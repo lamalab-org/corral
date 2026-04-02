@@ -1,10 +1,10 @@
 """
-Plot individual anti-pattern and productive-pattern prevalences, grouped by family.
+Plot individual anti-pattern and productive-pattern prevalences, grouped by family,
+with a coupled heatmap showing prevalence across reasoning-type groups.
 
-Produces a single horizontal bar chart averaged over **all models, domains, and
-levels** (the ``overall`` grouping from the annotation summary).  Families appear
-as bold headers on the left; within each family every constituent pattern is shown
-as a rounded rectangular bar with the percentage label at the end.
+Left panel:  horizontal bar chart averaged over all models, domains, and levels.
+Right panel: heatmap with one column per environment group (workflow execution,
+             strategic reasoning, hypothesis-driven enquiry).
 
 Usage:
   python analysis/plot_overall_pattern_bars.py
@@ -22,9 +22,10 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
-from lama_aesthetics import TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_WIDTH
 from loguru import logger
-from matplotlib.patches import FancyBboxPatch, Patch
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import FancyBboxPatch
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -35,42 +36,41 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUMMARY_PATH = (
     REPO_ROOT / "reasoning_reports" / "analysis" / "annotation_summary.json"
 )
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "analysis" / "results" / "figures"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "analysis" / "results" / "figures" / "fig_epistemology"
 
-# ── Family → individual pattern mapping (mirrors analyze.py) ──────────────
 ANTIPATTERN_FAMILIES: dict[str, list[str]] = {
     "hypothesis_generation": [
-        "untested_hypothesis",
-        "unresolved_contradiction",
-        "confirmation_only",
+        "untested_claim",
+        "contradiction_without_repair",
+        "one_sided_confirmation",
     ],
     "evidence_handling": [
-        "evidence_ignored",
-        "orphan_evidence",
-        "judgment_without_evidence",
-        "test_without_evidence",
+        "evidence_non_uptake",
+        "disconnected_evidence",
+        "unsupported_judgment",
+        "uninformative_test",
     ],
     "experimental_strategy": [
-        "dead_end_update",
-        "no_belief_revision",
-        "hypothesis_to_commitment_shortcut",
+        "stalled_revision",
+        "fixed_belief_trace",
+        "premature_commitment",
     ],
 }
 
 SUBGRAPH_FAMILIES: dict[str, list[str]] = {
     "hypothesis_generation": [
-        "popperian_falsification",
-        "bayesian_belief_updating",
-        "abductive",
+        "refutation_driven_belief_revision",
+        "hypothesis_reranking",
+        "evidence_led_hypothesis_generation",
     ],
     "evidence_handling": [
-        "triangulation",
-        "exploratory_to_confirmatory",
+        "convergent_multi_test_evidence",
+        "explore_then_test_transition",
     ],
     "experimental_strategy": [
-        "ml_make_it_work",
-        "preregistered",
-        "active_learning",
+        "fixed_hypothesis_test_tuning",
+        "precommitted_test_plan",
+        "evidence_guided_test_redesign",
     ],
 }
 
@@ -86,24 +86,32 @@ FAMILY_DISPLAY = {
 }
 
 PATTERN_SHORT: dict[str, str] = {
-    "untested_hypothesis": "Untested Hyp.",
-    "unresolved_contradiction": "Unresolved Contrad.",
-    "confirmation_only": "Confirmation Only",
-    "evidence_ignored": "Evidence Ignored",
-    "orphan_evidence": "Orphan Evidence",
-    "judgment_without_evidence": "Judgment w/o Evid.",
-    "test_without_evidence": "Test w/o Evid.",
-    "dead_end_update": "Dead-End Update",
-    "no_belief_revision": "No Belief Revision",
-    "hypothesis_to_commitment_shortcut": "Hyp.\u2192Commit Shortcut",
-    "popperian_falsification": "Popper. Falsification",
-    "bayesian_belief_updating": "Bayesian Updating",
-    "abductive": "Abductive",
-    "triangulation": "Triangulation",
-    "exploratory_to_confirmatory": "Explor.\u2192Confirm.",
-    "ml_make_it_work": "ML Make-It-Work",
-    "preregistered": "Preregistered",
-    "active_learning": "Active Learning",
+    # Antipatterns
+    "untested_claim": "Untested Claim",
+    "contradiction_without_repair": "Contrad. w/o Repair",
+    "one_sided_confirmation": "One-Sided Confirm.",
+    "evidence_non_uptake": "Evidence Non-Uptake",
+    "disconnected_evidence": "Disconnected Evid.",
+    "unsupported_judgment": "Unsupported Judgment",
+    "uninformative_test": "Uninformative Test",
+    "stalled_revision": "Stalled Revision",
+    "fixed_belief_trace": "Fixed Belief Trace",
+    "premature_commitment": "Premature Commit.",
+    # Productive subgraphs
+    "refutation_driven_belief_revision": "Refutation-Driven Rev.",
+    "hypothesis_reranking": "Hypothesis Reranking",
+    "evidence_led_hypothesis_generation": "Evidence-Led Hyp. Gen.",
+    "convergent_multi_test_evidence": "Convergent Multi-Test",
+    "explore_then_test_transition": "Explore→Test Trans.",
+    "fixed_hypothesis_test_tuning": "Fixed-Hyp. Test Tuning",
+    "precommitted_test_plan": "Precommitted Plan",
+    "evidence_guided_test_redesign": "Evidence-Guided Redesign",
+}
+
+ENV_GROUPS: dict[str, list[str]] = {
+    "Workflow": ["ml", "afm", "catalyst", "md"],
+    "Strategic": ["retrosynthesis"],
+    "Hyp.-Driven": ["spectra", "wetlab", "resistor"],
 }
 
 
@@ -131,54 +139,90 @@ def _save(fig: Figure, path: Path) -> None:
     logger.info(f"  saved: {path}")
 
 
-# ── Build ordered list of rows ────────────────────────────────────────────
+def _group_frac(by_env: dict, envs: list[str], section: str, field: str) -> float:
+    """Weighted-average fraction across *envs* (weighted by n_traces)."""
+    total_traces = 0
+    weighted_sum = 0.0
+    for env in envs:
+        env_data = by_env.get(env)
+        if env_data is None:
+            continue
+        n = env_data.get("n_traces", 0)
+        frac = _frac(env_data, section, field)
+        weighted_sum += frac * n
+        total_traces += n
+    if total_traces == 0:
+        return 0.0
+    return weighted_sum / total_traces
+
+
 def _build_rows(overall: dict) -> list[dict]:
     """Return a list of row dicts in display order (top→bottom).
 
-    Each dict has keys: label, value, color, kind ('header' | 'bar').
+    Two sections: Productive Motifs, then Reasoning Breakdowns.
+    Each dict has keys: label, value, color, kind ('header' | 'bar'),
+    and for bars: pattern_key, section.
     """
+    # Collect all productive subgraph patterns across families
+    all_subgraphs = [
+        {
+            "label": _pretty(pat),
+            "value": _frac(overall, "subgraph_presence_global", pat),
+            "color": GOOD_COLOR,
+            "kind": "bar",
+            "pattern_key": pat,
+            "section": "subgraph_presence_global",
+        }
+        for fam in FAMILY_ORDER
+        for pat in SUBGRAPH_FAMILIES[fam]
+    ]
+    all_subgraphs.sort(key=lambda r: r["value"], reverse=True)
+
+    # Collect all antipatterns across families
+    all_antipatterns = [
+        {
+            "label": _pretty(pat),
+            "value": _frac(overall, "antipattern_presence_global", pat),
+            "color": BAD_COLOR,
+            "kind": "bar",
+            "pattern_key": pat,
+            "section": "antipattern_presence_global",
+        }
+        for fam in FAMILY_ORDER
+        for pat in ANTIPATTERN_FAMILIES[fam]
+    ]
+    all_antipatterns.sort(key=lambda r: r["value"], reverse=True)
+
     rows: list[dict] = []
-    for fam in FAMILY_ORDER:
-        rows.append({"label": FAMILY_DISPLAY[fam], "kind": "header"})
-        # Collect all patterns in this family
-        fam_bars = [
-            {
-                "label": _pretty(pat),
-                "value": _frac(overall, "subgraph_presence_global", pat),
-                "color": GOOD_COLOR,
-                "kind": "bar",
-            }
-            for pat in SUBGRAPH_FAMILIES[fam]
-        ] + [
-            {
-                "label": _pretty(pat),
-                "value": _frac(overall, "antipattern_presence_global", pat),
-                "color": BAD_COLOR,
-                "kind": "bar",
-            }
-            for pat in ANTIPATTERN_FAMILIES[fam]
-        ]
-        # Sort by value descending
-        fam_bars.sort(key=lambda r: r["value"], reverse=True)
-        rows.extend(fam_bars)
+    rows.append({"label": "Productive Motifs", "kind": "header"})
+    rows.extend(all_subgraphs)
+    rows.append({"label": "Reasoning Breakdowns", "kind": "header"})
+    rows.extend(all_antipatterns)
     return rows
 
 
 def plot(summary: dict, out: Path) -> None:
     overall = summary["groupings"]["overall"]
-    n_traces = overall.get("n_traces", "?")
+    by_env = summary["groupings"]["by_env"]
     rows = _build_rows(overall)
 
     n_rows = len(rows)
-    row_height = 0.30
-    header_extra = 0.22
+    row_height = 0.22
+    header_extra = 0.18
+    row_step = 0.32
     fig_height = n_rows * row_height + sum(
         header_extra for r in rows if r["kind"] == "header"
     )
-    fig, ax = plt.subplots(figsize=(TWO_COL_WIDTH, fig_height))
+    fig_width = ONE_COL_WIDTH * 1.25
+    fig, (ax_bar, ax_heat) = plt.subplots(
+        1,
+        2,
+        figsize=(fig_width, fig_height),
+        gridspec_kw={"width_ratios": [1, 1], "wspace": 0.05},
+    )
 
-    bar_height = 0.22
-    rounding = 0.25  # FancyBboxPatch corner radius (data coords, x in 0-100)
+    bar_height = 0.15
+    rounding = 0.20
     y_pos = 0.0
     y_positions = []
 
@@ -186,34 +230,31 @@ def plot(summary: dict, out: Path) -> None:
         if row["kind"] == "header":
             y_pos -= header_extra
         y_positions.append(y_pos)
-        y_pos -= 0.42
+        y_pos -= row_step
 
-    # Flip so first row is at top
     y_arr = np.array(y_positions)
+    x_lim = 100.0
 
-    x_lim = 100.0  # x-axis in percent (0-100)
-
-    # Aspect-ratio correction so rounded corners look circular on screen
     y_range = (y_arr.max() + 0.5) - (y_arr.min() - 0.5)
-    mutation_aspect = (TWO_COL_WIDTH * y_range) / (fig_height * x_lim)
+    bar_ax_width = fig_width / 2  # approximate bar-axis width
+    mutation_aspect = (bar_ax_width * y_range) / (fig_height * x_lim)
 
     for y, row in zip(y_arr, rows, strict=False):
         if row["kind"] == "header":
-            ax.text(
-                -0.28,
+            ax_bar.text(
+                -0.35,
                 y,
                 row["label"],
                 ha="left",
                 va="center",
                 fontsize=10,
                 fontweight="bold",
-                transform=ax.get_yaxis_transform(),
+                transform=ax_bar.get_yaxis_transform(),
             )
         else:
             val = row["value"]
-            pct = val * 100  # convert to 0-100 scale
+            pct = val * 100
             color = row["color"]
-            # Draw rounded rectangle
             if pct > 0:
                 box = FancyBboxPatch(
                     (0, y - bar_height / 2),
@@ -225,9 +266,8 @@ def plot(summary: dict, out: Path) -> None:
                     alpha=0.85,
                     mutation_aspect=mutation_aspect,
                 )
-                ax.add_patch(box)
-            # Percentage label
-            ax.text(
+                ax_bar.add_patch(box)
+            ax_bar.text(
                 pct + 0.8,
                 y,
                 f"{val:.0%}",
@@ -236,57 +276,112 @@ def plot(summary: dict, out: Path) -> None:
                 fontsize=8,
                 color=color,
             )
-            # Row label
-            ax.text(
+            ax_bar.text(
                 -0.01,
                 y,
                 row["label"],
                 ha="right",
                 va="center",
-                fontsize=8.5,
-                transform=ax.get_yaxis_transform(),
+                fontsize=10,
+                transform=ax_bar.get_yaxis_transform(),
             )
 
-    # Axis formatting
-    ax.set_xlim(0, x_lim)
-    ax.set_ylim(y_arr.min() - 0.5, y_arr.max() + 0.15)
-    ax.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=100, decimals=0))
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["top"].set_visible(False)
-    ax.tick_params(axis="x", labelsize=9)
+    ax_bar.set_xlim(0, x_lim)
+    ax_bar.set_ylim(y_arr.min() - 0.5, y_arr.max() + 0.15)
+    ax_bar.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=100, decimals=0))
+    ax_bar.set_yticks([])
+    ax_bar.spines["left"].set_visible(False)
+    ax_bar.spines["right"].set_visible(False)
+    ax_bar.spines["top"].set_visible(False)
+    ax_bar.tick_params(axis="x", labelsize=9)
 
-    # ── Legend (bottom-left) + trace count (bottom-right) ─────────────
-    legend_elements = [
-        Patch(facecolor=GOOD_COLOR, alpha=0.85, label="Productive Patterns"),
-        Patch(facecolor=BAD_COLOR, alpha=0.85, label="Reasoning Breakdowns"),
-    ]
-    ax.legend(
-        handles=legend_elements,
-        fontsize=9,
-        loc="upper left",
-        bbox_to_anchor=(-0.28, -0.04),
-        ncol=2,
-        frameon=False,
-        borderpad=0,
-        borderaxespad=0,
-        handlelength=1.2,
-        handletextpad=0.1,
+    group_names = list(ENV_GROUPS.keys())
+    n_groups = len(group_names)
+
+    # Build matrix: one row per bar-row, one col per env group
+    bar_indices = [i for i, r in enumerate(rows) if r["kind"] == "bar"]
+    heat_matrix = np.full((len(bar_indices), n_groups), np.nan)
+
+    for ri, idx in enumerate(bar_indices):
+        row = rows[idx]
+        for gi, gname in enumerate(group_names):
+            heat_matrix[ri, gi] = _group_frac(
+                by_env,
+                ENV_GROUPS[gname],
+                row["section"],
+                row["pattern_key"],
+            )
+
+    # Grey-scale colormap: white at 0, dark grey at 1
+    cmap = LinearSegmentedColormap.from_list(
+        "heat",
+        ["#ffffff", "#999999", "#333333"],
+        N=256,
     )
 
-    ax.text(
-        1.0,
-        -0.04,
-        f"$N$ = {n_traces} Traces Across All Domains and Models for ReAct",
-        fontsize=9,
-        ha="right",
-        va="top",
-        transform=ax.transAxes,
-        color="grey",
+    # Map bar y-positions to heatmap cell edges
+    bar_y = y_arr[bar_indices]
+    cell_h = row_step
+    col_w = 1.0
+
+    ax_heat.set_xlim(0, n_groups * col_w)
+    ax_heat.set_ylim(y_arr.min() - 0.5, y_arr.max() + 0.15)
+
+    vmin, vmax = (
+        0.0,
+        float(np.nanmax(heat_matrix)) if np.nanmax(heat_matrix) > 0 else 1.0,
     )
+
+    for ri, y in enumerate(bar_y):
+        for gi in range(n_groups):
+            val = heat_matrix[ri, gi]
+            if np.isnan(val):
+                continue
+            norm_val = (val - vmin) / (vmax - vmin) if vmax > vmin else 0.0
+            fc = cmap(norm_val)
+            rect = plt.Rectangle(
+                (gi * col_w, y - cell_h / 2),
+                col_w,
+                cell_h,
+                facecolor=fc,
+                edgecolor="none",
+            )
+            ax_heat.add_patch(rect)
+            # Text label inside cell
+            text_color = "white" if norm_val > 0.55 else "#333333"
+            ax_heat.text(
+                gi * col_w + col_w / 2,
+                y,
+                f"{val:.0%}",
+                ha="center",
+                va="center",
+                fontsize=7,
+                color=text_color,
+            )
+
+    # Column headers at the bottom, rotated
+    for gi, gname in enumerate(group_names):
+        ax_heat.text(
+            gi * col_w + col_w / 2,
+            y_arr.min() - 0.45,
+            gname,
+            ha="right",
+            va="top",
+            fontsize=7,
+            fontweight="bold",
+            rotation=45,
+            rotation_mode="anchor",
+        )
+
+    ax_heat.set_yticks([])
+    ax_heat.set_xticks([])
+    ax_heat.spines["left"].set_visible(False)
+    ax_heat.spines["right"].set_visible(False)
+    ax_heat.spines["top"].set_visible(False)
+    ax_heat.spines["bottom"].set_visible(False)
 
     fig.tight_layout()
+
     _save(fig, out / "overall_pattern_bars.pdf")
 
 
@@ -294,7 +389,7 @@ def main(
     summary_path: str = str(DEFAULT_SUMMARY_PATH),
     output_dir: str = str(DEFAULT_OUTPUT_DIR),
 ) -> None:
-    """Generate the aggregated pattern bar chart.
+    """Generate the aggregated pattern bar chart with heatmap.
 
     Args:
         summary_path: Path to the annotation_summary.json file.
@@ -303,7 +398,7 @@ def main(
     summary = load_summary(Path(summary_path))
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Generating overall pattern bar chart in {out} ...")
+    logger.info(f"Generating overall pattern bar chart + heatmap in {out} ...")
     plot(summary, out)
     logger.info("Done.")
 

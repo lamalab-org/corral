@@ -2997,7 +2997,9 @@ async def _run_pipeline(
     except FileNotFoundError as e:
         logger.warning(f"Skipping aggregation: {e}")
 
-    write_pattern_definitions_latex(root_path / "analysis" / "pattern_definitions.tex")
+    write_pattern_definitions_latex(
+        root_path / ".." / "analysis" / "results" / "tables" / "pattern_definitions.tex"
+    )
 
 
 def _latex_escape(text: str) -> str:

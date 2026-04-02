@@ -36,44 +36,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 4 | 0.8000 | 4 | 0.8000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 4 | 0.8000 | 4 | 0.8000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.6000 | 4 | 0.8000 |
-| evidence_ignored | 5 | 1.0000 | 34 | 6.8000 |
-| judgment_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.6000 | 4 | 0.8000 |
+| evidence_non_uptake | 5 | 1.0000 | 34 | 6.8000 |
+| unsupported_judgment | 1 | 0.2000 | 1 | 0.2000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 5 | 1.0000 | 5 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.6000 | 4 | 0.8000 |
-| evidence_ignored | 5 | 1.0000 | 34 | 6.8000 |
-| judgment_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.6000 | 4 | 0.8000 |
+| evidence_non_uptake | 5 | 1.0000 | 34 | 6.8000 |
+| unsupported_judgment | 1 | 0.2000 | 1 | 0.2000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 5 | 1.0000 | 5 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
@@ -131,44 +131,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 0 | 0.0000 | 0 | 0.0000 |
-| triangulation | 1 | 0.5000 | 1 | 0.5000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
+| convergent_multi_test_evidence | 1 | 0.5000 | 1 | 0.5000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 1.0000 | 3 | 1.5000 |
-| evidence_ignored | 2 | 1.0000 | 18 | 9.0000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 2 | 1.0000 | 2 | 1.0000 |
-| orphan_evidence | 1 | 0.5000 | 1 | 0.5000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 2 | 1.0000 | 3 | 1.5000 |
+| evidence_non_uptake | 2 | 1.0000 | 18 | 9.0000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 2 | 1.0000 | 2 | 1.0000 |
+| disconnected_evidence | 1 | 0.5000 | 1 | 0.5000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 1.0000 | 3 | 1.5000 |
-| evidence_ignored | 2 | 1.0000 | 18 | 9.0000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 2 | 1.0000 | 2 | 1.0000 |
-| orphan_evidence | 1 | 0.5000 | 1 | 0.5000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 2 | 1.0000 | 3 | 1.5000 |
+| evidence_non_uptake | 2 | 1.0000 | 18 | 9.0000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 2 | 1.0000 | 2 | 1.0000 |
+| disconnected_evidence | 1 | 0.5000 | 1 | 0.5000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
@@ -226,44 +226,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 1 | 1.0000 | 1 | 1.0000 |
-| abductive | 1 | 1.0000 | 1 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 1 | 1.0000 | 1 | 1.0000 |
+| evidence_led_hypothesis_generation | 1 | 1.0000 | 1 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 1 | 1.0000 | 3 | 3.0000 |
-| evidence_ignored | 1 | 1.0000 | 7 | 7.0000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 1 | 1.0000 |
-| no_belief_revision | 1 | 1.0000 | 1 | 1.0000 |
-| orphan_evidence | 1 | 1.0000 | 1 | 1.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 1 | 1.0000 | 3 | 3.0000 |
+| evidence_non_uptake | 1 | 1.0000 | 7 | 7.0000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 1 | 1.0000 | 1 | 1.0000 |
+| fixed_belief_trace | 1 | 1.0000 | 1 | 1.0000 |
+| disconnected_evidence | 1 | 1.0000 | 1 | 1.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 1 | 1.0000 | 3 | 3.0000 |
-| evidence_ignored | 1 | 1.0000 | 7 | 7.0000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 1 | 1.0000 | 1 | 1.0000 |
-| no_belief_revision | 1 | 1.0000 | 1 | 1.0000 |
-| orphan_evidence | 1 | 1.0000 | 1 | 1.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 1 | 1.0000 | 3 | 3.0000 |
+| evidence_non_uptake | 1 | 1.0000 | 7 | 7.0000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 1 | 1.0000 | 1 | 1.0000 |
+| fixed_belief_trace | 1 | 1.0000 | 1 | 1.0000 |
+| disconnected_evidence | 1 | 1.0000 | 1 | 1.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
@@ -321,44 +321,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 1 | 0.5000 | 1 | 0.5000 |
-| abductive | 1 | 0.5000 | 1 | 0.5000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 1 | 0.5000 | 1 | 0.5000 |
+| evidence_led_hypothesis_generation | 1 | 0.5000 | 1 | 0.5000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 1.0000 | 5 | 2.5000 |
-| evidence_ignored | 2 | 1.0000 | 31 | 15.5000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 4 | 2.0000 |
-| no_belief_revision | 2 | 1.0000 | 2 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 2 | 1.0000 | 5 | 2.5000 |
+| evidence_non_uptake | 2 | 1.0000 | 31 | 15.5000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 2 | 1.0000 | 4 | 2.0000 |
+| fixed_belief_trace | 2 | 1.0000 | 2 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 1.0000 | 5 | 2.5000 |
-| evidence_ignored | 2 | 1.0000 | 31 | 15.5000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 2 | 1.0000 | 4 | 2.0000 |
-| no_belief_revision | 2 | 1.0000 | 2 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 2 | 1.0000 | 5 | 2.5000 |
+| evidence_non_uptake | 2 | 1.0000 | 31 | 15.5000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 2 | 1.0000 | 4 | 2.0000 |
+| fixed_belief_trace | 2 | 1.0000 | 2 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
@@ -416,44 +416,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 1 | 0.0667 | 1 | 0.0667 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 1 | 0.0667 | 1 | 0.0667 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.2000 | 3 | 0.2000 |
-| evidence_ignored | 15 | 1.0000 | 121 | 8.0667 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.0667 | 1 | 0.0667 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 15 | 1.0000 | 15 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 1 | 0.0667 | 1 | 0.0667 |
+| untested_claim | 3 | 0.2000 | 3 | 0.2000 |
+| evidence_non_uptake | 15 | 1.0000 | 121 | 8.0667 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 1 | 0.0667 | 1 | 0.0667 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 15 | 1.0000 | 15 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 1 | 0.0667 | 1 | 0.0667 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.2000 | 3 | 0.2000 |
-| evidence_ignored | 15 | 1.0000 | 121 | 8.0667 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.0667 | 1 | 0.0667 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 15 | 1.0000 | 15 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 1 | 0.0667 | 1 | 0.0667 |
+| untested_claim | 3 | 0.2000 | 3 | 0.2000 |
+| evidence_non_uptake | 15 | 1.0000 | 121 | 8.0667 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 1 | 0.0667 | 1 | 0.0667 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 15 | 1.0000 | 15 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 1 | 0.0667 | 1 | 0.0667 |
 
 #### Anti-pattern family presence (global)
 
@@ -511,44 +511,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 1 | 0.1000 | 1 | 0.1000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 1 | 0.1000 | 1 | 0.1000 |
-| abductive | 1 | 0.1000 | 1 | 0.1000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 1 | 0.1000 | 1 | 0.1000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 1 | 0.1000 | 1 | 0.1000 |
+| evidence_led_hypothesis_generation | 1 | 0.1000 | 1 | 0.1000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 9 | 0.9000 | 15 | 1.5000 |
-| evidence_ignored | 9 | 0.9000 | 89 | 8.9000 |
-| judgment_without_evidence | 1 | 0.1000 | 1 | 0.1000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 3 | 0.3000 | 9 | 0.9000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.1000 | 1 | 0.1000 |
-| test_without_evidence | 3 | 0.3000 | 27 | 2.7000 |
-| no_belief_revision | 9 | 0.9000 | 9 | 0.9000 |
-| orphan_evidence | 3 | 0.3000 | 5 | 0.5000 |
-| confirmation_only | 1 | 0.1000 | 1 | 0.1000 |
+| untested_claim | 9 | 0.9000 | 15 | 1.5000 |
+| evidence_non_uptake | 10 | 1.0000 | 89 | 8.9000 |
+| unsupported_judgment | 1 | 0.1000 | 1 | 0.1000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 4 | 0.4000 | 9 | 0.9000 |
+| premature_commitment | 1 | 0.1000 | 1 | 0.1000 |
+| uninformative_test | 5 | 0.5000 | 27 | 2.7000 |
+| fixed_belief_trace | 9 | 0.9000 | 9 | 0.9000 |
+| disconnected_evidence | 3 | 0.3000 | 5 | 0.5000 |
+| one_sided_confirmation | 1 | 0.1000 | 1 | 0.1000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 9 | 0.9000 | 15 | 1.5000 |
-| evidence_ignored | 10 | 1.0000 | 89 | 8.9000 |
-| judgment_without_evidence | 1 | 0.1000 | 1 | 0.1000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 4 | 0.4000 | 13 | 1.3000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.1000 | 1 | 0.1000 |
-| test_without_evidence | 5 | 0.5000 | 27 | 2.7000 |
-| no_belief_revision | 9 | 0.9000 | 9 | 0.9000 |
-| orphan_evidence | 3 | 0.3000 | 5 | 0.5000 |
-| confirmation_only | 1 | 0.1000 | 1 | 0.1000 |
+| untested_claim | 9 | 0.9000 | 15 | 1.5000 |
+| evidence_non_uptake | 10 | 1.0000 | 89 | 8.9000 |
+| unsupported_judgment | 1 | 0.1000 | 1 | 0.1000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 4 | 0.4000 | 13 | 1.3000 |
+| premature_commitment | 1 | 0.1000 | 1 | 0.1000 |
+| uninformative_test | 5 | 0.5000 | 27 | 2.7000 |
+| fixed_belief_trace | 9 | 0.9000 | 9 | 0.9000 |
+| disconnected_evidence | 3 | 0.3000 | 5 | 0.5000 |
+| one_sided_confirmation | 1 | 0.1000 | 1 | 0.1000 |
 
 #### Anti-pattern family presence (global)
 
@@ -606,44 +606,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 1 | 0.1000 | 1 | 0.1000 |
-| abductive | 4 | 0.4000 | 4 | 0.4000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 1 | 0.1000 | 1 | 0.1000 |
+| evidence_led_hypothesis_generation | 4 | 0.4000 | 4 | 0.4000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 9 | 0.9000 | 20 | 2.0000 |
-| evidence_ignored | 10 | 1.0000 | 120 | 12.0000 |
-| judgment_without_evidence | 2 | 0.2000 | 2 | 0.2000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 1 | 0.1000 | 4 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 3 | 0.3000 | 3 | 0.3000 |
-| test_without_evidence | 0 | 0.0000 | 5 | 0.5000 |
-| no_belief_revision | 8 | 0.8000 | 8 | 0.8000 |
-| orphan_evidence | 2 | 0.2000 | 2 | 0.2000 |
-| confirmation_only | 3 | 0.3000 | 3 | 0.3000 |
+| untested_claim | 9 | 0.9000 | 20 | 2.0000 |
+| evidence_non_uptake | 10 | 1.0000 | 120 | 12.0000 |
+| unsupported_judgment | 2 | 0.2000 | 2 | 0.2000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 2 | 0.2000 | 4 | 0.4000 |
+| premature_commitment | 3 | 0.3000 | 3 | 0.3000 |
+| uninformative_test | 4 | 0.4000 | 5 | 0.5000 |
+| fixed_belief_trace | 8 | 0.8000 | 8 | 0.8000 |
+| disconnected_evidence | 2 | 0.2000 | 2 | 0.2000 |
+| one_sided_confirmation | 3 | 0.3000 | 3 | 0.3000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 9 | 0.9000 | 20 | 2.0000 |
-| evidence_ignored | 10 | 1.0000 | 120 | 12.0000 |
-| judgment_without_evidence | 2 | 0.2000 | 2 | 0.2000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 2 | 0.2000 | 4 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 3 | 0.3000 | 3 | 0.3000 |
-| test_without_evidence | 4 | 0.4000 | 5 | 0.5000 |
-| no_belief_revision | 8 | 0.8000 | 8 | 0.8000 |
-| orphan_evidence | 2 | 0.2000 | 2 | 0.2000 |
-| confirmation_only | 3 | 0.3000 | 3 | 0.3000 |
+| untested_claim | 9 | 0.9000 | 20 | 2.0000 |
+| evidence_non_uptake | 10 | 1.0000 | 120 | 12.0000 |
+| unsupported_judgment | 2 | 0.2000 | 2 | 0.2000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 2 | 0.2000 | 4 | 0.4000 |
+| premature_commitment | 3 | 0.3000 | 3 | 0.3000 |
+| uninformative_test | 4 | 0.4000 | 5 | 0.5000 |
+| fixed_belief_trace | 8 | 0.8000 | 8 | 0.8000 |
+| disconnected_evidence | 2 | 0.2000 | 2 | 0.2000 |
+| one_sided_confirmation | 3 | 0.3000 | 3 | 0.3000 |
 
 #### Anti-pattern family presence (global)
 
@@ -701,44 +701,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 2 | 0.1333 | 2 | 0.1333 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 1 | 0.0667 | 1 | 0.0667 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 2 | 0.1333 | 2 | 0.1333 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 1 | 0.0667 | 1 | 0.0667 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.2000 | 3 | 0.2000 |
-| evidence_ignored | 15 | 1.0000 | 69 | 4.6000 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 4 | 0.2667 |
-| no_belief_revision | 14 | 0.9333 | 14 | 0.9333 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.2000 | 3 | 0.2000 |
+| evidence_non_uptake | 15 | 1.0000 | 69 | 4.6000 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 3 | 0.2000 | 4 | 0.2667 |
+| fixed_belief_trace | 14 | 0.9333 | 14 | 0.9333 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.2000 | 3 | 0.2000 |
-| evidence_ignored | 15 | 1.0000 | 69 | 4.6000 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 3 | 0.2000 | 4 | 0.2667 |
-| no_belief_revision | 14 | 0.9333 | 14 | 0.9333 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.2000 | 3 | 0.2000 |
+| evidence_non_uptake | 15 | 1.0000 | 69 | 4.6000 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 3 | 0.2000 | 4 | 0.2667 |
+| fixed_belief_trace | 14 | 0.9333 | 14 | 0.9333 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
@@ -796,51 +796,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 6 | 0.2000 | 6 | 0.2000 |
-| ml_make_it_work | 2 | 0.0667 | 2 | 0.0667 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 11 | 0.3667 | 11 | 0.3667 |
-| abductive | 20 | 0.6667 | 20 | 0.6667 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 6 | 0.2000 | 6 | 0.2000 |
+| fixed_hypothesis_test_tuning | 2 | 0.0667 | 2 | 0.0667 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 11 | 0.3667 | 11 | 0.3667 |
+| evidence_led_hypothesis_generation | 20 | 0.6667 | 20 | 0.6667 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 9 | 0.3000 | 47 | 1.5667 |
-| evidence_ignored | 11 | 0.3667 | 37 | 1.2333 |
-| judgment_without_evidence | 10 | 0.3333 | 34 | 1.1333 |
-| dead_end_update | 2 | 0.0667 | 3 | 0.1000 |
-| unresolved_contradiction | 2 | 0.0667 | 15 | 0.5000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.0333 | 1 | 0.0333 |
-| test_without_evidence | 1 | 0.0333 | 4 | 0.1333 |
-| no_belief_revision | 17 | 0.5667 | 17 | 0.5667 |
-| orphan_evidence | 1 | 0.0333 | 1 | 0.0333 |
-| confirmation_only | 3 | 0.1000 | 4 | 0.1333 |
+| untested_claim | 10 | 0.3333 | 47 | 1.5667 |
+| evidence_non_uptake | 16 | 0.5333 | 37 | 1.2333 |
+| unsupported_judgment | 10 | 0.3333 | 34 | 1.1333 |
+| stalled_revision | 2 | 0.0667 | 3 | 0.1000 |
+| contradiction_without_repair | 8 | 0.2667 | 15 | 0.5000 |
+| premature_commitment | 1 | 0.0333 | 1 | 0.0333 |
+| uninformative_test | 4 | 0.1333 | 4 | 0.1333 |
+| fixed_belief_trace | 17 | 0.5667 | 17 | 0.5667 |
+| disconnected_evidence | 1 | 0.0333 | 1 | 0.0333 |
+| one_sided_confirmation | 3 | 0.1000 | 4 | 0.1333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 0.3333 | 47 | 1.5667 |
-| evidence_ignored | 16 | 0.5333 | 37 | 1.2333 |
-| judgment_without_evidence | 10 | 0.3333 | 34 | 1.1333 |
-| dead_end_update | 2 | 0.0667 | 3 | 0.1000 |
-| unresolved_contradiction | 9 | 0.3000 | 22 | 0.7333 |
-| hypothesis_to_commitment_shortcut | 1 | 0.0333 | 1 | 0.0333 |
-| test_without_evidence | 4 | 0.1333 | 4 | 0.1333 |
-| no_belief_revision | 17 | 0.5667 | 17 | 0.5667 |
-| orphan_evidence | 1 | 0.0333 | 1 | 0.0333 |
-| confirmation_only | 3 | 0.1000 | 4 | 0.1333 |
+| untested_claim | 10 | 0.3333 | 47 | 1.5667 |
+| evidence_non_uptake | 16 | 0.5333 | 37 | 1.2333 |
+| unsupported_judgment | 10 | 0.3333 | 34 | 1.1333 |
+| stalled_revision | 2 | 0.0667 | 3 | 0.1000 |
+| contradiction_without_repair | 9 | 0.3000 | 22 | 0.7333 |
+| premature_commitment | 1 | 0.0333 | 1 | 0.0333 |
+| uninformative_test | 4 | 0.1333 | 4 | 0.1333 |
+| fixed_belief_trace | 17 | 0.5667 | 17 | 0.5667 |
+| disconnected_evidence | 1 | 0.0333 | 1 | 0.0333 |
+| one_sided_confirmation | 3 | 0.1000 | 4 | 0.1333 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 12 | 0.4000 | 66 | 2.2000 |
-| evidence_handling | 18 | 0.6000 | 76 | 2.5333 |
+| hypothesis_generation | 13 | 0.4333 | 66 | 2.2000 |
+| evidence_handling | 19 | 0.6333 | 76 | 2.5333 |
 | experimental_strategy | 20 | 0.6667 | 21 | 0.7000 |
 
 #### Anti-pattern family presence (local)
@@ -891,51 +891,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 1 | 0.0667 | 1 | 0.0667 |
-| exploratory_to_confirmatory | 1 | 0.0667 | 1 | 0.0667 |
-| bayesian_belief_updating | 2 | 0.1333 | 2 | 0.1333 |
-| abductive | 5 | 0.3333 | 5 | 0.3333 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 1 | 0.0667 | 1 | 0.0667 |
+| explore_then_test_transition | 1 | 0.0667 | 1 | 0.0667 |
+| hypothesis_reranking | 2 | 0.1333 | 2 | 0.1333 |
+| evidence_led_hypothesis_generation | 5 | 0.3333 | 5 | 0.3333 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 1 | 0.0667 | 3 | 0.2000 |
-| evidence_ignored | 8 | 0.5333 | 28 | 1.8667 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 1 | 0.0667 | 1 | 0.0667 |
-| unresolved_contradiction | 2 | 0.1333 | 7 | 0.4667 |
-| hypothesis_to_commitment_shortcut | 1 | 0.0667 | 1 | 0.0667 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 11 | 0.7333 | 11 | 0.7333 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 2 | 0.1333 | 3 | 0.2000 |
+| evidence_non_uptake | 9 | 0.6000 | 28 | 1.8667 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 1 | 0.0667 | 1 | 0.0667 |
+| contradiction_without_repair | 2 | 0.1333 | 7 | 0.4667 |
+| premature_commitment | 1 | 0.0667 | 1 | 0.0667 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 11 | 0.7333 | 11 | 0.7333 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 0.1333 | 3 | 0.2000 |
-| evidence_ignored | 9 | 0.6000 | 28 | 1.8667 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 1 | 0.0667 | 1 | 0.0667 |
-| unresolved_contradiction | 2 | 0.1333 | 7 | 0.4667 |
-| hypothesis_to_commitment_shortcut | 1 | 0.0667 | 1 | 0.0667 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 11 | 0.7333 | 11 | 0.7333 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 2 | 0.1333 | 3 | 0.2000 |
+| evidence_non_uptake | 9 | 0.6000 | 28 | 1.8667 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 1 | 0.0667 | 1 | 0.0667 |
+| contradiction_without_repair | 2 | 0.1333 | 7 | 0.4667 |
+| premature_commitment | 1 | 0.0667 | 1 | 0.0667 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 11 | 0.7333 | 11 | 0.7333 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 2 | 0.1333 | 10 | 0.6667 |
-| evidence_handling | 8 | 0.5333 | 28 | 1.8667 |
+| hypothesis_generation | 3 | 0.2000 | 10 | 0.6667 |
+| evidence_handling | 9 | 0.6000 | 28 | 1.8667 |
 | experimental_strategy | 12 | 0.8000 | 13 | 0.8667 |
 
 #### Anti-pattern family presence (local)
@@ -986,50 +986,50 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 1 | 0.0667 | 1 | 0.0667 |
-| ml_make_it_work | 3 | 0.2000 | 3 | 0.2000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 4 | 0.2667 | 4 | 0.2667 |
-| abductive | 1 | 0.0667 | 1 | 0.0667 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 1 | 0.0667 | 1 | 0.0667 |
+| refutation_driven_belief_revision | 1 | 0.0667 | 1 | 0.0667 |
+| fixed_hypothesis_test_tuning | 3 | 0.2000 | 3 | 0.2000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 4 | 0.2667 | 4 | 0.2667 |
+| evidence_led_hypothesis_generation | 1 | 0.0667 | 1 | 0.0667 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 1 | 0.0667 | 1 | 0.0667 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 9 | 0.6000 | 33 | 2.2000 |
-| evidence_ignored | 15 | 1.0000 | 121 | 8.0667 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 4 | 0.2667 | 4 | 0.2667 |
-| unresolved_contradiction | 3 | 0.2000 | 10 | 0.6667 |
-| hypothesis_to_commitment_shortcut | 3 | 0.2000 | 3 | 0.2000 |
-| test_without_evidence | 0 | 0.0000 | 5 | 0.3333 |
-| no_belief_revision | 6 | 0.4000 | 6 | 0.4000 |
-| orphan_evidence | 2 | 0.1333 | 2 | 0.1333 |
-| confirmation_only | 2 | 0.1333 | 2 | 0.1333 |
+| untested_claim | 10 | 0.6667 | 33 | 2.2000 |
+| evidence_non_uptake | 15 | 1.0000 | 121 | 8.0667 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 4 | 0.2667 | 4 | 0.2667 |
+| contradiction_without_repair | 5 | 0.3333 | 10 | 0.6667 |
+| premature_commitment | 3 | 0.2000 | 3 | 0.2000 |
+| uninformative_test | 3 | 0.2000 | 5 | 0.3333 |
+| fixed_belief_trace | 6 | 0.4000 | 6 | 0.4000 |
+| disconnected_evidence | 2 | 0.1333 | 2 | 0.1333 |
+| one_sided_confirmation | 2 | 0.1333 | 2 | 0.1333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 10 | 0.6667 | 33 | 2.2000 |
-| evidence_ignored | 15 | 1.0000 | 121 | 8.0667 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 4 | 0.2667 | 4 | 0.2667 |
-| unresolved_contradiction | 7 | 0.4667 | 18 | 1.2000 |
-| hypothesis_to_commitment_shortcut | 3 | 0.2000 | 3 | 0.2000 |
-| test_without_evidence | 3 | 0.2000 | 5 | 0.3333 |
-| no_belief_revision | 6 | 0.4000 | 6 | 0.4000 |
-| orphan_evidence | 2 | 0.1333 | 2 | 0.1333 |
-| confirmation_only | 2 | 0.1333 | 2 | 0.1333 |
+| untested_claim | 10 | 0.6667 | 33 | 2.2000 |
+| evidence_non_uptake | 15 | 1.0000 | 121 | 8.0667 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 4 | 0.2667 | 4 | 0.2667 |
+| contradiction_without_repair | 7 | 0.4667 | 18 | 1.2000 |
+| premature_commitment | 3 | 0.2000 | 3 | 0.2000 |
+| uninformative_test | 3 | 0.2000 | 5 | 0.3333 |
+| fixed_belief_trace | 6 | 0.4000 | 6 | 0.4000 |
+| disconnected_evidence | 2 | 0.1333 | 2 | 0.1333 |
+| one_sided_confirmation | 2 | 0.1333 | 2 | 0.1333 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 10 | 0.6667 | 45 | 3.0000 |
+| hypothesis_generation | 11 | 0.7333 | 45 | 3.0000 |
 | evidence_handling | 15 | 1.0000 | 129 | 8.6000 |
 | experimental_strategy | 10 | 0.6667 | 13 | 0.8667 |
 
@@ -1081,44 +1081,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 1 | 0.0667 | 1 | 0.0667 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.0667 | 1 | 0.0667 |
-| bayesian_belief_updating | 5 | 0.3333 | 5 | 0.3333 |
-| abductive | 1 | 0.0667 | 1 | 0.0667 |
-| triangulation | 1 | 0.0667 | 1 | 0.0667 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 1 | 0.0667 | 1 | 0.0667 |
+| refutation_driven_belief_revision | 1 | 0.0667 | 1 | 0.0667 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 1 | 0.0667 | 1 | 0.0667 |
+| hypothesis_reranking | 5 | 0.3333 | 5 | 0.3333 |
+| evidence_led_hypothesis_generation | 1 | 0.0667 | 1 | 0.0667 |
+| convergent_multi_test_evidence | 1 | 0.0667 | 1 | 0.0667 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 1 | 0.0667 | 1 | 0.0667 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 12 | 0.8000 | 33 | 2.2000 |
-| evidence_ignored | 15 | 1.0000 | 129 | 8.6000 |
-| judgment_without_evidence | 2 | 0.1333 | 2 | 0.1333 |
-| dead_end_update | 6 | 0.4000 | 6 | 0.4000 |
-| unresolved_contradiction | 6 | 0.4000 | 14 | 0.9333 |
-| hypothesis_to_commitment_shortcut | 3 | 0.2000 | 3 | 0.2000 |
-| test_without_evidence | 0 | 0.0000 | 5 | 0.3333 |
-| no_belief_revision | 3 | 0.2000 | 3 | 0.2000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 3 | 0.2000 | 3 | 0.2000 |
+| untested_claim | 12 | 0.8000 | 33 | 2.2000 |
+| evidence_non_uptake | 15 | 1.0000 | 129 | 8.6000 |
+| unsupported_judgment | 2 | 0.1333 | 2 | 0.1333 |
+| stalled_revision | 6 | 0.4000 | 6 | 0.4000 |
+| contradiction_without_repair | 6 | 0.4000 | 14 | 0.9333 |
+| premature_commitment | 3 | 0.2000 | 3 | 0.2000 |
+| uninformative_test | 5 | 0.3333 | 5 | 0.3333 |
+| fixed_belief_trace | 3 | 0.2000 | 3 | 0.2000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 3 | 0.2000 | 3 | 0.2000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 12 | 0.8000 | 33 | 2.2000 |
-| evidence_ignored | 15 | 1.0000 | 129 | 8.6000 |
-| judgment_without_evidence | 2 | 0.1333 | 2 | 0.1333 |
-| dead_end_update | 6 | 0.4000 | 6 | 0.4000 |
-| unresolved_contradiction | 7 | 0.4667 | 15 | 1.0000 |
-| hypothesis_to_commitment_shortcut | 3 | 0.2000 | 3 | 0.2000 |
-| test_without_evidence | 5 | 0.3333 | 5 | 0.3333 |
-| no_belief_revision | 3 | 0.2000 | 3 | 0.2000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 3 | 0.2000 | 3 | 0.2000 |
+| untested_claim | 12 | 0.8000 | 33 | 2.2000 |
+| evidence_non_uptake | 15 | 1.0000 | 129 | 8.6000 |
+| unsupported_judgment | 2 | 0.1333 | 2 | 0.1333 |
+| stalled_revision | 6 | 0.4000 | 6 | 0.4000 |
+| contradiction_without_repair | 7 | 0.4667 | 15 | 1.0000 |
+| premature_commitment | 3 | 0.2000 | 3 | 0.2000 |
+| uninformative_test | 5 | 0.3333 | 5 | 0.3333 |
+| fixed_belief_trace | 3 | 0.2000 | 3 | 0.2000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 3 | 0.2000 | 3 | 0.2000 |
 
 #### Anti-pattern family presence (global)
 
@@ -1176,51 +1176,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 11 | 0.5000 | 11 | 0.5000 |
-| abductive | 21 | 0.9545 | 21 | 0.9545 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 11 | 0.5000 | 11 | 0.5000 |
+| evidence_led_hypothesis_generation | 21 | 0.9545 | 21 | 0.9545 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 19 | 0.8636 | 54 | 2.4545 |
-| evidence_ignored | 3 | 0.1364 | 44 | 2.0000 |
-| judgment_without_evidence | 7 | 0.3182 | 19 | 0.8636 |
-| dead_end_update | 2 | 0.0909 | 2 | 0.0909 |
-| unresolved_contradiction | 3 | 0.1364 | 11 | 0.5000 |
-| hypothesis_to_commitment_shortcut | 4 | 0.1818 | 5 | 0.2273 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 7 | 0.3182 | 7 | 0.3182 |
-| orphan_evidence | 2 | 0.0909 | 4 | 0.1818 |
-| confirmation_only | 1 | 0.0455 | 2 | 0.0909 |
+| untested_claim | 19 | 0.8636 | 54 | 2.4545 |
+| evidence_non_uptake | 17 | 0.7727 | 44 | 2.0000 |
+| unsupported_judgment | 7 | 0.3182 | 19 | 0.8636 |
+| stalled_revision | 2 | 0.0909 | 2 | 0.0909 |
+| contradiction_without_repair | 7 | 0.3182 | 11 | 0.5000 |
+| premature_commitment | 4 | 0.1818 | 5 | 0.2273 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 7 | 0.3182 | 7 | 0.3182 |
+| disconnected_evidence | 2 | 0.0909 | 4 | 0.1818 |
+| one_sided_confirmation | 1 | 0.0455 | 2 | 0.0909 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 19 | 0.8636 | 54 | 2.4545 |
-| evidence_ignored | 17 | 0.7727 | 44 | 2.0000 |
-| judgment_without_evidence | 7 | 0.3182 | 19 | 0.8636 |
-| dead_end_update | 2 | 0.0909 | 2 | 0.0909 |
-| unresolved_contradiction | 7 | 0.3182 | 12 | 0.5455 |
-| hypothesis_to_commitment_shortcut | 4 | 0.1818 | 5 | 0.2273 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 7 | 0.3182 | 7 | 0.3182 |
-| orphan_evidence | 2 | 0.0909 | 4 | 0.1818 |
-| confirmation_only | 1 | 0.0455 | 2 | 0.0909 |
+| untested_claim | 19 | 0.8636 | 54 | 2.4545 |
+| evidence_non_uptake | 17 | 0.7727 | 44 | 2.0000 |
+| unsupported_judgment | 7 | 0.3182 | 19 | 0.8636 |
+| stalled_revision | 2 | 0.0909 | 2 | 0.0909 |
+| contradiction_without_repair | 7 | 0.3182 | 12 | 0.5455 |
+| premature_commitment | 4 | 0.1818 | 5 | 0.2273 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 7 | 0.3182 | 7 | 0.3182 |
+| disconnected_evidence | 2 | 0.0909 | 4 | 0.1818 |
+| one_sided_confirmation | 1 | 0.0455 | 2 | 0.0909 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 20 | 0.9091 | 67 | 3.0455 |
-| evidence_handling | 8 | 0.3636 | 67 | 3.0455 |
+| evidence_handling | 17 | 0.7727 | 67 | 3.0455 |
 | experimental_strategy | 11 | 0.5000 | 14 | 0.6364 |
 
 #### Anti-pattern family presence (local)
@@ -1271,51 +1271,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 12 | 0.5455 | 12 | 0.5455 |
-| abductive | 20 | 0.9091 | 20 | 0.9091 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 12 | 0.5455 | 12 | 0.5455 |
+| evidence_led_hypothesis_generation | 20 | 0.9091 | 20 | 0.9091 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 17 | 0.7727 | 64 | 2.9091 |
-| evidence_ignored | 6 | 0.2727 | 54 | 2.4545 |
-| judgment_without_evidence | 10 | 0.4545 | 28 | 1.2727 |
-| dead_end_update | 3 | 0.1364 | 3 | 0.1364 |
-| unresolved_contradiction | 1 | 0.0455 | 12 | 0.5455 |
-| hypothesis_to_commitment_shortcut | 3 | 0.1364 | 3 | 0.1364 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.0455 |
-| no_belief_revision | 5 | 0.2273 | 5 | 0.2273 |
-| orphan_evidence | 2 | 0.0909 | 2 | 0.0909 |
-| confirmation_only | 3 | 0.1364 | 3 | 0.1364 |
+| untested_claim | 18 | 0.8182 | 64 | 2.9091 |
+| evidence_non_uptake | 20 | 0.9091 | 54 | 2.4545 |
+| unsupported_judgment | 10 | 0.4545 | 28 | 1.2727 |
+| stalled_revision | 3 | 0.1364 | 3 | 0.1364 |
+| contradiction_without_repair | 7 | 0.3182 | 12 | 0.5455 |
+| premature_commitment | 3 | 0.1364 | 3 | 0.1364 |
+| uninformative_test | 1 | 0.0455 | 1 | 0.0455 |
+| fixed_belief_trace | 5 | 0.2273 | 5 | 0.2273 |
+| disconnected_evidence | 2 | 0.0909 | 2 | 0.0909 |
+| one_sided_confirmation | 3 | 0.1364 | 3 | 0.1364 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 18 | 0.8182 | 64 | 2.9091 |
-| evidence_ignored | 20 | 0.9091 | 54 | 2.4545 |
-| judgment_without_evidence | 10 | 0.4545 | 28 | 1.2727 |
-| dead_end_update | 3 | 0.1364 | 3 | 0.1364 |
-| unresolved_contradiction | 9 | 0.4091 | 24 | 1.0909 |
-| hypothesis_to_commitment_shortcut | 3 | 0.1364 | 3 | 0.1364 |
-| test_without_evidence | 1 | 0.0455 | 1 | 0.0455 |
-| no_belief_revision | 5 | 0.2273 | 5 | 0.2273 |
-| orphan_evidence | 2 | 0.0909 | 2 | 0.0909 |
-| confirmation_only | 3 | 0.1364 | 3 | 0.1364 |
+| untested_claim | 18 | 0.8182 | 64 | 2.9091 |
+| evidence_non_uptake | 20 | 0.9091 | 54 | 2.4545 |
+| unsupported_judgment | 10 | 0.4545 | 28 | 1.2727 |
+| stalled_revision | 3 | 0.1364 | 3 | 0.1364 |
+| contradiction_without_repair | 9 | 0.4091 | 24 | 1.0909 |
+| premature_commitment | 3 | 0.1364 | 3 | 0.1364 |
+| uninformative_test | 1 | 0.0455 | 1 | 0.0455 |
+| fixed_belief_trace | 5 | 0.2273 | 5 | 0.2273 |
+| disconnected_evidence | 2 | 0.0909 | 2 | 0.0909 |
+| one_sided_confirmation | 3 | 0.1364 | 3 | 0.1364 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 19 | 0.8636 | 79 | 3.5909 |
-| evidence_handling | 12 | 0.5455 | 85 | 3.8636 |
+| evidence_handling | 21 | 0.9545 | 85 | 3.8636 |
 | experimental_strategy | 9 | 0.4091 | 11 | 0.5000 |
 
 #### Anti-pattern family presence (local)
@@ -1366,51 +1366,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 7 | 0.4667 | 7 | 0.4667 |
-| abductive | 15 | 1.0000 | 15 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 7 | 0.4667 | 7 | 0.4667 |
+| evidence_led_hypothesis_generation | 15 | 1.0000 | 15 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 86 | 5.7333 |
-| evidence_ignored | 6 | 0.4000 | 53 | 3.5333 |
-| judgment_without_evidence | 8 | 0.5333 | 11 | 0.7333 |
-| dead_end_update | 5 | 0.3333 | 5 | 0.3333 |
-| unresolved_contradiction | 5 | 0.3333 | 8 | 0.5333 |
-| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 6 | 0.4000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 1 | 0.0667 | 1 | 0.0667 |
-| orphan_evidence | 10 | 0.6667 | 19 | 1.2667 |
-| confirmation_only | 4 | 0.2667 | 5 | 0.3333 |
+| untested_claim | 15 | 1.0000 | 86 | 5.7333 |
+| evidence_non_uptake | 15 | 1.0000 | 53 | 3.5333 |
+| unsupported_judgment | 8 | 0.5333 | 11 | 0.7333 |
+| stalled_revision | 5 | 0.3333 | 5 | 0.3333 |
+| contradiction_without_repair | 6 | 0.4000 | 8 | 0.5333 |
+| premature_commitment | 4 | 0.2667 | 6 | 0.4000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 1 | 0.0667 | 1 | 0.0667 |
+| disconnected_evidence | 10 | 0.6667 | 19 | 1.2667 |
+| one_sided_confirmation | 4 | 0.2667 | 5 | 0.3333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 86 | 5.7333 |
-| evidence_ignored | 15 | 1.0000 | 53 | 3.5333 |
-| judgment_without_evidence | 8 | 0.5333 | 11 | 0.7333 |
-| dead_end_update | 5 | 0.3333 | 5 | 0.3333 |
-| unresolved_contradiction | 6 | 0.4000 | 8 | 0.5333 |
-| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 6 | 0.4000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 1 | 0.0667 | 1 | 0.0667 |
-| orphan_evidence | 10 | 0.6667 | 19 | 1.2667 |
-| confirmation_only | 4 | 0.2667 | 5 | 0.3333 |
+| untested_claim | 15 | 1.0000 | 86 | 5.7333 |
+| evidence_non_uptake | 15 | 1.0000 | 53 | 3.5333 |
+| unsupported_judgment | 8 | 0.5333 | 11 | 0.7333 |
+| stalled_revision | 5 | 0.3333 | 5 | 0.3333 |
+| contradiction_without_repair | 6 | 0.4000 | 8 | 0.5333 |
+| premature_commitment | 4 | 0.2667 | 6 | 0.4000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 1 | 0.0667 | 1 | 0.0667 |
+| disconnected_evidence | 10 | 0.6667 | 19 | 1.2667 |
+| one_sided_confirmation | 4 | 0.2667 | 5 | 0.3333 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 15 | 1.0000 | 99 | 6.6000 |
-| evidence_handling | 13 | 0.8667 | 83 | 5.5333 |
+| evidence_handling | 15 | 1.0000 | 83 | 5.5333 |
 | experimental_strategy | 7 | 0.4667 | 12 | 0.8000 |
 
 #### Anti-pattern family presence (local)
@@ -1461,44 +1461,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.0667 | 1 | 0.0667 |
-| bayesian_belief_updating | 8 | 0.5333 | 8 | 0.5333 |
-| abductive | 15 | 1.0000 | 15 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 1 | 0.0667 | 1 | 0.0667 |
+| hypothesis_reranking | 8 | 0.5333 | 8 | 0.5333 |
+| evidence_led_hypothesis_generation | 15 | 1.0000 | 15 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 165 | 11.0000 |
-| evidence_ignored | 11 | 0.7333 | 157 | 10.4667 |
-| judgment_without_evidence | 10 | 0.6667 | 24 | 1.6000 |
-| dead_end_update | 10 | 0.6667 | 15 | 1.0000 |
-| unresolved_contradiction | 5 | 0.3333 | 23 | 1.5333 |
-| hypothesis_to_commitment_shortcut | 2 | 0.1333 | 4 | 0.2667 |
-| test_without_evidence | 0 | 0.0000 | 2 | 0.1333 |
-| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 15 | 1.0000 | 41 | 2.7333 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 15 | 1.0000 | 165 | 11.0000 |
+| evidence_non_uptake | 15 | 1.0000 | 157 | 10.4667 |
+| unsupported_judgment | 10 | 0.6667 | 24 | 1.6000 |
+| stalled_revision | 10 | 0.6667 | 15 | 1.0000 |
+| contradiction_without_repair | 8 | 0.5333 | 23 | 1.5333 |
+| premature_commitment | 2 | 0.1333 | 4 | 0.2667 |
+| uninformative_test | 2 | 0.1333 | 2 | 0.1333 |
+| fixed_belief_trace | 0 | 0.0000 | 0 | 0.0000 |
+| disconnected_evidence | 15 | 1.0000 | 41 | 2.7333 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 165 | 11.0000 |
-| evidence_ignored | 15 | 1.0000 | 157 | 10.4667 |
-| judgment_without_evidence | 10 | 0.6667 | 24 | 1.6000 |
-| dead_end_update | 10 | 0.6667 | 15 | 1.0000 |
-| unresolved_contradiction | 8 | 0.5333 | 24 | 1.6000 |
-| hypothesis_to_commitment_shortcut | 2 | 0.1333 | 4 | 0.2667 |
-| test_without_evidence | 2 | 0.1333 | 2 | 0.1333 |
-| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 15 | 1.0000 | 41 | 2.7333 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 15 | 1.0000 | 165 | 11.0000 |
+| evidence_non_uptake | 15 | 1.0000 | 157 | 10.4667 |
+| unsupported_judgment | 10 | 0.6667 | 24 | 1.6000 |
+| stalled_revision | 10 | 0.6667 | 15 | 1.0000 |
+| contradiction_without_repair | 8 | 0.5333 | 24 | 1.6000 |
+| premature_commitment | 2 | 0.1333 | 4 | 0.2667 |
+| uninformative_test | 2 | 0.1333 | 2 | 0.1333 |
+| fixed_belief_trace | 0 | 0.0000 | 0 | 0.0000 |
+| disconnected_evidence | 15 | 1.0000 | 41 | 2.7333 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
@@ -1556,44 +1556,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 1 | 0.0667 | 1 | 0.0667 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.0667 | 1 | 0.0667 |
-| bayesian_belief_updating | 14 | 0.9333 | 14 | 0.9333 |
-| abductive | 15 | 1.0000 | 15 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 1 | 0.0667 | 1 | 0.0667 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 1 | 0.0667 | 1 | 0.0667 |
+| hypothesis_reranking | 14 | 0.9333 | 14 | 0.9333 |
+| evidence_led_hypothesis_generation | 15 | 1.0000 | 15 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 177 | 11.8000 |
-| evidence_ignored | 11 | 0.7333 | 177 | 11.8000 |
-| judgment_without_evidence | 7 | 0.4667 | 13 | 0.8667 |
-| dead_end_update | 14 | 0.9333 | 22 | 1.4667 |
-| unresolved_contradiction | 6 | 0.4000 | 28 | 1.8667 |
-| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 8 | 0.5333 |
-| test_without_evidence | 0 | 0.0000 | 5 | 0.3333 |
-| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 15 | 1.0000 | 40 | 2.6667 |
-| confirmation_only | 2 | 0.1333 | 3 | 0.2000 |
+| untested_claim | 15 | 1.0000 | 177 | 11.8000 |
+| evidence_non_uptake | 15 | 1.0000 | 177 | 11.8000 |
+| unsupported_judgment | 7 | 0.4667 | 13 | 0.8667 |
+| stalled_revision | 14 | 0.9333 | 22 | 1.4667 |
+| contradiction_without_repair | 9 | 0.6000 | 28 | 1.8667 |
+| premature_commitment | 4 | 0.2667 | 8 | 0.5333 |
+| uninformative_test | 4 | 0.2667 | 5 | 0.3333 |
+| fixed_belief_trace | 0 | 0.0000 | 0 | 0.0000 |
+| disconnected_evidence | 15 | 1.0000 | 40 | 2.6667 |
+| one_sided_confirmation | 2 | 0.1333 | 3 | 0.2000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 177 | 11.8000 |
-| evidence_ignored | 15 | 1.0000 | 177 | 11.8000 |
-| judgment_without_evidence | 7 | 0.4667 | 13 | 0.8667 |
-| dead_end_update | 14 | 0.9333 | 22 | 1.4667 |
-| unresolved_contradiction | 9 | 0.6000 | 28 | 1.8667 |
-| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 8 | 0.5333 |
-| test_without_evidence | 4 | 0.2667 | 5 | 0.3333 |
-| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 15 | 1.0000 | 40 | 2.6667 |
-| confirmation_only | 2 | 0.1333 | 3 | 0.2000 |
+| untested_claim | 15 | 1.0000 | 177 | 11.8000 |
+| evidence_non_uptake | 15 | 1.0000 | 177 | 11.8000 |
+| unsupported_judgment | 7 | 0.4667 | 13 | 0.8667 |
+| stalled_revision | 14 | 0.9333 | 22 | 1.4667 |
+| contradiction_without_repair | 9 | 0.6000 | 28 | 1.8667 |
+| premature_commitment | 4 | 0.2667 | 8 | 0.5333 |
+| uninformative_test | 4 | 0.2667 | 5 | 0.3333 |
+| fixed_belief_trace | 0 | 0.0000 | 0 | 0.0000 |
+| disconnected_evidence | 15 | 1.0000 | 40 | 2.6667 |
+| one_sided_confirmation | 2 | 0.1333 | 3 | 0.2000 |
 
 #### Anti-pattern family presence (global)
 
@@ -1651,51 +1651,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 4 | 0.8000 | 4 | 0.8000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 4 | 0.8000 | 4 | 0.8000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.6000 | 3 | 0.6000 |
-| evidence_ignored | 4 | 0.8000 | 29 | 5.8000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 3 | 0.6000 | 9 | 1.8000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
-| orphan_evidence | 1 | 0.2000 | 1 | 0.2000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.6000 | 3 | 0.6000 |
+| evidence_non_uptake | 5 | 1.0000 | 29 | 5.8000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 3 | 0.6000 | 9 | 1.8000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 5 | 1.0000 | 5 | 1.0000 |
+| disconnected_evidence | 1 | 0.2000 | 1 | 0.2000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.6000 | 3 | 0.6000 |
-| evidence_ignored | 5 | 1.0000 | 29 | 5.8000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 3 | 0.6000 | 9 | 1.8000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
-| orphan_evidence | 1 | 0.2000 | 1 | 0.2000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.6000 | 3 | 0.6000 |
+| evidence_non_uptake | 5 | 1.0000 | 29 | 5.8000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 3 | 0.6000 | 9 | 1.8000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 5 | 1.0000 | 5 | 1.0000 |
+| disconnected_evidence | 1 | 0.2000 | 1 | 0.2000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 4 | 0.8000 | 12 | 2.4000 |
-| evidence_handling | 4 | 0.8000 | 30 | 6.0000 |
+| evidence_handling | 5 | 1.0000 | 30 | 6.0000 |
 | experimental_strategy | 5 | 1.0000 | 5 | 1.0000 |
 
 #### Anti-pattern family presence (local)
@@ -1746,51 +1746,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 2 | 0.4000 | 2 | 0.4000 |
-| abductive | 3 | 0.6000 | 3 | 0.6000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 2 | 0.4000 | 2 | 0.4000 |
+| evidence_led_hypothesis_generation | 3 | 0.6000 | 3 | 0.6000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 0.4000 | 4 | 0.8000 |
-| evidence_ignored | 4 | 0.8000 | 24 | 4.8000 |
-| judgment_without_evidence | 2 | 0.4000 | 2 | 0.4000 |
-| dead_end_update | 2 | 0.4000 | 3 | 0.6000 |
-| unresolved_contradiction | 1 | 0.2000 | 3 | 0.6000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.2000 |
-| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.6000 | 4 | 0.8000 |
+| evidence_non_uptake | 5 | 1.0000 | 24 | 4.8000 |
+| unsupported_judgment | 2 | 0.4000 | 2 | 0.4000 |
+| stalled_revision | 2 | 0.4000 | 3 | 0.6000 |
+| contradiction_without_repair | 2 | 0.4000 | 3 | 0.6000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 1 | 0.2000 | 1 | 0.2000 |
+| fixed_belief_trace | 0 | 0.0000 | 0 | 0.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.6000 | 4 | 0.8000 |
-| evidence_ignored | 5 | 1.0000 | 24 | 4.8000 |
-| judgment_without_evidence | 2 | 0.4000 | 2 | 0.4000 |
-| dead_end_update | 2 | 0.4000 | 3 | 0.6000 |
-| unresolved_contradiction | 2 | 0.4000 | 3 | 0.6000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
-| no_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.6000 | 4 | 0.8000 |
+| evidence_non_uptake | 5 | 1.0000 | 24 | 4.8000 |
+| unsupported_judgment | 2 | 0.4000 | 2 | 0.4000 |
+| stalled_revision | 2 | 0.4000 | 3 | 0.6000 |
+| contradiction_without_repair | 2 | 0.4000 | 3 | 0.6000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 1 | 0.2000 | 1 | 0.2000 |
+| fixed_belief_trace | 0 | 0.0000 | 0 | 0.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 2 | 0.4000 | 7 | 1.4000 |
-| evidence_handling | 4 | 0.8000 | 27 | 5.4000 |
+| hypothesis_generation | 3 | 0.6000 | 7 | 1.4000 |
+| evidence_handling | 5 | 1.0000 | 27 | 5.4000 |
 | experimental_strategy | 2 | 0.4000 | 3 | 0.6000 |
 
 #### Anti-pattern family presence (local)
@@ -1841,51 +1841,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 1 | 0.2000 | 1 | 0.2000 |
-| exploratory_to_confirmatory | 1 | 0.2000 | 1 | 0.2000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 2 | 0.4000 | 2 | 0.4000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 1 | 0.2000 | 1 | 0.2000 |
+| explore_then_test_transition | 1 | 0.2000 | 1 | 0.2000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 2 | 0.4000 | 2 | 0.4000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 1 | 0.2000 | 1 | 0.2000 |
-| evidence_ignored | 1 | 0.2000 | 14 | 2.8000 |
-| judgment_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 2 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 4 | 0.8000 | 4 | 0.8000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 1 | 0.2000 | 1 | 0.2000 |
+| evidence_non_uptake | 5 | 1.0000 | 14 | 2.8000 |
+| unsupported_judgment | 1 | 0.2000 | 1 | 0.2000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 1 | 0.2000 | 2 | 0.4000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 4 | 0.8000 | 4 | 0.8000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 1 | 0.2000 | 1 | 0.2000 |
-| evidence_ignored | 5 | 1.0000 | 14 | 2.8000 |
-| judgment_without_evidence | 1 | 0.2000 | 1 | 0.2000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 1 | 0.2000 | 2 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 4 | 0.8000 | 4 | 0.8000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 1 | 0.2000 | 1 | 0.2000 |
+| evidence_non_uptake | 5 | 1.0000 | 14 | 2.8000 |
+| unsupported_judgment | 1 | 0.2000 | 1 | 0.2000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 1 | 0.2000 | 2 | 0.4000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 4 | 0.8000 | 4 | 0.8000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 1 | 0.2000 | 3 | 0.6000 |
-| evidence_handling | 2 | 0.4000 | 15 | 3.0000 |
+| evidence_handling | 5 | 1.0000 | 15 | 3.0000 |
 | experimental_strategy | 4 | 0.8000 | 4 | 0.8000 |
 
 #### Anti-pattern family presence (local)
@@ -1936,51 +1936,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 4 | 0.8000 | 4 | 0.8000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 4 | 0.8000 | 4 | 0.8000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 0.4000 | 2 | 0.4000 |
-| evidence_ignored | 3 | 0.6000 | 15 | 3.0000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 1 | 0.2000 | 2 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 2 | 0.4000 | 2 | 0.4000 |
-| test_without_evidence | 0 | 0.0000 | 2 | 0.4000 |
-| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 2 | 0.4000 | 2 | 0.4000 |
+| untested_claim | 2 | 0.4000 | 2 | 0.4000 |
+| evidence_non_uptake | 5 | 1.0000 | 15 | 3.0000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 1 | 0.2000 | 2 | 0.4000 |
+| premature_commitment | 2 | 0.4000 | 2 | 0.4000 |
+| uninformative_test | 1 | 0.2000 | 2 | 0.4000 |
+| fixed_belief_trace | 5 | 1.0000 | 5 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 2 | 0.4000 | 2 | 0.4000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 0.4000 | 2 | 0.4000 |
-| evidence_ignored | 5 | 1.0000 | 15 | 3.0000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 1 | 0.2000 | 2 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 2 | 0.4000 | 2 | 0.4000 |
-| test_without_evidence | 1 | 0.2000 | 2 | 0.4000 |
-| no_belief_revision | 5 | 1.0000 | 5 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 2 | 0.4000 | 2 | 0.4000 |
+| untested_claim | 2 | 0.4000 | 2 | 0.4000 |
+| evidence_non_uptake | 5 | 1.0000 | 15 | 3.0000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 1 | 0.2000 | 2 | 0.4000 |
+| premature_commitment | 2 | 0.4000 | 2 | 0.4000 |
+| uninformative_test | 1 | 0.2000 | 2 | 0.4000 |
+| fixed_belief_trace | 5 | 1.0000 | 5 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 2 | 0.4000 | 2 | 0.4000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 3 | 0.6000 | 6 | 1.2000 |
-| evidence_handling | 3 | 0.6000 | 17 | 3.4000 |
+| evidence_handling | 5 | 1.0000 | 17 | 3.4000 |
 | experimental_strategy | 5 | 1.0000 | 7 | 1.4000 |
 
 #### Anti-pattern family presence (local)
@@ -2031,44 +2031,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 2 | 0.1333 | 2 | 0.1333 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 2 | 0.1333 | 2 | 0.1333 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 0.1333 | 2 | 0.1333 |
-| evidence_ignored | 14 | 0.9333 | 113 | 7.5333 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.0667 | 1 | 0.0667 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.0667 |
-| no_belief_revision | 15 | 1.0000 | 15 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 1 | 0.0667 | 1 | 0.0667 |
+| untested_claim | 2 | 0.1333 | 2 | 0.1333 |
+| evidence_non_uptake | 15 | 1.0000 | 113 | 7.5333 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 1 | 0.0667 | 1 | 0.0667 |
+| uninformative_test | 1 | 0.0667 | 1 | 0.0667 |
+| fixed_belief_trace | 15 | 1.0000 | 15 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 1 | 0.0667 | 1 | 0.0667 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 2 | 0.1333 | 2 | 0.1333 |
-| evidence_ignored | 15 | 1.0000 | 113 | 7.5333 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 1 | 0.0667 | 1 | 0.0667 |
-| test_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| no_belief_revision | 15 | 1.0000 | 15 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 1 | 0.0667 | 1 | 0.0667 |
+| untested_claim | 2 | 0.1333 | 2 | 0.1333 |
+| evidence_non_uptake | 15 | 1.0000 | 113 | 7.5333 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 1 | 0.0667 | 1 | 0.0667 |
+| uninformative_test | 1 | 0.0667 | 1 | 0.0667 |
+| fixed_belief_trace | 15 | 1.0000 | 15 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 1 | 0.0667 | 1 | 0.0667 |
 
 #### Anti-pattern family presence (global)
 
@@ -2126,44 +2126,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 5 | 0.5000 | 5 | 0.5000 |
-| bayesian_belief_updating | 4 | 0.4000 | 4 | 0.4000 |
-| abductive | 9 | 0.9000 | 9 | 0.9000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 5 | 0.5000 | 5 | 0.5000 |
+| hypothesis_reranking | 4 | 0.4000 | 4 | 0.4000 |
+| evidence_led_hypothesis_generation | 9 | 0.9000 | 9 | 0.9000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 7 | 0.7000 | 19 | 1.9000 |
-| evidence_ignored | 10 | 1.0000 | 95 | 9.5000 |
-| judgment_without_evidence | 1 | 0.1000 | 2 | 0.2000 |
-| dead_end_update | 1 | 0.1000 | 1 | 0.1000 |
-| unresolved_contradiction | 4 | 0.4000 | 11 | 1.1000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 2 | 0.2000 |
-| no_belief_revision | 6 | 0.6000 | 6 | 0.6000 |
-| orphan_evidence | 1 | 0.1000 | 1 | 0.1000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 8 | 0.8000 | 19 | 1.9000 |
+| evidence_non_uptake | 10 | 1.0000 | 95 | 9.5000 |
+| unsupported_judgment | 1 | 0.1000 | 2 | 0.2000 |
+| stalled_revision | 1 | 0.1000 | 1 | 0.1000 |
+| contradiction_without_repair | 6 | 0.6000 | 11 | 1.1000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 2 | 0.2000 | 2 | 0.2000 |
+| fixed_belief_trace | 6 | 0.6000 | 6 | 0.6000 |
+| disconnected_evidence | 1 | 0.1000 | 1 | 0.1000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 8 | 0.8000 | 19 | 1.9000 |
-| evidence_ignored | 10 | 1.0000 | 95 | 9.5000 |
-| judgment_without_evidence | 1 | 0.1000 | 2 | 0.2000 |
-| dead_end_update | 1 | 0.1000 | 1 | 0.1000 |
-| unresolved_contradiction | 6 | 0.6000 | 11 | 1.1000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 2 | 0.2000 | 2 | 0.2000 |
-| no_belief_revision | 6 | 0.6000 | 6 | 0.6000 |
-| orphan_evidence | 1 | 0.1000 | 1 | 0.1000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 8 | 0.8000 | 19 | 1.9000 |
+| evidence_non_uptake | 10 | 1.0000 | 95 | 9.5000 |
+| unsupported_judgment | 1 | 0.1000 | 2 | 0.2000 |
+| stalled_revision | 1 | 0.1000 | 1 | 0.1000 |
+| contradiction_without_repair | 6 | 0.6000 | 11 | 1.1000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 2 | 0.2000 | 2 | 0.2000 |
+| fixed_belief_trace | 6 | 0.6000 | 6 | 0.6000 |
+| disconnected_evidence | 1 | 0.1000 | 1 | 0.1000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
@@ -2221,50 +2221,50 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 2 | 0.4000 | 2 | 0.4000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 4 | 0.8000 | 4 | 0.8000 |
-| bayesian_belief_updating | 3 | 0.6000 | 3 | 0.6000 |
-| abductive | 5 | 1.0000 | 5 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 2 | 0.4000 | 2 | 0.4000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 4 | 0.8000 | 4 | 0.8000 |
+| hypothesis_reranking | 3 | 0.6000 | 3 | 0.6000 |
+| evidence_led_hypothesis_generation | 5 | 1.0000 | 5 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 4 | 0.8000 | 12 | 2.4000 |
-| evidence_ignored | 5 | 1.0000 | 53 | 10.6000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 2 | 0.4000 | 2 | 0.4000 |
-| unresolved_contradiction | 2 | 0.4000 | 3 | 0.6000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 2 | 0.4000 |
-| no_belief_revision | 1 | 0.2000 | 1 | 0.2000 |
-| orphan_evidence | 1 | 0.2000 | 2 | 0.4000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 5 | 1.0000 | 12 | 2.4000 |
+| evidence_non_uptake | 5 | 1.0000 | 53 | 10.6000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 2 | 0.4000 | 2 | 0.4000 |
+| contradiction_without_repair | 3 | 0.6000 | 3 | 0.6000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 2 | 0.4000 | 2 | 0.4000 |
+| fixed_belief_trace | 1 | 0.2000 | 1 | 0.2000 |
+| disconnected_evidence | 1 | 0.2000 | 2 | 0.4000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 5 | 1.0000 | 12 | 2.4000 |
-| evidence_ignored | 5 | 1.0000 | 53 | 10.6000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 2 | 0.4000 | 2 | 0.4000 |
-| unresolved_contradiction | 3 | 0.6000 | 4 | 0.8000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 2 | 0.4000 | 2 | 0.4000 |
-| no_belief_revision | 1 | 0.2000 | 1 | 0.2000 |
-| orphan_evidence | 1 | 0.2000 | 2 | 0.4000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 5 | 1.0000 | 12 | 2.4000 |
+| evidence_non_uptake | 5 | 1.0000 | 53 | 10.6000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 2 | 0.4000 | 2 | 0.4000 |
+| contradiction_without_repair | 3 | 0.6000 | 4 | 0.8000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 2 | 0.4000 | 2 | 0.4000 |
+| fixed_belief_trace | 1 | 0.2000 | 1 | 0.2000 |
+| disconnected_evidence | 1 | 0.2000 | 2 | 0.4000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 4 | 0.8000 | 15 | 3.0000 |
+| hypothesis_generation | 5 | 1.0000 | 15 | 3.0000 |
 | evidence_handling | 5 | 1.0000 | 57 | 11.4000 |
 | experimental_strategy | 3 | 0.6000 | 3 | 0.6000 |
 
@@ -2316,44 +2316,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 0 | 0.0000 | 0 | 0.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 0 | 0.0000 | 0 | 0.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 0 | 0.0000 | 0 | 0.0000 |
-| evidence_ignored | 14 | 0.9333 | 67 | 4.4667 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 15 | 1.0000 | 15 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_non_uptake | 14 | 0.9333 | 67 | 4.4667 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 15 | 1.0000 | 15 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 0 | 0.0000 | 0 | 0.0000 |
-| evidence_ignored | 14 | 0.9333 | 67 | 4.4667 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 15 | 1.0000 | 15 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_non_uptake | 14 | 0.9333 | 67 | 4.4667 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 15 | 1.0000 | 15 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
@@ -2411,51 +2411,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 7 | 0.2414 | 7 | 0.2414 |
-| bayesian_belief_updating | 19 | 0.6552 | 19 | 0.6552 |
-| abductive | 25 | 0.8621 | 25 | 0.8621 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 1 | 0.0345 | 1 | 0.0345 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 7 | 0.2414 | 7 | 0.2414 |
+| hypothesis_reranking | 19 | 0.6552 | 19 | 0.6552 |
+| evidence_led_hypothesis_generation | 25 | 0.8621 | 25 | 0.8621 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 1 | 0.0345 | 1 | 0.0345 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 19 | 0.6552 | 70 | 2.4138 |
-| evidence_ignored | 13 | 0.4483 | 167 | 5.7586 |
-| judgment_without_evidence | 9 | 0.3103 | 9 | 0.3103 |
-| dead_end_update | 10 | 0.3448 | 11 | 0.3793 |
-| unresolved_contradiction | 8 | 0.2759 | 59 | 2.0345 |
-| hypothesis_to_commitment_shortcut | 2 | 0.0690 | 3 | 0.1034 |
-| test_without_evidence | 0 | 0.0000 | 4 | 0.1379 |
-| no_belief_revision | 12 | 0.4138 | 12 | 0.4138 |
-| orphan_evidence | 8 | 0.2759 | 10 | 0.3448 |
-| confirmation_only | 2 | 0.0690 | 3 | 0.1034 |
+| untested_claim | 22 | 0.7586 | 70 | 2.4138 |
+| evidence_non_uptake | 28 | 0.9655 | 167 | 5.7586 |
+| unsupported_judgment | 9 | 0.3103 | 9 | 0.3103 |
+| stalled_revision | 10 | 0.3448 | 11 | 0.3793 |
+| contradiction_without_repair | 17 | 0.5862 | 59 | 2.0345 |
+| premature_commitment | 2 | 0.0690 | 3 | 0.1034 |
+| uninformative_test | 4 | 0.1379 | 4 | 0.1379 |
+| fixed_belief_trace | 12 | 0.4138 | 12 | 0.4138 |
+| disconnected_evidence | 8 | 0.2759 | 10 | 0.3448 |
+| one_sided_confirmation | 2 | 0.0690 | 3 | 0.1034 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 22 | 0.7586 | 70 | 2.4138 |
-| evidence_ignored | 28 | 0.9655 | 167 | 5.7586 |
-| judgment_without_evidence | 9 | 0.3103 | 9 | 0.3103 |
-| dead_end_update | 10 | 0.3448 | 11 | 0.3793 |
-| unresolved_contradiction | 20 | 0.6897 | 64 | 2.2069 |
-| hypothesis_to_commitment_shortcut | 2 | 0.0690 | 3 | 0.1034 |
-| test_without_evidence | 4 | 0.1379 | 4 | 0.1379 |
-| no_belief_revision | 12 | 0.4138 | 12 | 0.4138 |
-| orphan_evidence | 8 | 0.2759 | 10 | 0.3448 |
-| confirmation_only | 2 | 0.0690 | 3 | 0.1034 |
+| untested_claim | 22 | 0.7586 | 70 | 2.4138 |
+| evidence_non_uptake | 28 | 0.9655 | 167 | 5.7586 |
+| unsupported_judgment | 9 | 0.3103 | 9 | 0.3103 |
+| stalled_revision | 10 | 0.3448 | 11 | 0.3793 |
+| contradiction_without_repair | 20 | 0.6897 | 64 | 2.2069 |
+| premature_commitment | 2 | 0.0690 | 3 | 0.1034 |
+| uninformative_test | 4 | 0.1379 | 4 | 0.1379 |
+| fixed_belief_trace | 12 | 0.4138 | 12 | 0.4138 |
+| disconnected_evidence | 8 | 0.2759 | 10 | 0.3448 |
+| one_sided_confirmation | 2 | 0.0690 | 3 | 0.1034 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 20 | 0.6897 | 132 | 4.5517 |
-| evidence_handling | 20 | 0.6897 | 190 | 6.5517 |
+| hypothesis_generation | 24 | 0.8276 | 132 | 4.5517 |
+| evidence_handling | 28 | 0.9655 | 190 | 6.5517 |
 | experimental_strategy | 22 | 0.7586 | 26 | 0.8966 |
 
 #### Anti-pattern family presence (local)
@@ -2506,51 +2506,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.0667 | 1 | 0.0667 |
-| bayesian_belief_updating | 1 | 0.0667 | 1 | 0.0667 |
-| abductive | 5 | 0.3333 | 5 | 0.3333 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 1 | 0.0667 | 1 | 0.0667 |
+| hypothesis_reranking | 1 | 0.0667 | 1 | 0.0667 |
+| evidence_led_hypothesis_generation | 5 | 0.3333 | 5 | 0.3333 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 6 | 0.4000 | 6 | 0.4000 |
-| evidence_ignored | 10 | 0.6667 | 39 | 2.6000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 3 | 0.2000 | 3 | 0.2000 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.0667 |
-| no_belief_revision | 14 | 0.9333 | 14 | 0.9333 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 3 | 0.2000 | 3 | 0.2000 |
+| untested_claim | 6 | 0.4000 | 6 | 0.4000 |
+| evidence_non_uptake | 10 | 0.6667 | 39 | 2.6000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 3 | 0.2000 | 3 | 0.2000 |
+| uninformative_test | 1 | 0.0667 | 1 | 0.0667 |
+| fixed_belief_trace | 14 | 0.9333 | 14 | 0.9333 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 3 | 0.2000 | 3 | 0.2000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 6 | 0.4000 | 6 | 0.4000 |
-| evidence_ignored | 10 | 0.6667 | 39 | 2.6000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 3 | 0.2000 | 3 | 0.2000 |
-| test_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| no_belief_revision | 14 | 0.9333 | 14 | 0.9333 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 3 | 0.2000 | 3 | 0.2000 |
+| untested_claim | 6 | 0.4000 | 6 | 0.4000 |
+| evidence_non_uptake | 10 | 0.6667 | 39 | 2.6000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 3 | 0.2000 | 3 | 0.2000 |
+| uninformative_test | 1 | 0.0667 | 1 | 0.0667 |
+| fixed_belief_trace | 14 | 0.9333 | 14 | 0.9333 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 3 | 0.2000 | 3 | 0.2000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 6 | 0.4000 | 9 | 0.6000 |
-| evidence_handling | 10 | 0.6667 | 40 | 2.6667 |
+| evidence_handling | 11 | 0.7333 | 40 | 2.6667 |
 | experimental_strategy | 14 | 0.9333 | 17 | 1.1333 |
 
 #### Anti-pattern family presence (local)
@@ -2601,51 +2601,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 2 | 0.1333 | 2 | 0.1333 |
-| exploratory_to_confirmatory | 3 | 0.2000 | 3 | 0.2000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 8 | 0.5333 | 8 | 0.5333 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 2 | 0.1333 | 2 | 0.1333 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 2 | 0.1333 | 2 | 0.1333 |
+| explore_then_test_transition | 3 | 0.2000 | 3 | 0.2000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 8 | 0.5333 | 8 | 0.5333 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 2 | 0.1333 | 2 | 0.1333 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 7 | 0.4667 | 12 | 0.8000 |
-| evidence_ignored | 12 | 0.8000 | 57 | 3.8000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 2 | 0.1333 | 6 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 2 | 0.1333 | 2 | 0.1333 |
-| test_without_evidence | 0 | 0.0000 | 3 | 0.2000 |
-| no_belief_revision | 10 | 0.6667 | 10 | 0.6667 |
-| orphan_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| confirmation_only | 3 | 0.2000 | 3 | 0.2000 |
+| untested_claim | 7 | 0.4667 | 12 | 0.8000 |
+| evidence_non_uptake | 14 | 0.9333 | 57 | 3.8000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 2 | 0.1333 | 6 | 0.4000 |
+| premature_commitment | 2 | 0.1333 | 2 | 0.1333 |
+| uninformative_test | 2 | 0.1333 | 3 | 0.2000 |
+| fixed_belief_trace | 10 | 0.6667 | 10 | 0.6667 |
+| disconnected_evidence | 1 | 0.0667 | 1 | 0.0667 |
+| one_sided_confirmation | 3 | 0.2000 | 3 | 0.2000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 7 | 0.4667 | 12 | 0.8000 |
-| evidence_ignored | 14 | 0.9333 | 57 | 3.8000 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 2 | 0.1333 | 6 | 0.4000 |
-| hypothesis_to_commitment_shortcut | 2 | 0.1333 | 2 | 0.1333 |
-| test_without_evidence | 2 | 0.1333 | 3 | 0.2000 |
-| no_belief_revision | 10 | 0.6667 | 10 | 0.6667 |
-| orphan_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| confirmation_only | 3 | 0.2000 | 3 | 0.2000 |
+| untested_claim | 7 | 0.4667 | 12 | 0.8000 |
+| evidence_non_uptake | 14 | 0.9333 | 57 | 3.8000 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 2 | 0.1333 | 6 | 0.4000 |
+| premature_commitment | 2 | 0.1333 | 2 | 0.1333 |
+| uninformative_test | 2 | 0.1333 | 3 | 0.2000 |
+| fixed_belief_trace | 10 | 0.6667 | 10 | 0.6667 |
+| disconnected_evidence | 1 | 0.0667 | 1 | 0.0667 |
+| one_sided_confirmation | 3 | 0.2000 | 3 | 0.2000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 8 | 0.5333 | 21 | 1.4000 |
-| evidence_handling | 12 | 0.8000 | 61 | 4.0667 |
+| evidence_handling | 14 | 0.9333 | 61 | 4.0667 |
 | experimental_strategy | 11 | 0.7333 | 12 | 0.8000 |
 
 #### Anti-pattern family presence (local)
@@ -2696,50 +2696,50 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 2 | 0.1429 | 2 | 0.1429 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 4 | 0.2857 | 4 | 0.2857 |
-| abductive | 1 | 0.0714 | 1 | 0.0714 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 2 | 0.1429 | 2 | 0.1429 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 4 | 0.2857 | 4 | 0.2857 |
+| evidence_led_hypothesis_generation | 1 | 0.0714 | 1 | 0.0714 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 7 | 0.5000 | 16 | 1.1429 |
-| evidence_ignored | 14 | 1.0000 | 231 | 16.5000 |
-| judgment_without_evidence | 4 | 0.2857 | 4 | 0.2857 |
-| dead_end_update | 3 | 0.2143 | 4 | 0.2857 |
-| unresolved_contradiction | 7 | 0.5000 | 18 | 1.2857 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 10 | 0.7143 |
-| no_belief_revision | 5 | 0.3571 | 5 | 0.3571 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 9 | 0.6429 | 16 | 1.1429 |
+| evidence_non_uptake | 14 | 1.0000 | 231 | 16.5000 |
+| unsupported_judgment | 4 | 0.2857 | 4 | 0.2857 |
+| stalled_revision | 3 | 0.2143 | 4 | 0.2857 |
+| contradiction_without_repair | 9 | 0.6429 | 18 | 1.2857 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 4 | 0.2857 | 10 | 0.7143 |
+| fixed_belief_trace | 5 | 0.3571 | 5 | 0.3571 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 9 | 0.6429 | 16 | 1.1429 |
-| evidence_ignored | 14 | 1.0000 | 231 | 16.5000 |
-| judgment_without_evidence | 4 | 0.2857 | 4 | 0.2857 |
-| dead_end_update | 3 | 0.2143 | 4 | 0.2857 |
-| unresolved_contradiction | 9 | 0.6429 | 18 | 1.2857 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 4 | 0.2857 | 10 | 0.7143 |
-| no_belief_revision | 5 | 0.3571 | 5 | 0.3571 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 9 | 0.6429 | 16 | 1.1429 |
+| evidence_non_uptake | 14 | 1.0000 | 231 | 16.5000 |
+| unsupported_judgment | 4 | 0.2857 | 4 | 0.2857 |
+| stalled_revision | 3 | 0.2143 | 4 | 0.2857 |
+| contradiction_without_repair | 9 | 0.6429 | 18 | 1.2857 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 4 | 0.2857 | 10 | 0.7143 |
+| fixed_belief_trace | 5 | 0.3571 | 5 | 0.3571 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 11 | 0.7857 | 34 | 2.4286 |
+| hypothesis_generation | 12 | 0.8571 | 34 | 2.4286 |
 | evidence_handling | 14 | 1.0000 | 245 | 17.5000 |
 | experimental_strategy | 8 | 0.5714 | 9 | 0.6429 |
 
@@ -2791,51 +2791,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.0455 | 1 | 0.0455 |
-| bayesian_belief_updating | 3 | 0.1364 | 3 | 0.1364 |
-| abductive | 21 | 0.9545 | 21 | 0.9545 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 1 | 0.0455 | 1 | 0.0455 |
+| hypothesis_reranking | 3 | 0.1364 | 3 | 0.1364 |
+| evidence_led_hypothesis_generation | 21 | 0.9545 | 21 | 0.9545 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 11 | 0.5000 | 15 | 0.6818 |
-| evidence_ignored | 8 | 0.3636 | 26 | 1.1818 |
-| judgment_without_evidence | 1 | 0.0455 | 1 | 0.0455 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 3 | 0.1364 | 4 | 0.1818 |
-| hypothesis_to_commitment_shortcut | 5 | 0.2273 | 5 | 0.2273 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.0455 |
-| no_belief_revision | 19 | 0.8636 | 19 | 0.8636 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 6 | 0.2727 | 6 | 0.2727 |
+| untested_claim | 12 | 0.5455 | 15 | 0.6818 |
+| evidence_non_uptake | 12 | 0.5455 | 26 | 1.1818 |
+| unsupported_judgment | 1 | 0.0455 | 1 | 0.0455 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 4 | 0.1818 | 4 | 0.1818 |
+| premature_commitment | 5 | 0.2273 | 5 | 0.2273 |
+| uninformative_test | 1 | 0.0455 | 1 | 0.0455 |
+| fixed_belief_trace | 19 | 0.8636 | 19 | 0.8636 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 6 | 0.2727 | 6 | 0.2727 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 12 | 0.5455 | 15 | 0.6818 |
-| evidence_ignored | 12 | 0.5455 | 26 | 1.1818 |
-| judgment_without_evidence | 1 | 0.0455 | 1 | 0.0455 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 4 | 0.1818 | 4 | 0.1818 |
-| hypothesis_to_commitment_shortcut | 5 | 0.2273 | 5 | 0.2273 |
-| test_without_evidence | 1 | 0.0455 | 1 | 0.0455 |
-| no_belief_revision | 19 | 0.8636 | 19 | 0.8636 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 6 | 0.2727 | 6 | 0.2727 |
+| untested_claim | 12 | 0.5455 | 15 | 0.6818 |
+| evidence_non_uptake | 12 | 0.5455 | 26 | 1.1818 |
+| unsupported_judgment | 1 | 0.0455 | 1 | 0.0455 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 4 | 0.1818 | 4 | 0.1818 |
+| premature_commitment | 5 | 0.2273 | 5 | 0.2273 |
+| uninformative_test | 1 | 0.0455 | 1 | 0.0455 |
+| fixed_belief_trace | 19 | 0.8636 | 19 | 0.8636 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 6 | 0.2727 | 6 | 0.2727 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 13 | 0.5909 | 25 | 1.1364 |
-| evidence_handling | 9 | 0.4091 | 28 | 1.2727 |
+| hypothesis_generation | 14 | 0.6364 | 25 | 1.1364 |
+| evidence_handling | 12 | 0.5455 | 28 | 1.2727 |
 | experimental_strategy | 19 | 0.8636 | 24 | 1.0909 |
 
 #### Anti-pattern family presence (local)
@@ -2886,51 +2886,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 2 | 0.0909 | 2 | 0.0909 |
-| abductive | 22 | 1.0000 | 22 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 2 | 0.0909 | 2 | 0.0909 |
+| evidence_led_hypothesis_generation | 22 | 1.0000 | 22 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 0.6818 | 18 | 0.8182 |
-| evidence_ignored | 5 | 0.2273 | 23 | 1.0455 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 2 | 0.0909 | 4 | 0.1818 |
-| hypothesis_to_commitment_shortcut | 10 | 0.4545 | 10 | 0.4545 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 20 | 0.9091 | 20 | 0.9091 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 9 | 0.4091 | 9 | 0.4091 |
+| untested_claim | 15 | 0.6818 | 18 | 0.8182 |
+| evidence_non_uptake | 12 | 0.5455 | 23 | 1.0455 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 2 | 0.0909 | 4 | 0.1818 |
+| premature_commitment | 10 | 0.4545 | 10 | 0.4545 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 20 | 0.9091 | 20 | 0.9091 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 9 | 0.4091 | 9 | 0.4091 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 0.6818 | 18 | 0.8182 |
-| evidence_ignored | 12 | 0.5455 | 23 | 1.0455 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 2 | 0.0909 | 4 | 0.1818 |
-| hypothesis_to_commitment_shortcut | 10 | 0.4545 | 10 | 0.4545 |
-| test_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| no_belief_revision | 20 | 0.9091 | 20 | 0.9091 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 9 | 0.4091 | 9 | 0.4091 |
+| untested_claim | 15 | 0.6818 | 18 | 0.8182 |
+| evidence_non_uptake | 12 | 0.5455 | 23 | 1.0455 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 2 | 0.0909 | 4 | 0.1818 |
+| premature_commitment | 10 | 0.4545 | 10 | 0.4545 |
+| uninformative_test | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_belief_trace | 20 | 0.9091 | 20 | 0.9091 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 9 | 0.4091 | 9 | 0.4091 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 16 | 0.7273 | 31 | 1.4091 |
-| evidence_handling | 5 | 0.2273 | 23 | 1.0455 |
+| evidence_handling | 12 | 0.5455 | 23 | 1.0455 |
 | experimental_strategy | 20 | 0.9091 | 30 | 1.3636 |
 
 #### Anti-pattern family presence (local)
@@ -2981,44 +2981,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.0667 | 1 | 0.0667 |
-| bayesian_belief_updating | 9 | 0.6000 | 9 | 0.6000 |
-| abductive | 15 | 1.0000 | 15 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 1 | 0.0667 | 1 | 0.0667 |
+| hypothesis_reranking | 9 | 0.6000 | 9 | 0.6000 |
+| evidence_led_hypothesis_generation | 15 | 1.0000 | 15 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 50 | 3.3333 |
-| evidence_ignored | 15 | 1.0000 | 60 | 4.0000 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 1 | 0.0667 | 1 | 0.0667 |
-| unresolved_contradiction | 2 | 0.1333 | 5 | 0.3333 |
-| hypothesis_to_commitment_shortcut | 11 | 0.7333 | 14 | 0.9333 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.0667 |
-| no_belief_revision | 7 | 0.4667 | 7 | 0.4667 |
-| orphan_evidence | 13 | 0.8667 | 18 | 1.2000 |
-| confirmation_only | 11 | 0.7333 | 14 | 0.9333 |
+| untested_claim | 15 | 1.0000 | 50 | 3.3333 |
+| evidence_non_uptake | 15 | 1.0000 | 60 | 4.0000 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 1 | 0.0667 | 1 | 0.0667 |
+| contradiction_without_repair | 5 | 0.3333 | 5 | 0.3333 |
+| premature_commitment | 11 | 0.7333 | 14 | 0.9333 |
+| uninformative_test | 1 | 0.0667 | 1 | 0.0667 |
+| fixed_belief_trace | 7 | 0.4667 | 7 | 0.4667 |
+| disconnected_evidence | 13 | 0.8667 | 18 | 1.2000 |
+| one_sided_confirmation | 11 | 0.7333 | 14 | 0.9333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 50 | 3.3333 |
-| evidence_ignored | 15 | 1.0000 | 60 | 4.0000 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 1 | 0.0667 | 1 | 0.0667 |
-| unresolved_contradiction | 5 | 0.3333 | 5 | 0.3333 |
-| hypothesis_to_commitment_shortcut | 11 | 0.7333 | 14 | 0.9333 |
-| test_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| no_belief_revision | 7 | 0.4667 | 7 | 0.4667 |
-| orphan_evidence | 13 | 0.8667 | 18 | 1.2000 |
-| confirmation_only | 11 | 0.7333 | 14 | 0.9333 |
+| untested_claim | 15 | 1.0000 | 50 | 3.3333 |
+| evidence_non_uptake | 15 | 1.0000 | 60 | 4.0000 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 1 | 0.0667 | 1 | 0.0667 |
+| contradiction_without_repair | 5 | 0.3333 | 5 | 0.3333 |
+| premature_commitment | 11 | 0.7333 | 14 | 0.9333 |
+| uninformative_test | 1 | 0.0667 | 1 | 0.0667 |
+| fixed_belief_trace | 7 | 0.4667 | 7 | 0.4667 |
+| disconnected_evidence | 13 | 0.8667 | 18 | 1.2000 |
+| one_sided_confirmation | 11 | 0.7333 | 14 | 0.9333 |
 
 #### Anti-pattern family presence (global)
 
@@ -3076,44 +3076,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 9 | 0.6000 | 9 | 0.6000 |
-| abductive | 15 | 1.0000 | 15 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 9 | 0.6000 | 9 | 0.6000 |
+| evidence_led_hypothesis_generation | 15 | 1.0000 | 15 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 54 | 3.6000 |
-| evidence_ignored | 14 | 0.9333 | 68 | 4.5333 |
-| judgment_without_evidence | 5 | 0.3333 | 6 | 0.4000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 1 | 0.0667 | 2 | 0.1333 |
-| hypothesis_to_commitment_shortcut | 6 | 0.4000 | 12 | 0.8000 |
-| test_without_evidence | 0 | 0.0000 | 3 | 0.2000 |
-| no_belief_revision | 5 | 0.3333 | 5 | 0.3333 |
-| orphan_evidence | 14 | 0.9333 | 23 | 1.5333 |
-| confirmation_only | 6 | 0.4000 | 11 | 0.7333 |
+| untested_claim | 15 | 1.0000 | 54 | 3.6000 |
+| evidence_non_uptake | 15 | 1.0000 | 68 | 4.5333 |
+| unsupported_judgment | 5 | 0.3333 | 6 | 0.4000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 1 | 0.0667 | 2 | 0.1333 |
+| premature_commitment | 6 | 0.4000 | 12 | 0.8000 |
+| uninformative_test | 3 | 0.2000 | 3 | 0.2000 |
+| fixed_belief_trace | 5 | 0.3333 | 5 | 0.3333 |
+| disconnected_evidence | 14 | 0.9333 | 23 | 1.5333 |
+| one_sided_confirmation | 6 | 0.4000 | 11 | 0.7333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 54 | 3.6000 |
-| evidence_ignored | 15 | 1.0000 | 68 | 4.5333 |
-| judgment_without_evidence | 5 | 0.3333 | 6 | 0.4000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 2 | 0.1333 | 4 | 0.2667 |
-| hypothesis_to_commitment_shortcut | 6 | 0.4000 | 12 | 0.8000 |
-| test_without_evidence | 3 | 0.2000 | 3 | 0.2000 |
-| no_belief_revision | 5 | 0.3333 | 5 | 0.3333 |
-| orphan_evidence | 14 | 0.9333 | 23 | 1.5333 |
-| confirmation_only | 6 | 0.4000 | 11 | 0.7333 |
+| untested_claim | 15 | 1.0000 | 54 | 3.6000 |
+| evidence_non_uptake | 15 | 1.0000 | 68 | 4.5333 |
+| unsupported_judgment | 5 | 0.3333 | 6 | 0.4000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 2 | 0.1333 | 4 | 0.2667 |
+| premature_commitment | 6 | 0.4000 | 12 | 0.8000 |
+| uninformative_test | 3 | 0.2000 | 3 | 0.2000 |
+| fixed_belief_trace | 5 | 0.3333 | 5 | 0.3333 |
+| disconnected_evidence | 14 | 0.9333 | 23 | 1.5333 |
+| one_sided_confirmation | 6 | 0.4000 | 11 | 0.7333 |
 
 #### Anti-pattern family presence (global)
 
@@ -3171,44 +3171,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 2 | 0.1333 | 2 | 0.1333 |
-| bayesian_belief_updating | 7 | 0.4667 | 7 | 0.4667 |
-| abductive | 15 | 1.0000 | 15 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 2 | 0.1333 | 2 | 0.1333 |
+| hypothesis_reranking | 7 | 0.4667 | 7 | 0.4667 |
+| evidence_led_hypothesis_generation | 15 | 1.0000 | 15 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 14 | 0.9333 | 46 | 3.0667 |
-| evidence_ignored | 13 | 0.8667 | 71 | 4.7333 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 6 | 0.4000 | 12 | 0.8000 |
-| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 4 | 0.2667 |
-| test_without_evidence | 0 | 0.0000 | 2 | 0.1333 |
-| no_belief_revision | 8 | 0.5333 | 8 | 0.5333 |
-| orphan_evidence | 11 | 0.7333 | 19 | 1.2667 |
-| confirmation_only | 5 | 0.3333 | 8 | 0.5333 |
+| untested_claim | 15 | 1.0000 | 46 | 3.0667 |
+| evidence_non_uptake | 15 | 1.0000 | 71 | 4.7333 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 6 | 0.4000 | 12 | 0.8000 |
+| premature_commitment | 4 | 0.2667 | 4 | 0.2667 |
+| uninformative_test | 2 | 0.1333 | 2 | 0.1333 |
+| fixed_belief_trace | 8 | 0.5333 | 8 | 0.5333 |
+| disconnected_evidence | 11 | 0.7333 | 19 | 1.2667 |
+| one_sided_confirmation | 5 | 0.3333 | 8 | 0.5333 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 15 | 1.0000 | 46 | 3.0667 |
-| evidence_ignored | 15 | 1.0000 | 71 | 4.7333 |
-| judgment_without_evidence | 1 | 0.0667 | 1 | 0.0667 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 6 | 0.4000 | 12 | 0.8000 |
-| hypothesis_to_commitment_shortcut | 4 | 0.2667 | 4 | 0.2667 |
-| test_without_evidence | 2 | 0.1333 | 2 | 0.1333 |
-| no_belief_revision | 8 | 0.5333 | 8 | 0.5333 |
-| orphan_evidence | 11 | 0.7333 | 19 | 1.2667 |
-| confirmation_only | 5 | 0.3333 | 8 | 0.5333 |
+| untested_claim | 15 | 1.0000 | 46 | 3.0667 |
+| evidence_non_uptake | 15 | 1.0000 | 71 | 4.7333 |
+| unsupported_judgment | 1 | 0.0667 | 1 | 0.0667 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 6 | 0.4000 | 12 | 0.8000 |
+| premature_commitment | 4 | 0.2667 | 4 | 0.2667 |
+| uninformative_test | 2 | 0.1333 | 2 | 0.1333 |
+| fixed_belief_trace | 8 | 0.5333 | 8 | 0.5333 |
+| disconnected_evidence | 11 | 0.7333 | 19 | 1.2667 |
+| one_sided_confirmation | 5 | 0.3333 | 8 | 0.5333 |
 
 #### Anti-pattern family presence (global)
 
@@ -3268,51 +3268,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 9 | 0.0402 | 9 | 0.0402 |
-| ml_make_it_work | 7 | 0.0312 | 7 | 0.0312 |
-| exploratory_to_confirmatory | 4 | 0.0179 | 4 | 0.0179 |
-| bayesian_belief_updating | 78 | 0.3482 | 78 | 0.3482 |
-| abductive | 127 | 0.5670 | 127 | 0.5670 |
-| triangulation | 2 | 0.0089 | 2 | 0.0089 |
-| preregistered | 1 | 0.0045 | 1 | 0.0045 |
-| active_learning | 2 | 0.0089 | 2 | 0.0089 |
+| refutation_driven_belief_revision | 9 | 0.0402 | 9 | 0.0402 |
+| fixed_hypothesis_test_tuning | 7 | 0.0312 | 7 | 0.0312 |
+| explore_then_test_transition | 4 | 0.0179 | 4 | 0.0179 |
+| hypothesis_reranking | 78 | 0.3482 | 78 | 0.3482 |
+| evidence_led_hypothesis_generation | 127 | 0.5670 | 127 | 0.5670 |
+| convergent_multi_test_evidence | 2 | 0.0089 | 2 | 0.0089 |
+| precommitted_test_plan | 1 | 0.0045 | 1 | 0.0045 |
+| evidence_guided_test_redesign | 2 | 0.0089 | 2 | 0.0089 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 144 | 0.6429 | 718 | 3.2054 |
-| evidence_ignored | 145 | 0.6473 | 1289 | 5.7545 |
-| judgment_without_evidence | 60 | 0.2679 | 137 | 0.6116 |
-| dead_end_update | 47 | 0.2098 | 61 | 0.2723 |
-| unresolved_contradiction | 37 | 0.1652 | 141 | 0.6295 |
-| hypothesis_to_commitment_shortcut | 30 | 0.1339 | 39 | 0.1741 |
-| test_without_evidence | 4 | 0.0179 | 63 | 0.2812 |
-| no_belief_revision | 106 | 0.4732 | 106 | 0.4732 |
-| orphan_evidence | 54 | 0.2411 | 118 | 0.5268 |
-| confirmation_only | 23 | 0.1027 | 27 | 0.1205 |
+| untested_claim | 148 | 0.6607 | 718 | 3.2054 |
+| evidence_non_uptake | 197 | 0.8795 | 1289 | 5.7545 |
+| unsupported_judgment | 60 | 0.2679 | 137 | 0.6116 |
+| stalled_revision | 47 | 0.2098 | 61 | 0.2723 |
+| contradiction_without_repair | 64 | 0.2857 | 141 | 0.6295 |
+| premature_commitment | 30 | 0.1339 | 39 | 0.1741 |
+| uninformative_test | 34 | 0.1518 | 63 | 0.2812 |
+| fixed_belief_trace | 106 | 0.4732 | 106 | 0.4732 |
+| disconnected_evidence | 54 | 0.2411 | 118 | 0.5268 |
+| one_sided_confirmation | 23 | 0.1027 | 27 | 0.1205 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 148 | 0.6607 | 718 | 3.2054 |
-| evidence_ignored | 197 | 0.8795 | 1289 | 5.7545 |
-| judgment_without_evidence | 60 | 0.2679 | 137 | 0.6116 |
-| dead_end_update | 47 | 0.2098 | 61 | 0.2723 |
-| unresolved_contradiction | 70 | 0.3125 | 175 | 0.7812 |
-| hypothesis_to_commitment_shortcut | 30 | 0.1339 | 39 | 0.1741 |
-| test_without_evidence | 34 | 0.1518 | 63 | 0.2812 |
-| no_belief_revision | 106 | 0.4732 | 106 | 0.4732 |
-| orphan_evidence | 54 | 0.2411 | 118 | 0.5268 |
-| confirmation_only | 23 | 0.1027 | 27 | 0.1205 |
+| untested_claim | 148 | 0.6607 | 718 | 3.2054 |
+| evidence_non_uptake | 197 | 0.8795 | 1289 | 5.7545 |
+| unsupported_judgment | 60 | 0.2679 | 137 | 0.6116 |
+| stalled_revision | 47 | 0.2098 | 61 | 0.2723 |
+| contradiction_without_repair | 70 | 0.3125 | 175 | 0.7812 |
+| premature_commitment | 30 | 0.1339 | 39 | 0.1741 |
+| uninformative_test | 34 | 0.1518 | 63 | 0.2812 |
+| fixed_belief_trace | 106 | 0.4732 | 106 | 0.4732 |
+| disconnected_evidence | 54 | 0.2411 | 118 | 0.5268 |
+| one_sided_confirmation | 23 | 0.1027 | 27 | 0.1205 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 153 | 0.6830 | 886 | 3.9554 |
-| evidence_handling | 179 | 0.7991 | 1607 | 7.1741 |
+| hypothesis_generation | 156 | 0.6964 | 886 | 3.9554 |
+| evidence_handling | 201 | 0.8973 | 1607 | 7.1741 |
 | experimental_strategy | 160 | 0.7143 | 206 | 0.9196 |
 
 #### Anti-pattern family presence (local)
@@ -3363,51 +3363,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 2 | 0.0088 | 2 | 0.0088 |
-| ml_make_it_work | 5 | 0.0220 | 5 | 0.0220 |
-| exploratory_to_confirmatory | 25 | 0.1101 | 25 | 0.1101 |
-| bayesian_belief_updating | 63 | 0.2775 | 63 | 0.2775 |
-| abductive | 156 | 0.6872 | 156 | 0.6872 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 3 | 0.0132 | 3 | 0.0132 |
+| refutation_driven_belief_revision | 2 | 0.0088 | 2 | 0.0088 |
+| fixed_hypothesis_test_tuning | 5 | 0.0220 | 5 | 0.0220 |
+| explore_then_test_transition | 25 | 0.1101 | 25 | 0.1101 |
+| hypothesis_reranking | 63 | 0.2775 | 63 | 0.2775 |
+| evidence_led_hypothesis_generation | 156 | 0.6872 | 156 | 0.6872 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 3 | 0.0132 | 3 | 0.0132 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 130 | 0.5727 | 330 | 1.4537 |
-| evidence_ignored | 159 | 0.7004 | 1152 | 5.0749 |
-| judgment_without_evidence | 26 | 0.1145 | 28 | 0.1233 |
-| dead_end_update | 19 | 0.0837 | 22 | 0.0969 |
-| unresolved_contradiction | 42 | 0.1850 | 140 | 0.6167 |
-| hypothesis_to_commitment_shortcut | 46 | 0.2026 | 56 | 0.2467 |
-| test_without_evidence | 0 | 0.0000 | 33 | 0.1454 |
-| no_belief_revision | 151 | 0.6652 | 151 | 0.6652 |
-| orphan_evidence | 50 | 0.2203 | 75 | 0.3304 |
-| confirmation_only | 48 | 0.2115 | 60 | 0.2643 |
+| untested_claim | 140 | 0.6167 | 330 | 1.4537 |
+| evidence_non_uptake | 199 | 0.8767 | 1152 | 5.0749 |
+| unsupported_judgment | 26 | 0.1145 | 28 | 0.1233 |
+| stalled_revision | 19 | 0.0837 | 22 | 0.0969 |
+| contradiction_without_repair | 62 | 0.2731 | 140 | 0.6167 |
+| premature_commitment | 46 | 0.2026 | 56 | 0.2467 |
+| uninformative_test | 25 | 0.1101 | 33 | 0.1454 |
+| fixed_belief_trace | 151 | 0.6652 | 151 | 0.6652 |
+| disconnected_evidence | 50 | 0.2203 | 75 | 0.3304 |
+| one_sided_confirmation | 48 | 0.2115 | 60 | 0.2643 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 140 | 0.6167 | 330 | 1.4537 |
-| evidence_ignored | 199 | 0.8767 | 1152 | 5.0749 |
-| judgment_without_evidence | 26 | 0.1145 | 28 | 0.1233 |
-| dead_end_update | 19 | 0.0837 | 22 | 0.0969 |
-| unresolved_contradiction | 66 | 0.2907 | 148 | 0.6520 |
-| hypothesis_to_commitment_shortcut | 46 | 0.2026 | 56 | 0.2467 |
-| test_without_evidence | 25 | 0.1101 | 33 | 0.1454 |
-| no_belief_revision | 151 | 0.6652 | 151 | 0.6652 |
-| orphan_evidence | 50 | 0.2203 | 75 | 0.3304 |
-| confirmation_only | 48 | 0.2115 | 60 | 0.2643 |
+| untested_claim | 140 | 0.6167 | 330 | 1.4537 |
+| evidence_non_uptake | 199 | 0.8767 | 1152 | 5.0749 |
+| unsupported_judgment | 26 | 0.1145 | 28 | 0.1233 |
+| stalled_revision | 19 | 0.0837 | 22 | 0.0969 |
+| contradiction_without_repair | 66 | 0.2907 | 148 | 0.6520 |
+| premature_commitment | 46 | 0.2026 | 56 | 0.2467 |
+| uninformative_test | 25 | 0.1101 | 33 | 0.1454 |
+| fixed_belief_trace | 151 | 0.6652 | 151 | 0.6652 |
+| disconnected_evidence | 50 | 0.2203 | 75 | 0.3304 |
+| one_sided_confirmation | 48 | 0.2115 | 60 | 0.2643 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 145 | 0.6388 | 530 | 2.3348 |
-| evidence_handling | 172 | 0.7577 | 1288 | 5.6740 |
+| hypothesis_generation | 153 | 0.6740 | 530 | 2.3348 |
+| evidence_handling | 200 | 0.8811 | 1288 | 5.6740 |
 | experimental_strategy | 179 | 0.7885 | 229 | 1.0088 |
 
 #### Anti-pattern family presence (local)
@@ -3460,51 +3460,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 1 | 0.0333 | 1 | 0.0333 |
-| exploratory_to_confirmatory | 1 | 0.0333 | 1 | 0.0333 |
-| bayesian_belief_updating | 4 | 0.1333 | 4 | 0.1333 |
-| abductive | 19 | 0.6333 | 19 | 0.6333 |
-| triangulation | 1 | 0.0333 | 1 | 0.0333 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 1 | 0.0333 | 1 | 0.0333 |
+| explore_then_test_transition | 1 | 0.0333 | 1 | 0.0333 |
+| hypothesis_reranking | 4 | 0.1333 | 4 | 0.1333 |
+| evidence_led_hypothesis_generation | 19 | 0.6333 | 19 | 0.6333 |
+| convergent_multi_test_evidence | 1 | 0.0333 | 1 | 0.0333 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 16 | 0.5333 | 25 | 0.8333 |
-| evidence_ignored | 22 | 0.7333 | 172 | 5.7333 |
-| judgment_without_evidence | 4 | 0.1333 | 4 | 0.1333 |
-| dead_end_update | 2 | 0.0667 | 3 | 0.1000 |
-| unresolved_contradiction | 5 | 0.1667 | 16 | 0.5333 |
-| hypothesis_to_commitment_shortcut | 2 | 0.0667 | 2 | 0.0667 |
-| test_without_evidence | 0 | 0.0000 | 8 | 0.2667 |
-| no_belief_revision | 24 | 0.8000 | 24 | 0.8000 |
-| orphan_evidence | 3 | 0.1000 | 3 | 0.1000 |
-| confirmation_only | 2 | 0.0667 | 2 | 0.0667 |
+| untested_claim | 17 | 0.5667 | 25 | 0.8333 |
+| evidence_non_uptake | 30 | 1.0000 | 172 | 5.7333 |
+| unsupported_judgment | 4 | 0.1333 | 4 | 0.1333 |
+| stalled_revision | 2 | 0.0667 | 3 | 0.1000 |
+| contradiction_without_repair | 7 | 0.2333 | 16 | 0.5333 |
+| premature_commitment | 2 | 0.0667 | 2 | 0.0667 |
+| uninformative_test | 5 | 0.1667 | 8 | 0.2667 |
+| fixed_belief_trace | 24 | 0.8000 | 24 | 0.8000 |
+| disconnected_evidence | 3 | 0.1000 | 3 | 0.1000 |
+| one_sided_confirmation | 2 | 0.0667 | 2 | 0.0667 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 17 | 0.5667 | 25 | 0.8333 |
-| evidence_ignored | 30 | 1.0000 | 172 | 5.7333 |
-| judgment_without_evidence | 4 | 0.1333 | 4 | 0.1333 |
-| dead_end_update | 2 | 0.0667 | 3 | 0.1000 |
-| unresolved_contradiction | 7 | 0.2333 | 16 | 0.5333 |
-| hypothesis_to_commitment_shortcut | 2 | 0.0667 | 2 | 0.0667 |
-| test_without_evidence | 5 | 0.1667 | 8 | 0.2667 |
-| no_belief_revision | 24 | 0.8000 | 24 | 0.8000 |
-| orphan_evidence | 3 | 0.1000 | 3 | 0.1000 |
-| confirmation_only | 2 | 0.0667 | 2 | 0.0667 |
+| untested_claim | 17 | 0.5667 | 25 | 0.8333 |
+| evidence_non_uptake | 30 | 1.0000 | 172 | 5.7333 |
+| unsupported_judgment | 4 | 0.1333 | 4 | 0.1333 |
+| stalled_revision | 2 | 0.0667 | 3 | 0.1000 |
+| contradiction_without_repair | 7 | 0.2333 | 16 | 0.5333 |
+| premature_commitment | 2 | 0.0667 | 2 | 0.0667 |
+| uninformative_test | 5 | 0.1667 | 8 | 0.2667 |
+| fixed_belief_trace | 24 | 0.8000 | 24 | 0.8000 |
+| disconnected_evidence | 3 | 0.1000 | 3 | 0.1000 |
+| one_sided_confirmation | 2 | 0.0667 | 2 | 0.0667 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 18 | 0.6000 | 43 | 1.4333 |
-| evidence_handling | 23 | 0.7667 | 187 | 6.2333 |
+| hypothesis_generation | 19 | 0.6333 | 43 | 1.4333 |
+| evidence_handling | 30 | 1.0000 | 187 | 6.2333 |
 | experimental_strategy | 26 | 0.8667 | 29 | 0.9667 |
 
 #### Anti-pattern family presence (local)
@@ -3555,44 +3555,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 3 | 0.1000 | 3 | 0.1000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 3 | 0.1000 | 3 | 0.1000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 5 | 0.1667 | 5 | 0.1667 |
-| evidence_ignored | 29 | 0.9667 | 234 | 7.8000 |
-| judgment_without_evidence | 1 | 0.0333 | 1 | 0.0333 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 2 | 0.0667 | 2 | 0.0667 |
-| test_without_evidence | 0 | 0.0000 | 1 | 0.0333 |
-| no_belief_revision | 30 | 1.0000 | 30 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 2 | 0.0667 | 2 | 0.0667 |
+| untested_claim | 5 | 0.1667 | 5 | 0.1667 |
+| evidence_non_uptake | 30 | 1.0000 | 234 | 7.8000 |
+| unsupported_judgment | 1 | 0.0333 | 1 | 0.0333 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 2 | 0.0667 | 2 | 0.0667 |
+| uninformative_test | 1 | 0.0333 | 1 | 0.0333 |
+| fixed_belief_trace | 30 | 1.0000 | 30 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 2 | 0.0667 | 2 | 0.0667 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 5 | 0.1667 | 5 | 0.1667 |
-| evidence_ignored | 30 | 1.0000 | 234 | 7.8000 |
-| judgment_without_evidence | 1 | 0.0333 | 1 | 0.0333 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 2 | 0.0667 | 2 | 0.0667 |
-| test_without_evidence | 1 | 0.0333 | 1 | 0.0333 |
-| no_belief_revision | 30 | 1.0000 | 30 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 2 | 0.0667 | 2 | 0.0667 |
+| untested_claim | 5 | 0.1667 | 5 | 0.1667 |
+| evidence_non_uptake | 30 | 1.0000 | 234 | 7.8000 |
+| unsupported_judgment | 1 | 0.0333 | 1 | 0.0333 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 2 | 0.0667 | 2 | 0.0667 |
+| uninformative_test | 1 | 0.0333 | 1 | 0.0333 |
+| fixed_belief_trace | 30 | 1.0000 | 30 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 2 | 0.0667 | 2 | 0.0667 |
 
 #### Anti-pattern family presence (global)
 
@@ -3650,50 +3650,50 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 2 | 0.0571 | 2 | 0.0571 |
-| ml_make_it_work | 1 | 0.0286 | 1 | 0.0286 |
-| exploratory_to_confirmatory | 9 | 0.2571 | 9 | 0.2571 |
-| bayesian_belief_updating | 9 | 0.2571 | 9 | 0.2571 |
-| abductive | 19 | 0.5429 | 19 | 0.5429 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 2 | 0.0571 | 2 | 0.0571 |
+| fixed_hypothesis_test_tuning | 1 | 0.0286 | 1 | 0.0286 |
+| explore_then_test_transition | 9 | 0.2571 | 9 | 0.2571 |
+| hypothesis_reranking | 9 | 0.2571 | 9 | 0.2571 |
+| evidence_led_hypothesis_generation | 19 | 0.5429 | 19 | 0.5429 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 29 | 0.8286 | 66 | 1.8857 |
-| evidence_ignored | 34 | 0.9714 | 357 | 10.2000 |
-| judgment_without_evidence | 4 | 0.1143 | 5 | 0.1429 |
-| dead_end_update | 3 | 0.0857 | 3 | 0.0857 |
-| unresolved_contradiction | 10 | 0.2857 | 27 | 0.7714 |
-| hypothesis_to_commitment_shortcut | 4 | 0.1143 | 4 | 0.1143 |
-| test_without_evidence | 3 | 0.0857 | 36 | 1.0286 |
-| no_belief_revision | 24 | 0.6857 | 24 | 0.6857 |
-| orphan_evidence | 7 | 0.2000 | 10 | 0.2857 |
-| confirmation_only | 4 | 0.1143 | 4 | 0.1143 |
+| untested_claim | 31 | 0.8857 | 66 | 1.8857 |
+| evidence_non_uptake | 35 | 1.0000 | 357 | 10.2000 |
+| unsupported_judgment | 4 | 0.1143 | 5 | 0.1429 |
+| stalled_revision | 3 | 0.0857 | 3 | 0.0857 |
+| contradiction_without_repair | 15 | 0.4286 | 27 | 0.7714 |
+| premature_commitment | 4 | 0.1143 | 4 | 0.1143 |
+| uninformative_test | 13 | 0.3714 | 36 | 1.0286 |
+| fixed_belief_trace | 24 | 0.6857 | 24 | 0.6857 |
+| disconnected_evidence | 7 | 0.2000 | 10 | 0.2857 |
+| one_sided_confirmation | 4 | 0.1143 | 4 | 0.1143 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 31 | 0.8857 | 66 | 1.8857 |
-| evidence_ignored | 35 | 1.0000 | 357 | 10.2000 |
-| judgment_without_evidence | 4 | 0.1143 | 5 | 0.1429 |
-| dead_end_update | 3 | 0.0857 | 3 | 0.0857 |
-| unresolved_contradiction | 15 | 0.4286 | 32 | 0.9143 |
-| hypothesis_to_commitment_shortcut | 4 | 0.1143 | 4 | 0.1143 |
-| test_without_evidence | 13 | 0.3714 | 36 | 1.0286 |
-| no_belief_revision | 24 | 0.6857 | 24 | 0.6857 |
-| orphan_evidence | 7 | 0.2000 | 10 | 0.2857 |
-| confirmation_only | 4 | 0.1143 | 4 | 0.1143 |
+| untested_claim | 31 | 0.8857 | 66 | 1.8857 |
+| evidence_non_uptake | 35 | 1.0000 | 357 | 10.2000 |
+| unsupported_judgment | 4 | 0.1143 | 5 | 0.1429 |
+| stalled_revision | 3 | 0.0857 | 3 | 0.0857 |
+| contradiction_without_repair | 15 | 0.4286 | 32 | 0.9143 |
+| premature_commitment | 4 | 0.1143 | 4 | 0.1143 |
+| uninformative_test | 13 | 0.3714 | 36 | 1.0286 |
+| fixed_belief_trace | 24 | 0.6857 | 24 | 0.6857 |
+| disconnected_evidence | 7 | 0.2000 | 10 | 0.2857 |
+| one_sided_confirmation | 4 | 0.1143 | 4 | 0.1143 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 32 | 0.9143 | 97 | 2.7714 |
+| hypothesis_generation | 33 | 0.9429 | 97 | 2.7714 |
 | evidence_handling | 35 | 1.0000 | 408 | 11.6571 |
 | experimental_strategy | 28 | 0.8000 | 31 | 0.8857 |
 
@@ -3745,44 +3745,44 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 0 | 0.0000 | 0 | 0.0000 |
-| abductive | 2 | 0.0667 | 2 | 0.0667 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 1 | 0.0333 | 1 | 0.0333 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_led_hypothesis_generation | 2 | 0.0667 | 2 | 0.0667 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 1 | 0.0333 | 1 | 0.0333 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.1000 | 3 | 0.1000 |
-| evidence_ignored | 29 | 0.9667 | 136 | 4.5333 |
-| judgment_without_evidence | 1 | 0.0333 | 1 | 0.0333 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 0 | 0.0000 | 4 | 0.1333 |
-| no_belief_revision | 29 | 0.9667 | 29 | 0.9667 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.1000 | 3 | 0.1000 |
+| evidence_non_uptake | 29 | 0.9667 | 136 | 4.5333 |
+| unsupported_judgment | 1 | 0.0333 | 1 | 0.0333 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 3 | 0.1000 | 4 | 0.1333 |
+| fixed_belief_trace | 29 | 0.9667 | 29 | 0.9667 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 3 | 0.1000 | 3 | 0.1000 |
-| evidence_ignored | 29 | 0.9667 | 136 | 4.5333 |
-| judgment_without_evidence | 1 | 0.0333 | 1 | 0.0333 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 0 | 0.0000 | 0 | 0.0000 |
-| hypothesis_to_commitment_shortcut | 0 | 0.0000 | 0 | 0.0000 |
-| test_without_evidence | 3 | 0.1000 | 4 | 0.1333 |
-| no_belief_revision | 29 | 0.9667 | 29 | 0.9667 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 0 | 0.0000 | 0 | 0.0000 |
+| untested_claim | 3 | 0.1000 | 3 | 0.1000 |
+| evidence_non_uptake | 29 | 0.9667 | 136 | 4.5333 |
+| unsupported_judgment | 1 | 0.0333 | 1 | 0.0333 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 0 | 0.0000 | 0 | 0.0000 |
+| premature_commitment | 0 | 0.0000 | 0 | 0.0000 |
+| uninformative_test | 3 | 0.1000 | 4 | 0.1333 |
+| fixed_belief_trace | 29 | 0.9667 | 29 | 0.9667 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern family presence (global)
 
@@ -3840,51 +3840,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 6 | 0.1017 | 6 | 0.1017 |
-| ml_make_it_work | 2 | 0.0339 | 2 | 0.0339 |
-| exploratory_to_confirmatory | 7 | 0.1186 | 7 | 0.1186 |
-| bayesian_belief_updating | 30 | 0.5085 | 30 | 0.5085 |
-| abductive | 45 | 0.7627 | 45 | 0.7627 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 1 | 0.0169 | 1 | 0.0169 |
+| refutation_driven_belief_revision | 6 | 0.1017 | 6 | 0.1017 |
+| fixed_hypothesis_test_tuning | 2 | 0.0339 | 2 | 0.0339 |
+| explore_then_test_transition | 7 | 0.1186 | 7 | 0.1186 |
+| hypothesis_reranking | 30 | 0.5085 | 30 | 0.5085 |
+| evidence_led_hypothesis_generation | 45 | 0.7627 | 45 | 0.7627 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 1 | 0.0169 | 1 | 0.0169 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 28 | 0.4746 | 117 | 1.9831 |
-| evidence_ignored | 24 | 0.4068 | 204 | 3.4576 |
-| judgment_without_evidence | 19 | 0.3220 | 43 | 0.7288 |
-| dead_end_update | 12 | 0.2034 | 14 | 0.2373 |
-| unresolved_contradiction | 10 | 0.1695 | 74 | 1.2542 |
-| hypothesis_to_commitment_shortcut | 3 | 0.0508 | 4 | 0.0678 |
-| test_without_evidence | 1 | 0.0169 | 8 | 0.1356 |
-| no_belief_revision | 29 | 0.4915 | 29 | 0.4915 |
-| orphan_evidence | 9 | 0.1525 | 11 | 0.1864 |
-| confirmation_only | 5 | 0.0847 | 7 | 0.1186 |
+| untested_claim | 32 | 0.5424 | 117 | 1.9831 |
+| evidence_non_uptake | 44 | 0.7458 | 204 | 3.4576 |
+| unsupported_judgment | 19 | 0.3220 | 43 | 0.7288 |
+| stalled_revision | 12 | 0.2034 | 14 | 0.2373 |
+| contradiction_without_repair | 25 | 0.4237 | 74 | 1.2542 |
+| premature_commitment | 3 | 0.0508 | 4 | 0.0678 |
+| uninformative_test | 8 | 0.1356 | 8 | 0.1356 |
+| fixed_belief_trace | 29 | 0.4915 | 29 | 0.4915 |
+| disconnected_evidence | 9 | 0.1525 | 11 | 0.1864 |
+| one_sided_confirmation | 5 | 0.0847 | 7 | 0.1186 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 32 | 0.5424 | 117 | 1.9831 |
-| evidence_ignored | 44 | 0.7458 | 204 | 3.4576 |
-| judgment_without_evidence | 19 | 0.3220 | 43 | 0.7288 |
-| dead_end_update | 12 | 0.2034 | 14 | 0.2373 |
-| unresolved_contradiction | 29 | 0.4915 | 86 | 1.4576 |
-| hypothesis_to_commitment_shortcut | 3 | 0.0508 | 4 | 0.0678 |
-| test_without_evidence | 8 | 0.1356 | 8 | 0.1356 |
-| no_belief_revision | 29 | 0.4915 | 29 | 0.4915 |
-| orphan_evidence | 9 | 0.1525 | 11 | 0.1864 |
-| confirmation_only | 5 | 0.0847 | 7 | 0.1186 |
+| untested_claim | 32 | 0.5424 | 117 | 1.9831 |
+| evidence_non_uptake | 44 | 0.7458 | 204 | 3.4576 |
+| unsupported_judgment | 19 | 0.3220 | 43 | 0.7288 |
+| stalled_revision | 12 | 0.2034 | 14 | 0.2373 |
+| contradiction_without_repair | 29 | 0.4915 | 86 | 1.4576 |
+| premature_commitment | 3 | 0.0508 | 4 | 0.0678 |
+| uninformative_test | 8 | 0.1356 | 8 | 0.1356 |
+| fixed_belief_trace | 29 | 0.4915 | 29 | 0.4915 |
+| disconnected_evidence | 9 | 0.1525 | 11 | 0.1864 |
+| one_sided_confirmation | 5 | 0.0847 | 7 | 0.1186 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 32 | 0.5424 | 198 | 3.3559 |
-| evidence_handling | 38 | 0.6441 | 266 | 4.5085 |
+| hypothesis_generation | 37 | 0.6271 | 198 | 3.3559 |
+| evidence_handling | 47 | 0.7966 | 266 | 4.5085 |
 | experimental_strategy | 42 | 0.7119 | 47 | 0.7966 |
 
 #### Anti-pattern family presence (local)
@@ -3935,51 +3935,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 2 | 0.0225 | 2 | 0.0225 |
-| ml_make_it_work | 8 | 0.0899 | 8 | 0.0899 |
-| exploratory_to_confirmatory | 6 | 0.0674 | 6 | 0.0674 |
-| bayesian_belief_updating | 16 | 0.1798 | 16 | 0.1798 |
-| abductive | 21 | 0.2360 | 21 | 0.2360 |
-| triangulation | 1 | 0.0112 | 1 | 0.0112 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 4 | 0.0449 | 4 | 0.0449 |
+| refutation_driven_belief_revision | 2 | 0.0225 | 2 | 0.0225 |
+| fixed_hypothesis_test_tuning | 8 | 0.0899 | 8 | 0.0899 |
+| explore_then_test_transition | 6 | 0.0674 | 6 | 0.0674 |
+| hypothesis_reranking | 16 | 0.1798 | 16 | 0.1798 |
+| evidence_led_hypothesis_generation | 21 | 0.2360 | 21 | 0.2360 |
+| convergent_multi_test_evidence | 1 | 0.0112 | 1 | 0.0112 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 4 | 0.0449 | 4 | 0.0449 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 42 | 0.4719 | 103 | 1.1573 |
-| evidence_ignored | 74 | 0.8315 | 605 | 6.7978 |
-| judgment_without_evidence | 7 | 0.0787 | 7 | 0.0787 |
-| dead_end_update | 14 | 0.1573 | 15 | 0.1685 |
-| unresolved_contradiction | 20 | 0.2247 | 55 | 0.6180 |
-| hypothesis_to_commitment_shortcut | 12 | 0.1348 | 12 | 0.1348 |
-| test_without_evidence | 0 | 0.0000 | 24 | 0.2697 |
-| no_belief_revision | 49 | 0.5506 | 49 | 0.5506 |
-| orphan_evidence | 3 | 0.0337 | 3 | 0.0337 |
-| confirmation_only | 11 | 0.1236 | 11 | 0.1236 |
+| untested_claim | 46 | 0.5169 | 103 | 1.1573 |
+| evidence_non_uptake | 77 | 0.8652 | 605 | 6.7978 |
+| unsupported_judgment | 7 | 0.0787 | 7 | 0.0787 |
+| stalled_revision | 14 | 0.1573 | 15 | 0.1685 |
+| contradiction_without_repair | 24 | 0.2697 | 55 | 0.6180 |
+| premature_commitment | 12 | 0.1348 | 12 | 0.1348 |
+| uninformative_test | 15 | 0.1685 | 24 | 0.2697 |
+| fixed_belief_trace | 49 | 0.5506 | 49 | 0.5506 |
+| disconnected_evidence | 3 | 0.0337 | 3 | 0.0337 |
+| one_sided_confirmation | 11 | 0.1236 | 11 | 0.1236 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 46 | 0.5169 | 103 | 1.1573 |
-| evidence_ignored | 77 | 0.8652 | 605 | 6.7978 |
-| judgment_without_evidence | 7 | 0.0787 | 7 | 0.0787 |
-| dead_end_update | 14 | 0.1573 | 15 | 0.1685 |
-| unresolved_contradiction | 27 | 0.3034 | 64 | 0.7191 |
-| hypothesis_to_commitment_shortcut | 12 | 0.1348 | 12 | 0.1348 |
-| test_without_evidence | 15 | 0.1685 | 24 | 0.2697 |
-| no_belief_revision | 49 | 0.5506 | 49 | 0.5506 |
-| orphan_evidence | 3 | 0.0337 | 3 | 0.0337 |
-| confirmation_only | 11 | 0.1236 | 11 | 0.1236 |
+| untested_claim | 46 | 0.5169 | 103 | 1.1573 |
+| evidence_non_uptake | 77 | 0.8652 | 605 | 6.7978 |
+| unsupported_judgment | 7 | 0.0787 | 7 | 0.0787 |
+| stalled_revision | 14 | 0.1573 | 15 | 0.1685 |
+| contradiction_without_repair | 27 | 0.3034 | 64 | 0.7191 |
+| premature_commitment | 12 | 0.1348 | 12 | 0.1348 |
+| uninformative_test | 15 | 0.1685 | 24 | 0.2697 |
+| fixed_belief_trace | 49 | 0.5506 | 49 | 0.5506 |
+| disconnected_evidence | 3 | 0.0337 | 3 | 0.0337 |
+| one_sided_confirmation | 11 | 0.1236 | 11 | 0.1236 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 50 | 0.5618 | 169 | 1.8989 |
-| evidence_handling | 74 | 0.8315 | 639 | 7.1798 |
+| hypothesis_generation | 53 | 0.5955 | 169 | 1.8989 |
+| evidence_handling | 78 | 0.8764 | 639 | 7.1798 |
 | experimental_strategy | 65 | 0.7303 | 76 | 0.8539 |
 
 #### Anti-pattern family presence (local)
@@ -4030,51 +4030,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 1 | 0.0114 | 1 | 0.0114 |
-| bayesian_belief_updating | 28 | 0.3182 | 28 | 0.3182 |
-| abductive | 84 | 0.9545 | 84 | 0.9545 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 1 | 0.0114 | 1 | 0.0114 |
+| hypothesis_reranking | 28 | 0.3182 | 28 | 0.3182 |
+| evidence_led_hypothesis_generation | 84 | 0.9545 | 84 | 0.9545 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 62 | 0.7045 | 151 | 1.7159 |
-| evidence_ignored | 22 | 0.2500 | 147 | 1.6705 |
-| judgment_without_evidence | 18 | 0.2045 | 48 | 0.5455 |
-| dead_end_update | 5 | 0.0568 | 5 | 0.0568 |
-| unresolved_contradiction | 9 | 0.1023 | 31 | 0.3523 |
-| hypothesis_to_commitment_shortcut | 22 | 0.2500 | 23 | 0.2614 |
-| test_without_evidence | 0 | 0.0000 | 2 | 0.0227 |
-| no_belief_revision | 51 | 0.5795 | 51 | 0.5795 |
-| orphan_evidence | 4 | 0.0455 | 6 | 0.0682 |
-| confirmation_only | 19 | 0.2159 | 20 | 0.2273 |
+| untested_claim | 64 | 0.7273 | 151 | 1.7159 |
+| evidence_non_uptake | 61 | 0.6932 | 147 | 1.6705 |
+| unsupported_judgment | 18 | 0.2045 | 48 | 0.5455 |
+| stalled_revision | 5 | 0.0568 | 5 | 0.0568 |
+| contradiction_without_repair | 20 | 0.2273 | 31 | 0.3523 |
+| premature_commitment | 22 | 0.2500 | 23 | 0.2614 |
+| uninformative_test | 2 | 0.0227 | 2 | 0.0227 |
+| fixed_belief_trace | 51 | 0.5795 | 51 | 0.5795 |
+| disconnected_evidence | 4 | 0.0455 | 6 | 0.0682 |
+| one_sided_confirmation | 19 | 0.2159 | 20 | 0.2273 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 64 | 0.7273 | 151 | 1.7159 |
-| evidence_ignored | 61 | 0.6932 | 147 | 1.6705 |
-| judgment_without_evidence | 18 | 0.2045 | 48 | 0.5455 |
-| dead_end_update | 5 | 0.0568 | 5 | 0.0568 |
-| unresolved_contradiction | 22 | 0.2500 | 44 | 0.5000 |
-| hypothesis_to_commitment_shortcut | 22 | 0.2500 | 23 | 0.2614 |
-| test_without_evidence | 2 | 0.0227 | 2 | 0.0227 |
-| no_belief_revision | 51 | 0.5795 | 51 | 0.5795 |
-| orphan_evidence | 4 | 0.0455 | 6 | 0.0682 |
-| confirmation_only | 19 | 0.2159 | 20 | 0.2273 |
+| untested_claim | 64 | 0.7273 | 151 | 1.7159 |
+| evidence_non_uptake | 61 | 0.6932 | 147 | 1.6705 |
+| unsupported_judgment | 18 | 0.2045 | 48 | 0.5455 |
+| stalled_revision | 5 | 0.0568 | 5 | 0.0568 |
+| contradiction_without_repair | 22 | 0.2500 | 44 | 0.5000 |
+| premature_commitment | 22 | 0.2500 | 23 | 0.2614 |
+| uninformative_test | 2 | 0.0227 | 2 | 0.0227 |
+| fixed_belief_trace | 51 | 0.5795 | 51 | 0.5795 |
+| disconnected_evidence | 4 | 0.0455 | 6 | 0.0682 |
+| one_sided_confirmation | 19 | 0.2159 | 20 | 0.2273 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 68 | 0.7727 | 202 | 2.2955 |
-| evidence_handling | 34 | 0.3864 | 203 | 2.3068 |
+| hypothesis_generation | 69 | 0.7841 | 202 | 2.2955 |
+| evidence_handling | 62 | 0.7045 | 203 | 2.3068 |
 | experimental_strategy | 59 | 0.6705 | 79 | 0.8977 |
 
 #### Anti-pattern family presence (local)
@@ -4125,51 +4125,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 1 | 0.0111 | 1 | 0.0111 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 5 | 0.0556 | 5 | 0.0556 |
-| bayesian_belief_updating | 54 | 0.6000 | 54 | 0.6000 |
-| abductive | 90 | 1.0000 | 90 | 1.0000 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 1 | 0.0111 | 1 | 0.0111 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 5 | 0.0556 | 5 | 0.0556 |
+| hypothesis_reranking | 54 | 0.6000 | 54 | 0.6000 |
+| evidence_led_hypothesis_generation | 90 | 1.0000 | 90 | 1.0000 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 89 | 0.9889 | 578 | 6.4222 |
-| evidence_ignored | 70 | 0.7778 | 586 | 6.5111 |
-| judgment_without_evidence | 32 | 0.3556 | 56 | 0.6222 |
-| dead_end_update | 30 | 0.3333 | 43 | 0.4778 |
-| unresolved_contradiction | 25 | 0.2778 | 78 | 0.8667 |
-| hypothesis_to_commitment_shortcut | 31 | 0.3444 | 48 | 0.5333 |
-| test_without_evidence | 0 | 0.0000 | 13 | 0.1444 |
-| no_belief_revision | 21 | 0.2333 | 21 | 0.2333 |
-| orphan_evidence | 78 | 0.8667 | 160 | 1.7778 |
-| confirmation_only | 28 | 0.3111 | 41 | 0.4556 |
+| untested_claim | 90 | 1.0000 | 578 | 6.4222 |
+| evidence_non_uptake | 90 | 1.0000 | 586 | 6.5111 |
+| unsupported_judgment | 32 | 0.3556 | 56 | 0.6222 |
+| stalled_revision | 30 | 0.3333 | 43 | 0.4778 |
+| contradiction_without_repair | 35 | 0.3889 | 78 | 0.8667 |
+| premature_commitment | 31 | 0.3444 | 48 | 0.5333 |
+| uninformative_test | 12 | 0.1333 | 13 | 0.1444 |
+| fixed_belief_trace | 21 | 0.2333 | 21 | 0.2333 |
+| disconnected_evidence | 78 | 0.8667 | 160 | 1.7778 |
+| one_sided_confirmation | 28 | 0.3111 | 41 | 0.4556 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 90 | 1.0000 | 578 | 6.4222 |
-| evidence_ignored | 90 | 1.0000 | 586 | 6.5111 |
-| judgment_without_evidence | 32 | 0.3556 | 56 | 0.6222 |
-| dead_end_update | 30 | 0.3333 | 43 | 0.4778 |
-| unresolved_contradiction | 36 | 0.4000 | 81 | 0.9000 |
-| hypothesis_to_commitment_shortcut | 31 | 0.3444 | 48 | 0.5333 |
-| test_without_evidence | 12 | 0.1333 | 13 | 0.1444 |
-| no_belief_revision | 21 | 0.2333 | 21 | 0.2333 |
-| orphan_evidence | 78 | 0.8667 | 160 | 1.7778 |
-| confirmation_only | 28 | 0.3111 | 41 | 0.4556 |
+| untested_claim | 90 | 1.0000 | 578 | 6.4222 |
+| evidence_non_uptake | 90 | 1.0000 | 586 | 6.5111 |
+| unsupported_judgment | 32 | 0.3556 | 56 | 0.6222 |
+| stalled_revision | 30 | 0.3333 | 43 | 0.4778 |
+| contradiction_without_repair | 36 | 0.4000 | 81 | 0.9000 |
+| premature_commitment | 31 | 0.3444 | 48 | 0.5333 |
+| uninformative_test | 12 | 0.1333 | 13 | 0.1444 |
+| fixed_belief_trace | 21 | 0.2333 | 21 | 0.2333 |
+| disconnected_evidence | 78 | 0.8667 | 160 | 1.7778 |
+| one_sided_confirmation | 28 | 0.3111 | 41 | 0.4556 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 90 | 1.0000 | 697 | 7.7444 |
-| evidence_handling | 88 | 0.9778 | 815 | 9.0556 |
+| evidence_handling | 90 | 1.0000 | 815 | 9.0556 |
 | experimental_strategy | 60 | 0.6667 | 112 | 1.2444 |
 
 #### Anti-pattern family presence (local)
@@ -4222,51 +4222,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 6 | 0.0237 | 6 | 0.0237 |
-| ml_make_it_work | 4 | 0.0158 | 4 | 0.0158 |
-| exploratory_to_confirmatory | 16 | 0.0632 | 16 | 0.0632 |
-| bayesian_belief_updating | 68 | 0.2688 | 68 | 0.2688 |
-| abductive | 150 | 0.5929 | 150 | 0.5929 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 1 | 0.0040 | 1 | 0.0040 |
-| active_learning | 1 | 0.0040 | 1 | 0.0040 |
+| refutation_driven_belief_revision | 6 | 0.0237 | 6 | 0.0237 |
+| fixed_hypothesis_test_tuning | 4 | 0.0158 | 4 | 0.0158 |
+| explore_then_test_transition | 16 | 0.0632 | 16 | 0.0632 |
+| hypothesis_reranking | 68 | 0.2688 | 68 | 0.2688 |
+| evidence_led_hypothesis_generation | 150 | 0.5929 | 150 | 0.5929 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 1 | 0.0040 | 1 | 0.0040 |
+| evidence_guided_test_redesign | 1 | 0.0040 | 1 | 0.0040 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 125 | 0.4941 | 380 | 1.5020 |
-| evidence_ignored | 160 | 0.6324 | 1071 | 4.2332 |
-| judgment_without_evidence | 41 | 0.1621 | 81 | 0.3202 |
-| dead_end_update | 22 | 0.0870 | 24 | 0.0949 |
-| unresolved_contradiction | 35 | 0.1383 | 138 | 0.5455 |
-| hypothesis_to_commitment_shortcut | 34 | 0.1344 | 41 | 0.1621 |
-| test_without_evidence | 4 | 0.0158 | 45 | 0.1779 |
-| no_belief_revision | 172 | 0.6798 | 172 | 0.6798 |
-| orphan_evidence | 39 | 0.1542 | 59 | 0.2332 |
-| confirmation_only | 33 | 0.1304 | 40 | 0.1581 |
+| untested_claim | 132 | 0.5217 | 380 | 1.5020 |
+| evidence_non_uptake | 211 | 0.8340 | 1071 | 4.2332 |
+| unsupported_judgment | 41 | 0.1621 | 81 | 0.3202 |
+| stalled_revision | 22 | 0.0870 | 24 | 0.0949 |
+| contradiction_without_repair | 62 | 0.2451 | 138 | 0.5455 |
+| premature_commitment | 34 | 0.1344 | 41 | 0.1621 |
+| uninformative_test | 22 | 0.0870 | 45 | 0.1779 |
+| fixed_belief_trace | 172 | 0.6798 | 172 | 0.6798 |
+| disconnected_evidence | 39 | 0.1542 | 59 | 0.2332 |
+| one_sided_confirmation | 33 | 0.1304 | 40 | 0.1581 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 132 | 0.5217 | 380 | 1.5020 |
-| evidence_ignored | 211 | 0.8340 | 1071 | 4.2332 |
-| judgment_without_evidence | 41 | 0.1621 | 81 | 0.3202 |
-| dead_end_update | 22 | 0.0870 | 24 | 0.0949 |
-| unresolved_contradiction | 66 | 0.2609 | 155 | 0.6126 |
-| hypothesis_to_commitment_shortcut | 34 | 0.1344 | 41 | 0.1621 |
-| test_without_evidence | 22 | 0.0870 | 45 | 0.1779 |
-| no_belief_revision | 172 | 0.6798 | 172 | 0.6798 |
-| orphan_evidence | 39 | 0.1542 | 59 | 0.2332 |
-| confirmation_only | 33 | 0.1304 | 40 | 0.1581 |
+| untested_claim | 132 | 0.5217 | 380 | 1.5020 |
+| evidence_non_uptake | 211 | 0.8340 | 1071 | 4.2332 |
+| unsupported_judgment | 41 | 0.1621 | 81 | 0.3202 |
+| stalled_revision | 22 | 0.0870 | 24 | 0.0949 |
+| contradiction_without_repair | 66 | 0.2609 | 155 | 0.6126 |
+| premature_commitment | 34 | 0.1344 | 41 | 0.1621 |
+| uninformative_test | 22 | 0.0870 | 45 | 0.1779 |
+| fixed_belief_trace | 172 | 0.6798 | 172 | 0.6798 |
+| disconnected_evidence | 39 | 0.1542 | 59 | 0.2332 |
+| one_sided_confirmation | 33 | 0.1304 | 40 | 0.1581 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 137 | 0.5415 | 558 | 2.2055 |
-| evidence_handling | 189 | 0.7470 | 1256 | 4.9644 |
+| hypothesis_generation | 144 | 0.5692 | 558 | 2.2055 |
+| evidence_handling | 215 | 0.8498 | 1256 | 4.9644 |
 | experimental_strategy | 201 | 0.7945 | 237 | 0.9368 |
 
 #### Anti-pattern family presence (local)
@@ -4317,51 +4317,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 3 | 0.0238 | 3 | 0.0238 |
-| ml_make_it_work | 5 | 0.0397 | 5 | 0.0397 |
-| exploratory_to_confirmatory | 8 | 0.0635 | 8 | 0.0635 |
-| bayesian_belief_updating | 41 | 0.3254 | 41 | 0.3254 |
-| abductive | 93 | 0.7381 | 93 | 0.7381 |
-| triangulation | 1 | 0.0079 | 1 | 0.0079 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 3 | 0.0238 | 3 | 0.0238 |
+| refutation_driven_belief_revision | 3 | 0.0238 | 3 | 0.0238 |
+| fixed_hypothesis_test_tuning | 5 | 0.0397 | 5 | 0.0397 |
+| explore_then_test_transition | 8 | 0.0635 | 8 | 0.0635 |
+| hypothesis_reranking | 41 | 0.3254 | 41 | 0.3254 |
+| evidence_led_hypothesis_generation | 93 | 0.7381 | 93 | 0.7381 |
+| convergent_multi_test_evidence | 1 | 0.0079 | 1 | 0.0079 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 3 | 0.0238 | 3 | 0.0238 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 95 | 0.7540 | 385 | 3.0556 |
-| evidence_ignored | 84 | 0.6667 | 695 | 5.5159 |
-| judgment_without_evidence | 30 | 0.2381 | 63 | 0.5000 |
-| dead_end_update | 21 | 0.1667 | 27 | 0.2143 |
-| unresolved_contradiction | 18 | 0.1429 | 67 | 0.5317 |
-| hypothesis_to_commitment_shortcut | 29 | 0.2302 | 37 | 0.2937 |
-| test_without_evidence | 0 | 0.0000 | 22 | 0.1746 |
-| no_belief_revision | 57 | 0.4524 | 57 | 0.4524 |
-| orphan_evidence | 38 | 0.3016 | 74 | 0.5873 |
-| confirmation_only | 26 | 0.2063 | 31 | 0.2460 |
+| untested_claim | 99 | 0.7857 | 385 | 3.0556 |
+| evidence_non_uptake | 113 | 0.8968 | 695 | 5.5159 |
+| unsupported_judgment | 30 | 0.2381 | 63 | 0.5000 |
+| stalled_revision | 21 | 0.1667 | 27 | 0.2143 |
+| contradiction_without_repair | 32 | 0.2540 | 67 | 0.5317 |
+| premature_commitment | 29 | 0.2302 | 37 | 0.2937 |
+| uninformative_test | 18 | 0.1429 | 22 | 0.1746 |
+| fixed_belief_trace | 57 | 0.4524 | 57 | 0.4524 |
+| disconnected_evidence | 38 | 0.3016 | 74 | 0.5873 |
+| one_sided_confirmation | 26 | 0.2063 | 31 | 0.2460 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 99 | 0.7857 | 385 | 3.0556 |
-| evidence_ignored | 113 | 0.8968 | 695 | 5.5159 |
-| judgment_without_evidence | 30 | 0.2381 | 63 | 0.5000 |
-| dead_end_update | 21 | 0.1667 | 27 | 0.2143 |
-| unresolved_contradiction | 37 | 0.2937 | 91 | 0.7222 |
-| hypothesis_to_commitment_shortcut | 29 | 0.2302 | 37 | 0.2937 |
-| test_without_evidence | 18 | 0.1429 | 22 | 0.1746 |
-| no_belief_revision | 57 | 0.4524 | 57 | 0.4524 |
-| orphan_evidence | 38 | 0.3016 | 74 | 0.5873 |
-| confirmation_only | 26 | 0.2063 | 31 | 0.2460 |
+| untested_claim | 99 | 0.7857 | 385 | 3.0556 |
+| evidence_non_uptake | 113 | 0.8968 | 695 | 5.5159 |
+| unsupported_judgment | 30 | 0.2381 | 63 | 0.5000 |
+| stalled_revision | 21 | 0.1667 | 27 | 0.2143 |
+| contradiction_without_repair | 37 | 0.2937 | 91 | 0.7222 |
+| premature_commitment | 29 | 0.2302 | 37 | 0.2937 |
+| uninformative_test | 18 | 0.1429 | 22 | 0.1746 |
+| fixed_belief_trace | 57 | 0.4524 | 57 | 0.4524 |
+| disconnected_evidence | 38 | 0.3016 | 74 | 0.5873 |
+| one_sided_confirmation | 26 | 0.2063 | 31 | 0.2460 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 100 | 0.7937 | 483 | 3.8333 |
-| evidence_handling | 95 | 0.7540 | 854 | 6.7778 |
+| hypothesis_generation | 103 | 0.8175 | 483 | 3.8333 |
+| evidence_handling | 114 | 0.9048 | 854 | 6.7778 |
 | experimental_strategy | 84 | 0.6667 | 121 | 0.9603 |
 
 #### Anti-pattern family presence (local)
@@ -4412,51 +4412,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 2 | 0.0308 | 2 | 0.0308 |
-| ml_make_it_work | 3 | 0.0462 | 3 | 0.0462 |
-| exploratory_to_confirmatory | 5 | 0.0769 | 5 | 0.0769 |
-| bayesian_belief_updating | 31 | 0.4769 | 31 | 0.4769 |
-| abductive | 35 | 0.5385 | 35 | 0.5385 |
-| triangulation | 1 | 0.0154 | 1 | 0.0154 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 1 | 0.0154 | 1 | 0.0154 |
+| refutation_driven_belief_revision | 2 | 0.0308 | 2 | 0.0308 |
+| fixed_hypothesis_test_tuning | 3 | 0.0462 | 3 | 0.0462 |
+| explore_then_test_transition | 5 | 0.0769 | 5 | 0.0769 |
+| hypothesis_reranking | 31 | 0.4769 | 31 | 0.4769 |
+| evidence_led_hypothesis_generation | 35 | 0.5385 | 35 | 0.5385 |
+| convergent_multi_test_evidence | 1 | 0.0154 | 1 | 0.0154 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 1 | 0.0154 | 1 | 0.0154 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 50 | 0.7692 | 276 | 4.2462 |
-| evidence_ignored | 55 | 0.8462 | 629 | 9.6769 |
-| judgment_without_evidence | 15 | 0.2308 | 21 | 0.3231 |
-| dead_end_update | 23 | 0.3538 | 32 | 0.4923 |
-| unresolved_contradiction | 25 | 0.3846 | 74 | 1.1385 |
-| hypothesis_to_commitment_shortcut | 11 | 0.1692 | 15 | 0.2308 |
-| test_without_evidence | 0 | 0.0000 | 23 | 0.3538 |
-| no_belief_revision | 21 | 0.3231 | 21 | 0.3231 |
-| orphan_evidence | 27 | 0.4154 | 60 | 0.9231 |
-| confirmation_only | 10 | 0.1538 | 14 | 0.2154 |
+| untested_claim | 53 | 0.8154 | 276 | 4.2462 |
+| evidence_non_uptake | 65 | 1.0000 | 629 | 9.6769 |
+| unsupported_judgment | 15 | 0.2308 | 21 | 0.3231 |
+| stalled_revision | 23 | 0.3538 | 32 | 0.4923 |
+| contradiction_without_repair | 31 | 0.4769 | 74 | 1.1385 |
+| premature_commitment | 11 | 0.1692 | 15 | 0.2308 |
+| uninformative_test | 16 | 0.2462 | 23 | 0.3538 |
+| fixed_belief_trace | 21 | 0.3231 | 21 | 0.3231 |
+| disconnected_evidence | 27 | 0.4154 | 60 | 0.9231 |
+| one_sided_confirmation | 10 | 0.1538 | 14 | 0.2154 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 53 | 0.8154 | 276 | 4.2462 |
-| evidence_ignored | 65 | 1.0000 | 629 | 9.6769 |
-| judgment_without_evidence | 15 | 0.2308 | 21 | 0.3231 |
-| dead_end_update | 23 | 0.3538 | 32 | 0.4923 |
-| unresolved_contradiction | 32 | 0.4923 | 75 | 1.1538 |
-| hypothesis_to_commitment_shortcut | 11 | 0.1692 | 15 | 0.2308 |
-| test_without_evidence | 16 | 0.2462 | 23 | 0.3538 |
-| no_belief_revision | 21 | 0.3231 | 21 | 0.3231 |
-| orphan_evidence | 27 | 0.4154 | 60 | 0.9231 |
-| confirmation_only | 10 | 0.1538 | 14 | 0.2154 |
+| untested_claim | 53 | 0.8154 | 276 | 4.2462 |
+| evidence_non_uptake | 65 | 1.0000 | 629 | 9.6769 |
+| unsupported_judgment | 15 | 0.2308 | 21 | 0.3231 |
+| stalled_revision | 23 | 0.3538 | 32 | 0.4923 |
+| contradiction_without_repair | 32 | 0.4923 | 75 | 1.1538 |
+| premature_commitment | 11 | 0.1692 | 15 | 0.2308 |
+| uninformative_test | 16 | 0.2462 | 23 | 0.3538 |
+| fixed_belief_trace | 21 | 0.3231 | 21 | 0.3231 |
+| disconnected_evidence | 27 | 0.4154 | 60 | 0.9231 |
+| one_sided_confirmation | 10 | 0.1538 | 14 | 0.2154 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 56 | 0.8615 | 364 | 5.6000 |
-| evidence_handling | 62 | 0.9538 | 733 | 11.2769 |
+| hypothesis_generation | 57 | 0.8769 | 364 | 5.6000 |
+| evidence_handling | 65 | 1.0000 | 733 | 11.2769 |
 | experimental_strategy | 47 | 0.7231 | 68 | 1.0462 |
 
 #### Anti-pattern family presence (local)
@@ -4507,51 +4507,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 0 | 0.0000 | 0 | 0.0000 |
-| ml_make_it_work | 0 | 0.0000 | 0 | 0.0000 |
-| exploratory_to_confirmatory | 0 | 0.0000 | 0 | 0.0000 |
-| bayesian_belief_updating | 1 | 0.1429 | 1 | 0.1429 |
-| abductive | 5 | 0.7143 | 5 | 0.7143 |
-| triangulation | 0 | 0.0000 | 0 | 0.0000 |
-| preregistered | 0 | 0.0000 | 0 | 0.0000 |
-| active_learning | 0 | 0.0000 | 0 | 0.0000 |
+| refutation_driven_belief_revision | 0 | 0.0000 | 0 | 0.0000 |
+| fixed_hypothesis_test_tuning | 0 | 0.0000 | 0 | 0.0000 |
+| explore_then_test_transition | 0 | 0.0000 | 0 | 0.0000 |
+| hypothesis_reranking | 1 | 0.1429 | 1 | 0.1429 |
+| evidence_led_hypothesis_generation | 5 | 0.7143 | 5 | 0.7143 |
+| convergent_multi_test_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| precommitted_test_plan | 0 | 0.0000 | 0 | 0.0000 |
+| evidence_guided_test_redesign | 0 | 0.0000 | 0 | 0.0000 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 4 | 0.5714 | 7 | 1.0000 |
-| evidence_ignored | 5 | 0.7143 | 46 | 6.5714 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 1 | 0.1429 | 2 | 0.2857 |
-| hypothesis_to_commitment_shortcut | 2 | 0.2857 | 2 | 0.2857 |
-| test_without_evidence | 0 | 0.0000 | 6 | 0.8571 |
-| no_belief_revision | 7 | 1.0000 | 7 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 2 | 0.2857 | 2 | 0.2857 |
+| untested_claim | 4 | 0.5714 | 7 | 1.0000 |
+| evidence_non_uptake | 7 | 1.0000 | 46 | 6.5714 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 1 | 0.1429 | 2 | 0.2857 |
+| premature_commitment | 2 | 0.2857 | 2 | 0.2857 |
+| uninformative_test | 3 | 0.4286 | 6 | 0.8571 |
+| fixed_belief_trace | 7 | 1.0000 | 7 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 2 | 0.2857 | 2 | 0.2857 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 4 | 0.5714 | 7 | 1.0000 |
-| evidence_ignored | 7 | 1.0000 | 46 | 6.5714 |
-| judgment_without_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| dead_end_update | 0 | 0.0000 | 0 | 0.0000 |
-| unresolved_contradiction | 1 | 0.1429 | 2 | 0.2857 |
-| hypothesis_to_commitment_shortcut | 2 | 0.2857 | 2 | 0.2857 |
-| test_without_evidence | 3 | 0.4286 | 6 | 0.8571 |
-| no_belief_revision | 7 | 1.0000 | 7 | 1.0000 |
-| orphan_evidence | 0 | 0.0000 | 0 | 0.0000 |
-| confirmation_only | 2 | 0.2857 | 2 | 0.2857 |
+| untested_claim | 4 | 0.5714 | 7 | 1.0000 |
+| evidence_non_uptake | 7 | 1.0000 | 46 | 6.5714 |
+| unsupported_judgment | 0 | 0.0000 | 0 | 0.0000 |
+| stalled_revision | 0 | 0.0000 | 0 | 0.0000 |
+| contradiction_without_repair | 1 | 0.1429 | 2 | 0.2857 |
+| premature_commitment | 2 | 0.2857 | 2 | 0.2857 |
+| uninformative_test | 3 | 0.4286 | 6 | 0.8571 |
+| fixed_belief_trace | 7 | 1.0000 | 7 | 1.0000 |
+| disconnected_evidence | 0 | 0.0000 | 0 | 0.0000 |
+| one_sided_confirmation | 2 | 0.2857 | 2 | 0.2857 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
 | hypothesis_generation | 5 | 0.7143 | 11 | 1.5714 |
-| evidence_handling | 5 | 0.7143 | 52 | 7.4286 |
+| evidence_handling | 7 | 1.0000 | 52 | 7.4286 |
 | experimental_strategy | 7 | 1.0000 | 9 | 1.2857 |
 
 #### Anti-pattern family presence (local)
@@ -4604,51 +4604,51 @@
 
 | subgraph | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| popperian_falsification | 11 | 0.0244 | 11 | 0.0244 |
-| ml_make_it_work | 12 | 0.0266 | 12 | 0.0266 |
-| exploratory_to_confirmatory | 29 | 0.0643 | 29 | 0.0643 |
-| bayesian_belief_updating | 141 | 0.3126 | 141 | 0.3126 |
-| abductive | 283 | 0.6275 | 283 | 0.6275 |
-| triangulation | 2 | 0.0044 | 2 | 0.0044 |
-| preregistered | 1 | 0.0022 | 1 | 0.0022 |
-| active_learning | 5 | 0.0111 | 5 | 0.0111 |
+| refutation_driven_belief_revision | 11 | 0.0244 | 11 | 0.0244 |
+| fixed_hypothesis_test_tuning | 12 | 0.0266 | 12 | 0.0266 |
+| explore_then_test_transition | 29 | 0.0643 | 29 | 0.0643 |
+| hypothesis_reranking | 141 | 0.3126 | 141 | 0.3126 |
+| evidence_led_hypothesis_generation | 283 | 0.6275 | 283 | 0.6275 |
+| convergent_multi_test_evidence | 2 | 0.0044 | 2 | 0.0044 |
+| precommitted_test_plan | 1 | 0.0022 | 1 | 0.0022 |
+| evidence_guided_test_redesign | 5 | 0.0111 | 5 | 0.0111 |
 
 #### Anti-pattern presence (global)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 274 | 0.6075 | 1048 | 2.3237 |
-| evidence_ignored | 304 | 0.6741 | 2441 | 5.4124 |
-| judgment_without_evidence | 86 | 0.1907 | 165 | 0.3659 |
-| dead_end_update | 66 | 0.1463 | 83 | 0.1840 |
-| unresolved_contradiction | 79 | 0.1752 | 281 | 0.6231 |
-| hypothesis_to_commitment_shortcut | 76 | 0.1685 | 95 | 0.2106 |
-| test_without_evidence | 4 | 0.0089 | 96 | 0.2129 |
-| no_belief_revision | 257 | 0.5698 | 257 | 0.5698 |
-| orphan_evidence | 104 | 0.2306 | 193 | 0.4279 |
-| confirmation_only | 71 | 0.1574 | 87 | 0.1929 |
+| untested_claim | 288 | 0.6386 | 1048 | 2.3237 |
+| evidence_non_uptake | 396 | 0.8780 | 2441 | 5.4124 |
+| unsupported_judgment | 86 | 0.1907 | 165 | 0.3659 |
+| stalled_revision | 66 | 0.1463 | 83 | 0.1840 |
+| contradiction_without_repair | 126 | 0.2794 | 281 | 0.6231 |
+| premature_commitment | 76 | 0.1685 | 95 | 0.2106 |
+| uninformative_test | 59 | 0.1308 | 96 | 0.2129 |
+| fixed_belief_trace | 257 | 0.5698 | 257 | 0.5698 |
+| disconnected_evidence | 104 | 0.2306 | 193 | 0.4279 |
+| one_sided_confirmation | 71 | 0.1574 | 87 | 0.1929 |
 
 #### Anti-pattern presence (local)
 
 | anti-pattern | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| untested_hypothesis | 288 | 0.6386 | 1048 | 2.3237 |
-| evidence_ignored | 396 | 0.8780 | 2441 | 5.4124 |
-| judgment_without_evidence | 86 | 0.1907 | 165 | 0.3659 |
-| dead_end_update | 66 | 0.1463 | 83 | 0.1840 |
-| unresolved_contradiction | 136 | 0.3016 | 323 | 0.7162 |
-| hypothesis_to_commitment_shortcut | 76 | 0.1685 | 95 | 0.2106 |
-| test_without_evidence | 59 | 0.1308 | 96 | 0.2129 |
-| no_belief_revision | 257 | 0.5698 | 257 | 0.5698 |
-| orphan_evidence | 104 | 0.2306 | 193 | 0.4279 |
-| confirmation_only | 71 | 0.1574 | 87 | 0.1929 |
+| untested_claim | 288 | 0.6386 | 1048 | 2.3237 |
+| evidence_non_uptake | 396 | 0.8780 | 2441 | 5.4124 |
+| unsupported_judgment | 86 | 0.1907 | 165 | 0.3659 |
+| stalled_revision | 66 | 0.1463 | 83 | 0.1840 |
+| contradiction_without_repair | 136 | 0.3016 | 323 | 0.7162 |
+| premature_commitment | 76 | 0.1685 | 95 | 0.2106 |
+| uninformative_test | 59 | 0.1308 | 96 | 0.2129 |
+| fixed_belief_trace | 257 | 0.5698 | 257 | 0.5698 |
+| disconnected_evidence | 104 | 0.2306 | 193 | 0.4279 |
+| one_sided_confirmation | 71 | 0.1574 | 87 | 0.1929 |
 
 #### Anti-pattern family presence (global)
 
 | family | count | fraction | raw_total | raw_mean |
 | --- | ---: | ---: | ---: | ---: |
-| hypothesis_generation | 298 | 0.6608 | 1416 | 3.1397 |
-| evidence_handling | 351 | 0.7783 | 2895 | 6.4191 |
+| hypothesis_generation | 309 | 0.6851 | 1416 | 3.1397 |
+| evidence_handling | 401 | 0.8891 | 2895 | 6.4191 |
 | experimental_strategy | 339 | 0.7517 | 435 | 0.9645 |
 
 #### Anti-pattern family presence (local)
