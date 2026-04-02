@@ -207,7 +207,7 @@ def plot_full_coverage_heatmap(
     fig_height = max(ONE_COL_HEIGHT * 0.6, n_rows * 0.35)
 
     # Add space for marginal plots (use absolute size so both bars are same dimension)
-    bar_size = 0.6  # inches for both marginal bar plots
+    bar_size = 1.0  # inches for both marginal bar plots
     fig_width_total = fig_width + bar_size + 0.1
     fig_height_total = fig_height + bar_size + 0.1
     bar_ratio_w = bar_size / fig_width
@@ -232,13 +232,13 @@ def plot_full_coverage_heatmap(
     sns.heatmap(
         display_df,
         annot=True,
-        fmt=".2f",
+        fmt=".1f",
         cmap="Purples",
         cbar=False,
         ax=ax_heatmap,
         linewidths=0.5,
         linecolor="white",
-        annot_kws={"fontsize": FONT_SIZES["tick_label"] - 3},
+        annot_kws={"fontsize": FONT_SIZES["tick_label"] - 1},
     )
 
     # --- Thin white separator lines between model groups (horizontal) ---
@@ -306,7 +306,7 @@ def plot_full_coverage_heatmap(
             env_name,
             ha="right",
             va="top",
-            fontsize=FONT_SIZES["tick_label"] - 2,
+            fontsize=FONT_SIZES["tick_label"],
             rotation=45,
             rotation_mode="anchor",
             clip_on=False,
@@ -326,16 +326,18 @@ def plot_full_coverage_heatmap(
         linewidth=0.4,
     )
     ax_top.set_xlim(0, n_cols)
-    ax_top.set_ylim(0, min(1.0, col_means.max() * 1.3))
+    ax_top.set_ylim(0, 1.0)
     ax_top.set_xticks([])
     # Vertical separators matching heatmap groups
     for _group_name, _col_start, col_end in group_spans[:-1]:
         ax_top.axvline(x=col_end + 1, color="white", linewidth=3, zorder=5)
     ax_top.yaxis.tick_right()
     ax_top.yaxis.set_label_position("right")
+    ax_top.set_yticks([0.5, 1])
+    ax_top.yaxis.set_minor_locator(plt.NullLocator())
     ax_top.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"] - 2)
     ax_top.set_ylabel(
-        "Mean", fontsize=FONT_SIZES["tick_label"] - 1, rotation=270, labelpad=10
+        "Mean score", fontsize=FONT_SIZES["tick_label"], rotation=270, labelpad=10
     )
     for spine in ax_top.spines.values():
         spine.set_visible(False)
@@ -352,10 +354,12 @@ def plot_full_coverage_heatmap(
         linewidth=0.4,
     )
     ax_right.set_ylim(n_rows, 0)  # Invert to match heatmap orientation
-    ax_right.set_xlim(0, min(1.0, row_means.max() * 1.3))
+    ax_right.set_xlim(0, 1.0)
     ax_right.set_yticks([])
+    ax_right.set_xticks([0.5, 1])
+    ax_right.xaxis.set_minor_locator(plt.NullLocator())
     ax_right.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
-    ax_right.set_xlabel("Mean", fontsize=FONT_SIZES["tick_label"] - 1)
+    ax_right.set_xlabel("Mean score", fontsize=FONT_SIZES["tick_label"])
     for spine in ax_right.spines.values():
         spine.set_visible(False)
 
