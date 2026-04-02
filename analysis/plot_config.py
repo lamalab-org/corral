@@ -36,11 +36,11 @@ ENVIRONMENT_GROUPS = {
     },
     "Strategic reasoning": {
         "description": "Navigate combinatorial spaces under constraints",
-        "environments": ["retro", "afm"],
+        "environments": ["retro"],
     },
     "Workflow construction": {
         "description": "Assemble and execute computational protocols",
-        "environments": ["md", "catalyst", "ml"],
+        "environments": ["afm", "md", "catalyst", "ml"],
     },
 }
 
