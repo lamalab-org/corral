@@ -61,13 +61,14 @@ COLORS = {"brief": "#4C72B0", "workflow": "#DD8452", "comprehensive": "#55A868"}
 MARKERS = {"workflow": "D", "comprehensive": "o"}
 
 ENV_LABELS = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "MD",
-    "ml": "ML",
-    "resistor": "Resistor",
-    "retro": "Retro",
-    "spectra": "Spectra",
+    "afm": "AFM experimental execution",
+    "catalyst": "Adsorption Surface Construction",
+    "md": "Molecular Simulation",
+    "ml": "ML-based property",
+    "resistor": "Circuit Inference",
+    "retro": "Retrosynthetic Planning",
+    "spectra": "Spectroscopic Structure Elucidation",
+    "wetlab": "Inorganic Qualitative Analysis",
 }
 MODEL_LABELS = {
     "claude-4.5": "Claude 4.5",

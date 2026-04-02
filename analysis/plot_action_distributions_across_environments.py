@@ -36,13 +36,14 @@ OUT_FILE_AGENT = OUT_DIR / "action_distribution_by_environment_and_agent.pdf"
 OUT_FILE_MODEL = OUT_DIR / "action_distribution_by_environment_and_model.pdf"
 
 ENV_LABELS = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "MD",
-    "ml": "ML",
-    "resistor": "Resistor",
-    "retro": "Retro",
-    "spectra": "Spectra",
+    "afm": "AFM experimental execution",
+    "catalyst": "Adsorption Surface Construction",
+    "md": "Molecular Simulation",
+    "ml": "ML-based property",
+    "resistor": "Circuit Inference",
+    "retro": "Retrosynthetic Planning",
+    "spectra": "Spectroscopic Structure Elucidation",
+    "wetlab": "Inorganic Qualitative Analysis",
 }
 MODEL_LABELS = {
     "claude-4.5": "Claude 4.5",
