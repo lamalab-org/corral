@@ -67,64 +67,154 @@ EDGE_RELATIONS = [
 ]
 EDGE_RELATIONS_SET = set(EDGE_RELATIONS)
 
-SUBGRAPH_NAMES = [
-    "popperian_falsification",
-    "ml_make_it_work",
-    "exploratory_to_confirmatory",
-    "bayesian_belief_updating",
-    "abductive",
-    "triangulation",
-    "preregistered",
-    "active_learning",
-]
+# The description dicts are the single source of truth for pattern names.
+# Change a key here and it propagates to SUBGRAPH_NAMES, families, matchers, etc.
 
-ANTIPATTERN_NAMES = [
-    "untested_hypothesis",
-    "evidence_ignored",
-    "judgment_without_evidence",
-    "dead_end_update",
-    "unresolved_contradiction",
-    "hypothesis_to_commitment_shortcut",
-    "test_without_evidence",
-    "no_belief_revision",
-    "orphan_evidence",
-    "confirmation_only",
-]
+SUBGRAPH_DESCRIPTIONS: dict[str, str] = {
+    "refutation_driven_belief_revision": (
+        "Hypothesis is tested, evidence is gathered, judgment interprets it, "
+        "and an update revises the belief to a different hypothesis "
+        "[H -tests-> T -observes-> E -uses-> J/U -updates_to-> H2]."
+    ),
+    "fixed_hypothesis_test_tuning": (
+        "A single hypothesis is retained while tests and parameters are "
+        "iteratively adjusted without revising the underlying hypothesis "
+        "[H -tests-> T -observes-> E -uses-> J/U -updates_to-> T]."
+    ),
+    "explore_then_test_transition": (
+        "Testing begins before any hypothesis is formed; observations then "
+        "lead to a hypothesis that is subsequently tested "
+        "[T -observes-> E ... H ... H -tests-> T]."
+    ),
+    "hypothesis_reranking": (
+        "Multiple competing hypotheses coexist and are compared or ranked "
+        "as new evidence arrives [H1 -competes_with- H2, both tested]."
+    ),
+    "evidence_led_hypothesis_generation": (
+        "An observation precedes hypothesis formation: evidence is observed "
+        "first, a judgment is made, and a hypothesis is proposed afterward "
+        "[E -uses-> J ... H ... H -tests-> T]."
+    ),
+    "convergent_multi_test_evidence": (
+        "A single hypothesis is evaluated through three or more independent "
+        "tests, each producing its own evidence [H -tests-> T1/T2/T3..., each "
+        "-> E]."
+    ),
+    "precommitted_test_plan": (
+        "A commitment or prediction is stated before any evidence is "
+        "collected, and tests are then conducted to evaluate it [C before E; "
+        "then H -tests-> T]."
+    ),
+    "evidence_guided_test_redesign": (
+        "An update explicitly revises the test design, and the new test "
+        "produces fresh evidence, forming an adaptive experimentation loop "
+        "[U -updates_to-> T -observes-> E]."
+    ),
+}
+
+SUBGRAPH_NAMES = list(SUBGRAPH_DESCRIPTIONS.keys())
+
+(
+    SG_REFUTATION_DRIVEN_BELIEF_REVISION,
+    SG_FIXED_HYPOTHESIS_TEST_TUNING,
+    SG_EXPLORE_THEN_TEST_TRANSITION,
+    SG_HYPOTHESIS_RERANKING,
+    SG_EVIDENCE_LED_HYPOTHESIS_GENERATION,
+    SG_CONVERGENT_MULTI_TEST_EVIDENCE,
+    SG_PRECOMMITTED_TEST_PLAN,
+    SG_EVIDENCE_GUIDED_TEST_REDESIGN,
+) = SUBGRAPH_NAMES
+
+ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
+    "untested_claim": (
+        "A hypothesis is stated but never linked to any test [H with no " "tests]."
+    ),
+    "evidence_non_uptake": (
+        "Evidence is collected but never used by any judgment or update "
+        "[E with no uses to J/U]."
+    ),
+    "unsupported_judgment": (
+        "A judgment is made without any supporting evidence edge [J with no " "E]."
+    ),
+    "stalled_revision": (
+        "An update node has no outgoing edges, meaning the revised belief "
+        "leads nowhere [U with no outgoing edge]."
+    ),
+    "contradiction_without_repair": (
+        "Evidence contradicts a hypothesis, but no subsequent update or "
+        "competing hypothesis addresses the conflict [E -contradicts-> H, no "
+        "U/H alt]."
+    ),
+    "premature_commitment": (
+        "A hypothesis is directly linked to a commitment without any "
+        "intermediate testing [H -> C with no T]."
+    ),
+    "uninformative_test": (
+        "A test is designed but produces no observed evidence [T with no E]."
+    ),
+    "fixed_belief_trace": (
+        "The entire trace contains no update nodes, indicating beliefs "
+        "were never revised [No U in trace]."
+    ),
+    "disconnected_evidence": (
+        "An evidence node has no incoming or outgoing edges at all [Isolated " "E]."
+    ),
+    "one_sided_confirmation": (
+        "A hypothesis reaches commitment with supporting evidence but "
+        "without any contradicting evidence ever being considered [H -> C with "
+        "support, no contradicts]."
+    ),
+}
+
+ANTIPATTERN_NAMES = list(ANTIPATTERN_DESCRIPTIONS.keys())
+
+(
+    AP_UNTESTED_CLAIM,
+    AP_EVIDENCE_NON_UPTAKE,
+    AP_UNSUPPORTED_JUDGMENT,
+    AP_STALLED_REVISION,
+    AP_CONTRADICTION_WITHOUT_REPAIR,
+    AP_PREMATURE_COMMITMENT,
+    AP_UNINFORMATIVE_TEST,
+    AP_FIXED_BELIEF_TRACE,
+    AP_DISCONNECTED_EVIDENCE,
+    AP_ONE_SIDED_CONFIRMATION,
+) = ANTIPATTERN_NAMES
 
 ANTIPATTERN_FAMILIES: dict[str, list[str]] = {
     "hypothesis_generation": [
-        "untested_hypothesis",
-        "unresolved_contradiction",
-        "confirmation_only",
+        AP_UNTESTED_CLAIM,
+        AP_CONTRADICTION_WITHOUT_REPAIR,
+        AP_ONE_SIDED_CONFIRMATION,
     ],
     "evidence_handling": [
-        "evidence_ignored",
-        "orphan_evidence",
-        "judgment_without_evidence",
-        "test_without_evidence",
+        AP_EVIDENCE_NON_UPTAKE,
+        AP_DISCONNECTED_EVIDENCE,
+        AP_UNSUPPORTED_JUDGMENT,
+        AP_UNINFORMATIVE_TEST,
     ],
     "experimental_strategy": [
-        "dead_end_update",
-        "no_belief_revision",
-        "hypothesis_to_commitment_shortcut",
+        AP_STALLED_REVISION,
+        AP_FIXED_BELIEF_TRACE,
+        AP_PREMATURE_COMMITMENT,
     ],
 }
 ANTIPATTERN_FAMILY_NAMES = list(ANTIPATTERN_FAMILIES.keys())
 
 SUBGRAPH_FAMILIES: dict[str, list[str]] = {
     "hypothesis_generation": [
-        "popperian_falsification",
-        "bayesian_belief_updating",
-        "abductive",
+        SG_REFUTATION_DRIVEN_BELIEF_REVISION,
+        SG_HYPOTHESIS_RERANKING,
+        SG_EVIDENCE_LED_HYPOTHESIS_GENERATION,
     ],
     "evidence_handling": [
-        "triangulation",
-        "exploratory_to_confirmatory",
+        SG_CONVERGENT_MULTI_TEST_EVIDENCE,
+        SG_EXPLORE_THEN_TEST_TRANSITION,
     ],
     "experimental_strategy": [
-        "ml_make_it_work",
-        "preregistered",
-        "active_learning",
+        SG_FIXED_HYPOTHESIS_TEST_TUNING,
+        SG_PRECOMMITTED_TEST_PLAN,
+        SG_EVIDENCE_GUIDED_TEST_REDESIGN,
     ],
 }
 SUBGRAPH_FAMILY_NAMES = list(SUBGRAPH_FAMILIES.keys())
@@ -1151,14 +1241,14 @@ def _match_active_learning(node_type_map, _node_by_id, out_edges):
 
 
 _SUBGRAPH_MATCHERS = {
-    "popperian_falsification": _match_popperian,
-    "ml_make_it_work": _match_ml_make_it_work,
-    "exploratory_to_confirmatory": _match_exploratory_to_confirmatory,
-    "bayesian_belief_updating": _match_bayesian,
-    "abductive": _match_abductive,
-    "triangulation": _match_triangulation,
-    "preregistered": _match_preregistered,
-    "active_learning": _match_active_learning,
+    SG_REFUTATION_DRIVEN_BELIEF_REVISION: _match_popperian,
+    SG_FIXED_HYPOTHESIS_TEST_TUNING: _match_ml_make_it_work,
+    SG_EXPLORE_THEN_TEST_TRANSITION: _match_exploratory_to_confirmatory,
+    SG_HYPOTHESIS_RERANKING: _match_bayesian,
+    SG_EVIDENCE_LED_HYPOTHESIS_GENERATION: _match_abductive,
+    SG_CONVERGENT_MULTI_TEST_EVIDENCE: _match_triangulation,
+    SG_PRECOMMITTED_TEST_PLAN: _match_preregistered,
+    SG_EVIDENCE_GUIDED_TEST_REDESIGN: _match_active_learning,
 }
 
 
@@ -1226,10 +1316,10 @@ def detect_subgraphs_global(nodes: list, edges: list) -> dict[str, int]:
     ) or _typed_edge_exists("J", "E", "uses", node_by_id, out_edges)
 
     results: dict[str, int] = {}
-    results["popperian_falsification"] = int(
+    results[SG_REFUTATION_DRIVEN_BELIEF_REVISION] = int(
         has_HT_tests and has_TE_observes and has_UH_updates and n_H >= 2
     )
-    results["ml_make_it_work"] = int(
+    results[SG_FIXED_HYPOTHESIS_TEST_TUNING] = int(
         n_H <= 1
         and n_T >= 2
         and has_HT_tests
@@ -1237,21 +1327,21 @@ def detect_subgraphs_global(nodes: list, edges: list) -> dict[str, int]:
         and has_EJ_uses
         and not has_UH_updates
     )
-    results["exploratory_to_confirmatory"] = int(
+    results[SG_EXPLORE_THEN_TEST_TRANSITION] = int(
         t_first_T is not None
         and t_first_H is not None
         and t_first_T < t_first_H
         and has_HT_tests
     )
-    results["bayesian_belief_updating"] = int(n_H >= 2 and has_HH_competes)
-    results["abductive"] = int(
+    results[SG_HYPOTHESIS_RERANKING] = int(n_H >= 2 and has_HH_competes)
+    results[SG_EVIDENCE_LED_HYPOTHESIS_GENERATION] = int(
         t_first_E is not None and t_first_H is not None and t_first_E < t_first_H
     )
-    results["triangulation"] = int(fan_out_H_T >= 3)
-    results["preregistered"] = int(
+    results[SG_CONVERGENT_MULTI_TEST_EVIDENCE] = int(fan_out_H_T >= 3)
+    results[SG_PRECOMMITTED_TEST_PLAN] = int(
         t_first_C is not None and t_first_E is not None and t_first_C < t_first_E
     )
-    results["active_learning"] = int(has_UT_updates and has_TE_observes)
+    results[SG_EVIDENCE_GUIDED_TEST_REDESIGN] = int(has_UT_updates and has_TE_observes)
     return results
 
 
@@ -1440,16 +1530,16 @@ def _ap_confirmation_only(node_type_map, _node_by_id, out_edges, in_edges):
 
 
 _ANTIPATTERN_MATCHERS = {
-    "untested_hypothesis": _ap_untested_hypothesis,
-    "evidence_ignored": _ap_evidence_ignored,
-    "judgment_without_evidence": _ap_judgment_without_evidence,
-    "dead_end_update": _ap_dead_end_update,
-    "unresolved_contradiction": _ap_unresolved_contradiction,
-    "hypothesis_to_commitment_shortcut": _ap_hypothesis_to_commitment_shortcut,
-    "test_without_evidence": _ap_test_without_evidence,
-    "no_belief_revision": _ap_no_belief_revision,
-    "orphan_evidence": _ap_orphan_evidence,
-    "confirmation_only": _ap_confirmation_only,
+    AP_UNTESTED_CLAIM: _ap_untested_hypothesis,
+    AP_EVIDENCE_NON_UPTAKE: _ap_evidence_ignored,
+    AP_UNSUPPORTED_JUDGMENT: _ap_judgment_without_evidence,
+    AP_STALLED_REVISION: _ap_dead_end_update,
+    AP_CONTRADICTION_WITHOUT_REPAIR: _ap_unresolved_contradiction,
+    AP_PREMATURE_COMMITMENT: _ap_hypothesis_to_commitment_shortcut,
+    AP_UNINFORMATIVE_TEST: _ap_test_without_evidence,
+    AP_FIXED_BELIEF_TRACE: _ap_no_belief_revision,
+    AP_DISCONNECTED_EVIDENCE: _ap_orphan_evidence,
+    AP_ONE_SIDED_CONFIRMATION: _ap_confirmation_only,
 }
 
 
@@ -1560,11 +1650,6 @@ def detect_antipatterns_global(
         if not out_edges.get(ev) and not in_edges.get(ev)
     )
 
-    untested_h_rate = (n_H - h_tested) / n_H if n_H else 0.0
-    evidence_ignored_rate = (n_E - e_used) / n_E if n_E else 0.0
-    t_no_ev_rate = (n_T - t_with_ev) / n_T if n_T else 0.0
-    unresolved_rate = n_unresolved / n_contradicts if n_contradicts else 0.0
-
     j_without_e = 0
     for j in _nodes_of_type("J", node_type_map):
         has_e = any(
@@ -1583,28 +1668,29 @@ def detect_antipatterns_global(
     ap_local_counts = detect_antipatterns_local(nodes, edges)
 
     binary: dict[str, bool] = {
-        "untested_hypothesis": untested_h_rate > 0.25,
-        "evidence_ignored": evidence_ignored_rate > 0.25,
-        "judgment_without_evidence": j_without_e > 0,
-        "dead_end_update": dead_u > 0,
-        "unresolved_contradiction": unresolved_rate > 0.5 and n_contradicts > 0,
-        "hypothesis_to_commitment_shortcut": h_to_c_untested > 0,
-        "test_without_evidence": t_no_ev_rate > 0.5,
-        "no_belief_revision": n_U == 0,
-        "orphan_evidence": e_orphan > 0,
-        "confirmation_only": ap_local_counts.get("confirmation_only", 0) > 0,
+        AP_UNTESTED_CLAIM: (n_H - h_tested) > 0,
+        AP_EVIDENCE_NON_UPTAKE: (n_E - e_used) > 0,
+        AP_UNSUPPORTED_JUDGMENT: j_without_e > 0,
+        AP_STALLED_REVISION: dead_u > 0,
+        AP_CONTRADICTION_WITHOUT_REPAIR: n_unresolved > 0,
+        AP_PREMATURE_COMMITMENT: h_to_c_untested > 0,
+        AP_UNINFORMATIVE_TEST: (n_T - t_with_ev) > 0,
+        AP_FIXED_BELIEF_TRACE: n_U == 0,
+        AP_DISCONNECTED_EVIDENCE: e_orphan > 0,
+        AP_ONE_SIDED_CONFIRMATION: ap_local_counts.get(AP_ONE_SIDED_CONFIRMATION, 0)
+        > 0,
     }
     counts: dict[str, int] = {
-        "untested_hypothesis": n_H - h_tested,
-        "evidence_ignored": n_E - e_used,
-        "judgment_without_evidence": j_without_e,
-        "dead_end_update": dead_u,
-        "unresolved_contradiction": n_unresolved,
-        "hypothesis_to_commitment_shortcut": h_to_c_untested,
-        "test_without_evidence": n_T - t_with_ev,
-        "no_belief_revision": 1 if n_U == 0 else 0,
-        "orphan_evidence": e_orphan,
-        "confirmation_only": ap_local_counts.get("confirmation_only", 0),
+        AP_UNTESTED_CLAIM: n_H - h_tested,
+        AP_EVIDENCE_NON_UPTAKE: n_E - e_used,
+        AP_UNSUPPORTED_JUDGMENT: j_without_e,
+        AP_STALLED_REVISION: dead_u,
+        AP_CONTRADICTION_WITHOUT_REPAIR: n_unresolved,
+        AP_PREMATURE_COMMITMENT: h_to_c_untested,
+        AP_UNINFORMATIVE_TEST: n_T - t_with_ev,
+        AP_FIXED_BELIEF_TRACE: 1 if n_U == 0 else 0,
+        AP_DISCONNECTED_EVIDENCE: e_orphan,
+        AP_ONE_SIDED_CONFIRMATION: ap_local_counts.get(AP_ONE_SIDED_CONFIRMATION, 0),
     }
     return binary, counts
 
@@ -2910,6 +2996,79 @@ async def _run_pipeline(
         logger.info(f"Cross-model aggregation written to {out_dir}")
     except FileNotFoundError as e:
         logger.warning(f"Skipping aggregation: {e}")
+
+    write_pattern_definitions_latex(root_path / "analysis" / "pattern_definitions.tex")
+
+
+def _latex_escape(text: str) -> str:
+    """Escape special LaTeX characters in *text*."""
+    for ch in ("&", "%", "$", "#", "_", "{", "}"):
+        text = text.replace(ch, f"\\{ch}")
+    text = text.replace("~", "\\textasciitilde{}")
+    return text.replace("^", "\\textasciicircum{}")
+
+
+def _pretty_name(raw: str) -> str:
+    """Turn a snake_case identifier into a readable title."""
+    return raw.replace("_", " ").title()
+
+
+def build_pattern_definitions_latex() -> str:
+    """Return a LaTeX tabular with definitions of all patterns and antipatterns.
+
+    Uses `\\multicolumn` headers (in `\\textit`) to separate the
+    *Reasoning Patterns* block from the *Reasoning Antipatterns* block.
+    Each row lists the name and its definition in separate columns.
+    """
+    lines: list[str] = []
+    lines.append(r"\begin{tabular}{lp{12cm}}")
+    lines.append(r"\toprule")
+    lines.append(r"Topic & Description \\")
+    lines.append(r"\midrule")
+    lines.append(r"\midrule")
+    lines.append(r"\multicolumn{2}{l}{\textit{Reasoning Patterns}} \\")
+    lines.append(r"\midrule")
+
+    for sg in SUBGRAPH_NAMES:
+        name = _pretty_name(sg)
+        desc = _latex_escape(SUBGRAPH_DESCRIPTIONS[sg])
+        lines.append(rf"{name} & {desc} \\")
+
+    lines.append(r"\midrule")
+    lines.append(r"\midrule")
+    lines.append(r"\multicolumn{2}{l}{\textit{Reasoning Antipatterns}} \\")
+    lines.append(r"\midrule")
+
+    for ap in ANTIPATTERN_NAMES:
+        name = _pretty_name(ap)
+        desc = _latex_escape(ANTIPATTERN_DESCRIPTIONS[ap])
+        lines.append(rf"{name} & {desc} \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+    return "\n".join(lines)
+
+
+def write_pattern_definitions_latex(out_path: str | Path | None = None) -> Path:
+    """Write the pattern-definitions LaTeX table to *out_path*.
+
+    If *out_path* is `None`, defaults to
+    `<script_dir>/analysis/pattern_definitions.tex`.
+    """
+    if out_path is None:
+        out_path = (
+            SCRIPT_DIR
+            / ".."
+            / "analysis"
+            / "results"
+            / "tables"
+            / "pattern_definitions.tex"
+        )
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(build_pattern_definitions_latex(), encoding="utf-8")
+    logger.info(f"Pattern definitions LaTeX table written to {out_path}")
+    return out_path
 
 
 def main(
