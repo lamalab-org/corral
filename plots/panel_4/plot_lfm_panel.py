@@ -304,20 +304,18 @@ def main(best_model=None, results_dir=None, output_dir=None):
     idata = load_trace(best_model, results_dir)
     p_loo = compute_loo_predicted_probs(idata)
 
-    # Create 3-subplot panel
+    # Create 2-subplot panel
     fig, axes = plt.subplots(
         1,
-        3,
-        figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT * 1.1),
-        gridspec_kw={"width_ratios": [1, 1, 1]},
+        2,
+        figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT),
     )
 
-    _plot_variance_decomposition(axes[0], best_model, data_df, results_dir)
-    _plot_loo_by_outcome(axes[1], data_df, p_loo)
-    _plot_task_averaged(axes[2], data_df, p_loo)
+    _plot_loo_by_outcome(axes[0], data_df, p_loo)
+    _plot_task_averaged(axes[1], data_df, p_loo)
 
     # Add subplot labels
-    for ax, label in zip(axes, ["b", "c", "d"], strict=False):
+    for ax, label in zip(axes, ["a", "b"], strict=False):
         ax.text(
             -0.15,
             1.12,

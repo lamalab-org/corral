@@ -16,26 +16,26 @@ MODEL_NAMES = {
 # For environments, keep simple names without newlines for IRT plots
 # (other plots may want multi-line names for axis labels)
 ENVIRONMENT_NAMES = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "MD",  # Simple name for IRT
-    "ml": "ML",  # Simple name for IRT
-    "resistor": "Resistor",
-    "retro": "Retrosynthesis",  # Simple name for IRT
-    "spectra": "Spectra",
-    "wetlab": "Wetlab",
+    "afm": "AFM Experiment\nExecution",
+    "catalyst": "Adsorption Surface\nConstruction",
+    "md": "Molecular\nSimulation",
+    "ml": "ML-based Property\nPrediction",
+    "resistor": "Circuit\nInference",
+    "retro": "Retrosynthetic\nPlanning",
+    "spectra": "Spectroscopic Structure\nElucidation",
+    "wetlab": "Inorganic Qualitative\nAnalysis",
 }
 
 # Multi-line environment names for plots with tight x-axis spacing
 ENVIRONMENT_NAMES_MULTILINE = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "Molecular\nDynamics",
-    "ml": "Machine\nLearning",
-    "resistor": "Resistor",
-    "retro": "Retro-\nsynthesis",
-    "spectra": "Spectra",
-    "wetlab": "Wetlab",
+    "afm": "AFM Experiment\nExecution",
+    "catalyst": "Adsorption Surface\nConstruction",
+    "md": "Molecular\nSimulation",
+    "ml": "ML-based Property\nPrediction",
+    "resistor": "Circuit\nInference",
+    "retro": "Retrosynthetic\nPlanning",
+    "spectra": "Spectroscopic Structure\nElucidation",
+    "wetlab": "Inorganic Qualitative\nAnalysis",
 }
 
 AGENT_NAMES = {
@@ -91,6 +91,34 @@ AGENT_COLOUR_MAP = dict(zip(AGENT_NAMES.keys(), AGENT_COLOURS, strict=False))
 ENVIRONMENT_COLOUR_MAP = dict(
     zip(ENVIRONMENT_NAMES.keys(), ENVIRONMENT_COLOURS, strict=False)
 )
+
+# ---------- Environment domain groups ----------
+ENVIRONMENT_GROUPS = {
+    "Hypothesis-driven inquiry": {
+        "description": "Reason from observations to hidden structure",
+        "environments": ["spectra", "wetlab", "resistor"],
+    },
+    "Strategic reasoning": {
+        "description": "Navigate combinatorial spaces under constraints",
+        "environments": ["retro"],
+    },
+    "Workflow construction": {
+        "description": "Assemble and execute computational protocols",
+        "environments": ["afm", "md", "catalyst", "ml"],
+    },
+}
+
+GROUP_COLOURS = {
+    "Hypothesis-driven inquiry": "#b000ff",
+    "Strategic reasoning": "#fd00ff",
+    "Workflow construction": "#0051ff",
+}
+
+# Reverse lookup: env_id -> group colour
+ENV_GROUP_COLOUR_MAP = {}
+for _group_name, _group_info in ENVIRONMENT_GROUPS.items():
+    for _env in _group_info["environments"]:
+        ENV_GROUP_COLOUR_MAP[_env] = GROUP_COLOURS[_group_name]
 
 # ---------- Font sizes ----------
 FONT_SIZES = {

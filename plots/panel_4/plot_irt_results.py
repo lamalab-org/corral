@@ -70,6 +70,9 @@ AGENT_NAMES = plot_config.AGENT_NAMES
 ENVIRONMENT_NAMES = plot_config.ENVIRONMENT_NAMES
 MODEL_COLOURS = plot_config.MODEL_COLOURS
 MODEL_NAMES = plot_config.MODEL_NAMES
+ENVIRONMENT_GROUPS = plot_config.ENVIRONMENT_GROUPS
+GROUP_COLOURS = plot_config.GROUP_COLOURS
+ENV_GROUP_COLOUR_MAP = plot_config.ENV_GROUP_COLOUR_MAP
 
 # Apply style
 lama_aesthetics.get_style("main")
@@ -125,21 +128,31 @@ def get_model_color(display_name):
 
 
 def plot_capability_heatmaps(knowledge_df, reasoning_df, output_path):
-    """Side-by-side heatmaps for theta_K and theta_R."""
-    # Map raw IDs to display names
+    """Side-by-side heatmaps for theta_K and theta_R.
+
+    Models on x-axis (horizontal), environments on y-axis.
+    Y-axis labels shown only on the left heatmap.
+    """
+    # Map raw IDs to display names (strip newlines for heatmap labels)
     knowledge_df = map_display_names(knowledge_df)
     reasoning_df = map_display_names(reasoning_df)
+    for df in [knowledge_df, reasoning_df]:
+        if "environment" in df.columns:
+            df["environment"] = df["environment"].str.replace("\n", " ")
 
     fig, axes = plt.subplots(1, 2, figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT))
 
-    for ax, df, label in zip(
-        axes,
-        [knowledge_df, reasoning_df],
-        [r"$\theta_K$", r"$\theta_R$"],
-        strict=False,
+    for i, (ax, df, label) in enumerate(
+        zip(
+            axes,
+            [knowledge_df, reasoning_df],
+            [r"$\theta_K$", r"$\theta_R$"],
+            strict=False,
+        )
     ):
+        # Pivot with environment as index (rows) and model as columns
         pivot = df.pivot_table(
-            index="model", columns="environment", values="theta_mean"
+            index="environment", columns="model", values="theta_mean"
         )
         sns.heatmap(
             pivot,
@@ -151,10 +164,16 @@ def plot_capability_heatmaps(knowledge_df, reasoning_df, output_path):
             cbar_kws={"label": label},
         )
         ax.set_title(f"Capability {label}", fontsize=9, fontweight="bold")
-        ax.set_xlabel("Environment")
         ax.set_ylabel("")
+        ax.set_xlabel("")
+        # Rotate model labels on x-axis
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
 
-    axes[0].set_ylabel("Model")
+        # Only show y-axis labels on the left heatmap
+        if i > 0:
+            ax.set_yticklabels([])
+
+    axes[0].set_ylabel("Environment")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -298,10 +317,14 @@ def plot_knowledge_vs_reasoning(knowledge_df, reasoning_df, output_path):
 
 
 def plot_scatter_knowledge_reasoning(knowledge_df, reasoning_df, output_path):
-    """Scatter plot of knowledge theta vs reasoning theta."""
-    # Map raw IDs to display names
-    knowledge_df = map_display_names(knowledge_df)
-    reasoning_df = map_display_names(reasoning_df)
+    """Scatter plot of knowledge theta vs reasoning theta, coloured by domain group."""
+    # Keep raw env IDs for group lookup, but map model names
+    knowledge_df = knowledge_df.copy()
+    reasoning_df = reasoning_df.copy()
+    if "model" in knowledge_df.columns:
+        knowledge_df["model"] = knowledge_df["model"].map(MODEL_NAMES)
+    if "model" in reasoning_df.columns:
+        reasoning_df["model"] = reasoning_df["model"].map(MODEL_NAMES)
 
     merged = knowledge_df.merge(
         reasoning_df,
@@ -309,32 +332,40 @@ def plot_scatter_knowledge_reasoning(knowledge_df, reasoning_df, output_path):
         suffixes=("_knowledge", "_reasoning"),
     )
 
-    fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH * 1.5, ONE_COL_HEIGHT * 1.5))
+    # Model markers
+    model_markers = {}
+    marker_list = ["o", "s", "D"]
+    for i, model in enumerate(sorted(merged["model"].unique())):
+        model_markers[model] = marker_list[i % len(marker_list)]
 
-    for model in merged["model"].unique():
-        model_data = merged[merged["model"] == model]
-        color = get_model_color(model)
+    fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_WIDTH))
+
+    # Plot points coloured by domain, shaped by model
+    for _, row in merged.iterrows():
+        color = ENV_GROUP_COLOUR_MAP.get(row["environment"], "gray")
+        marker = model_markers.get(row["model"], "o")
         ax.scatter(
-            model_data["theta_mean_knowledge"],
-            model_data["theta_mean_reasoning"],
+            row["theta_mean_knowledge"],
+            row["theta_mean_reasoning"],
             color=color,
-            label=model,
+            marker=marker,
             s=80,
             zorder=3,
+            edgecolors="white",
+            linewidths=0.5,
         )
-        # Label each point with environment name
-        for _, row in model_data.iterrows():
-            ax.annotate(
-                row["environment"],
-                (row["theta_mean_knowledge"], row["theta_mean_reasoning"]),
-                fontsize=5,
-                ha="left",
-                va="bottom",
-                xytext=(3, 3),
-                textcoords="offset points",
-            )
 
-    # Add diagonal reference line
+    # Legend handles: domain groups + model markers
+    domain_handles = []
+    for group_name, group_color in GROUP_COLOURS.items():
+        h = ax.scatter([], [], color=group_color, marker="o", s=30, label=group_name)
+        domain_handles.append(h)
+    model_handles = []
+    for model_name, marker in model_markers.items():
+        h = ax.scatter([], [], color="gray", marker=marker, s=30, label=model_name)
+        model_handles.append(h)
+
+    # Diagonal reference line
     all_x = merged["theta_mean_knowledge"].to_numpy()
     all_y = merged["theta_mean_reasoning"].to_numpy()
     range_frame(ax, all_x, all_y, pad=0.1)
@@ -348,7 +379,18 @@ def plot_scatter_knowledge_reasoning(knowledge_df, reasoning_df, output_path):
     ax.set_xlabel(r"$\theta_K$ (Knowledge)", fontsize=9)
     ax.set_ylabel(r"$\theta_R$ (Reasoning)", fontsize=9)
     ax.set_title(r"$\theta_K$ vs $\theta_R$", fontsize=10, fontweight="bold")
-    ax.legend(fontsize=7)
+
+    # Compact legend at lower right (empty region of the plot)
+    ax.legend(
+        handles=domain_handles + model_handles,
+        fontsize=5,
+        loc="lower left",
+        handletextpad=0.3,
+        labelspacing=0.4,
+        borderpad=0.4,
+        framealpha=0.8,
+        markerscale=0.8,
+    )
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -575,6 +617,68 @@ def plot_level_effects(trace, output_path):
     return fig
 
 
+def plot_elpd_vs_complexity(comparison_csv, output_path):
+    """Performance vs complexity scatter: ELPD-LOO vs effective parameters (p_loo)."""
+    df = pd.read_csv(comparison_csv)
+
+    # Short display labels: model1_baseline_tasks -> M1, model7_abilities_env_level -> M7
+    df["label"] = "M" + df["model"].str.extract(r"model(\d+)", expand=False)
+
+    fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_WIDTH))
+
+    # Distinct colour per model
+    palette = [
+        "#0051ff",
+        "#fd00ff",
+        "#b000ff",
+        "#e87584",
+        "#2a9d8f",
+        "#e9c46a",
+        "#711c91",
+        "#ea00d9",
+    ]
+    colors = {label: palette[i % len(palette)] for i, label in enumerate(df["label"])}
+
+    for _, row in df.iterrows():
+        c = colors[row["label"]]
+        converged = row["converged"]
+        rhat = row["rhat_max"]
+        ax.scatter(
+            row["p_loo"],
+            row["loo"],
+            color=c if converged else "none",
+            s=70,
+            zorder=3,
+            edgecolors=c,
+            linewidths=1.5,
+            label=f"{row['label']} ($\\hat{{R}}$={rhat:.3f})",
+        )
+
+    all_x = df["p_loo"].to_numpy()
+    all_y = df["loo"].to_numpy()
+    range_frame(ax, all_x, all_y, pad=0.05)
+
+    ax.set_xlabel("Effective Parameters (p_loo)", fontsize=8)
+    ax.set_ylabel("ELPD-LOO (higher is better)", fontsize=8)
+    ax.set_title("Performance vs Complexity", fontsize=9, fontweight="bold")
+    ax.legend(
+        fontsize=5,
+        loc="lower left",
+        handletextpad=0.3,
+        labelspacing=0.4,
+        borderpad=0.4,
+        framealpha=0.8,
+        markerscale=0.8,
+    )
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.savefig(output_path.with_suffix(".pdf"), bbox_inches="tight")
+    plt.close()
+    logger.success(f"Saved ELPD vs complexity to {output_path}")
+    return fig
+
+
 # =============================================================================
 # Plot registry and dispatcher
 # =============================================================================
@@ -625,6 +729,12 @@ PLOT_FUNCTIONS = {
         "requires_trace": True,
         "description": "Difficulty level effects",
     },
+    "elpd_vs_complexity": {
+        "func": plot_elpd_vs_complexity,
+        "requires_trace": False,
+        "requires_comparison": True,
+        "description": "ELPD-LOO vs effective parameters scatter",
+    },
 }
 
 
@@ -643,6 +753,7 @@ def list_plots():
 def generate(
     model_type: str = "baseline",
     results_dir: str | None = None,
+    comparison_csv: str | None = None,
     output_dir: str = "./output",
     plots: str | list[str] = "all",
 ):
@@ -775,6 +886,15 @@ def generate(
                 func(agent_trace, scaffold_names, output_path)
             elif plot_name == "level_effects":
                 func(agent_trace, output_path)
+            elif plot_name == "elpd_vs_complexity":
+                csv_path = comparison_csv or str(
+                    REPO_ROOT
+                    / "analysis"
+                    / "results"
+                    / "lfm-binomial"
+                    / "model_comparison.csv"
+                )
+                func(csv_path, output_path)
         except Exception as e:
             logger.error(f"Failed to generate {plot_name}: {e}")
             import traceback
