@@ -174,13 +174,17 @@ def plot_gap_scatter(
     ax.tick_params(axis="both", labelsize=FONT_SIZES["tick_label"])
 
     # Legend
-    ax.legend(
+    leg = ax.legend(
         loc="center left",
         bbox_to_anchor=(0.45, 0.2),
         fontsize=FONT_SIZES["legend"],
         framealpha=0.0,
         ncol=1,
     )
+    # Color each legend text to match its marker
+    for text, handle in zip(leg.get_texts(), leg.legend_handles, strict=False):
+        color = handle.get_facecolor()[0][:3]  # RGB from RGBA array
+        text.set_color(color)
 
     # Add shaded region above diagonal to highlight model dominance
     ax.fill_between(
