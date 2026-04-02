@@ -15,10 +15,6 @@ HF_REPO_QA_TOPIC = "jablonkagroup/corral-QAs-topic_reports"
 # push_trace_to_hf
 HF_REPO_TRACE = "jablonkagroup/corral-oss-trace-logprobs"
 
-# ---------------------------------------------------------------------------
-# Report file-walking
-# ---------------------------------------------------------------------------
-
 # Prevents accidentally ingesting agent logs, W&B artefacts, or cache files
 # that share the .json extension.
 SKIP_DIR_PREFIXES: tuple[str, ...] = (
@@ -42,9 +38,11 @@ MODEL_CANONICAL: dict[str, str] = {
     "gpt-4o": "gpt_4o",
     "gpt_4o": "gpt_4o",
     "gpt4o": "gpt_4o",
+    "gpt": "gpt_4o",
     "gpt_oss_120b": "gpt_oss_120b",
     "gpt_oss_120": "gpt_oss_120b",
     "gpt-oss-120b": "gpt_oss_120b",
+    "gpt_oss": "gpt_oss_120b",
 }
 
 # Display names use dashes (human-readable form) while canonical keys use
@@ -106,7 +104,8 @@ TASK_KEY_MAP: dict[str, str] = {
     **{f"pass^{i}": f"Task Pass^{i}" for i in range(1, 6)},
 }
 
-# Keys that receive special handling (token-usage & tool-calls).
+# Token and tool-call counts are summed, not averaged, so they bypass METRICS_KEY_MAP
+# normalization and are aggregated separately by the calling script.
 METRICS_SKIP_KEYS: frozenset[str] = frozenset(
     {
         "total_token_usage",
@@ -118,7 +117,8 @@ METRICS_SKIP_KEYS: frozenset[str] = frozenset(
     }
 )
 
-# Full dataset schema
+# Declared upfront so downstream code (e.g. pandas DataFrame construction) gets
+# deterministic column ordering and correct dtype inference for all fields.
 ALL_COLUMNS: list[str] = [
     "model",
     "agent_type",
