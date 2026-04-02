@@ -166,6 +166,10 @@ def plot_variance_decomposition(best_model, df, results_dir, output_dir):
                 (coef_val * df[f"{coef_name}_z"].to_numpy()).var()
             )
 
+    effect_label_map = {
+        "env_level_effect": "Env x Scope",
+    }
+
     for effect_name in [
         "scaffold_effect",
         "level_effect",
@@ -177,7 +181,10 @@ def plot_variance_decomposition(best_model, df, results_dir, output_dir):
     ]:
         if effect_name in posterior:
             effect_var = float(posterior[effect_name].var().mean().values)
-            contributions[effect_name.replace("_effect", "").title()] = effect_var
+            label = effect_label_map.get(
+                effect_name, effect_name.replace("_effect", "").title()
+            )
+            contributions[label] = effect_var
 
     if not contributions:
         logger.warning("No variance contributions computed")
