@@ -20,6 +20,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import INTERVENTION_ROOT, NUM_STEPS_VALUES
 
 
+def _count_assistant_steps(trace_path: str) -> int:
+    """Count assistant messages in a trace file."""
+    with Path(trace_path).open() as f:
+        trace = json.load(f)
+    return sum(1 for m in trace.get("messages", []) if m.get("role") == "assistant")
+
+
 def load_registry() -> dict:
     registry_path = INTERVENTION_ROOT / "trace_registry.json"
     with registry_path.open() as f:
@@ -62,13 +69,21 @@ def generate_conditions(registry: dict) -> list[dict]:
 
         # Intervention conditions per trace type
         for intervention_type in ["success", "failed"]:
-            trace_key = f"{intervention_type}_trace_steps"
+            traces_key = f"{intervention_type}_traces"
 
-            # Find the minimum trace steps across tasks for this group
-            # to determine which num_steps values work for all tasks
-            all_steps = [e[trace_key] for e in entries]
-            min_steps = min(all_steps)
-            usable = get_usable_num_steps(min_steps)
+            # Use the max trace steps across all tasks/traces to determine
+            # which num_steps values are possible. Short traces are filtered
+            # out at sampling time in the hook, so we only need at least one
+            # trace per task that supports the step count.
+            max_steps = 0
+            for e in entries:
+                for trace_path in e.get(traces_key, []):
+                    steps = _count_assistant_steps(trace_path)
+                    if steps > max_steps:
+                        max_steps = steps
+            if max_steps == 0:
+                continue
+            usable = get_usable_num_steps(max_steps)
 
             for ns in usable:
                 ns_label = f"n{abs(ns)}" if ns < 0 else str(ns)
@@ -128,7 +143,7 @@ def main():
             logger.info(" \\\n".join(cmd_parts[2:]))
             logger.info("")
     elif args.json:
-        logger.info(json.dumps(conditions, indent=2))
+        print(json.dumps(conditions, indent=2))
     else:
         # Summary
         logger.info(f"Total conditions: {len(conditions)}")

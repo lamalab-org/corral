@@ -36,11 +36,22 @@ def find_baseline_report(baseline_dir: Path) -> Path | None:
 
 
 def find_trace_dir(baseline_dir: Path) -> Path | None:
-    """Find the agent_logs-* directory in a baseline run directory."""
-    log_dirs = list(baseline_dir.glob("agent_logs-*"))
-    if not log_dirs:
-        return None
-    return log_dirs[0]
+    """Find the directory containing trace JSON files.
+
+    Agent logs are stored in a nested structure:
+      agent_logs-{AgentType}-{provider}/{model}-{verbosity}/
+    We search recursively for the deepest directory containing trace JSONs.
+    """
+    # Look for the deepest subdirectory under agent_logs-* that contains .json files
+    for log_dir in baseline_dir.glob("agent_logs-*"):
+        # Check subdirectories (e.g. model-verbosity dirs)
+        for sub in log_dir.iterdir():
+            if sub.is_dir() and list(sub.glob("*.json")):
+                return sub
+        # Fall back to the log_dir itself if it directly contains traces
+        if list(log_dir.glob("*.json")):
+            return log_dir
+    return None
 
 
 def get_trace_files_for_task(trace_dir: Path, task_id: str) -> list[Path]:
@@ -100,37 +111,33 @@ def build_registry_for_baseline(
         failures = [m for m in matched if not m["success"]]
 
         if not successes or not failures:
-            sr = task_data["success_rate"]
+            sr = task_data.get("Task Success Rate", task_data.get("success_rate", 0))
             label = "ALL_SUCCESS" if sr == 1 else "ALL_FAIL"
             logger.info(
                 f"    {task_id}: {label} ({sr:.0%}) -> SKIPPED (no mixed results)"
             )
             continue
 
-        # Pick one randomly from each pool
-        success_trace = rng.choice(successes)
-        failed_trace = rng.choice(failures)
-
-        success_steps = count_assistant_steps(success_trace["path"])
-        failed_steps = count_assistant_steps(failed_trace["path"])
+        # Store all traces for both pools (shuffled for randomness)
+        rng.shuffle(successes)
+        rng.shuffle(failures)
 
         entries[task_id] = {
             "environment": env,
             "agent_type": agent,
             "task_id": task_id,
-            "success_trace": success_trace["path"],
-            "failed_trace": failed_trace["path"],
-            "success_trace_steps": success_steps,
-            "failed_trace_steps": failed_steps,
-            "success_rate": task_data["success_rate"],
+            "success_traces": [s["path"] for s in successes],
+            "failed_traces": [f["path"] for f in failures],
+            "success_rate": task_data.get(
+                "Task Success Rate", task_data.get("success_rate", 0)
+            ),
             "n_success_traces": len(successes),
             "n_failed_traces": len(failures),
         }
         logger.info(
             f"    {task_id}: OK "
-            f"(picked 1/{len(successes)} success, 1/{len(failures)} failed, "
-            f"steps={success_steps}/{failed_steps}, "
-            f"baseline_sr={task_data['success_rate']:.0%})"
+            f"({len(successes)} success, {len(failures)} failed traces, "
+            f"baseline_sr={task_data.get('Task Success Rate', task_data.get('success_rate', 0)):.0%})"
         )
 
     return entries

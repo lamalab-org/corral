@@ -47,6 +47,49 @@ SERVER_DIR="$INTERVENTION_ROOT/servers"
 ALL_ENVS="spectra resistor wetlab"
 ALL_AGENTS="react toolcalling"
 
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+timestamp() { date +"%Y%m%d_%H%M%S"; }
+
+GIT_SHA=$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+# Check if a run already completed (report JSON exists)
+run_completed() {
+    local run_dir="$1"
+    local count
+    count=$(find "$run_dir" -maxdepth 1 -name '*_report.json' 2>/dev/null | wc -l)
+    [ "$count" -gt 0 ]
+}
+
+# Launch a run with timestamped log and metadata header
+launch_run() {
+    local run_dir="$1"; shift
+    local run_name="$1"; shift
+    # remaining args are the python command
+
+    local ts
+    ts=$(timestamp)
+    local log_file="$run_dir/run_${ts}.log"
+    local meta_file="$run_dir/run_${ts}_meta.json"
+
+    mkdir -p "$run_dir"
+
+    # Write metadata
+    cat > "$meta_file" <<METAEOF
+{"run_name": "$run_name", "start_time": "$ts", "git_sha": "$GIT_SHA", "command": "$*"}
+METAEOF
+
+    # Symlink run.log -> latest timestamped log for convenience
+    ln -sf "$(basename "$log_file")" "$run_dir/run.log"
+
+    (
+        cd "$run_dir"
+        nohup "$@" > "$log_file" 2>&1 &
+        echo $! > run.pid
+    )
+    echo "    log: $log_file"
+}
+
 # ─── Server config lookup (bash 3 compatible, no associative arrays) ─────────
 
 # Returns: venv_dir|module|extra_args
@@ -74,6 +117,7 @@ get_port() {
 # Defaults
 ENV_FILTER=""
 AGENT_FILTER=""
+NUM_STEPS_FILTER=""
 MAX_PARALLEL=0
 DRY_RUN=false
 TRIALS=""
@@ -90,6 +134,7 @@ while [[ $# -gt 0 ]]; do
         --agent) AGENT_FILTER="$2"; shift 2 ;;
         --max-parallel) MAX_PARALLEL="$2"; shift 2 ;;
         --trials) TRIALS="$2"; shift 2 ;;
+        --num-steps) NUM_STEPS_FILTER="$2"; shift 2 ;;
         --dry-run) DRY_RUN=true; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -110,6 +155,7 @@ if [ -z "$MODE" ]; then
     echo "  --agent NAME     Filter by agent type (react, toolcalling)"
     echo "  --max-parallel N Limit concurrent runs"
     echo "  --trials N       Override trials per condition (default: from config)"
+    echo "  --num-steps N    Filter intervention runs by num_steps value (e.g. 1, 2, -1, -2)"
     echo "  --dry-run        Print commands without running"
     exit 1
 fi
@@ -294,6 +340,12 @@ for key, entry in sorted(sel.items()):
         RUN_DIR="$INTERVENTION_ROOT/runs/$ENV/$AGENT/baseline"
         RUN_NAME="${ENV}_${AGENT}_none"
 
+        # Skip if already completed
+        if run_completed "$RUN_DIR"; then
+            echo "  $RUN_NAME: SKIPPED (report already exists in $RUN_DIR)"
+            continue
+        fi
+
         echo "  $RUN_NAME -> $RUN_DIR"
 
         LAUNCHED=$((LAUNCHED + 1))
@@ -306,18 +358,13 @@ for key, entry in sorted(sel.items()):
             continue
         fi
 
-        mkdir -p "$RUN_DIR"
-        (
-            cd "$RUN_DIR"
-            nohup uv run python "$RUNNER_SCRIPT" \
+        launch_run "$RUN_DIR" "$RUN_NAME" \
+            uv run python "$RUNNER_SCRIPT" \
                 --env "$ENV" \
                 --agent "$AGENT" \
                 --intervention none \
                 --task-selection "$TASK_SELECTION" \
-                $TRIALS_ARG \
-                > run.log 2>&1 &
-            echo $! > run.pid
-        )
+                $TRIALS_ARG
 
         if [ $MAX_PARALLEL -gt 0 ] && [ $LAUNCHED -ge $MAX_PARALLEL ]; then
             echo "    Waiting for a slot (max $MAX_PARALLEL)..."
@@ -327,7 +374,7 @@ for key, entry in sorted(sel.items()):
 
     echo ""
     echo "Launched $LAUNCHED baseline runs."
-    echo "Monitor: find $INTERVENTION_ROOT/runs -name 'run.log' -path '*/baseline/*' -exec tail -1 {} +"
+    echo "Monitor: find $INTERVENTION_ROOT/runs -name 'run_*.log' -path '*/baseline/*' -exec tail -1 {} +"
     echo ""
     echo "After baselines finish, run:"
     echo "  uv run python scripts/build_trace_registry.py"
@@ -361,8 +408,17 @@ for c in conditions:
         print(f\"{c['env']} {c['agent']} {c['intervention']} {c['num_steps']} {c['dir_name']}\")
 " | while read -r ENV AGENT INTERVENTION NUM_STEPS DIR_NAME; do
 
+        # Apply num_steps filter
+        if [ -n "$NUM_STEPS_FILTER" ] && [ "$NUM_STEPS" != "$NUM_STEPS_FILTER" ]; then continue; fi
+
         RUN_DIR="$INTERVENTION_ROOT/runs/$ENV/$AGENT/$DIR_NAME"
         RUN_NAME="${ENV}_${AGENT}_${DIR_NAME}"
+
+        # Skip if already completed
+        if run_completed "$RUN_DIR"; then
+            echo "  $RUN_NAME: SKIPPED (report already exists in $RUN_DIR)"
+            continue
+        fi
 
         echo "  $RUN_NAME -> $RUN_DIR"
         LAUNCHED=$((LAUNCHED + 1))
@@ -375,19 +431,14 @@ for c in conditions:
             continue
         fi
 
-        mkdir -p "$RUN_DIR"
-        (
-            cd "$RUN_DIR"
-            nohup uv run python "$RUNNER_SCRIPT" \
+        launch_run "$RUN_DIR" "$RUN_NAME" \
+            uv run python "$RUNNER_SCRIPT" \
                 --env "$ENV" \
                 --agent "$AGENT" \
                 --intervention "$INTERVENTION" \
                 --num-steps "$NUM_STEPS" \
                 --trace-registry "$TRACE_REGISTRY" \
-                $TRIALS_ARG \
-                > run.log 2>&1 &
-            echo $! > run.pid
-        )
+                $TRIALS_ARG
         RUNNING=$((RUNNING + 1))
 
         if [ $MAX_PARALLEL -gt 0 ] && [ $RUNNING -ge $MAX_PARALLEL ]; then
@@ -398,6 +449,6 @@ for c in conditions:
     done
 
     echo ""
-    echo "Monitor: find $INTERVENTION_ROOT/runs -name 'run.log' -not -path '*/baseline/*' -exec tail -1 {} +"
+    echo "Monitor: find $INTERVENTION_ROOT/runs -name 'run_*.log' -not -path '*/baseline/*' -exec tail -1 {} +"
     echo "Reports: find $INTERVENTION_ROOT/runs -name '*_report.json'"
 fi

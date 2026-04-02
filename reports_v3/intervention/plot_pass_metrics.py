@@ -6,7 +6,7 @@ from pathlib import Path
 import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
-from lama_aesthetics import TWO_COL_WIDTH, TWO_COL_HEIGHT
+from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 
 lama_aesthetics.get_style("main")
@@ -31,7 +31,9 @@ MARKERS = {
 
 
 def load_metrics(env: str, agent: str) -> dict:
-    report_path = RUNS_DIR / env / agent / "baseline" / f"{env}_{agent}_none_report.json"
+    report_path = (
+        RUNS_DIR / env / agent / "baseline" / f"{env}_{agent}_none_report.json"
+    )
     with open(report_path) as f:
         return json.load(f)["metrics"]
 
@@ -74,13 +76,27 @@ def main():
             marker = MARKERS[env]
 
             ks, vals = extract_pass_at(metrics)
-            ax_at.plot(ks, vals, color=color, marker=marker, markersize=5,
-                       label=env.capitalize(), linewidth=1.5)
+            ax_at.plot(
+                ks,
+                vals,
+                color=color,
+                marker=marker,
+                markersize=5,
+                label=env.capitalize(),
+                linewidth=1.5,
+            )
             all_pass_at_vals.extend(vals)
 
             ks, vals = extract_pass_caret(metrics)
-            ax_caret.plot(ks, vals, color=color, marker=marker, markersize=5,
-                          label=env.capitalize(), linewidth=1.5)
+            ax_caret.plot(
+                ks,
+                vals,
+                color=color,
+                marker=marker,
+                markersize=5,
+                label=env.capitalize(),
+                linewidth=1.5,
+            )
             all_pass_caret_vals.extend(vals)
 
         ax_at.set_ylabel("Pass@k")
@@ -88,8 +104,18 @@ def main():
         ax_at.set_title(f"Pass@k — {AGENT_LABELS[agent]}")
         ax_caret.set_title(f"Pass^k — {AGENT_LABELS[agent]}")
 
-        range_frame(ax_at, np.array(all_ks * len(ENVIRONMENTS)), np.array(all_pass_at_vals), pad=0.05)
-        range_frame(ax_caret, np.array(all_ks * len(ENVIRONMENTS)), np.array(all_pass_caret_vals), pad=0.05)
+        range_frame(
+            ax_at,
+            np.array(all_ks * len(ENVIRONMENTS)),
+            np.array(all_pass_at_vals),
+            pad=0.05,
+        )
+        range_frame(
+            ax_caret,
+            np.array(all_ks * len(ENVIRONMENTS)),
+            np.array(all_pass_caret_vals),
+            pad=0.05,
+        )
 
         ax_at.legend(loc="best", framealpha=0.9)
         ax_caret.legend(loc="best", framealpha=0.9)

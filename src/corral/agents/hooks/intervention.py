@@ -375,7 +375,7 @@ def _inject_toolcalling_step(
 
 
 def create_trace_intervention_hook(
-    trace_map: dict[str, str],
+    trace_pool: dict[str, str] | dict[str, list[str]],
     num_steps: int,
     execute_tools: bool = False,
 ) -> HookCallback:
@@ -390,7 +390,9 @@ def create_trace_intervention_hook(
     - ToolCallingAgent traces: structured tool_calls format
 
     Args:
-        trace_map: Mapping of task_id to trace file path
+        trace_pool: Mapping of task_id to either:
+            - a single trace file path (str) for backward compatibility
+            - a list of trace file paths to sample from per trial
         num_steps: Number of assistant message steps to inject
             - Positive: first N steps (e.g., 1, 2, 3)
             - -1: all steps except the last one
@@ -403,19 +405,46 @@ def create_trace_intervention_hook(
         HookCallback to be registered with AgentHooks
 
     Example:
-        >>> trace_map = {
-        ...     "task_1": "/path/to/successful_trace.json",
-        ...     "task_2": "/path/to/another_trace.json",
+        >>> trace_pool = {
+        ...     "task_1": ["/path/to/trace_a.json", "/path/to/trace_b.json"],
+        ...     "task_2": ["/path/to/another_trace.json"],
         ... }
-        >>> hook = create_trace_intervention_hook(trace_map, num_steps=2, execute_tools=True)
+        >>> hook = create_trace_intervention_hook(trace_pool, num_steps=2, execute_tools=True)
         >>> hooks.register(HookPoint.BEFORE_TASK, hook)
     """
+    import random
+
+    def _eligible_traces(pool, ns):
+        """Filter pool to traces with enough assistant steps for num_steps."""
+        if isinstance(pool, str):
+            return [pool]
+        eligible = []
+        for tp in pool:
+            n_assistant = sum(
+                1
+                for m in json.loads(Path(tp).read_text()).get("messages", [])
+                if m.get("role") == "assistant"
+            )
+            if ns >= 0 and n_assistant >= ns or ns < 0 and n_assistant > abs(ns):
+                eligible.append(tp)
+        return eligible
 
     def trace_intervention_hook(context: HookContext) -> None:
-        if context.task_id not in trace_map:
+        if context.task_id not in trace_pool:
             return
 
-        trace_path = trace_map[context.task_id]
+        pool = trace_pool[context.task_id]
+        eligible = _eligible_traces(pool, num_steps)
+
+        if not eligible:
+            logger.warning(
+                f"No traces with enough steps for task {context.task_id} "
+                f"(num_steps={num_steps}, pool_size={len(pool) if isinstance(pool, list) else 1})"
+            )
+            return
+
+        trace_path = random.choice(eligible)
+
         steps = _load_trace_steps(trace_path, num_steps)
 
         if not steps:
@@ -425,7 +454,8 @@ def create_trace_intervention_hook(
             return
 
         logger.info(
-            f"Injecting {len(steps)} intervention step(s) for task {context.task_id}"
+            f"Injecting {len(steps)} intervention step(s) for task {context.task_id} "
+            f"from {Path(trace_path).name}"
         )
 
         context.metadata["intervention_applied"] = True

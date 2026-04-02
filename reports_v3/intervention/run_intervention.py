@@ -121,15 +121,19 @@ def load_baseline_task_ids(task_selection_path: str, env: str, agent: str) -> li
     return entry.get("task_ids", [])
 
 
-def load_intervention_task_ids_and_trace_map(
+def load_intervention_task_ids_and_trace_pool(
     registry_path: str, env: str, agent: str, intervention: str
-) -> tuple[list[str], dict[str, str]]:
-    """Load task IDs and trace_map from trace_registry.json for intervention runs."""
+) -> tuple[list[str], dict[str, list[str]]]:
+    """Load task IDs and trace pools from trace_registry.json for intervention runs.
+
+    Returns a pool of traces per task so the hook can sample a different
+    trace for each trial, reducing confounds from any single trace.
+    """
     with Path(registry_path).open() as f:
         registry = json.load(f)
 
     task_ids = []
-    trace_map = {}
+    trace_pool = {}
 
     for entry in registry.values():
         if entry["environment"] != env or entry["agent_type"] != agent:
@@ -139,11 +143,11 @@ def load_intervention_task_ids_and_trace_map(
         task_ids.append(task_id)
 
         if intervention == "success":
-            trace_map[task_id] = entry["success_trace"]
+            trace_pool[task_id] = entry["success_traces"]
         elif intervention == "failed":
-            trace_map[task_id] = entry["failed_trace"]
+            trace_pool[task_id] = entry["failed_traces"]
 
-    return task_ids, trace_map
+    return task_ids, trace_pool
 
 
 def main():
@@ -157,12 +161,12 @@ def main():
     logger.info(f"Run: {run_name}")
     logger.info(f"Working directory: {Path.cwd()}")
 
-    # Load task IDs (and trace map for intervention)
-    trace_map = {}
+    # Load task IDs (and trace pool for intervention)
+    trace_pool = {}
     if args.intervention == "none":
         task_ids = load_baseline_task_ids(args.task_selection, args.env, args.agent)
     else:
-        task_ids, trace_map = load_intervention_task_ids_and_trace_map(
+        task_ids, trace_pool = load_intervention_task_ids_and_trace_pool(
             args.trace_registry, args.env, args.agent, args.intervention
         )
 
@@ -174,16 +178,18 @@ def main():
 
     # Set up hooks
     hooks = None
-    if args.intervention != "none" and trace_map:
+    if args.intervention != "none" and trace_pool:
         hooks = AgentHooks()
         hook = create_trace_intervention_hook(
-            trace_map,
+            trace_pool,
             num_steps=args.num_steps,
             execute_tools=True,
         )
         hooks.register(HookPoint.BEFORE_TASK, hook)
+        for tid, traces in trace_pool.items():
+            logger.info(f"  {tid}: {len(traces)} trace(s) in pool")
         logger.info(
-            f"Intervention hook: {args.intervention} trace, "
+            f"Intervention hook: {args.intervention} trace pool, "
             f"num_steps={args.num_steps}, execute_tools=True"
         )
 
