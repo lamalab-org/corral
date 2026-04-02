@@ -119,12 +119,12 @@ def main() -> None:
     output_path = (
         Path(__file__).parent / "results" / "data" / "filtered_annotations.json"
     )
-    accepted_questions_path = Path(__file__).parent.parent / "accepted_questions"
+    accepted_questions_path = Path(__file__).parent.parent / "questions_to_annotate"
     logger.info(f"Accepted questions path: {accepted_questions_path}")
 
     file_metadata = build_file_metadata_map(accepted_questions_path)
     logger.info(
-        f"Built metadata for {len(file_metadata)} files from accepted_questions"
+        f"Built metadata for {len(file_metadata)} files from questions_to_annotate"
     )
 
     catalyst_file_ids = get_catalyst_file_ids(accepted_questions_path)
