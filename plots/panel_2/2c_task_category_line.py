@@ -16,7 +16,7 @@ from pathlib import Path
 import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
-from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH
+from lama_aesthetics import TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 from matplotlib.lines import Line2D
@@ -142,15 +142,14 @@ def main():
     category_tags = load_category_tags()
 
     df_sub = reports_df[reports_df["category"] == "subtask"].copy()
-    df_comp = df_sub[df_sub["Tool Verbosity"] == "comprehensive"].copy()
-    logger.info(f"Filtered to {len(df_comp)} rows (subtask + comprehensive)")
+    logger.info(f"Filtered to {len(df_sub)} rows (subtask, all verbosities)")
 
     category_order = ["retrieval", "execution", "reasoning", "validation"]
 
     # Collect scores by (agent_type, category) — average across models
     scores_by_agent_cat = defaultdict(lambda: defaultdict(list))
 
-    for _, row in df_comp.iterrows():
+    for _, row in df_sub.iterrows():
         agent_type = row["agent_type"]
         environment = row["environment"]
         task_results = row["Task Results"]
@@ -184,7 +183,10 @@ def main():
             )
 
     # Plot
-    fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT))
+    GOLDEN_RATIO = 1.618
+    fig_w = TWO_COL_WIDTH / 2
+    fig_h = fig_w / GOLDEN_RATIO
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     x_values = np.arange(len(category_order))
 
     # Grey vertical lines at each category

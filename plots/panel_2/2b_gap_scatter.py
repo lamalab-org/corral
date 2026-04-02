@@ -16,7 +16,7 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH
+from lama_aesthetics import TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 
@@ -35,7 +35,6 @@ from plot_config import (  # noqa: E402
     GROUP_COLOURS,
 )
 from plot_utils import (  # noqa: E402
-    filter_by_level,
     filter_by_task_type,
     filter_by_verbosity,
     get_metric_column_name,
@@ -126,7 +125,10 @@ def plot_gap_scatter(
     model_gaps = [gap_data[env]["model_gap"] for env in environments]
 
     # Create figure
-    fig, ax = plt.subplots(1, 1, figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT))
+    GOLDEN_RATIO = 1.618
+    fig_w = TWO_COL_WIDTH / 2
+    fig_h = fig_w / GOLDEN_RATIO
+    fig, ax = plt.subplots(1, 1, figsize=(fig_w, fig_h))
 
     # Plot diagonal line (y=x) first
     max_gap = max(*agent_gaps, *model_gaps)
@@ -286,7 +288,6 @@ def main(
         filtered_df, None if verbosity_strategy == "average" else verbosity_strategy
     )
     filtered_df = filter_by_task_type(filtered_df, task_type_strategy)
-    filtered_df = filter_by_level(filtered_df, level_strategy)
 
     logger.info(f"Filtered to {len(filtered_df)} rows")
     logger.info("")
