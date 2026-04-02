@@ -336,7 +336,14 @@ def plot_model_summary(ax: plt.Axes) -> None:
     Returns:
         None: The function mutates the provided axis.
     """
-    ax.set_ylabel("")
+    plot_horizontal_verbosity_bars(
+        ax,
+        model_pivot,
+        models,
+        model_labels,
+        "Model",
+        show_legend=False,
+    )
 
 
 fig = plt.figure(figsize=(TWO_COL_WIDTH, 3 * ONE_COL_HEIGHT))
@@ -374,7 +381,14 @@ def plot_agent_summary(ax: plt.Axes) -> None:
     Returns:
         None: The function mutates the provided axis.
     """
-    ax.set_ylabel("")
+    plot_horizontal_verbosity_bars(
+        ax,
+        agent_type_pivot,
+        agent_types,
+        agent_type_labels,
+        "Agent Type",
+        show_legend=False,
+    )
 
 
 plot_agent_summary(ax_agent_grid)
