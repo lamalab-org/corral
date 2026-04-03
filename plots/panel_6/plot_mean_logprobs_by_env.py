@@ -28,20 +28,14 @@ from plot_config import (  # noqa: E402
 from plot_utils import load_logprobs_data  # noqa: E402
 
 ENVIRONMENT_NAMES = {
-    "afm": "AFM operation",
-    "catalyst": "Surface construction",
-    "md": "Molecular simulation",
-    "ml": "Build property predictor",
-    # Options for a shorter name focused on building ML models:
-    # "ml": "ML training",
-    # "ml": "Build ML model",
-    # "ml": "Model fitting",
-    # "ml": "ML build",
-    # "ml": "Train ML model",
-    "resistor": "Circuit Inference",
-    "retro": "Retrosynthetic planning",
-    "spectra": "Spectroscopic elucidation",
-    "wetlab": "Qualitative analysis",
+    "afm": "AFM Experiment\nExecution",
+    "catalyst": "Adsorption Surface\nConstruction",
+    "md": "Molecular\nSimulation",
+    "ml": "ML-based Property\nPrediction",
+    "resistor": "Circuit\nInference",
+    "retro": "Retrosynthetic\nPlanning",
+    "spectra": "Spectroscopic Structure\nElucidation",
+    "wetlab": "Inorganic Qualitative\nAnalysis",
 }
 
 
@@ -84,7 +78,7 @@ def compute_env_stats(df: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "environment": env,
-                "display_name": ENVIRONMENT_NAMES.get(env, env),
+                "display_name": ENVIRONMENT_NAMES.get(env, env).replace("\n", " "),
                 "mean": float(np.mean(tokens)),
                 "n_tokens": int(tokens.size),
                 "color": "#7150e0",
