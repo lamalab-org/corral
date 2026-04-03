@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
 from loguru import logger
 
 lama_aesthetics.get_style("main")
@@ -213,7 +213,7 @@ def plot_full_coverage_heatmap(
     bar_ratio_w = bar_size / fig_width
     bar_ratio_h = bar_size / fig_height
 
-    fig = plt.figure(figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT))
+    fig = plt.figure(figsize=(fig_width_total, fig_height_total))
     gs = gridspec.GridSpec(
         2,
         2,
@@ -238,7 +238,7 @@ def plot_full_coverage_heatmap(
         ax=ax_heatmap,
         linewidths=0.5,
         linecolor="white",
-        annot_kws={"fontsize": FONT_SIZES["tick_label"]},
+        annot_kws={"fontsize": FONT_SIZES["tick_label"] - 1},
     )
 
     # --- Thin white separator lines between model groups (horizontal) ---
@@ -273,7 +273,7 @@ def plot_full_coverage_heatmap(
             meta["agent"],
             ha="right",
             va="center",
-            fontsize=FONT_SIZES["tick_label"],
+            fontsize=FONT_SIZES["tick_label"] - 1,
             transform=ax_heatmap.get_yaxis_transform(),
         )
 
@@ -281,7 +281,7 @@ def plot_full_coverage_heatmap(
 
     # --- X-axis: S# labels at bottom, environment names above them ---
     ax_heatmap.set_xlabel("")
-    ax_heatmap.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
+    ax_heatmap.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
     ax_heatmap.set_xticklabels(ax_heatmap.get_xticklabels(), rotation=0, ha="center")
 
     # Lines and environment name labels below S# tick labels
@@ -335,7 +335,7 @@ def plot_full_coverage_heatmap(
     ax_top.yaxis.set_label_position("right")
     ax_top.set_yticks([0.5, 1])
     ax_top.yaxis.set_minor_locator(plt.NullLocator())
-    ax_top.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"])
+    ax_top.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"] - 2)
     ax_top.set_ylabel(
         "Mean score", fontsize=FONT_SIZES["tick_label"], rotation=270, labelpad=10
     )
@@ -358,7 +358,7 @@ def plot_full_coverage_heatmap(
     ax_right.set_yticks([])
     ax_right.set_xticks([0.5, 1])
     ax_right.xaxis.set_minor_locator(plt.NullLocator())
-    ax_right.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
+    ax_right.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
     ax_right.set_xlabel("Mean score", fontsize=FONT_SIZES["tick_label"])
     for spine in ax_right.spines.values():
         spine.set_visible(False)

@@ -16,7 +16,7 @@ from pathlib import Path
 import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
-from lama_aesthetics import TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 from matplotlib.lines import Line2D
@@ -183,17 +183,17 @@ def main():
             )
 
     # Plot
-    GOLDEN_RATIO = 1.618
-    fig_w = TWO_COL_WIDTH / 2
-    fig_h = fig_w / GOLDEN_RATIO
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    # GOLDEN_RATIO = 1.618
+    # fig_w = TWO_COL_WIDTH / 2
+    # fig_h = fig_w / GOLDEN_RATIO
+    fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT))
     x_values = np.arange(len(category_order))
 
     # Grey vertical lines at each category
-    for x in x_values:
-        ax.axvline(
-            x=x, color="gray", linewidth=0.5, alpha=0.2, linestyle="--", zorder=1
-        )
+    # for x in x_values:
+    #     ax.axvline(
+    #         x=x, color="gray", linewidth=0.5, alpha=0.2, linestyle="--", zorder=1
+    #     )
 
     agent_linestyle = {"react": "-", "tool_calling": "--"}
 
@@ -211,7 +211,9 @@ def main():
             zorder=3,
         )
 
-    ax.set_ylabel("Average Pass@5", fontsize=FONT_SIZES["axis_label"])
+    ax.set_ylabel(
+        "Average Pass@5", fontsize=FONT_SIZES["axis_label"], fontweight="bold"
+    )
     ax.tick_params(axis="both", labelsize=FONT_SIZES["tick_label"])
 
     category_labels = [cat.replace("_", " ").title() for cat in category_order]

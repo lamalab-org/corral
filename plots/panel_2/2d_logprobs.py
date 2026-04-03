@@ -15,7 +15,7 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 
@@ -28,20 +28,14 @@ from plot_config import (  # noqa: E402
 from plot_utils import load_logprobs_data  # noqa: E402
 
 ENVIRONMENT_NAMES = {
-    "afm": "AFM operation",
-    "catalyst": "Surface construction",
-    "md": "Molecular simulation",
-    "ml": "Build property predictor",
-    # Options for a shorter name focused on building ML models:
-    # "ml": "ML training",
-    # "ml": "Build ML model",
-    # "ml": "Model fitting",
-    # "ml": "ML build",
-    # "ml": "Train ML model",
+    "afm": "AFM Experiment Execution",
+    "catalyst": "Adsorption Surface Construction",
+    "md": "Molecular Simulation",
+    "ml": "ML-based Property Prediction",
     "resistor": "Circuit Inference",
-    "retro": "Retrosynthetic planning",
-    "spectra": "Spectroscopic elucidation",
-    "wetlab": "Qualitative analysis",
+    "retro": "Retrosynthetic Planning",
+    "spectra": "Spectroscopic Structure Elucidation",
+    "wetlab": "Inorganic Qualitative Analysis",
 }
 
 
@@ -103,7 +97,7 @@ def compute_env_stats(df: pd.DataFrame) -> pd.DataFrame:
 
 def plot_mean_logprobs(stats: pd.DataFrame, output_path: Path):
     """Horizontal barplot of mean logprob per environment (token-pooled)."""
-    fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT))
+    fig, ax = plt.subplots(figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
 
     labels = stats["display_name"].tolist()
     values = stats["mean"].tolist()
@@ -120,20 +114,21 @@ def plot_mean_logprobs(stats: pd.DataFrame, output_path: Path):
 
     for bar, val in zip(bars, values, strict=False):
         ax.text(
-            bar.get_width() + 0.002,
+            bar.get_width() - 0.01,
             bar.get_y() + bar.get_height() / 2,
             f"{val:.2f}",
             va="center",
             ha="right",
-            # color="white",
             fontsize=FONT_SIZES["tick_label"] - 1,
         )
 
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(labels, fontsize=FONT_SIZES["tick_label"])
+    ax.set_yticklabels(labels)
+    ax.tick_params(axis="both", labelsize=FONT_SIZES["tick_label"])
     ax.set_xlabel(
         "Mean log-probability",
         fontsize=FONT_SIZES["axis_label"],
+        fontweight="bold",
     )
 
     range_frame(ax, np.array([min(values), 0]), y_pos, pad=0.15)
