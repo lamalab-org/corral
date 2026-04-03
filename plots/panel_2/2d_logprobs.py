@@ -119,7 +119,7 @@ def plot_mean_logprobs(stats: pd.DataFrame, output_path: Path):
             f"{val:.2f}",
             va="center",
             ha="right",
-            fontsize=FONT_SIZES["tick_label"] - 1,
+            fontsize=FONT_SIZES["tick_label"],
         )
 
     ax.set_yticks(y_pos)
