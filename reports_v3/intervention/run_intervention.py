@@ -52,7 +52,15 @@ def parse_args():
     parser.add_argument(
         "--env",
         required=True,
-        choices=["spectra", "wetlab", "resistor"],
+        choices=[
+            "spectra",
+            "wetlab",
+            "resistor",
+            "ml",
+            "catalyst",
+            "retrosynthesis",
+            "md",
+        ],
     )
     parser.add_argument(
         "--agent",

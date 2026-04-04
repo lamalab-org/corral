@@ -117,19 +117,79 @@ setup_wetlab() {
     echo "  WetLab ready: $env_dir/.venv"
 }
 
+setup_ml() {
+    echo "=== Setting up ML ==="
+    local env_dir="$TASKS_DIR/ml"
+    cd "$env_dir"
+
+    if [ ! -d ".venv" ]; then
+        uv venv --python 3.12
+    fi
+    uv lock --upgrade-package promptstore
+    uv sync
+    echo "  ML ready: $env_dir/.venv"
+}
+
+setup_catalyst() {
+    echo "=== Setting up Catalyst ==="
+    local env_dir="$TASKS_DIR/catalyst"
+    cd "$env_dir"
+
+    if [ ! -d ".venv" ]; then
+        uv venv --python 3.12
+    fi
+    uv lock --upgrade-package promptstore
+    uv sync
+    echo "  Catalyst ready: $env_dir/.venv"
+}
+
+setup_retrosynthesis() {
+    echo "=== Setting up Retrosynthesis ==="
+    local env_dir="$TASKS_DIR/retrosynthesis"
+    cd "$env_dir"
+
+    if [ ! -d ".venv" ]; then
+        uv venv --python 3.11
+    fi
+    uv lock --upgrade-package promptstore
+    uv sync
+    echo "  Retrosynthesis ready: $env_dir/.venv"
+}
+
+setup_md() {
+    echo "=== Setting up MD (Molecular Dynamics) ==="
+    local env_dir="$TASKS_DIR/corral_md"
+    cd "$env_dir"
+
+    if [ ! -d ".venv" ]; then
+        uv venv --python 3.11
+    fi
+    uv lock --upgrade-package promptstore
+    uv sync
+    echo "  MD ready: $env_dir/.venv"
+}
+
 case "$TARGET" in
     all)
         setup_root
         setup_spectra
         setup_resistor
         setup_wetlab
+        setup_ml
+        setup_catalyst
+        setup_retrosynthesis
+        setup_md
         ;;
-    spectra)  setup_spectra ;;
-    resistor) setup_resistor ;;
-    wetlab)   setup_wetlab ;;
+    spectra)         setup_spectra ;;
+    resistor)        setup_resistor ;;
+    wetlab)          setup_wetlab ;;
+    ml)              setup_ml ;;
+    catalyst)        setup_catalyst ;;
+    retrosynthesis)  setup_retrosynthesis ;;
+    md)              setup_md ;;
     *)
         echo "Unknown target: $TARGET"
-        echo "Usage: $0 [all|spectra|resistor|wetlab]"
+        echo "Usage: $0 [all|spectra|resistor|wetlab|ml|catalyst|retrosynthesis|md]"
         exit 1
         ;;
 esac

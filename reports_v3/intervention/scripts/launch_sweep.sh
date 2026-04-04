@@ -44,7 +44,7 @@ PROJECT_ROOT="$(cd "$INTERVENTION_ROOT/../.." && pwd)"
 TASKS_DIR="$PROJECT_ROOT/tasks"
 SERVER_DIR="$INTERVENTION_ROOT/servers"
 
-ALL_ENVS="spectra resistor wetlab"
+ALL_ENVS="spectra resistor wetlab ml catalyst retrosynthesis md"
 ALL_AGENTS="react toolcalling"
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -95,9 +95,13 @@ METAEOF
 # Returns: venv_dir|module|extra_args
 get_server_cfg() {
     case "$1" in
-        spectra)  echo "$TASKS_DIR/spectra_elucidation|spectra_elucidation.env|--level 2" ;;
-        resistor) echo "$TASKS_DIR/resistor_network|resistor_network.env|--mode single" ;;
-        wetlab)   echo "$TASKS_DIR/wetlab|wetlab.env|--level 2" ;;
+        spectra)         echo "$TASKS_DIR/spectra_elucidation|spectra_elucidation.env|--level 2" ;;
+        resistor)        echo "$TASKS_DIR/resistor_network|resistor_network.env|--mode single" ;;
+        wetlab)          echo "$TASKS_DIR/wetlab|wetlab.env|--level 2" ;;
+        ml)              echo "$TASKS_DIR/ml|ml.env|positional:$TASKS_DIR/ml/config/single/single.json" ;;
+        catalyst)        echo "$TASKS_DIR/catalyst|catalyst.env|positional:$TASKS_DIR/catalyst/config/single/single.json" ;;
+        retrosynthesis)  echo "$TASKS_DIR/retrosynthesis|retrosynthesis.env|--level 2" ;;
+        md)              echo "$TASKS_DIR/corral_md|corral_md.env|--environment combined_level2 --level . --subtask_level false --dir /results/AGENT" ;;
     esac
 }
 
@@ -105,12 +109,20 @@ get_server_cfg() {
 get_port() {
     local env_name="$1" agent="$2"
     case "${env_name}_${agent}" in
-        spectra_react)       echo 8002 ;;
-        spectra_toolcalling) echo 8012 ;;
-        resistor_react)       echo 8001 ;;
-        resistor_toolcalling) echo 8011 ;;
-        wetlab_react)         echo 8003 ;;
-        wetlab_toolcalling)   echo 8013 ;;
+        spectra_react)              echo 8002 ;;
+        spectra_toolcalling)        echo 8012 ;;
+        resistor_react)             echo 8001 ;;
+        resistor_toolcalling)       echo 8011 ;;
+        wetlab_react)               echo 8003 ;;
+        wetlab_toolcalling)         echo 8013 ;;
+        ml_react)                   echo 8004 ;;
+        ml_toolcalling)             echo 8014 ;;
+        catalyst_react)             echo 8005 ;;
+        catalyst_toolcalling)       echo 8015 ;;
+        retrosynthesis_react)       echo 8006 ;;
+        retrosynthesis_toolcalling) echo 8016 ;;
+        md_react)                   echo 8007 ;;
+        md_toolcalling)             echo 8017 ;;
     esac
 }
 
@@ -190,16 +202,41 @@ start_server() {
 
     echo "  $server_name: starting on port $port"
 
+    # Substitute AGENT placeholder in extra_args (used by md for per-agent work dirs)
+    extra_args="${extra_args//AGENT/$agent}"
+
+    # Build command: handle positional arg pattern (ml/catalyst use: module tasks.json port)
+    local cmd
+    if [[ "$extra_args" == positional:* ]]; then
+        local tasks_json="${extra_args#positional:}"
+        cmd="$python -m $module $tasks_json $port"
+    else
+        cmd="$python -m $module --port $port $extra_args"
+    fi
+
     if [ "$DRY_RUN" = true ]; then
-        echo "    [DRY RUN] $python -m $module --port $port $extra_args"
+        echo "    [DRY RUN] $cmd"
         return 0
     fi
 
     mkdir -p "$SERVER_DIR"
+    # Create work dirs referenced in extra_args (e.g. MD's --dir /tmp/corral_md_react)
+    for arg in $extra_args; do
+        if [[ "$arg" == /tmp/* ]]; then mkdir -p "$arg"; fi
+    done
     (
         cd "$venv_dir"
-        nohup "$python" -m "$module" --port "$port" $extra_args \
-            > "$log_file" 2>&1 &
+        # Source .env if present (e.g. retrosynthesis API keys)
+        if [ -f .env ]; then
+            set -a; source .env; set +a
+        fi
+        # Add src/<package> to PYTHONPATH for packages with bare sibling imports (e.g. corral_md)
+        if [ -d "src" ]; then
+            for pkg_dir in src/*/; do
+                export PYTHONPATH="${pkg_dir%/}:${PYTHONPATH:-}"
+            done
+        fi
+        nohup $cmd > "$log_file" 2>&1 &
         echo $! > "$pid_file"
     )
     echo "    PID: $(cat "$pid_file"), log: $log_file"
