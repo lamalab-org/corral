@@ -20,14 +20,14 @@ OUT_PATH = Path(__file__).parent / "results" / "tables" / "qa_scores_table.tex"
 ENV_ALIASES = {"corral_md": "md"}
 
 ENV_LABELS = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "MD",
-    "ml": "ML",
-    "resistor": "Resistor Network",
-    "retro": "Retrosynthesis",
-    "spectra": "Spectra Elucidation",
-    "wetlab": "Wet Lab",
+    "afm": "AFM experiment execution",
+    "catalyst": "Adsorption surface construction",
+    "md": "Molecular simulation",
+    "ml": "ML-based property prediction",
+    "resistor": "Circuit inference",
+    "retro": "Retrosynthetic planning",
+    "spectra": "Spectroscopic structure elucidation",
+    "wetlab": "Inorganic qualitative analysis",
 }
 
 QA_TYPE_LABELS = {
@@ -68,7 +68,7 @@ all_models: list[str] = sorted(
 
 n_model_cols = len(all_models)
 # columns: Environment | N questions | model1 | model2 | ...
-col_spec = "l r " + " ".join(["S[table-format=1.2]"] * n_model_cols)
+col_spec = "l c " + " ".join(["S[table-format=1.2]"] * n_model_cols)
 
 # Model names contain '-' and '.', so each header cell needs {} wrapping for siunitx S columns.
 model_header = " & ".join(f"{{\\textbf{{{m}}}}}" for m in all_models)
