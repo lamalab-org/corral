@@ -202,13 +202,14 @@ def plot_variance_decomposition(best_model, df, results_dir, output_dir):
     bar_colors = ["#7150e0"] * len(components)
 
     ax.barh(components, values, color=bar_colors)
-    ax.set_xlabel("Variance Explained (%)", fontsize=FONT_SIZES["axis_label"])
-    ax.set_title(
-        "Variance Decomposition", fontsize=FONT_SIZES["title"], fontweight="bold"
-    )
+    ax.set_xlabel("Variance Explained (%)", fontsize=FONT_SIZES["tick_label"])
+
+    ax.tick_params(axis="both", labelsize=FONT_SIZES["tick_label"])
 
     for i, val in enumerate(values):
-        ax.text(val + 0.8, i, f"{val:.1f}%", va="center", fontsize=FONT_SIZES["legend"])
+        ax.text(
+            val + 0.8, i, f"{val:.1f}%", va="center", fontsize=FONT_SIZES["tick_label"]
+        )
 
     range_frame(ax, np.array(values), np.arange(len(components)), pad=0.1)
 
