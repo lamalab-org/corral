@@ -403,22 +403,24 @@ def make_combined_plot(marker_names, model_imp, scaffold_imp, filename):
     add_panel_label(bar_axes[0], "B", x=-0.4)
 
     handles, labels = ax_scatter.get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        title="Sentiment",
-        loc="lower right",
-        fontsize=10,
-        title_fontsize=10,
-        framealpha=0.9,
-        bbox_to_anchor=(0.42, 0.0),
-    )
 
     import warnings
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
-        fig.tight_layout(rect=[0, 0, 1, 1])
+        fig.tight_layout(rect=[0, 0.08, 1, 1])
+
+    fig.legend(
+        handles,
+        labels,
+        title="Sentiment",
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.1),
+        ncol=len(labels),
+        fontsize=10,
+        title_fontsize=10,
+        frameon=False,
+    )
 
     # Align x-axis spines: force all axes to share the same bottom and top
     fig.canvas.draw()
