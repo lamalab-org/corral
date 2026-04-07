@@ -62,7 +62,7 @@ SENTIMENT_COLORS = {
 SENTIMENT_ORDER = ["positive", "negative", "neutral"]
 
 MODEL_DISPLAY = {
-    "claude_sonnet_45": "Claude Sonnet 4.5",
+    "claude_sonnet_45": "Claude-4.5-Sonnet",
     "gpt-4o": "GPT-4o",
 }
 
