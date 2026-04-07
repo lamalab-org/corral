@@ -6,6 +6,7 @@ Zero line = baseline reference.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import lama_aesthetics
@@ -16,13 +17,18 @@ from lama_aesthetics.plotutils import range_frame
 
 lama_aesthetics.get_style("main")
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from utils import avg_matched_baseline
+
 RUNS_DIR = Path(__file__).parent.parent / "runs"
 
-ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "ml"]
+ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
 ENV_LABELS = {
     "spectra": "Spectroscopic Structure\nElucidation",
     "wetlab": "Inorganic Qualitative\nAnalysis",
     "resistor": "Circuit\nInference",
+    "md": "Molecular\nSimulation",
     "ml": "ML-based Property\nPrediction",
     "retrosynthesis": "Retrosynthetic\nPlanning",
 }
@@ -35,6 +41,7 @@ COLORS = {
     "spectra": "#1f77b4",
     "wetlab": "#2ca02c",
     "resistor": "#d62728",
+    "md": "#ff7f0e",
     "ml": "#9467bd",
     "retrosynthesis": "#E8A317",
 }
@@ -80,7 +87,9 @@ def avg_pass_caret(env: str, step: str) -> np.ndarray | None:
         all_vals.append(extract_pass_caret(m))
     if not all_vals:
         return None
-    return np.mean(all_vals, axis=0)
+    min_len = min(len(v) for v in all_vals)
+    truncated = [v[:min_len] for v in all_vals]
+    return np.mean(truncated, axis=0)
 
 
 def main():
@@ -97,9 +106,11 @@ def main():
         ax.axhline(0, color="#999999", linewidth=0.8, linestyle="-", zorder=1)
 
         for env in ENVIRONMENTS:
-            baseline = avg_pass_caret(env, "baseline")
-            if baseline is None:
+            result = avg_matched_baseline(env, metric_type="pass_caret")
+            if result is None:
                 continue
+            _, baseline_vals = result
+            baseline = np.array(baseline_vals)
 
             for step_name in steps:
                 suffix = step_name.split("_", 1)[1]
@@ -107,13 +118,15 @@ def main():
                 if intervention is None:
                     continue
 
-                delta = intervention - baseline
+                min_len = min(len(intervention), len(baseline))
+                delta = intervention[:min_len] - baseline[:min_len]
                 marker = MARKERS[suffix]
                 alpha = STEP_ALPHA[suffix]
                 label = f"{ENV_LABELS[env]} — {suffix.replace('step', 'Step ')}"
 
+                ks_plot = ks[:min_len]
                 ax.plot(
-                    ks,
+                    ks_plot,
                     delta,
                     color=COLORS[env],
                     linestyle="-",
@@ -123,13 +136,14 @@ def main():
                     alpha=alpha,
                     label=label,
                 )
-                all_x.extend(ks)
+                all_x.extend(ks_plot)
                 all_y.extend(delta)
 
         ax.set_title(title)
         ax.set_xlabel("k")
 
-        range_frame(ax, np.array(all_x), np.array(all_y), pad=0.08)
+        if all_x and all_y:
+            range_frame(ax, np.array(all_x), np.array(all_y), pad=0.08)
         ax.legend(loc="best", fontsize=5, framealpha=0.9, ncol=1)
 
     axes[0].set_ylabel("ΔPass^k  (intervention − baseline)")

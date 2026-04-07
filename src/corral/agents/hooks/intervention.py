@@ -20,7 +20,97 @@ from corral.agents.schema import Action
 from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 
 
-def _load_trace_steps(trace_path: str, num_steps: int) -> list[dict]:
+def _rewrite_workspace_paths(
+    steps: list[dict], old_workspace: str | None, new_workspace: str | None
+) -> list[dict]:
+    """Rewrite workspace paths in trace steps to match the current trial.
+
+    When traces are injected from a different trial, file paths like
+    /results/react/task_trial_8/ need to be replaced with the current
+    trial's workspace path (e.g., /results/react/task_trial_0/).
+
+    Args:
+        steps: List of assistant message dicts from a trace
+        old_workspace: The workspace path used in the trace (auto-detected if None)
+        new_workspace: The current trial's workspace path
+
+    Returns:
+        Steps with workspace paths rewritten
+    """
+    if not new_workspace or not old_workspace:
+        return steps
+
+    if old_workspace == new_workspace:
+        return steps
+
+    logger.info(f"Rewriting trace paths: {old_workspace} -> {new_workspace}")
+
+    rewritten = []
+    for step in steps:
+        step = step.copy()
+
+        # Rewrite content (string field)
+        content = step.get("content", "")
+        if isinstance(content, str) and old_workspace in content:
+            step["content"] = content.replace(old_workspace, new_workspace)
+
+        # Rewrite tool_calls arguments (ToolCalling agent format)
+        if step.get("tool_calls"):
+            new_tool_calls = []
+            for tc in step["tool_calls"]:
+                tc = tc.copy()
+                func = tc.get("function", {})
+                args_str = func.get("arguments", "")
+                if isinstance(args_str, str) and old_workspace in args_str:
+                    func = func.copy()
+                    func["arguments"] = args_str.replace(old_workspace, new_workspace)
+                    tc["function"] = func
+                new_tool_calls.append(tc)
+            step["tool_calls"] = new_tool_calls
+
+        rewritten.append(step)
+
+    return rewritten
+
+
+def _detect_workspace_from_trace(messages: list[dict]) -> str | None:
+    """Detect the workspace path used in a trace by looking at file paths."""
+    # Look for /results/.../task_trial_N/ pattern in assistant messages
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            match = re.search(r"(/results/\w+/\w+_trial_\d+)/", content)
+            if match:
+                return match.group(1)
+        # Also check tool_calls arguments
+        for tc in msg.get("tool_calls", []):
+            args_str = tc.get("function", {}).get("arguments", "")
+            if isinstance(args_str, str):
+                match = re.search(r"(/results/\w+/\w+_trial_\d+)/", args_str)
+                if match:
+                    return match.group(1)
+    return None
+
+
+def _detect_workspace_from_context(context_messages: list) -> str | None:
+    """Detect the current trial's workspace path from the conversation context."""
+    for msg in context_messages:
+        content = None
+        if isinstance(msg, dict):
+            content = msg.get("content", "")
+        elif hasattr(msg, "content"):
+            content = msg.content
+        if isinstance(content, str):
+            # Look for "Your current workspace directory is: ..."
+            match = re.search(r"Your current workspace directory is:\s*(\S+)", content)
+            if match:
+                return match.group(1).rstrip("/")
+    return None
+
+
+def _load_trace_steps(trace_path: str, num_steps: int) -> tuple[list[dict], str | None]:
     """Load trace file and extract assistant messages.
 
     Args:
@@ -32,23 +122,26 @@ def _load_trace_steps(trace_path: str, num_steps: int) -> list[dict]:
             - etc.
 
     Returns:
-        List of assistant message dicts (full message including tool_calls if present)
+        Tuple of (list of assistant message dicts, detected workspace path or None)
     """
     with Path(trace_path).open() as f:
         trace = json.load(f)
 
     messages = trace.get("messages", [])
 
+    # Detect workspace path used in this trace
+    trace_workspace = _detect_workspace_from_trace(messages)
+
     # Extract all assistant messages (full dict, not just content)
     assistant_messages = [msg for msg in messages if msg.get("role") == "assistant"]
 
     if not assistant_messages:
         logger.warning(f"No assistant messages found in trace: {trace_path}")
-        return []
+        return [], trace_workspace
 
     # Handle num_steps
     if num_steps >= 0:
-        return assistant_messages[:num_steps]
+        return assistant_messages[:num_steps], trace_workspace
     else:
         # -1 means all except last 1, -2 means all except last 2, etc.
         # Python slicing: lst[:-1] gives all except last, lst[:-2] all except last 2
@@ -56,8 +149,8 @@ def _load_trace_steps(trace_path: str, num_steps: int) -> list[dict]:
             logger.warning(
                 f"num_steps={num_steps} would exclude all {len(assistant_messages)} messages"
             )
-            return []
-        return assistant_messages[:num_steps]
+            return [], trace_workspace
+        return assistant_messages[:num_steps], trace_workspace
 
 
 def _default_intervention(context: HookContext, intervention: str, execute_tools: bool):
@@ -445,7 +538,7 @@ def create_trace_intervention_hook(
 
         trace_path = random.choice(eligible)
 
-        steps = _load_trace_steps(trace_path, num_steps)
+        steps, trace_workspace = _load_trace_steps(trace_path, num_steps)
 
         if not steps:
             logger.warning(
@@ -457,6 +550,10 @@ def create_trace_intervention_hook(
             f"Injecting {len(steps)} intervention step(s) for task {context.task_id} "
             f"from {Path(trace_path).name}"
         )
+
+        # Rewrite workspace paths from trace to current trial
+        current_workspace = _detect_workspace_from_context(context.messages)
+        steps = _rewrite_workspace_paths(steps, trace_workspace, current_workspace)
 
         context.metadata["intervention_applied"] = True
         context.metadata["intervention_num_steps"] = len(steps)

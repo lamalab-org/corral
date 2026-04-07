@@ -6,6 +6,7 @@ Columns = environments. Baseline shown in both rows as reference.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import lama_aesthetics
@@ -15,9 +16,13 @@ from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
 
 lama_aesthetics.get_style("main")
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from utils import avg_matched_baseline, extract_matched_pass_at
+
 RUNS_DIR = Path(__file__).parent.parent / "runs"
 
-ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "ml"]
+ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
 AGENTS = ["react", "toolcalling"]
 
 FAILED_STEPS = ["failed_step1", "failed_step2", "failed_stepn1", "failed_stepn2"]
@@ -45,6 +50,7 @@ ENV_LABELS = {
     "spectra": "Spectroscopic Structure\nElucidation",
     "wetlab": "Inorganic Qualitative\nAnalysis",
     "resistor": "Circuit\nInference",
+    "md": "Molecular\nSimulation",
     "ml": "ML-based Property\nPrediction",
     "retrosynthesis": "Retrosynthetic\nPlanning",
 }
@@ -80,7 +86,9 @@ def avg_pass_at(env: str, step: str) -> tuple[list[int], list[float]] | None:
         all_vals.append(vals)
     if not all_vals:
         return None
-    avg = np.mean(all_vals, axis=0)
+    min_len = min(len(v) for v in all_vals)
+    truncated = [v[:min_len] for v in all_vals]
+    avg = np.mean(truncated, axis=0)
     return list(range(1, len(avg) + 1)), avg.tolist()
 
 
@@ -90,8 +98,8 @@ def plot_row(axes_row, environments, steps, step_color, row_label):
         all_k_vals = []
         all_y_vals = []
 
-        # Baseline reference
-        result = avg_pass_at(env, "baseline")
+        # Baseline reference (matched to intervention tasks)
+        result = avg_matched_baseline(env, metric_type="pass_at")
         if result:
             ks, vals = result
             ax.plot(
@@ -161,10 +169,10 @@ def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
         all_k_vals = []
         all_y_vals = []
 
-        # Baseline for this agent
-        m = load_metrics(env, agent, "baseline")
-        if m is not None:
-            ks, vals = extract_pass_at(m)
+        # Baseline for this agent (matched to intervention tasks)
+        result = extract_matched_pass_at(env, agent)
+        if result is not None:
+            ks, vals = result
             ax.plot(
                 ks,
                 vals,

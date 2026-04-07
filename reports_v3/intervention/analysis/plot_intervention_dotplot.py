@@ -5,6 +5,7 @@ Failed steps in red, success steps in blue. Marker/alpha encodes step distance.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import lama_aesthetics
@@ -15,13 +16,18 @@ from lama_aesthetics.plotutils import range_frame
 
 lama_aesthetics.get_style("main")
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from utils import get_matched_baseline_pass1
+
 RUNS_DIR = Path(__file__).parent.parent / "runs"
 
-ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "ml"]
+ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
 ENV_LABELS = {
     "spectra": "Spectroscopic Structure\nElucidation",
     "wetlab": "Inorganic Qualitative\nAnalysis",
     "resistor": "Circuit\nInference",
+    "md": "Molecular\nSimulation",
     "ml": "ML-based Property\nPrediction",
     "retrosynthesis": "Retrosynthetic\nPlanning",
 }
@@ -68,13 +74,24 @@ def load_pass1(env: str, agent: str, step: str) -> float | None:
     if not report_glob:
         return None
     with open(report_glob[0]) as f:
-        return json.load(f)["metrics"].get("Pass@1")
+        metrics = json.load(f)["metrics"]
+    return metrics.get("Pass@1")
 
 
 def avg_pass1(env: str, step: str) -> float | None:
     vals = []
     for agent in AGENTS:
         v = load_pass1(env, agent, step)
+        if v is not None:
+            vals.append(v)
+    return np.mean(vals) if vals else None
+
+
+def avg_matched_pass1(env: str) -> float | None:
+    """Baseline Pass@1 averaged across agents, matched to intervention tasks."""
+    vals = []
+    for agent in AGENTS:
+        v = get_matched_baseline_pass1(env, agent)
         if v is not None:
             vals.append(v)
     return np.mean(vals) if vals else None
@@ -99,7 +116,7 @@ def main():
     legend_added = set()
 
     for env in ENVIRONMENTS:
-        baseline = avg_pass1(env, "baseline")
+        baseline = avg_matched_pass1(env)
         if baseline is None or baseline == 0:
             continue
 
@@ -158,7 +175,7 @@ def main():
     # Collect all x values for range_frame
     all_x = []
     for env in ENVIRONMENTS:
-        baseline = avg_pass1(env, "baseline")
+        baseline = avg_matched_pass1(env)
         if baseline is None or baseline == 0:
             continue
         for step in STEPS:
@@ -166,13 +183,16 @@ def main():
             if val is not None:
                 all_x.append(((val - baseline) / baseline) * 100)
 
-    range_frame(
-        ax,
-        np.array(all_x),
-        np.array(list(y_positions.values()) * (len(all_x) // n_env + 1))[: len(all_x)],
-        pad=0.1,
-        nice=False,
-    )
+    if all_x:
+        range_frame(
+            ax,
+            np.array(all_x),
+            np.array(list(y_positions.values()) * (len(all_x) // n_env + 1))[
+                : len(all_x)
+            ],
+            pad=0.1,
+            nice=False,
+        )
     ax.set_yticks(list(y_positions.values()))
     ax.set_yticklabels([ENV_LABELS[e] for e in ENVIRONMENTS])
 

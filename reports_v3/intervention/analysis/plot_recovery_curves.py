@@ -25,15 +25,17 @@ lama_aesthetics.get_style("main")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config import INTERVENTION_ROOT
+from utils import filter_baseline_to_matched_tasks  # noqa: E402
 
 # Step label ordering for x-axis
 STEP_ORDER = {1: "Step 1", 2: "Step 2", -2: "Step n-2", -1: "Step n-1"}
 
-ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "ml"]
+ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
 ENV_LABELS = {
     "spectra": "Spectroscopic Structure\nElucidation",
     "wetlab": "Inorganic Qualitative\nAnalysis",
     "resistor": "Circuit\nInference",
+    "md": "Molecular\nSimulation",
     "ml": "ML-based Property\nPrediction",
     "retrosynthesis": "Retrosynthetic\nPlanning",
 }
@@ -712,9 +714,9 @@ def plot_recovery_curves_react_only(df: pd.DataFrame, output_dir: Path):
     """2x3 grid: ReAct only, both success & failed in same panel.
 
     Row 1: spectra, wetlab, retrosynthesis
-    Row 2: resistor, ml (third cell hidden)
+    Row 2: resistor, md, ml
     """
-    REACT_ENV_ORDER = ["spectra", "wetlab", "retrosynthesis", "resistor", "ml"]
+    REACT_ENV_ORDER = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
     react_df = df[df["agent"] == "react"]
 
     fig, axes = plt.subplots(2, 3, figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT))
@@ -727,16 +729,13 @@ def plot_recovery_curves_react_only(df: pd.DataFrame, output_dir: Path):
         if col == 0:
             ax.set_ylabel("Success Rate", fontsize=8)
 
-    # Row 1: next 2 envs
+    # Row 1: next 3 envs
     for col, env in enumerate(REACT_ENV_ORDER[3:]):
         ax = axes[1, col]
         env_df = react_df[react_df["env"] == env]
         _plot_react_only_panel(ax, env_df, env)
         if col == 0:
             ax.set_ylabel("Success Rate", fontsize=8)
-
-    # Hide the empty third cell in row 1
-    axes[1, 2].set_visible(False)
 
     legend_elements = [
         Line2D(
@@ -764,7 +763,7 @@ def plot_recovery_curves_react_only(df: pd.DataFrame, output_dir: Path):
 
 def plot_recovery_curves_react_only_1row(df: pd.DataFrame, output_dir: Path):
     """1x5 grid: ReAct only, all environments in one row."""
-    REACT_ENV_ORDER = ["spectra", "wetlab", "retrosynthesis", "resistor", "ml"]
+    REACT_ENV_ORDER = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
     react_df = df[df["agent"] == "react"]
     n_envs = len(REACT_ENV_ORDER)
 
@@ -808,6 +807,7 @@ def main():
         sys.exit(1)
 
     results_df = pd.read_csv(results_path)
+    results_df = filter_baseline_to_matched_tasks(results_df)
     output_dir = INTERVENTION_ROOT / "analysis" / "figures"
     output_dir.mkdir(exist_ok=True)
 

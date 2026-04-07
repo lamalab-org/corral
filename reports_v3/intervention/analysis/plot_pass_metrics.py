@@ -13,13 +13,14 @@ lama_aesthetics.get_style("main")
 
 RUNS_DIR = Path(__file__).parent.parent / "runs"
 
-ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "ml"]
+ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
 AGENTS = ["react", "toolcalling"]
 AGENT_LABELS = {"react": "ReAct", "toolcalling": "ToolCalling"}
 ENV_LABELS = {
     "spectra": "Spectroscopic Structure\nElucidation",
     "wetlab": "Inorganic Qualitative\nAnalysis",
     "resistor": "Circuit\nInference",
+    "md": "Molecular\nSimulation",
     "ml": "ML-based Property\nPrediction",
     "retrosynthesis": "Retrosynthetic\nPlanning",
 }
@@ -28,6 +29,7 @@ COLORS = {
     "spectra": "#1f77b4",
     "wetlab": "#2ca02c",
     "resistor": "#d62728",
+    "md": "#ff7f0e",
     "ml": "#9467bd",
     "retrosynthesis": "#E8A317",
 }
@@ -36,6 +38,7 @@ MARKERS = {
     "spectra": "o",
     "wetlab": "s",
     "resistor": "D",
+    "md": "X",
     "ml": "^",
     "retrosynthesis": "P",
 }
