@@ -72,42 +72,35 @@ EDGE_RELATIONS_SET = set(EDGE_RELATIONS)
 
 SUBGRAPH_DESCRIPTIONS: dict[str, str] = {
     "refutation_driven_belief_revision": (
-        "Hypothesis is tested, evidence is gathered, judgment interprets it, "
-        "and an update revises the belief to a different hypothesis "
+        "Evidence triggers a belief update to a new hypothesis "
         "[H -tests-> T -observes-> E -uses-> J/U -updates_to-> H2]."
     ),
     "fixed_hypothesis_test_tuning": (
-        "A single hypothesis is retained while tests and parameters are "
-        "iteratively adjusted without revising the underlying hypothesis "
+        "Hypothesis is held fixed while tests are iteratively adjusted "
         "[H -tests-> T -observes-> E -uses-> J/U -updates_to-> T]."
     ),
     "explore_then_test_transition": (
-        "Testing begins before any hypothesis is formed; observations then "
-        "lead to a hypothesis that is subsequently tested "
+        "Exploration precedes hypothesis formation, which then drives testing "
         "[T -observes-> E ... H ... H -tests-> T]."
     ),
     "hypothesis_reranking": (
-        "Multiple competing hypotheses coexist and are compared or ranked "
-        "as new evidence arrives [H1 -competes_with- H2, both tested]."
+        "Competing hypotheses are compared as new evidence arrives "
+        "[H1 -competes_with- H2, both tested]."
     ),
     "evidence_led_hypothesis_generation": (
-        "An observation precedes hypothesis formation: evidence is observed "
-        "first, a judgment is made, and a hypothesis is proposed afterward "
+        "Evidence is observed first; a hypothesis is formed afterward "
         "[E -uses-> J ... H ... H -tests-> T]."
     ),
     "convergent_multi_test_evidence": (
-        "A single hypothesis is evaluated through three or more independent "
-        "tests, each producing its own evidence [H -tests-> T1/T2/T3..., each "
-        "-> E]."
+        "One hypothesis is evaluated via multiple independent tests "
+        "[H -tests-> T1/T2/T3..., each -> E]."
     ),
     "precommitted_test_plan": (
-        "A commitment or prediction is stated before any evidence is "
-        "collected, and tests are then conducted to evaluate it [C before E; "
-        "then H -tests-> T]."
+        "A commitment is stated before evidence collection begins "
+        "[C before E; then H -tests-> T]."
     ),
     "evidence_guided_test_redesign": (
-        "An update explicitly revises the test design, and the new test "
-        "produces fresh evidence, forming an adaptive experimentation loop "
+        "An update revises the test, which then produces new evidence "
         "[U -updates_to-> T -observes-> E]."
     ),
 }
@@ -126,43 +119,29 @@ SUBGRAPH_NAMES = list(SUBGRAPH_DESCRIPTIONS.keys())
 ) = SUBGRAPH_NAMES
 
 ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
-    "untested_claim": (
-        "A hypothesis is stated but never linked to any test [H with no " "tests]."
-    ),
+    "untested_claim": ("Hypothesis never linked to a test [H with no tests]."),
     "evidence_non_uptake": (
-        "Evidence is collected but never used by any judgment or update "
-        "[E with no uses to J/U]."
+        "Evidence collected but never used [E with no uses to J/U]."
     ),
     "unsupported_judgment": (
-        "A judgment is made without any supporting evidence edge [J with no " "E]."
+        "Judgment made without supporting evidence [J with no E]."
     ),
     "stalled_revision": (
-        "An update node has no outgoing edges, meaning the revised belief "
-        "leads nowhere [U with no outgoing edge]."
+        "Update node has no outgoing edges [U with no outgoing edge]."
     ),
     "contradiction_without_repair": (
-        "Evidence contradicts a hypothesis, but no subsequent update or "
-        "competing hypothesis addresses the conflict [E -contradicts-> H, no "
-        "U/H alt]."
+        "Contradiction unresolved by any update or alternative "
+        "[E -contradicts-> H, no U/H alt]."
     ),
     "premature_commitment": (
-        "A hypothesis is directly linked to a commitment without any "
-        "intermediate testing [H -> C with no T]."
+        "Hypothesis committed without intermediate testing [H -> C with no T]."
     ),
-    "uninformative_test": (
-        "A test is designed but produces no observed evidence [T with no E]."
-    ),
-    "fixed_belief_trace": (
-        "The entire trace contains no update nodes, indicating beliefs "
-        "were never revised [No U in trace]."
-    ),
-    "disconnected_evidence": (
-        "An evidence node has no incoming or outgoing edges at all [Isolated " "E]."
-    ),
+    "uninformative_test": ("Test produces no observed evidence [T with no E]."),
+    "fixed_belief_trace": ("No update nodes in the entire trace [No U in trace]."),
+    "disconnected_evidence": ("Evidence node with no edges [Isolated E]."),
     "one_sided_confirmation": (
-        "A hypothesis reaches commitment with supporting evidence but "
-        "without any contradicting evidence ever being considered [H -> C with "
-        "support, no contradicts]."
+        "Commitment reached without considering contradicting evidence "
+        "[H -> C with support, no contradicts]."
     ),
 }
 
@@ -320,6 +299,199 @@ Return JSON with keys:
   ]
 }
 """
+
+_TIKZ_STYLE_DEFS = r"""\definecolor{nodefill}{HTML}{DFE3E8}%
+\tikzset{%
+  rnode/.style={circle, draw, thick, minimum size=5mm, inner sep=1pt,
+                font=\scriptsize\bfseries, fill=nodefill},%
+  rlbl/.style={font=\tiny, midway, above},%
+  rlblb/.style={font=\tiny, midway, below},%
+  missing/.style={dashed, gray},%
+  missingnode/.style={rnode, dashed, gray, text=gray, fill=none},%
+}%
+"""
+
+
+def _make_tikz(body: str) -> str:
+    """Wrap TikZ node/edge commands in a tikzpicture environment."""
+    indented = body.strip().replace("\n", "\n  ")
+    return (
+        r"\begin{tikzpicture}"
+        r"[>=Stealth, baseline=(current bounding box.center), node distance=7mm]"
+        "\n  " + indented + "\n"
+        r"\end{tikzpicture}"
+    )
+
+
+_TIKZ_SUBGRAPH_PATTERNS: dict[str, str] = {
+    SG_REFUTATION_DRIVEN_BELIEF_REVISION: _make_tikz(
+        r"""\node[rnode] (h1) {H};
+\node[rnode, right=of h1] (t) {T};
+\node[rnode, right=of t] (e) {E};
+\node[rnode, right=of e] (ju) {\scalebox{.7}{J/U}};
+\node[rnode, right=of ju] (h2) {H$_2$};
+\draw[->] (h1) -- node[rlbl] {tests} (t);
+\draw[->] (t) -- node[rlbl] {obs.} (e);
+\draw[->] (e) -- node[rlbl] {uses} (ju);
+\draw[->] (ju) -- node[rlbl] {upd.} (h2);"""
+    ),
+    SG_FIXED_HYPOTHESIS_TEST_TUNING: _make_tikz(
+        r"""\node[rnode] (h) {H};
+\node[rnode, right=of h] (t) {T};
+\node[rnode, right=of t] (e) {E};
+\node[rnode, right=of e] (ju) {\scalebox{.7}{J/U}};
+\draw[->] (h) -- node[rlbl] {tests} (t);
+\draw[->] (t) -- node[rlbl] {obs.} (e);
+\draw[->] (e) -- node[rlbl] {uses} (ju);
+\draw[->, bend left=50] (ju) to node[rlblb] {upd.} (t);"""
+    ),
+    SG_EXPLORE_THEN_TEST_TRANSITION: _make_tikz(
+        r"""\node[rnode] (t1) {T};
+\node[rnode, right=of t1] (e) {E};
+\node[right=4mm of e, draw=none, font=\scriptsize] (dots) {\ldots};
+\node[rnode, right=4mm of dots] (h) {H};
+\node[rnode, right=of h] (t2) {T};
+\draw[->] (t1) -- node[rlbl] {obs.} (e);
+\draw[->] (h) -- node[rlbl] {tests} (t2);"""
+    ),
+    SG_HYPOTHESIS_RERANKING: _make_tikz(
+        r"""\node[rnode] (h1) {H$_1$};
+\node[rnode, right=15mm of h1] (h2) {H$_2$};
+\node[rnode, below left=5mm and 0mm of h1] (t1) {T};
+\node[rnode, below right=5mm and 0mm of h2] (t2) {T};
+\draw[<->, dashed] (h1) -- node[rlbl] {competes} (h2);
+\draw[->] (h1) -- node[left, font=\tiny] {tests} (t1);
+\draw[->] (h2) -- node[right, font=\tiny] {tests} (t2);"""
+    ),
+    SG_EVIDENCE_LED_HYPOTHESIS_GENERATION: _make_tikz(
+        r"""\node[rnode] (e) {E};
+\node[rnode, right=of e] (j) {J};
+\node[right=4mm of j, draw=none, font=\scriptsize] (dots) {\ldots};
+\node[rnode, right=4mm of dots] (h) {H};
+\node[rnode, right=of h] (t) {T};
+\draw[->] (e) -- node[rlbl] {uses} (j);
+\draw[->] (h) -- node[rlbl] {tests} (t);"""
+    ),
+    SG_CONVERGENT_MULTI_TEST_EVIDENCE: _make_tikz(
+        r"""\node[rnode] (h) {H};
+\node[rnode, right=10mm of h, yshift=7mm] (t1) {T$_1$};
+\node[rnode, right=10mm of h] (t2) {T$_2$};
+\node[rnode, right=10mm of h, yshift=-7mm] (t3) {T$_3$};
+\node[rnode, right=10mm of t2] (e) {E};
+\draw[->] (h) -- (t1);
+\draw[->] (h) -- (t2);
+\draw[->] (h) -- (t3);
+\draw[->] (t1) -- (e);
+\draw[->] (t2) -- (e);
+\draw[->] (t3) -- (e);"""
+    ),
+    SG_PRECOMMITTED_TEST_PLAN: _make_tikz(
+        r"""\node[rnode] (c) {C};
+\node[right=4mm of c, draw=none, font=\scriptsize] (dots) {\ldots};
+\node[rnode, right=4mm of dots] (h) {H};
+\node[rnode, right=of h] (t) {T};
+\node[rnode, right=of t] (e) {E};
+\draw[->] (h) -- node[rlbl] {tests} (t);
+\draw[->] (t) -- node[rlbl] {obs.} (e);"""
+    ),
+    SG_EVIDENCE_GUIDED_TEST_REDESIGN: _make_tikz(
+        r"""\node[rnode] (u) {U};
+\node[rnode, right=of u] (t) {T};
+\node[rnode, right=of t] (e) {E};
+\draw[->] (u) -- node[rlbl] {upd.} (t);
+\draw[->] (t) -- node[rlbl] {obs.} (e);"""
+    ),
+}
+
+
+_TIKZ_ANTIPATTERN_PATTERNS: dict[str, str] = {
+    AP_UNTESTED_CLAIM: _make_tikz(
+        r"""\node[rnode] (h) {H};
+\node[missingnode, right=of h] (t) {T};
+\draw[->, missing] (h) -- node[rlbl, text=gray] {tests} (t);
+\draw[red, thick] (t.north west) -- (t.south east);
+\draw[red, thick] (t.north east) -- (t.south west);"""
+    ),
+    AP_EVIDENCE_NON_UPTAKE: _make_tikz(
+        r"""\node[rnode] (e) {E};
+\node[missingnode, right=of e] (j) {\scalebox{.7}{J/U}};
+\draw[->, missing] (e) -- node[rlbl, text=gray] {uses} (j);
+\draw[red, thick] (j.north west) -- (j.south east);
+\draw[red, thick] (j.north east) -- (j.south west);"""
+    ),
+    AP_UNSUPPORTED_JUDGMENT: _make_tikz(
+        r"""\node[missingnode] (e) {E};
+\node[rnode, right=of e] (j) {J};
+\draw[->, missing] (e) -- node[rlbl, text=gray] {uses} (j);
+\draw[red, thick] (e.north west) -- (e.south east);
+\draw[red, thick] (e.north east) -- (e.south west);"""
+    ),
+    AP_STALLED_REVISION: _make_tikz(
+        r"""\node[rnode] (u) {U};
+\node[right=7mm of u, draw=none, font=\scriptsize, text=gray] (none) {$\varnothing$};
+\draw[->, missing] (u) -- (none);"""
+    ),
+    AP_CONTRADICTION_WITHOUT_REPAIR: _make_tikz(
+        r"""\node[rnode] (e) {E};
+\node[rnode, right=of e] (h) {H};
+\node[missingnode, right=of h] (u) {U};
+\draw[->] (e) -- node[rlbl] {contr.} (h);
+\draw[->, missing] (h) -- (u);
+\draw[red, thick] (u.north west) -- (u.south east);
+\draw[red, thick] (u.north east) -- (u.south west);"""
+    ),
+    AP_PREMATURE_COMMITMENT: _make_tikz(
+        r"""\node[rnode] (h) {H};
+\node[rnode, right=of h] (c) {C};
+\node[missingnode, below=5mm of h] (t) {T};
+\draw[->] (h) -- (c);
+\draw[->, missing] (h) -- (t);
+\draw[red, thick] (t.north west) -- (t.south east);
+\draw[red, thick] (t.north east) -- (t.south west);"""
+    ),
+    AP_UNINFORMATIVE_TEST: _make_tikz(
+        r"""\node[rnode] (t) {T};
+\node[missingnode, right=of t] (e) {E};
+\draw[->, missing] (t) -- node[rlbl, text=gray] {obs.} (e);
+\draw[red, thick] (e.north west) -- (e.south east);
+\draw[red, thick] (e.north east) -- (e.south west);"""
+    ),
+    AP_FIXED_BELIEF_TRACE: _make_tikz(
+        r"""\node[rnode] (h) {H};
+\node[rnode, right=of h] (t) {T};
+\node[rnode, right=of t] (e) {E};
+\node[rnode, right=of e] (j) {J};
+\node[missingnode, below=5mm of j] (u) {U};
+\draw[->] (h) -- (t);
+\draw[->] (t) -- (e);
+\draw[->] (e) -- (j);
+\draw[->, missing] (j) -- (u);
+\draw[red, thick] (u.north west) -- (u.south east);
+\draw[red, thick] (u.north east) -- (u.south west);"""
+    ),
+    AP_DISCONNECTED_EVIDENCE: _make_tikz(
+        r"""\node[rnode] (e) {E};
+\node[missingnode, left=of e] (t) {T};
+\node[missingnode, right=of e] (j) {J};
+\draw[->, missing] (t) -- (e);
+\draw[->, missing] (e) -- (j);
+\draw[red, thick] (t.north west) -- (t.south east);
+\draw[red, thick] (t.north east) -- (t.south west);
+\draw[red, thick] (j.north west) -- (j.south east);
+\draw[red, thick] (j.north east) -- (j.south west);"""
+    ),
+    AP_ONE_SIDED_CONFIRMATION: _make_tikz(
+        r"""\node[rnode] (h) {H};
+\node[rnode, below left=5mm and 1mm of h] (es) {E};
+\node[rnode, right=12mm of h] (c) {C};
+\node[missingnode, below right=5mm and 1mm of h] (ec) {E$_{\!c}$};
+\draw[->] (es) -- (h);
+\draw[->] (h) -- (c);
+\draw[->, missing] (ec) -- node[right, font=\tiny, text=gray] {contr.} (h);
+\draw[red, thick] (ec.north west) -- (ec.south east);
+\draw[red, thick] (ec.north east) -- (ec.south west);"""
+    ),
+}
 
 
 class LLMError(RuntimeError):
@@ -2997,9 +3169,7 @@ async def _run_pipeline(
     except FileNotFoundError as e:
         logger.warning(f"Skipping aggregation: {e}")
 
-    write_pattern_definitions_latex(
-        root_path / ".." / "analysis" / "results" / "tables" / "pattern_definitions.tex"
-    )
+    write_pattern_definitions_latex(root_path / "analysis" / "results" / "tables")
 
 
 def _latex_escape(text: str) -> str:
@@ -3015,62 +3185,155 @@ def _pretty_name(raw: str) -> str:
     return raw.replace("_", " ").title()
 
 
-def build_pattern_definitions_latex() -> str:
-    """Return a LaTeX tabular with definitions of all patterns and antipatterns.
+def _split_description(desc: str) -> tuple[str, str]:
+    """Split a description of the form 'prose [graph notation].' into a (prose, graph) tuple."""
+    m = re.search(r"\[([^\]]+)\]\s*\.?\s*$", desc)
+    if m:
+        graph = m.group(1)
+        prose = desc[: m.start()].rstrip().rstrip(".")
+        return prose, graph
+    return desc.rstrip("."), ""
 
-    Uses `\\multicolumn` headers (in `\\textit`) to separate the
-    *Reasoning Patterns* block from the *Reasoning Antipatterns* block.
-    Each row lists the name and its definition in separate columns.
+
+# Display order for the LaTeX definitions table.
+# Each entry is (merge_label | None, [pattern_keys]).
+# When *merge_label* is not None, \multirow groups the constituent rows.
+_SUBGRAPH_TABLE_ORDER: list[tuple[str | None, list[str]]] = [
+    (None, [SG_REFUTATION_DRIVEN_BELIEF_REVISION]),
+    (
+        "Data-First Hypothesis",
+        [SG_EXPLORE_THEN_TEST_TRANSITION, SG_EVIDENCE_LED_HYPOTHESIS_GENERATION],
+    ),
+    (None, [SG_HYPOTHESIS_RERANKING]),
+    (None, [SG_CONVERGENT_MULTI_TEST_EVIDENCE]),
+    (
+        "Iterative Test Refinement",
+        [SG_FIXED_HYPOTHESIS_TEST_TUNING, SG_EVIDENCE_GUIDED_TEST_REDESIGN],
+    ),
+    (None, [SG_PRECOMMITTED_TEST_PLAN]),
+]
+
+_ANTIPATTERN_TABLE_ORDER: list[tuple[str | None, list[str]]] = [
+    ("Untested Hypothesis", [AP_UNTESTED_CLAIM, AP_PREMATURE_COMMITMENT]),
+    ("Unused Evidence", [AP_EVIDENCE_NON_UPTAKE, AP_DISCONNECTED_EVIDENCE]),
+    (None, [AP_UNSUPPORTED_JUDGMENT]),
+    (None, [AP_CONTRADICTION_WITHOUT_REPAIR]),
+    (None, [AP_UNINFORMATIVE_TEST]),
+    ("Absent/Stalled Revision", [AP_STALLED_REVISION, AP_FIXED_BELIEF_TRACE]),
+    (None, [AP_ONE_SIDED_CONFIRMATION]),
+]
+
+
+def _emit_group(
+    merge_name: str | None,
+    keys: list[str],
+    descriptions: dict[str, str],
+    tikz_patterns: dict[str, str] | None = None,
+) -> list[str]:
+    rows: list[str] = []
+    n = len(keys)
+    for i, key in enumerate(keys):
+        prose, graph_text = _split_description(descriptions[key])
+        prose = _latex_escape(prose)
+        if tikz_patterns and key in tikz_patterns:
+            graph = tikz_patterns[key]
+        else:
+            graph = _latex_escape(graph_text)
+        if n == 1:
+            name = _pretty_name(key)
+            rows.append(rf"{name} & {graph} & {prose} \\")
+        else:
+            if i == 0:
+                rows.append(
+                    rf"\multirow{{{n}}}{{=}}{{{merge_name}}} & {graph} & {prose} \\"
+                )
+            else:
+                rows.append(rf" & {graph} & {prose} \\")
+    return rows
+
+
+def build_productive_motifs_latex() -> str:
+    r"""Return a LaTeX tabularx table with definitions of productive motifs.
+
+    Column layout: Topic (X), Graph (TikZ picture), Description (X).
+    Related patterns share a single merged row label via multirow.
+    Each graph cell contains an inline TikZ diagram.
     """
     lines: list[str] = []
-    lines.append(r"\begin{tabular}{lp{12cm}}")
+    lines.append(_TIKZ_STYLE_DEFS)
+    lines.append(r"\begin{tabularx}{\textwidth}{p{2.2cm}cX}")
     lines.append(r"\toprule")
-    lines.append(r"Topic & Description \\")
-    lines.append(r"\midrule")
-    lines.append(r"\midrule")
-    lines.append(r"\multicolumn{2}{l}{\textit{Reasoning Patterns}} \\")
+    lines.append(r"Topic & Graph & Description \\")
     lines.append(r"\midrule")
 
-    for sg in SUBGRAPH_NAMES:
-        name = _pretty_name(sg)
-        desc = _latex_escape(SUBGRAPH_DESCRIPTIONS[sg])
-        lines.append(rf"{name} & {desc} \\")
-
-    lines.append(r"\midrule")
-    lines.append(r"\midrule")
-    lines.append(r"\multicolumn{2}{l}{\textit{Reasoning Antipatterns}} \\")
-    lines.append(r"\midrule")
-
-    for ap in ANTIPATTERN_NAMES:
-        name = _pretty_name(ap)
-        desc = _latex_escape(ANTIPATTERN_DESCRIPTIONS[ap])
-        lines.append(rf"{name} & {desc} \\")
+    for idx, (merge_name, keys) in enumerate(_SUBGRAPH_TABLE_ORDER):
+        if idx:
+            lines.append(r"\midrule[0.015em]")
+        lines.extend(
+            _emit_group(
+                merge_name, keys, SUBGRAPH_DESCRIPTIONS, _TIKZ_SUBGRAPH_PATTERNS
+            )
+        )
 
     lines.append(r"\bottomrule")
-    lines.append(r"\end{tabular}")
+    lines.append(r"\end{tabularx}")
     return "\n".join(lines)
 
 
-def write_pattern_definitions_latex(out_path: str | Path | None = None) -> Path:
-    """Write the pattern-definitions LaTeX table to *out_path*.
+def build_reasoning_breakdowns_latex() -> str:
+    r"""Return a LaTeX tabularx table with definitions of reasoning breakdowns.
 
-    If *out_path* is `None`, defaults to
-    `<script_dir>/analysis/pattern_definitions.tex`.
+    Column layout: Topic (X), Graph (TikZ picture), Description (X).
+    Related breakdowns share a single merged row label via multirow.
+    Each graph cell contains an inline TikZ diagram.
     """
-    if out_path is None:
-        out_path = (
-            SCRIPT_DIR
-            / ".."
-            / "analysis"
-            / "results"
-            / "tables"
-            / "pattern_definitions.tex"
+    lines: list[str] = []
+    lines.append(_TIKZ_STYLE_DEFS)
+    lines.append(r"\begin{tabularx}{\textwidth}{XcX}")
+    lines.append(r"\toprule")
+    lines.append(r"Topic & Graph & Description \\")
+    lines.append(r"\midrule")
+
+    for idx, (merge_name, keys) in enumerate(_ANTIPATTERN_TABLE_ORDER):
+        if idx:
+            lines.append(r"\midrule[0.03em]")
+        lines.extend(
+            _emit_group(
+                merge_name, keys, ANTIPATTERN_DESCRIPTIONS, _TIKZ_ANTIPATTERN_PATTERNS
+            )
         )
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(build_pattern_definitions_latex(), encoding="utf-8")
-    logger.info(f"Pattern definitions LaTeX table written to {out_path}")
-    return out_path
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabularx}")
+    return "\n".join(lines)
+
+
+def write_pattern_definitions_latex(
+    out_dir: str | Path | None = None,
+) -> tuple[Path, Path]:
+    """Write the pattern-definition LaTeX tables to out_dir.
+
+    Produces two files:
+
+    - productive_motifs.tex: Productive Motifs table.
+    - reasoning_breakdowns.tex: Reasoning Breakdowns table.
+
+    If out_dir is None, defaults to <script_dir>/../analysis/results/tables/.
+    """
+    if out_dir is None:
+        out_dir = SCRIPT_DIR / "analysis" / "results" / "tables"
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    motifs_path = out_dir / "productive_motifs.tex"
+    motifs_path.write_text(build_productive_motifs_latex(), encoding="utf-8")
+    logger.info(f"Productive Motifs LaTeX table written to {motifs_path}")
+
+    breakdowns_path = out_dir / "reasoning_breakdowns.tex"
+    breakdowns_path.write_text(build_reasoning_breakdowns_latex(), encoding="utf-8")
+    logger.info(f"Reasoning Breakdowns LaTeX table written to {breakdowns_path}")
+
+    return motifs_path, breakdowns_path
 
 
 def main(

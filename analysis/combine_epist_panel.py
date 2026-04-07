@@ -1,14 +1,12 @@
-"""Combine epist.pdf and overall_pattern_bars_horizontal.pdf into one labeled figure.
+"""Combine epist.pdf and overall_pattern_bars_horizontal_individual.pdf into one figure.
 
-Uses PyMuPDF's show_pdf_page() to embed source pages as *vector* graphics,
-preserving full quality (no rasterization).
+Uses PyMuPDF's show_pdf_page to embed source pages as vector graphics,
+preserving full quality without rasterization.
 
 Layout:
-  - Label A ("From trace to motif") top-left, above epist.pdf content
-  - Label B ("Canonical graph motifs") top-center (starts at horizontal midpoint)
-  - epist.pdf image
-  - Label C ("Prevalence and weak adaptation across settings") centered between images
-  - overall_pattern_bars_horizontal.pdf image
+  The canvas size equals epist.pdf.  The bars figure is overlaid on top of it,
+  centred horizontally, at a tuneable Y position.  Labels A, B and C are also
+  overlaid at tuneable coordinates.
 
 Usage:
     python analysis/combine_epist_panel.py
@@ -29,7 +27,7 @@ BARS_PDF = (
     / "results"
     / "figures"
     / "fig_epistemology"
-    / "overall_pattern_bars_horizontal.pdf"
+    / "overall_pattern_bars_horizontal_individual.pdf"
 )
 OUTPUT_PDF = (
     REPO_ROOT
@@ -40,12 +38,23 @@ OUTPUT_PDF = (
     / "epst_combined.pdf"
 )
 
-CMU_SANS_SERIF = Path.home() / "Library" / "Fonts" / "cmunso.otf"
+CMU_SANS_SERIF = Path.home() / "Library" / "Fonts" / "cmunss.otf"
 
-LABEL_FONTSIZE = 14
-LABEL_FONTSIZE_SMALL = 12
-LABEL_GAP = 14  # vertical space reserved for labels above each panel
-PANEL_GAP = 2  # vertical gap between the two panels
+# Bars figure: centred in X; top edge at BARS_Y.
+# Width is scaled to BARS_WIDTH_FRACTION of the canvas width.
+BARS_Y = 365.0  # adjust this to move the bars figure up/down
+BARS_WIDTH_FRACTION = 0.95  # fraction of canvas width for the bars figure
+
+# Labels A and B share the same Y coordinate.
+LABEL_AB_Y = 13.0  # adjust this to move A and B up/down
+LABEL_A_X = 9.0  # adjust this to move A left/right
+LABEL_B_X = 0.505  # fraction of canvas width (0.50 = start of second half)
+
+# Label C has the same X as A but its own Y.
+LABEL_C_X = LABEL_A_X  # same X as A
+LABEL_C_Y = 362.0  # adjust this to move C up/down
+
+LABEL_FONTSIZE = 16
 
 _FONT_REGISTERED = False
 
@@ -79,61 +88,45 @@ def _insert_label(page, x: float, y: float, label: str, description: str = "") -
 
 
 def main() -> None:
-    # Verify input figures exist
+    """Compose the combined epistemology panel PDF from its constituent figures.
+
+    Embeds epist.pdf as a full-page background and overlays the individual
+    pattern bar chart at the configured position, then inserts panel labels
+    A, B, and C. Writes the result to OUTPUT_PDF.
+    """
     for pdf_path in (EPIST_PDF, BARS_PDF):
         if not pdf_path.exists():
             raise FileNotFoundError(f"Required input figure not found: {pdf_path}")
 
-    doc_top = fitz.open(str(EPIST_PDF))
-    doc_bot = fitz.open(str(BARS_PDF))
+    doc_epist = fitz.open(str(EPIST_PDF))
+    doc_bars = fitz.open(str(BARS_PDF))
 
-    page_top = doc_top[0]
-    page_bot = doc_bot[0]
+    page_epist = doc_epist[0]
+    page_bars = doc_bars[0]
 
-    w_top, h_top = page_top.rect.width, page_top.rect.height
-    w_bot, h_bot = page_bot.rect.width, page_bot.rect.height
-
-    # Scale bottom panel so its width matches the top panel
-    scale = w_top / w_bot
-    h_bot_scaled = h_bot * scale
-
-    # Total canvas dimensions
-    total_width = w_top
-    total_height = LABEL_GAP + h_top + PANEL_GAP + LABEL_GAP + h_bot_scaled
+    canvas_w = page_epist.rect.width
+    canvas_h = page_epist.rect.height
 
     out_doc = fitz.open()
-    out_page = out_doc.new_page(width=total_width, height=total_height)
+    out_page = out_doc.new_page(width=canvas_w, height=canvas_h)
 
-    top_y0 = LABEL_GAP
-    top_rect = fitz.Rect(0, top_y0, w_top, top_y0 + h_top)
-    out_page.show_pdf_page(top_rect, doc_top, 0)
+    out_page.show_pdf_page(fitz.Rect(0, 0, canvas_w, canvas_h), doc_epist, 0)
 
-    # Labels A and B above the top panel
-    label_y = LABEL_GAP - 2
-    _insert_label(out_page, 9, label_y, "A.", " From trace to motif")
-    _insert_label(
-        out_page, total_width * 0.50, label_y, "B.", " Canonical graph motifs"
-    )
+    bars_w = canvas_w * BARS_WIDTH_FRACTION
+    bars_h = page_bars.rect.height * (bars_w / page_bars.rect.width)
+    bars_x0 = (canvas_w - bars_w) / 2.0
+    bars_rect = fitz.Rect(bars_x0, BARS_Y, bars_x0 + bars_w, BARS_Y + bars_h)
+    out_page.show_pdf_page(bars_rect, doc_bars, 0)
 
-    bot_y0 = top_y0 + h_top + PANEL_GAP + LABEL_GAP
-    bot_rect = fitz.Rect(0, bot_y0, w_top, bot_y0 + h_bot_scaled)
-    out_page.show_pdf_page(bot_rect, doc_bot, 0)
-
-    # Label C above the bottom panel
-    label_c_y = bot_y0 - 2
-    _insert_label(
-        out_page,
-        9,
-        label_c_y,
-        "C.",
-        " Prevalence and weak adaptation across settings",
-    )
+    _insert_label(out_page, LABEL_A_X, LABEL_AB_Y, "A")
+    _insert_label(out_page, canvas_w * LABEL_B_X, LABEL_AB_Y, "B")
+    _insert_label(out_page, LABEL_C_X, LABEL_C_Y, "C")
 
     OUTPUT_PDF.parent.mkdir(parents=True, exist_ok=True)
     out_doc.save(str(OUTPUT_PDF), garbage=3, deflate=True)
     out_doc.close()
-    doc_top.close()
-    doc_bot.close()
+    doc_epist.close()
+    doc_bars.close()
     logger.info(f"Saved combined figure to {OUTPUT_PDF}")
 
 
