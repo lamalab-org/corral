@@ -52,7 +52,7 @@ MODEL_LABELS = {
 }
 AGENT_TYPE_LABELS = {
     "react": "ReAct",
-    "tool_calling": "Tool Calling",
+    "tool_calling": "Tool calling",
 }
 
 ACTION_ORDER = [

@@ -50,7 +50,7 @@ MODEL_CANONICAL: dict[str, str] = {
 MODEL_DISPLAY: dict[str, str] = {
     "claude_4_5": "Claude-4.5-Sonnet",
     "gpt_4o": "GPT-4o",
-    "gpt_oss_120b": "GPT-Oss-120B",
+    "gpt_oss_120b": "gpt-oss-120b",
 }
 
 # V2 top-level dir names may differ from the v1 filename fragments; a separate

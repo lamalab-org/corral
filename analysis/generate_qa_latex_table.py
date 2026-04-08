@@ -31,8 +31,8 @@ ENV_LABELS = {
 }
 
 QA_TYPE_LABELS = {
-    "qa": "Knowledge Questions",
-    "reasoning_qa": "Reasoning Questions",
+    "qa": "Knowledge questions",
+    "reasoning_qa": "Reasoning questions",
 }
 
 # Canonical display order; wetlab is included for future data even if not yet present.

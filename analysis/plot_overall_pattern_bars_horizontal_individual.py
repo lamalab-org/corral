@@ -102,38 +102,38 @@ GOOD_COLOR = "#3C77B1"
 BAD_COLOR = "#C62828"
 
 GROUP_DISPLAY: dict[str, str] = {
-    "hypothesis_handling": "Hypothesis Handling",
-    "evidence_handling": "Evidence Handling",
-    "inquiry_control": "Inquiry Control",
+    "hypothesis_handling": "Hypothesis handling",
+    "evidence_handling": "Evidence handling",
+    "inquiry_control": "Inquiry control",
 }
 
 PATTERN_SHORT: dict[str, str] = {
     # Antipatterns
-    "untested_claim": "Untested Claim",
-    "contradiction_without_repair": "Contrad. w/o Repair",
-    "one_sided_confirmation": "One-Sided Confirm.",
-    "evidence_non_uptake": "Evidence Non-Uptake",
-    "disconnected_evidence": "Disconnected Evid.",
-    "unsupported_judgment": "Unsupported Judgment",
-    "uninformative_test": "Uninformative Test",
-    "stalled_revision": "Stalled Revision",
-    "fixed_belief_trace": "Fixed Belief Trace",
-    "premature_commitment": "Premature Commit.",
+    "untested_claim": "Untested claim",
+    "contradiction_without_repair": "Contrad. w/o repair",
+    "one_sided_confirmation": "One-sided confirm.",
+    "evidence_non_uptake": "Evidence non-uptake",
+    "disconnected_evidence": "Disconnected evid.",
+    "unsupported_judgment": "Unsupported judgment",
+    "uninformative_test": "Uninformative test",
+    "stalled_revision": "Stalled revision",
+    "fixed_belief_trace": "Fixed belief trace",
+    "premature_commitment": "Premature commit.",
     # Productive subgraphs
-    "refutation_driven_belief_revision": "Refutation-Driven Rev.",
-    "hypothesis_reranking": "Hypothesis Reranking",
-    "evidence_led_hypothesis_generation": "Evidence-Led Hyp. Gen.",
-    "convergent_multi_test_evidence": "Convergent Multi-Test",
-    "explore_then_test_transition": "Explore→Test Trans.",
-    "fixed_hypothesis_test_tuning": "Fixed-Hyp. Test Tuning",
-    "precommitted_test_plan": "Precommitted Plan",
-    "evidence_guided_test_redesign": "Evidence-Guided Redesign",
+    "refutation_driven_belief_revision": "Refutation-driven rev.",
+    "hypothesis_reranking": "Hypothesis reranking",
+    "evidence_led_hypothesis_generation": "Evidence-led hyp. gen.",
+    "convergent_multi_test_evidence": "Convergent multi-test",
+    "explore_then_test_transition": "Explore→test trans.",
+    "fixed_hypothesis_test_tuning": "Fixed-hyp. test tuning",
+    "precommitted_test_plan": "Precommitted plan",
+    "evidence_guided_test_redesign": "Evidence-guided redesign",
 }
 
 ENV_GROUPS: dict[str, list[str]] = {
     "Workflow": ["ml", "afm", "catalyst", "md"],
     "Strategic": ["retrosynthesis"],
-    "Hyp.-Driven": ["spectra", "wetlab", "resistor"],
+    "Hyp.-driven": ["spectra", "wetlab", "resistor"],
 }
 
 
@@ -304,7 +304,7 @@ def plot(summary: dict, out: Path) -> None:
         )
 
     ax_bar.set_xlim(x_arr[0] - 0.3, x_arr[-1] + 0.3)
-    ax_bar.set_ylim(0, max_val * 1.15)
+    ax_bar.set_ylim(0, 100)
     ax_bar.yaxis.set_major_formatter(
         mticker.PercentFormatter(xmax=100, decimals=0),
     )
@@ -314,17 +314,17 @@ def plot(summary: dict, out: Path) -> None:
         [GROUP_DISPLAY[g] for g in GROUP_ORDER],
         fontsize=10,
     )
-    ax_bar.set_yticks([0, 25, 50])
+    ax_bar.set_yticks([0, 50, 100])
     ax_bar.tick_params(axis="y", labelsize=10)
 
     ax_bar.spines["left"].set_position(("outward", 0))
     ax_bar.spines["bottom"].set_position(("outward", 10))
-    ax_bar.spines["left"].set_bounds(0, 50)
+    ax_bar.spines["left"].set_bounds(0, 100)
     ax_bar.spines["bottom"].set_bounds(group_centres[0], group_centres[-1])
 
     legend_elements = [
-        Patch(facecolor=GOOD_COLOR, alpha=0.85, label="Productive Motifs"),
-        Patch(facecolor=BAD_COLOR, alpha=0.85, label="Reasoning Breakdowns"),
+        Patch(facecolor=GOOD_COLOR, alpha=0.85, label="Productive motifs"),
+        Patch(facecolor=BAD_COLOR, alpha=0.85, label="Reasoning breakdowns"),
     ]
     ax_bar.legend(
         handles=legend_elements,

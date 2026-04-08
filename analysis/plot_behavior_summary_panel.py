@@ -27,16 +27,41 @@ lama_aesthetics.get_style("main")
 
 LABEL_SIZE = 10
 
+
+def format_display_text(text: str) -> str:
+    """Format plot text using the requested title-case convention."""
+    stripped_text = text.replace("_", " ").strip()
+    if not stripped_text:
+        return stripped_text
+    return stripped_text[0].upper() + stripped_text[1:].lower()
+
+
 # Abbreviated environment labels for compact tick labels in panels.
 SHORT_ENV_LABELS: dict[str, str] = {
-    "afm": "AFM Exp.",
-    "catalyst": "Adsorp. Surface",
-    "md": "Mol. Simulation",
-    "ml": "ML Property",
-    "resistor": "Circuit Inference",
+    "afm": "Afm exp.",
+    "catalyst": "Adsorp. surface",
+    "md": "Mol. simulation",
+    "ml": "Ml property",
+    "resistor": "Circuit inference",
     "retro": "Retrosynthesis",
-    "spectra": "Spectra Elucid.",
-    "wetlab": "Inorg. Analysis",
+    "spectra": "Spectra elucid.",
+    "wetlab": "Inorg. analysis",
+}
+
+MODEL_LABELS: dict[str, str] = {
+    "gpt-oss-120b": "gpt-oss-120b",
+    "gpt-4o": "GPT-4o",
+    "claude-4.5": "Claude-4.5-Sonnet",
+}
+
+AGENT_TYPE_LABELS: dict[str, str] = {
+    "react": "ReAct",
+    "tool_calling": "Tool calling",
+}
+
+ACTION_LABELS: dict[str, str] = {
+    action_key: format_display_text(label)
+    for action_key, label in action_plots.ACTION_LABELS.items()
 }
 
 OUT_DIR = Path(__file__).parent / "results" / "figures" / "fig_4_app"
@@ -231,9 +256,9 @@ def plot_action_distribution_panel(
     ax.set_ylim(0, 1.06)
     ax.set_xticks(x_centers)
     ax.set_xticklabels(
-        [SHORT_ENV_LABELS.get(env, str(env).capitalize()) for env in env_order]
+        [SHORT_ENV_LABELS.get(env, format_display_text(str(env))) for env in env_order]
     )
-    ax.set_ylabel("Fraction of Tool Calls by Action Type")
+    ax.set_ylabel(format_display_text("Fraction of tool calls by action type"))
 
     if n_env > 0:
         range_frame(
@@ -247,9 +272,12 @@ def plot_action_distribution_panel(
 
     add_text_legend(
         ax,
-        subgroup_col.replace("_", " ").title(),
+        format_display_text(subgroup_col),
         [
-            (subgroup_markers[subgroup], subgroup_labels.get(subgroup, str(subgroup)))
+            (
+                subgroup_markers[subgroup],
+                subgroup_labels.get(subgroup, format_display_text(str(subgroup))),
+            )
             for subgroup in subgroup_order
         ],
         loc="lower center",
@@ -293,7 +321,7 @@ def plot_output_tokens_environment(ax, results_df: pd.DataFrame) -> None:
         for environment in environments
     ]
     labels = [
-        SHORT_ENV_LABELS.get(environment, str(environment).capitalize())
+        SHORT_ENV_LABELS.get(environment, format_display_text(str(environment)))
         for environment in environments
     ]
 
@@ -317,7 +345,7 @@ def plot_output_tokens_environment(ax, results_df: pd.DataFrame) -> None:
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels)
-    ax.set_xlabel("Average Output Tokens Per Message")
+    ax.set_xlabel(format_display_text("Average output tokens per message"))
     ax.set_ylabel("")
     range_frame(
         ax,
@@ -338,6 +366,7 @@ def plot_output_token_distribution(
     group_col: str,
     label_map: dict[str, str],
     colors: list[str],
+    group_order: list[str] | None = None,
     x_scale: str = "symlog",
     show_legend: bool = False,
 ) -> None:
@@ -349,6 +378,7 @@ def plot_output_token_distribution(
         group_col: Column defining the comparison groups.
         label_map: Human-readable labels for group values.
         colors: Color cycle for the grouped point clouds.
+        group_order: Optional explicit order for displayed groups.
         x_scale: Either `log` or `symlog`.
         show_legend: Whether to draw the distribution encoding legend.
 
@@ -364,6 +394,11 @@ def plot_output_token_distribution(
         .sort_values(ascending=True)
     )
     groups = list(grouped.index)
+    if group_order is not None:
+        ordered_groups = [group for group in group_order if group in grouped.index]
+        groups = ordered_groups + [
+            group for group in groups if group not in set(ordered_groups)
+        ]
     raw_values_per_group = [
         results_df.loc[results_df[group_col].eq(group), "output_tokens_per_message"]
         .dropna()
@@ -390,7 +425,7 @@ def plot_output_token_distribution(
     groups = [group for group, _ in non_empty]
     values_per_group = [values for _, values in non_empty]
     positions = np.arange(1, len(groups) + 1)
-    labels = [label_map.get(group, str(group)) for group in groups]
+    labels = [label_map.get(group, format_display_text(str(group))) for group in groups]
     plot_colors = [colors[i % len(colors)] for i in range(len(groups))]
     flattened_values = np.concatenate(values_per_group)
     positive_values = flattened_values[flattened_values > 0]
@@ -438,7 +473,7 @@ def plot_output_token_distribution(
 
     ax.set_yticks(positions)
     ax.set_yticklabels(labels)
-    ax.set_xlabel(f"Output Tokens Per Message ({x_scale.title()} Scale)")
+    ax.set_xlabel(format_display_text(f"Output tokens per message ({x_scale} scale)"))
     ax.set_ylabel("")
 
     upper_limit = output_token_plots.get_axis_max(flattened_values, minimum=1.0)
@@ -572,7 +607,10 @@ def plot_tool_call_ridgeline_panel(
 
     group_keys = [group_key for group_key, _ in non_empty]
     plot_data = [group_values for _, group_values in non_empty]
-    labels = [label_map.get(group_key, str(group_key)) for group_key in group_keys]
+    labels = [
+        label_map.get(group_key, format_display_text(str(group_key)))
+        for group_key in group_keys
+    ]
     n_groups = len(group_keys)
     overlap = 0.6
     inner_grid = panel_spec.subgridspec(n_groups, 1, hspace=-overlap)
@@ -632,7 +670,7 @@ def plot_tool_call_ridgeline_panel(
         if idx < n_groups - 1:
             ax.tick_params(axis="x", which="both", labelbottom=False, bottom=False)
 
-    axes[-1].set_xlabel("Tool Calls Per Task Trial")
+    axes[-1].set_xlabel(format_display_text("Tool calls per task trial"))
     axes[-1].spines["bottom"].set_visible(True)
     return axes[0]
 
@@ -681,10 +719,10 @@ def main() -> None:
         subgroup_col="agent_type",
         subgroup_order=[
             agent
-            for agent in action_plots.AGENT_TYPE_LABELS
+            for agent in AGENT_TYPE_LABELS
             if agent in set(action_distribution_df["agent_type"])
         ],
-        subgroup_labels=action_plots.AGENT_TYPE_LABELS,
+        subgroup_labels=AGENT_TYPE_LABELS,
     )
     plot_action_distribution_panel(
         ax_action_model,
@@ -692,16 +730,16 @@ def main() -> None:
         subgroup_col="model",
         subgroup_order=[
             model
-            for model in action_plots.MODEL_LABELS
+            for model in ["claude-4.5", "gpt-4o", "gpt-oss-120b"]
             if model in set(action_distribution_df["model"])
         ],
-        subgroup_labels=action_plots.MODEL_LABELS,
+        subgroup_labels=MODEL_LABELS,
     )
 
     category_handles = [
         Patch(
             facecolor=action_plots.ACTION_COLORS[action_category],
-            label=action_plots.ACTION_LABELS[action_category],
+            label=ACTION_LABELS[action_category],
         )
         for action_category in action_plots.ACTION_ORDER
     ]
@@ -711,7 +749,7 @@ def main() -> None:
         bbox_to_anchor=(0.5, -0.6),
         ncol=len(action_plots.ACTION_ORDER),
         frameon=False,
-        title="Action Types",
+        title=format_display_text("Action types"),
         fontsize=LABEL_SIZE,
         title_fontsize=LABEL_SIZE,
     )
@@ -788,7 +826,7 @@ def main() -> None:
         ax_output_tokens_agent,
         output_token_df,
         group_col="agent_type",
-        label_map=action_plots.AGENT_TYPE_LABELS,
+        label_map=AGENT_TYPE_LABELS,
         colors=output_token_plots.AGENT_COLORS,
         x_scale="symlog",
         show_legend=False,
@@ -797,8 +835,9 @@ def main() -> None:
         ax_output_tokens_model,
         output_token_df,
         group_col="model",
-        label_map=action_plots.MODEL_LABELS,
+        label_map=MODEL_LABELS,
         colors=output_token_plots.MODEL_COLORS,
+        group_order=["gpt-oss-120b", "gpt-4o", "claude-4.5"],
         x_scale="symlog",
         show_legend=True,
     )
@@ -816,15 +855,17 @@ def main() -> None:
         ridge_grid2[0, 0],
         tool_call_df,
         group_col="agent_type",
-        label_map=action_plots.AGENT_TYPE_LABELS,
+        label_map=AGENT_TYPE_LABELS,
     )
     ridge_ax_model = plot_tool_call_ridgeline_panel(
         fig2,
         ridge_grid2[0, 1],
         tool_call_df,
         group_col="model",
-        label_map=action_plots.MODEL_LABELS,
+        label_map=MODEL_LABELS,
     )
+
+    ax_tool_calls.set_xlabel(format_display_text("Tool calls per task trial"))
 
     for ax in fig2.get_axes():
         ax.tick_params(axis="both", labelsize=LABEL_SIZE)
