@@ -71,14 +71,12 @@ n_model_cols = len(all_models)
 col_spec = "l c " + " ".join(["S[table-format=1.2]"] * n_model_cols)
 
 # Model names contain '-' and '.', so each header cell needs {} wrapping for siunitx S columns.
-model_header = " & ".join(f"{{\\textbf{{{m}}}}}" for m in all_models)
+model_header = " & ".join(f"{{{m}}}" for m in all_models)
 
 lines: list[str] = []
 lines.append(r"  \begin{tabular}{" + col_spec + r"}")
 lines.append(r"    \toprule")
-lines.append(
-    r"    \textbf{Environment} & \textbf{\# Questions} & " + model_header + r" \\"
-)
+lines.append(r"    Environment & \# Questions & " + model_header + r" \\")
 lines.append(r"    \midrule")
 
 for qa_type in ["qa", "reasoning_qa"]:

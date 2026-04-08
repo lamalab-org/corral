@@ -110,30 +110,69 @@ GROUP_DISPLAY: dict[str, str] = {
 PATTERN_SHORT: dict[str, str] = {
     # Antipatterns
     "untested_claim": "Untested claim",
-    "contradiction_without_repair": "Contrad. w/o repair",
-    "one_sided_confirmation": "One-sided confirm.",
+    "contradiction_without_repair": "Contradiction without repair",
+    "one_sided_confirmation": "One-sided confirmation",
     "evidence_non_uptake": "Evidence non-uptake",
-    "disconnected_evidence": "Disconnected evid.",
+    "disconnected_evidence": "Disconnected evidence",
     "unsupported_judgment": "Unsupported judgment",
     "uninformative_test": "Uninformative test",
     "stalled_revision": "Stalled revision",
     "fixed_belief_trace": "Fixed belief trace",
-    "premature_commitment": "Premature commit.",
+    "premature_commitment": "Premature commitment",
     # Productive subgraphs
-    "refutation_driven_belief_revision": "Refutation-driven rev.",
+    "refutation_driven_belief_revision": "Refutation-driven belief revision",
     "hypothesis_reranking": "Hypothesis reranking",
-    "evidence_led_hypothesis_generation": "Evidence-led hyp. gen.",
-    "convergent_multi_test_evidence": "Convergent multi-test",
-    "explore_then_test_transition": "Explore→test trans.",
-    "fixed_hypothesis_test_tuning": "Fixed-hyp. test tuning",
-    "precommitted_test_plan": "Precommitted plan",
-    "evidence_guided_test_redesign": "Evidence-guided redesign",
+    "evidence_led_hypothesis_generation": "Evidence-led hypothesis generation",
+    "convergent_multi_test_evidence": "Convergent multi-test evidence",
+    "explore_then_test_transition": "Explore-then-test transition",
+    "fixed_hypothesis_test_tuning": "Fixed hypothesis test tuning",
+    "precommitted_test_plan": "Precommitted test plan",
+    "evidence_guided_test_redesign": "Evidence-guided test redesign",
 }
 
 ENV_GROUPS: dict[str, list[str]] = {
     "Workflow": ["ml", "afm", "catalyst", "md"],
     "Strategic": ["retrosynthesis"],
-    "Hyp.-driven": ["spectra", "wetlab", "resistor"],
+    "Hypothesis-driven": ["spectra", "wetlab", "resistor"],
+}
+
+ENV_FULL_NAME: dict[str, str] = {
+    "afm": "AFM experimental execution",
+    "catalyst": "Adsorption surface construction",
+    "md": "Molecular simulation",
+    "ml": "ML-based property",
+    "resistor": "Circuit inference",
+    "retrosynthesis": "Retrosynthetic planning",
+    "spectra": "Spectroscopic structure elucidation",
+    "wetlab": "Inorganic qualitative analysis",
+}
+
+ENV_SHORT_NAME: dict[str, str] = {
+    "afm": "AFM\nexperimental\nexecution",
+    "catalyst": "Adsorption\nsurface\nconstruction",
+    "md": "Molecular\nsimulation",
+    "ml": "ML-based\nproperty",
+    "resistor": "Circuit\ninference",
+    "retrosynthesis": "Retrosynthetic\nplanning",
+    "spectra": "Spectroscopic\nstructure\nelucidation",
+    "wetlab": "Inorganic\nqualitative\nanalysis",
+}
+
+ENV_GROUP_DISPLAY: dict[str, str] = {
+    "Workflow": "Workflow execution",
+    "Strategic": "Strategic reasoning",
+    "Hypothesis-driven": "Hypothesis-driven enquiry",
+}
+
+ENV_GROUP_COLORS: dict[str, str] = {
+    "Workflow": "#4C72B0",
+    "Strategic": "#DD8452",
+    "Hypothesis-driven": "#55A868",
+}
+
+MODEL_DISPLAY: dict[str, str] = {
+    "claude_sonnet_45": "Claude-4.5-Sonnet",
+    "gpt_4o": "GPT-4o",
 }
 
 
@@ -393,6 +432,8 @@ def plot(summary: dict, out: Path) -> None:
 
     _save(fig, out / "overall_pattern_bars_horizontal_individual.pdf")
     _save_table(bars, heat_matrix, env_group_names, out)
+    _save_table_per_model(summary, out)
+    plot_env_level(summary, out)
 
 
 def _save_table(
@@ -402,21 +443,26 @@ def _save_table(
     out: Path,
 ) -> None:
     """Write a tabularx table (inner only) with pattern scores."""
-    env_cols = " ".join("r" for _ in env_group_names)
+    env_cols = " ".join("c" for _ in env_group_names)
     header_cells = " & ".join(env_group_names)
+    n_data_cols = len(env_group_names) + 1  # env groups + overall
 
     lines: list[str] = []
-    lines.append(r"\begin{tabularx}{\linewidth}{X " + env_cols + " r}")
+    lines.append(r"\begin{tabularx}{\linewidth}{X " + env_cols + " c}")
     lines.append(r"\toprule")
     lines.append(f"Pattern & {header_cells} & Overall \\\\")
-    lines.append(r"\midrule")
 
     prev_group = None
     for bi, b in enumerate(bars):
         group_key = b["group"]
-        if prev_group is not None and group_key != prev_group:
+        if group_key != prev_group:
             lines.append(r"\midrule")
-        prev_group = group_key
+            heading = GROUP_DISPLAY.get(group_key, group_key)
+            lines.append(
+                f"\\multicolumn{{{n_data_cols + 1}}}{{l}}{{\\textit{{{heading}}}}} \\\\"
+            )
+            lines.append(r"\midrule")
+            prev_group = group_key
 
         name = _pretty(b["pattern"])
         env_vals = " & ".join(
@@ -434,6 +480,285 @@ def _save_table(
     tex_path = table_dir / "overall_pattern_bars_horizontal_individual.tex"
     tex_path.write_text("\n".join(lines), encoding="utf-8")
     logger.info(f"  saved: {tex_path}")
+
+
+def _save_table_per_model(
+    summary: dict,
+    out: Path,
+) -> None:
+    """Write a tabularx table with one overall column per model."""
+    by_model = summary["groupings"]["by_model"]
+    model_keys = sorted(by_model.keys())
+    model_labels = [MODEL_DISPLAY.get(m, m) for m in model_keys]
+    model_cols = " ".join("c" for _ in model_keys)
+    header_cells = " & ".join(model_labels)
+    n_data_cols = len(model_keys)
+
+    lines: list[str] = []
+    lines.append(r"\begin{tabularx}{\linewidth}{X " + model_cols + "}")
+    lines.append(r"\toprule")
+    lines.append(f"Pattern & {header_cells} \\\\")
+
+    for group_key in GROUP_ORDER:
+        lines.append(r"\midrule")
+        heading = GROUP_DISPLAY.get(group_key, group_key)
+        lines.append(
+            f"\\multicolumn{{{n_data_cols + 1}}}{{l}}{{\\textit{{{heading}}}}} \\\\"
+        )
+        lines.append(r"\midrule")
+
+        group = GROUPS[group_key]
+        for kind in ("productive", "breakdowns"):
+            for pat in group[kind]:
+                section = _data_section(pat)
+                vals = []
+                for mk in model_keys:
+                    frac = _frac(by_model[mk], section, pat)
+                    vals.append(f"{frac:.2f}")
+                name = _pretty(pat)
+                lines.append(f"{name} & {' & '.join(vals)} \\\\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabularx}")
+
+    table_dir = out.parents[1] / "tables"
+    table_dir.mkdir(parents=True, exist_ok=True)
+    tex_path = table_dir / "overall_pattern_bars_horizontal_individual_per_model.tex"
+    tex_path.write_text("\n".join(lines), encoding="utf-8")
+    logger.info(f"  saved: {tex_path}")
+
+
+def _env_level_label(env: str, level: str) -> str:
+    """Build a display label like 'Spectroscopic structure elucidation S1'."""
+    full = ENV_FULL_NAME.get(env, env.replace("_", " ").title())
+    num = level.replace("level_", "")
+    return f"{full} S{num}"
+
+
+def _env_level_frac(
+    by_mel: dict, env: str, level: str, section: str, field: str
+) -> float:
+    """Return n_traces-weighted fraction across models for one env/level."""
+    total_traces = 0
+    weighted_sum = 0.0
+    for key, data in by_mel.items():
+        parts = key.split("/")
+        if parts[1] == env and parts[2] == level:
+            n = data.get("n_traces", 0)
+            frac = _frac(data, section, field)
+            weighted_sum += frac * n
+            total_traces += n
+    if total_traces == 0:
+        return 0.0
+    return weighted_sum / total_traces
+
+
+def plot_env_level(summary: dict, out: Path) -> None:
+    """Horizontal lollipop chart of pattern prevalence per environment and level.
+
+    Each env/level scope (e.g. "Spectroscopic structure elucidation S1") gets a
+    row.  Three colour-coded groups are shown: Workflow execution, Strategic
+    reasoning, and Hypothesis-driven enquiry.
+    """
+    by_mel = summary["groupings"]["by_model_env_level"]
+
+    # Collect all env/level combos, ordered by group then env then level
+    scopes: list[dict] = [
+        {
+            "env": env,
+            "level": lvl,
+            "label": _env_level_label(env, lvl),
+            "group": gname,
+        }
+        for gname, envs in ENV_GROUPS.items()
+        for env in envs
+        for lvl in sorted({k.split("/")[2] for k in by_mel if k.split("/")[1] == env})
+    ]  # {env, level, label, group_name}
+
+    n_scopes = len(scopes)
+    if n_scopes == 0:
+        return
+
+    # Compute all pattern fractions per scope
+    all_pats: list[str] = []
+    for gk in GROUP_ORDER:
+        for kind in ("productive", "breakdowns"):
+            all_pats.extend(GROUPS[gk][kind])
+
+    # Build matrix: rows = scopes, cols = patterns
+    mat = np.zeros((n_scopes, len(all_pats)))
+    for si, sc in enumerate(scopes):
+        for pi, pat in enumerate(all_pats):
+            mat[si, pi] = _env_level_frac(
+                by_mel, sc["env"], sc["level"], _data_section(pat), pat
+            )
+
+    # Average across all patterns for each scope (overall prevalence)
+    productive_idx = []
+    breakdown_idx = []
+    for pi, pat in enumerate(all_pats):
+        if pat in _SUBGRAPH_SET or any(
+            pat in GROUPS[gk]["productive"] for gk in GROUP_ORDER
+        ):
+            productive_idx.append(pi)
+        else:
+            breakdown_idx.append(pi)
+
+    prod_mean = (
+        mat[:, productive_idx].mean(axis=1) if productive_idx else np.zeros(n_scopes)
+    )
+    break_mean = (
+        mat[:, breakdown_idx].mean(axis=1) if breakdown_idx else np.zeros(n_scopes)
+    )
+
+    # Vertical lollipop chart
+    bar_width = 0.28
+    gap_width = 0.12
+    x_centers = np.arange(n_scopes) * (2 * bar_width + gap_width)
+
+    fig, ax = plt.subplots(figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT * 1.0))
+
+    for si, _sc in enumerate(scopes):
+        x_prod = x_centers[si] - bar_width / 2
+        x_break = x_centers[si] + bar_width / 2
+
+        # Productive (vertical)
+        ax.vlines(x_prod, 0, prod_mean[si], color=GOOD_COLOR, alpha=0.75, linewidth=5)
+        ax.plot(x_prod, prod_mean[si], "o", markersize=5, color=GOOD_COLOR)
+
+        # Breakdowns (vertical)
+        ax.vlines(x_break, 0, break_mean[si], color=BAD_COLOR, alpha=0.75, linewidth=5)
+        ax.plot(x_break, break_mean[si], "o", markersize=5, color=BAD_COLOR)
+
+    # x-axis labels: just Sn
+    ax.set_xticks(x_centers)
+    ax.set_xticklabels(
+        [f"S{sc['level'].replace('level_', '')}" for sc in scopes],
+        fontsize=10,
+    )
+    ax.set_ylabel("Mean prevalence")
+
+    # Spine adjustments
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["bottom"].set_bounds(x_centers[0], x_centers[-1])
+    x_pad = bar_width * 2.0
+    ax.set_xlim(x_centers[0] - x_pad, x_centers[-1] + x_pad)
+    ax.set_ylim(0, 0.6)
+    ax.set_yticks([0, 0.2, 0.4, 0.6])
+
+    # Legend
+    legend_elements = [
+        Patch(facecolor=GOOD_COLOR, alpha=0.7, label="Productive motifs"),
+        Patch(facecolor=BAD_COLOR, alpha=0.7, label="Reasoning breakdowns"),
+    ]
+    ax.legend(
+        handles=legend_elements,
+        loc="upper left",
+        fontsize=10,
+        frameon=False,
+    )
+
+    # Draw per-environment brackets below the x-axis
+    env_idx = 0
+    prev_env = None
+    env_start = 0
+    for si, sc in enumerate(scopes):
+        if sc["env"] != prev_env:
+            if prev_env is not None:
+                _draw_env_bracket(ax, prev_env, x_centers[env_start], x_centers[si - 1])
+                env_idx += 1
+            env_start = si
+            prev_env = sc["env"]
+    if prev_env is not None:
+        _draw_env_bracket(ax, prev_env, x_centers[env_start], x_centers[n_scopes - 1])
+
+    # Draw environment group brackets below the env brackets
+    prev_group = None
+    group_start = 0
+    for si, sc in enumerate(scopes):
+        if sc["group"] != prev_group:
+            if prev_group is not None:
+                _draw_group_bracket(
+                    ax, prev_group, x_centers[group_start], x_centers[si - 1]
+                )
+            group_start = si
+            prev_group = sc["group"]
+    if prev_group is not None:
+        _draw_group_bracket(
+            ax, prev_group, x_centers[group_start], x_centers[n_scopes - 1]
+        )
+
+    fig.subplots_adjust(bottom=0.45, left=0.08, right=0.97, top=0.97)
+    _save(fig, out / "env_level_pattern_prevalence.pdf")
+
+
+def _draw_group_bracket(
+    ax: plt.Axes, group_name: str, x_left: float, x_right: float
+) -> None:
+    """Draw a coloured bracket and label below the env brackets."""
+    color = ENV_GROUP_COLORS.get(group_name, "#333333")
+    display = ENV_GROUP_DISPLAY.get(group_name, group_name)
+    y_bot = ax.get_ylim()[0]
+    y_range = ax.get_ylim()[1] - y_bot
+    y_bracket = y_bot - y_range * 0.48
+    ax.plot(
+        [x_left, x_right],
+        [y_bracket, y_bracket],
+        color=color,
+        linewidth=2.5,
+        clip_on=False,
+        solid_capstyle="round",
+    )
+    ax.text(
+        (x_left + x_right) / 2,
+        y_bracket - y_range * 0.03,
+        display,
+        va="top",
+        ha="center",
+        fontsize=10,
+        fontweight="bold",
+        color=color,
+        clip_on=False,
+    )
+
+
+def _draw_env_bracket(ax: plt.Axes, env: str, x_left: float, x_right: float) -> None:
+    """Draw a bracket and environment label below the x-axis tick labels."""
+    display = ENV_SHORT_NAME.get(env, env.replace("_", " ").title())
+    # Find which group this env belongs to, use that colour
+    color = "#333333"
+    for gname, envs in ENV_GROUPS.items():
+        if env in envs:
+            color = ENV_GROUP_COLORS.get(gname, color)
+            break
+    y_bot = ax.get_ylim()[0]
+    y_range = ax.get_ylim()[1] - y_bot
+    y_bracket = y_bot - y_range * 0.08
+    ax.plot(
+        [x_left, x_right],
+        [y_bracket, y_bracket],
+        color=color,
+        linewidth=2.0,
+        clip_on=False,
+        solid_capstyle="round",
+    )
+    # Shift catalyst label slightly left to avoid overlap
+    x_text = (x_left + x_right) / 2
+    if env == "catalyst":
+        x_text -= 0.15
+    ax.text(
+        x_text,
+        y_bracket - y_range * 0.02,
+        display,
+        va="top",
+        ha="right",
+        rotation=45,
+        rotation_mode="anchor",
+        fontsize=10,
+        color=color,
+        clip_on=False,
+    )
 
 
 def main(

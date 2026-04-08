@@ -3182,7 +3182,11 @@ def _latex_escape(text: str) -> str:
 
 def _pretty_name(raw: str) -> str:
     """Turn a snake_case identifier into a readable title."""
-    return raw.replace("_", " ").title()
+    text = raw.replace("_", " ")
+    if not text:
+        return raw
+    result = text[0].upper() + text[1:].lower()
+    return re.sub(r"/(.)", lambda m: "/" + m.group(1).upper(), result)
 
 
 def _split_description(desc: str) -> tuple[str, str]:
@@ -3201,25 +3205,25 @@ def _split_description(desc: str) -> tuple[str, str]:
 _SUBGRAPH_TABLE_ORDER: list[tuple[str | None, list[str]]] = [
     (None, [SG_REFUTATION_DRIVEN_BELIEF_REVISION]),
     (
-        "Data-First Hypothesis",
+        "Data-first hypothesis",
         [SG_EXPLORE_THEN_TEST_TRANSITION, SG_EVIDENCE_LED_HYPOTHESIS_GENERATION],
     ),
     (None, [SG_HYPOTHESIS_RERANKING]),
     (None, [SG_CONVERGENT_MULTI_TEST_EVIDENCE]),
     (
-        "Iterative Test Refinement",
+        "Iterative test refinement",
         [SG_FIXED_HYPOTHESIS_TEST_TUNING, SG_EVIDENCE_GUIDED_TEST_REDESIGN],
     ),
     (None, [SG_PRECOMMITTED_TEST_PLAN]),
 ]
 
 _ANTIPATTERN_TABLE_ORDER: list[tuple[str | None, list[str]]] = [
-    ("Untested Hypothesis", [AP_UNTESTED_CLAIM, AP_PREMATURE_COMMITMENT]),
-    ("Unused Evidence", [AP_EVIDENCE_NON_UPTAKE, AP_DISCONNECTED_EVIDENCE]),
+    ("Untested hypothesis", [AP_UNTESTED_CLAIM, AP_PREMATURE_COMMITMENT]),
+    ("Unused evidence", [AP_EVIDENCE_NON_UPTAKE, AP_DISCONNECTED_EVIDENCE]),
     (None, [AP_UNSUPPORTED_JUDGMENT]),
     (None, [AP_CONTRADICTION_WITHOUT_REPAIR]),
     (None, [AP_UNINFORMATIVE_TEST]),
-    ("Absent/Stalled Revision", [AP_STALLED_REVISION, AP_FIXED_BELIEF_TRACE]),
+    ("Absent/Stalled revision", [AP_STALLED_REVISION, AP_FIXED_BELIEF_TRACE]),
     (None, [AP_ONE_SIDED_CONFIRMATION]),
 ]
 
@@ -3263,7 +3267,7 @@ def build_productive_motifs_latex() -> str:
     lines.append(_TIKZ_STYLE_DEFS)
     lines.append(r"\begin{tabularx}{\textwidth}{p{2.2cm}cX}")
     lines.append(r"\toprule")
-    lines.append(r"Topic & Graph & Description \\")
+    lines.append(r"Pattern & Graph & Description \\")
     lines.append(r"\midrule")
 
     for idx, (merge_name, keys) in enumerate(_SUBGRAPH_TABLE_ORDER):
@@ -3291,7 +3295,7 @@ def build_reasoning_breakdowns_latex() -> str:
     lines.append(_TIKZ_STYLE_DEFS)
     lines.append(r"\begin{tabularx}{\textwidth}{XcX}")
     lines.append(r"\toprule")
-    lines.append(r"Topic & Graph & Description \\")
+    lines.append(r"Pattern & Graph & Description \\")
     lines.append(r"\midrule")
 
     for idx, (merge_name, keys) in enumerate(_ANTIPATTERN_TABLE_ORDER):
