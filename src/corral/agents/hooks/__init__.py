@@ -10,6 +10,7 @@ from corral.agents.hooks.intervention import (
     create_intervention_hook,
     create_trace_intervention_hook,
 )
+from corral.agents.hooks.sycophancy import create_sycophancy_hook
 
 __all__ = [
     "AgentHooks",
@@ -17,5 +18,6 @@ __all__ = [
     "HookContext",
     "HookPoint",
     "create_intervention_hook",
+    "create_sycophancy_hook",
     "create_trace_intervention_hook",
 ]
