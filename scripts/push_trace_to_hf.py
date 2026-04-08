@@ -472,7 +472,7 @@ def main() -> None:
     # Define the structure to iterate
     # This assumes a structure like: base_root/level_1/tasks, base_root/level_1/subtasks, etc.
     levels = {1: ["level_1"], 2: ["level_2"], 3: ["level_3"]}
-    task_types = ["tasks", "subtasks"]
+    task_types = ["tasks", "subtasks", "task", "subtask"]
 
     all_rows: list[dict[str, Any]] = []
 
@@ -500,7 +500,7 @@ def main() -> None:
                     if p.name.startswith("chatcmpl-"):
                         continue
                     # matches your report style names
-                    if "verbosity" in p.name and "_try" in p.name:
+                    if "_try" in p.name:
                         report_paths.append(p)
 
                 if not report_paths:
