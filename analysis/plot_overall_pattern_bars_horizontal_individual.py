@@ -122,8 +122,8 @@ PATTERN_SHORT: dict[str, str] = {
     # Productive subgraphs
     "refutation_driven_belief_revision": "Refutation-driven belief revision",
     "hypothesis_reranking": "Hypothesis reranking",
-    "evidence_led_hypothesis_generation": "Evidence-led hypothesis generation",
-    "convergent_multi_test_evidence": "Convergent multi-test evidence",
+    "evidence_led_hypothesis_generation": "Evidence-led\nhypothesis generation",
+    "convergent_multi_test_evidence": "Convergent multi-test\nevidence",
     "explore_then_test_transition": "Explore-then-test transition",
     "fixed_hypothesis_test_tuning": "Fixed hypothesis test tuning",
     "precommitted_test_plan": "Precommitted test plan",
@@ -290,7 +290,7 @@ def plot(summary: dict, out: Path) -> None:
     """
     overall = summary["groupings"]["overall"]
     by_env = summary["groupings"]["by_env"]
-    bars, group_centres = _build_individual_bars(overall)
+    bars, _group_centres = _build_individual_bars(overall)
 
     x_arr = np.array([b["x"] for b in bars])
     n_bars = len(bars)
@@ -302,7 +302,7 @@ def plot(summary: dict, out: Path) -> None:
     fig, (ax_heat, ax_bar) = plt.subplots(
         2,
         1,
-        figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT * 0.7),
+        figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT * 1),
         gridspec_kw={"height_ratios": [1, 1], "hspace": 0.08},
     )
 
@@ -348,18 +348,39 @@ def plot(summary: dict, out: Path) -> None:
         mticker.PercentFormatter(xmax=100, decimals=0),
     )
 
-    ax_bar.set_xticks(group_centres)
+    ax_bar.set_xticks(x_arr)
     ax_bar.set_xticklabels(
-        [GROUP_DISPLAY[g] for g in GROUP_ORDER],
+        [_pretty(b["pattern"]) for b in bars],
         fontsize=10,
     )
+    # Color-code x-tick labels to match bar colors
+    for tick_label, b in zip(ax_bar.get_xticklabels(), bars, strict=False):
+        tick_label.set_color(b["color"])
     ax_bar.set_yticks([0, 50, 100])
     ax_bar.tick_params(axis="y", labelsize=10)
+    ax_bar.tick_params(axis="x", labelrotation=60)
+    plt.setp(
+        ax_bar.get_xticklabels(),
+        rotation=60,
+        ha="right",
+        rotation_mode="anchor",
+    )
+    # Nudge multiline labels leftward so they don't crowd neighbours
+    _shift_labels = {
+        "evidence_led_hypothesis_generation",
+        "convergent_multi_test_evidence",
+    }
+    from matplotlib.transforms import ScaledTranslation
+
+    dx_pt = -4  # points
+    for tick_label, b in zip(ax_bar.get_xticklabels(), bars, strict=False):
+        if b["pattern"] in _shift_labels:
+            offset = ScaledTranslation(dx_pt / 72, 0, fig.dpi_scale_trans)
+            tick_label.set_transform(tick_label.get_transform() + offset)
 
     ax_bar.spines["left"].set_position(("outward", 0))
-    ax_bar.spines["bottom"].set_position(("outward", 10))
     ax_bar.spines["left"].set_bounds(0, 100)
-    ax_bar.spines["bottom"].set_bounds(group_centres[0], group_centres[-1])
+    ax_bar.spines["bottom"].set_bounds(x_arr[0] - 0.15, x_arr[-1] + 0.15)
 
     legend_elements = [
         Patch(facecolor=GOOD_COLOR, alpha=0.85, label="Productive motifs"),
@@ -368,7 +389,7 @@ def plot(summary: dict, out: Path) -> None:
     ax_bar.legend(
         handles=legend_elements,
         loc="upper right",
-        fontsize=9,
+        fontsize=10,
         frameon=False,
         bbox_to_anchor=(1.0, 1.1),
     )
@@ -428,9 +449,10 @@ def plot(summary: dict, out: Path) -> None:
         spine.set_visible(False)
     ax_heat.tick_params(left=False, bottom=False)
 
-    fig.subplots_adjust(bottom=0.12, left=0.10, right=0.97, top=0.98)
+    fig.subplots_adjust(bottom=0.38, left=0.10, right=0.97, top=0.98)
 
     _save(fig, out / "overall_pattern_bars_horizontal_individual.pdf")
+    _save(fig, out / "overall_pattern_bars_horizontal_individual.png")
     _save_table(bars, heat_matrix, env_group_names, out)
     _save_table_per_model(summary, out)
     plot_env_level(summary, out)

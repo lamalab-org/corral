@@ -5,7 +5,7 @@ preserving full quality without rasterization.
 
 Layout:
   The canvas size equals epist.pdf.  The bars figure is overlaid on top of it,
-  centred horizontally, at a tuneable Y position.  Labels A, B and C are also
+  centred horizontally, at a tuneable Y position.  Labels A and B are also
   overlaid at tuneable coordinates.
 
 Usage:
@@ -42,17 +42,15 @@ CMU_SANS_SERIF = Path.home() / "Library" / "Fonts" / "cmunss.otf"
 
 # Bars figure: centred in X; top edge at BARS_Y.
 # Width is scaled to BARS_WIDTH_FRACTION of the canvas width.
-BARS_Y = 365.0  # adjust this to move the bars figure up/down
+BARS_Y = 245.0  # adjust this to move the bars figure up/down
 BARS_WIDTH_FRACTION = 0.95  # fraction of canvas width for the bars figure
 
-# Labels A and B share the same Y coordinate.
-LABEL_AB_Y = 13.0  # adjust this to move A and B up/down
+LABEL_A_Y = 13.0  # adjust this to move A up/down
 LABEL_A_X = 9.0  # adjust this to move A left/right
-LABEL_B_X = 0.505  # fraction of canvas width (0.50 = start of second half)
 
-# Label C has the same X as A but its own Y.
-LABEL_C_X = LABEL_A_X  # same X as A
-LABEL_C_Y = 362.0  # adjust this to move C up/down
+# Label B has the same X as A but its own Y.
+LABEL_B_X = LABEL_A_X  # same X as A
+LABEL_B_Y = 245.0  # adjust this to move B up/down
 
 LABEL_FONTSIZE = 16
 
@@ -92,7 +90,7 @@ def main() -> None:
 
     Embeds epist.pdf as a full-page background and overlays the individual
     pattern bar chart at the configured position, then inserts panel labels
-    A, B, and C. Writes the result to OUTPUT_PDF.
+    A and B. Writes the result to OUTPUT_PDF.
     """
     for pdf_path in (EPIST_PDF, BARS_PDF):
         if not pdf_path.exists():
@@ -118,9 +116,8 @@ def main() -> None:
     bars_rect = fitz.Rect(bars_x0, BARS_Y, bars_x0 + bars_w, BARS_Y + bars_h)
     out_page.show_pdf_page(bars_rect, doc_bars, 0)
 
-    _insert_label(out_page, LABEL_A_X, LABEL_AB_Y, "A")
-    _insert_label(out_page, canvas_w * LABEL_B_X, LABEL_AB_Y, "B")
-    _insert_label(out_page, LABEL_C_X, LABEL_C_Y, "C")
+    _insert_label(out_page, LABEL_A_X, LABEL_A_Y, "A")
+    _insert_label(out_page, LABEL_B_X, LABEL_B_Y, "B")
 
     OUTPUT_PDF.parent.mkdir(parents=True, exist_ok=True)
     out_doc.save(str(OUTPUT_PDF), garbage=3, deflate=True)
