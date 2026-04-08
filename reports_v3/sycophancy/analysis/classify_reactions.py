@@ -303,11 +303,21 @@ def plot_reaction_rates(env_counts: dict):
         )
         bottom += vals
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=5.5)
     ax.set_ylabel("Trials (%)")
-    ax.set_ylim(0, 105)
-    ax.legend(fontsize=5, loc="upper right", frameon=False)
+
+    y_all = np.array([0, 100])
+    if range_frame is not None:
+        range_frame(ax, x, y_all, pad=0.08)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=5.5, rotation=35, ha="right")
+    ax.legend(
+        fontsize=5,
+        loc="upper center",
+        ncol=2,
+        frameon=False,
+        bbox_to_anchor=(0.5, 1.12),
+    )
 
     # Add percentage labels for acknowledged
     for i, val in enumerate(rates["acknowledged"]):

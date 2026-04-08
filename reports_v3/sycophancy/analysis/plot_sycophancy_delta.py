@@ -173,14 +173,15 @@ for i, d in enumerate(env_data):
         fontweight="bold",
     )
 
-ax.set_xticks(x)
-ax.set_xticklabels(labels, fontsize=5.5, rotation=35, ha="right")
 ax.set_ylabel("$\\Delta$ Success Rate (%)")
 
 y_range = np.array(
     [d["ci_lo"] for d in env_data] + [d["ci_hi"] for d in env_data] + deltas
 )
-range_frame(ax, x, y_range, pad=0.15)
+range_frame(ax, x, y_range, pad=0.08)
+
+ax.set_xticks(x)
+ax.set_xticklabels(labels, fontsize=5.5, rotation=35, ha="right")
 
 fig.tight_layout()
 
