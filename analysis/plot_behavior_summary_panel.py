@@ -27,6 +27,18 @@ lama_aesthetics.get_style("main")
 
 LABEL_SIZE = 10
 
+# Abbreviated environment labels for compact tick labels in panels.
+SHORT_ENV_LABELS: dict[str, str] = {
+    "afm": "AFM Exp.",
+    "catalyst": "Adsorp. Surface",
+    "md": "Mol. Simulation",
+    "ml": "ML Property",
+    "resistor": "Circuit Inference",
+    "retro": "Retrosynthesis",
+    "spectra": "Spectra Elucid.",
+    "wetlab": "Inorg. Analysis",
+}
+
 OUT_DIR = Path(__file__).parent / "results" / "figures" / "fig_4_app"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_FILE_1 = OUT_DIR / "app_fig4_behavior_panel_1.pdf"
@@ -219,7 +231,7 @@ def plot_action_distribution_panel(
     ax.set_ylim(0, 1.06)
     ax.set_xticks(x_centers)
     ax.set_xticklabels(
-        [action_plots.ENV_LABELS.get(env, str(env).capitalize()) for env in env_order]
+        [SHORT_ENV_LABELS.get(env, str(env).capitalize()) for env in env_order]
     )
     ax.set_ylabel("Fraction of Tool Calls by Action Type")
 
@@ -281,7 +293,7 @@ def plot_output_tokens_environment(ax, results_df: pd.DataFrame) -> None:
         for environment in environments
     ]
     labels = [
-        action_plots.ENV_LABELS.get(environment) or str(environment).capitalize()
+        SHORT_ENV_LABELS.get(environment, str(environment).capitalize())
         for environment in environments
     ]
 
@@ -655,7 +667,7 @@ def main() -> None:
         2,
         1,
         height_ratios=[11.2, 0.2],
-        hspace=0.45,
+        hspace=0.65,
     )
     top_grid1 = outer_grid1[0].subgridspec(1, 2, wspace=0.26)
     ax_action_agent = fig1.add_subplot(top_grid1[0, 0])
@@ -794,7 +806,7 @@ def main() -> None:
         ax_tool_calls,
         tool_call_df,
         "environment",
-        action_plots.ENV_LABELS,
+        SHORT_ENV_LABELS,
         "",
         max_display_value=tool_call_plots.ENVIRONMENT_BOXPLOT_MAX,
         box_color=tool_call_plots.PLOT_COLOR,

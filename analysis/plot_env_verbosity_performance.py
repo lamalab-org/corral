@@ -61,13 +61,14 @@ COLORS = {"brief": "#4C72B0", "workflow": "#DD8452", "comprehensive": "#55A868"}
 MARKERS = {"workflow": "D", "comprehensive": "o"}
 
 ENV_LABELS = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "MD",
-    "ml": "ML",
-    "resistor": "Resistor",
-    "retro": "Retro",
-    "spectra": "Spectra",
+    "afm": "AFM Experimental\nExecution",
+    "catalyst": "Adsorption Surface\nConstruction",
+    "md": "Molecular\nSimulation",
+    "ml": "ML-Based\nProperty",
+    "resistor": "Circuit Inference",
+    "retro": "Retrosynthetic\nPlanning",
+    "spectra": "Spectroscopic\nStructure Elucidation",
+    "wetlab": "Inorganic\nQualitative Analysis",
 }
 MODEL_LABELS = {
     "claude-4.5": "Claude 4.5",
@@ -139,7 +140,7 @@ def plot_horizontal_verbosity_bars(
     pivot_df: pd.DataFrame,
     groups: list[str],
     group_labels: list[str],
-    y_label: str,
+    y_label: str | None = None,
     *,
     bar_width: float = 0.22,
     gap_width: float = 0.1,
@@ -193,7 +194,8 @@ def plot_horizontal_verbosity_bars(
         )
 
     ax.set_xlabel("Average Score")
-    ax.set_ylabel(y_label)
+    if y_label is not None:
+        ax.set_ylabel(y_label)
     range_frame(ax, np.array([0, 1]), y_centers)
     # Override y-axis: spine bounds must match categorical tick positions
     ax.spines["left"].set_bounds(y_centers[0], y_centers[-1])
@@ -268,7 +270,6 @@ def plot_environment_summary(ax_bar: plt.Axes, ax_delta: plt.Axes) -> None:
         env_pivot,
         envs,
         yticklabels,
-        "Environment",
         show_legend=False,
     )
 

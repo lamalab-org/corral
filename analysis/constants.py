@@ -48,9 +48,9 @@ MODEL_CANONICAL: dict[str, str] = {
 # Display names use dashes (human-readable form) while canonical keys use
 # underscores (safe for column names and config identifiers).
 MODEL_DISPLAY: dict[str, str] = {
-    "claude_4_5": "claude-4.5",
-    "gpt_4o": "gpt-4o",
-    "gpt_oss_120b": "gpt-oss-120b",
+    "claude_4_5": "Claude-4.5-Sonnet",
+    "gpt_4o": "GPT-4o",
+    "gpt_oss_120b": "GPT-Oss-120B",
 }
 
 # V2 top-level dir names may differ from the v1 filename fragments; a separate
