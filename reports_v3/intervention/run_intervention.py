@@ -102,6 +102,13 @@ def parse_args():
         type=str,
         default=MODEL,
     )
+    parser.add_argument(
+        "--task-ids",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Optional: only run these task IDs (subset filter)",
+    )
     args = parser.parse_args()
 
     # Validate: baseline needs task-selection, intervention needs trace-registry
@@ -177,6 +184,11 @@ def main():
         task_ids, trace_pool = load_intervention_task_ids_and_trace_pool(
             args.trace_registry, args.env, args.agent, args.intervention
         )
+
+    # Optional: filter to specific task IDs
+    if args.task_ids:
+        task_ids = [t for t in task_ids if t in args.task_ids]
+        trace_pool = {k: v for k, v in trace_pool.items() if k in args.task_ids}
 
     if not task_ids:
         logger.error(f"No tasks found for {args.env}/{args.agent}")

@@ -8,6 +8,7 @@ Per-task plots: one figure per environment.
 Reads from analysis/results.csv (output of aggregate_results.py).
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -710,16 +711,29 @@ def _plot_react_only_panel(ax, env_df, env, show_title=True):
         ax.tick_params(axis="y", labelsize=8)
 
 
-def plot_recovery_curves_react_only(df: pd.DataFrame, output_dir: Path):
+def plot_recovery_curves_react_only(
+    df: pd.DataFrame, output_dir: Path, env_list: list[str] | None = None
+):
     """2x3 grid: ReAct only, both success & failed in same panel.
 
     Row 1: spectra, wetlab, retrosynthesis
     Row 2: resistor, md, ml
     """
-    REACT_ENV_ORDER = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
+    REACT_ENV_ORDER = env_list or [
+        "spectra",
+        "wetlab",
+        "retrosynthesis",
+        "resistor",
+        "md",
+        "ml",
+    ]
     react_df = df[df["agent"] == "react"]
 
-    fig, axes = plt.subplots(2, 3, figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT))
+    n_cols = min(3, len(REACT_ENV_ORDER))
+    n_rows = (len(REACT_ENV_ORDER) + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT))
+    if n_rows == 1:
+        axes = axes.reshape(1, -1)
 
     # Row 0: first 3 envs
     for col, env in enumerate(REACT_ENV_ORDER[:3]):
@@ -761,9 +775,18 @@ def plot_recovery_curves_react_only(df: pd.DataFrame, output_dir: Path):
     plt.close(fig)
 
 
-def plot_recovery_curves_react_only_1row(df: pd.DataFrame, output_dir: Path):
-    """1x5 grid: ReAct only, all environments in one row."""
-    REACT_ENV_ORDER = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
+def plot_recovery_curves_react_only_1row(
+    df: pd.DataFrame, output_dir: Path, env_list: list[str] | None = None
+):
+    """1xN grid: ReAct only, all environments in one row."""
+    REACT_ENV_ORDER = env_list or [
+        "spectra",
+        "wetlab",
+        "retrosynthesis",
+        "resistor",
+        "md",
+        "ml",
+    ]
     react_df = df[df["agent"] == "react"]
     n_envs = len(REACT_ENV_ORDER)
 
@@ -801,6 +824,14 @@ def plot_recovery_curves_react_only_1row(df: pd.DataFrame, output_dir: Path):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--no-md",
+        action="store_true",
+        help="Exclude md environment from plots",
+    )
+    args = parser.parse_args()
+
     results_path = INTERVENTION_ROOT / "analysis" / "results.csv"
     if not results_path.exists():
         logger.error(f"{results_path} not found. Run aggregate_results.py first.")
@@ -811,11 +842,15 @@ def main():
     output_dir = INTERVENTION_ROOT / "analysis" / "figures"
     output_dir.mkdir(exist_ok=True)
 
+    env_list = None
+    if args.no_md:
+        env_list = [e for e in ENVIRONMENTS if e != "md"]
+
     plot_recovery_curves(results_df, output_dir)
     plot_recovery_curves_averaged(results_df, output_dir)
     plot_recovery_curves_combined(results_df, output_dir)
-    plot_recovery_curves_react_only(results_df, output_dir)
-    plot_recovery_curves_react_only_1row(results_df, output_dir)
+    plot_recovery_curves_react_only(results_df, output_dir, env_list=env_list)
+    plot_recovery_curves_react_only_1row(results_df, output_dir, env_list=env_list)
     plot_per_task_recovery(results_df, output_dir)
 
     logger.info(f"\nDone. Figures saved to {output_dir}")

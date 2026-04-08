@@ -1,8 +1,8 @@
-"""Plot Pass^k vs k averaged over ReAct & ToolCalling.
+"""Plot Pass^k vs k averaged over ReAct & ToolCalling, plus per-agent version.
 
-2x3 grid: top row = success interventions, bottom row = failed interventions.
+2xN grid (averaged): top row = success, bottom row = failed.
+4xN grid (per-agent): rows = Success(ReAct), Success(TC), Failed(ReAct), Failed(TC).
 Columns = environments. Baseline shown in both rows as reference.
-Opacity decreases for steps further from baseline.
 """
 
 import json
@@ -13,6 +13,7 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics.plotutils import range_frame
 
 lama_aesthetics.get_style("main")
 
@@ -45,6 +46,17 @@ STEP_MARKERS = {
     "stepn1": "^",
     "stepn2": "v",
 }
+
+ENV_LABELS = {
+    "spectra": "Spectroscopic Structure\nElucidation",
+    "wetlab": "Inorganic Qualitative\nAnalysis",
+    "resistor": "Circuit\nInference",
+    "md": "Molecular\nSimulation",
+    "ml": "ML-based Property\nPrediction",
+    "retrosynthesis": "Retrosynthetic\nPlanning",
+}
+
+AGENT_LABELS = {"react": "ReAct", "toolcalling": "ToolCalling"}
 
 
 def load_metrics(env: str, agent: str, step: str) -> dict | None:
@@ -79,16 +91,6 @@ def avg_pass_caret(env: str, step: str) -> tuple[list[int], list[float]] | None:
     truncated = [v[:min_len] for v in all_vals]
     avg = np.mean(truncated, axis=0)
     return list(range(1, len(avg) + 1)), avg.tolist()
-
-
-ENV_LABELS = {
-    "spectra": "Spectroscopic Structure\nElucidation",
-    "wetlab": "Inorganic Qualitative\nAnalysis",
-    "resistor": "Circuit\nInference",
-    "md": "Molecular\nSimulation",
-    "ml": "ML-based Property\nPrediction",
-    "retrosynthesis": "Retrosynthetic\nPlanning",
-}
 
 
 def plot_row(axes_row, environments, steps, step_color, row_label):
@@ -144,8 +146,7 @@ def plot_row(axes_row, environments, steps, step_color, row_label):
             ax.set_ylabel(f"{row_label}\nPass^k")
 
         if all_k_vals and all_y_vals:
-            ax.set_ylim(-0.05, 1.05)
-            ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
+            range_frame(ax, np.array(all_k_vals), np.array(all_y_vals), pad=0.05)
         else:
             ax.text(
                 0.5,
@@ -159,9 +160,6 @@ def plot_row(axes_row, environments, steps, step_color, row_label):
             )
             ax.set_xticks([])
             ax.set_yticks([])
-
-
-AGENT_LABELS = {"react": "ReAct", "toolcalling": "ToolCalling"}
 
 
 def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
@@ -217,8 +215,7 @@ def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
             ax.set_ylabel(f"{row_label}\nPass^k")
 
         if all_k_vals and all_y_vals:
-            ax.set_ylim(-0.05, 1.05)
-            ax.legend(loc="upper right", fontsize=5, framealpha=0.9)
+            range_frame(ax, np.array(all_k_vals), np.array(all_y_vals), pad=0.05)
         else:
             ax.text(
                 0.5,
@@ -237,12 +234,11 @@ def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
 def main():
     n_envs = len(ENVIRONMENTS)
 
-    # --- Averaged version (2 rows) ---
+    # --- Averaged version (2 rows: success / failed) ---
     fig, axes = plt.subplots(
         2,
         n_envs,
         figsize=(TWO_COL_WIDTH * n_envs / 3, TWO_COL_HEIGHT),
-        sharey=True,
     )
 
     plot_row(axes[0], ENVIRONMENTS, SUCCESS_STEPS, SUCCESS_COLOR, "Success")
@@ -267,8 +263,7 @@ def main():
     fig, axes = plt.subplots(
         4,
         n_envs,
-        figsize=(TWO_COL_WIDTH, 1.5 * TWO_COL_HEIGHT),
-        sharey=True,
+        figsize=(TWO_COL_WIDTH * n_envs / 3, 1.5 * TWO_COL_HEIGHT),
     )
 
     plot_row_agent(
@@ -280,18 +275,13 @@ def main():
         "toolcalling",
         SUCCESS_STEPS,
         SUCCESS_COLOR,
-        "Success\n(ToolCalling)",
+        "Success\n(TC)",
     )
     plot_row_agent(
         axes[2], ENVIRONMENTS, "react", FAILED_STEPS, FAILED_COLOR, "Failed\n(ReAct)"
     )
     plot_row_agent(
-        axes[3],
-        ENVIRONMENTS,
-        "toolcalling",
-        FAILED_STEPS,
-        FAILED_COLOR,
-        "Failed\n(ToolCalling)",
+        axes[3], ENVIRONMENTS, "toolcalling", FAILED_STEPS, FAILED_COLOR, "Failed\n(TC)"
     )
 
     # Titles only on top row
@@ -301,9 +291,19 @@ def main():
         for ax in axes[row]:
             ax.set_title("")
 
-    # x-labels only on bottom row
     for ax in axes[3]:
         ax.set_xlabel("k")
+
+    # Shared legend in bottom-right subplot
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        axes[-1, -1].legend(
+            handles,
+            labels,
+            loc="upper right",
+            fontsize=5,
+            framealpha=0.9,
+        )
 
     fig.tight_layout()
 

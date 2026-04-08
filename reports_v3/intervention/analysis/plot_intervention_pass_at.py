@@ -55,6 +55,7 @@ ENV_LABELS = {
     "retrosynthesis": "Retrosynthetic\nPlanning",
 }
 
+
 AGENT_LABELS = {"react": "ReAct", "toolcalling": "ToolCalling"}
 
 
@@ -146,7 +147,6 @@ def plot_row(axes_row, environments, steps, step_color, row_label):
 
         if all_k_vals and all_y_vals:
             ax.set_ylim(-0.05, 1.05)
-            ax.legend(loc="upper left", fontsize=6, framealpha=0.9)
         else:
             ax.text(
                 0.5,
@@ -216,7 +216,6 @@ def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
 
         if all_k_vals and all_y_vals:
             ax.set_ylim(-0.05, 1.05)
-            ax.legend(loc="upper left", fontsize=5, framealpha=0.9)
         else:
             ax.text(
                 0.5,
@@ -302,6 +301,17 @@ def main():
     # x-labels only on bottom row
     for ax in axes[3]:
         ax.set_xlabel("k")
+
+    # Shared legend in bottom-right subplot
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        axes[-1, -1].legend(
+            handles,
+            labels,
+            loc="lower right",
+            fontsize=5,
+            framealpha=0.9,
+        )
 
     fig.tight_layout()
 
