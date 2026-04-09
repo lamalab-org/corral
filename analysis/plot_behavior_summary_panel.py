@@ -27,9 +27,47 @@ lama_aesthetics.get_style("main")
 
 LABEL_SIZE = 10
 
+
+def format_display_text(text: str) -> str:
+    """Format plot text using the requested title-case convention."""
+    stripped_text = text.replace("_", " ").strip()
+    if not stripped_text:
+        return stripped_text
+    return stripped_text[0].upper() + stripped_text[1:].lower()
+
+
+# Abbreviated environment labels for compact tick labels in panels.
+SHORT_ENV_LABELS: dict[str, str] = {
+    "afm": "Afm exp.",
+    "catalyst": "Adsorp. surface",
+    "md": "Mol. simulation",
+    "ml": "Ml property",
+    "resistor": "Circuit inference",
+    "retro": "Retrosynthesis",
+    "spectra": "Spectra elucid.",
+    "wetlab": "Inorg. analysis",
+}
+
+MODEL_LABELS: dict[str, str] = {
+    "gpt-oss-120b": "gpt-oss-120b",
+    "gpt-4o": "GPT-4o",
+    "claude-4.5": "Claude-4.5-Sonnet",
+}
+
+AGENT_TYPE_LABELS: dict[str, str] = {
+    "react": "ReAct",
+    "tool_calling": "Tool calling",
+}
+
+ACTION_LABELS: dict[str, str] = {
+    action_key: format_display_text(label)
+    for action_key, label in action_plots.ACTION_LABELS.items()
+}
+
 OUT_DIR = Path(__file__).parent / "results" / "figures" / "fig_4_app"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-OUT_FILE = OUT_DIR / "app_fig4_behavior_panel.pdf"
+OUT_FILE_1 = OUT_DIR / "app_fig4_behavior_panel_1.pdf"
+OUT_FILE_2 = OUT_DIR / "app_fig4_behavior_panel_2.pdf"
 
 
 def add_panel_label(ax, label: str, x: float = -0.18, y: float = 1.08) -> None:
@@ -218,9 +256,9 @@ def plot_action_distribution_panel(
     ax.set_ylim(0, 1.06)
     ax.set_xticks(x_centers)
     ax.set_xticklabels(
-        [action_plots.ENV_LABELS.get(env, str(env).capitalize()) for env in env_order]
+        [SHORT_ENV_LABELS.get(env, format_display_text(str(env))) for env in env_order]
     )
-    ax.set_ylabel("Fraction of Tool Calls by Action Type")
+    ax.set_ylabel(format_display_text("Fraction of tool calls by action type"))
 
     if n_env > 0:
         range_frame(
@@ -234,9 +272,12 @@ def plot_action_distribution_panel(
 
     add_text_legend(
         ax,
-        subgroup_col.replace("_", " ").title(),
+        format_display_text(subgroup_col),
         [
-            (subgroup_markers[subgroup], subgroup_labels.get(subgroup, str(subgroup)))
+            (
+                subgroup_markers[subgroup],
+                subgroup_labels.get(subgroup, format_display_text(str(subgroup))),
+            )
             for subgroup in subgroup_order
         ],
         loc="lower center",
@@ -280,7 +321,7 @@ def plot_output_tokens_environment(ax, results_df: pd.DataFrame) -> None:
         for environment in environments
     ]
     labels = [
-        action_plots.ENV_LABELS.get(environment) or str(environment).capitalize()
+        SHORT_ENV_LABELS.get(environment, format_display_text(str(environment)))
         for environment in environments
     ]
 
@@ -304,7 +345,7 @@ def plot_output_tokens_environment(ax, results_df: pd.DataFrame) -> None:
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels)
-    ax.set_xlabel("Average Output Tokens Per Message")
+    ax.set_xlabel(format_display_text("Average output tokens per message"))
     ax.set_ylabel("")
     range_frame(
         ax,
@@ -325,6 +366,7 @@ def plot_output_token_distribution(
     group_col: str,
     label_map: dict[str, str],
     colors: list[str],
+    group_order: list[str] | None = None,
     x_scale: str = "symlog",
     show_legend: bool = False,
 ) -> None:
@@ -336,6 +378,7 @@ def plot_output_token_distribution(
         group_col: Column defining the comparison groups.
         label_map: Human-readable labels for group values.
         colors: Color cycle for the grouped point clouds.
+        group_order: Optional explicit order for displayed groups.
         x_scale: Either `log` or `symlog`.
         show_legend: Whether to draw the distribution encoding legend.
 
@@ -351,6 +394,11 @@ def plot_output_token_distribution(
         .sort_values(ascending=True)
     )
     groups = list(grouped.index)
+    if group_order is not None:
+        ordered_groups = [group for group in group_order if group in grouped.index]
+        groups = ordered_groups + [
+            group for group in groups if group not in set(ordered_groups)
+        ]
     raw_values_per_group = [
         results_df.loc[results_df[group_col].eq(group), "output_tokens_per_message"]
         .dropna()
@@ -377,7 +425,7 @@ def plot_output_token_distribution(
     groups = [group for group, _ in non_empty]
     values_per_group = [values for _, values in non_empty]
     positions = np.arange(1, len(groups) + 1)
-    labels = [label_map.get(group, str(group)) for group in groups]
+    labels = [label_map.get(group, format_display_text(str(group))) for group in groups]
     plot_colors = [colors[i % len(colors)] for i in range(len(groups))]
     flattened_values = np.concatenate(values_per_group)
     positive_values = flattened_values[flattened_values > 0]
@@ -425,7 +473,7 @@ def plot_output_token_distribution(
 
     ax.set_yticks(positions)
     ax.set_yticklabels(labels)
-    ax.set_xlabel(f"Output Tokens Per Message ({x_scale.title()} Scale)")
+    ax.set_xlabel(format_display_text(f"Output tokens per message ({x_scale} scale)"))
     ax.set_ylabel("")
 
     upper_limit = output_token_plots.get_axis_max(flattened_values, minimum=1.0)
@@ -559,7 +607,10 @@ def plot_tool_call_ridgeline_panel(
 
     group_keys = [group_key for group_key, _ in non_empty]
     plot_data = [group_values for _, group_values in non_empty]
-    labels = [label_map.get(group_key, str(group_key)) for group_key in group_keys]
+    labels = [
+        label_map.get(group_key, format_display_text(str(group_key)))
+        for group_key in group_keys
+    ]
     n_groups = len(group_keys)
     overlap = 0.6
     inner_grid = panel_spec.subgridspec(n_groups, 1, hspace=-overlap)
@@ -619,16 +670,16 @@ def plot_tool_call_ridgeline_panel(
         if idx < n_groups - 1:
             ax.tick_params(axis="x", which="both", labelbottom=False, bottom=False)
 
-    axes[-1].set_xlabel("Tool Calls Per Task Trial")
+    axes[-1].set_xlabel(format_display_text("Tool calls per task trial"))
     axes[-1].spines["bottom"].set_visible(True)
     return axes[0]
 
 
 def main() -> None:
-    """Build and save the combined environment-behavior panel.
+    """Build and save the two combined environment-behavior panels.
 
     Returns:
-        None: The function saves the panel PDF.
+        None: The function saves two panel PDFs.
     """
     reports_df = action_plots.load_reports_df()
     action_distribution_df, unknown_tools = action_plots.build_action_distribution_df(
@@ -642,31 +693,24 @@ def main() -> None:
             "No tool-level action data could be extracted from reports.jsonl"
         )
 
-    fig = plt.figure(figsize=(TWO_COL_WIDTH, 6.5 * ONE_COL_HEIGHT))
-    outer_grid = fig.add_gridspec(
-        5,
-        1,
-        height_ratios=[1.9, 1, 1, 1, 1],
-        hspace=0.65,
-    )
-    top_section_grid = outer_grid[0].subgridspec(
+    # Shared label-placement constants
+    X_PAD = 0.018
+    RIGHT_X_OFFSET = 0.1
+    Y_PAD_TOP = -0.005
+    Y_PAD_REST = -0.005
+
+    # ---- Figure 1: panels A and B (action distributions) ------------------
+    fig1 = plt.figure(figsize=(TWO_COL_WIDTH, 2.2 * ONE_COL_HEIGHT))
+    outer_grid1 = fig1.add_gridspec(
         2,
         1,
         height_ratios=[11.2, 0.2],
-        hspace=0.45,
+        hspace=0.65,
     )
-    top_grid = top_section_grid[0].subgridspec(1, 2, wspace=0.26)
-    token_dist_grid = outer_grid[2].subgridspec(1, 2, wspace=0.40)
-    ridge_grid = outer_grid[4].subgridspec(1, 2, wspace=0.42)
-
-    ax_action_agent = fig.add_subplot(top_grid[0, 0])
-    ax_action_model = fig.add_subplot(top_grid[0, 1])
-    ax_action_legend = fig.add_subplot(top_section_grid[1, 0])
-    ax_output_tokens = fig.add_subplot(outer_grid[1, 0])
-    ax_output_tokens_agent = fig.add_subplot(token_dist_grid[0, 0])
-    ax_output_tokens_model = fig.add_subplot(token_dist_grid[0, 1])
-    ax_tool_calls = fig.add_subplot(outer_grid[3, 0])
-
+    top_grid1 = outer_grid1[0].subgridspec(1, 2, wspace=0.26)
+    ax_action_agent = fig1.add_subplot(top_grid1[0, 0])
+    ax_action_model = fig1.add_subplot(top_grid1[0, 1])
+    ax_action_legend = fig1.add_subplot(outer_grid1[1, 0])
     ax_action_legend.axis("off")
 
     plot_action_distribution_panel(
@@ -675,10 +719,10 @@ def main() -> None:
         subgroup_col="agent_type",
         subgroup_order=[
             agent
-            for agent in action_plots.AGENT_TYPE_LABELS
+            for agent in AGENT_TYPE_LABELS
             if agent in set(action_distribution_df["agent_type"])
         ],
-        subgroup_labels=action_plots.AGENT_TYPE_LABELS,
+        subgroup_labels=AGENT_TYPE_LABELS,
     )
     plot_action_distribution_panel(
         ax_action_model,
@@ -686,58 +730,16 @@ def main() -> None:
         subgroup_col="model",
         subgroup_order=[
             model
-            for model in action_plots.MODEL_LABELS
+            for model in ["claude-4.5", "gpt-4o", "gpt-oss-120b"]
             if model in set(action_distribution_df["model"])
         ],
-        subgroup_labels=action_plots.MODEL_LABELS,
-    )
-    plot_output_tokens_environment(ax_output_tokens, output_token_df)
-    plot_output_token_distribution(
-        ax_output_tokens_agent,
-        output_token_df,
-        group_col="agent_type",
-        label_map=action_plots.AGENT_TYPE_LABELS,
-        colors=output_token_plots.AGENT_COLORS,
-        x_scale="symlog",
-        show_legend=False,
-    )
-    plot_output_token_distribution(
-        ax_output_tokens_model,
-        output_token_df,
-        group_col="model",
-        label_map=action_plots.MODEL_LABELS,
-        colors=output_token_plots.MODEL_COLORS,
-        x_scale="symlog",
-        show_legend=True,
-    )
-    tool_call_plots.plot_group_boxplots(
-        ax_tool_calls,
-        tool_call_df,
-        "environment",
-        action_plots.ENV_LABELS,
-        "",
-        max_display_value=tool_call_plots.ENVIRONMENT_BOXPLOT_MAX,
-        box_color=tool_call_plots.PLOT_COLOR,
-    )
-    ridge_ax_agent = plot_tool_call_ridgeline_panel(
-        fig,
-        ridge_grid[0, 0],
-        tool_call_df,
-        group_col="agent_type",
-        label_map=action_plots.AGENT_TYPE_LABELS,
-    )
-    ridge_ax_model = plot_tool_call_ridgeline_panel(
-        fig,
-        ridge_grid[0, 1],
-        tool_call_df,
-        group_col="model",
-        label_map=action_plots.MODEL_LABELS,
+        subgroup_labels=MODEL_LABELS,
     )
 
     category_handles = [
         Patch(
             facecolor=action_plots.ACTION_COLORS[action_category],
-            label=action_plots.ACTION_LABELS[action_category],
+            label=ACTION_LABELS[action_category],
         )
         for action_category in action_plots.ACTION_ORDER
     ]
@@ -747,59 +749,165 @@ def main() -> None:
         bbox_to_anchor=(0.5, -0.6),
         ncol=len(action_plots.ACTION_ORDER),
         frameon=False,
-        title="Action Types",
+        title=format_display_text("Action types"),
         fontsize=LABEL_SIZE,
         title_fontsize=LABEL_SIZE,
     )
 
-    # Unify tick label sizes across all axes
-    for ax in fig.get_axes():
+    for ax in fig1.get_axes():
         ax.tick_params(axis="both", labelsize=LABEL_SIZE)
 
-    # --- Place panel labels with pixel-perfect column alignment ------------
-    # Render once so all layout positions are finalised.
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
+    fig1.canvas.draw()
+    renderer1 = fig1.canvas.get_renderer()
 
-    def _tight_fig_bbox(ax):
-        """Return the tight bounding box of *ax* in figure coordinates."""
-        tb = ax.get_tightbbox(renderer)
+    def _tight_fig_bbox1(ax):
+        tb = ax.get_tightbbox(renderer1)
         if tb is None:
             return ax.get_position()
-        return tb.transformed(fig.transFigure.inverted())
+        return tb.transformed(fig1.transFigure.inverted())
 
-    # Define left-column and right-column label specifications.
-    left_specs = [
-        (ax_action_agent, "A"),
-        (ax_output_tokens, "C"),
-        (ax_output_tokens_agent, "D"),
-        (ax_tool_calls, "F"),
+    left_specs1 = [(ax_action_agent, "A")]
+    right_specs1 = [(ax_action_model, "B")]
+    left_bboxes1 = [_tight_fig_bbox1(ax) for ax, _ in left_specs1]
+    right_bboxes1 = [_tight_fig_bbox1(ax) for ax, _ in right_specs1]
+    left_x1 = min(bb.x0 for bb in left_bboxes1) - X_PAD
+    right_x1 = min(bb.x0 for bb in right_bboxes1) - X_PAD + RIGHT_X_OFFSET
+
+    for (_ax, label), bb in zip(left_specs1, left_bboxes1, strict=True):
+        fig1.text(
+            left_x1,
+            bb.y1 + Y_PAD_TOP,
+            label,
+            fontweight="bold",
+            fontsize=16,
+            color="black",
+            ha="right",
+            va="bottom",
+            clip_on=False,
+        )
+    for (_ax, label), bb in zip(right_specs1, right_bboxes1, strict=True):
+        fig1.text(
+            right_x1,
+            bb.y1 + Y_PAD_TOP,
+            label,
+            fontweight="bold",
+            fontsize=16,
+            color="black",
+            ha="right",
+            va="bottom",
+            clip_on=False,
+        )
+
+    logger.info(
+        f"Fig 1 label alignment -- left_x={left_x1:.4f}, right_x={right_x1:.4f}"
+    )
+    fig1.savefig(OUT_FILE_1, bbox_inches="tight")
+    plt.close(fig1)
+    logger.info(f"Saved figure 1 to {OUT_FILE_1}")
+
+    # ---- Figure 2: panels A-F (formerly C-H) ------------------------------
+    fig2 = plt.figure(figsize=(TWO_COL_WIDTH, 4.5 * ONE_COL_HEIGHT))
+    outer_grid2 = fig2.add_gridspec(
+        4,
+        1,
+        height_ratios=[1, 1, 1, 1],
+        hspace=0.65,
+    )
+    token_dist_grid2 = outer_grid2[1].subgridspec(1, 2, wspace=0.40)
+    ridge_grid2 = outer_grid2[3].subgridspec(1, 2, wspace=0.42)
+
+    ax_output_tokens = fig2.add_subplot(outer_grid2[0, 0])
+    ax_output_tokens_agent = fig2.add_subplot(token_dist_grid2[0, 0])
+    ax_output_tokens_model = fig2.add_subplot(token_dist_grid2[0, 1])
+    ax_tool_calls = fig2.add_subplot(outer_grid2[2, 0])
+
+    plot_output_tokens_environment(ax_output_tokens, output_token_df)
+    plot_output_token_distribution(
+        ax_output_tokens_agent,
+        output_token_df,
+        group_col="agent_type",
+        label_map=AGENT_TYPE_LABELS,
+        colors=output_token_plots.AGENT_COLORS,
+        x_scale="symlog",
+        show_legend=False,
+    )
+    plot_output_token_distribution(
+        ax_output_tokens_model,
+        output_token_df,
+        group_col="model",
+        label_map=MODEL_LABELS,
+        colors=output_token_plots.MODEL_COLORS,
+        group_order=["gpt-oss-120b", "gpt-4o", "claude-4.5"],
+        x_scale="symlog",
+        show_legend=True,
+    )
+    tool_call_plots.plot_group_boxplots(
+        ax_tool_calls,
+        tool_call_df,
+        "environment",
+        SHORT_ENV_LABELS,
+        "",
+        max_display_value=tool_call_plots.ENVIRONMENT_BOXPLOT_MAX,
+        box_color=tool_call_plots.PLOT_COLOR,
+    )
+    ridge_ax_agent = plot_tool_call_ridgeline_panel(
+        fig2,
+        ridge_grid2[0, 0],
+        tool_call_df,
+        group_col="agent_type",
+        label_map=AGENT_TYPE_LABELS,
+    )
+    ridge_ax_model = plot_tool_call_ridgeline_panel(
+        fig2,
+        ridge_grid2[0, 1],
+        tool_call_df,
+        group_col="model",
+        label_map=MODEL_LABELS,
+    )
+
+    ax_tool_calls.set_xlabel(format_display_text("Tool calls per task trial"))
+
+    for ax in fig2.get_axes():
+        ax.tick_params(axis="both", labelsize=LABEL_SIZE)
+
+    fig2.canvas.draw()
+    renderer2 = fig2.canvas.get_renderer()
+
+    def _tight_fig_bbox2(ax):
+        tb = ax.get_tightbbox(renderer2)
+        if tb is None:
+            return ax.get_position()
+        return tb.transformed(fig2.transFigure.inverted())
+
+    # A = output tokens by env (full-width, left label)
+    # B = output token dist by agent type (left col)
+    # C = output token dist by model (right col)
+    # D = tool calls by env (full-width, left label)
+    # E = ridgeline by agent type (left col)
+    # F = ridgeline by model (right col)
+    left_specs2 = [
+        (ax_output_tokens, "A"),
+        (ax_output_tokens_agent, "B"),
+        (ax_tool_calls, "D"),
     ]
-    right_specs = [
-        (ax_action_model, "B"),
-        (ax_output_tokens_model, "E"),
+    right_specs2 = [
+        (ax_output_tokens_model, "C"),
     ]
     if ridge_ax_agent is not None:
-        left_specs.append((ridge_ax_agent, "G"))
+        left_specs2.append((ridge_ax_agent, "E"))
     if ridge_ax_model is not None:
-        right_specs.append((ridge_ax_model, "H"))
+        right_specs2.append((ridge_ax_model, "F"))
 
-    left_bboxes = [_tight_fig_bbox(ax) for ax, _ in left_specs]
-    right_bboxes = [_tight_fig_bbox(ax) for ax, _ in right_specs]
+    left_bboxes2 = [_tight_fig_bbox2(ax) for ax, _ in left_specs2]
+    right_bboxes2 = [_tight_fig_bbox2(ax) for ax, _ in right_specs2]
+    top_labels2 = {"A"}
+    left_x2 = min(bb.x0 for bb in left_bboxes2) - X_PAD
+    right_x2 = min(bb.x0 for bb in right_bboxes2) - X_PAD + RIGHT_X_OFFSET
 
-    # Aligned x = leftmost tight-bbox edge in each column, minus padding.
-    X_PAD = 0.018
-    RIGHT_X_OFFSET = 0.1  # shift B, E, H a bit to the right
-    Y_PAD_TOP = 0.008  # y padding for A and B (top row)
-    Y_PAD_REST = 0.002  # y padding for C-H (lower rows, moved down)
-    left_x = min(bb.x0 for bb in left_bboxes) - X_PAD
-    right_x = min(bb.x0 for bb in right_bboxes) - X_PAD + RIGHT_X_OFFSET
-
-    top_labels = {"A", "B"}
-    for (_ax, label), bb in zip(left_specs, left_bboxes, strict=True):
-        y_pad = Y_PAD_TOP if label in top_labels else Y_PAD_REST
-        fig.text(
-            left_x,
+    for (_ax, label), bb in zip(left_specs2, left_bboxes2, strict=True):
+        y_pad = Y_PAD_TOP if label in top_labels2 else Y_PAD_REST
+        fig2.text(
+            left_x2,
             bb.y1 + y_pad,
             label,
             fontweight="bold",
@@ -809,10 +917,10 @@ def main() -> None:
             va="bottom",
             clip_on=False,
         )
-    for (_ax, label), bb in zip(right_specs, right_bboxes, strict=True):
-        y_pad = Y_PAD_TOP if label in top_labels else Y_PAD_REST
-        fig.text(
-            right_x,
+    for (_ax, label), bb in zip(right_specs2, right_bboxes2, strict=True):
+        y_pad = Y_PAD_TOP if label in top_labels2 else Y_PAD_REST
+        fig2.text(
+            right_x2,
             bb.y1 + y_pad,
             label,
             fontweight="bold",
@@ -823,12 +931,13 @@ def main() -> None:
             clip_on=False,
         )
 
-    logger.info(f"Label alignment -- left_x={left_x:.4f}, right_x={right_x:.4f}")
+    logger.info(
+        f"Fig 2 label alignment -- left_x={left_x2:.4f}, right_x={right_x2:.4f}"
+    )
+    fig2.savefig(OUT_FILE_2, bbox_inches="tight")
+    plt.close(fig2)
+    logger.info(f"Saved figure 2 to {OUT_FILE_2}")
 
-    fig.savefig(OUT_FILE, bbox_inches="tight")
-    plt.close(fig)
-
-    logger.info(f"Saved figure to {OUT_FILE}")
     logger.info(f"Skipped {skipped_output_trials} trials without message histories")
     logger.info(f"Skipped {skipped_tool_call_trials} trials without tool call counts")
     if unknown_tools:

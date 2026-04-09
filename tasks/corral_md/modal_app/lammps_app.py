@@ -83,7 +83,7 @@ def _run_lammps(
             "-log",
             log_file,
         ]
-        subprocess.run(command, shell=False, check=True, capture_output=True, text=True)
+        subprocess.run(command, shell=False, check=True, capture_output=True, text=False)
         # log_file = Path(log_file)
         with Path(log_file).open("rb") as log_f:
             log_content = log_f.read()
@@ -93,11 +93,83 @@ def _run_lammps(
     except subprocess.CalledProcessError:
         import log_lammps_reader
 
-        error_log = log_lammps_reader.log_starts_with(log_file, "ERROR")
-        # Raise ValueError without chaining the original exception
+        log_path = Path(log_file)
+        if log_path.exists():
+            raw = log_path.read_bytes()
+            log_path.write_text(raw.decode("utf-8", errors="ignore"), encoding="utf-8")
+
+        try:
+            error_log = log_lammps_reader.log_starts_with(log_file, "ERROR")
+        except Exception:
+            error_log = "Could not read error log"
+
         raise ValueError(f"LAMMPS simulation failed: {error_log}") from None
     finally:
+        # Sanitize log file regardless of success or failure
+        log_path = Path(log_file)
+        if log_path.exists():
+            raw = log_path.read_bytes()
+            log_path.write_text(raw.decode("utf-8", errors="ignore"), encoding="utf-8")
+        
         os.chdir(original_cwd)  # Restore original directory
+
+# def _run_lammps(
+#     input_file: str, log_file: str, directory_path: str | None = None, CPUS: int = 1
+# ) -> None:
+#     import os
+#     import subprocess
+
+#     lmp_command = "/root/lammps/build/lmp"
+#     original_cwd = Path.cwd()
+#     if directory_path:
+#         os.chdir(directory_path)
+#     try:
+#         command = [
+#             "mpirun",
+#             "--allow-run-as-root",
+#             "--bind-to",
+#             "core",
+#             "--map-by",
+#             "core",
+#             "-np",
+#             str(CPUS),
+#             lmp_command,
+#             "-in",
+#             input_file,
+#             "-log",
+#             log_file,
+#         ]
+#         subprocess.run(command, shell=False, check=True, capture_output=True, text=True)
+#         with Path(log_file).open("rb") as log_f:
+#             log_content = log_f.read()
+#         text = log_content.decode("utf-8", errors="ignore")
+#         with Path(log_file).open("w", encoding="utf-8") as dst:
+#             dst.write(text)
+#     # except subprocess.CalledProcessError:
+#     #     import log_lammps_reader
+
+#     #     log_path = Path(log_file)
+#     #     if log_path.exists():
+#     #         raw = log_path.read_bytes()
+#     #         log_path.write_text(raw.decode("utf-8", errors="ignore"), encoding="utf-8")
+
+#     #     error_log = log_lammps_reader.log_starts_with(log_file, "ERROR")
+#     #     raise ValueError(f"LAMMPS simulation failed: {error_log}") from None
+#     except subprocess.CalledProcessError:
+#         import log_lammps_reader
+
+#         log_path = Path(log_file)
+#         print(f"Log file exists: {log_path.exists()}")  # ← add this
+#         if log_path.exists():
+#             raw = log_path.read_bytes()
+#             print(f"Raw bytes length: {len(raw)}")  # ← add this
+#             log_path.write_text(raw.decode("utf-8", errors="ignore"), encoding="utf-8")
+#             print("Sanitization done")  # ← add this
+
+#         error_log = log_lammps_reader.log_starts_with(log_file, "ERROR")
+#         raise ValueError(f"LAMMPS simulation failed: {error_log}") from None
+#     finally:
+#         os.chdir(original_cwd)
 
 
 def ensure_directory_exists(file_path: str) -> None:
@@ -657,8 +729,13 @@ def run_lammps(input_file: str, log_file: str) -> None:
         volume_sim.commit()
 
     except Exception as e:
-        raise ValueError(f"LAMMPS simulation failed: {e!s}") from e
+        # raise ValueError(f"LAMMPS simulation failed: {e!s}") from e
 
+        log_path = Path(input_file).parent / log_file
+        if log_path.exists():
+            raw = log_path.read_bytes()
+            log_path.write_text(raw.decode("utf-8", errors="ignore"), encoding="utf-8")
+        raise ValueError(f"{e!s}") from e
 
 @app.function(
     image=lammps_image,
