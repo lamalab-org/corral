@@ -14,7 +14,7 @@ from lama_aesthetics import ONE_COL_WIDTH
 from loguru import logger
 from plot_config import ENVIRONMENT_NAMES, FONT_SIZES, MODEL_COLOURS, MODEL_NAMES
 
-MODEL_COLOR_MAP = dict(zip(MODEL_NAMES.keys(), MODEL_COLOURS, strict=False))
+MODEL_COLOR_MAP = MODEL_COLOURS
 
 lama_aesthetics.get_style("main")
 

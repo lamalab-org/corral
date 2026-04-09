@@ -1,20 +1,33 @@
 rule all:
     input:
-        # Baseline model (no task or category effects)
+        "results/data/reports.jsonl",
+        "results/data/qa_topic_reports.jsonl",
+        # IRT models
         "results/irt_baseline/agent_trace.nc",
         "results/irt_baseline/results.json",
-        # Category effects only
         "results/irt_category/agent_trace.nc",
         "results/irt_category/results.json",
-        # Task effects only
         "results/irt_task/agent_trace.nc",
         "results/irt_task/results.json",
-        # Both category and task effects
         "results/irt_category_task/agent_trace.nc",
         "results/irt_category_task/results.json",
-        # Model 3: Environment-specific ability slopes + tasks (best model)
         "results/model3_abilities_env/agent_trace.nc",
         "results/model3_abilities_env/results.json",
+        # Dev analysis plots
+        "results/figures/fig_4_app/app_fig4_behavior_panel_1.pdf",
+        "results/figures/fig_4_app/app_fig4_behavior_panel_2.pdf",
+        "results/figures/fig_5_app/app_fig5_ver1.pdf",
+        "results/figures/analysis/avg_output_tokens_per_message_by_environment.pdf",
+        "results/figures/analysis/avg_output_tokens_per_message_by_model_symlog.pdf",
+        "results/figures/analysis/avg_output_tokens_per_message_by_agent_type_symlog.pdf",
+        "results/figures/analysis/avg_tool_calls_per_task_by_environment.pdf",
+        "results/figures/analysis/avg_tool_calls_per_task_by_model.pdf",
+        "results/figures/analysis/avg_tool_calls_per_task_by_agent_type.pdf",
+        "results/figures/analysis/action_distribution_by_environment_and_agent.pdf",
+        "results/figures/analysis/action_distribution_by_environment_and_model.pdf",
+        "results/figures/fig_epistemology/overall_pattern_bars_horizontal_individual.pdf",
+        "results/figures/fig_epistemology/epst_combined.pdf",
+        "results/tables/qa_scores_table.tex",
 
 
 rule download_reports:
@@ -443,3 +456,142 @@ rule plot_panel4_radar_and_variance:
         "results/logs/plot_panel4_radar_and_variance.log",
     shell:
         "{PYTHON} plot_panel4_radar_and_variance.py > {log} 2>&1"
+
+
+### Annotation figure scripts
+
+rule retrieve_annotations_from_mongo:
+    output:
+        "data/annotation_data/corral_dump.json",
+    log:
+        "results/logs/retrieve_annotations_from_mongo.log",
+    shell:
+        "python retrieve_annotations_from_mongo.py > {log} 2>&1"
+
+rule filter_annotations:
+    input:
+        "data/annotation_data/corral_dump.json",
+    output:
+        "results/data/filtered_annotations.json",
+    log:
+        "results/logs/filter_annotations.log",
+    shell:
+        "python filter_annotations.py > {log} 2>&1"
+
+rule plot_marker_vs_scaffold:
+    input:
+        "results/data/filtered_annotations.json",
+    output:
+        "results/figures/fig_5/marker_impact_raw_counts.pdf",
+        "results/figures/fig_5/stacked_regression_raw_counts.pdf",
+    log:
+        "results/logs/plot_marker_vs_scaffold.log",
+    shell:
+        "python plot_marker_vs_scaffold.py > {log} 2>&1"
+rule plot_avg_output_tokens:
+    input:
+        "results/data/reports.jsonl",
+    output:
+        "results/figures/analysis/avg_output_tokens_per_message_by_environment.pdf",
+        "results/figures/analysis/avg_output_tokens_per_message_by_model_symlog.pdf",
+        "results/figures/analysis/avg_output_tokens_per_message_by_agent_type_symlog.pdf",
+    log:
+        "results/logs/plot_avg_output_tokens.log",
+    shell:
+        "python plot_avg_output_tokens.py > {log} 2>&1"
+
+
+rule plot_avg_tool_calls_per_task:
+    input:
+        "results/data/reports.jsonl",
+    output:
+        "results/figures/analysis/avg_tool_calls_per_task_by_environment.pdf",
+        "results/figures/analysis/avg_tool_calls_per_task_by_model.pdf",
+        "results/figures/analysis/avg_tool_calls_per_task_by_agent_type.pdf",
+    log:
+        "results/logs/plot_avg_tool_calls_per_task.log",
+    shell:
+        "python plot_avg_tool_calls_per_task.py > {log} 2>&1"
+
+
+rule plot_action_distributions_across_environments:
+    input:
+        "results/data/reports.jsonl",
+    output:
+        "results/figures/analysis/action_distribution_by_environment_and_agent.pdf",
+        "results/figures/analysis/action_distribution_by_environment_and_model.pdf",
+    log:
+        "results/logs/plot_action_distributions_across_environments.log",
+    shell:
+        "python plot_action_distributions_across_environments.py > {log} 2>&1"
+
+
+rule plot_behavior_summary_panel:
+    input:
+        "results/data/reports.jsonl",
+    output:
+        "results/figures/fig_4_app/app_fig4_behavior_panel_1.pdf",
+        "results/figures/fig_4_app/app_fig4_behavior_panel_2.pdf",
+    log:
+        "results/logs/plot_behavior_summary_panel.log",
+    shell:
+        "python plot_behavior_summary_panel.py > {log} 2>&1"
+
+
+rule plot_env_verbosity_performance:
+    input:
+        "results/data/reports.jsonl",
+    output:
+        "results/figures/fig_5_app/app_fig5_ver1.pdf",
+    log:
+        "results/logs/plot_env_verbosity_performance.log",
+    shell:
+        "python plot_env_verbosity_performance.py > {log} 2>&1"
+
+
+rule run_reasoning_analysis_skip_annotate:
+    output:
+        "../reasoning_reports/analysis/annotation_summary.json",
+        "../reasoning_reports/analysis/results/tables/productive_motifs.tex",
+        "../reasoning_reports/analysis/results/tables/reasoning_breakdowns.tex",
+    log:
+        "results/logs/run_reasoning_analysis_skip_annotate.log",
+    shell:
+        "python ../reasoning_reports/analyze.py --skip-annotate > {log} 2>&1"
+
+
+
+rule plot_overall_pattern_bars_horizontal_individual:
+    input:
+        "../reasoning_reports/analysis/annotation_summary.json",
+        "../reasoning_reports/analysis/results/tables/productive_motifs.tex",
+        "../reasoning_reports/analysis/results/tables/reasoning_breakdowns.tex",
+    output:
+        "results/figures/fig_epistemology/overall_pattern_bars_horizontal_individual.pdf",
+    log:
+        "results/logs/plot_overall_pattern_bars_horizontal_individual.log",
+    shell:
+        "python plot_overall_pattern_bars_horizontal_individual.py > {log} 2>&1"
+
+
+rule combine_epist_panel:
+    input:
+        "epist.pdf",
+        "results/figures/fig_epistemology/overall_pattern_bars_horizontal_individual.pdf",
+    output:
+        "results/figures/fig_epistemology/epst_combined.pdf",
+    log:
+        "results/logs/combine_epist_panel.log",
+    shell:
+        "python combine_epist_panel.py > {log} 2>&1"
+
+
+rule generate_qa_latex_table:
+    input:
+        "results/data/qa_topic_reports.jsonl",
+    output:
+        "results/tables/qa_scores_table.tex",
+    log:
+        "results/logs/generate_qa_latex_table.log",
+    shell:
+        "python generate_qa_latex_table.py > {log} 2>&1"

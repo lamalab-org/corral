@@ -60,7 +60,7 @@ lama_aesthetics.get_style("main")
 OUT_DIR = Path(__file__).parent / "results" / "figures" / "panel_4"
 
 # Create color maps: raw ID -> color and display name -> color
-MODEL_COLORS_BY_ID = dict(zip(MODEL_NAMES.keys(), MODEL_COLOURS, strict=False))
+MODEL_COLORS_BY_ID = MODEL_COLOURS
 MODEL_COLORS_BY_NAME = {
     MODEL_NAMES[model_id]: color for model_id, color in MODEL_COLORS_BY_ID.items()
 }
