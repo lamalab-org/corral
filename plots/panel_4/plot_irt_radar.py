@@ -49,7 +49,7 @@ OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 # ---------------------------------------------------------------------------
 # Custom radar projection (polygon frame)
 # ---------------------------------------------------------------------------
-def radar_factory(num_vars, frame="polygon"):
+def radar_factory(num_vars):
     """Create a RadarAxes projection with polygon grid lines."""
     theta = np.linspace(0, 2 * np.pi, num_vars, endpoint=False)
 
@@ -68,7 +68,7 @@ def radar_factory(num_vars, frame="polygon"):
             self.set_theta_zero_location("N")
 
         def fill(self, *args, closed=True, **kwargs):
-            return super().fill(closed=closed, *args, **kwargs)
+            return super().fill(*args, closed=closed, **kwargs)
 
         def plot(self, *args, **kwargs):
             lines = super().plot(*args, **kwargs)
@@ -124,11 +124,13 @@ def plot_capability_radar(output_path: Path):
     reasoning_df = pd.read_csv(RESULTS_DIR / "reasoning_theta.csv")
 
     # Map to display names
-    df = reasoning_df.copy()
-    df["model"] = df["model"].map(MODEL_NAMES)
-    df["environment"] = df["environment"].map(ENVIRONMENT_NAMES)
+    radar_df = reasoning_df.copy()
+    radar_df["model"] = radar_df["model"].map(MODEL_NAMES)
+    radar_df["environment"] = radar_df["environment"].map(ENVIRONMENT_NAMES)
 
-    pivot = df.pivot_table(index="environment", columns="model", values="theta_mean")
+    pivot = radar_df.pivot_table(
+        index="environment", columns="model", values="theta_mean"
+    )
 
     # Order environments by cognitive group
     ENV_ORDER = [
@@ -147,7 +149,7 @@ def plot_capability_radar(output_path: Path):
     pivot = pivot.reindex(env_display_order)
 
     environments = pivot.index.tolist()
-    theta = radar_factory(len(environments), frame="polygon")
+    theta = radar_factory(len(environments))
 
     fig, ax = plt.subplots(
         figsize=(ONE_COL_WIDTH, ONE_COL_WIDTH),
@@ -158,7 +160,7 @@ def plot_capability_radar(output_path: Path):
     for model_id, display_name in MODEL_NAMES.items():
         if display_name not in pivot.columns:
             continue
-        values = pivot[display_name].values
+        values = pivot[display_name].to_numpy()
         color = MODEL_COLOR_MAP.get(model_id, "#999999")
         ax.fill(theta, values, alpha=0.08, color=color, label=display_name)
         ax.plot(theta, values, color=color, linewidth=1.2)

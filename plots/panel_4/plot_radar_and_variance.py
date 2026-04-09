@@ -1,7 +1,7 @@
 """
 Combined panel: Radar chart (left) + Variance decomposition (right).
 
-TWO_COL_WIDTH × ONE_COL_HEIGHT, matching font sizes.
+TWO_COL_WIDTH x ONE_COL_HEIGHT, matching font sizes.
 """
 
 import importlib.util
@@ -53,7 +53,7 @@ ENV_ORDER = ["spectra", "wetlab", "resistor", "retro", "afm", "catalyst", "md", 
 # ---------------------------------------------------------------------------
 # Radar projection (polygon frame)
 # ---------------------------------------------------------------------------
-def radar_factory(num_vars, frame="polygon"):
+def radar_factory(num_vars):
     theta = np.linspace(0, 2 * np.pi, num_vars, endpoint=False)
 
     class RadarTransform(PolarAxes.PolarTransform):
@@ -71,7 +71,7 @@ def radar_factory(num_vars, frame="polygon"):
             self.set_theta_zero_location("N")
 
         def fill(self, *args, closed=True, **kwargs):
-            return super().fill(closed=closed, *args, **kwargs)
+            return super().fill(*args, closed=closed, **kwargs)
 
         def plot(self, *args, **kwargs):
             lines = super().plot(*args, **kwargs)
@@ -139,7 +139,7 @@ def main(best_model="model3_abilities_env"):
     ]
     pivot = pivot.reindex(env_display_order)
     environments = pivot.index.tolist()
-    theta = radar_factory(len(environments), frame="polygon")
+    theta = radar_factory(len(environments))
 
     # --- Load variance decomposition data ---
     idata = az.from_netcdf(RESULTS_DIR / f"{best_model}_trace.nc")
@@ -151,7 +151,7 @@ def main(best_model="model3_abilities_env"):
         total_key = f"{coef_name}_coef_total"
         base_key = f"{coef_name}_coef"
         if total_key in posterior:
-            coef_vals = posterior[total_key].mean(dim=["chain", "draw"]).values
+            coef_vals = posterior[total_key].mean(dim=["chain", "draw"]).to_numpy()
             contributions[label] = float(
                 (coef_vals * data_df[f"{coef_name}_z"].to_numpy()).var()
             )
@@ -191,7 +191,7 @@ def main(best_model="model3_abilities_env"):
     for model_id, display_name in MODEL_NAMES.items():
         if display_name not in pivot.columns:
             continue
-        values = pivot[display_name].values
+        values = pivot[display_name].to_numpy()
         color = MODEL_COLOR_MAP.get(model_id, "#999999")
         ax_radar.fill(theta, values, alpha=0.08, color=color, label=display_name)
         ax_radar.plot(theta, values, color=color, linewidth=1.2)

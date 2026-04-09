@@ -368,7 +368,7 @@ def plot_error_distribution(agent_df, output_path):
         va="top",
         ha="right",
         fontsize=7,
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.8},
     )
 
     plt.tight_layout()

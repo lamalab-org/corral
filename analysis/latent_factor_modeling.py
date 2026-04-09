@@ -525,9 +525,9 @@ def fit_agent_model3_abilities_env(
     Model 3: Environment-specific slopes for abilities + Task random effects
     (From latent_factor_modeling project)
 
-    logit P(success) = β₀ + (λ_base + θ[e])·knowledge_z + (ψ_base + φ[e])·reasoning_z
-                       + γ[scaffold] + δ[level] + η[task] + ξ[verbosity]
-                       + α[environment] + (κ[category] if include_category)
+    logit P(success) = B0 + (l_base + t[e])*knowledge_z + (p_base + f[e])*reasoning_z
+                       + g[scaffold] + d[level] + n[task] + x[verbosity]
+                       + a[environment] + (k[category] if include_category)
 
     Key features:
     - Base ability slopes (λ_base, ψ_base)

@@ -619,10 +619,12 @@ def plot_level_effects(trace, output_path):
 
 def plot_elpd_vs_complexity(comparison_csv, output_path):
     """Performance vs complexity scatter: ELPD-LOO vs effective parameters (p_loo)."""
-    df = pd.read_csv(comparison_csv)
+    comparison = pd.read_csv(comparison_csv)
 
     # Short display labels: model1_baseline_tasks -> M1, model7_abilities_env_level -> M7
-    df["label"] = "M" + df["model"].str.extract(r"model(\d+)", expand=False)
+    comparison["label"] = "M" + comparison["model"].str.extract(
+        r"model(\d+)", expand=False
+    )
 
     fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_WIDTH))
 
@@ -637,9 +639,11 @@ def plot_elpd_vs_complexity(comparison_csv, output_path):
         "#711c91",
         "#ea00d9",
     ]
-    colors = {label: palette[i % len(palette)] for i, label in enumerate(df["label"])}
+    colors = {
+        label: palette[i % len(palette)] for i, label in enumerate(comparison["label"])
+    }
 
-    for _, row in df.iterrows():
+    for _, row in comparison.iterrows():
         c = colors[row["label"]]
         converged = row["converged"]
         rhat = row["rhat_max"]
@@ -654,8 +658,8 @@ def plot_elpd_vs_complexity(comparison_csv, output_path):
             label=f"{row['label']} ($\\hat{{R}}$={rhat:.3f})",
         )
 
-    all_x = df["p_loo"].to_numpy()
-    all_y = df["loo"].to_numpy()
+    all_x = comparison["p_loo"].to_numpy()
+    all_y = comparison["loo"].to_numpy()
     range_frame(ax, all_x, all_y, pad=0.05)
 
     ax.set_xlabel("Effective Parameters (p_loo)", fontsize=8)

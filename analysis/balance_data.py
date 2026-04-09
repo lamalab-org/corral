@@ -20,8 +20,8 @@ def load_data():
     irt_dir = Path("results/irt_baseline")
 
     # Load agent trials
-    df = pd.read_csv(data_dir / "overall_trace.csv")
-    logger.info(f"Loaded {len(df):,} total agent trials")
+    trials = pd.read_csv(data_dir / "overall_trace.csv")
+    logger.info(f"Loaded {len(trials):,} total agent trials")
 
     # Load IRT abilities (organized by model AND environment)
     knowledge = pd.read_csv(irt_dir / "knowledge_theta.csv")
@@ -36,49 +36,49 @@ def load_data():
     )
 
     # Merge abilities (on both model AND environment)
-    df = df.merge(
+    trials = trials.merge(
         knowledge[["model", "environment", "knowledge_theta", "knowledge_sd"]],
         on=["model", "environment"],
         how="left",
     )
-    df = df.merge(
+    trials = trials.merge(
         reasoning[["model", "environment", "reasoning_theta", "reasoning_sd"]],
         on=["model", "environment"],
         how="left",
     )
 
     logger.info(
-        f"Merged IRT abilities: {df[['knowledge_theta', 'reasoning_theta']].notna().all(axis=1).sum():,} complete"
+        f"Merged IRT abilities: {trials[['knowledge_theta', 'reasoning_theta']].notna().all(axis=1).sum():,} complete"
     )
 
-    return df
+    return trials
 
 
-def analyze_imbalance(df):
+def analyze_imbalance(data):
     """Report current data distribution"""
     logger.info("\n=== Current Data Distribution ===")
 
     # By environment
-    env_counts = df["environment"].value_counts().sort_index()
+    env_counts = data["environment"].value_counts().sort_index()
     logger.info("\nEnvironment counts:")
     for env, count in env_counts.items():
-        pct = 100 * count / len(df)
+        pct = 100 * count / len(data)
         logger.info(f"  {env:12s}: {count:6,} ({pct:5.1f}%)")
 
-    # By environment × category
-    logger.info("\nEnvironment × Category:")
-    crosstab = pd.crosstab(df["environment"], df["category"], margins=True)
+    # By environment x category
+    logger.info("\nEnvironment x Category:")
+    crosstab = pd.crosstab(data["environment"], data["category"], margins=True)
     logger.info(f"\n{crosstab}")
 
-    # By environment × level
-    logger.info("\nEnvironment × Level:")
-    level_crosstab = pd.crosstab(df["environment"], df["level"], margins=True)
+    # By environment x level
+    logger.info("\nEnvironment x Level:")
+    level_crosstab = pd.crosstab(data["environment"], data["level"], margins=True)
     logger.info(f"\n{level_crosstab}")
 
     return env_counts, crosstab
 
 
-def determine_sample_size(df):
+def determine_sample_size(data):
     """
     Determine balanced sample size per (environment, category) combination
 
@@ -87,11 +87,11 @@ def determine_sample_size(df):
     - Target: At least 800-1000 per group, but respect data limits
     - Ensure sufficient representation of all environments
     """
-    group_sizes = df.groupby(["environment", "category"]).size()
+    group_sizes = data.groupby(["environment", "category"]).size()
 
     logger.info("\n=== Available samples per (Environment, Category) ===")
     for (env, cat), count in group_sizes.sort_index().items():
-        logger.info(f"  {env:12s} × {cat:7s}: {count:6,}")
+        logger.info(f"  {env:12s} x {cat:7s}: {count:6,}")
 
     min_available = group_sizes.min()
     logger.info(f"\nMinimum available: {min_available:,}")
@@ -117,12 +117,12 @@ def determine_sample_size(df):
     return target_per_group
 
 
-def balance_dataset(df, samples_per_group):
+def balance_dataset(data, samples_per_group):
     """
     Create balanced dataset with equal samples per (environment, category)
 
     Args:
-        df: Full dataset
+        data: Full dataset
         samples_per_group: Number of samples to draw from each group
 
     Returns:
@@ -130,15 +130,15 @@ def balance_dataset(df, samples_per_group):
     """
     balanced_data = []
 
-    for (env, cat), group_df in df.groupby(["environment", "category"]):
+    for (env, cat), group_df in data.groupby(["environment", "category"]):
         if len(group_df) < samples_per_group:
-            logger.warning(f"{env} × {cat}: Only {len(group_df)} available, using all")
+            logger.warning(f"{env} x {cat}: Only {len(group_df)} available, using all")
             sampled = group_df
         else:
             sampled = group_df.sample(n=samples_per_group, random_state=42)
 
         balanced_data.append(sampled)
-        logger.debug(f"  {env:12s} × {cat:7s}: sampled {len(sampled):,}")
+        logger.debug(f"  {env:12s} x {cat:7s}: sampled {len(sampled):,}")
 
     balanced_df = pd.concat(balanced_data, ignore_index=True)
 
@@ -148,39 +148,39 @@ def balance_dataset(df, samples_per_group):
     return balanced_df
 
 
-def verify_balance(df):
+def verify_balance(data):
     """Verify balanced distribution"""
     logger.info("\n=== Balanced Distribution Verification ===")
 
     # By environment
-    env_counts = df["environment"].value_counts().sort_index()
+    env_counts = data["environment"].value_counts().sort_index()
     logger.info("\nEnvironment counts (should be equal):")
     for env, count in env_counts.items():
-        pct = 100 * count / len(df)
+        pct = 100 * count / len(data)
         logger.info(f"  {env:12s}: {count:6,} ({pct:5.1f}%)")
 
-    # By environment × category (should be exactly equal)
-    logger.info("\nEnvironment × Category (should be equal per cell):")
-    crosstab = pd.crosstab(df["environment"], df["category"])
+    # By environment x category (should be exactly equal)
+    logger.info("\nEnvironment x Category (should be equal per cell):")
+    crosstab = pd.crosstab(data["environment"], data["category"])
     logger.info(f"\n{crosstab}")
 
     # Success rates should still vary (this is real signal, not imbalance artifact)
     logger.info("\nSuccess rates by environment (real signal, should vary):")
     success_rates = (
-        df.groupby("environment")["success"].mean().sort_values(ascending=False)
+        data.groupby("environment")["success"].mean().sort_values(ascending=False)
     )
     for env, rate in success_rates.items():
         logger.info(f"  {env:12s}: {rate:.1%}")
 
 
-def save_balanced_data(df, output_path="results/balanced_data.csv"):
+def save_balanced_data(data, output_path="results/balanced_data.csv"):
     """Save balanced dataset"""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    df.to_csv(output_path, index=False)
+    data.to_csv(output_path, index=False)
     logger.info(f"\nBalanced data saved to: {output_path}")
-    logger.info(f"Shape: {df.shape}")
+    logger.info(f"Shape: {data.shape}")
 
     return output_path
 
@@ -190,16 +190,16 @@ def main():
     logger.info("Starting data balancing...")
 
     # Load data
-    df = load_data()
+    trials = load_data()
 
     # Analyze current imbalance
-    analyze_imbalance(df)
+    analyze_imbalance(trials)
 
     # Determine balanced sample size
-    samples_per_group = determine_sample_size(df)
+    samples_per_group = determine_sample_size(trials)
 
     # Create balanced dataset
-    balanced_df = balance_dataset(df, samples_per_group)
+    balanced_df = balance_dataset(trials, samples_per_group)
 
     # Verify balance
     verify_balance(balanced_df)

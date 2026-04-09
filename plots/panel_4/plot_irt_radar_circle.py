@@ -61,7 +61,7 @@ def _make_spider(ax, pivot, model_color_map):
     ax.set_theta_direction(-1)
 
     # Compute data range
-    all_vals = pivot.values.flatten()
+    all_vals = pivot.to_numpy().flatten()
     r_min = np.floor(all_vals.min())
     r_max = np.ceil(all_vals.max())
 
@@ -128,11 +128,13 @@ def plot_capability_radar(output_path: Path):
     )
 
     # Map to display names
-    df = reasoning_df.copy()
-    df["model"] = df["model"].map(MODEL_NAMES)
-    df["environment"] = df["environment"].map(ENVIRONMENT_NAMES)
+    radar_df = reasoning_df.copy()
+    radar_df["model"] = radar_df["model"].map(MODEL_NAMES)
+    radar_df["environment"] = radar_df["environment"].map(ENVIRONMENT_NAMES)
 
-    pivot = df.pivot_table(index="environment", columns="model", values="theta_mean")
+    pivot = radar_df.pivot_table(
+        index="environment", columns="model", values="theta_mean"
+    )
 
     # Order environments by cognitive group
     ENV_ORDER = [
