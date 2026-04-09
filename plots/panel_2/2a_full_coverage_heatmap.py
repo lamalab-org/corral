@@ -208,8 +208,6 @@ def plot_full_coverage_heatmap(
 
     # Add space for marginal plots (use absolute size so both bars are same dimension)
     bar_size = 1.0  # inches for both marginal bar plots
-    fig_width_total = fig_width + bar_size + 0.1
-    fig_height_total = fig_height + bar_size + 0.1
     bar_ratio_w = bar_size / fig_width
     bar_ratio_h = bar_size / fig_height
 
