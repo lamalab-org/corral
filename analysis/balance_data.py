@@ -2,7 +2,7 @@
 Data Balancing Script
 
 Creates balanced dataset with equal representation across:
-- All 7 environments
+- All environments
 - Both task categories (task/subtask) within each environment
 
 Addresses severe imbalance in raw data (Spectra 65%, smallest envs ~2%)
