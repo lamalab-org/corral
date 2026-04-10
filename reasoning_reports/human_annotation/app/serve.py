@@ -96,7 +96,6 @@ class AnnotationHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
     max_attempts = 100
     for _attempt in range(max_attempts):
@@ -104,14 +103,14 @@ def main():
             server = http.server.HTTPServer(("", port), AnnotationHandler)
             break
         except OSError:
-            logging.warning("Port %d is in use, trying %d...", port, port + 1)
+            logging.warning(f"Port {port} is in use, trying {port + 1}...")
             port += 1
     else:
-        logging.error("Could not find a free port after %d attempts.", max_attempts)
+        logging.error(f"Could not find a free port after {max_attempts} attempts.")
         sys.exit(1)
-    logging.info("Annotation server running at http://localhost:%d", port)
-    logging.info("  App dir:    %s", APP_DIR)
-    logging.info("  Annotations:%s", HUMAN_ANNOTATION_DIR)
+    logging.info(f"Annotation server running at http://localhost:{port}")
+    logging.info(f"  App dir:    {APP_DIR}")
+    logging.info(f"  Annotations:{HUMAN_ANNOTATION_DIR}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
