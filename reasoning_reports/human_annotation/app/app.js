@@ -8,6 +8,7 @@ const state = {
   windowSize: 16,
   overlap: 4,
   annotations: { nodes: {}, edges: {} },
+  allAnnotations: {},    // { filename: { nodes, edges, last_window } } across all files
   annotatorName: '',
   dirty: false,
   showAll: false,
@@ -103,8 +104,22 @@ function bindEvents() {
   });
 }
 
+/**
+ * Persists the current file's annotations into allAnnotations before switching.
+ */
+function stashCurrentAnnotations() {
+  if (state.annotatedData && state.annotatedData._filename) {
+    state.allAnnotations[state.annotatedData._filename] = {
+      nodes: JSON.parse(JSON.stringify(state.annotations.nodes)),
+      edges: JSON.parse(JSON.stringify(state.annotations.edges)),
+      last_window: state.currentWindow,
+    };
+  }
+}
+
 async function loadAnnotatedFile(filename) {
   if (!filename) return;
+  stashCurrentAnnotations();
   try {
     const data = await fetchJSON(`/api/annotated/${encodeURIComponent(filename)}`);
     state.annotatedData = data;
@@ -128,15 +143,24 @@ async function loadAnnotatedFile(filename) {
     state.windows = iterWindows(nMsgs, state.windowSize, state.overlap);
     state.currentWindow = 0;
 
-    state.annotations = { nodes: {}, edges: {} };
-    (data.nodes || []).forEach(n => {
-      state.annotations.nodes[n.node_id] = { decision: null, note: '' };
-    });
-    (data.edges || []).forEach((_, i) => {
-      state.annotations.edges[String(i)] = { decision: null, note: '' };
-    });
+    // Restore from allAnnotations if we already have progress for this file
+    if (state.allAnnotations[filename]) {
+      state.annotations = {
+        nodes: JSON.parse(JSON.stringify(state.allAnnotations[filename].nodes)),
+        edges: JSON.parse(JSON.stringify(state.allAnnotations[filename].edges)),
+      };
+      state.currentWindow = state.allAnnotations[filename].last_window || 0;
+      if (state.currentWindow >= state.windows.length) state.currentWindow = 0;
+    } else {
+      state.annotations = { nodes: {}, edges: {} };
+      (data.nodes || []).forEach(n => {
+        state.annotations.nodes[n.node_id] = { decision: null, note: '' };
+      });
+      (data.edges || []).forEach((_, i) => {
+        state.annotations.edges[String(i)] = { decision: null, note: '' };
+      });
+    }
     state.dirty = false;
-    state.annotatorName = '';
 
     dom.saveBtn.disabled = false;
     renderAll();
@@ -149,6 +173,30 @@ async function loadSavedAnnotation(filename) {
   if (!filename) return;
   try {
     const saved = await fetchJSON(`/api/annotation/${encodeURIComponent(filename)}`);
+
+    // New combined format: has a "files" dict
+    if (saved.files) {
+      state.annotatorName = saved.annotator || '';
+      state._created = saved.created || null;
+      state.allAnnotations = {};
+      for (const [fname, ann] of Object.entries(saved.files)) {
+        state.allAnnotations[fname] = {
+          nodes: ann.nodes || {},
+          edges: ann.edges || {},
+          last_window: ann.last_window || 0,
+        };
+      }
+      // Load the file the annotator was last working on (or first available)
+      const resumeFile = saved.current_file || Object.keys(saved.files)[0];
+      if (resumeFile) {
+        await loadAnnotatedFile(resumeFile);
+      }
+      state.dirty = false;
+      renderAll();
+      return;
+    }
+
+    // Legacy single-file format: has "source_file"
     const sourceFile = saved.source_file;
     if (!sourceFile) { alert('Saved annotation is missing source_file.'); return; }
     await loadAnnotatedFile(sourceFile);
@@ -157,6 +205,8 @@ async function loadSavedAnnotation(filename) {
     state.annotatorName = saved.annotator || '';
     state.currentWindow = saved.last_window || 0;
     if (state.currentWindow >= state.windows.length) state.currentWindow = 0;
+    // Also stash into allAnnotations for future saves
+    stashCurrentAnnotations();
     state.dirty = false;
     renderAll();
   } catch (err) {
@@ -178,8 +228,11 @@ function closeSaveModal() {
 
 function updateSavePreview() {
   const name = sanitizeName(dom.annotatorInput.value);
+  // stash current to get accurate count
+  stashCurrentAnnotations();
+  const fileCount = Object.keys(state.allAnnotations).length;
   dom.savePathPreview.textContent = name
-    ? `Will save as: annotations_${name}.json`
+    ? `Will save as: annotations_${name}.json (${fileCount} file${fileCount !== 1 ? 's' : ''})`
     : 'Enter a valid name (letters, numbers, hyphens, underscores)';
 }
 
@@ -188,17 +241,29 @@ async function doSave() {
   if (!name) { alert('Enter a valid annotator name.'); return; }
   state.annotatorName = name;
 
+  // stash current file so allAnnotations is complete
+  stashCurrentAnnotations();
+
+  const now = new Date().toISOString();
+  if (!state._created) state._created = now;
+
+  const files = {};
+  for (const [filename, ann] of Object.entries(state.allAnnotations)) {
+    files[filename] = {
+      nodes: ann.nodes,
+      edges: ann.edges,
+      last_window: ann.last_window || 0,
+    };
+  }
+
   const payload = {
-    source_file: state.annotatedData._filename,
     annotator: name,
-    created: state.annotations._created || new Date().toISOString(),
-    modified: new Date().toISOString(),
+    created: state._created,
+    modified: now,
     provenance: { window: state.windowSize, overlap: state.overlap },
-    last_window: state.currentWindow,
-    nodes: state.annotations.nodes,
-    edges: state.annotations.edges,
+    current_file: state.annotatedData ? state.annotatedData._filename : null,
+    files: files,
   };
-  if (!state.annotations._created) state.annotations._created = payload.created;
 
   try {
     const resp = await fetch('/api/save', {
@@ -409,7 +474,6 @@ window.toggleExpand = function(headerEl) {
 window.setDecision = function(type, key, decision, btnEl) {
   const bucket = type === 'node' ? state.annotations.nodes : state.annotations.edges;
   if (!bucket[key]) bucket[key] = { decision: null, note: '' };
-  // toggle off if same
   if (bucket[key].decision === decision) {
     bucket[key].decision = null;
   } else {
@@ -434,7 +498,6 @@ window.setNote = function(type, key, value) {
 window.jumpToMsg = function(msgIdx) {
   const el = document.getElementById(`msg-${msgIdx}`);
   if (!el) {
-    // check if message is in a different window
     const targetWindow = state.windows.findIndex(([s, e]) => msgIdx >= s && msgIdx < e);
     if (targetWindow >= 0 && targetWindow !== state.currentWindow) {
       state.currentWindow = targetWindow;
