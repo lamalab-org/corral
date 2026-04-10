@@ -28,8 +28,6 @@ class AnnotationHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(APP_DIR), **kwargs)
 
-    # ---------- routing ----------
-
     def do_GET(self):
         if self.path == "/api/list-files":
             return self._json_response(self._list_annotated_files())
@@ -58,8 +56,6 @@ class AnnotationHandler(http.server.SimpleHTTPRequestHandler):
             return self._json_response({"status": "ok", "filename": out.name})
         self.send_error(405)
         return None
-
-    # ---------- helpers ----------
 
     def _json_response(self, data, status=200):
         blob = json.dumps(data).encode()

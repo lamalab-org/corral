@@ -1,27 +1,18 @@
-/* ============================================================
-   Reasoning Trace Annotation Tool – main application logic
-   ============================================================ */
-
-// ─── State ──────────────────────────────────────────────────
 const state = {
   files: [],
   savedAnnotations: [],
-  // loaded data
   annotatedData: null,   // parsed annotated JSON
   traceData: null,       // raw trace JSON with messages
-  // sliding-window
   windows: [],           // [[start,end], ...]
   currentWindow: 0,
   windowSize: 16,
   overlap: 4,
-  // annotations
   annotations: { nodes: {}, edges: {} },
   annotatorName: '',
   dirty: false,
   showAll: false,
 };
 
-// ─── DOM refs ───────────────────────────────────────────────
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
@@ -46,7 +37,6 @@ const dom = {
   showAllToggle:    $('#show-all-toggle'),
   progressBar:      $('#progress-bar'),
   progressText:     $('#progress-text'),
-  // modal
   saveModal:        $('#save-modal'),
   annotatorInput:   $('#annotator-name'),
   savePathPreview:  $('#save-path-preview'),
@@ -54,7 +44,6 @@ const dom = {
   saveCancel:       $('#save-cancel'),
 };
 
-// ─── Init ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
@@ -93,12 +82,10 @@ function bindEvents() {
     state.showAll = dom.showAllToggle.checked;
     renderAnnotations();
   });
-  // modal
   dom.saveConfirm.addEventListener('click', doSave);
   dom.saveCancel.addEventListener('click', closeSaveModal);
   dom.saveModal.querySelector('.modal-backdrop').addEventListener('click', closeSaveModal);
   dom.annotatorInput.addEventListener('input', updateSavePreview);
-  // keyboard
   document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft' && !e.target.matches('input,textarea')) navigateWindow(-1);
     if (e.key === 'ArrowRight' && !e.target.matches('input,textarea')) navigateWindow(1);
@@ -107,7 +94,6 @@ function bindEvents() {
       if (!dom.saveModal.classList.contains('hidden')) closeSaveModal();
     }
   });
-  // toggle instruction blocks
   $$('.toggle-instructions').forEach(btn => {
     btn.addEventListener('click', () => {
       const target = document.getElementById(btn.dataset.target);
@@ -117,8 +103,6 @@ function bindEvents() {
   });
 }
 
-// ─── Data Loading ───────────────────────────────────────────
-
 async function loadAnnotatedFile(filename) {
   if (!filename) return;
   try {
@@ -126,12 +110,10 @@ async function loadAnnotatedFile(filename) {
     state.annotatedData = data;
     state.annotatedData._filename = filename;
 
-    // provenance
     const prov = data.provenance || {};
     state.windowSize = prov.window || 16;
     state.overlap = prov.overlap || 4;
 
-    // load raw trace
     const inputFile = data.input_file;
     if (inputFile) {
       try {
@@ -142,12 +124,10 @@ async function loadAnnotatedFile(filename) {
       }
     }
 
-    // compute windows
     const nMsgs = state.traceData ? state.traceData.messages.length : 0;
     state.windows = iterWindows(nMsgs, state.windowSize, state.overlap);
     state.currentWindow = 0;
 
-    // init annotations (all pending)
     state.annotations = { nodes: {}, edges: {} };
     (data.nodes || []).forEach(n => {
       state.annotations.nodes[n.node_id] = { decision: null, note: '' };
@@ -169,11 +149,9 @@ async function loadSavedAnnotation(filename) {
   if (!filename) return;
   try {
     const saved = await fetchJSON(`/api/annotation/${encodeURIComponent(filename)}`);
-    // load the source annotated file first
     const sourceFile = saved.source_file;
     if (!sourceFile) { alert('Saved annotation is missing source_file.'); return; }
     await loadAnnotatedFile(sourceFile);
-    // apply saved annotations
     if (saved.nodes) state.annotations.nodes = { ...state.annotations.nodes, ...saved.nodes };
     if (saved.edges) state.annotations.edges = { ...state.annotations.edges, ...saved.edges };
     state.annotatorName = saved.annotator || '';
@@ -186,7 +164,6 @@ async function loadSavedAnnotation(filename) {
   }
 }
 
-// ─── Save ───────────────────────────────────────────────────
 
 function openSaveModal() {
   dom.annotatorInput.value = state.annotatorName;
@@ -233,7 +210,6 @@ async function doSave() {
     if (result.error) throw new Error(result.error);
     state.dirty = false;
     closeSaveModal();
-    // refresh annotation list
     state.savedAnnotations = await fetchJSON('/api/list-annotations');
     populateSelect(dom.annotationSelect, state.savedAnnotations, '— none —');
     dom.loadAnnotationBtn.disabled = state.savedAnnotations.length === 0;
@@ -242,13 +218,11 @@ async function doSave() {
   }
 }
 
-// ─── Guidelines ─────────────────────────────────────────────
 
 function toggleGuidelines() {
   dom.guidelinesPanel.classList.toggle('hidden');
 }
 
-// ─── Window Navigation ──────────────────────────────────────
 
 function navigateWindow(delta) {
   const next = state.currentWindow + delta;
@@ -257,7 +231,6 @@ function navigateWindow(delta) {
   renderAll();
 }
 
-// ─── Rendering ──────────────────────────────────────────────
 
 function renderAll() {
   renderWindowNav();
@@ -427,7 +400,6 @@ function renderProgress() {
   dom.progressText.textContent = `${doneNodes}/${totalNodes} nodes · ${doneEdges}/${totalEdges} edges reviewed (${pct}%)`;
 }
 
-// ─── Interaction Handlers ───────────────────────────────────
 
 // exposed globally for inline onclick
 window.toggleExpand = function(headerEl) {
@@ -444,11 +416,9 @@ window.setDecision = function(type, key, decision, btnEl) {
     bucket[key].decision = decision;
   }
   state.dirty = true;
-  // update card classes
   const card = btnEl.closest('.item-card');
   card.classList.remove('decision-correct', 'decision-incorrect', 'decision-pending');
   card.classList.add(bucket[key].decision ? `decision-${bucket[key].decision}` : 'decision-pending');
-  // update buttons
   card.querySelectorAll('.decision-btn').forEach(b => b.classList.remove('active'));
   if (bucket[key].decision) btnEl.classList.add('active');
   renderProgress();
@@ -485,7 +455,6 @@ function scrollAndHighlight(el) {
   setTimeout(() => el.classList.remove('highlighted'), 2000);
 }
 
-// ─── Utilities ──────────────────────────────────────────────
 
 function iterWindows(n, windowSize, overlap) {
   if (n <= 0) return [];
