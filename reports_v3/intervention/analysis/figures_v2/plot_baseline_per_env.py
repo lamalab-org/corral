@@ -1,10 +1,10 @@
-"""Baseline Pass@k and Pass^k per environment — 1×N grid.
+"""Baseline Pass@k and Pass^k per environment — single-row grid.
 
 Each subplot shows both metrics for one environment.
 Blue (#16476A) = Pass@k, Red (#BF092F) = Pass^k.
 
 Usage:
-    python plot_baseline_per_env.py            # all 6 environments
+    python plot_baseline_per_env.py
     python plot_baseline_per_env.py --no-md    # exclude md
 """
 
@@ -15,11 +15,12 @@ from pathlib import Path
 import lama_aesthetics
 import matplotlib.pyplot as plt
 from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
+from loguru import logger
 
 lama_aesthetics.get_style("main")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from utils import avg_matched_baseline
+from utils import avg_matched_baseline  # noqa: E402
 
 ALL_ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
 
@@ -104,7 +105,7 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=300, bbox_inches="tight")
     fig.savefig(out.with_suffix(".pdf"), dpi=300, bbox_inches="tight", format="pdf")
-    print(f"Saved to {out}")
+    logger.info(f"Saved to {out}")
     plt.close(fig)
 
 

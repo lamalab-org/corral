@@ -31,7 +31,7 @@ def get_intervention_task_ids(env: str, agent: str) -> set[str]:
     for step in ALL_INTERVENTION_STEPS:
         step_dir = RUNS_DIR / env / agent / step
         for report_path in step_dir.glob("*_report.json"):
-            with open(report_path) as f:
+            with report_path.open() as f:
                 data = json.load(f)
             task_ids.update(data.get("task_results", {}).keys())
     return task_ids
@@ -42,7 +42,7 @@ def load_baseline_report(env: str, agent: str) -> dict | None:
     report_glob = list((RUNS_DIR / env / agent / "baseline").glob("*_report.json"))
     if not report_glob:
         return None
-    with open(report_glob[0]) as f:
+    with report_glob[0].open() as f:
         return json.load(f)
 
 
@@ -195,7 +195,7 @@ def load_report_filtered(env: str, agent: str, step: str) -> dict | None:
     report_glob = list((RUNS_DIR / env / agent / step).glob("*_report.json"))
     if not report_glob:
         return None
-    with open(report_glob[0]) as f:
+    with report_glob[0].open() as f:
         report = json.load(f)
 
     # Collect per-task success counts (excluding errored trials)

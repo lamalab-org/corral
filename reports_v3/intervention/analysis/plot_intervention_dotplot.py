@@ -13,12 +13,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
+from loguru import logger
 
 lama_aesthetics.get_style("main")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from utils import get_matched_baseline_pass1
+from utils import get_matched_baseline_pass1  # noqa: E402
 
 RUNS_DIR = Path(__file__).parent.parent / "runs"
 
@@ -73,7 +74,7 @@ def load_pass1(env: str, agent: str, step: str) -> float | None:
     report_glob = list((RUNS_DIR / env / agent / step).glob("*_report.json"))
     if not report_glob:
         return None
-    with open(report_glob[0]) as f:
+    with report_glob[0].open() as f:
         metrics = json.load(f)["metrics"]
     return metrics.get("Pass@1")
 
@@ -202,7 +203,7 @@ def main():
 
     out_path = Path(__file__).parent / "figures" / "intervention_dotplot.png"
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
-    print(f"Saved to {out_path}")
+    logger.info(f"Saved to {out_path}")
 
 
 if __name__ == "__main__":

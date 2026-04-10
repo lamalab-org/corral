@@ -1,7 +1,7 @@
 """Plot Pass@k vs k — separate figures for success and failed interventions.
 
-Averaged: 2×3 grid per figure (6 environments, 3 per row).
-Per-agent: 4×3 grid per figure (2 agents × 2 env-rows, 3 cols each).
+Averaged: grid per figure, rows of environments.
+Per-agent: grid per figure, rows = agents x env-rows, cols = environments.
 """
 
 import json
@@ -13,12 +13,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
+from loguru import logger
 
 lama_aesthetics.get_style("main")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from utils import avg_matched_baseline, extract_matched_pass_at
+from utils import avg_matched_baseline, extract_matched_pass_at  # noqa: E402
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / "runs"
 
@@ -63,7 +64,7 @@ def load_metrics(env: str, agent: str, step: str) -> dict | None:
     report_glob = list((RUNS_DIR / env / agent / step).glob("*_report.json"))
     if not report_glob:
         return None
-    with open(report_glob[0]) as f:
+    with report_glob[0].open() as f:
         return json.load(f)["metrics"]
 
 
@@ -212,12 +213,12 @@ def _save_fig(fig, out_path):
     fig.savefig(
         out_path.with_suffix(".pdf"), dpi=300, bbox_inches="tight", format="pdf"
     )
-    print(f"Saved to {out_path}")
+    logger.info(f"Saved to {out_path}")
     plt.close(fig)
 
 
-def plot_avg_figure(steps, step_color, label, filename):
-    """Create a 2×3 averaged figure for one intervention type (success or failed)."""
+def plot_avg_figure(steps, step_color, _label, filename):
+    """Create a 2x3 averaged figure for one intervention type (success or failed)."""
     n_rows = len(ENVIRONMENTS) // N_COLS
     fig, axes = plt.subplots(
         n_rows,
@@ -254,8 +255,8 @@ def plot_avg_figure(steps, step_color, label, filename):
     _save_fig(fig, out_path)
 
 
-def plot_per_agent_figure(steps, step_color, label, filename):
-    """Create a 4×3 per-agent figure (2 agents × 2 env-rows)."""
+def plot_per_agent_figure(steps, step_color, _label, filename):
+    """Create a 4x3 per-agent figure (2 agents x 2 env-rows)."""
     n_env_rows = len(ENVIRONMENTS) // N_COLS
     n_total_rows = len(AGENTS) * n_env_rows
     fig, axes = plt.subplots(

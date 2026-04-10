@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
+from loguru import logger
 
 lama_aesthetics.get_style("main")
 
@@ -48,7 +49,7 @@ def load_metrics(env: str, agent: str) -> dict:
     report_path = (
         RUNS_DIR / env / agent / "baseline" / f"{env}_{agent}_none_report.json"
     )
-    with open(report_path) as f:
+    with report_path.open() as f:
         return json.load(f)["metrics"]
 
 
@@ -142,7 +143,7 @@ def main():
 
     out_path = Path(__file__).parent / "figures" / "pass_metrics_plot.png"
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
-    print(f"Saved to {out_path}")
+    logger.info(f"Saved to {out_path}")
 
 
 if __name__ == "__main__":

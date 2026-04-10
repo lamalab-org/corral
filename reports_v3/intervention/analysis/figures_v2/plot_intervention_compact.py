@@ -1,6 +1,6 @@
-"""Compact 1×2 intervention plot: Pass@k (left) and Pass^k (right).
+"""Compact 1x2 intervention plot: Pass@k (left) and Pass^k (right).
 
-Averaged across 4 environments (spectra, wetlab, resistor, ml) and both agents.
+Averaged across all environments and both agents.
 Lines use a blue→red gradient ordered by intervention strength:
   success_stepn1 (blue) → … → failed_stepn1 (red).
 """
@@ -15,11 +15,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
+from loguru import logger
 
 lama_aesthetics.get_style("main")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from utils import avg_matched_baseline
+from utils import avg_matched_baseline  # noqa: E402
 
 RUNS_DIR = Path(__file__).resolve().parents[2] / "runs"
 ENVIRONMENTS = ["spectra", "wetlab", "resistor", "ml"]
@@ -74,7 +75,7 @@ def load_metrics(env: str, agent: str, step: str) -> dict | None:
     report_glob = list((RUNS_DIR / env / agent / step).glob("*_report.json"))
     if not report_glob:
         return None
-    with open(report_glob[0]) as f:
+    with report_glob[0].open() as f:
         return json.load(f)["metrics"]
 
 
@@ -92,7 +93,7 @@ def extract(metrics: dict, prefix: str) -> tuple[list[int], list[float]]:
 def avg_step(
     env_list: list[str], step: str, prefix: str
 ) -> tuple[list[int], list[float]] | None:
-    """Average a metric across envs × agents for one intervention step."""
+    """Average a metric across envs x agents for one intervention step."""
     all_vals = []
     for env in env_list:
         for agent in AGENTS:
@@ -205,7 +206,7 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=300, bbox_inches="tight")
     fig.savefig(out.with_suffix(".pdf"), dpi=300, bbox_inches="tight", format="pdf")
-    print(f"Saved to {out}")
+    logger.info(f"Saved to {out}")
     plt.close(fig)
 
 

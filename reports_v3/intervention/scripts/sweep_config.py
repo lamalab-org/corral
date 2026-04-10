@@ -143,7 +143,7 @@ def main():
             logger.info(" \\\n".join(cmd_parts[2:]))
             logger.info("")
     elif args.json:
-        print(json.dumps(conditions, indent=2))
+        print(json.dumps(conditions, indent=2))  # noqa: T201
     else:
         # Summary
         logger.info(f"Total conditions: {len(conditions)}")

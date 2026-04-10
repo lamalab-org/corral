@@ -2,7 +2,7 @@
 
 Uses lama_aesthetics style with range_frame for consistent publication-quality plots.
 
-Main plot: 2x3 grid (rows = success/failed, cols = environments).
+Main plot: grid with rows = success/failed, cols = environments.
 Per-task plots: one figure per environment.
 
 Reads from analysis/results.csv (output of aggregate_results.py).
@@ -25,7 +25,7 @@ lama_aesthetics.get_style("main")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config import INTERVENTION_ROOT
+from config import INTERVENTION_ROOT  # noqa: E402
 from utils import filter_baseline_to_matched_tasks  # noqa: E402
 
 # Step label ordering for x-axis
@@ -61,119 +61,153 @@ def bootstrap_ci(series, n_boot=1000, ci=0.95):
     return means[int((1 - ci) / 2 * n_boot)], means[int((1 + ci) / 2 * n_boot)]
 
 
+def _plot_recovery_panel(
+    ax, env_df, env, intervention_type, show_title=True, ylim=None
+):
+    """Plot a single recovery panel for one env and intervention type."""
+    color = SUCCESS_COLOR if intervention_type == "success" else FAILED_COLOR
+    all_x, all_y = [], []
+
+    for agent in AGENTS:
+        agent_df = env_df[env_df["agent"] == agent]
+
+        # Baseline (separate per agent, matching line style)
+        baseline = agent_df[agent_df["intervention"] == "none"]
+        if not baseline.empty:
+            baseline_sr = baseline["success"].mean()
+            ls_agent = AGENT_LINESTYLES[agent]
+            ax.axhline(
+                baseline_sr,
+                color=BASELINE_COLOR,
+                linestyle=ls_agent,
+                alpha=0.4,
+                linewidth=0.8,
+            )
+            all_y.append(baseline_sr)
+
+        # Intervention
+        int_df = agent_df[agent_df["intervention"] == intervention_type]
+        if int_df.empty:
+            continue
+
+        grouped = int_df.groupby("num_steps")
+        steps, rates, ci_lo, ci_hi = [], [], [], []
+        for ns in sorted(STEP_ORDER.keys(), key=list(STEP_ORDER.keys()).index):
+            if ns not in grouped.groups:
+                continue
+            group = grouped.get_group(ns)
+            sr = group["success"].mean()
+            lo, hi = bootstrap_ci(group["success"])
+            steps.append(ns)
+            rates.append(sr)
+            ci_lo.append(lo)
+            ci_hi.append(hi)
+
+        x_pos = list(range(len(steps)))
+        marker = AGENT_MARKERS[agent]
+        ls = AGENT_LINESTYLES[agent]
+
+        ax.plot(
+            x_pos,
+            rates,
+            color=color,
+            marker=marker,
+            linestyle=ls,
+            linewidth=1.5,
+            markersize=5,
+            label=AGENT_LABELS[agent],
+        )
+        ax.fill_between(x_pos, ci_lo, ci_hi, alpha=0.12, color=color)
+
+        # Value labels (ReAct only to avoid overlap)
+        if agent == "react":
+            for xi, yi in zip(x_pos, rates, strict=False):
+                ax.annotate(
+                    f"{yi:.2f}",
+                    (xi, yi),
+                    textcoords="offset points",
+                    xytext=(0, 7),
+                    ha="center",
+                    fontsize=5,
+                    color=color,
+                )
+
+        all_x.extend(x_pos)
+        all_y.extend(rates)
+
+    if show_title:
+        ax.set_title(ENV_LABELS[env], fontsize=8)
+
+    if all_x and all_y:
+        range_frame(ax, np.array(all_x), np.array(all_y), pad=0.08, nice=False)
+        # Override ylim so shared axes don't clip lines
+        if ylim:
+            ax.set_ylim(ylim)
+        else:
+            ax.set_ylim(-0.05, 1.05)
+        all_step_keys = list(STEP_ORDER.keys())
+        n_ticks = max(all_x) + 1 if all_x else 0
+        used_steps = all_step_keys[:n_ticks]
+        ax.set_xticks(list(range(n_ticks)))
+        ax.set_xticklabels(
+            [STEP_ORDER[s] for s in used_steps],
+            rotation=30,
+            ha="right",
+            fontsize=7,
+        )
+    elif not all_x:
+        ax.text(
+            0.5,
+            0.5,
+            "No data",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="#999999",
+        )
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+
 def plot_recovery_curves(df: pd.DataFrame, output_dir: Path):
-    """2xN grid: rows = success/failed interventions, cols = environments."""
-    n_envs = len(ENVIRONMENTS)
+    """Grid: rows split by success/failed intervention type, cols = environments."""
+    n_cols = 3
+    n_rows = 4
     fig, axes = plt.subplots(
-        2, n_envs, figsize=(TWO_COL_WIDTH * n_envs / 3, TWO_COL_HEIGHT)
+        n_rows,
+        n_cols,
+        figsize=(TWO_COL_WIDTH, TWO_COL_HEIGHT * 1.8),
+        sharey="row",
     )
 
-    for col, env in enumerate(ENVIRONMENTS):
-        env_df = df[df["env"] == env]
+    env_rows = [ENVIRONMENTS[:3], ENVIRONMENTS[3:6]]
 
-        for row, intervention_type in enumerate(["success", "failed"]):
-            ax = axes[row, col]
-            color = SUCCESS_COLOR if intervention_type == "success" else FAILED_COLOR
-            all_x, all_y = [], []
+    ylim_map = {"success": (0.2, 1.05), "failed": (-0.05, 0.8)}
 
-            for agent in AGENTS:
-                agent_df = env_df[env_df["agent"] == agent]
-
-                # Baseline (separate per agent, matching line style)
-                baseline = agent_df[agent_df["intervention"] == "none"]
-                if not baseline.empty:
-                    baseline_sr = baseline["success"].mean()
-                    ls_agent = AGENT_LINESTYLES[agent]
-                    ax.axhline(
-                        baseline_sr,
-                        color=BASELINE_COLOR,
-                        linestyle=ls_agent,
-                        alpha=0.4,
-                        linewidth=0.8,
-                    )
-                    # Include baseline in range so range_frame doesn't clip it
-                    all_y.append(baseline_sr)
-
-                # Intervention
-                int_df = agent_df[agent_df["intervention"] == intervention_type]
-                if int_df.empty:
-                    continue
-
-                grouped = int_df.groupby("num_steps")
-                steps, rates, ci_lo, ci_hi = [], [], [], []
-                for ns in sorted(STEP_ORDER.keys(), key=list(STEP_ORDER.keys()).index):
-                    if ns not in grouped.groups:
-                        continue
-                    group = grouped.get_group(ns)
-                    sr = group["success"].mean()
-                    lo, hi = bootstrap_ci(group["success"])
-                    steps.append(ns)
-                    rates.append(sr)
-                    ci_lo.append(lo)
-                    ci_hi.append(hi)
-
-                x_pos = list(range(len(steps)))
-                marker = AGENT_MARKERS[agent]
-                ls = AGENT_LINESTYLES[agent]
-
-                ax.plot(
-                    x_pos,
-                    rates,
-                    color=color,
-                    marker=marker,
-                    linestyle=ls,
-                    linewidth=1.5,
-                    markersize=5,
-                    label=AGENT_LABELS[agent],
-                )
-                ax.fill_between(x_pos, ci_lo, ci_hi, alpha=0.12, color=color)
-
-                # Value labels
-                for xi, yi in zip(x_pos, rates, strict=False):
-                    ax.annotate(
-                        f"{yi:.2f}",
-                        (xi, yi),
-                        textcoords="offset points",
-                        xytext=(0, 7),
-                        ha="center",
-                        fontsize=5,
-                        color=color,
-                    )
-
-                all_x.extend(x_pos)
-                all_y.extend(rates)
-
-                ax.set_xticks(x_pos)
-                ax.set_xticklabels(
-                    [STEP_ORDER[s] for s in steps], rotation=30, ha="right", fontsize=7
+    for row_offset, intervention_type in enumerate(["success", "failed"]):
+        for sub_row, envs in enumerate(env_rows):
+            grid_row = row_offset * 2 + sub_row
+            for col, env in enumerate(envs):
+                ax = axes[grid_row, col]
+                env_df = df[df["env"] == env]
+                _plot_recovery_panel(
+                    ax,
+                    env_df,
+                    env,
+                    intervention_type,
+                    show_title=True,
+                    ylim=ylim_map[intervention_type],
                 )
 
-            # Titles and labels
-            if row == 0:
-                ax.set_title(ENV_LABELS[env], fontsize=8)
-            if col == 0:
-                row_label = "Success" if intervention_type == "success" else "Failed"
-                ax.set_ylabel(f"{row_label}\nSuccess Rate")
-
-            if all_x and all_y:
-                range_frame(ax, np.array(all_x), np.array(all_y), pad=0.08, nice=False)
-                ax.set_xticks(list(range(len(steps))))
-                ax.set_xticklabels(
-                    [STEP_ORDER[s] for s in steps], rotation=30, ha="right", fontsize=7
-                )
-            elif not all_x:
-                ax.text(
-                    0.5,
-                    0.5,
-                    "No data",
-                    transform=ax.transAxes,
-                    ha="center",
-                    va="center",
-                    fontsize=8,
-                    color="#999999",
-                )
-                ax.set_xticks([])
-                ax.set_yticks([])
+                if col == 0:
+                    if sub_row == 0:
+                        row_label = (
+                            "Success" if intervention_type == "success" else "Failed"
+                        )
+                        ax.set_ylabel(f"{row_label}\nSuccess Rate")
+                    else:
+                        ax.set_ylabel("Success Rate")
 
     # Legend
     legend_elements = [
@@ -216,11 +250,11 @@ def plot_recovery_curves(df: pd.DataFrame, output_dir: Path):
         handles=legend_elements,
         loc="upper center",
         ncol=6,
-        bbox_to_anchor=(0.5, 1.04),
+        bbox_to_anchor=(0.5, 1.02),
         fontsize=6.5,
     )
 
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
 
     for ext in ["pdf", "png"]:
         out = output_dir / f"recovery_curves.{ext}"
@@ -340,7 +374,7 @@ def plot_per_task_recovery(df: pd.DataFrame, output_dir: Path):
 
 
 def plot_recovery_curves_averaged(df: pd.DataFrame, output_dir: Path):
-    """1xN grid: both success & failed, agents as solid (ReAct) / dashed (TC)."""
+    """Single-row grid: both success & failed, agents as solid (ReAct) / dashed (TC)."""
     n_envs = len(ENVIRONMENTS)
     fig, axes = plt.subplots(1, n_envs, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
 
@@ -496,7 +530,7 @@ def plot_recovery_curves_averaged(df: pd.DataFrame, output_dir: Path):
 
 
 def plot_recovery_curves_combined(df: pd.DataFrame, output_dir: Path):
-    """2xN grid: rows = agents (ReAct/TC), cols = environments.
+    """Grid: rows = agents (ReAct/TC), cols = environments.
 
     Both success and failed lines in the same panel.
     """
@@ -714,10 +748,9 @@ def _plot_react_only_panel(ax, env_df, env, show_title=True):
 def plot_recovery_curves_react_only(
     df: pd.DataFrame, output_dir: Path, env_list: list[str] | None = None
 ):
-    """2x3 grid: ReAct only, both success & failed in same panel.
+    """Multi-row grid: ReAct only, both success & failed in same panel.
 
-    Row 1: spectra, wetlab, retrosynthesis
-    Row 2: resistor, md, ml
+    Columns = environments, wrapped across rows.
     """
     REACT_ENV_ORDER = env_list or [
         "spectra",
@@ -778,7 +811,7 @@ def plot_recovery_curves_react_only(
 def plot_recovery_curves_react_only_1row(
     df: pd.DataFrame, output_dir: Path, env_list: list[str] | None = None
 ):
-    """1xN grid: ReAct only, all environments in one row."""
+    """Single-row grid: ReAct only, all environments in one row."""
     REACT_ENV_ORDER = env_list or [
         "spectra",
         "wetlab",

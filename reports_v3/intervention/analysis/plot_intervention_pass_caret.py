@@ -1,10 +1,11 @@
 """Plot Pass^k vs k averaged over ReAct & ToolCalling, plus per-agent version.
 
-2xN grid (averaged): top row = success, bottom row = failed.
-4xN grid (per-agent): rows = Success(ReAct), Success(TC), Failed(ReAct), Failed(TC).
+Averaged grid: top row = success, bottom row = failed.
+Per-agent grid: rows = Success(ReAct), Success(TC), Failed(ReAct), Failed(TC).
 Columns = environments. Baseline shown in both rows as reference.
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -14,12 +15,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
+from loguru import logger
 
 lama_aesthetics.get_style("main")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from utils import avg_matched_baseline, extract_matched_pass_caret
+from utils import avg_matched_baseline, extract_matched_pass_caret  # noqa: E402
 
 RUNS_DIR = Path(__file__).parent.parent / "runs"
 
@@ -63,7 +65,7 @@ def load_metrics(env: str, agent: str, step: str) -> dict | None:
     report_glob = list((RUNS_DIR / env / agent / step).glob("*_report.json"))
     if not report_glob:
         return None
-    with open(report_glob[0]) as f:
+    with report_glob[0].open() as f:
         return json.load(f)["metrics"]
 
 
@@ -162,7 +164,16 @@ def plot_row(axes_row, environments, steps, step_color, row_label):
             ax.set_yticks([])
 
 
-def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
+def plot_row_agent(
+    axes_row,
+    environments,
+    agent,
+    steps,
+    step_color,
+    row_label,
+    ylim=None,
+    use_markers=True,
+):
     """Like plot_row but for a single agent (no averaging)."""
     for col, env in enumerate(environments):
         ax = axes_row[col]
@@ -173,16 +184,17 @@ def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
         result = extract_matched_pass_caret(env, agent)
         if result is not None:
             ks, vals = result
+            mk = {"marker": "o", "markersize": 4} if use_markers else {}
             ax.plot(
                 ks,
                 vals,
                 color=BASELINE_COLOR,
-                marker="o",
-                markersize=4,
                 label="Baseline",
                 linewidth=1.8,
                 alpha=1.0,
                 zorder=10,
+                clip_on=False,
+                **mk,
             )
             all_k_vals.extend(ks)
             all_y_vals.extend(vals)
@@ -198,15 +210,16 @@ def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
             alpha = STEP_ALPHA[suffix]
             marker = STEP_MARKERS[suffix]
             label = suffix.replace("step", "Step ")
+            mk = {"marker": marker, "markersize": 4} if use_markers else {}
             ax.plot(
                 ks,
                 vals,
                 color=step_color,
-                marker=marker,
-                markersize=4,
                 label=label,
                 linewidth=1.3,
                 alpha=alpha,
+                clip_on=False,
+                **mk,
             )
             all_k_vals.extend(ks)
             all_y_vals.extend(vals)
@@ -215,7 +228,19 @@ def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
             ax.set_ylabel(f"{row_label}\nPass^k")
 
         if all_k_vals and all_y_vals:
-            range_frame(ax, np.array(all_k_vals), np.array(all_y_vals), pad=0.05)
+            ax.set_xlim(0, 16)
+            ax.set_xticks([1, 5, 10, 15])
+            if ylim:
+                ax.set_ylim(ylim)
+                ax.set_yticks(
+                    [t for t in [0, 0.25, 0.5, 0.75, 1.0] if ylim[0] <= t <= ylim[1]]
+                )
+            else:
+                ax.set_ylim(-0.05, 1.05)
+                ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+            # Detach spines so axes don't touch (like range_frame)
+            ax.spines["left"].set_bounds(ax.get_yticks()[0], ax.get_yticks()[-1])
+            ax.spines["bottom"].set_bounds(1, 15)
         else:
             ax.text(
                 0.5,
@@ -232,17 +257,23 @@ def plot_row_agent(axes_row, environments, agent, steps, step_color, row_label):
 
 
 def main():
-    n_envs = len(ENVIRONMENTS)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-md", action="store_true", help="Exclude md environment")
+    args = parser.parse_args()
+
+    envs = [e for e in ENVIRONMENTS if e != "md"] if args.no_md else ENVIRONMENTS
+    n_envs = len(envs)
 
     # --- Averaged version (2 rows: success / failed) ---
     fig, axes = plt.subplots(
         2,
         n_envs,
         figsize=(TWO_COL_WIDTH * n_envs / 3, TWO_COL_HEIGHT),
+        sharey=True,
     )
 
-    plot_row(axes[0], ENVIRONMENTS, SUCCESS_STEPS, SUCCESS_COLOR, "Success")
-    plot_row(axes[1], ENVIRONMENTS, FAILED_STEPS, FAILED_COLOR, "Failed")
+    plot_row(axes[0], envs, SUCCESS_STEPS, SUCCESS_COLOR, "Success")
+    plot_row(axes[1], envs, FAILED_STEPS, FAILED_COLOR, "Failed")
 
     for ax in axes[1]:
         ax.set_xlabel("k")
@@ -256,50 +287,84 @@ def main():
     fig.savefig(
         out_path.with_suffix(".pdf"), dpi=300, bbox_inches="tight", format="pdf"
     )
-    print(f"Saved to {out_path}")
+    logger.info(f"Saved to {out_path}")
     plt.close(fig)
 
     # --- Per-agent version (4 rows) ---
+    success_ylim = (-0.05, 1.15)
+    failed_ylim = (-0.05, 0.8)
+
     fig, axes = plt.subplots(
         4,
         n_envs,
-        figsize=(TWO_COL_WIDTH * n_envs / 3, 1.5 * TWO_COL_HEIGHT),
+        figsize=(TWO_COL_WIDTH, 1.5 * TWO_COL_HEIGHT),
+        sharey="row",
+        sharex=True,
     )
 
     plot_row_agent(
-        axes[0], ENVIRONMENTS, "react", SUCCESS_STEPS, SUCCESS_COLOR, "Success\n(ReAct)"
+        axes[0],
+        envs,
+        "react",
+        SUCCESS_STEPS,
+        SUCCESS_COLOR,
+        "Success\n(ReAct)",
+        ylim=success_ylim,
     )
     plot_row_agent(
         axes[1],
-        ENVIRONMENTS,
+        envs,
         "toolcalling",
         SUCCESS_STEPS,
         SUCCESS_COLOR,
-        "Success\n(TC)",
+        "Success\n(ToolCalling)",
+        ylim=success_ylim,
     )
     plot_row_agent(
-        axes[2], ENVIRONMENTS, "react", FAILED_STEPS, FAILED_COLOR, "Failed\n(ReAct)"
+        axes[2],
+        envs,
+        "react",
+        FAILED_STEPS,
+        FAILED_COLOR,
+        "Failed\n(ReAct)",
+        ylim=failed_ylim,
     )
     plot_row_agent(
-        axes[3], ENVIRONMENTS, "toolcalling", FAILED_STEPS, FAILED_COLOR, "Failed\n(TC)"
+        axes[3],
+        envs,
+        "toolcalling",
+        FAILED_STEPS,
+        FAILED_COLOR,
+        "Failed\n(ToolCalling)",
+        ylim=failed_ylim,
     )
 
     # Titles only on top row
-    for col, env in enumerate(ENVIRONMENTS):
+    for col, env in enumerate(envs):
         axes[0, col].set_title(ENV_LABELS.get(env, env.capitalize()), fontsize=8)
     for row in range(1, 4):
         for ax in axes[row]:
             ax.set_title("")
 
+    # x-labels only on bottom row
     for ax in axes[3]:
         ax.set_xlabel("k")
 
-    # Shared legend in bottom-right subplot
+    # Legend in 2nd and 4th rows (top right)
     handles, labels = axes[0, 0].get_legend_handles_labels()
     if handles:
-        axes[-1, -1].legend(
+        axes[1, -1].legend(
             handles,
             labels,
+            loc="upper right",
+            fontsize=5,
+            framealpha=0.9,
+        )
+    handles_f, labels_f = axes[2, 0].get_legend_handles_labels()
+    if handles_f:
+        axes[3, -1].legend(
+            handles_f,
+            labels_f,
             loc="upper right",
             fontsize=5,
             framealpha=0.9,
@@ -314,7 +379,98 @@ def main():
     fig.savefig(
         out_path.with_suffix(".pdf"), dpi=300, bbox_inches="tight", format="pdf"
     )
-    print(f"Saved to {out_path}")
+    logger.info(f"Saved to {out_path}")
+    plt.close(fig)
+
+    # --- Per-agent version without markers (lines only) ---
+    fig, axes = plt.subplots(
+        4,
+        n_envs,
+        figsize=(TWO_COL_WIDTH, 1.5 * TWO_COL_HEIGHT),
+        sharey="row",
+        sharex=True,
+    )
+
+    plot_row_agent(
+        axes[0],
+        envs,
+        "react",
+        SUCCESS_STEPS,
+        SUCCESS_COLOR,
+        "Success\n(ReAct)",
+        ylim=success_ylim,
+        use_markers=False,
+    )
+    plot_row_agent(
+        axes[1],
+        envs,
+        "toolcalling",
+        SUCCESS_STEPS,
+        SUCCESS_COLOR,
+        "Success\n(ToolCalling)",
+        ylim=success_ylim,
+        use_markers=False,
+    )
+    plot_row_agent(
+        axes[2],
+        envs,
+        "react",
+        FAILED_STEPS,
+        FAILED_COLOR,
+        "Failed\n(ReAct)",
+        ylim=failed_ylim,
+        use_markers=False,
+    )
+    plot_row_agent(
+        axes[3],
+        envs,
+        "toolcalling",
+        FAILED_STEPS,
+        FAILED_COLOR,
+        "Failed\n(ToolCalling)",
+        ylim=failed_ylim,
+        use_markers=False,
+    )
+
+    for col, env in enumerate(envs):
+        axes[0, col].set_title(ENV_LABELS.get(env, env.capitalize()), fontsize=8)
+    for row in range(1, 4):
+        for ax in axes[row]:
+            ax.set_title("")
+    for ax in axes[3]:
+        ax.set_xlabel("k")
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        axes[1, -1].legend(
+            handles,
+            labels,
+            loc="upper right",
+            fontsize=5,
+            framealpha=0.9,
+        )
+    handles_f, labels_f = axes[2, 0].get_legend_handles_labels()
+    if handles_f:
+        axes[3, -1].legend(
+            handles_f,
+            labels_f,
+            loc="upper right",
+            fontsize=5,
+            framealpha=0.9,
+        )
+
+    fig.tight_layout()
+
+    out_path = (
+        Path(__file__).parent
+        / "figures"
+        / "intervention_pass_caret_per_agent_nomarkers.png"
+    )
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    fig.savefig(
+        out_path.with_suffix(".pdf"), dpi=300, bbox_inches="tight", format="pdf"
+    )
+    logger.info(f"Saved to {out_path}")
     plt.close(fig)
 
 

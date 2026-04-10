@@ -47,7 +47,7 @@ def _rewrite_workspace_paths(
 
     rewritten = []
     for step in steps:
-        step = step.copy()
+        step = step.copy()  # noqa: PLW2901
 
         # Rewrite content (string field)
         content = step.get("content", "")
@@ -58,7 +58,7 @@ def _rewrite_workspace_paths(
         if step.get("tool_calls"):
             new_tool_calls = []
             for tc in step["tool_calls"]:
-                tc = tc.copy()
+                tc = tc.copy()  # noqa: PLW2901
                 func = tc.get("function", {})
                 args_str = func.get("arguments", "")
                 if isinstance(args_str, str) and old_workspace in args_str:
@@ -518,7 +518,7 @@ def create_trace_intervention_hook(
                 for m in json.loads(Path(tp).read_text()).get("messages", [])
                 if m.get("role") == "assistant"
             )
-            if ns >= 0 and n_assistant >= ns or ns < 0 and n_assistant > abs(ns):
+            if (ns >= 0 and n_assistant >= ns) or (ns < 0 and n_assistant > abs(ns)):
                 eligible.append(tp)
         return eligible
 

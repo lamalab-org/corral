@@ -1,4 +1,4 @@
-"""Plot baseline Pass^k decay vs k — 1×6 single-row figure, all environments."""
+"""Plot baseline Pass^k decay vs k — 1x6 single-row figure, all environments."""
 
 import sys
 from pathlib import Path
@@ -8,12 +8,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
+from loguru import logger
 
 lama_aesthetics.get_style("main")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from utils import avg_matched_baseline
+from utils import avg_matched_baseline  # noqa: E402
 
 ENVIRONMENTS = ["spectra", "wetlab", "retrosynthesis", "resistor", "md", "ml"]
 
@@ -35,7 +36,7 @@ def _save_fig(fig, out_path):
     fig.savefig(
         out_path.with_suffix(".pdf"), dpi=300, bbox_inches="tight", format="pdf"
     )
-    print(f"Saved to {out_path}")
+    logger.info(f"Saved to {out_path}")
     plt.close(fig)
 
 
