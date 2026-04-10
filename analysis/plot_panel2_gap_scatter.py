@@ -77,7 +77,6 @@ def collect_gap_data(
 def plot_gap_scatter(
     gap_data: dict,
     output_path: Path,
-    metric_display_name: str,
 ) -> None:
     """Create scatter plot of model gap vs agent gap."""
     if not gap_data:
@@ -126,12 +125,12 @@ def plot_gap_scatter(
         )
 
     ax.set_xlabel(
-        f"Scaffold Spread ({metric_display_name})",
+        "Scaffold Spread",
         fontsize=FONT_SIZES["axis_label"],
         fontweight="bold",
     )
     ax.set_ylabel(
-        f"Model Spread ({metric_display_name})",
+        "Model Spread",
         fontsize=FONT_SIZES["axis_label"],
         fontweight="bold",
     )
@@ -207,12 +206,6 @@ def main(
         raise ValueError(msg)
 
     metric_column = get_metric_column_name(metric, k_value)
-    if metric == "average_score":
-        metric_display_name = "Score"
-    elif metric == "pass_at_k":
-        metric_display_name = f"Pass@{k_value}"
-    elif metric == "pass_hat_k":
-        metric_display_name = f"Pass^{k_value}"
 
     logger.info("Loading datasets...")
     reports_df = load_reports_data()
@@ -235,7 +228,7 @@ def main(
         output_path = OUT_DIR / "panel2_gap_scatter.pdf"
     else:
         output_path = Path(output_filename)
-    plot_gap_scatter(gap_data, output_path, metric_display_name)
+    plot_gap_scatter(gap_data, output_path)
 
     agent_gaps = [gap_data[env]["agent_gap"] for env in gap_data]
     model_gaps = [gap_data[env]["model_gap"] for env in gap_data]

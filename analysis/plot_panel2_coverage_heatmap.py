@@ -245,7 +245,7 @@ def plot_full_coverage_heatmap(
         )
         ax_heatmap.text(
             start_frac,
-            -0.03,
+            -0.06,
             env_name,
             ha="right",
             va="top",
@@ -278,7 +278,10 @@ def plot_full_coverage_heatmap(
     ax_top.yaxis.set_minor_locator(plt.NullLocator())
     ax_top.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"])
     ax_top.set_ylabel(
-        "Mean score", fontsize=FONT_SIZES["tick_label"], rotation=270, labelpad=10
+        "Mean score\n(per environment)",
+        fontsize=FONT_SIZES["tick_label"],
+        rotation=270,
+        labelpad=14,
     )
     for spine in ax_top.spines.values():
         spine.set_visible(False)
@@ -299,7 +302,7 @@ def plot_full_coverage_heatmap(
     ax_right.set_xticks([0.5, 1])
     ax_right.xaxis.set_minor_locator(plt.NullLocator())
     ax_right.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
-    ax_right.set_xlabel("Mean score", fontsize=FONT_SIZES["tick_label"])
+    ax_right.set_xlabel("Mean score\n(per agent)", fontsize=FONT_SIZES["tick_label"])
     for spine in ax_right.spines.values():
         spine.set_visible(False)
 

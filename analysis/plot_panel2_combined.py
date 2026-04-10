@@ -35,7 +35,6 @@ from plot_utils import (
     filter_by_level,
     get_metric_column_name,
     load_category_tags,
-    load_logprobs_data,
     load_reports_data,
 )
 
@@ -216,7 +215,7 @@ def draw_heatmap(parent_gs):
         )
         ax_heatmap.text(
             start_frac,
-            -0.03,
+            -0.06,
             env_name,
             ha="right",
             va="top",
@@ -247,7 +246,10 @@ def draw_heatmap(parent_gs):
     ax_top.yaxis.set_label_position("right")
     ax_top.tick_params(axis="y", labelsize=FONT_SIZES["tick_label"] - 2)
     ax_top.set_ylabel(
-        "Mean", fontsize=FONT_SIZES["tick_label"] - 1, rotation=270, labelpad=10
+        "Mean score\n(per environment)",
+        fontsize=FONT_SIZES["tick_label"] - 1,
+        rotation=270,
+        labelpad=14,
     )
     for spine in ax_top.spines.values():
         spine.set_visible(False)
@@ -266,7 +268,9 @@ def draw_heatmap(parent_gs):
     ax_right.set_xlim(0, min(1.0, row_means.max() * 1.3))
     ax_right.set_yticks([])
     ax_right.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"] - 2)
-    ax_right.set_xlabel("Mean", fontsize=FONT_SIZES["tick_label"] - 1)
+    ax_right.set_xlabel(
+        "Mean score\n(per agent)", fontsize=FONT_SIZES["tick_label"] - 1
+    )
     for spine in ax_right.spines.values():
         spine.set_visible(False)
 
@@ -449,12 +453,12 @@ def draw_scatter(ax, gap_data):
         diag, diag, [max_gap * 1.1] * 2, alpha=0.1, color="#7150e0", zorder=0
     )
     ax.set_xlabel(
-        "Scaffold Spread (Score)",
+        "Scaffold Spread",
         fontsize=FONT_SIZES["axis_label"],
         fontweight="bold",
     )
     ax.set_ylabel(
-        "Model Spread (Score)",
+        "Model Spread",
         fontsize=FONT_SIZES["axis_label"],
         fontweight="bold",
     )
@@ -550,16 +554,12 @@ def main():
     logger.info("Loading data...")
     reports_df = load_reports_data()
     category_tags = load_category_tags()
-    logprobs_df = load_logprobs_data()
 
     metric_column = get_metric_column_name("average_score", 5)
 
     # Scatter data (default_map levels, average verbosity)
     scatter_df = filter_by_level(reports_df, "default_map")
     gap_data = collect_gap_data(scatter_df, metric_column)
-
-    # Logprobs stats
-    logprob_stats = compute_env_stats(logprobs_df)
 
     # --- Build combined figure ---
     heatmap_data = collect_full_coverage_data(reports_df, metric_column)
@@ -575,33 +575,29 @@ def main():
 
     outer_gs = fig.add_gridspec(
         2,
-        3,
+        2,
         height_ratios=[hm_height, bottom_height],
-        width_ratios=[0.8, 0.8, 1.2],
+        width_ratios=[1, 1],
         hspace=0.6,
         wspace=0.55,
     )
 
-    # (a) Heatmap — spans all 3 columns of row 0
+    # (a) Heatmap — spans both columns of row 0
     heatmap_slot = outer_gs[0, :]
     ax_top = draw_heatmap(heatmap_slot)
 
-    # (b) Scatter — row 1, left
-    ax_scatter = fig.add_subplot(outer_gs[1, 0])
-    draw_scatter(ax_scatter, gap_data)
-
-    # (c) Task category bar — row 1, center
-    ax_category = fig.add_subplot(outer_gs[1, 1])
+    # (b) Task category bar — row 1, left
+    ax_category = fig.add_subplot(outer_gs[1, 0])
     draw_task_category(ax_category, reports_df, category_tags)
 
-    # (d) Logprobs — row 1, right
-    ax_logprobs = fig.add_subplot(outer_gs[1, 2])
-    draw_logprobs(ax_logprobs, logprob_stats)
+    # (c) Scatter — row 1, right
+    ax_scatter = fig.add_subplot(outer_gs[1, 1])
+    draw_scatter(ax_scatter, gap_data)
 
     # Panel labels
     for ax, label in zip(
-        [ax_top, ax_scatter, ax_category, ax_logprobs],
-        ["a", "b", "c", "d"],
+        [ax_top, ax_category, ax_scatter],
+        ["a", "b", "c"],
         strict=False,
     ):
         ax.text(
