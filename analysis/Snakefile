@@ -1,7 +1,11 @@
+PYTHON = "uv run --project .. python"
+
 rule all:
     input:
+        # Data downloads
         "results/data/reports.jsonl",
         "results/data/qa_topic_reports.jsonl",
+        "results/data/logprobs.jsonl",
         # IRT models
         "results/irt_baseline/agent_trace.nc",
         "results/irt_baseline/results.json",
@@ -11,7 +15,7 @@ rule all:
         "results/irt_task/results.json",
         "results/irt_category_task/agent_trace.nc",
         "results/irt_category_task/results.json",
-        # Dev analysis plots
+        # Existing analysis plots
         "results/figures/fig_4_app/app_fig4_behavior_panel_1.pdf",
         "results/figures/fig_4_app/app_fig4_behavior_panel_2.pdf",
         "results/figures/fig_5_app/app_fig5_ver1.pdf",
@@ -23,9 +27,34 @@ rule all:
         "results/figures/analysis/avg_tool_calls_per_task_by_agent_type.pdf",
         "results/figures/analysis/action_distribution_by_environment_and_agent.pdf",
         "results/figures/analysis/action_distribution_by_environment_and_model.pdf",
+        # Epistemology & annotation plots (from dev)
         "results/figures/fig_epistemology/overall_pattern_bars_horizontal_individual.pdf",
         "results/figures/fig_epistemology/epst_combined.pdf",
         "results/tables/qa_scores_table.tex",
+        # Panel 2 plots
+        "results/figures/panel_2/panel2_coverage_heatmap.pdf",
+        "results/figures/panel_2/panel2_coverage_heatmap.png",
+        "results/figures/panel_2/panel2_coverage_tables.tex",
+        "results/figures/panel_2/panel2_gap_scatter.pdf",
+        "results/figures/panel_2/panel2_gap_scatter.png",
+        "results/figures/panel_2/panel2_task_category_bar.pdf",
+        "results/figures/panel_2/panel2_task_category_bar.png",
+        "results/figures/panel_2/panel2_task_category_line.pdf",
+        "results/figures/panel_2/panel2_task_category_line.png",
+        "results/figures/panel_2/panel2_task_category.pdf",
+        "results/figures/panel_2/panel2_task_category.png",
+        "results/figures/panel_2/panel2_logprobs.pdf",
+        "results/figures/panel_2/panel2_logprobs.png",
+        "results/figures/panel_2/panel2_logprobs_subset.pdf",
+        "results/figures/panel_2/panel2_logprobs_subset.png",
+        "results/figures/panel_2/panel2_logprobs_grouped.pdf",
+        "results/figures/panel_2/panel2_logprobs_grouped.png",
+        # Panel 6 plots
+        "results/figures/panel_6/panel6_logprob_score_correlation.pdf",
+        "results/figures/panel_6/panel6_logprob_score_correlation.png",
+
+
+# ── Data downloads ───────────────────────────────────────────────────────────
 
 
 rule download_reports:
@@ -34,7 +63,7 @@ rule download_reports:
     log:
         "results/logs/download_reports.log",
     shell:
-        "python download_reports_from_hf.py > {log} 2>&1"
+        "{PYTHON} download_reports_from_hf.py > {log} 2>&1"
 
 
 rule download_qa_topic_reports:
@@ -43,7 +72,7 @@ rule download_qa_topic_reports:
     log:
         "results/logs/download_qa_topic_reports.log",
     shell:
-        "python download_qa_topic_reports_from_hf.py > {log} 2>&1"
+        "{PYTHON} download_qa_topic_reports_from_hf.py > {log} 2>&1"
 
 
 rule download_qa_reports:
@@ -54,6 +83,15 @@ rule download_qa_reports:
         "results/logs/download_qa_reports.log",
     shell:
         "python download_qa_reports_from_hf.py > {log} 2>&1"
+
+
+rule download_logprobs:
+    output:
+        "results/data/logprobs.jsonl",
+    log:
+        "results/logs/download_logprobs.log",
+    shell:
+        "{PYTHON} download_logprobs_from_hf.py > {log} 2>&1"
 
 
 rule prepare_agent_data:
@@ -247,8 +285,6 @@ rule lfm_bin_evaluate:
 # Panel 4: IRT & LFM Visualizations
 # ==============================================================================
 
-PYTHON = "uv run --project .. python"
-
 
 rule download_lfm_binomial:
     output:
@@ -340,7 +376,7 @@ rule plot_irt_radar_and_variance:
         "{PYTHON} plot_irt_radar_and_variance.py > {log} 2>&1"
 
 
-### Annotation figure scripts
+# ── Annotation figure scripts ────────────────────────────────────────────────
 
 rule retrieve_annotations_from_mongo:
     output:
@@ -370,6 +406,11 @@ rule plot_marker_vs_scaffold:
         "results/logs/plot_marker_vs_scaffold.log",
     shell:
         "python plot_marker_vs_scaffold.py > {log} 2>&1"
+
+
+# ── Existing analysis plots ─────────────────────────────────────────────────
+
+
 rule plot_avg_output_tokens:
     input:
         "results/data/reports.jsonl",
@@ -431,6 +472,9 @@ rule plot_env_verbosity_performance:
         "python plot_env_verbosity_performance.py > {log} 2>&1"
 
 
+# ── Reasoning & epistemology (from dev) ──────────────────────────────────────
+
+
 rule run_reasoning_analysis_skip_annotate:
     output:
         "../reasoning_reports/analysis/annotation_summary.json",
@@ -440,7 +484,6 @@ rule run_reasoning_analysis_skip_annotate:
         "results/logs/run_reasoning_analysis_skip_annotate.log",
     shell:
         "python ../reasoning_reports/analyze.py --skip-annotate > {log} 2>&1"
-
 
 
 rule plot_overall_pattern_bars_horizontal_individual:
@@ -477,3 +520,133 @@ rule generate_qa_latex_table:
         "results/logs/generate_qa_latex_table.log",
     shell:
         "python generate_qa_latex_table.py > {log} 2>&1"
+
+
+# ── Panel 2 plots ───────────────────────────────────────────────────────────
+
+
+rule plot_panel2_coverage_heatmap:
+    input:
+        "results/data/reports.jsonl",
+    output:
+        "results/figures/panel_2/panel2_coverage_heatmap.pdf",
+        "results/figures/panel_2/panel2_coverage_heatmap.png",
+    log:
+        "results/logs/plot_panel2_coverage_heatmap.log",
+    shell:
+        "{PYTHON} plot_panel2_coverage_heatmap.py > {log} 2>&1"
+
+
+rule plot_panel2_coverage_tables:
+    input:
+        "results/data/reports.jsonl",
+    output:
+        "results/figures/panel_2/panel2_coverage_tables.tex",
+    log:
+        "results/logs/plot_panel2_coverage_tables.log",
+    shell:
+        "{PYTHON} plot_panel2_coverage_tables.py > {log} 2>&1"
+
+
+rule plot_panel2_gap_scatter:
+    input:
+        "results/data/reports.jsonl",
+    output:
+        "results/figures/panel_2/panel2_gap_scatter.pdf",
+        "results/figures/panel_2/panel2_gap_scatter.png",
+    log:
+        "results/logs/plot_panel2_gap_scatter.log",
+    shell:
+        "{PYTHON} plot_panel2_gap_scatter.py > {log} 2>&1"
+
+
+rule plot_panel2_task_category_bar:
+    input:
+        "results/data/reports.jsonl",
+        "subtask_category_tags.json",
+    output:
+        "results/figures/panel_2/panel2_task_category_bar.pdf",
+        "results/figures/panel_2/panel2_task_category_bar.png",
+    log:
+        "results/logs/plot_panel2_task_category_bar.log",
+    shell:
+        "{PYTHON} plot_panel2_task_category_bar.py > {log} 2>&1"
+
+
+rule plot_panel2_task_category_line:
+    input:
+        "results/data/reports.jsonl",
+        "subtask_category_tags.json",
+    output:
+        "results/figures/panel_2/panel2_task_category_line.pdf",
+        "results/figures/panel_2/panel2_task_category_line.png",
+    log:
+        "results/logs/plot_panel2_task_category_line.log",
+    shell:
+        "{PYTHON} plot_panel2_task_category_line.py > {log} 2>&1"
+
+
+rule plot_panel2_task_category:
+    input:
+        "results/data/reports.jsonl",
+        "subtask_category_tags.json",
+    output:
+        "results/figures/panel_2/panel2_task_category.pdf",
+        "results/figures/panel_2/panel2_task_category.png",
+    log:
+        "results/logs/plot_panel2_task_category.log",
+    shell:
+        "{PYTHON} plot_panel2_task_category.py > {log} 2>&1"
+
+
+rule plot_panel2_logprobs:
+    input:
+        "results/data/logprobs.jsonl",
+    output:
+        "results/figures/panel_2/panel2_logprobs.pdf",
+        "results/figures/panel_2/panel2_logprobs.png",
+    log:
+        "results/logs/plot_panel2_logprobs.log",
+    shell:
+        "{PYTHON} plot_panel2_logprobs.py > {log} 2>&1"
+
+
+rule plot_panel2_logprobs_grouped:
+    input:
+        "results/data/logprobs.jsonl",
+    output:
+        "results/figures/panel_2/panel2_logprobs_grouped.pdf",
+        "results/figures/panel_2/panel2_logprobs_grouped.png",
+    log:
+        "results/logs/plot_panel2_logprobs_grouped.log",
+    shell:
+        "{PYTHON} plot_panel2_logprobs_grouped.py > {log} 2>&1"
+
+
+rule plot_panel2_logprobs_subset:
+    input:
+        "results/data/logprobs.jsonl",
+    output:
+        "results/figures/panel_2/panel2_logprobs_subset.pdf",
+        "results/figures/panel_2/panel2_logprobs_subset.png",
+    log:
+        "results/logs/plot_panel2_logprobs_subset.log",
+    shell:
+        "{PYTHON} plot_panel2_logprobs_subset.py > {log} 2>&1"
+
+
+# ── Panel 6 plots ───────────────────────────────────────────────────────────
+
+
+rule plot_panel6_logprob_score_correlation:
+    input:
+        "results/data/logprobs.jsonl",
+        "results/data/reports.jsonl",
+        "results/data/qa_topic_reports.jsonl",
+    output:
+        "results/figures/panel_6/panel6_logprob_score_correlation.pdf",
+        "results/figures/panel_6/panel6_logprob_score_correlation.png",
+    log:
+        "results/logs/plot_panel6_logprob_score_correlation.log",
+    shell:
+        "{PYTHON} plot_panel6_logprob_score_correlation.py > {log} 2>&1"

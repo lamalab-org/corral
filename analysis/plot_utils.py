@@ -7,6 +7,8 @@ This module provides common functions for:
 - Metric column name handling
 """
 
+import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -21,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Data paths
 REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "reports.jsonl"
 QA_REPORTS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "qa_topic_reports.jsonl"
+LOGPROBS_PATH = REPO_ROOT / "analysis" / "results" / "data" / "logprobs.jsonl"
 REASONING_PATH = REPO_ROOT / "analysis" / "reasoning.json"
 
 
@@ -91,6 +94,17 @@ def load_qa_data() -> pd.DataFrame:
 
     df = pd.read_json(QA_REPORTS_PATH, lines=True)  # noqa: PD901
     logger.info(f"Loaded {len(df)} rows from qa_topic_reports.jsonl")
+    return df
+
+
+def load_logprobs_data() -> pd.DataFrame:
+    """Load per-message log-probability trace dataset."""
+    if not LOGPROBS_PATH.exists():
+        msg = f"Logprobs file not found: {LOGPROBS_PATH}"
+        raise FileNotFoundError(msg)
+
+    df = pd.read_json(LOGPROBS_PATH, lines=True)  # noqa: PD901
+    logger.info(f"Loaded {len(df)} rows from logprobs.jsonl")
     return df
 
 
@@ -337,3 +351,116 @@ def order_environments(
         logger.info(f"  {env}: {score:.3f}")
 
     return ordered_env_list
+
+
+# ==================== CATEGORY CLASSIFICATION ====================
+
+CATEGORY_TAGS_PATH = Path(__file__).parent / "subtask_category_tags.json"
+
+
+def load_category_tags() -> dict:
+    """Load subtask category tags from JSON."""
+    if not CATEGORY_TAGS_PATH.exists():
+        msg = f"Category tags file not found: {CATEGORY_TAGS_PATH}"
+        raise FileNotFoundError(msg)
+    with CATEGORY_TAGS_PATH.open() as f:
+        return json.load(f)
+
+
+def get_env_key_mapping() -> dict[str, str]:
+    """Map environment short names to keys used in subtask_category_tags.json."""
+    return {
+        "spectra": "sptectra",
+        "retro": "retrosynthesis",
+        "afm": "afm",
+        "catalyst": "catalyst",
+        "md": "md",
+        "ml": "ml",
+        "resistor": "resistor",
+        "wetlab": "wetlab",
+    }
+
+
+def classify_subtask(subtask: str, environment: str, category_tags: dict) -> str | None:
+    """Classify a subtask into a category using the category tags mapping."""
+    env_mapping = get_env_key_mapping()
+    tag_env_key = env_mapping.get(environment, environment)
+    env_tags = category_tags.get(tag_env_key, {})
+    if not env_tags:
+        return None
+
+    if environment == "afm":
+        if "subtask_level_" in subtask:
+            base_name = subtask.split("_level_")[0]
+            if base_name + "_level_1" in env_tags:
+                return env_tags[base_name + "_level_1"]
+        return env_tags.get(subtask)
+
+    if environment == "catalyst":
+        parts = subtask.split("_", 1)
+        if len(parts) > 1 and parts[1] in env_tags:
+            return env_tags[parts[1]]
+        return None
+
+    if environment == "md":
+        for task_type in ["melting", "quenching", "surface_energy", "surface"]:
+            if task_type in subtask:
+                task_tags = env_tags.get(task_type, {})
+                if "subtask_" in subtask:
+                    subtask_name = subtask.split("subtask_")[-1]
+                    if subtask_name == "diffusion_coefficient":
+                        subtask_name = "diffusivity"
+                    elif subtask_name == "tg_calculation":
+                        subtask_name = "tg_detection"
+                    elif subtask_name == "equilibration":
+                        subtask_name = "structure_retrieval"
+                    if subtask_name in task_tags:
+                        return task_tags[subtask_name]
+        return None
+
+    if environment == "ml":
+        parts = subtask.split("_", 1)
+        if len(parts) > 1 and parts[0].isdigit():
+            task_name = parts[1]
+            if (
+                task_name.startswith("batch_retrieve_")
+                and "batch_retrieve_*" in env_tags
+            ):
+                return env_tags["batch_retrieve_*"]
+            if task_name in env_tags:
+                return env_tags[task_name]
+        return None
+
+    if environment == "resistor":
+        parts = subtask.split("_", 2)
+        if len(parts) >= 3 and parts[0] == "task" and parts[1].isdigit():
+            pattern = "_".join(parts[2:])
+            if pattern in env_tags:
+                return env_tags[pattern]
+        return None
+
+    if environment == "retro":
+        if "-" in subtask:
+            pattern = subtask.split("-", 1)[1]
+            if pattern in env_tags:
+                return env_tags[pattern]
+        return None
+
+    if environment == "spectra":
+        if "_subtask_" in subtask:
+            subtask_num = "subtask_" + subtask.split("_subtask_")[-1]
+            if subtask_num in env_tags:
+                return env_tags[subtask_num]
+        return None
+
+    if environment == "wetlab":
+        m = re.match(r"qualysis_lvl(\d+)_\d+_(sub\d+)", subtask)
+        if m:
+            level_key = f"level_{m.group(1)}"
+            sub_key = f"qualysis_lvl{m.group(1)}_*_{m.group(2)}"
+            level_tags = env_tags.get(level_key, {})
+            if sub_key in level_tags:
+                return level_tags[sub_key]
+        return None
+
+    return None
