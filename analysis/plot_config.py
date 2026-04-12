@@ -118,6 +118,19 @@ ENVIRONMENT_COLOURS = {
     "md": "#0891b2",
 }
 
+# ---------- Domain group colours (for scatter plots) ----------
+GROUP_COLOURS = {
+    "Hypothesis-driven inquiry": "#b000ff",
+    "Strategic reasoning": "#fd00ff",
+    "Workflow construction": "#0051ff",
+}
+
+# Reverse lookup: env_id -> group colour
+ENV_GROUP_COLOUR_MAP = {}
+for _group_name, _group_info in ENVIRONMENT_GROUPS.items():
+    for _env in _group_info["environments"]:
+        ENV_GROUP_COLOUR_MAP[_env] = GROUP_COLOURS[_group_name]
+
 # ---------- Font sizes ----------
 FONT_SIZES = {
     "axis_label": 8,  # X and Y axis labels
