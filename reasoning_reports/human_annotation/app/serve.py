@@ -38,6 +38,13 @@ class AnnotationHandler(http.server.SimpleHTTPRequestHandler):
             return self._serve_json(HUMAN_ANNOTATION_DIR / "files2annotate" / name)
         if self.path.startswith("/api/trace/"):
             rel = unquote(self.path[len("/api/trace/") :])
+            # Some annotated files store input_file with a
+            # "corral/reasoning_reports/" prefix; strip it so the path
+            # resolves correctly relative to REASONING_DIR.
+            for prefix in ("corral/reasoning_reports/",):
+                if rel.startswith(prefix):
+                    rel = rel[len(prefix) :]
+                    break
             return self._serve_json(REASONING_DIR / rel)
         if self.path.startswith("/api/annotation/"):
             name = unquote(self.path[len("/api/annotation/") :])
