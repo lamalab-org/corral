@@ -43,29 +43,46 @@ from loguru import logger
 
 load_dotenv()
 
-try:
-    import matplotlib  # noqa
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    HAS_MPL = True
-except ImportError:
-    HAS_MPL = False
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-NODE_TYPES = ["H", "T", "E", "J", "U", "C"]
+NODE_TYPES = ["H", "T", "E", "J", "C", "N"]
 NODE_TYPES_SET = set(NODE_TYPES)
 EDGE_RELATIONS = [
     "tests",
     "observes",
-    "uses",
+    "informs",
     "updates_to",
     "competes_with",
     "contradicts",
 ]
 EDGE_RELATIONS_SET = set(EDGE_RELATIONS)
+
+# Allowed (relation, src_type, dst_type) combinations for edges.
+# "tests" edges are bidirectional (H<->T, J<->T).
+# Same-type edges are bidirectional by definition (H<->H, J<->J).
+ALLOWED_EDGE_TYPE_COMBOS: set[tuple[str, str, str]] = {
+    # tests (bidirectional)
+    ("tests", "H", "T"),
+    ("tests", "T", "H"),
+    ("tests", "J", "T"),
+    ("tests", "T", "J"),
+    # observes
+    ("observes", "T", "E"),
+    # updates_to (same type, bidirectional)
+    ("updates_to", "H", "H"),
+    # competes_with (same type, bidirectional)
+    ("competes_with", "H", "H"),
+    # contradicts
+    ("contradicts", "E", "H"),
+    ("contradicts", "J", "H"),
+    # informs
+    ("informs", "E", "H"),
+    ("informs", "E", "J"),
+    ("informs", "E", "C"),
+    ("informs", "J", "C"),
+    ("informs", "J", "H"),
+    ("informs", "J", "J"),
+}
 
 # The description dicts are the single source of truth for pattern names.
 # Change a key here and it propagates to SUBGRAPH_NAMES, families, matchers, etc.
@@ -73,11 +90,11 @@ EDGE_RELATIONS_SET = set(EDGE_RELATIONS)
 SUBGRAPH_DESCRIPTIONS: dict[str, str] = {
     "refutation_driven_belief_revision": (
         "Evidence triggers a belief update to a new hypothesis "
-        "[H -tests-> T -observes-> E -uses-> J/U -updates_to-> H2]."
+        "[H -tests-> T -observes-> E -informs-> J, H -updates_to-> H2]."
     ),
     "fixed_hypothesis_test_tuning": (
         "Hypothesis is held fixed while tests are iteratively adjusted "
-        "[H -tests-> T -observes-> E -uses-> J/U -updates_to-> T]."
+        "[H -tests-> T -observes-> E -informs-> J -tests-> T2]."
     ),
     "explore_then_test_transition": (
         "Exploration precedes hypothesis formation, which then drives testing "
@@ -89,7 +106,7 @@ SUBGRAPH_DESCRIPTIONS: dict[str, str] = {
     ),
     "evidence_led_hypothesis_generation": (
         "Evidence is observed first; a hypothesis is formed afterward "
-        "[E -uses-> J ... H ... H -tests-> T]."
+        "[E -informs-> J ... H ... H -tests-> T]."
     ),
     "convergent_multi_test_evidence": (
         "One hypothesis is evaluated via multiple independent tests "
@@ -100,8 +117,8 @@ SUBGRAPH_DESCRIPTIONS: dict[str, str] = {
         "[C before E; then H -tests-> T]."
     ),
     "evidence_guided_test_redesign": (
-        "An update revises the test, which then produces new evidence "
-        "[U -updates_to-> T -observes-> E]."
+        "A judgment motivates a new test, which then produces new evidence "
+        "[J -tests-> T -observes-> E]."
     ),
 }
 
@@ -121,23 +138,26 @@ SUBGRAPH_NAMES = list(SUBGRAPH_DESCRIPTIONS.keys())
 ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
     "untested_claim": ("Hypothesis never linked to a test [H with no tests]."),
     "evidence_non_uptake": (
-        "Evidence collected but never used [E with no uses to J/U]."
+        "Evidence collected but never used [E with no informs to J or H]."
     ),
     "unsupported_judgment": (
-        "Judgment made without supporting evidence [J with no E]."
+        "Judgment made without supporting evidence [J with no E via informs]."
     ),
     "stalled_revision": (
-        "Update node has no outgoing edges [U with no outgoing edge]."
+        "Revised hypothesis never tested "
+        "[H target of updates_to with no outgoing tests]."
     ),
     "contradiction_without_repair": (
         "Contradiction unresolved by any update or alternative "
-        "[E -contradicts-> H, no U/H alt]."
+        "[E -contradicts-> H, no updates_to/competes_with]."
     ),
     "premature_commitment": (
         "Hypothesis committed without intermediate testing [H -> C with no T]."
     ),
     "uninformative_test": ("Test produces no observed evidence [T with no E]."),
-    "fixed_belief_trace": ("No update nodes in the entire trace [No U in trace]."),
+    "fixed_belief_trace": (
+        "No hypothesis revision in the entire trace " "[No updates_to edges in trace]."
+    ),
     "disconnected_evidence": ("Evidence node with no edges [Isolated E]."),
     "one_sided_confirmation": (
         "Commitment reached without considering contradicting evidence "
@@ -198,34 +218,17 @@ SUBGRAPH_FAMILIES: dict[str, list[str]] = {
 }
 SUBGRAPH_FAMILY_NAMES = list(SUBGRAPH_FAMILIES.keys())
 
-DEFAULT_WINDOW = 16
-DEFAULT_OVERLAP = 4
+DEFAULT_WINDOW = 20
+DEFAULT_OVERLAP = 5
 DEFAULT_MAX_NODES_PER_WINDOW = 100
 DEFAULT_CONCURRENCY = 8
-
-METRIC_FIELDS = [
-    "workflow_completeness",
-    "loop_density",
-    "update_grounding_rate",
-    "orphan_evidence_rate",
-    "refute_neglect_rate",
-    "hypothesis_switch_without_eval_rate",
-    "scientificness_score",
-]
-
-COUNT_FIELDS = (
-    ["nodes_total", "edges_total"]
-    + [f"n_{t}" for t in NODE_TYPES]
-    + [f"e_{r}" for r in EDGE_RELATIONS]
-)
-
-NODE_COUNT_FIELDS = ["nodes_total", *[f"n_{t}" for t in NODE_TYPES]]
 
 
 PASS_A_SYSTEM = """You are a careful annotator. You MUST only extract information explicitly present in the provided messages.
 Rules:
 - Do NOT invent hidden thoughts or implied steps.
-- Every node MUST include at least one support quote with message indices.
+- Do not borrow any external knowledge or make assumptions beyond the text.
+- Do not judge or correct the content, only label supported nodes.
 - For messages with several nodes, you MUST follow the order in which they appear in the text to assign message indices.
 - If uncertain, omit the node rather than guessing.
 - Output JSON only, matching the required schema.
@@ -233,22 +236,27 @@ Rules:
 
 PASS_A_INSTRUCTIONS = """Extract 0..k nodes from the provided message window.
 
-Node types:
-H = Hypothesis (candidate explanation, or state)
-T = Test design or information-seeking plan
-E = Evidence / observation (result of a test, tool call, or direct observation)
-J = Judgment (interpretation of evidence, or comparison - it cannot be only paraphrasing the tool output; "what does one observation imply?")
-U = Update (change in beliefs, revision of best hypothesis, revising)
-C = Commitment / final answer / lock-in statement / committing to one hypothesis ("the answer is X", "I conclude ...")
+Every non-Observation message must be assigned with at least one node. It is possible that some messages will have multiple nodes (e.g., a message that both states a hypothesis and describes a test). Avoid repeated nodes of the **same type** within a single message, unless the text explicitly supports multiple distinct instances.
 
-Constraints:
+Node types:
+H = Hypothesis: a candidate explanation, or a working assumption about the system. It should be a revisable claim, proposal, or the current best guess about the answer. Information in task definitions or environment descriptions do not count as hypotheses (H).
+E = Evidence: all Observation messages must be assigned with and only with an Evidence (E) node. Only Observation messages can be Evidence (E) nodes.
+T = Test: any information-seeking action, including experiments, evaluations, or lookups. Both the intention and the concrete tool call qualify as tests (T). What matters is that the system is seeking new scientific information to evaluate a hypothesis (H) or a judgment (J). Only the tool calls of a message can be assigned as Test (T), and only if it is not Neutral (N).
+N = Neutral: for boilerplate operations like writing or copying files, or non-scientific tool calls. Only the tool calls of a message can be assigned as Neutral (N).
+J = Judgment: an interpretation of test results (Observation) that goes beyond the literal repetition of the raw output. If the agent restates an observation while adding any evaluative, comparative, or inferential content, even brief it is a judgment (J).
+
+Constraints for nodes:
 - Only label what is explicitly present in text.
 - Every node must have support quotes (exact substrings) and msg indices.
 - If you normalize text, still cite original quote(s).
 
-Hypothesis identity:
-- For each H node, produce "canonical" (short normalized form) and "hid" = sha1(canonical).
-- If hypothesis is vague, canonical can be the minimal explicit claim.
+Pseudo-nodes (not explicitly stated but can be inferred):
+C = Commitment: if from the actions of the agents or system it can be inferred that they have reached an implicit commitment to an answer that is not yet fully supported by evidence, and that they are **refusing to revise it**, then create a pseudo-node labeled C. This is a special pseudo-node that captures the commitment even if it is not explicitly stated.
+
+Constrains for pseudo-nodes:
+- Only Commitment (C) can be a pseudo-node.
+- For the quote support of a pseudo-node, you can cite the text that implies the commitment, even if it is not explicit. You are allowed to add a brief explanation to clarify the implication, but it must be concise and directly tied to the quote.
+
 
 Return JSON with keys:
 {
@@ -259,7 +267,6 @@ Return JSON with keys:
       "time": <int message index of earliest support>,
       "text": <normalized short node text>,
       "support": [{"msg_idx": <int>, "quote": <exact substring from that message>}],
-      "hypothesis": {"canonical": <str>, "hid": <str>}   // only if type == "H"
     }, ...
   ]
 }
@@ -268,6 +275,8 @@ Return JSON with keys:
 PASS_B_SYSTEM = """You are a careful annotator. You MUST only add edges supported by explicit text.
 Rules:
 - You may only connect nodes provided to you.
+- Do not borrow any external knowledge or make assumptions beyond the text.
+- Do not judge or correct the content, only label supported edges.
 - Every edge MUST include at least one support quote with message indices.
 - If uncertain, omit the edge rather than guessing.
 - Output JSON only, matching the required schema.
@@ -275,16 +284,26 @@ Rules:
 
 PASS_B_INSTRUCTIONS = """Given the message window and a list of extracted nodes (with node_id and text), extract supported edges among these nodes.
 
-Allowed relations:
-tests, observes, uses, updates_to, competes_with, contradicts
-
-Guidance:
-- tests: T evaluates a hypothesis or leads to evidence
-- observes: E is an observation from T or from a tool result
-- uses: J or U uses E (or uses another node) as support
-- updates_to: U transitions from one H to another H, or updates belief state
-- competes_with: between H alternatives
-- contradicts: E contradicts/refutes H, or J refutes H explicitly
+Only the following edge types are allowed, any other combination is forbidden:
+- tests: Allowed only between: H -> T, J -> T.
+    H -> T: the Test (T) directly addresses the Hypothesis' claim (H), or attempts to falsify or verify it.
+    J -> T: the Test (T) is designed in response to the Judgment (J), or the Judgment (J) motivates the test design.
+- observes: Allowed only between: T -> E.
+    T -> E: the Evidence (E) is a direct result of the Test (T).
+- updates_to: Allowed only between: H -> H.
+    H -> H: the later Hypothesis (H) is a revision of the earlier one, based on the nodes in between.
+- competes_with: Allowed only between: H -> H.
+    H -> H: the two Hypotheses (H) are alternative explanations that are directly compared or evaluated against each other. Both hypotheses should be plausible and co-existing at the same time. If another hypothesis is introduced later as a revision of the first one, then it should be connected with updates_to instead of competes_with.
+- contradicts: Allowed only between: E -> H, J -> H.
+    E -> H: the Evidence (E) contradicts the claim of the Hypothesis (H).
+    J -> H: the Judgment (J) contradicts the claim of the Hypothesis (H).
+- informs: Allowed only between: E -> H, E -> J, E -> C, J -> C, J -> H, J -> J.
+    E -> H: the Evidence (E) provides information relevant to the claim of the Hypothesis (H).
+    E -> J: the Judgment (J) is an interpretation of the Evidence (E).
+    E -> C: the Commitment (C) is informed by the Evidence (E) but not necessarily in an explicit way.
+    J -> H: the Judgment (J) provides information relevant to the claim of the Hypothesis (H).
+    J -> J: the later Judgment (J) is a refinement, an extension, or a combination of one or serveral earlier judgments (J).
+    J -> C: the Commitment (C) is informed by the Judgment (J) but not necessarily in an explicit way.
 
 Return JSON with keys:
 {
@@ -328,22 +347,22 @@ _TIKZ_SUBGRAPH_PATTERNS: dict[str, str] = {
         r"""\node[rnode] (h1) {H};
 \node[rnode, right=of h1] (t) {T};
 \node[rnode, right=of t] (e) {E};
-\node[rnode, right=of e] (ju) {\scalebox{.7}{J/U}};
-\node[rnode, right=of ju] (h2) {H$_2$};
+\node[rnode, right=of e] (j) {J};
+\node[rnode, right=of j] (h2) {H$_2$};
 \draw[->] (h1) -- node[rlbl] {tests} (t);
 \draw[->] (t) -- node[rlbl] {obs.} (e);
-\draw[->] (e) -- node[rlbl] {uses} (ju);
-\draw[->] (ju) -- node[rlbl] {upd.} (h2);"""
+\draw[->] (e) -- node[rlbl] {inf.} (j);
+\draw[->] (h1) to[bend right=40] node[rlblb] {upd.} (h2);"""
     ),
     SG_FIXED_HYPOTHESIS_TEST_TUNING: _make_tikz(
         r"""\node[rnode] (h) {H};
 \node[rnode, right=of h] (t) {T};
 \node[rnode, right=of t] (e) {E};
-\node[rnode, right=of e] (ju) {\scalebox{.7}{J/U}};
+\node[rnode, right=of e] (j) {J};
 \draw[->] (h) -- node[rlbl] {tests} (t);
 \draw[->] (t) -- node[rlbl] {obs.} (e);
-\draw[->] (e) -- node[rlbl] {uses} (ju);
-\draw[->, bend left=50] (ju) to node[rlblb] {upd.} (t);"""
+\draw[->] (e) -- node[rlbl] {inf.} (j);
+\draw[->, bend left=50] (j) to node[rlblb] {tests} (t);"""
     ),
     SG_EXPLORE_THEN_TEST_TRANSITION: _make_tikz(
         r"""\node[rnode] (t1) {T};
@@ -369,7 +388,7 @@ _TIKZ_SUBGRAPH_PATTERNS: dict[str, str] = {
 \node[right=4mm of j, draw=none, font=\scriptsize] (dots) {\ldots};
 \node[rnode, right=4mm of dots] (h) {H};
 \node[rnode, right=of h] (t) {T};
-\draw[->] (e) -- node[rlbl] {uses} (j);
+\draw[->] (e) -- node[rlbl] {inf.} (j);
 \draw[->] (h) -- node[rlbl] {tests} (t);"""
     ),
     SG_CONVERGENT_MULTI_TEST_EVIDENCE: _make_tikz(
@@ -395,10 +414,10 @@ _TIKZ_SUBGRAPH_PATTERNS: dict[str, str] = {
 \draw[->] (t) -- node[rlbl] {obs.} (e);"""
     ),
     SG_EVIDENCE_GUIDED_TEST_REDESIGN: _make_tikz(
-        r"""\node[rnode] (u) {U};
-\node[rnode, right=of u] (t) {T};
+        r"""\node[rnode] (j) {J};
+\node[rnode, right=of j] (t) {T};
 \node[rnode, right=of t] (e) {E};
-\draw[->] (u) -- node[rlbl] {upd.} (t);
+\draw[->] (j) -- node[rlbl] {tests} (t);
 \draw[->] (t) -- node[rlbl] {obs.} (e);"""
     ),
 }
@@ -414,31 +433,33 @@ _TIKZ_ANTIPATTERN_PATTERNS: dict[str, str] = {
     ),
     AP_EVIDENCE_NON_UPTAKE: _make_tikz(
         r"""\node[rnode] (e) {E};
-\node[missingnode, right=of e] (j) {\scalebox{.7}{J/U}};
-\draw[->, missing] (e) -- node[rlbl, text=gray] {uses} (j);
+\node[missingnode, right=of e] (j) {J};
+\draw[->, missing] (e) -- node[rlbl, text=gray] {inf.} (j);
 \draw[red, thick] (j.north west) -- (j.south east);
 \draw[red, thick] (j.north east) -- (j.south west);"""
     ),
     AP_UNSUPPORTED_JUDGMENT: _make_tikz(
         r"""\node[missingnode] (e) {E};
 \node[rnode, right=of e] (j) {J};
-\draw[->, missing] (e) -- node[rlbl, text=gray] {uses} (j);
+\draw[->, missing] (e) -- node[rlbl, text=gray] {inf.} (j);
 \draw[red, thick] (e.north west) -- (e.south east);
 \draw[red, thick] (e.north east) -- (e.south west);"""
     ),
     AP_STALLED_REVISION: _make_tikz(
-        r"""\node[rnode] (u) {U};
-\node[right=7mm of u, draw=none, font=\scriptsize, text=gray] (none) {$\varnothing$};
-\draw[->, missing] (u) -- (none);"""
+        r"""\node[rnode] (h1) {H};
+\node[rnode, right=of h1] (h2) {H$_2$};
+\node[right=7mm of h2, draw=none, font=\scriptsize, text=gray] (none) {$\varnothing$};
+\draw[->] (h1) -- node[rlbl] {upd.} (h2);
+\draw[->, missing] (h2) -- (none);"""
     ),
     AP_CONTRADICTION_WITHOUT_REPAIR: _make_tikz(
         r"""\node[rnode] (e) {E};
 \node[rnode, right=of e] (h) {H};
-\node[missingnode, right=of h] (u) {U};
+\node[missingnode, right=of h] (h2) {H$_2$};
 \draw[->] (e) -- node[rlbl] {contr.} (h);
-\draw[->, missing] (h) -- (u);
-\draw[red, thick] (u.north west) -- (u.south east);
-\draw[red, thick] (u.north east) -- (u.south west);"""
+\draw[->, missing] (h) -- node[rlbl, text=gray] {upd.} (h2);
+\draw[red, thick] (h2.north west) -- (h2.south east);
+\draw[red, thick] (h2.north east) -- (h2.south west);"""
     ),
     AP_PREMATURE_COMMITMENT: _make_tikz(
         r"""\node[rnode] (h) {H};
@@ -461,13 +482,13 @@ _TIKZ_ANTIPATTERN_PATTERNS: dict[str, str] = {
 \node[rnode, right=of h] (t) {T};
 \node[rnode, right=of t] (e) {E};
 \node[rnode, right=of e] (j) {J};
-\node[missingnode, below=5mm of j] (u) {U};
+\node[missingnode, below=5mm of h] (h2) {H$_2$};
 \draw[->] (h) -- (t);
 \draw[->] (t) -- (e);
 \draw[->] (e) -- (j);
-\draw[->, missing] (j) -- (u);
-\draw[red, thick] (u.north west) -- (u.south east);
-\draw[red, thick] (u.north east) -- (u.south west);"""
+\draw[->, missing] (h) -- node[left, font=\tiny, text=gray] {upd.} (h2);
+\draw[red, thick] (h2.north west) -- (h2.south east);
+\draw[red, thick] (h2.north east) -- (h2.south west);"""
     ),
     AP_DISCONNECTED_EVIDENCE: _make_tikz(
         r"""\node[rnode] (e) {E};
@@ -515,15 +536,6 @@ def safe_write_json(path: Path, obj: Any) -> None:
 
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
-
-
-def safe_float(x: Any) -> float | None:
-    try:
-        if x is None:
-            return None
-        return float(x)
-    except Exception:
-        return None
 
 
 def _mean(values: list[float | None]) -> float | None:
@@ -618,7 +630,20 @@ def iter_windows(n: int, window: int, overlap: int) -> list[tuple[int, int]]:
 
 def format_window(messages: list[dict[str, Any]], start: int, end: int) -> str:
     lines = []
-    for i in range(start, end):
+    # Always prepend the first two messages (task / system context)
+    preamble_end = min(2, len(messages))
+    for i in range(preamble_end):
+        role = messages[i].get("role", "")
+        content = messages[i].get("content", "")
+        if content is None:
+            content = ""
+        content = str(content)
+        lines.append(f"[{i}] role={role}\n{content}\n")
+    # For windows that don't start at the beginning, indicate omitted messages
+    actual_start = max(start, preamble_end)
+    if actual_start > preamble_end:
+        lines.append(f"[... messages {preamble_end}-{actual_start - 1} omitted ...]\n")
+    for i in range(actual_start, end):
         role = messages[i].get("role", "")
         content = messages[i].get("content", "")
         if content is None:
@@ -889,331 +914,6 @@ def earliest_time_of_type(nodes: list[dict[str, Any]], t: str) -> int | None:
     return min(ts) if ts else None
 
 
-def earliest_evidence_used_time(
-    nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
-) -> int | None:
-    node_by_id, out_edges, in_edges = build_index(nodes, edges)
-    node_type_map = {nid: n.get("type") for nid, n in node_by_id.items()}
-    candidate_times: list[int] = []
-    for nid, n in node_by_id.items():
-        if n.get("type") != "E":
-            continue
-        candidate_times.extend(
-            node_time(n)
-            for e in out_edges.get(nid, [])
-            if e.get("relation") == "uses"
-            and node_type_map.get(e.get("dst")) in {"J", "U"}
-        )
-        candidate_times.extend(
-            node_time(n)
-            for e in in_edges.get(nid, [])
-            if e.get("relation") == "uses"
-            and node_type_map.get(e.get("src")) in {"J", "U"}
-        )
-    return min(candidate_times) if candidate_times else None
-
-
-def metric_update_grounding_rate(nodes: list, edges: list) -> dict[str, Any]:
-    node_type_map = {n["node_id"]: n["type"] for n in nodes}
-    in_edges = build_adjacency(edges)[1]
-    u_nodes = [n for n in nodes if n["type"] == "U"]
-    if not u_nodes:
-        return {"value": None, "numerator": 0, "denominator": 0}
-    grounded = 0
-    for u in u_nodes:
-        for e in in_edges.get(u["node_id"], []):
-            if e["relation"] == "uses" and node_type_map.get(e["src"]) == "E":
-                grounded += 1
-                break
-    return {
-        "value": grounded / len(u_nodes),
-        "numerator": grounded,
-        "denominator": len(u_nodes),
-    }
-
-
-def metric_orphan_evidence_rate(nodes: list, edges: list) -> dict[str, Any]:
-    out_edges = build_adjacency(edges)[0]
-    e_nodes = [n for n in nodes if n["type"] == "E"]
-    if not e_nodes:
-        return {"value": None, "numerator": 0, "denominator": 0}
-    orphan = 0
-    for en in e_nodes:
-        outs = out_edges.get(en["node_id"], [])
-        used = any(ed["relation"] == "uses" for ed in outs)
-        if not used:
-            orphan += 1
-    return {
-        "value": orphan / len(e_nodes),
-        "numerator": orphan,
-        "denominator": len(e_nodes),
-    }
-
-
-def metric_refute_neglect_rate(nodes: list, edges: list) -> dict[str, Any]:
-    node_type_map = {n["node_id"]: n["type"] for n in nodes}
-    out_edges, in_edges = build_adjacency(edges)
-    refuting = [
-        e
-        for e in edges
-        if e["relation"] in {"refutes", "contradicts"}
-        and node_type_map.get(e["src"]) == "E"
-        and node_type_map.get(e["dst"]) == "H"
-    ]
-    if not refuting:
-        return {"value": None, "numerator": 0, "denominator": 0}
-    neglected = 0
-    for e in refuting:
-        ev = e["src"]
-        outs = out_edges.get(ev, [])
-        ins = in_edges.get(ev, [])
-        linked = False
-        for ed in outs:
-            if ed["relation"] == "uses" and node_type_map.get(ed["dst"]) in {"J", "U"}:
-                linked = True
-                break
-        if not linked:
-            for ed in ins:
-                if ed["relation"] == "uses" and node_type_map.get(ed["src"]) in {
-                    "J",
-                    "U",
-                }:
-                    linked = True
-                    break
-        if not linked:
-            neglected += 1
-    return {
-        "value": neglected / len(refuting),
-        "numerator": neglected,
-        "denominator": len(refuting),
-    }
-
-
-def metric_loop_density(nodes: list, edges: list) -> dict[str, Any]:
-    node_type_map = {n["node_id"]: n["type"] for n in nodes}
-    out_edges = build_adjacency(edges)[0]
-    Hs = [n["node_id"] for n in nodes if n["type"] == "H"]
-    Js = [n["node_id"] for n in nodes if n["type"] == "J"]
-    Us = [n["node_id"] for n in nodes if n["type"] == "U"]
-
-    def outs_by_rel(src: str, rel: str) -> list[str]:
-        return [e["dst"] for e in out_edges.get(src, []) if e["relation"] == rel]
-
-    def has_uses(a: str, b: str) -> bool:
-        for e in out_edges.get(a, []):
-            if e["relation"] == "uses" and e["dst"] == b:
-                return True
-        for e in out_edges.get(b, []):
-            if e["relation"] == "uses" and e["dst"] == a:
-                return True
-        return False
-
-    motif_count = 0
-    for h in Hs:
-        for t in outs_by_rel(h, "tests"):
-            if node_type_map.get(t) != "T":
-                continue
-            for ev in outs_by_rel(t, "observes"):
-                if node_type_map.get(ev) != "E":
-                    continue
-                for j in Js:
-                    if has_uses(j, ev):
-                        for u in Us:
-                            if has_uses(u, ev):
-                                motif_count += 1
-    denom = max(1, len(nodes))
-    return {
-        "value": motif_count / denom,
-        "count": motif_count,
-        "denominator_nodes": len(nodes),
-    }
-
-
-def metric_hypothesis_switch_without_eval(nodes: list, edges: list) -> dict[str, Any]:
-    node_by_id = {n["node_id"]: n for n in nodes}
-    node_type_map = {nid: n["type"] for nid, n in node_by_id.items()}
-    out_edges_map, in_edges_map = build_adjacency(edges)
-
-    switches: list[tuple[str, str, int]] = []
-    for e in edges:
-        if e["relation"] == "updates_to":
-            s, d = e["src"], e["dst"]
-            if node_type_map.get(s) == "H" and node_type_map.get(d) == "H":
-                switches.append((s, d, int(e.get("time", 0))))
-            elif node_type_map.get(s) == "U" and node_type_map.get(d) == "H":
-                for ie in in_edges_map.get(s, []):
-                    if node_type_map.get(ie["src"]) == "H":
-                        switches.append((ie["src"], d, int(e.get("time", 0))))
-                        break
-
-    if not switches:
-        return {"value": None, "numerator": 0, "denominator": 0}
-
-    def _node_time(nid: str) -> int:
-        t = node_by_id.get(nid, {}).get("time", 0)
-        return int(t) if isinstance(t, int) else 0
-
-    def has_nearby_eval(switch_time: int, target_h: str) -> bool:
-        for n in nodes:
-            if n["type"] not in {"J", "V"}:
-                continue
-            t = _node_time(n["node_id"])
-            if switch_time - 2 <= t <= switch_time:
-                nid = n["node_id"]
-                for e in out_edges_map.get(nid, []):
-                    if e["dst"] == target_h:
-                        return True
-                for e in in_edges_map.get(nid, []):
-                    if e["src"] == target_h:
-                        return True
-        return False
-
-    denom = len(switches)
-    bad = sum(
-        1
-        for hold, hnew, t in switches
-        if not (has_nearby_eval(t, hold) or has_nearby_eval(t, hnew))
-    )
-    return {"value": bad / denom, "numerator": bad, "denominator": denom}
-
-
-def metric_alternative_coverage(nodes: list, edges: list) -> dict[str, Any]:
-    h_nodes = [n for n in nodes if n["type"] == "H"]
-    if not h_nodes:
-        return {"value": None, "numerator": 0, "denominator": 0}
-    h_ids = {n["node_id"] for n in h_nodes}
-    h_with_alt: set[str] = set()
-    for e in edges:
-        if e["relation"] == "competes_with":
-            if e["src"] in h_ids:
-                h_with_alt.add(e["src"])
-            if e["dst"] in h_ids:
-                h_with_alt.add(e["dst"])
-    covered = len(h_with_alt)
-    return {
-        "value": covered / len(h_nodes),
-        "numerator": covered,
-        "denominator": len(h_nodes),
-    }
-
-
-def metric_unlinked_test_evidence_rate(nodes: list, edges: list) -> dict[str, Any]:
-    te_nodes = [n for n in nodes if n["type"] in {"T", "E"}]
-    if not te_nodes:
-        return {"value": None, "numerator": 0, "denominator": 0}
-    h_ids = {n["node_id"] for n in nodes if n["type"] == "H"}
-    edge_pairs: set[tuple[str, str]] = {(e["src"], e["dst"]) for e in edges}
-    unlinked = 0
-    for te in te_nodes:
-        nid = te["node_id"]
-        linked = any((nid, h) in edge_pairs or (h, nid) in edge_pairs for h in h_ids)
-        if not linked:
-            unlinked += 1
-    return {
-        "value": unlinked / len(te_nodes),
-        "numerator": unlinked,
-        "denominator": len(te_nodes),
-    }
-
-
-def antipattern_hypothesis_hopping(nodes: list, edges: list) -> dict[str, Any]:
-    node_type_map = {n["node_id"]: n["type"] for n in nodes}
-    h_transitions: dict[str, list[tuple[str, int]]] = {}
-    for e in edges:
-        if e["relation"] == "updates_to":
-            s, d = e["src"], e["dst"]
-            if node_type_map.get(s) == "H" and node_type_map.get(d) == "H":
-                h_transitions.setdefault(s, []).append((d, int(e.get("time", 0))))
-
-    out_edges_map, in_edges_map = build_adjacency(edges)
-
-    def has_eval_between(h1: str, h2: str, t: int) -> bool:
-        for n in nodes:
-            if n["type"] not in {"J", "U"}:
-                continue
-            nt = int(n.get("time", 0))
-            if abs(nt - t) > 2:
-                continue
-            nid = n["node_id"]
-            for ed in out_edges_map.get(nid, []):
-                if ed["dst"] in {h1, h2}:
-                    return True
-            for ed in in_edges_map.get(nid, []):
-                if ed["src"] in {h1, h2}:
-                    return True
-        return False
-
-    bare_next: dict[str, list[str]] = {}
-    for h1, nexts in h_transitions.items():
-        for h2, t in nexts:
-            if not has_eval_between(h1, h2, t):
-                bare_next.setdefault(h1, []).append(h2)
-
-    if not bare_next:
-        return {"detected": False, "hop_chain_count": 0, "longest_hop_chain": 0}
-
-    def chain_len(h: str, visited: set) -> int:
-        if h in visited:
-            return 0
-        nexts = bare_next.get(h, [])
-        if not nexts:
-            return 1
-        visited.add(h)
-        best = 1 + max(chain_len(nx, visited) for nx in nexts)
-        visited.discard(h)
-        return best
-
-    reached = {h2 for nexts_list in bare_next.values() for h2 in nexts_list}
-    starts = [h for h in bare_next if h not in reached]
-    longest = 0
-    hop_chains = 0
-    for s in starts:
-        length = chain_len(s, set())
-        if length >= 3:
-            hop_chains += 1
-            longest = max(longest, length)
-    return {
-        "detected": hop_chains > 0,
-        "hop_chain_count": hop_chains,
-        "longest_hop_chain": longest,
-    }
-
-
-def antipattern_no_hypothesis(nodes: list) -> dict[str, Any]:
-    h_count = sum(1 for n in nodes if n["type"] == "H")
-    return {"detected": h_count == 0, "hypothesis_count": h_count}
-
-
-def compute_metrics(nodes: list, edges: list) -> dict[str, Any]:
-    return {
-        "update_grounding_rate": metric_update_grounding_rate(nodes, edges),
-        "orphan_evidence_rate": metric_orphan_evidence_rate(nodes, edges),
-        "refute_neglect_rate": metric_refute_neglect_rate(nodes, edges),
-        "loop_density": metric_loop_density(nodes, edges),
-        "hypothesis_switch_without_eval_rate": metric_hypothesis_switch_without_eval(
-            nodes, edges
-        ),
-        "alternative_coverage": metric_alternative_coverage(nodes, edges),
-        "unlinked_test_evidence_rate": metric_unlinked_test_evidence_rate(nodes, edges),
-        "antipatterns": {
-            "hypothesis_hopping": antipattern_hypothesis_hopping(nodes, edges),
-            "no_hypothesis": antipattern_no_hypothesis(nodes),
-        },
-        "counts": {
-            "nodes_total": len(nodes),
-            "edges_total": len(edges),
-            "nodes_by_type": {
-                t: sum(1 for n in nodes if n["type"] == t)
-                for t in sorted(NODE_TYPES_SET)
-            },
-            "edges_by_relation": {
-                r: sum(1 for e in edges if e["relation"] == r)
-                for r in sorted(EDGE_RELATIONS_SET)
-            },
-        },
-    }
-
-
 def _nodes_of_type(ntype: str, node_type_map: dict[str, str]) -> list[str]:
     return [nid for nid, t in node_type_map.items() if t == ntype]
 
@@ -1227,8 +927,12 @@ def _has_edge(
     return False
 
 
-def _has_uses_link(a: str, b: str, out_edges: dict[str, list[dict[str, Any]]]) -> bool:
-    return _has_edge(a, b, "uses", out_edges) or _has_edge(b, a, "uses", out_edges)
+def _has_informs_link(
+    a: str, b: str, out_edges: dict[str, list[dict[str, Any]]]
+) -> bool:
+    return _has_edge(a, b, "informs", out_edges) or _has_edge(
+        b, a, "informs", out_edges
+    )
 
 
 def _neighbours(
@@ -1252,18 +956,13 @@ def _match_popperian(node_type_map, _node_by_id, out_edges):
         for t in _neighbours(h1, "tests", "T", out_edges, node_type_map):
             for ev in _neighbours(t, "observes", "E", out_edges, node_type_map):
                 for j in _nodes_of_type("J", node_type_map):
-                    if not _has_uses_link(ev, j, out_edges):
+                    if not _has_informs_link(ev, j, out_edges):
                         continue
-                    for u in _nodes_of_type("U", node_type_map):
-                        if not _has_uses_link(ev, u, out_edges):
-                            continue
-                        for h2 in _neighbours(
-                            u, "updates_to", "H", out_edges, node_type_map
-                        ):
-                            if h2 != h1:
-                                matched = True
-                                break
-                        if matched:
+                    for h2 in _neighbours(
+                        h1, "updates_to", "H", out_edges, node_type_map
+                    ):
+                        if h2 != h1:
+                            matched = True
                             break
                     if matched:
                         break
@@ -1283,23 +982,18 @@ def _match_ml_make_it_work(node_type_map, _node_by_id, out_edges):
         for t1 in _neighbours(h, "tests", "T", out_edges, node_type_map):
             for ev in _neighbours(t1, "observes", "E", out_edges, node_type_map):
                 for j in _nodes_of_type("J", node_type_map):
-                    if not _has_uses_link(ev, j, out_edges):
+                    if not _has_informs_link(ev, j, out_edges):
                         continue
-                    for u in _nodes_of_type("U", node_type_map):
-                        u_to_Ts = _neighbours(
-                            u, "updates_to", "T", out_edges, node_type_map
-                        )
-                        if not u_to_Ts:
-                            continue
-                        u_to_Hs = _neighbours(
-                            u, "updates_to", "H", out_edges, node_type_map
-                        )
-                        if u_to_Hs:
-                            continue
-                        matched = True
-                        break
-                    if matched:
-                        break
+                    j_to_Ts = _neighbours(j, "tests", "T", out_edges, node_type_map)
+                    if not j_to_Ts:
+                        continue
+                    h_to_Hs = _neighbours(
+                        h, "updates_to", "H", out_edges, node_type_map
+                    )
+                    if h_to_Hs:
+                        continue
+                    matched = True
+                    break
                 if matched:
                     break
             if matched:
@@ -1348,7 +1042,7 @@ def _match_abductive(node_type_map, node_by_id, out_edges):
         e0_time = node_time(node_by_id[e0])
         matched = False
         for j0 in _nodes_of_type("J", node_type_map):
-            if not _has_uses_link(e0, j0, out_edges):
+            if not _has_informs_link(e0, j0, out_edges):
                 continue
             for h1 in _nodes_of_type("H", node_type_map):
                 if node_time(node_by_id[h1]) <= e0_time:
@@ -1404,8 +1098,8 @@ def _match_preregistered(node_type_map, node_by_id, out_edges):
 
 def _match_active_learning(node_type_map, _node_by_id, out_edges):
     count = 0
-    for u in _nodes_of_type("U", node_type_map):
-        for t in _neighbours(u, "updates_to", "T", out_edges, node_type_map):
+    for j in _nodes_of_type("J", node_type_map):
+        for t in _neighbours(j, "tests", "T", out_edges, node_type_map):
             if _neighbours(t, "observes", "E", out_edges, node_type_map):
                 count += 1
                 break
@@ -1477,27 +1171,27 @@ def detect_subgraphs_global(nodes: list, edges: list) -> dict[str, int]:
 
     has_HT_tests = _typed_edge_exists("H", "T", "tests", node_by_id, out_edges)
     has_TE_observes = _typed_edge_exists("T", "E", "observes", node_by_id, out_edges)
-    has_UH_updates = _typed_edge_exists("U", "H", "updates_to", node_by_id, out_edges)
-    has_UT_updates = _typed_edge_exists("U", "T", "updates_to", node_by_id, out_edges)
+    has_HH_updates = _typed_edge_exists("H", "H", "updates_to", node_by_id, out_edges)
+    has_JT_tests = _typed_edge_exists("J", "T", "tests", node_by_id, out_edges)
     has_HH_competes = _typed_edge_exists(
         "H", "H", "competes_with", node_by_id, out_edges
     )
     fan_out_H_T = _fan_out_global("H", "T", "tests", node_by_id, out_edges)
-    has_EJ_uses = _typed_edge_exists(
-        "E", "J", "uses", node_by_id, out_edges
-    ) or _typed_edge_exists("J", "E", "uses", node_by_id, out_edges)
+    has_EJ_informs = _typed_edge_exists(
+        "E", "J", "informs", node_by_id, out_edges
+    ) or _typed_edge_exists("J", "E", "informs", node_by_id, out_edges)
 
     results: dict[str, int] = {}
     results[SG_REFUTATION_DRIVEN_BELIEF_REVISION] = int(
-        has_HT_tests and has_TE_observes and has_UH_updates and n_H >= 2
+        has_HT_tests and has_TE_observes and has_HH_updates and n_H >= 2
     )
     results[SG_FIXED_HYPOTHESIS_TEST_TUNING] = int(
         n_H <= 1
         and n_T >= 2
         and has_HT_tests
         and has_TE_observes
-        and has_EJ_uses
-        and not has_UH_updates
+        and has_EJ_informs
+        and not has_HH_updates
     )
     results[SG_EXPLORE_THEN_TEST_TRANSITION] = int(
         t_first_T is not None
@@ -1513,7 +1207,7 @@ def detect_subgraphs_global(nodes: list, edges: list) -> dict[str, int]:
     results[SG_PRECOMMITTED_TEST_PLAN] = int(
         t_first_C is not None and t_first_E is not None and t_first_C < t_first_E
     )
-    results[SG_EVIDENCE_GUIDED_TEST_REDESIGN] = int(has_UT_updates and has_TE_observes)
+    results[SG_EVIDENCE_GUIDED_TEST_REDESIGN] = int(has_JT_tests and has_TE_observes)
     return results
 
 
@@ -1532,14 +1226,14 @@ def _ap_evidence_ignored(node_type_map, _node_by_id, out_edges, in_edges):
     count = 0
     for ev in _nodes_of_type("E", node_type_map):
         used = any(
-            e.get("relation") == "uses"
-            and node_type_map.get(e.get("dst")) in {"J", "U"}
+            e.get("relation") == "informs"
+            and node_type_map.get(e.get("dst")) in {"J", "H"}
             for e in out_edges.get(ev, [])
         )
         if not used:
             used = any(
-                e.get("relation") == "uses"
-                and node_type_map.get(e.get("src")) in {"J", "U"}
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("src")) in {"J", "H"}
                 for e in in_edges.get(ev, [])
             )
         if not used:
@@ -1551,12 +1245,13 @@ def _ap_judgment_without_evidence(node_type_map, _node_by_id, out_edges, in_edge
     count = 0
     for j in _nodes_of_type("J", node_type_map):
         has_e = any(
-            e.get("relation") == "uses" and node_type_map.get(e.get("dst")) == "E"
+            e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "E"
             for e in out_edges.get(j, [])
         )
         if not has_e:
             has_e = any(
-                e.get("relation") == "uses" and node_type_map.get(e.get("src")) == "E"
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("src")) == "E"
                 for e in in_edges.get(j, [])
             )
         if not has_e:
@@ -1564,8 +1259,17 @@ def _ap_judgment_without_evidence(node_type_map, _node_by_id, out_edges, in_edge
     return count
 
 
-def _ap_dead_end_update(node_type_map, _node_by_id, out_edges, _in_edges):
-    return sum(1 for u in _nodes_of_type("U", node_type_map) if not out_edges.get(u))
+def _ap_dead_end_update(node_type_map, _node_by_id, out_edges, in_edges):
+    # Revised hypotheses (targets of updates_to) with no outgoing tests
+    count = 0
+    for h in _nodes_of_type("H", node_type_map):
+        is_revised = any(e.get("relation") == "updates_to" for e in in_edges.get(h, []))
+        if not is_revised:
+            continue
+        has_test = any(e.get("relation") == "tests" for e in out_edges.get(h, []))
+        if not has_test:
+            count += 1
+    return count
 
 
 def _ap_unresolved_contradiction(node_type_map, node_by_id, out_edges, in_edges):
@@ -1583,7 +1287,7 @@ def _ap_unresolved_contradiction(node_type_map, node_by_id, out_edges, in_edges)
                 src = ie.get("src")
                 if (
                     ie.get("relation") == "updates_to"
-                    and node_type_map.get(src) == "U"
+                    and node_type_map.get(src) == "H"
                     and node_time(node_by_id.get(src, {})) >= h_t
                 ):
                     resolved = True
@@ -1609,12 +1313,13 @@ def _ap_hypothesis_to_commitment_shortcut(
     count = 0
     for h in _nodes_of_type("H", node_type_map):
         links_c = any(
-            e.get("relation") == "uses" and node_type_map.get(e.get("dst")) == "C"
+            e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "C"
             for e in out_edges.get(h, [])
         )
         if not links_c:
             links_c = any(
-                e.get("relation") == "uses" and node_type_map.get(e.get("src")) == "C"
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("src")) == "C"
                 for e in in_edges.get(h, [])
             )
         if not links_c:
@@ -1646,8 +1351,14 @@ def _ap_test_without_evidence(node_type_map, _node_by_id, out_edges, in_edges):
     return count
 
 
-def _ap_no_belief_revision(node_type_map, _node_by_id, _out_edges, _in_edges):
-    return 1 if len(_nodes_of_type("U", node_type_map)) == 0 else 0
+def _ap_no_belief_revision(_node_type_map, _node_by_id, out_edges, _in_edges):
+    # No updates_to edges anywhere in the trace
+    has_update = any(
+        e.get("relation") == "updates_to"
+        for edges_list in out_edges.values()
+        for e in edges_list
+    )
+    return 0 if has_update else 1
 
 
 def _ap_orphan_evidence(node_type_map, _node_by_id, out_edges, in_edges):
@@ -1662,12 +1373,13 @@ def _ap_confirmation_only(node_type_map, _node_by_id, out_edges, in_edges):
     count = 0
     for h in _nodes_of_type("H", node_type_map):
         committed = any(
-            e.get("relation") == "uses" and node_type_map.get(e.get("dst")) == "C"
+            e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "C"
             for e in out_edges.get(h, [])
         )
         if not committed:
             committed = any(
-                e.get("relation") == "uses" and node_type_map.get(e.get("src")) == "C"
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("src")) == "C"
                 for e in in_edges.get(h, [])
             )
         if not committed:
@@ -1675,15 +1387,15 @@ def _ap_confirmation_only(node_type_map, _node_by_id, out_edges, in_edges):
         has_support = False
         for ie in in_edges.get(h, []):
             src = ie.get("src")
-            if ie.get("relation") == "uses" and node_type_map.get(src) == "J":
+            if ie.get("relation") == "informs" and node_type_map.get(src) == "J":
                 for je in in_edges.get(src, []):
                     if (
-                        je.get("relation") == "uses"
+                        je.get("relation") == "informs"
                         and node_type_map.get(je.get("src")) == "E"
                     ):
                         has_support = True
                         break
-            if ie.get("relation") == "uses" and node_type_map.get(src) == "E":
+            if ie.get("relation") == "informs" and node_type_map.get(src) == "E":
                 has_support = True
             if has_support:
                 break
@@ -1733,7 +1445,9 @@ def detect_antipatterns_global(
     n_H = sum(1 for t in node_type_map.values() if t == "H")
     n_T = sum(1 for t in node_type_map.values() if t == "T")
     n_E = sum(1 for t in node_type_map.values() if t == "E")
-    n_U = sum(1 for t in node_type_map.values() if t == "U")
+
+    # Count updates_to edges for fixed_belief_trace check
+    n_updates_to = sum(1 for e in edges if e.get("relation") == "updates_to")
 
     h_tested = 0
     for h in _nodes_of_type("H", node_type_map):
@@ -1746,14 +1460,14 @@ def detect_antipatterns_global(
     e_used = 0
     for ev in _nodes_of_type("E", node_type_map):
         used = any(
-            e.get("relation") == "uses"
-            and node_type_map.get(e.get("dst")) in {"J", "U"}
+            e.get("relation") == "informs"
+            and node_type_map.get(e.get("dst")) in {"J", "H"}
             for e in out_edges.get(ev, [])
         )
         if not used:
             used = any(
-                e.get("relation") == "uses"
-                and node_type_map.get(e.get("src")) in {"J", "U"}
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("src")) in {"J", "H"}
                 for e in in_edges.get(ev, [])
             )
         if used:
@@ -1800,12 +1514,13 @@ def detect_antipatterns_global(
     h_to_c_untested = 0
     for h in _nodes_of_type("H", node_type_map):
         links_c = any(
-            e.get("relation") == "uses" and node_type_map.get(e.get("dst")) == "C"
+            e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "C"
             for e in out_edges.get(h, [])
         )
         if not links_c:
             links_c = any(
-                e.get("relation") == "uses" and node_type_map.get(e.get("src")) == "C"
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("src")) == "C"
                 for e in in_edges.get(h, [])
             )
         if not links_c:
@@ -1825,29 +1540,38 @@ def detect_antipatterns_global(
     j_without_e = 0
     for j in _nodes_of_type("J", node_type_map):
         has_e = any(
-            e.get("relation") == "uses" and node_type_map.get(e.get("dst")) == "E"
+            e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "E"
             for e in out_edges.get(j, [])
         )
         if not has_e:
             has_e = any(
-                e.get("relation") == "uses" and node_type_map.get(e.get("src")) == "E"
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("src")) == "E"
                 for e in in_edges.get(j, [])
             )
         if not has_e:
             j_without_e += 1
 
-    dead_u = sum(1 for u in _nodes_of_type("U", node_type_map) if not out_edges.get(u))
+    # Stalled revision: revised H (target of updates_to) with no outgoing tests
+    dead_revised = 0
+    for h in _nodes_of_type("H", node_type_map):
+        is_revised = any(e.get("relation") == "updates_to" for e in in_edges.get(h, []))
+        if not is_revised:
+            continue
+        has_test = any(e.get("relation") == "tests" for e in out_edges.get(h, []))
+        if not has_test:
+            dead_revised += 1
     ap_local_counts = detect_antipatterns_local(nodes, edges)
 
     binary: dict[str, bool] = {
         AP_UNTESTED_CLAIM: (n_H - h_tested) > 0,
         AP_EVIDENCE_NON_UPTAKE: (n_E - e_used) > 0,
         AP_UNSUPPORTED_JUDGMENT: j_without_e > 0,
-        AP_STALLED_REVISION: dead_u > 0,
+        AP_STALLED_REVISION: dead_revised > 0,
         AP_CONTRADICTION_WITHOUT_REPAIR: n_unresolved > 0,
         AP_PREMATURE_COMMITMENT: h_to_c_untested > 0,
         AP_UNINFORMATIVE_TEST: (n_T - t_with_ev) > 0,
-        AP_FIXED_BELIEF_TRACE: n_U == 0,
+        AP_FIXED_BELIEF_TRACE: n_updates_to == 0,
         AP_DISCONNECTED_EVIDENCE: e_orphan > 0,
         AP_ONE_SIDED_CONFIRMATION: ap_local_counts.get(AP_ONE_SIDED_CONFIRMATION, 0)
         > 0,
@@ -1856,131 +1580,20 @@ def detect_antipatterns_global(
         AP_UNTESTED_CLAIM: n_H - h_tested,
         AP_EVIDENCE_NON_UPTAKE: n_E - e_used,
         AP_UNSUPPORTED_JUDGMENT: j_without_e,
-        AP_STALLED_REVISION: dead_u,
+        AP_STALLED_REVISION: dead_revised,
         AP_CONTRADICTION_WITHOUT_REPAIR: n_unresolved,
         AP_PREMATURE_COMMITMENT: h_to_c_untested,
         AP_UNINFORMATIVE_TEST: n_T - t_with_ev,
-        AP_FIXED_BELIEF_TRACE: 1 if n_U == 0 else 0,
+        AP_FIXED_BELIEF_TRACE: 1 if n_updates_to == 0 else 0,
         AP_DISCONNECTED_EVIDENCE: e_orphan,
         AP_ONE_SIDED_CONFIRMATION: ap_local_counts.get(AP_ONE_SIDED_CONFIRMATION, 0),
     }
     return binary, counts
 
 
-def count_nodes_by_type_summary(nodes: list) -> dict[str, int]:
-    out = dict.fromkeys(NODE_TYPES, 0)
-    for n in nodes:
-        t = n.get("type")
-        if t in out:
-            out[t] += 1
-    return out
-
-
-def count_nodes_by_type_annotated(nodes: list) -> dict[str, int]:
-    counts = {f"n_{t}": 0 for t in NODE_TYPES}
-    for n in nodes:
-        t = n.get("type")
-        key = f"n_{t}"
-        if key in counts:
-            counts[key] += 1
-    counts["nodes_total"] = len(nodes)
-    return counts
-
-
-def count_edges_by_relation(edges: list) -> dict[str, int]:
-    out = dict.fromkeys(EDGE_RELATIONS, 0)
-    for e in edges:
-        r = e.get("relation")
-        if r in out:
-            out[r] += 1
-    return out
-
-
-def workflow_completeness(nodes: list) -> float:
-    present = dict.fromkeys(["H", "T", "E", "J", "U"], False)
-    for n in nodes:
-        if n.get("type") in present:
-            present[n["type"]] = True
-    return sum(1 for v in present.values() if v) / 5.0
-
-
-def scientificness_score(summary_row: dict[str, Any]) -> float | None:
-    ld = safe_float(summary_row.get("loop_density"))
-    ugr = safe_float(summary_row.get("update_grounding_rate"))
-    oer = safe_float(summary_row.get("orphan_evidence_rate"))
-    rnr = safe_float(summary_row.get("refute_neglect_rate"))
-    pc = summary_row.get("premature_commit")
-    if ld is None or ugr is None or oer is None:
-        return None
-    ld_norm = ld / (ld + 0.1) if ld >= 0 else 0.0
-    inv_oer = (1.0 - oer) if oer is not None else 0.0
-    inv_rnr = (1.0 - rnr) if rnr is not None else 0.0
-    inv_pc = 0.0 if pc is None else (0.0 if pc else 1.0)
-    return 0.30 * ld_norm + 0.25 * ugr + 0.20 * inv_oer + 0.15 * inv_rnr + 0.10 * inv_pc
-
-
-def detect_motifs_HTEJU(
-    nodes: list, edges: list
-) -> list[tuple[int, int, tuple[str, str, str, str, str]]]:
-    node_by_id, out_edges, _in = build_index(nodes, edges)
-    node_type_map = {nid: n.get("type") for nid, n in node_by_id.items()}
-
-    def outs_by_rel(src, rel):
-        return [
-            e["dst"]
-            for e in out_edges.get(src, [])
-            if e.get("relation") == rel and "dst" in e
-        ]
-
-    Js = [nid for nid, t in node_type_map.items() if t == "J"]
-    Us = [nid for nid, t in node_type_map.items() if t == "U"]
-    Hs = [nid for nid, t in node_type_map.items() if t == "H"]
-
-    motifs = []
-    for h in Hs:
-        for t in outs_by_rel(h, "tests"):
-            if node_type_map.get(t) != "T":
-                continue
-            for ev in outs_by_rel(t, "observes"):
-                if node_type_map.get(ev) != "E":
-                    continue
-                for j in Js:
-                    if not _has_uses_link(j, ev, out_edges):
-                        continue
-                    for u in Us:
-                        if not _has_uses_link(u, ev, out_edges):
-                            continue
-                        times = [
-                            node_time(node_by_id[x])
-                            for x in [h, t, ev, j, u]
-                            if x in node_by_id
-                        ]
-                        if times:
-                            motifs.append((min(times), max(times), (h, t, ev, j, u)))
-
-    seen: set[tuple] = set()
-    dedup = []
-    for m in motifs:
-        if m[2] in seen:
-            continue
-        seen.add(m[2])
-        dedup.append(m)
-    return dedup
-
-
 def summarize_trace(doc: dict[str, Any], file_path: Path) -> dict[str, Any]:
     nodes = doc.get("nodes", []) or []
     edges = doc.get("edges", []) or []
-    metrics = doc.get("metrics", {}) or {}
-
-    tC = earliest_time_of_type(nodes, "C")
-    tE_used = earliest_evidence_used_time(nodes, edges)
-    premature = None
-    if tC is not None and tE_used is not None:
-        premature = tC < tE_used
-
-    ncounts = count_nodes_by_type_summary(nodes)
-    ecounts = count_edges_by_relation(edges)
 
     row: dict[str, Any] = {
         "file": file_path.name,
@@ -1988,30 +1601,7 @@ def summarize_trace(doc: dict[str, Any], file_path: Path) -> dict[str, Any]:
         "model": doc.get("provenance", {}).get("model", ""),
         "nodes_total": len(nodes),
         "edges_total": len(edges),
-        "workflow_completeness": workflow_completeness(nodes),
-        "t_commit": tC,
-        "t_evidence_used": tE_used,
-        "premature_commit": premature,
-        "loop_density": safe_float(metrics.get("loop_density", {}).get("value")),
-        "update_grounding_rate": safe_float(
-            metrics.get("update_grounding_rate", {}).get("value")
-        ),
-        "orphan_evidence_rate": safe_float(
-            metrics.get("orphan_evidence_rate", {}).get("value")
-        ),
-        "refute_neglect_rate": safe_float(
-            metrics.get("refute_neglect_rate", {}).get("value")
-        ),
-        "hypothesis_switch_without_eval_rate": safe_float(
-            metrics.get("hypothesis_switch_without_eval_rate", {}).get("value")
-        ),
     }
-    for t, c in ncounts.items():
-        row[f"n_{t}"] = c
-    for r, c in ecounts.items():
-        row[f"e_{r}"] = c
-
-    row["scientificness_score"] = scientificness_score(row)
 
     sg_local = detect_subgraphs_local(nodes, edges)
     sg_global = detect_subgraphs_global(nodes, edges)
@@ -2060,112 +1650,8 @@ def summarize_trace(doc: dict[str, Any], file_path: Path) -> dict[str, Any]:
     return row
 
 
-def _save_fig(path: Path) -> None:
-    if not HAS_MPL:
-        return
-    ensure_dir(path.parent)
-    plt.tight_layout()
-    plt.savefig(path, dpi=200)
-    plt.close()
-
-
-def plot_stacked_node_type_fractions(
-    rows: list[dict[str, Any]], out_path: Path
-) -> None:
-    if not HAS_MPL or not rows:
-        return
-
-    def sort_key(r):
-        s = safe_float(r.get("scientificness_score"))
-        return -s if s is not None else 1e9
-
-    rows2 = sorted(rows, key=sort_key)
-    fractions_by_type = {t: [] for t in NODE_TYPES}
-    labels = []
-    max_label_len = 20
-    for r in rows2:
-        total = max(1, int(r.get("nodes_total", 1)))
-        raw = Path(r.get("file", "")).stem
-        short = raw if len(raw) <= max_label_len else raw[: max_label_len - 1] + "…"
-        labels.append(short)
-        for t in NODE_TYPES:
-            fractions_by_type[t].append(float(r.get(f"n_{t}", 0)) / total)
-
-    x = list(range(len(rows2)))
-    bottom = [0.0] * len(rows2)
-    plt.figure(figsize=(max(8, len(rows2) * 0.5), 5))
-    for t in NODE_TYPES:
-        plt.bar(x, fractions_by_type[t], bottom=bottom, label=t)
-        bottom = [bottom[i] + fractions_by_type[t][i] for i in range(len(bottom))]
-    plt.xticks(x, labels, rotation=45, ha="right", fontsize=7)
-    plt.ylabel("fraction of nodes")
-    plt.title("Node type composition per trace")
-    plt.legend(ncol=7, fontsize=8)
-    _save_fig(out_path)
-
-
-def plot_timeline(
-    doc: dict[str, Any], out_path: Path, shade_motifs: bool = True
-) -> None:
-    if not HAS_MPL:
-        return
-    nodes = doc.get("nodes", []) or []
-    edges = doc.get("edges", []) or []
-    if not nodes:
-        return
-
-    by_type: dict[str, list] = {t: [] for t in NODE_TYPES}
-    for n in nodes:
-        t = n.get("type")
-        if t in by_type:
-            by_type[t].append(n)
-
-    y_pos = {t: i for i, t in enumerate(NODE_TYPES)}
-    plt.figure(figsize=(10, 3.5))
-
-    if shade_motifs:
-        motifs = detect_motifs_HTEJU(nodes, edges)
-        for a, b, _ in motifs:
-            plt.axvspan(a - 0.2, b + 0.2, alpha=0.15)
-
-    for t in NODE_TYPES:
-        xs = [node_time(n) for n in by_type[t]]
-        ys = [y_pos[t]] * len(xs)
-        if xs:
-            plt.scatter(xs, ys, label=t)
-
-    tC = earliest_time_of_type(nodes, "C")
-    if tC is not None:
-        plt.axvline(tC, linestyle="--")
-    tE_used = earliest_evidence_used_time(nodes, edges)
-    if tE_used is not None:
-        plt.axvline(tE_used, linestyle=":")
-
-    plt.yticks(list(y_pos.values()), list(y_pos.keys()))
-    plt.xlabel("time (message index)")
-    plt.title(f"Timeline: {Path(doc.get('input_file', '')).name or ''}")
-    plt.legend(ncol=7, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, 1.25))
-    _save_fig(out_path)
-
-
 def compute_aggregate_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
     n = len(rows)
-
-    metrics_means: dict[str, float | None] = {}
-    for field in METRIC_FIELDS:
-        vals = [safe_float(r.get(field)) for r in rows]
-        metrics_means[field] = _mean(vals)
-
-    counts: dict[str, dict[str, Any]] = {}
-    for field in COUNT_FIELDS:
-        vals = [safe_float(r.get(field)) for r in rows]
-        clean = [v for v in vals if v is not None]
-        total = sum(clean) if clean else None
-        mean_val = (total / len(clean)) if clean else None
-        counts[field] = {
-            "mean": mean_val,
-            "total": int(total) if total is not None else None,
-        }
 
     subgraph_local: dict[str, dict[str, Any]] = {}
     subgraph_global: dict[str, dict[str, Any]] = {}
@@ -2249,8 +1735,6 @@ def compute_aggregate_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "n_traces": n,
-        "metric_means": metrics_means,
-        "counts": counts,
         "subgraph_presence_local": subgraph_local,
         "subgraph_presence_global": subgraph_global,
         "antipattern_presence_local": antipattern_local,
@@ -2262,18 +1746,6 @@ def compute_aggregate_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def print_aggregate_stats(stats: dict[str, Any]) -> None:
-    logger.info(f"=== Aggregate statistics across {stats['n_traces']} traces ===")
-    logger.info("-- Metric means --")
-    for k, v in stats["metric_means"].items():
-        logger.info(f"  {k:<45s} {v:.4f}" if v is not None else f"  {k:<45s} N/A")
-    logger.info("-- Count mean / total --")
-    for k, d in stats["counts"].items():
-        mean_s = f"{d['mean']:.2f}" if d["mean"] is not None else "N/A"
-        tot_s = str(d["total"]) if d["total"] is not None else "N/A"
-        logger.info(f"  {k:<35s}  {mean_s:>10s}  {tot_s:>10s}")
-
-
 @dataclass(frozen=True)
 class ModelLevelAggregate:
     model: str
@@ -2282,12 +1754,6 @@ class ModelLevelAggregate:
     annotated_dir: Path
     aggregate_stats_path: Path
     aggregate_stats: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class TraceNodeRow:
-    model: str
-    env: str
     level: str
     file: str
     input_file: str
@@ -2327,74 +1793,6 @@ def iter_model_level_aggregates(root: Path) -> list[ModelLevelAggregate]:
     return aggregates
 
 
-def resolve_input_file(annotated_doc: dict[str, Any], annotated_path: Path) -> Path:
-    raw_input = annotated_doc.get("input_file")
-    if raw_input:
-        candidate = Path(raw_input)
-        if not candidate.is_absolute():
-            candidate = SCRIPT_DIR / candidate
-        if candidate.is_file():
-            return candidate
-    stem = annotated_path.name.removesuffix(".annotated.json")
-    fallback = annotated_path.parent.parent / f"{stem}.json"
-    if fallback.is_file():
-        return fallback
-    raise FileNotFoundError(f"Could not resolve original trace for {annotated_path}")
-
-
-def collect_trace_node_rows(
-    aggregates: list[ModelLevelAggregate],
-) -> list[TraceNodeRow]:
-    rows: list[TraceNodeRow] = []
-    for agg in aggregates:
-        for ap in sorted(agg.annotated_dir.glob("*.annotated.json")):
-            doc = safe_read_json(ap)
-            try:
-                input_path = resolve_input_file(doc, ap)
-            except FileNotFoundError:
-                logger.warning(f"Skipping {ap.name}: cannot resolve input file")
-                continue
-            input_doc = safe_read_json(input_path)
-            messages = input_doc.get("messages", []) or []
-            try:
-                _rel_input = input_path.relative_to(SCRIPT_DIR)
-            except ValueError:
-                _rel_input = input_path
-            rows.append(
-                TraceNodeRow(
-                    model=agg.model,
-                    env=agg.env,
-                    level=agg.level,
-                    file=ap.name,
-                    input_file=str(_rel_input),
-                    message_count=len(messages),
-                    counts=count_nodes_by_type_annotated(doc.get("nodes", []) or []),
-                )
-            )
-    return rows
-
-
-def _group_trace_rows(
-    trace_rows: list[TraceNodeRow], key: str, value: str | None = None
-) -> list[TraceNodeRow]:
-    if key == "overall":
-        return trace_rows
-    if key == "model":
-        return [r for r in trace_rows if r.model == value]
-    if key == "env":
-        return [r for r in trace_rows if r.env == value]
-    if key == "level":
-        return [r for r in trace_rows if r.level == value]
-    if key == "model_env_level":
-        model, env, level = value.split("/", maxsplit=2)
-        return [
-            r
-            for r in trace_rows
-            if r.model == model and r.env == env and r.level == level
-        ]
-    raise ValueError(f"Unsupported grouping key: {key}")
-
-
 def _group_aggregates(
     aggregates: list[ModelLevelAggregate], key: str, value: str | None = None
 ) -> list[ModelLevelAggregate]:
@@ -2416,46 +1814,12 @@ def _group_aggregates(
     raise ValueError(f"Unsupported grouping key: {key}")
 
 
-def summarize_node_probabilities(rows: list[TraceNodeRow]) -> dict[str, Any]:
-    total_messages = sum(r.message_count for r in rows)
-    summary: dict[str, Any] = {
-        "n_traces": len(rows),
-        "message_count": {
-            "total": total_messages,
-            "mean": _mean([float(r.message_count) for r in rows]),
-        },
-        "node_probability_per_message": {},
-    }
-    for field in NODE_COUNT_FIELDS:
-        per_trace = [_safe_div(r.counts.get(field, 0), r.message_count) for r in rows]
-        total_nodes = sum(r.counts.get(field, 0) for r in rows)
-        summary["node_probability_per_message"][field] = {
-            "mean_per_trace": _mean(per_trace),
-            "pooled": _safe_div(total_nodes, total_messages),
-            "total_nodes": total_nodes,
-            "total_messages": total_messages,
-        }
-    return summary
-
-
-def summarize_metrics_and_subgraphs(
+def summarize_subgraphs_and_antipatterns(
     aggregates: list[ModelLevelAggregate],
 ) -> dict[str, Any]:
     total_traces = sum(
         int(a.aggregate_stats.get("n_traces", 0) or 0) for a in aggregates
     )
-    metric_means: dict[str, float | None] = {}
-    for field in METRIC_FIELDS:
-        weighted_sum = 0.0
-        weight_total = 0
-        for a in aggregates:
-            n_tr = int(a.aggregate_stats.get("n_traces", 0) or 0)
-            val = a.aggregate_stats.get("metric_means", {}).get(field)
-            if val is None:
-                continue
-            weighted_sum += float(val) * n_tr
-            weight_total += n_tr
-        metric_means[field] = _safe_div(weighted_sum, weight_total)
 
     subgraph_presence_global: dict[str, Any] = {}
     for sg in SUBGRAPH_NAMES:
@@ -2617,7 +1981,6 @@ def summarize_metrics_and_subgraphs(
 
     return {
         "n_traces": total_traces,
-        "metric_means": metric_means,
         "subgraph_presence_global": subgraph_presence_global,
         "antipattern_presence_local": antipattern_local,
         "antipattern_presence_global": antipattern_global,
@@ -2628,15 +1991,13 @@ def summarize_metrics_and_subgraphs(
 
 
 def build_group_summary(
-    trace_rows: list[TraceNodeRow],
     aggregates: list[ModelLevelAggregate],
     key: str,
     value: str | None = None,
 ) -> dict[str, Any]:
-    return {
-        **summarize_node_probabilities(_group_trace_rows(trace_rows, key, value)),
-        **summarize_metrics_and_subgraphs(_group_aggregates(aggregates, key, value)),
-    }
+    return summarize_subgraphs_and_antipatterns(
+        _group_aggregates(aggregates, key, value)
+    )
 
 
 def build_cross_model_summary(root: Path) -> dict[str, Any]:
@@ -2644,7 +2005,6 @@ def build_cross_model_summary(root: Path) -> dict[str, Any]:
     if not aggregates:
         raise FileNotFoundError(f"No aggregate_stats.json found under {root}")
 
-    trace_rows = collect_trace_node_rows(aggregates)
     models = sorted({a.model for a in aggregates})
     envs = sorted({a.env for a in aggregates})
     levels = sorted({a.level for a in aggregates})
@@ -2655,13 +2015,12 @@ def build_cross_model_summary(root: Path) -> dict[str, Any]:
         _rel_root = root
     summary: dict[str, Any] = {
         "root": str(_rel_root),
-        "node_probability_definition": "node_count / number_of_messages_in_original_trace",
         "groupings": {
             "by_model_env_level": {},
             "by_model": {},
             "by_env": {},
             "by_level": {},
-            "overall": build_group_summary(trace_rows, aggregates, "overall"),
+            "overall": build_group_summary(aggregates, "overall"),
         },
     }
 
@@ -2669,48 +2028,28 @@ def build_cross_model_summary(root: Path) -> dict[str, Any]:
         key = f"{a.model}/{a.env}/{a.level}"
         if key not in summary["groupings"]["by_model_env_level"]:
             summary["groupings"]["by_model_env_level"][key] = build_group_summary(
-                trace_rows, aggregates, "model_env_level", key
+                aggregates, "model_env_level", key
             )
 
     for model in models:
         summary["groupings"]["by_model"][model] = build_group_summary(
-            trace_rows, aggregates, "model", model
+            aggregates, "model", model
         )
     for env in envs:
         summary["groupings"]["by_env"][env] = build_group_summary(
-            trace_rows, aggregates, "env", env
+            aggregates, "env", env
         )
     for level in levels:
         summary["groupings"]["by_level"][level] = build_group_summary(
-            trace_rows, aggregates, "level", level
+            aggregates, "level", level
         )
 
-    summary["trace_node_rows"] = [
-        {
-            "model": r.model,
-            "env": r.env,
-            "level": r.level,
-            "file": r.file,
-            "input_file": r.input_file,
-            "message_count": r.message_count,
-            **r.counts,
-            **{
-                f"{field}_per_message": _safe_div(
-                    r.counts.get(field, 0), r.message_count
-                )
-                for field in NODE_COUNT_FIELDS
-            },
-        }
-        for r in trace_rows
-    ]
     return summary
 
 
 def build_aggregation_markdown(summary: dict[str, Any]) -> str:
     lines = [
         "# Reasoning annotation analysis",
-        "",
-        f"- Node probability definition: {summary['node_probability_definition']}",
         "",
     ]
 
@@ -2720,29 +2059,7 @@ def build_aggregation_markdown(summary: dict[str, Any]) -> str:
         for name, data in grouping.items():
             lines.append(f"### {name}")
             lines.append("")
-            lines.append(
-                f"- Traces: {data['n_traces']} | Total messages: {data['message_count']['total']} | Mean messages/trace: {data['message_count']['mean']:.2f}"
-            )
-            lines.append("")
-            lines.append("#### Node probability per message")
-            lines.append("")
-            lines.append("| field | mean/trace | pooled |")
-            lines.append("| --- | ---: | ---: |")
-            for field, stats in data["node_probability_per_message"].items():
-                m = (
-                    "N/A"
-                    if stats["mean_per_trace"] is None
-                    else f"{stats['mean_per_trace']:.4f}"
-                )
-                p = "N/A" if stats["pooled"] is None else f"{stats['pooled']:.4f}"
-                lines.append(f"| {field} | {m} | {p} |")
-            lines.append("")
-            lines.append("#### Metric means")
-            lines.append("")
-            lines.append("| metric | mean |")
-            lines.append("| --- | ---: |")
-            for metric, val in data["metric_means"].items():
-                lines.append(f"| {metric} | {'N/A' if val is None else f'{val:.4f}'} |")
+            lines.append(f"- Traces: {data['n_traces']}")
             lines.append("")
             lines.append("#### Global subgraph presence")
             lines.append("")
@@ -2928,6 +2245,139 @@ def discover_annotated_dirs(root: Path) -> list[Path]:
     return dirs
 
 
+def _postprocess_observation_nodes(
+    nodes: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Enforce that observation messages have exactly one E node each.
+
+    If the previous message contains a Neutral (N) node, the observation
+    node is assigned N instead of E.  Also removes E nodes that appear at
+    non-observation messages.
+    """
+    warnings: list[str] = []
+
+    # Identify observation message indices
+    obs_indices: set[int] = set()
+    for i, msg in enumerate(messages):
+        content = str(msg.get("content", "") or "")
+        if content.startswith("Observation:"):
+            obs_indices.add(i)
+
+    if not obs_indices:
+        return nodes, warnings
+
+    # Group nodes by time (message index)
+    nodes_by_time: dict[int, list[dict[str, Any]]] = {}
+    for n in nodes:
+        t = n.get("time")
+        if isinstance(t, int):
+            nodes_by_time.setdefault(t, []).append(n)
+
+    def _has_neutral_at(msg_idx: int) -> bool:
+        return any(n.get("type") == "N" for n in nodes_by_time.get(msg_idx, []))
+
+    # Compute max node id for generating new ones
+    max_id = max(
+        (
+            int(n["node_id"][1:])
+            for n in nodes
+            if n.get("node_id", "").startswith("N") and n["node_id"][1:].isdigit()
+        ),
+        default=0,
+    )
+
+    obs_covered: set[int] = set()
+    result: list[dict[str, Any]] = []
+
+    for n in nodes:
+        t = n.get("time")
+        ntype = n.get("type")
+
+        if isinstance(t, int) and t in obs_indices:
+            if t not in obs_covered:
+                # Keep first node but ensure correct type
+                prev_neutral = t > 0 and _has_neutral_at(t - 1)
+                target_type = "N" if prev_neutral else "E"
+                if ntype != target_type:
+                    warnings.append(
+                        f"Changed node {n.get('node_id')} at observation message {t} "
+                        f"from {ntype} to {target_type}."
+                    )
+                    node = dict(n)
+                    node["type"] = target_type
+                    result.append(node)
+                else:
+                    result.append(n)
+                obs_covered.add(t)
+            else:
+                warnings.append(
+                    f"Removed extra node {n.get('node_id')} ({ntype}) "
+                    f"at observation message {t}: only one node per observation."
+                )
+        elif ntype == "E":
+            warnings.append(
+                f"Removed Evidence node {n.get('node_id')} at message {t}: "
+                f"not an Observation message."
+            )
+        else:
+            result.append(n)
+
+    # Add missing nodes for uncovered observation messages
+    for obs_idx in sorted(obs_indices - obs_covered):
+        max_id += 1
+        content = str(messages[obs_idx].get("content", "") or "")
+        prev_neutral = obs_idx > 0 and _has_neutral_at(obs_idx - 1)
+        target_type = "N" if prev_neutral else "E"
+        new_node = {
+            "node_id": f"N{max_id}",
+            "type": target_type,
+            "time": obs_idx,
+            "text": normalize_whitespace(content[:200]),
+            "support": [{"msg_idx": obs_idx, "quote": content[:500]}],
+        }
+        result.append(new_node)
+        warnings.append(
+            f"Added {target_type} node N{max_id} for observation message {obs_idx} "
+            f"(no node was previously assigned)."
+        )
+
+    result.sort(key=lambda n: (n.get("time", 0), n.get("node_id", "")))
+    return result, warnings
+
+
+def _filter_invalid_edges(
+    edges: list[dict[str, Any]],
+    nodes: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Remove edges whose (relation, src_type, dst_type) is not in ALLOWED_EDGE_TYPE_COMBOS."""
+    warnings: list[str] = []
+    node_type_map = {n["node_id"]: n.get("type") for n in nodes if "node_id" in n}
+
+    valid_edges: list[dict[str, Any]] = []
+    for e in edges:
+        src = e.get("src")
+        dst = e.get("dst")
+        rel = e.get("relation")
+        src_type = node_type_map.get(src)
+        dst_type = node_type_map.get(dst)
+
+        if src_type is None or dst_type is None:
+            warnings.append(f"Removed edge {src}->{dst} ({rel}): unknown node type.")
+            continue
+
+        if (rel, src_type, dst_type) not in ALLOWED_EDGE_TYPE_COMBOS:
+            warnings.append(
+                f"Removed edge {src}({src_type})->{dst}({dst_type}) ({rel}): "
+                f"disallowed type combination."
+            )
+            continue
+
+        valid_edges.append(e)
+
+    return valid_edges, warnings
+
+
 async def process_file_async(
     in_path: Path,
     out_dir: Path,
@@ -2972,6 +2422,10 @@ async def process_file_async(
             if validate_support_quotes(clean_messages, n.get("support", []))[0]
         ]
 
+    if not dry_run:
+        nodes, wObs = _postprocess_observation_nodes(nodes, clean_messages)
+        qc_warnings.extend(wObs)
+
     edges, wB = await extract_edges_pass_b(
         messages=clean_messages,
         nodes=nodes,
@@ -2992,7 +2446,9 @@ async def process_file_async(
             and e.get("dst") in node_ids
         ]
 
-    metrics = compute_metrics(nodes, edges) if not dry_run else {}
+    if not dry_run:
+        edges, wEdge = _filter_invalid_edges(edges, nodes)
+        qc_warnings.extend(wEdge)
 
     try:
         _rel_in = in_path.relative_to(SCRIPT_DIR)
@@ -3011,7 +2467,6 @@ async def process_file_async(
         },
         "nodes": nodes,
         "edges": edges,
-        "metrics": metrics,
         "qc": {"warnings": qc_warnings},
     }
 
@@ -3080,7 +2535,7 @@ async def annotate_all(
     logger.info(f"Annotation done. ok={ok} failed={failed} skipped={skipped}")
 
 
-def run_analysis_for_dir(annotated_dir: Path, shade_motifs: bool = True) -> None:
+def run_analysis_for_dir(annotated_dir: Path) -> None:
     files = sorted(annotated_dir.glob("*.annotated.json"))
     if not files:
         return
@@ -3089,30 +2544,13 @@ def run_analysis_for_dir(annotated_dir: Path, shade_motifs: bool = True) -> None
     ensure_dir(out_dir)
 
     rows: list[dict[str, Any]] = []
-    docs: list[tuple[Path, dict[str, Any]]] = []
 
     for fp in files:
         doc = safe_read_json(fp)
-        docs.append((fp, doc))
         rows.append(summarize_trace(doc, fp))
 
     agg_stats = compute_aggregate_stats(rows)
     safe_write_json(out_dir / "aggregate_stats.json", agg_stats)
-    print_aggregate_stats(agg_stats)
-
-    if HAS_MPL:
-        agg_plots = out_dir / "aggregate_plots"
-        ensure_dir(agg_plots)
-        plot_stacked_node_type_fractions(
-            rows, agg_plots / "node_type_fractions_stacked.png"
-        )
-
-        tl_dir = out_dir / "timelines"
-        ensure_dir(tl_dir)
-        for fp, doc in docs:
-            plot_timeline(
-                doc, tl_dir / f"{fp.stem}.timeline.png", shade_motifs=shade_motifs
-            )
 
     logger.info(f"Analysis done for {annotated_dir}")
 
@@ -3127,10 +2565,45 @@ async def _run_pipeline(
     strict_support: bool,
     dry_run: bool,
     force: bool,
-    shade_motifs: bool,
     skip_annotate: bool,
+    files: list[str] | None = None,
 ) -> None:
     root_path = Path(root).resolve()
+
+    if files:
+        # Annotate only the explicitly listed files
+        resolved = [Path(f.strip()).resolve() for f in files]
+        missing = [p for p in resolved if not p.is_file()]
+        if missing:
+            raise FileNotFoundError(f"File(s) not found: {[str(p) for p in missing]}")
+        # Build (model, env, level, path) tuples; use "_" placeholders
+        # when the file is not inside the standard hierarchy.
+        trace_files: list[tuple[str, str, str, Path]] = []
+        for p in resolved:
+            try:
+                rel = p.relative_to(root_path)
+                parts = rel.parts  # model/env/level/file.json
+                if len(parts) >= 4:
+                    trace_files.append((parts[0], parts[1], parts[2], p))
+                else:
+                    trace_files.append(("_", "_", "_", p))
+            except ValueError:
+                trace_files.append(("_", "_", "_", p))
+
+        logger.info(f"Annotating {len(trace_files)} explicitly listed file(s)")
+        await annotate_all(
+            trace_files=trace_files,
+            model=model,
+            concurrency=concurrency,
+            window=window,
+            overlap=overlap,
+            max_nodes_per_window=max_nodes_per_window,
+            strict_support=strict_support,
+            dry_run=dry_run,
+            force=force,
+        )
+        logger.info("Done. Skipping analysis/aggregation for explicit file mode.")
+        return
 
     if not skip_annotate:
         trace_files = discover_trace_files(root_path)
@@ -3154,7 +2627,7 @@ async def _run_pipeline(
     if annotated_dirs:
         logger.info(f"Running analysis for {len(annotated_dirs)} annotated directories")
         for ann_dir in annotated_dirs:
-            run_analysis_for_dir(ann_dir, shade_motifs=shade_motifs)
+            run_analysis_for_dir(ann_dir)
     else:
         logger.warning("No annotated directories found for analysis")
 
@@ -3350,14 +2823,14 @@ def main(
     strict_support: bool = False,
     dry_run: bool = False,
     force: bool = False,
-    shade_motifs: bool = False,
     skip_annotate: bool = False,
+    files: list[str] | None = None,
 ) -> None:
     """Unified reasoning analysis pipeline: annotate, analyze, and aggregate.
 
     Processes trace files organized as `<root>/<model>/<env>/<level>/*.json`
     through three stages: LLM-based annotation, per-directory analysis with
-    aggregate statistics and plots, and cross-model aggregation.
+    pattern/antipattern detection, and cross-model aggregation.
 
     Only annotation is optional (via `skip_annotate`). Analysis and
     aggregation always run on existing annotated files.
@@ -3382,10 +2855,12 @@ def main(
             any LLM calls. Useful for checking directory layout.
         force: When True, re-annotate files even if an `.annotated.json`
             output already exists.
-        shade_motifs: When True, shade H-T-E-J-U motif time spans in the
-            generated timeline plots.
         skip_annotate: Skip the LLM annotation step entirely and run only
             analysis and aggregation on existing annotated files.
+        files: Optional list of specific JSON trace file paths to annotate.
+            When provided, only these files are annotated (analysis and
+            aggregation are skipped). Annotated output is written next to
+            each file in an `annotated/` subdirectory.
     """
     asyncio.run(
         _run_pipeline(
@@ -3398,11 +2873,13 @@ def main(
             strict_support=strict_support,
             dry_run=dry_run,
             force=force,
-            shade_motifs=shade_motifs,
             skip_annotate=skip_annotate,
+            files=files,
         )
     )
 
 
 if __name__ == "__main__":
     fire.Fire(main)
+
+# ["claude_sonnet_45/afm/level_2/afm_experiment_level_2-8.json", "gpt_4o/ml/level_1/ml_oxides-13.json", "gpt_4o/wetlab/level_2/qualysis_lvl2_08-70.json", "claude_sonnet_45/retrosynthesis/level_3/make_5_lvl3-43.json", "claude_sonnet_45/spectra/level_1/10_15227_orgsyn_096_0036-19.json ", "claude_sonnet_45/ml/level_1/ml_sulphides-10.json"]
