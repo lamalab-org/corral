@@ -1,7 +1,7 @@
 """Shared utilities for intervention analysis plots.
 
-Provides the same API as the original reports_v3/intervention/utils.py
-but reads from a downloaded JSONL file instead of the local filesystem.
+Reads from a downloaded JSONL file (via HuggingFace) instead of the local
+filesystem.
 """
 
 import json

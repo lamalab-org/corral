@@ -1,7 +1,7 @@
 """
 Push intervention benchmark reports to HuggingFace Hub.
 
-Walks ``reports_v3/intervention/runs/{env}/{agent}/{condition}/*_report.json``,
+Walks ``analysis/intervention/runs/{env}/{agent}/{condition}/*_report.json``,
 adds intervention-specific columns (condition, condition_type, step), and
 pushes one HF config (subset) per environment.
 
@@ -34,7 +34,7 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 RUNS_ROOT = (
-    Path(__file__).resolve().parent.parent / "reports_v3" / "intervention" / "runs"
+    Path(__file__).resolve().parent.parent / "analysis" / "intervention" / "runs"
 )
 
 # Directories to skip (old reruns, archives, test runs)

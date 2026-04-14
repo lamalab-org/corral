@@ -2,7 +2,7 @@
 Push intervention agent traces to HuggingFace Hub.
 
 Extracts one row **per trial** from the report JSON (messages are already
-embedded) under ``reports_v3/intervention/runs/{env}/{agent}/{condition}/``.
+embedded) under ``analysis/intervention/runs/{env}/{agent}/{condition}/``.
 
 Each row contains the full message list plus trial-level metadata, making it
 straightforward to analyse individual conversations.
@@ -38,7 +38,7 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 RUNS_ROOT = (
-    Path(__file__).resolve().parent.parent / "reports_v3" / "intervention" / "runs"
+    Path(__file__).resolve().parent.parent / "analysis" / "intervention" / "runs"
 )
 
 _SKIP_SUFFIXES = ("_old", "_archive", "_test", "_rerun")
