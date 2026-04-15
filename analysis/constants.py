@@ -15,6 +15,9 @@ HF_REPO_QA_TOPIC = "jablonkagroup/corral-QAs-topic_reports"
 # push_trace_to_hf
 HF_REPO_TRACE = "jablonkagroup/corral-oss-trace-logprobs"
 
+# download_traces_from_hf
+HF_REPO_TRACES = "jablonkagroup/corral-traces"
+
 # Prevents accidentally ingesting agent logs, W&B artefacts, or cache files
 # that share the .json extension.
 SKIP_DIR_PREFIXES: tuple[str, ...] = (
