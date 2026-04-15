@@ -17,7 +17,7 @@ from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 from plot_config import ENVIRONMENT_GROUPS, FONT_SIZES
-from plot_utils import load_logprobs_data
+from plot_utils import load_logprobs_stats
 
 COLOR_HIGH = "#BF092F"  # largest (least negative) mean
 COLOR_LOW = "#16476A"  # lowest (most negative) mean
@@ -32,19 +32,6 @@ OUT_FILE = OUT_DIR / "panel2_logprobs_grouped.pdf"
 # ── Data ─────────────────────────────────────────────────────────────────────
 
 
-def _pool_nonzero_tokens(series) -> np.ndarray:
-    """Concatenate all non-zero, finite token logprobs across all messages."""
-    arrays = []
-    for lp in series:
-        if not isinstance(lp, list | np.ndarray) or len(lp) == 0:
-            continue
-        arr = np.asarray(lp, dtype=np.float32)
-        arr = arr[np.isfinite(arr) & (arr != 0.0)]
-        if arr.size > 0:
-            arrays.append(arr)
-    return np.concatenate(arrays) if arrays else np.array([], dtype=np.float32)
-
-
 def _make_gradient(n: int):
     """Return n colors linearly interpolated from COLOR_HIGH to COLOR_LOW."""
     cmap = mcolors.LinearSegmentedColormap.from_list(
@@ -54,7 +41,7 @@ def _make_gradient(n: int):
 
 
 def compute_group_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-group stats: average the per-environment mean logprobs within each group."""
+    """Per-group stats: average the per-environment token-weighted means."""
     rows = []
     for group_name, group_info in ENVIRONMENT_GROUPS.items():
         env_means = []
@@ -62,10 +49,10 @@ def compute_group_stats(df: pd.DataFrame) -> pd.DataFrame:
             grp = df[df["environment"] == env]
             if grp.empty:
                 continue
-            tokens = _pool_nonzero_tokens(grp["per_token_logprob"])
-            if tokens.size == 0:
+            total_count = int(grp["logprob_count"].sum())
+            if total_count == 0:
                 continue
-            env_means.append(float(np.mean(tokens)))
+            env_means.append(float(grp["logprob_sum"].sum()) / total_count)
 
         if env_means:
             rows.append(
@@ -131,7 +118,7 @@ def plot_grouped_logprobs(stats: pd.DataFrame, output_path: Path):
 
 def main() -> None:
     logger.info("Loading logprobs data …")
-    logprobs_df = load_logprobs_data()
+    logprobs_df = load_logprobs_stats()
     logger.info(
         f"  {len(logprobs_df):,} rows | environments: "
         f"{sorted(logprobs_df['environment'].unique())}"

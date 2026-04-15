@@ -144,8 +144,11 @@ def plot_gap_scatter(
         ncol=1,
     )
     for text, handle in zip(leg.get_texts(), leg.legend_handles, strict=False):
-        color = handle.get_facecolor()[0][:3]
+        fc = handle.get_facecolor()
+        color = fc[0][:3] if fc.ndim == 2 else fc[:3]
         text.set_color(color)
+        handle.set_facecolor((*color, 1.0))
+        handle.set_edgecolor("white")
 
     ax.fill_between(
         diagonal_range,
@@ -162,6 +165,22 @@ def plot_gap_scatter(
     x_range = np.array([min_gap * 0.95, max_gap * 1.05])
     y_range = np.array([min_gap * 0.95, max_gap * 1.05])
     range_frame(ax, x_range, y_range, pad=0.05)
+
+    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=2))
+    ax.yaxis.set_major_locator(plt.MultipleLocator(0.2))
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.1f}"))
+
+    # Re-assert axis labels in case range_frame overrides them
+    ax.set_xlabel(
+        "Scaffold Spread",
+        fontsize=FONT_SIZES["axis_label"],
+        fontweight="bold",
+    )
+    ax.set_ylabel(
+        "Model Spread",
+        fontsize=FONT_SIZES["axis_label"],
+        fontweight="bold",
+    )
 
     fig.tight_layout()
 

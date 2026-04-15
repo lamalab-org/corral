@@ -94,6 +94,7 @@ def main():
             zorder=3,
         )
 
+    ax.grid(False)
     ax.set_ylabel(
         "Average Pass@5", fontsize=FONT_SIZES["axis_label"], fontweight="bold"
     )

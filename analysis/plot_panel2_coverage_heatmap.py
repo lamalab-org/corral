@@ -230,7 +230,7 @@ def plot_full_coverage_heatmap(
 
     ax_heatmap.set_xlabel("")
     ax_heatmap.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
-    ax_heatmap.set_xticklabels(ax_heatmap.get_xticklabels(), rotation=0, ha="center")
+    ax_heatmap.set_xticklabels(ax_heatmap.get_xticklabels(), rotation=90, ha="center")
 
     for env_name, col_start, col_end in env_spans:
         start_frac = (col_start + 0.15) / n_cols

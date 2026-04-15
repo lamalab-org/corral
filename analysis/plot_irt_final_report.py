@@ -122,8 +122,23 @@ def plot_variance_decomposition(best_model, df, results_dir, output_dir):
     idata = load_trace(best_model, results_dir)
     posterior = idata.posterior
 
+    EFFECT_LABELS = {
+        "knowledge":          r"Knowledge ($\tilde{\theta}_K$)",
+        "reasoning":          r"Reasoning ($\tilde{\theta}_R$)",
+        "scaffold_effect":    r"Scaffold ($\gamma_s$)",
+        "level_effect":       r"Scope ($\delta_\ell$)",
+        "verbosity_effect":   r"Verbosity ($\xi_v$)",
+        "category_effect":    r"Category ($\kappa_c$)",
+        "env_level_effect":   r"Env ($e$) $\times$ Scope ($\delta_\ell$)",
+        "environment_effect": r"Environment ($e$)",
+        "task_effect":        r"Task ($t$)",
+    }
+
     contributions = {}
-    for coef_name, label in [("knowledge", "Knowledge"), ("reasoning", "Reasoning")]:
+    for coef_name, label in [
+        ("knowledge", EFFECT_LABELS["knowledge"]),
+        ("reasoning", EFFECT_LABELS["reasoning"]),
+    ]:
         total_key = f"{coef_name}_coef_total"
         base_key = f"{coef_name}_coef"
         if total_key in posterior:
@@ -137,10 +152,6 @@ def plot_variance_decomposition(best_model, df, results_dir, output_dir):
                 (coef_val * df[f"{coef_name}_z"].to_numpy()).var()
             )
 
-    effect_label_map = {
-        "env_level_effect": "Env x Scope",
-    }
-
     for effect_name in [
         "scaffold_effect",
         "level_effect",
@@ -152,9 +163,7 @@ def plot_variance_decomposition(best_model, df, results_dir, output_dir):
     ]:
         if effect_name in posterior:
             effect_var = float(posterior[effect_name].var().mean().values)
-            label = effect_label_map.get(
-                effect_name, effect_name.replace("_effect", "").title()
-            )
+            label = EFFECT_LABELS.get(effect_name, effect_name.replace("_effect", "").title())
             contributions[label] = effect_var
 
     if not contributions:
@@ -216,7 +225,7 @@ def plot_posterior_distributions(best_model, results_dir, output_dir):
 
     for ax, param in zip(axes, available, strict=False):
         samples = posterior[param].values.flatten()  # noqa: PD011
-        hdi = az.hdi(samples, hdi_prob=0.9)
+        hdi = az.hdi(samples, prob=0.9)
 
         ax.hist(
             samples, bins=50, alpha=0.7, color=PRIMARY, edgecolor="black", linewidth=0.3

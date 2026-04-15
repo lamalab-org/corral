@@ -105,7 +105,7 @@ def radar_factory(num_vars, frame="polygon"):  # noqa: ARG001
     return theta
 
 
-def main(best_model="model3_abilities_env"):
+def main(best_model="model7_abilities_env_level"):
     reasoning_df = pd.read_csv(IRT_DIR / "reasoning_theta.csv")
     df_r = reasoning_df.copy()
     df_r["model"] = df_r["model"].map(MODEL_NAMES)
@@ -122,8 +122,23 @@ def main(best_model="model3_abilities_env"):
     data_df = pd.read_csv(RESULTS_DIR / "prepared_data.csv")
     posterior = idata.posterior
 
+    EFFECT_LABELS = {
+        "knowledge":        r"Knowledge ($\tilde{\theta}_K$)",
+        "reasoning":        r"Reasoning ($\tilde{\theta}_R$)",
+        "scaffold_effect":  r"Scaffold ($\gamma_s$)",
+        "level_effect":     r"Scope ($\delta_\ell$)",
+        "verbosity_effect": r"Verbosity ($\xi_v$)",
+        "category_effect":  r"Category ($\kappa_c$)",
+        "env_level_effect": r"Env ($e$) $\times$ Scope ($\delta_\ell$)",
+        "environment_effect": r"Environment ($e$)",
+        "task_effect":      r"Task ($t$)",
+    }
+
     contributions = {}
-    for coef_name, label in [("knowledge", "Knowledge"), ("reasoning", "Reasoning")]:
+    for coef_name, label in [
+        ("knowledge", EFFECT_LABELS["knowledge"]),
+        ("reasoning", EFFECT_LABELS["reasoning"]),
+    ]:
         total_key = f"{coef_name}_coef_total"
         base_key = f"{coef_name}_coef"
         if total_key in posterior:
@@ -148,9 +163,7 @@ def main(best_model="model3_abilities_env"):
     ]:
         if effect_name in posterior:
             effect_var = float(posterior[effect_name].var().mean().values)
-            label = {"env_level_effect": "Env x Scope"}.get(
-                effect_name, effect_name.replace("_effect", "").title()
-            )
+            label = EFFECT_LABELS.get(effect_name, effect_name.replace("_effect", "").title())
             contributions[label] = effect_var
 
     total_var = sum(contributions.values())
