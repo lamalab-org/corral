@@ -1,9 +1,14 @@
-"""OpenAlex-based analysis of AI-scientist / agentic-science papers in chemistry
-and materials science.
+"""OpenAlex-based analysis of AI for chemistry and materials science.
 
-This script is intentionally narrower than a general AI-in-science analysis:
-it targets papers about AI scientists, agentic science, LLM agents,
-autonomous scientific discovery, and self-driving laboratories.
+The *strict* bucket targets papers specifically about AI scientists,
+agentic science, LLM agents, autonomous scientific discovery, and
+self-driving laboratories.
+
+The *expanded* bucket broadens the scope to any AI / machine-learning
+research applied to chemistry and materials science, including (but not
+limited to) deep learning, graph neural networks, generative models,
+machine-learning potentials, AI-driven retrosynthesis, and foundation
+models.
 
 Outputs:
 - works_all_hits.csv         deduplicated retrieved papers
@@ -108,6 +113,106 @@ EXPANDED_PATTERNS = {
         r"\btool use agent(?:s)?\b",
         r"\bagent[- ]based scientific discovery\b",
     ],
+    "machine_learning": [
+        r"\bmachine learning\b",
+        r"\bdeep learning\b",
+        r"\breinforcement learning\b",
+        r"\bactive learning\b",
+        r"\btransfer learning\b",
+        r"\bsupervised learning\b",
+        r"\bunsupervised learning\b",
+        r"\bsemi[- ]supervised learning\b",
+    ],
+    "neural_networks": [
+        r"\bneural network(?:s)?\b",
+        r"\bgraph neural network(?:s)?\b",
+        r"\bconvolutional neural network(?:s)?\b",
+        r"\brecurrent neural network(?:s)?\b",
+        r"\bmessage[- ]passing neural network(?:s)?\b",
+        r"\bequivariant neural network(?:s)?\b",
+        r"\btransformer(?:s)?\b",
+        r"\battention mechanism(?:s)?\b",
+    ],
+    "generative_models": [
+        r"\bgenerative model(?:s)?\b",
+        r"\bgenerative adversarial network(?:s)?\b",
+        r"\bvariational autoencoder(?:s)?\b",
+        r"\bdiffusion model(?:s)?\b",
+        r"\bnormalizing flow(?:s)?\b",
+        r"\bflow matching\b",
+    ],
+    "foundation_models": [
+        r"\bfoundation model(?:s)?\b",
+        r"\blarge language model(?:s)?\b",
+        r"\bllm(?:s)?\b",
+        r"\bpretrained model(?:s)?\b",
+        r"\bpre[- ]trained model(?:s)?\b",
+        r"\bfine[- ]tun(?:e|ed|ing)\b",
+    ],
+    "ml_potentials": [
+        r"\bmachine[- ]learning potential(?:s)?\b",
+        r"\bml potential(?:s)?\b",
+        r"\bneural network potential(?:s)?\b",
+        r"\binteratomic potential(?:s)?\b",
+        r"\bforce field(?:s)?\b",
+        r"\bmolecular dynamics\b",
+    ],
+    "property_prediction": [
+        r"\bproperty prediction\b",
+        r"\bquantitative structure[- ](?:activity|property) relationship(?:s)?\b",
+        r"\bqsar\b",
+        r"\bqspr\b",
+    ],
+    "molecular_design": [
+        r"\bmolecular design\b",
+        r"\bmolecular generation\b",
+        r"\binverse design\b",
+        r"\bde novo design\b",
+        r"\bdrug design\b",
+        r"\bdrug discovery\b",
+        r"\bvirtual screening\b",
+        r"\bmolecular optimization\b",
+    ],
+    "retrosynthesis_planning": [
+        r"\bretrosynthes(?:is|tic)\b",
+        r"\bsynthesis planning\b",
+        r"\breaction prediction\b",
+        r"\byield prediction\b",
+    ],
+    "ai_general": [
+        r"\bartificial intelligence\b",
+        r"\bai[- ]driven\b",
+        r"\bai[- ]guided\b",
+        r"\bai[- ]assisted\b",
+        r"\bai[- ]enabled\b",
+        r"\bdata[- ]driven\b",
+        r"\bautomated\b",
+    ],
+    "bayesian_methods": [
+        r"\bbayesian optimization\b",
+        r"\bgaussian process(?:es)?\b",
+        r"\bsurrogate model(?:s)?\b",
+    ],
+    "representation_learning": [
+        r"\brepresentation learning\b",
+        r"\bmolecular representation(?:s)?\b",
+        r"\bmolecular fingerprint(?:s)?\b",
+        r"\blearned representation(?:s)?\b",
+        r"\bembedding(?:s)?\b",
+    ],
+    "nlp_text_mining": [
+        r"\btext mining\b",
+        r"\bnatural language processing\b",
+        r"\bnlp\b",
+        r"\binformation extraction\b",
+        r"\bnamed entity recognition\b",
+    ],
+    "robotics_automation": [
+        r"\brobot(?:ic)?(?:s)?\b",
+        r"\bautomated synthesis\b",
+        r"\bhigh[- ]throughput\b",
+        r"\bautomated experiment(?:ation)?\b",
+    ],
 }
 
 STRICT_QUERIES = [
@@ -161,6 +266,107 @@ EXPANDED_QUERIES = [
         "AND (science OR scientific OR discovery OR experiment* OR planning) "
         "AND (chemistry OR chemical OR molecular OR materials OR material* OR synthesis "
         "OR catalyst OR battery OR polymer OR semiconductor OR crystal OR alloy))",
+    ),
+    (
+        "expanded_ml_chemistry",
+        '(("machine learning" OR "deep learning" OR "neural network") '
+        "AND (chemistry OR chemical OR molecular OR molecule* OR materials OR material* "
+        "OR synthesis OR catalyst OR catalysis OR battery OR polymer OR semiconductor "
+        "OR crystal OR alloy OR electrolyte OR reaction))",
+    ),
+    (
+        "expanded_gnn_molecules",
+        '(("graph neural network" OR "message passing" OR "equivariant neural network") '
+        "AND (chemistry OR chemical OR molecular OR molecule* OR materials OR material* "
+        "OR synthesis OR catalyst OR crystal OR alloy OR polymer))",
+    ),
+    (
+        "expanded_generative_molecular",
+        '(("generative model" OR "generative adversarial" OR "variational autoencoder" '
+        'OR "diffusion model" OR "normalizing flow" OR "flow matching") '
+        "AND (chemistry OR chemical OR molecular OR molecule* OR materials OR material* "
+        "OR synthesis OR catalyst OR drug OR polymer))",
+    ),
+    (
+        "expanded_ml_potentials",
+        '(("machine learning potential" OR "neural network potential" OR "interatomic potential" '
+        'OR "force field" OR "molecular dynamics") '
+        'AND ("machine learning" OR "deep learning" OR "neural network") '
+        "AND (chemistry OR chemical OR molecular OR materials OR material* "
+        "OR crystal OR alloy OR semiconductor))",
+    ),
+    (
+        "expanded_property_prediction",
+        '(("property prediction" OR QSAR OR QSPR OR "structure-activity") '
+        'AND ("machine learning" OR "deep learning" OR "neural network" OR "random forest" OR "AI") '
+        "AND (chemistry OR chemical OR molecular OR molecule* OR materials OR material* "
+        "OR drug OR polymer OR catalyst))",
+    ),
+    (
+        "expanded_molecular_design",
+        '(("molecular design" OR "molecular generation" OR "inverse design" '
+        'OR "de novo design" OR "drug discovery" OR "virtual screening" OR "molecular optimization") '
+        'AND ("machine learning" OR "deep learning" OR "neural network" OR "generative" OR "AI" OR "reinforcement learning") '
+        "AND (chemistry OR chemical OR molecular OR molecule* OR materials OR material* "
+        "OR drug OR catalyst OR polymer))",
+    ),
+    (
+        "expanded_retrosynthesis",
+        '((retrosynthesis OR "retrosynthetic analysis" OR "synthesis planning" '
+        'OR "reaction prediction" OR "yield prediction") '
+        'AND ("machine learning" OR "deep learning" OR "neural network" OR transformer OR "AI") '
+        "AND (chemistry OR chemical OR molecular OR organic OR synthesis))",
+    ),
+    (
+        "expanded_ai_driven_chemistry",
+        '(("artificial intelligence" OR "AI-driven" OR "AI-guided" OR "AI-assisted" '
+        'OR "data-driven") '
+        "AND (chemistry OR chemical OR molecular OR molecule* OR materials OR material* "
+        "OR synthesis OR catalyst OR catalysis OR battery OR polymer OR semiconductor "
+        "OR crystal OR alloy OR electrolyte))",
+    ),
+    (
+        "expanded_bayesian_optimization",
+        '(("bayesian optimization" OR "gaussian process" OR "surrogate model" '
+        'OR "active learning") '
+        "AND (chemistry OR chemical OR molecular OR materials OR material* "
+        "OR synthesis OR catalyst OR drug OR polymer OR crystal OR alloy))",
+    ),
+    (
+        "expanded_representation_learning",
+        '(("representation learning" OR "molecular representation" OR "molecular fingerprint" '
+        'OR "learned representation") '
+        'AND ("machine learning" OR "deep learning" OR "neural network") '
+        "AND (chemistry OR chemical OR molecular OR molecule* OR materials OR material* "
+        "OR drug OR polymer OR catalyst))",
+    ),
+    (
+        "expanded_nlp_text_mining",
+        '(("text mining" OR "natural language processing" OR "information extraction" '
+        'OR "named entity recognition") '
+        "AND (chemistry OR chemical OR molecular OR materials OR material* "
+        "OR synthesis OR catalyst OR reaction OR polymer))",
+    ),
+    (
+        "expanded_robotics_automation",
+        '((robot OR robotic OR robotics OR "automated synthesis" OR "high-throughput" '
+        'OR "automated experimentation") '
+        'AND ("machine learning" OR "deep learning" OR "AI" OR "artificial intelligence") '
+        "AND (chemistry OR chemical OR molecular OR materials OR material* "
+        "OR synthesis OR catalyst OR drug OR polymer))",
+    ),
+    (
+        "expanded_foundation_models",
+        '(("foundation model" OR "large language model" OR "pre-trained model" '
+        'OR "pretrained model" OR "fine-tuning" OR "fine-tune") '
+        "AND (chemistry OR chemical OR molecular OR molecule* OR materials OR material* "
+        "OR synthesis OR catalyst OR drug OR polymer OR crystal))",
+    ),
+    (
+        "expanded_reinforcement_learning",
+        '(("reinforcement learning" OR "transfer learning") '
+        "AND (chemistry OR chemical OR molecular OR molecule* OR materials OR material* "
+        "OR synthesis OR catalyst OR drug OR polymer OR crystal OR alloy))",
     ),
 ]
 
@@ -446,17 +652,53 @@ def flatten_work_record(
     }
 
 
+def _checkpoint_path(checkpoint_dir: Path, label: str) -> Path:
+    """Return the checkpoint file path for a given query label."""
+    safe_name = re.sub(r"[^\w\-]", "_", label)
+    return checkpoint_dir / f"{safe_name}.json"
+
+
+def _save_checkpoint(checkpoint_dir: Path, label: str, works: list[dict]) -> None:
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    path = _checkpoint_path(checkpoint_dir, label)
+    path.write_text(json.dumps(works), encoding="utf-8")
+    logger.debug("Saved checkpoint for '{}' ({} works)", label, len(works))
+
+
+def _load_checkpoint(checkpoint_dir: Path, label: str) -> list[dict] | None:
+    path = _checkpoint_path(checkpoint_dir, label)
+    if not path.exists():
+        return None
+    works = json.loads(path.read_text(encoding="utf-8"))
+    logger.info("Loaded checkpoint for '{}' ({} works)", label, len(works))
+    return works
+
+
 def fetch_and_classify(
     client: OpenAlexClient,
     query_specs: Sequence[QuerySpec],
     filter_str: str,
+    checkpoint_dir: Path | None = None,
 ) -> pd.DataFrame:
     aggregated: dict[str, dict] = {}
 
     for idx, spec in enumerate(query_specs, start=1):
         logger.info("[{}/{}] Searching {}", idx, len(query_specs), spec.label)
+
+        # Try loading from checkpoint
+        cached_works: list[dict] | None = None
+        if checkpoint_dir is not None:
+            cached_works = _load_checkpoint(checkpoint_dir, spec.label)
+
+        if cached_works is not None:
+            works_list = cached_works
+        else:
+            works_list = list(client.iterate_works(spec.query, filter_str))
+            if checkpoint_dir is not None:
+                _save_checkpoint(checkpoint_dir, spec.label, works_list)
+
         n_seen = 0
-        for work in client.iterate_works(spec.query, filter_str):
+        for work in works_list:
             n_seen += 1
             work_id = short_openalex_id(work.get("id"))
             if not work_id:
@@ -619,6 +861,17 @@ def parse_args() -> argparse.Namespace:
         default=0.15,
         help="Delay between successful API requests.",
     )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        default=None,
+        help="Directory to cache per-query API results. If set, completed queries are skipped on re-run. Defaults to <outdir>/checkpoints.",
+    )
+    parser.add_argument(
+        "--no-checkpoint",
+        action="store_true",
+        help="Disable checkpointing even if --checkpoint-dir is set.",
+    )
     return parser.parse_args()
 
 
@@ -640,11 +893,19 @@ def main() -> int:
         args.start_year, args.end_year, field_ids if field_ids else None, types
     )
 
+    checkpoint_dir: Path | None = None
+    if not args.no_checkpoint:
+        checkpoint_dir = args.checkpoint_dir or (outdir / "checkpoints")
+        logger.info("Checkpointing enabled: {}", checkpoint_dir)
+
     logger.info("Using filter: {}", filter_str)
     client = OpenAlexClient(api_key=args.api_key, sleep_seconds=args.sleep_seconds)
 
     works_df = fetch_and_classify(
-        client=client, query_specs=ALL_QUERY_SPECS, filter_str=filter_str
+        client=client,
+        query_specs=ALL_QUERY_SPECS,
+        filter_str=filter_str,
+        checkpoint_dir=checkpoint_dir,
     )
     if works_df.empty:
         logger.warning(
