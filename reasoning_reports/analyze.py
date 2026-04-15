@@ -239,11 +239,12 @@ PASS_A_INSTRUCTIONS = """Extract 0..k nodes from the provided message window.
 Every non-Observation message must be assigned with at least one node. It is possible that some messages will have multiple nodes (e.g., a message that both states a hypothesis and describes a test). Avoid repeated nodes of the **same type** within a single message, unless the text explicitly supports multiple distinct instances.
 
 Node types:
-H = Hypothesis: a candidate explanation, or a working assumption about the system. It should be a revisable claim, proposal, or the current best guess about the answer. Information in task definitions or environment descriptions do not count as hypotheses (H).
-E = Evidence: all Observation messages must be assigned with and only with an Evidence (E) node. Only Observation messages can be Evidence (E) nodes.
-T = Test: any information-seeking action, including experiments, evaluations, or lookups. Both the intention and the concrete tool call qualify as tests (T). What matters is that the system is seeking new scientific information to evaluate a hypothesis (H) or a judgment (J). Only the tool calls of a message can be assigned as Test (T), and only if it is not Neutral (N).
+H = Hypothesis: a candidate explanation, or a working assumption about the system. It should be a revisable claim, proposal, suggestion, or the current best guess about the answer. Information in task definitions or environment descriptions do not count as hypotheses (H). Partial or full reiteration of the task descriptionn does not count as hypothesis (H). Correcting a typo in a tool argument does not count as a Hypothesis (H). We consider a Hypothesis (H) to be present if the agent states a claim similar to "I think the answer is X", "This suggests that X might be the solution", "The most likely explanation is X", "X could be the case if...", "It seems that the answer can be X", etc.
+E = Evidence: all Observation messages must be assigned with and only with an Evidence (E) node. Only Observation messages can be Evidence (E) nodes, with the exception of the task description message.
 N = Neutral: for boilerplate operations like writing or copying files, or non-scientific tool calls. Only the tool calls of a message can be assigned as Neutral (N).
+T = Test: any information-seeking action, including experiments, evaluations, or lookups. Both the intention and the concrete tool call qualify as tests (T); what matters is that the system is seeking new scientific information to evaluate a hypothesis (H) or a judgment (J). If both the intention/plan to run a test and the actual tool call are present within the same message, count only the tool call as the test (T) node. Every tool call must be assigned as either a Test (T) or a Neutral (N) node.
 J = Judgment: an interpretation of test results (Observation) that goes beyond the literal repetition of the raw output. If the agent restates an observation while adding any evaluative, comparative, or inferential content, even brief it is a judgment (J).
+F = Final Answer: Only the last message of the trace, if and only if it contains a final submisssion, can be a assigned with a Final Answer (F) node.
 
 Constraints for nodes:
 - Only label what is explicitly present in text.
@@ -251,7 +252,7 @@ Constraints for nodes:
 - If you normalize text, still cite original quote(s).
 
 Pseudo-nodes (not explicitly stated but can be inferred):
-C = Commitment: if from the actions of the agents or system it can be inferred that they have reached an implicit commitment to an answer that is not yet fully supported by evidence, and that they are **refusing to revise it**, then create a pseudo-node labeled C. This is a special pseudo-node that captures the commitment even if it is not explicitly stated.
+C = Commitment: if from the actions of the agents or system it can be inferred that they have reached an implicit commitment to an answer that is not yet fully supported by evidence, and that they are **refusing to revise it**, then create a pseudo-node labeled C. This is a special pseudo-node that captures the commitment even if it is not explicitly stated. It is possible that the Final Answer (F) node is also a Commitment (C) if the Final Answer (F) is not fully supported by evidence.
 
 Constrains for pseudo-nodes:
 - Only Commitment (C) can be a pseudo-node.
@@ -580,7 +581,7 @@ async def llm_json_call_async(
     model: str,
     system: str,
     user: str,
-    temperature: float = 0.0,
+    temperature: float = 0.7,
     max_retries: int = 5,
     timeout_s: int = 120,
 ) -> dict[str, Any]:
@@ -770,7 +771,7 @@ async def extract_nodes_pass_a(
             continue
 
         out = await llm_json_call_async(
-            model=model, system=PASS_A_SYSTEM, user=user, temperature=0.0
+            model=model, system=PASS_A_SYSTEM, user=user, temperature=0.7
         )
         nodes = out.get("nodes", [])
         if not isinstance(nodes, list):
@@ -842,7 +843,7 @@ async def extract_edges_pass_b(
             continue
 
         out = await llm_json_call_async(
-            model=model, system=PASS_B_SYSTEM, user=user, temperature=0.0
+            model=model, system=PASS_B_SYSTEM, user=user, temperature=0.7
         )
         edges = out.get("edges", [])
         if not isinstance(edges, list):
