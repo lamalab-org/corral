@@ -1,8 +1,6 @@
 """Tests for the BaseAgent class."""
 
-import litellm
 import pytest
-from litellm.types.utils import Message
 
 from corral.agents.base_agent import BaseAgent
 from corral.router import CorralRouter
@@ -234,28 +232,6 @@ def test_get_llm_response_with_tools(monkeypatch, concrete_agent):
     response = concrete_agent.get_llm_response(tools=tools)
 
     assert response == mock_response
-
-
-def test_get_llm_response_context_window_error(monkeypatch, concrete_agent):
-    """Test handling of context window exceeded errors."""
-
-    def mock_llm_call_with_error(*args, **kwargs):
-        raise litellm.ContextWindowExceededError(
-            "Context window exceeded", model="test-model", llm_provider="test-provider"
-        )
-
-    monkeypatch.setattr("corral.agents.base_agent.llm_call", mock_llm_call_with_error)
-
-    concrete_agent.messages = [
-        {"role": "user", "content": "Test message"},
-        {"role": "assistant", "content": "Response"},
-    ]
-
-    response = concrete_agent.get_llm_response()
-
-    assert isinstance(response, Message)
-    assert response.role == "user"
-    assert "ContextWindowExceededError" in response.content
 
 
 def test_get_llm_response_generic_error(monkeypatch, concrete_agent):

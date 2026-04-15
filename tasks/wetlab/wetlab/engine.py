@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from math import log10
 from typing import Optional, Dict, Generator
-from colors import mix_colors, solution_color, closest_color_names, PRECIPITATE_COLORS, PALETTE
+from wetlab.colors import mix_colors, solution_color, closest_color_names, PRECIPITATE_COLORS, PALETTE
 import reaktoro as rk
 import numpy as np
 
@@ -17,7 +17,8 @@ class NegativeMassError(ArithmeticError):
     pass
 
 
-DB = rk.Database.fromFile('WetChem.yaml')
+import pathlib as _pathlib
+DB = rk.Database.fromFile(str(_pathlib.Path(__file__).with_name('WetChem.yaml')))
 ZERO = 1e-20
 SOLVER_OPTIONS = rk.EquilibriumOptions()
 SOLVER_OPTIONS.epsilon = ZERO
