@@ -11,7 +11,7 @@ from loguru import logger
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATASET_ID = "jablonkagroup/corral-traces"
-MODELS = ("claude_sonnet_45", "gpt_4o")
+MODELS = ("claude_sonnet_45", "gpt_4o", "gpt_oss_120b")
 AGENT = "ReActAgent"
 VERBOSITY = "brief"
 COMPLEXITY = ("tasks", "task")
@@ -127,7 +127,11 @@ def sample_env(
     total_available = 0
     for model, level, config_name in combos:
         logger.info(f"    Loading {config_name} …")
-        ds = load_dataset(DATASET_ID, config_name, split="train")
+        try:
+            ds = load_dataset(DATASET_ID, config_name, split="train")
+        except ValueError:
+            logger.warning(f"    ⚠ Config {config_name} not loadable - skipping.")
+            continue
         rows = [dict(row) for row in ds]
         combo_rows.append((model, level, config_name, rows))
         total_available += len(rows)
@@ -185,6 +189,7 @@ def sample_files(
     output_dir: str | None = None,
     n: int = 10,
     env: str | None = None,
+    model: str | None = None,
     seed: int | None = None,
 ) -> None:
     """Sample traces from the HF dataset and save as individual JSON files."""
@@ -196,6 +201,13 @@ def sample_files(
 
     logger.info("Discovering configs …")
     all_configs = discover_configs()
+
+    if model is not None:
+        all_configs = [c for c in all_configs if c["model"] == model]
+        if not all_configs:
+            raise ValueError(f"Model '{model}' not found. Known models: {MODELS}")
+        logger.info(f"Filtered to model: {model}")
+
     by_env = group_by_env(all_configs)
 
     if env is not None:
@@ -216,6 +228,7 @@ def main(
     output_dir: str | None = None,
     n: int = 90,
     env: str | None = None,
+    model: str | None = None,
     seed: int | None = None,
 ) -> None:
     """Sample trace files from the Hugging Face dataset into JSON files.
@@ -230,9 +243,11 @@ def main(
         n: Number of traces to sample per environment.
         env: Optional environment name to restrict sampling to a single
             environment, such as "catalyst".
+        model: Optional model name to restrict sampling to a single model,
+            such as "gpt_oss_120b".
         seed: Optional random seed used to make sampling reproducible.
     """
-    sample_files(output_dir=output_dir, n=n, env=env, seed=seed)
+    sample_files(output_dir=output_dir, n=n, env=env, model=model, seed=seed)
 
 
 if __name__ == "__main__":

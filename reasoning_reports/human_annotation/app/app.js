@@ -8,10 +8,11 @@ const state = {
   windowSize: 16,
   overlap: 4,
   annotations: { nodes: {}, edges: {} },
-  allAnnotations: {},    // { filename: { nodes, edges, last_window } } across all files
+  allAnnotations: {},    // { filename: { nodes, edges, source_nodes, source_edges, last_window } } across all files
   annotatorName: '',
   dirty: false,
   showAll: false,
+  config: { old: false, prefix: 'annotations' },
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -48,6 +49,9 @@ const dom = {
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
+  try {
+    state.config = await fetchJSON('/api/config');
+  } catch { /* keep defaults */ }
   await loadFileLists();
   bindEvents();
 }
@@ -113,6 +117,8 @@ function stashCurrentAnnotations() {
       nodes: JSON.parse(JSON.stringify(state.annotations.nodes)),
       edges: JSON.parse(JSON.stringify(state.annotations.edges)),
       last_window: state.currentWindow,
+      source_nodes: JSON.parse(JSON.stringify(state.annotatedData.nodes || [])),
+      source_edges: JSON.parse(JSON.stringify(state.annotatedData.edges || [])),
     };
   }
 }
@@ -184,6 +190,8 @@ async function loadSavedAnnotation(filename) {
           nodes: ann.nodes || {},
           edges: ann.edges || {},
           last_window: ann.last_window || 0,
+          source_nodes: ann.source_nodes || [],
+          source_edges: ann.source_edges || [],
         };
       }
       // Load the file the annotator was last working on (or first available)
@@ -231,8 +239,9 @@ function updateSavePreview() {
   // stash current to get accurate count
   stashCurrentAnnotations();
   const fileCount = Object.keys(state.allAnnotations).length;
+  const prefix = state.config.prefix || 'annotations';
   dom.savePathPreview.textContent = name
-    ? `Will save as: annotations_${name}.json (${fileCount} file${fileCount !== 1 ? 's' : ''})`
+    ? `Will save as: ${prefix}_${name}.json (${fileCount} file${fileCount !== 1 ? 's' : ''})`
     : 'Enter a valid name (letters, numbers, hyphens, underscores)';
 }
 
@@ -253,6 +262,8 @@ async function doSave() {
       nodes: ann.nodes,
       edges: ann.edges,
       last_window: ann.last_window || 0,
+      source_nodes: ann.source_nodes || [],
+      source_edges: ann.source_edges || [],
     };
   }
 

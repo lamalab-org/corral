@@ -41,11 +41,11 @@ import fire
 from dotenv import load_dotenv
 from loguru import logger
 
-load_dotenv()
+load_dotenv("../../.env", override=True)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-NODE_TYPES = ["H", "T", "E", "J", "C", "N"]
+NODE_TYPES = ["H", "T", "E", "J", "C", "N", "F"]
 NODE_TYPES_SET = set(NODE_TYPES)
 EDGE_RELATIONS = [
     "tests",
@@ -152,7 +152,8 @@ ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
         "[E -contradicts-> H, no updates_to/competes_with]."
     ),
     "premature_commitment": (
-        "Hypothesis committed without intermediate testing [H -> C with no T]."
+        "Hypothesis committed without intermediate testing "
+        "[J -informs-> C, J -informs-> H, H with no tests]."
     ),
     "uninformative_test": ("Test produces no observed evidence [T with no E]."),
     "fixed_belief_trace": (
@@ -161,7 +162,7 @@ ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
     "disconnected_evidence": ("Evidence node with no edges [Isolated E]."),
     "one_sided_confirmation": (
         "Commitment reached without considering contradicting evidence "
-        "[H -> C with support, no contradicts]."
+        "[J -informs-> C, J -informs-> H, H has support but no contradicts]."
     ),
 }
 
@@ -242,9 +243,9 @@ Node types:
 H = Hypothesis: a candidate explanation, or a working assumption about the system. It should be a revisable claim, proposal, suggestion, or the current best guess about the answer. Information in task definitions or environment descriptions do not count as hypotheses (H). Partial or full reiteration of the task descriptionn does not count as hypothesis (H). Correcting a typo in a tool argument does not count as a Hypothesis (H). We consider a Hypothesis (H) to be present if the agent states a claim similar to "I think the answer is X", "This suggests that X might be the solution", "The most likely explanation is X", "X could be the case if...", "It seems that the answer can be X", etc.
 E = Evidence: all Observation messages must be assigned with and only with an Evidence (E) node. Only Observation messages can be Evidence (E) nodes, with the exception of the task description message.
 N = Neutral: for boilerplate operations like writing or copying files, or non-scientific tool calls. Only the tool calls of a message can be assigned as Neutral (N).
-T = Test: any information-seeking action, including experiments, evaluations, or lookups. Both the intention and the concrete tool call qualify as tests (T); what matters is that the system is seeking new scientific information to evaluate a hypothesis (H) or a judgment (J). If both the intention/plan to run a test and the actual tool call are present within the same message, count only the tool call as the test (T) node. Every tool call must be assigned as either a Test (T) or a Neutral (N) node.
+T = Test: any information-seeking action, including experiments, evaluations, or lookups. Both the intention and the concrete tool call qualify as tests (T); what matters is that the system is seeking new scientific information to evaluate a hypothesis (H) or a judgment (J). If both the intention/plan to run a test and the actual tool call are present within the same message, count only the tool call as the test (T) node. Every tool call (with the tag <action>) must be assigned as either a Test (T) or a Neutral (N) node.
 J = Judgment: an interpretation of test results (Observation) that goes beyond the literal repetition of the raw output. If the agent restates an observation while adding any evaluative, comparative, or inferential content, even brief it is a judgment (J).
-F = Final Answer: Only the last message of the trace, if and only if it contains a final submisssion, can be a assigned with a Final Answer (F) node.
+F = Final Answer: Only the message that contains a final submisssion (with tag <final_answer>), must be a assigned with a Final Answer (F) node.
 
 Constraints for nodes:
 - Only label what is explicitly present in text.
@@ -264,7 +265,7 @@ Return JSON with keys:
   "nodes": [
     {
       "node_id": "N1",
-      "type": "H|T|E|J|U|V|C",
+      "type": "H|T|E|J|C|F",
       "time": <int message index of earliest support>,
       "text": <normalized short node text>,
       "support": [{"msg_idx": <int>, "quote": <exact substring from that message>}],
@@ -463,11 +464,13 @@ _TIKZ_ANTIPATTERN_PATTERNS: dict[str, str] = {
 \draw[red, thick] (h2.north east) -- (h2.south west);"""
     ),
     AP_PREMATURE_COMMITMENT: _make_tikz(
-        r"""\node[rnode] (h) {H};
-\node[rnode, right=of h] (c) {C};
-\node[missingnode, below=5mm of h] (t) {T};
-\draw[->] (h) -- (c);
-\draw[->, missing] (h) -- (t);
+        r"""\node[rnode] (j) {J};
+\node[rnode, above right=5mm and 8mm of j] (h) {H};
+\node[rnode, below right=5mm and 8mm of j] (c) {C};
+\node[missingnode, right=of h] (t) {T};
+\draw[->] (j) -- node[rlbl] {inf.} (h);
+\draw[->] (j) -- node[rlblb] {inf.} (c);
+\draw[->, missing] (h) -- node[rlbl, text=gray] {tests} (t);
 \draw[red, thick] (t.north west) -- (t.south east);
 \draw[red, thick] (t.north east) -- (t.south west);"""
     ),
@@ -505,10 +508,12 @@ _TIKZ_ANTIPATTERN_PATTERNS: dict[str, str] = {
     AP_ONE_SIDED_CONFIRMATION: _make_tikz(
         r"""\node[rnode] (h) {H};
 \node[rnode, below left=5mm and 1mm of h] (es) {E};
-\node[rnode, right=12mm of h] (c) {C};
+\node[rnode, right=12mm of h] (j) {J};
+\node[rnode, right=of j] (c) {C};
 \node[missingnode, below right=5mm and 1mm of h] (ec) {E$_{\!c}$};
-\draw[->] (es) -- (h);
-\draw[->] (h) -- (c);
+\draw[->] (es) -- node[left, font=\tiny] {inf.} (h);
+\draw[->] (j) -- node[rlbl] {inf.} (h);
+\draw[->] (j) -- node[rlbl] {inf.} (c);
 \draw[->, missing] (ec) -- node[right, font=\tiny, text=gray] {contr.} (h);
 \draw[red, thick] (ec.north west) -- (ec.south east);
 \draw[red, thick] (ec.north east) -- (ec.south west);"""
@@ -1311,20 +1316,25 @@ def _ap_unresolved_contradiction(node_type_map, node_by_id, out_edges, in_edges)
 def _ap_hypothesis_to_commitment_shortcut(
     node_type_map, _node_by_id, out_edges, in_edges
 ):
+    # Find H nodes linked to a C through a shared J (J->H informs, J->C informs)
+    # where H has no tests.  H->C is not an allowed edge; the path must go via J.
     count = 0
-    for h in _nodes_of_type("H", node_type_map):
-        links_c = any(
+    # Build set of H ids connected to some C through a shared J
+    h_linked_to_c: set[str] = set()
+    for j in _nodes_of_type("J", node_type_map):
+        informs_c = any(
             e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "C"
-            for e in out_edges.get(h, [])
+            for e in out_edges.get(j, [])
         )
-        if not links_c:
-            links_c = any(
-                e.get("relation") == "informs"
-                and node_type_map.get(e.get("src")) == "C"
-                for e in in_edges.get(h, [])
-            )
-        if not links_c:
+        if not informs_c:
             continue
+        for e in out_edges.get(j, []):
+            if (
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("dst")) == "H"
+            ):
+                h_linked_to_c.add(e["dst"])
+    for h in h_linked_to_c:
         tested = any(e.get("relation") == "tests" for e in out_edges.get(h, []))
         if not tested:
             tested = any(e.get("relation") == "tests" for e in in_edges.get(h, []))
@@ -1371,20 +1381,27 @@ def _ap_orphan_evidence(node_type_map, _node_by_id, out_edges, in_edges):
 
 
 def _ap_confirmation_only(node_type_map, _node_by_id, out_edges, in_edges):
+    # Find H linked to C via a shared J (J->H informs, J->C informs),
+    # where H has supporting evidence but no contradicts.
+    # H->C is not an allowed edge; the path must go via J.
     count = 0
-    for h in _nodes_of_type("H", node_type_map):
-        committed = any(
+    # Build set of H ids connected to some C through a shared J
+    h_linked_to_c: set[str] = set()
+    for j in _nodes_of_type("J", node_type_map):
+        informs_c = any(
             e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "C"
-            for e in out_edges.get(h, [])
+            for e in out_edges.get(j, [])
         )
-        if not committed:
-            committed = any(
-                e.get("relation") == "informs"
-                and node_type_map.get(e.get("src")) == "C"
-                for e in in_edges.get(h, [])
-            )
-        if not committed:
+        if not informs_c:
             continue
+        for e in out_edges.get(j, []):
+            if (
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("dst")) == "H"
+            ):
+                h_linked_to_c.add(e["dst"])
+    for h in h_linked_to_c:
+        # Check H has supporting evidence (E->H or E->J->H via informs)
         has_support = False
         for ie in in_edges.get(h, []):
             src = ie.get("src")
@@ -1512,20 +1529,23 @@ def detect_antipatterns_global(
             if not resolved:
                 n_unresolved += 1
 
-    h_to_c_untested = 0
-    for h in _nodes_of_type("H", node_type_map):
-        links_c = any(
+    # Premature commitment: H linked to C via shared J, but H has no tests
+    h_linked_to_c: set[str] = set()
+    for j in _nodes_of_type("J", node_type_map):
+        j_informs_c = any(
             e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "C"
-            for e in out_edges.get(h, [])
+            for e in out_edges.get(j, [])
         )
-        if not links_c:
-            links_c = any(
-                e.get("relation") == "informs"
-                and node_type_map.get(e.get("src")) == "C"
-                for e in in_edges.get(h, [])
-            )
-        if not links_c:
+        if not j_informs_c:
             continue
+        for e in out_edges.get(j, []):
+            if (
+                e.get("relation") == "informs"
+                and node_type_map.get(e.get("dst")) == "H"
+            ):
+                h_linked_to_c.add(e["dst"])
+    h_to_c_untested = 0
+    for h in h_linked_to_c:
         tested = any(e.get("relation") == "tests" for e in out_edges.get(h, []))
         if not tested:
             tested = any(e.get("relation") == "tests" for e in in_edges.get(h, []))
@@ -1755,11 +1775,6 @@ class ModelLevelAggregate:
     annotated_dir: Path
     aggregate_stats_path: Path
     aggregate_stats: dict[str, Any]
-    level: str
-    file: str
-    input_file: str
-    message_count: int
-    counts: dict[str, int]
 
 
 def iter_model_level_aggregates(root: Path) -> list[ModelLevelAggregate]:
@@ -2402,7 +2417,13 @@ async def process_file_async(
         content = m.get("content", "")
         if content is None:
             content = ""
-        clean_messages.append({"role": role, "content": str(content)})
+        content = str(content)
+        if (
+            content.strip()
+            == "Error: Maximum iterations reached without finding a final answer."
+        ):
+            continue
+        clean_messages.append({"role": role, "content": content})
 
     qc_warnings: list[str] = []
 
@@ -2731,7 +2752,7 @@ def _emit_group(
 
 
 def build_productive_motifs_latex() -> str:
-    r"""Return a LaTeX tabularx table with definitions of productive motifs.
+    """Return a LaTeX tabularx table with definitions of productive motifs.
 
     Column layout: Topic (X), Graph (TikZ picture), Description (X).
     Related patterns share a single merged row label via multirow.
@@ -2759,7 +2780,7 @@ def build_productive_motifs_latex() -> str:
 
 
 def build_reasoning_breakdowns_latex() -> str:
-    r"""Return a LaTeX tabularx table with definitions of reasoning breakdowns.
+    """Return a LaTeX tabularx table with definitions of reasoning breakdowns.
 
     Column layout: Topic (X), Graph (TikZ picture), Description (X).
     Related breakdowns share a single merged row label via multirow.
@@ -2882,5 +2903,3 @@ def main(
 
 if __name__ == "__main__":
     fire.Fire(main)
-
-# ["claude_sonnet_45/afm/level_2/afm_experiment_level_2-8.json", "gpt_4o/ml/level_1/ml_oxides-13.json", "gpt_4o/wetlab/level_2/qualysis_lvl2_08-70.json", "claude_sonnet_45/retrosynthesis/level_3/make_5_lvl3-43.json", "claude_sonnet_45/spectra/level_1/10_15227_orgsyn_096_0036-19.json ", "claude_sonnet_45/ml/level_1/ml_sulphides-10.json"]
