@@ -2759,8 +2759,8 @@ def build_productive_motifs_latex() -> str:
     """Return a LaTeX tabularx table with definitions of productive motifs.
 
     Column layout: Topic (p{2.2cm}), Graph (TikZ picture, c), Description (X).
-    Related patterns share a merged row label via ``\\multirow``. Each graph
-    cell contains an inline TikZ diagram from ``_TIKZ_SUBGRAPH_PATTERNS``.
+    Related patterns share a merged row label via `\\multirow`. Each graph
+    cell contains an inline TikZ diagram from `_TIKZ_SUBGRAPH_PATTERNS`.
 
     Returns:
         A string of LaTeX source for the complete tabularx environment,
@@ -2791,8 +2791,8 @@ def build_reasoning_breakdowns_latex() -> str:
     """Return a LaTeX tabularx table with definitions of reasoning breakdowns.
 
     Column layout: Topic (X), Graph (TikZ picture, c), Description (X).
-    Related breakdowns share a merged row label via ``\\multirow``. Each graph
-    cell contains an inline TikZ diagram from ``_TIKZ_ANTIPATTERN_PATTERNS``.
+    Related breakdowns share a merged row label via `\\multirow`. Each graph
+    cell contains an inline TikZ diagram from `_TIKZ_ANTIPATTERN_PATTERNS`.
 
     Returns:
         A string of LaTeX source for the complete tabularx environment,
@@ -2824,16 +2824,16 @@ def write_pattern_definitions_latex(
 ) -> tuple[Path, Path]:
     """Write the pattern-definition LaTeX tables to *out_dir*.
 
-    Produces two files: ``productive_motifs.tex`` and
-    ``reasoning_breakdowns.tex``. The output directory is created if it does
+    Produces two files: `productive_motifs.tex` and
+    `reasoning_breakdowns.tex`. The output directory is created if it does
     not already exist.
 
     Args:
-        out_dir: Destination directory for the two ``.tex`` files. Defaults
-            to ``<script_dir>/analysis/results/tables/``.
+        out_dir: Destination directory for the two `.tex` files. Defaults
+            to `<script_dir>/analysis/results/tables/`.
 
     Returns:
-        A tuple of ``(motifs_path, breakdowns_path)`` pointing to the written
+        A tuple of `(motifs_path, breakdowns_path)` pointing to the written
         files.
     """
     if out_dir is None:

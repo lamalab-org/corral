@@ -126,9 +126,9 @@ def sample_paired_files(
     """Sample annotated files present in BOTH iterations for paired comparison.
 
     For each sampled file (by relative path), the new-iteration version is
-    copied to ``files2annotate`` and the old-iteration version to
-    ``oldfiles2annotate``.  The 50 files used for code improvement (listed
-    in ``EXCLUDED_FILES``) are always excluded.
+    copied to `files2annotate` and the old-iteration version to
+    `oldfiles2annotate`.  The 50 files used for code improvement (listed
+    in `EXCLUDED_FILES`) are always excluded.
     """
     rng = random.Random(seed)
     new_dir = REASONING_REPORTS_DIR

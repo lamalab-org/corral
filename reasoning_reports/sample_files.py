@@ -131,7 +131,7 @@ def sample_env(
             combination.
         env_name: Environment name used for sub-directory naming and logging.
         n: Requested number of traces to sample.
-        output_dir: Root directory under which ``model/env/level/`` subdirs
+        output_dir: Root directory under which `model/env/level/` subdirs
             are created.
 
     Returns:

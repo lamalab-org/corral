@@ -237,12 +237,12 @@ def _build_individual_bars(overall: dict) -> tuple[list[dict], list[float]]:
     within the same kind cluster tightly while groups are visually separated.
 
     Args:
-        overall: The ``"overall"`` grouping dict from ``annotation_summary.json``.
+        overall: The `"overall"` grouping dict from `annotation_summary.json`.
 
     Returns:
-        A tuple of ``(bars, group_centres)`` where ``bars`` is a list of dicts
-        with keys ``group``, ``kind``, ``pattern``, ``value``, ``color``, and
-        ``x``; and ``group_centres`` is a list of x-axis midpoints suitable for
+        A tuple of `(bars, group_centres)` where `bars` is a list of dicts
+        with keys `group`, `kind`, `pattern`, `value`, `color`, and
+        `x`; and `group_centres` is a list of x-axis midpoints suitable for
         group bracket labels.
     """
     bars: list[dict] = []
@@ -594,7 +594,7 @@ def plot_env_level(summary: dict, out: Path) -> None:
     group (Workflow, Strategic, Hypothesis-driven).
 
     Args:
-        summary: Parsed ``annotation_summary.json`` as a dict.
+        summary: Parsed `annotation_summary.json` as a dict.
         out: Directory where the output PDF will be written.
     """
     by_mel = summary["groupings"]["by_model_env_level"]
