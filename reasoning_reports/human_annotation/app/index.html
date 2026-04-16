@@ -26,6 +26,7 @@
     <div class="control-group">
       <button id="save-btn" class="btn btn-success" disabled>Save</button>
       <button id="guidelines-toggle" class="btn btn-outline">Guidelines</button>
+      <span id="schema-indicator" style="font-size:.8rem;font-weight:600"></span>
     </div>
   </div>
   <div id="progress-bar-container">
@@ -71,6 +72,18 @@
 
     <section>
       <h3>Node Types</h3>
+      <div class="schema-new">
+      <table class="ref-table">
+        <tr><td class="badge badge-H">H</td><td><strong>Hypothesis</strong> &mdash; a candidate explanation, or a working assumption about the system. It should be a revisable claim, proposal, suggestion, or the current best guess about the answer. Information in task definitions or environment descriptions do not count as H. Partial or full reiteration of the task description does not count as H. Correcting a typo in a tool argument does not count as H.</td></tr>
+        <tr><td class="badge badge-T">T</td><td><strong>Test</strong> &mdash; any information-seeking action, including experiments, evaluations, or lookups. Both the intention and the concrete tool call qualify as T; what matters is that the system is seeking new scientific information to evaluate a hypothesis (H) or a judgment (J). If both the intention/plan and the actual tool call are present within the same message, count only the tool call as T. Every tool call (with the tag <code>&lt;action&gt;</code>) must be assigned as either T or N.</td></tr>
+        <tr><td class="badge badge-E">E</td><td><strong>Evidence</strong> &mdash; all Observation messages must be assigned with and only with an Evidence (E) node. Only Observation messages can be E, with the exception of the task description message.</td></tr>
+        <tr><td class="badge badge-J">J</td><td><strong>Judgment</strong> &mdash; an interpretation of test results (Observation) that goes beyond the literal repetition of the raw output. If the agent restates an observation while adding any evaluative, comparative, or inferential content&mdash;even brief&mdash;it is J.</td></tr>
+        <tr><td class="badge badge-N">N</td><td><strong>Neutral</strong> &mdash; for boilerplate operations like writing or copying files, or non-scientific tool calls. Only the tool calls (with the tag <code>&lt;action&gt;</code>) of a message can be assigned as N.</td></tr>
+        <tr><td class="badge badge-F">F</td><td><strong>Final Answer</strong> &mdash; only the message that contains a final submission (with tag <code>&lt;final_answer&gt;</code>) must be assigned with an F node.</td></tr>
+        <tr><td class="badge badge-C">C</td><td><strong>Commitment</strong> (pseudo-node) &mdash; if from the actions of the agent it can be inferred that they have reached an implicit commitment to an answer that is not yet fully supported by evidence and they are refusing to revise it. The Final Answer (F) may also be C if it is not fully supported by evidence. Unlike other nodes, C does not require explicit text; it may be inferred from context.</td></tr>
+      </table>
+      </div>
+      <div class="schema-old">
       <table class="ref-table">
         <tr><td class="badge badge-H">H</td><td><strong>Hypothesis</strong> &mdash; a candidate explanation, a working assumption about the system, or the current best state of a parameter or answer. This includes quantitative estimates, parameter choices, and proposed plans that the agent treats as revisable claims (e.g., &ldquo;time per line should be ~0.4 s&rdquo;, &ldquo;the compound is X&rdquo;). If the agent explicitly states a candidate value and later evaluates or revises it, it counts as H.</td></tr>
         <tr><td class="badge badge-T">T</td><td><strong>Test</strong> &mdash; any information-seeking action: designing an experiment, calling a tool, executing code, querying documentation, or running a simulation. Both the abstract plan (&ldquo;I will check X&rdquo;) and the concrete action (&ldquo;execute code to set parameters&rdquo;) qualify as T; what matters is that the agent is seeking new information.</td></tr>
@@ -80,10 +93,24 @@
         <tr><td class="badge badge-C">C</td><td><strong>Commitment</strong> &mdash; a final lock-in statement: &ldquo;the answer is X&rdquo;, &ldquo;I conclude&hellip;&rdquo;, a final submission. The agent must signal that it is done deliberating on this point.</td></tr>
       </table>
       <p class="note">Do not use <strong>V</strong> even if the text contains reliability appraisal. Fold reliability comments into <strong>J</strong> when they are explicitly interpretive.</p>
+      </div>
     </section>
 
     <section>
       <h3>Edge Relations</h3>
+      <div class="schema-new">
+      <table class="ref-table">
+        <tr><td><code>tests</code></td><td>Allowed between <strong>H&rarr;T</strong> and <strong>J&rarr;T</strong>. H&rarr;T: the Test directly addresses the Hypothesis&rsquo; claim, or attempts to falsify or verify it. J&rarr;T: the Test is designed in response to the Judgment, or the Judgment motivates the test design.</td></tr>
+        <tr><td><code>observes</code></td><td>Allowed only between <strong>T&rarr;E</strong>. The Evidence is the direct result of the Test.</td></tr>
+        <tr><td><code>informs</code></td><td>Allowed between E&rarr;H, E&rarr;J, E&rarr;C, J&rarr;C, J&rarr;H, J&rarr;J. E&rarr;J: the Judgment is an interpretation of the Evidence. E&rarr;H / J&rarr;H: the Evidence or Judgment provides information relevant to the Hypothesis. E&rarr;C / J&rarr;C: the Commitment is informed by the Evidence or Judgment (not necessarily explicit). J&rarr;J: the later Judgment is a refinement or extension of one or more earlier Judgments.</td></tr>
+        <tr><td><code>updates_to</code></td><td>Allowed only between <strong>H&rarr;H</strong>. The later Hypothesis is a revision of the earlier one, based on intervening nodes.</td></tr>
+        <tr><td><code>competes_with</code></td><td>Allowed only between <strong>H&rarr;H</strong>. The two Hypotheses are alternative explanations directly compared or evaluated against each other, co-existing at the same time. If a hypothesis is introduced as a revision of the first, use <code>updates_to</code> instead.</td></tr>
+        <tr><td><code>contradicts</code></td><td>Allowed between <strong>E&rarr;H</strong> and <strong>J&rarr;H</strong>. The Evidence or Judgment explicitly contradicts the claim of the Hypothesis.</td></tr>
+      </table>
+      <h4>Allowed directions</h4>
+      <p>Only the directions listed above are permitted. Any combination not listed (e.g., T&rarr;H, E&rarr;T, H&rarr;J) is forbidden and should be marked <strong>incorrect</strong>.</p>
+      </div>
+      <div class="schema-old">
       <table class="ref-table">
         <tr><td><code>tests</code></td><td>A test evaluates a hypothesis, or a test produces evidence. Both <strong>H&rarr;T</strong> (&ldquo;hypothesis drives the test&rdquo;) and <strong>T&rarr;E</strong> (&ldquo;test yields evidence&rdquo;) are common patterns.</td></tr>
         <tr><td><code>observes</code></td><td>Evidence is observed as a direct product of a test or tool call. Typically <strong>T&rarr;E</strong>. Both <code>tests</code> and <code>observes</code> can link T to E: use <code>tests</code> when the emphasis is on the test evaluating something, and <code>observes</code> when the emphasis is on the evidence appearing as output.</td></tr>
@@ -94,10 +121,24 @@
       </table>
       <h4>Preferred directions</h4>
       <p>The canonical directions are H&rarr;T, T&rarr;E, E&rarr;J, E&rarr;U, U&rarr;H, E&rarr;H (for contradicts). However, the trace may justify other orientations (e.g., E&rarr;T for <code>uses</code> when evidence informs a follow-up test). Accept the direction used in the annotation if the support quote justifies the stated relationship.</p>
+      </div>
     </section>
 
     <section>
       <h3>Quick Decision Rules</h3>
+      <div class="schema-new">
+      <ul>
+        <li>If the node/edge has no corresponding content in the trace at all &rarr; <strong>incorrect</strong></li>
+        <li>If the quote clearly does not match the referenced message &rarr; <strong>incorrect</strong></li>
+        <li>If a message is an Observation but is not labeled E &rarr; <strong>incorrect</strong></li>
+        <li>If a tool call (<code>&lt;action&gt;</code>) is neither T nor N &rarr; <strong>incorrect</strong></li>
+        <li>If it is only a literal restatement with zero evaluative content &rarr; it is not judgment</li>
+        <li>If C is claimed but there is no evidence of an implicit refusal to revise &rarr; it is not commitment</li>
+        <li>If an edge direction or type is not in the allowed list &rarr; <strong>incorrect</strong></li>
+        <li>If two items are merely adjacent in time with no functional link &rarr; no automatic edge</li>
+      </ul>
+      </div>
+      <div class="schema-old">
       <ul>
         <li>If the node/edge has no corresponding content in the trace at all &rarr; <strong>incorrect</strong></li>
         <li>If the quote clearly does not match the referenced message &rarr; <strong>incorrect</strong></li>
@@ -107,6 +148,7 @@
         <li>If there is no explicit lock-in &rarr; it is not commitment</li>
         <li>If two items are merely adjacent in time with no functional link &rarr; no automatic edge</li>
       </ul>
+      </div>
     </section>
 
     <section>
@@ -174,6 +216,56 @@
           <button class="btn btn-sm btn-outline toggle-instructions" data-target="nodes-instructions">LLM Instructions</button>
         </div>
         <div id="nodes-instructions" class="instructions-block hidden">
+          <div class="schema-new">
+          <h4>System prompt (Pass A)</h4>
+          <pre>You are a careful annotator. You MUST only extract information explicitly present in the provided messages.
+Rules:
+- Do NOT invent hidden thoughts or implied steps.
+- Do not borrow any external knowledge or make assumptions beyond the text.
+- Do not judge or correct the content, only label supported nodes.
+- For messages with several nodes, you MUST follow the order in which they appear in the text to assign message indices.
+- If uncertain, omit the node rather than guessing.
+- Output JSON only, matching the required schema.</pre>
+          <h4>User instructions (Pass A)</h4>
+          <pre>Extract 0..k nodes from the provided message window.
+
+Every non-Observation message must be assigned with at least one node. It is possible that some messages will have multiple nodes (e.g., a message that both states a hypothesis and describes a test). Avoid repeated nodes of the same type within a single message, unless the text explicitly supports multiple distinct instances.
+
+Node types:
+H = Hypothesis: a candidate explanation, or a working assumption about the system. It should be a revisable claim, proposal, suggestion, or the current best guess about the answer. Information in task definitions or environment descriptions do not count as hypotheses (H). Partial or full reiteration of the task description does not count as hypothesis (H). Correcting a typo in a tool argument does not count as a Hypothesis (H).
+E = Evidence: all Observation messages must be assigned with and only with an Evidence (E) node. Only Observation messages can be Evidence (E) nodes, with the exception of the task description message.
+N = Neutral: for boilerplate operations like writing or copying files, or non-scientific tool calls. Only the tool calls of a message can be assigned as Neutral (N).
+T = Test: any information-seeking action, including experiments, evaluations, or lookups. Both the intention and the concrete tool call qualify as tests (T); what matters is that the system is seeking new scientific information to evaluate a hypothesis (H) or a judgment (J). If both the intention/plan to run a test and the actual tool call are present within the same message, count only the tool call as the test (T) node. Every tool call (with the tag &lt;action&gt;) must be assigned as either a Test (T) or a Neutral (N) node.
+J = Judgment: an interpretation of test results (Observation) that goes beyond the literal repetition of the raw output. If the agent restates an observation while adding any evaluative, comparative, or inferential content, even brief, it is a judgment (J).
+F = Final Answer: Only the message that contains a final submission (with tag &lt;final_answer&gt;) must be assigned with a Final Answer (F) node.
+
+Constraints for nodes:
+- Only label what is explicitly present in text.
+- Every node must have support quotes (exact substrings) and msg indices.
+- If you normalize text, still cite original quote(s).
+- If uncertain, omit the node rather than guessing.
+
+Pseudo-nodes (not explicitly stated but can be inferred):
+C = Commitment: if from the actions of the agents or system it can be inferred that they have reached an implicit commitment to an answer that is not yet fully supported by evidence, and that they are refusing to revise it, then create a pseudo-node labeled C. It is possible that the Final Answer (F) node is also a Commitment (C) if the Final Answer (F) is not fully supported by evidence.
+
+Constraints for pseudo-nodes:
+- Only Commitment (C) can be a pseudo-node.
+- For the quote support of a pseudo-node, you can cite the text that implies the commitment, even if it is not explicit. You are allowed to add a brief explanation to clarify the implication, but it must be concise and directly tied to the quote.
+
+Return JSON with keys:
+{
+  "nodes": [
+    {
+      "node_id": "N1",
+      "type": "H|T|E|J|N|F|C",
+      "time": &lt;int message index of earliest support&gt;,
+      "text": &lt;normalized short node text&gt;,
+      "support": [{"msg_idx": &lt;int&gt;, "quote": &lt;exact substring from that message&gt;}]
+    }, ...
+  ]
+}</pre>
+          </div>
+          <div class="schema-old">
           <h4>System prompt (Pass A)</h4>
           <pre>You are a careful annotator. You MUST only extract information explicitly present in the provided messages.
 Rules:
@@ -215,6 +307,7 @@ Return JSON with keys:
     }, ...
   ]
 }</pre>
+          </div>
         </div>
         <div id="nodes-list"></div>
       </div>
@@ -225,6 +318,54 @@ Return JSON with keys:
           <button class="btn btn-sm btn-outline toggle-instructions" data-target="edges-instructions">LLM Instructions</button>
         </div>
         <div id="edges-instructions" class="instructions-block hidden">
+          <div class="schema-new">
+          <h4>System prompt (Pass B)</h4>
+          <pre>You are a careful annotator. You MUST only add edges supported by explicit text.
+Rules:
+- You may only connect nodes provided to you.
+- Do not borrow any external knowledge or make assumptions beyond the text.
+- Do not judge or correct the content, only label supported edges.
+- Every edge MUST include at least one support quote with message indices.
+- If uncertain, omit the edge rather than guessing.
+- Output JSON only, matching the required schema.</pre>
+          <h4>User instructions (Pass B)</h4>
+          <pre>Given the message window and a list of extracted nodes (with node_id and text), extract supported edges among these nodes.
+
+Only the following edge types are allowed, any other combination is forbidden:
+- tests: Allowed only between: H -&gt; T, J -&gt; T.
+    H -&gt; T: the Test directly addresses the Hypothesis' claim, or attempts to falsify or verify it.
+    J -&gt; T: the Test is designed in response to the Judgment, or the Judgment motivates the test design.
+- observes: Allowed only between: T -&gt; E.
+    T -&gt; E: the Evidence is a direct result of the Test.
+- updates_to: Allowed only between: H -&gt; H.
+    H -&gt; H: the later Hypothesis is a revision of the earlier one, based on the nodes in between.
+- competes_with: Allowed only between: H -&gt; H.
+    H -&gt; H: the two Hypotheses are alternative explanations directly compared or evaluated against each other. Both should be plausible and co-existing at the same time. If another hypothesis is introduced later as a revision of the first, use updates_to instead.
+- contradicts: Allowed only between: E -&gt; H, J -&gt; H.
+    E -&gt; H: the Evidence contradicts the claim of the Hypothesis.
+    J -&gt; H: the Judgment contradicts the claim of the Hypothesis.
+- informs: Allowed only between: E -&gt; H, E -&gt; J, E -&gt; C, J -&gt; C, J -&gt; H, J -&gt; J.
+    E -&gt; H: the Evidence provides information relevant to the claim of the Hypothesis.
+    E -&gt; J: the Judgment is an interpretation of the Evidence.
+    E -&gt; C: the Commitment is informed by the Evidence (not necessarily in an explicit way).
+    J -&gt; H: the Judgment provides information relevant to the claim of the Hypothesis.
+    J -&gt; J: the later Judgment is a refinement, an extension, or a combination of one or several earlier judgments.
+    J -&gt; C: the Commitment is informed by the Judgment (not necessarily in an explicit way).
+
+Return JSON with keys:
+{
+  "edges": [
+    {
+      "src": "&lt;node_id&gt;",
+      "dst": "&lt;node_id&gt;",
+      "relation": "&lt;one of allowed&gt;",
+      "time": &lt;int message index of earliest support&gt;,
+      "support": [{"msg_idx": &lt;int&gt;, "quote": &lt;exact substring from that message&gt;}]
+    }, ...
+  ]
+}</pre>
+          </div>
+          <div class="schema-old">
           <h4>System prompt (Pass B)</h4>
           <pre>You are a careful annotator. You MUST only add edges supported by explicit text.
 Rules:
@@ -258,6 +399,7 @@ Return JSON with keys:
     }, ...
   ]
 }</pre>
+          </div>
         </div>
         <div id="edges-list"></div>
       </div>

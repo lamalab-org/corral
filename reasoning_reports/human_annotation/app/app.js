@@ -52,8 +52,24 @@ async function init() {
   try {
     state.config = await fetchJSON('/api/config');
   } catch { /* keep defaults */ }
+  applySchema();
   await loadFileLists();
   bindEvents();
+}
+
+function applySchema() {
+  const isOld = !!state.config.old;
+  document.querySelectorAll('.schema-new').forEach(el => {
+    el.style.display = isOld ? 'none' : 'block';
+  });
+  document.querySelectorAll('.schema-old').forEach(el => {
+    el.style.display = isOld ? 'block' : 'none';
+  });
+  const indicator = document.getElementById('schema-indicator');
+  if (indicator) {
+    indicator.textContent = isOld ? 'Schema: old (H/T/E/J/U/C · uses)' : 'Schema: new (H/T/E/J/N/F/C · informs)';
+    indicator.style.color = isOld ? 'var(--amber)' : 'var(--success)';
+  }
 }
 
 async function loadFileLists() {
