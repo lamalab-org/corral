@@ -173,6 +173,7 @@ ENV_GROUP_COLORS: dict[str, str] = {
 MODEL_DISPLAY: dict[str, str] = {
     "claude_sonnet_45": "Claude-4.5-Sonnet",
     "gpt_4o": "GPT-4o",
+    "gpt_oss_120b": "GPT-OSS-120B",
 }
 
 
@@ -229,11 +230,20 @@ def _group_frac(by_env: dict, envs: list[str], section: str, field: str) -> floa
 
 
 def _build_individual_bars(overall: dict) -> tuple[list[dict], list[float]]:
-    """Return one bar dict per individual pattern, ordered by group then kind.
+    """Build per-pattern bar layout data ordered by conceptual group and kind.
 
-    Within each group the productive patterns come first (blue), then the
-    breakdowns (red).  Returns the list of bar dicts and a parallel list of
-    group-centre x positions for labelling.
+    Within each group productive motifs come before reasoning breakdowns. X
+    positions are computed using fixed bar-width and gap constants so that bars
+    within the same kind cluster tightly while groups are visually separated.
+
+    Args:
+        overall: The ``"overall"`` grouping dict from ``annotation_summary.json``.
+
+    Returns:
+        A tuple of ``(bars, group_centres)`` where ``bars`` is a list of dicts
+        with keys ``group``, ``kind``, ``pattern``, ``value``, ``color``, and
+        ``x``; and ``group_centres`` is a list of x-axis midpoints suitable for
+        group bracket labels.
     """
     bars: list[dict] = []
     group_centres: list[float] = []
@@ -353,7 +363,6 @@ def plot(summary: dict, out: Path) -> None:
         [_pretty(b["pattern"]) for b in bars],
         fontsize=10,
     )
-    # Color-code x-tick labels to match bar colors
     for tick_label, b in zip(ax_bar.get_xticklabels(), bars, strict=False):
         tick_label.set_color(b["color"])
     ax_bar.set_yticks([0, 50, 100])
@@ -392,6 +401,7 @@ def plot(summary: dict, out: Path) -> None:
         fontsize=10,
         frameon=False,
         bbox_to_anchor=(1.0, 1.1),
+        ncol=2,
     )
 
     heat_matrix = np.full((n_env_groups, n_bars), np.nan)
@@ -576,11 +586,16 @@ def _env_level_frac(
 
 
 def plot_env_level(summary: dict, out: Path) -> None:
-    """Horizontal lollipop chart of pattern prevalence per environment and level.
+    """Render and save a lollipop chart of pattern prevalence per environment and level.
 
-    Each env/level scope (e.g. "Spectroscopic structure elucidation S1") gets a
-    row.  Three colour-coded groups are shown: Workflow execution, Strategic
-    reasoning, and Hypothesis-driven enquiry.
+    Productive motifs and reasoning breakdowns are plotted as paired vertical
+    stems for each environment/level scope. Bracket annotations below the
+    x-axis indicate both individual environments and their parent task-type
+    group (Workflow, Strategic, Hypothesis-driven).
+
+    Args:
+        summary: Parsed ``annotation_summary.json`` as a dict.
+        out: Directory where the output PDF will be written.
     """
     by_mel = summary["groupings"]["by_model_env_level"]
 
@@ -748,7 +763,6 @@ def _draw_group_bracket(
 def _draw_env_bracket(ax: plt.Axes, env: str, x_left: float, x_right: float) -> None:
     """Draw a bracket and environment label below the x-axis tick labels."""
     display = ENV_SHORT_NAME.get(env, env.replace("_", " ").title())
-    # Find which group this env belongs to, use that colour
     color = "#333333"
     for gname, envs in ENV_GROUPS.items():
         if env in envs:

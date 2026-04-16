@@ -1266,7 +1266,6 @@ def _ap_judgment_without_evidence(node_type_map, _node_by_id, out_edges, in_edge
 
 
 def _ap_dead_end_update(node_type_map, _node_by_id, out_edges, in_edges):
-    # Revised hypotheses (targets of updates_to) with no outgoing tests
     count = 0
     for h in _nodes_of_type("H", node_type_map):
         is_revised = any(e.get("relation") == "updates_to" for e in in_edges.get(h, []))
@@ -1316,10 +1315,9 @@ def _ap_unresolved_contradiction(node_type_map, node_by_id, out_edges, in_edges)
 def _ap_hypothesis_to_commitment_shortcut(
     node_type_map, _node_by_id, out_edges, in_edges
 ):
-    # Find H nodes linked to a C through a shared J (J->H informs, J->C informs)
-    # where H has no tests.  H->C is not an allowed edge; the path must go via J.
+    # H->C is not a permitted edge; the commitment is reached via a shared J
+    # that informs both the hypothesis and the commitment node.
     count = 0
-    # Build set of H ids connected to some C through a shared J
     h_linked_to_c: set[str] = set()
     for j in _nodes_of_type("J", node_type_map):
         informs_c = any(
@@ -1363,7 +1361,6 @@ def _ap_test_without_evidence(node_type_map, _node_by_id, out_edges, in_edges):
 
 
 def _ap_no_belief_revision(_node_type_map, _node_by_id, out_edges, _in_edges):
-    # No updates_to edges anywhere in the trace
     has_update = any(
         e.get("relation") == "updates_to"
         for edges_list in out_edges.values()
@@ -1381,11 +1378,11 @@ def _ap_orphan_evidence(node_type_map, _node_by_id, out_edges, in_edges):
 
 
 def _ap_confirmation_only(node_type_map, _node_by_id, out_edges, in_edges):
-    # Find H linked to C via a shared J (J->H informs, J->C informs),
-    # where H has supporting evidence but no contradicts.
-    # H->C is not an allowed edge; the path must go via J.
+    # H->C is not a permitted edge; the path must run through a shared J that
+    # informs both H and C.  We additionally require supporting evidence for H
+    # and the absence of any contradicting evidence to distinguish from genuine
+    # belief-revision traces.
     count = 0
-    # Build set of H ids connected to some C through a shared J
     h_linked_to_c: set[str] = set()
     for j in _nodes_of_type("J", node_type_map):
         informs_c = any(
@@ -2267,9 +2264,16 @@ def _postprocess_observation_nodes(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Enforce that observation messages have exactly one E node each.
 
-    If the previous message contains a Neutral (N) node, the observation
-    node is assigned N instead of E.  Also removes E nodes that appear at
-    non-observation messages.
+    When the immediately preceding message carries a Neutral (N) node the
+    observation is labeled N instead of E, preventing false evidence entries
+    from tool-dispatch cycles where the "action" step is already marked N.
+
+    Args:
+        nodes: Nodes extracted by Pass A for the current trace.
+        messages: Full message list of the trace (role + content dicts).
+
+    Returns:
+        A tuple of (updated node list, list of QC warning strings).
     """
     warnings: list[str] = []
 
@@ -2754,9 +2758,13 @@ def _emit_group(
 def build_productive_motifs_latex() -> str:
     """Return a LaTeX tabularx table with definitions of productive motifs.
 
-    Column layout: Topic (X), Graph (TikZ picture), Description (X).
-    Related patterns share a single merged row label via multirow.
-    Each graph cell contains an inline TikZ diagram.
+    Column layout: Topic (p{2.2cm}), Graph (TikZ picture, c), Description (X).
+    Related patterns share a merged row label via ``\\multirow``. Each graph
+    cell contains an inline TikZ diagram from ``_TIKZ_SUBGRAPH_PATTERNS``.
+
+    Returns:
+        A string of LaTeX source for the complete tabularx environment,
+        including TikZ style definitions prepended at the top.
     """
     lines: list[str] = []
     lines.append(_TIKZ_STYLE_DEFS)
@@ -2782,9 +2790,13 @@ def build_productive_motifs_latex() -> str:
 def build_reasoning_breakdowns_latex() -> str:
     """Return a LaTeX tabularx table with definitions of reasoning breakdowns.
 
-    Column layout: Topic (X), Graph (TikZ picture), Description (X).
-    Related breakdowns share a single merged row label via multirow.
-    Each graph cell contains an inline TikZ diagram.
+    Column layout: Topic (X), Graph (TikZ picture, c), Description (X).
+    Related breakdowns share a merged row label via ``\\multirow``. Each graph
+    cell contains an inline TikZ diagram from ``_TIKZ_ANTIPATTERN_PATTERNS``.
+
+    Returns:
+        A string of LaTeX source for the complete tabularx environment,
+        including TikZ style definitions prepended at the top.
     """
     lines: list[str] = []
     lines.append(_TIKZ_STYLE_DEFS)
@@ -2810,14 +2822,19 @@ def build_reasoning_breakdowns_latex() -> str:
 def write_pattern_definitions_latex(
     out_dir: str | Path | None = None,
 ) -> tuple[Path, Path]:
-    """Write the pattern-definition LaTeX tables to out_dir.
+    """Write the pattern-definition LaTeX tables to *out_dir*.
 
-    Produces two files:
+    Produces two files: ``productive_motifs.tex`` and
+    ``reasoning_breakdowns.tex``. The output directory is created if it does
+    not already exist.
 
-    - productive_motifs.tex: Productive Motifs table.
-    - reasoning_breakdowns.tex: Reasoning Breakdowns table.
+    Args:
+        out_dir: Destination directory for the two ``.tex`` files. Defaults
+            to ``<script_dir>/analysis/results/tables/``.
 
-    If out_dir is None, defaults to <script_dir>/../analysis/results/tables/.
+    Returns:
+        A tuple of ``(motifs_path, breakdowns_path)`` pointing to the written
+        files.
     """
     if out_dir is None:
         out_dir = SCRIPT_DIR / "analysis" / "results" / "tables"

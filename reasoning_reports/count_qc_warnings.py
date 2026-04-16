@@ -43,7 +43,9 @@ DEFAULT_ROOTS = [
     SCRIPT_DIR / "gpt_oss_120b",
 ]
 
-# ── category rules (applied in order, first match wins) ─────────────────────
+# Rules are evaluated in declaration order; the first match wins, so more
+# specific patterns must precede broader ones (e.g. PassA/PassB quote checks
+# before the catch-all "other").
 _RULES: list[tuple[str, re.Pattern]] = [
     ("quote_mismatch_node", re.compile(r"^PassA\[.*\] Quote not found verbatim", re.I)),
     ("quote_mismatch_edge", re.compile(r"^PassB\[.*\] Quote not found verbatim", re.I)),
@@ -109,7 +111,8 @@ def print_table(summary: dict) -> None:
     gc = summary["global_counts"]
     total_warnings = sum(gc.values())
 
-    # Order: discard categories first, then info, then other
+    # Verbatim-quote failures are shown first because they are the most common
+    # QC signal; structural-correction categories follow; "other" is last.
     ORDER = [
         "quote_mismatch_node",
         "quote_mismatch_edge",
