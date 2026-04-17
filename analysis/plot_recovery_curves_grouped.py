@@ -228,7 +228,24 @@ def plot_grouped_recovery_react_only(results_df, output_dir):
     n_groups = len(group_names)
     react_df = results_df[results_df["agent"] == "react"]
 
-    fig, axes = plt.subplots(1, n_groups, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
+    fig, axes = plt.subplots(1, n_groups, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT), sharey=True)
+
+    # Collect global y range for consistent range_frame across shared axes
+    global_y = []
+    for col, gname in enumerate(group_names):
+        envs = _filter_available_envs(react_df, ENVIRONMENT_GROUPS[gname]["environments"])
+        group_df = react_df[react_df["env"].isin(envs)]
+        for intervention_type in ["success", "failed"]:
+            int_df = group_df[group_df["intervention"] == intervention_type]
+            if int_df.empty:
+                continue
+            for ns in STEP_ORDER:
+                grp = int_df[int_df["num_steps"] == ns]
+                if not grp.empty:
+                    global_y.append(grp["success"].mean())
+        baseline = group_df[group_df["intervention"] == "none"]
+        if not baseline.empty:
+            global_y.append(baseline["success"].mean())
 
     for col, gname in enumerate(group_names):
         ax = axes[col]
@@ -285,6 +302,7 @@ def plot_grouped_recovery_react_only(results_df, output_dir):
 
             all_x.extend(x_pos)
             all_y.extend(rates)
+            global_y.extend(rates)
             if len(steps) > len(all_steps_used):
                 all_steps_used = steps
 
@@ -292,7 +310,7 @@ def plot_grouped_recovery_react_only(results_df, output_dir):
         if col == 0:
             ax.set_ylabel("Success Rate", fontsize=8)
         if all_x and all_y:
-            range_frame(ax, np.array(all_x), np.array(all_y), pad=0.08, nice=False)
+            range_frame(ax, np.array(all_x), np.array(global_y), pad=0.08, nice=False)
             ax.set_xticks(list(range(len(all_steps_used))))
             ax.set_xticklabels(
                 [STEP_ORDER[s] for s in all_steps_used],
@@ -310,8 +328,8 @@ def plot_grouped_recovery_react_only(results_df, output_dir):
             alpha=0.4,
             label="Baseline",
         ),
-        Line2D([0], [0], color=SUCCESS_COLOR, marker="o", label="Success"),
-        Line2D([0], [0], color=FAILED_COLOR, marker="o", label="Failed"),
+        Line2D([0], [0], color=SUCCESS_COLOR, marker="o", label="Success trace intervention"),
+        Line2D([0], [0], color=FAILED_COLOR, marker="o", label="Failed trace intervention"),
     ]
     fig.legend(
         handles=legend_elements,

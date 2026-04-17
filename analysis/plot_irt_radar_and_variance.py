@@ -185,8 +185,17 @@ def main(best_model="model7_abilities_env_level"):
 
     ax_radar.set_varlabels(environments)
     ax_radar.tick_params(pad=28)
-    ax_radar.set_yticklabels([])
-    ax_radar.set_yticks([])
+    ax_radar.grid(alpha=0.2)
+    ax_radar.set_yticks([-2, 0, 2])
+    ax_radar.set_yticklabels(
+        ["-2", "0", "2"],
+        fontsize=FONT_SIZES["tick_label"] - 1,
+        color="gray",
+    )
+    ax_radar.yaxis.set_tick_params(labelrotation=0)
+    # Place the y-axis labels at the first spoke angle to avoid overlap
+    ax_radar.set_rlabel_position(0)
+    ax_radar.tick_params(axis="y", pad=2)
 
     legend_handles = [
         Line2D(

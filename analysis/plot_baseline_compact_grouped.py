@@ -9,10 +9,11 @@ Reads from results/data/intervention_reports.jsonl (downloaded from HF).
 from pathlib import Path
 
 import lama_aesthetics
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 from intervention_utils import avg_matched_baseline, load_reports
-from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH, TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 
@@ -20,9 +21,8 @@ lama_aesthetics.get_style("main")
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 
-BLUE = "#16476A"
-RED = "#BF092F"
-GREY = "#7A7A7A"
+COLOR_HIGH = "#BF092F"
+COLOR_LOW = "#16476A"
 
 ENVIRONMENT_GROUPS = {
     "Hypothesis-driven inquiry": {
@@ -39,11 +39,16 @@ ENVIRONMENT_GROUPS = {
     },
 }
 
-GROUP_COLORS = {
-    "Hypothesis-driven inquiry": BLUE,
-    "Strategic reasoning": GREY,
-    "Workflow construction": RED,
-}
+def _make_gradient(n: int):
+    cmap = mcolors.LinearSegmentedColormap.from_list(
+        "custom", [COLOR_HIGH, COLOR_LOW], N=n
+    )
+    return [mcolors.to_hex(cmap(i / max(n - 1, 1))) for i in range(n)]
+
+
+GROUP_COLORS = dict(
+    zip(ENVIRONMENT_GROUPS.keys(), _make_gradient(len(ENVIRONMENT_GROUPS)))
+)
 
 
 def _filter_available_envs(reports, envs):
@@ -79,8 +84,9 @@ def _save_fig(fig, out_path):
     plt.close(fig)
 
 
-def _plot_grouped_metric(ax, metric_type, ylabel, reports):
+def _plot_grouped_metric(ax, metric_type, ylabel, reports, annotate_lines=False):
     all_k, all_y = [], []
+    line_ends = []  # (x, y, gname, color) for inline labels
     for gname, ginfo in ENVIRONMENT_GROUPS.items():
         envs = _filter_available_envs(reports, ginfo["environments"])
         if not envs:
@@ -98,6 +104,7 @@ def _plot_grouped_metric(ax, metric_type, ylabel, reports):
         )
         all_k.extend(ks)
         all_y.extend(vals)
+        line_ends.append((ks[-1], vals[-1], gname, GROUP_COLORS[gname]))
 
     if all_k and all_y:
         range_frame(ax, np.array(all_k), np.array(all_y), pad=0.05)
@@ -106,6 +113,21 @@ def _plot_grouped_metric(ax, metric_type, ylabel, reports):
     ax.set_xlabel("k")
     ax.set_ylabel(ylabel)
 
+    if annotate_lines:
+        # Sort by y so labels stack predictably, then stagger
+        line_ends.sort(key=lambda t: t[1])
+        for i, (x, y, gname, color) in enumerate(line_ends):
+            ax.annotate(
+                gname,
+                xy=(x, y),
+                xytext=(4, (i - 1) * 10),
+                textcoords="offset points",
+                color=color,
+                fontsize=5.5,
+                va="center",
+                ha="left",
+            )
+
 
 def main():
     reports = load_reports()
@@ -113,19 +135,9 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Two-col: Pass@k + Pass^k
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
-    _plot_grouped_metric(ax1, "pass_at", "Pass@k", reports)
-    _plot_grouped_metric(ax2, "pass_caret", "Pass^k", reports)
-    handles, labels = ax1.get_legend_handles_labels()
-    if handles:
-        fig.legend(
-            handles,
-            labels,
-            loc="center right",
-            fontsize=5.5,
-            framealpha=0.9,
-            bbox_to_anchor=(1.22, 0.5),
-        )
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(1.5 * ONE_COL_WIDTH, ONE_COL_HEIGHT))
+    _plot_grouped_metric(ax1, "pass_at", "Pass@k", reports, annotate_lines=True)
+    _plot_grouped_metric(ax2, "pass_caret", "Pass^k", reports, annotate_lines=True)
     fig.tight_layout()
     _save_fig(fig, out_dir / "baseline_grouped_twocol.png")
 
