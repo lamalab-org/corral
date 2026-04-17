@@ -1033,7 +1033,7 @@
           </div>
 
           <!-- SVG graph -->
-          <svg x-ref="graphSvg" class="w-full h-full" x-show="selectedTrace" style="min-height: 500px;"></svg>
+          <svg x-ref="graphSvg" x-show="selectedTrace" style="width: 100%; height: 100%; min-height: 500px; display: block;"></svg>
         </main>
 
         <!-- RIGHT DETAIL PANEL -->
@@ -1538,6 +1538,7 @@
         },
 
         toggleLayout() {
+          if (this.simulation) { this.simulation.stop(); this.simulation = null; }
           this.layoutMode = this.layoutMode === 'force' ? 'temporal' : 'force';
           if (this.selectedTrace) this.$nextTick(() => this.renderGraph());
         },
@@ -1554,10 +1555,25 @@
           }
         },
         zoomReset() {
-          if (this.svgZoom) {
-            const svg = d3.select(this.$refs.graphSvg);
-            svg.transition().duration(500).call(this.svgZoom.transform, d3.zoomIdentity);
-          }
+          if (!this.svgZoom || !this.svgGroup) return;
+          const svg = d3.select(this.$refs.graphSvg);
+          const bounds = this.svgGroup.node().getBBox();
+          if (!bounds.width || !bounds.height) return;
+          const container = this.$refs.graphContainer;
+          const w = container.clientWidth;
+          const h = container.clientHeight || 600;
+          const pad = 40;
+          const scale = Math.min(
+            (w - pad * 2) / bounds.width,
+            (h - pad * 2) / bounds.height,
+            1.5
+          );
+          const tx = w / 2 - scale * (bounds.x + bounds.width / 2);
+          const ty = h / 2 - scale * (bounds.y + bounds.height / 2);
+          svg.transition().duration(500).call(
+            this.svgZoom.transform,
+            d3.zoomIdentity.translate(tx, ty).scale(scale)
+          );
         },
 
         _highlightSelectedNode(nodeId) {
@@ -1582,7 +1598,7 @@
           const container = this.$refs.graphContainer;
           const width = container.clientWidth;
           const height = container.clientHeight || 600;
-          svg.attr('viewBox', `0 0 ${width} ${height}`);
+          svg.attr('width', width).attr('height', height);
 
           this.svgZoom = d3.zoom()
             .scaleExtent([0.15, 5])
@@ -1719,6 +1735,7 @@
             const sweep = dy >= 0 ? 1 : 0;
             edgeGroup.append('path')
               .attr('d', `M${s.x},${s.y} A${dr},${dr} 0 0,${sweep} ${t.x},${t.y}`)
+              .attr('fill', 'none')
               .attr('stroke', _ec(e.relation))
               .attr('stroke-width', _ew(e.relation))
               .attr('stroke-dasharray', _ed(e.relation))
