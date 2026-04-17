@@ -71,7 +71,7 @@ DEFAULT_ENV_LEVEL_MAP = {
 
 # ---------- Colours per environment group ----------
 GROUP_COLOURS = {
-    "Hypothesis-driven inquiry": "#b000ff",
+    "Hypothesis-driven inquiry": "#7150e0",
     "Strategic reasoning": "#fd00ff",
     "Workflow construction": "#0051ff",
 }
@@ -120,7 +120,7 @@ ENVIRONMENT_COLOURS = {
 
 # ---------- Domain group colours (for scatter plots) ----------
 GROUP_COLOURS = {
-    "Hypothesis-driven inquiry": "#b000ff",
+    "Hypothesis-driven inquiry": "#7150e0",
     "Strategic reasoning": "#fd00ff",
     "Workflow construction": "#0051ff",
 }

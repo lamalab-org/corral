@@ -122,6 +122,7 @@ def plot_gap_scatter(
             linewidths=1.5,
             zorder=3,
             label=group_name,
+            clip_on=False,
         )
 
     ax.set_xlabel(
@@ -183,6 +184,7 @@ def plot_gap_scatter(
     )
 
     fig.tight_layout()
+    fig.subplots_adjust(left=0.18)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, bbox_inches="tight")
