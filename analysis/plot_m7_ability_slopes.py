@@ -18,7 +18,7 @@ import pandas as pd
 from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
-from plot_config import ENVIRONMENT_NAMES, FONT_SIZES
+from plot_config import FONT_SIZES
 
 RESULTS_DIR = Path(__file__).parent / "results" / "lfm-binomial"
 OUT_DIR = Path(__file__).parent / "results" / "figures" / "panel_4"
@@ -109,17 +109,32 @@ def main(reasoning=False):
         # --- Reasoning-only single-column plot ---
         fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT))
 
-        for y, lo, hi in zip(y_pos, r_lo, r_hi):
-            ax.plot([lo, hi], [y, y], color=REASONING_COLOUR, linewidth=1.8,
-                    solid_capstyle="round", alpha=0.4)
-        ax.scatter(r_med, y_pos, color=REASONING_COLOUR, s=25, zorder=5,
-                   edgecolors="white", linewidths=0.4)
+        for y, lo, hi in zip(y_pos, r_lo, r_hi, strict=False):
+            ax.plot(
+                [lo, hi],
+                [y, y],
+                color=REASONING_COLOUR,
+                linewidth=1.8,
+                solid_capstyle="round",
+                alpha=0.4,
+            )
+        ax.scatter(
+            r_med,
+            y_pos,
+            color=REASONING_COLOUR,
+            s=25,
+            zorder=5,
+            edgecolors="white",
+            linewidths=0.4,
+        )
         ax.axvline(0, color="grey", linewidth=0.5, linestyle=":", alpha=0.5)
 
         ax.set_yticks(y_pos)
         ax.set_yticklabels(labels, fontsize=FONT_SIZES["legend"])
-        ax.set_xlabel(r"Total reasoning slope ($\psi + \phi_{e,\ell}$)",
-                      fontsize=FONT_SIZES["axis_label"])
+        ax.set_xlabel(
+            r"Total reasoning slope ($\psi + \phi_{e,\ell}$)",
+            fontsize=FONT_SIZES["axis_label"],
+        )
         ax.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
         range_frame(ax, np.concatenate([r_lo, r_hi]), y_pos, pad=0.1)
 
@@ -130,28 +145,58 @@ def main(reasoning=False):
             1, 2, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT * 1.6), sharey=True
         )
 
-        for y, lo, hi in zip(y_pos, k_lo, k_hi):
-            ax_k.plot([lo, hi], [y, y], color=KNOWLEDGE_COLOUR, linewidth=1.8,
-                      solid_capstyle="round", alpha=0.4)
-        ax_k.scatter(k_med, y_pos, color=KNOWLEDGE_COLOUR, s=25, zorder=5,
-                     edgecolors="white", linewidths=0.4)
+        for y, lo, hi in zip(y_pos, k_lo, k_hi, strict=False):
+            ax_k.plot(
+                [lo, hi],
+                [y, y],
+                color=KNOWLEDGE_COLOUR,
+                linewidth=1.8,
+                solid_capstyle="round",
+                alpha=0.4,
+            )
+        ax_k.scatter(
+            k_med,
+            y_pos,
+            color=KNOWLEDGE_COLOUR,
+            s=25,
+            zorder=5,
+            edgecolors="white",
+            linewidths=0.4,
+        )
         ax_k.axvline(0, color="grey", linewidth=0.5, linestyle=":", alpha=0.5)
         ax_k.set_yticks(y_pos)
         ax_k.set_yticklabels(labels, fontsize=FONT_SIZES["tick_label"])
-        ax_k.set_xlabel(r"Total knowledge slope ($\lambda + \theta_{e,\ell}$)",
-                        fontsize=FONT_SIZES["axis_label"])
+        ax_k.set_xlabel(
+            r"Total knowledge slope ($\lambda + \theta_{e,\ell}$)",
+            fontsize=FONT_SIZES["axis_label"],
+        )
         ax_k.set_title("Knowledge", fontsize=FONT_SIZES["title"], fontweight="bold")
         ax_k.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
         range_frame(ax_k, np.concatenate([k_lo, k_hi]), y_pos, pad=0.1)
 
-        for y, lo, hi in zip(y_pos, r_lo, r_hi):
-            ax_r.plot([lo, hi], [y, y], color=REASONING_COLOUR, linewidth=1.8,
-                      solid_capstyle="round", alpha=0.4)
-        ax_r.scatter(r_med, y_pos, color=REASONING_COLOUR, s=25, zorder=5,
-                     edgecolors="white", linewidths=0.4)
+        for y, lo, hi in zip(y_pos, r_lo, r_hi, strict=False):
+            ax_r.plot(
+                [lo, hi],
+                [y, y],
+                color=REASONING_COLOUR,
+                linewidth=1.8,
+                solid_capstyle="round",
+                alpha=0.4,
+            )
+        ax_r.scatter(
+            r_med,
+            y_pos,
+            color=REASONING_COLOUR,
+            s=25,
+            zorder=5,
+            edgecolors="white",
+            linewidths=0.4,
+        )
         ax_r.axvline(0, color="grey", linewidth=0.5, linestyle=":", alpha=0.5)
-        ax_r.set_xlabel(r"Total reasoning slope ($\psi + \phi_{e,\ell}$)",
-                        fontsize=FONT_SIZES["axis_label"])
+        ax_r.set_xlabel(
+            r"Total reasoning slope ($\psi + \phi_{e,\ell}$)",
+            fontsize=FONT_SIZES["axis_label"],
+        )
         ax_r.set_title("Reasoning", fontsize=FONT_SIZES["title"], fontweight="bold")
         ax_r.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
         range_frame(ax_r, np.concatenate([r_lo, r_hi]), y_pos, pad=0.1)

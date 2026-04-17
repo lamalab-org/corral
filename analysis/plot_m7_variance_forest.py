@@ -98,78 +98,77 @@ def compute_variance_shares(posterior, df):
     if "knowledge_coef_total" in posterior:
         k_total = _flat(posterior, "knowledge_coef_total")
         r_total = _flat(posterior, "reasoning_coef_total")
-        components.append(("model",
-            lambda d, kt=k_total, rt=r_total:
-                np.var(kt[d] * knowledge_z) + np.var(rt[d] * reasoning_z)))
+        components.append(
+            (
+                "model",
+                lambda d, kt=k_total, rt=r_total: np.var(kt[d] * knowledge_z)
+                + np.var(rt[d] * reasoning_z),
+            )
+        )
     elif "knowledge_coef" in posterior:
         k_coef = _flat(posterior, "knowledge_coef")  # (D,) scalar
         r_coef = _flat(posterior, "reasoning_coef")
-        components.append(("model",
-            lambda d, kc=k_coef, rc=r_coef:
-                np.var(kc[d] * knowledge_z) + np.var(rc[d] * reasoning_z)))
+        components.append(
+            (
+                "model",
+                lambda d, kc=k_coef, rc=r_coef: np.var(kc[d] * knowledge_z)
+                + np.var(rc[d] * reasoning_z),
+            )
+        )
 
     # --- Scaffold ---
     if "scaffold_effect" in posterior:
         idx = df["scaffold_id"].to_numpy()
         eff = _flat(posterior, "scaffold_effect")
-        components.append(("scaffold",
-            lambda d, e=eff, i=idx: np.var(e[d][i])))
+        components.append(("scaffold", lambda d, e=eff, i=idx: np.var(e[d][i])))
 
     # --- Scaffold × Environment ---
     if "scaffold_env_effect" in posterior:
         idx = df["env_scaffold_id"].to_numpy()
         eff = _flat(posterior, "scaffold_env_effect")
-        components.append(("scaffold_x_env",
-            lambda d, e=eff, i=idx: np.var(e[d][i])))
+        components.append(("scaffold_x_env", lambda d, e=eff, i=idx: np.var(e[d][i])))
 
     # --- Scaffold × Scope ---
     if "scaffold_level_effect" in posterior:
         idx = df["scaffold_level_id"].to_numpy()
         eff = _flat(posterior, "scaffold_level_effect")
-        components.append(("scaffold_x_scope",
-            lambda d, e=eff, i=idx: np.var(e[d][i])))
+        components.append(("scaffold_x_scope", lambda d, e=eff, i=idx: np.var(e[d][i])))
 
     # --- Scope (level_effect) ---
     if "level_effect" in posterior:
         idx = df["level_id"].to_numpy()
         eff = _flat(posterior, "level_effect")
-        components.append(("scope",
-            lambda d, e=eff, i=idx: np.var(e[d][i])))
+        components.append(("scope", lambda d, e=eff, i=idx: np.var(e[d][i])))
 
     # --- Verbosity ---
     if "verbosity_effect" in posterior:
         idx = df["verbosity_id"].to_numpy()
         eff = _flat(posterior, "verbosity_effect")
-        components.append(("verbosity",
-            lambda d, e=eff, i=idx: np.var(e[d][i])))
+        components.append(("verbosity", lambda d, e=eff, i=idx: np.var(e[d][i])))
 
     # --- Category ---
     if "category_effect" in posterior:
         idx = df["category_id"].to_numpy()
         eff = _flat(posterior, "category_effect")
-        components.append(("category",
-            lambda d, e=eff, i=idx: np.var(e[d][i])))
+        components.append(("category", lambda d, e=eff, i=idx: np.var(e[d][i])))
 
     # --- Environment ---
     if "environment_effect" in posterior:
         idx = df["environment_id"].to_numpy()
         eff = _flat(posterior, "environment_effect")
-        components.append(("environment",
-            lambda d, e=eff, i=idx: np.var(e[d][i])))
+        components.append(("environment", lambda d, e=eff, i=idx: np.var(e[d][i])))
 
     # --- Env × Scope ---
     if "env_level_effect" in posterior:
         idx = df["env_level_id"].to_numpy()
         eff = _flat(posterior, "env_level_effect")
-        components.append(("env_x_scope",
-            lambda d, e=eff, i=idx: np.var(e[d][i])))
+        components.append(("env_x_scope", lambda d, e=eff, i=idx: np.var(e[d][i])))
 
     # --- Task ---
     if "task_effect" in posterior:
         idx = df["task_id"].to_numpy()
         eff = _flat(posterior, "task_effect")
-        components.append(("task",
-            lambda d, e=eff, i=idx: np.var(e[d][i])))
+        components.append(("task", lambda d, e=eff, i=idx: np.var(e[d][i])))
 
     keys = [k for k, _ in components]
     funcs = [f for _, f in components]
@@ -198,19 +197,34 @@ def plot_single_forest(shares, keys, output_path):
     fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT * 0.85))
     y_pos = np.arange(n_comp)
 
-    for y, lo, hi in zip(y_pos, hdi_low, hdi_high):
-        ax.plot([lo, hi], [y, y], color=HDI_COLOUR, linewidth=2.5, solid_capstyle="round")
-    ax.scatter(medians, y_pos, color=MEDIAN_COLOUR, s=40, zorder=5,
-               edgecolors="white", linewidths=0.5)
+    for y, lo, hi in zip(y_pos, hdi_low, hdi_high, strict=False):
+        ax.plot(
+            [lo, hi], [y, y], color=HDI_COLOUR, linewidth=2.5, solid_capstyle="round"
+        )
+    ax.scatter(
+        medians,
+        y_pos,
+        color=MEDIAN_COLOUR,
+        s=40,
+        zorder=5,
+        edgecolors="white",
+        linewidths=0.5,
+    )
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels, fontsize=FONT_SIZES["axis_label"])
     ax.set_xlabel("Variance share (%)", fontsize=FONT_SIZES["axis_label"])
     ax.tick_params(axis="x", labelsize=FONT_SIZES["tick_label"])
 
-    for y, med, hi in zip(y_pos, medians, hdi_high):
-        ax.text(hi + 1.0, y, f"{med:.1f}%", va="center",
-                fontsize=FONT_SIZES["tick_label"], color=MEDIAN_COLOUR)
+    for y, med, hi in zip(y_pos, medians, hdi_high, strict=False):
+        ax.text(
+            hi + 1.0,
+            y,
+            f"{med:.1f}%",
+            va="center",
+            fontsize=FONT_SIZES["tick_label"],
+            color=MEDIAN_COLOUR,
+        )
 
     range_frame(ax, np.concatenate([hdi_low, hdi_high]), y_pos, pad=0.12)
 
@@ -231,8 +245,9 @@ def _top_k(shares, keys, k=5):
 
 def plot_all_models_panel(all_results, output_path, top_k=5):
     """2×4 panel of forest plots, one per model, showing top-k components."""
-    fig, axes = plt.subplots(2, 4, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT * 2.2),
-                             sharey=False)
+    fig, axes = plt.subplots(
+        2, 4, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT * 2.2), sharey=False
+    )
     axes = axes.flatten()
 
     # Compute a shared x-limit across all panels
@@ -266,24 +281,43 @@ def plot_all_models_panel(all_results, output_path, top_k=5):
 
         y_pos = np.arange(n_comp)
 
-        for y, lo, hi in zip(y_pos, hdi_low, hdi_high):
-            ax.plot([lo, hi], [y, y], color=HDI_COLOUR, linewidth=2.0,
-                    solid_capstyle="round")
-        ax.scatter(medians, y_pos, color=MEDIAN_COLOUR, s=20, zorder=5,
-                   edgecolors="white", linewidths=0.3)
+        for y, lo, hi in zip(y_pos, hdi_low, hdi_high, strict=False):
+            ax.plot(
+                [lo, hi],
+                [y, y],
+                color=HDI_COLOUR,
+                linewidth=2.0,
+                solid_capstyle="round",
+            )
+        ax.scatter(
+            medians,
+            y_pos,
+            color=MEDIAN_COLOUR,
+            s=20,
+            zorder=5,
+            edgecolors="white",
+            linewidths=0.3,
+        )
 
         ax.set_yticks(y_pos)
         ax.set_yticklabels(labels)
-        ax.set_title(display_name, fontsize=FONT_SIZES["axis_label"], fontweight="bold",
-                     pad=6)
+        ax.set_title(
+            display_name, fontsize=FONT_SIZES["axis_label"], fontweight="bold", pad=6
+        )
         ax.tick_params(axis="y", labelsize=6.5)
         ax.tick_params(axis="x", labelsize=6.5)
 
         range_frame(ax, np.concatenate([hdi_low, hdi_high]), y_pos, pad=0.15)
 
-        for y, med, hi in zip(y_pos, medians, hdi_high):
-            ax.text(hi + 3.5, y, f"{med:.0f}%", va="center",
-                    fontsize=5.5, color=MEDIAN_COLOUR)
+        for y, med, hi in zip(y_pos, medians, hdi_high, strict=False):
+            ax.text(
+                hi + 3.5,
+                y,
+                f"{med:.0f}%",
+                va="center",
+                fontsize=5.5,
+                color=MEDIAN_COLOUR,
+            )
 
     fig.supxlabel("Variance share (%)", fontsize=FONT_SIZES["axis_label"])
     fig.subplots_adjust(hspace=0.5, wspace=0.7)
@@ -312,7 +346,9 @@ def main(all_models=False):
             med = np.median(shares[:, j])
             lo = np.percentile(shares[:, j], 5)
             hi = np.percentile(shares[:, j], 95)
-            logger.info(f"  {COMPONENT_LABELS[key]:30s}  {med:5.1f}%  [{lo:5.1f}%, {hi:5.1f}%]")
+            logger.info(
+                f"  {COMPONENT_LABELS[key]:30s}  {med:5.1f}%  [{lo:5.1f}%, {hi:5.1f}%]"
+            )
 
         plot_single_forest(shares, keys, OUT_DIR / "m7_variance_forest.png")
     else:

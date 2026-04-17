@@ -18,7 +18,12 @@ from lama_aesthetics import ONE_COL_HEIGHT, ONE_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 from plot_config import FONT_SIZES
-from plot_utils import classify_subtask, filter_by_verbosity, load_category_tags, load_reports_data
+from plot_utils import (
+    classify_subtask,
+    filter_by_verbosity,
+    load_category_tags,
+    load_reports_data,
+)
 
 lama_aesthetics.get_style("main")
 
