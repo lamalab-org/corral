@@ -124,42 +124,42 @@ def run_in_terminal(
 
     Args:
         command (str):
-            [BRIEF] The shell command to execute. [/BRIEF]
-            [DETAILED] A valid shell command string that will be executed in the terminal.
+            [ARGS_BRIEF] The shell command to execute. [/ARGS_BRIEF]
+            [ARGS_DETAILED] A valid shell command string that will be executed in the terminal.
             The command should be compatible with the system's default shell (bash/zsh on Unix, cmd on Windows).
             Multi-line commands are not supported - use semicolons or && to chain commands.
             For commands that use pagers (like git log), disable paging with flags (e.g., 'git --no-pager log').
-            Use absolute paths when possible to avoid ambiguity. [/DETAILED]
-            [SYNTACTIC] "valid shell command string" [/SYNTACTIC]
-            [EXAMPLES] "ls -la /home/user", "git clone https://github.com/repo.git", "npm install --save package-name" [/EXAMPLES]
+            Use absolute paths when possible to avoid ambiguity. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] "valid shell command string" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "ls -la /home/user", "git clone https://github.com/repo.git", "npm install --save package-name" [/ARGS_EXAMPLES]
 
         timeout (int):
-            [BRIEF] Maximum execution time in seconds. Defaults to 300 (5 minutes). [/BRIEF]
-            [DETAILED] The maximum time in seconds the command is allowed to run before being terminated.
+            [ARGS_BRIEF] Maximum execution time in seconds. Defaults to 300 (5 minutes). [/ARGS_BRIEF]
+            [ARGS_DETAILED] The maximum time in seconds the command is allowed to run before being terminated.
             This prevents hanging processes and ensures resource management.
             Set to None to disable timeout (use with caution, only for trusted commands).
-            For quick commands, use shorter timeouts (10-60s). For installations or builds, use longer timeouts (300-1800s). [/DETAILED]
-            [SYNTACTIC] positive integer representing seconds, or None [/SYNTACTIC]
-            [EXAMPLES] 30 (quick commands), 300 (default, moderate operations), 600 (builds/installations), None (no limit) [/EXAMPLES]
+            For quick commands, use shorter timeouts (10-60s). For installations or builds, use longer timeouts (300-1800s). [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] positive integer representing seconds, or None [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] 30 (quick commands), 300 (default, moderate operations), 600 (builds/installations), None (no limit) [/ARGS_EXAMPLES]
 
         session_id (str):
-            [BRIEF] Optional session ID to use an existing terminal session. [/BRIEF]
-            [DETAILED] The unique identifier of a terminal session to execute the command in.
+            [ARGS_BRIEF] Optional session ID to use an existing terminal session. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The unique identifier of a terminal session to execute the command in.
             If provided, the command runs in the context of that session (preserving directory and environment).
             If None, a new session is created or the default session is used.
             This allows maintaining state across multiple command invocations.
-            Useful for workflows that require sequential commands in the same context. [/DETAILED]
-            [SYNTACTIC] UUID string or None [/SYNTACTIC]
-            [EXAMPLES] "123e4567-e89b-12d3-a456-426614174000", None [/EXAMPLES]
+            Useful for workflows that require sequential commands in the same context. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] UUID string or None [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "123e4567-e89b-12d3-a456-426614174000", None [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] JSON string with execution results including output, errors, and process information. [/BRIEF]
-            [DETAILED] A JSON-formatted string containing the execution status, stdout, stderr, exit code, working directory, and session ID.
+            [RETURNS_BRIEF] JSON string with execution results including output, errors, and process information. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] A JSON-formatted string containing the execution status, stdout, stderr, exit code, working directory, and session ID.
             The output is automatically truncated if it exceeds 60KB to prevent memory issues.
             Provides comprehensive information for debugging and workflow integration.
-            The command blocks until completion or timeout. [/DETAILED]
-            [EXAMPLES] '{"success": true, "stdout": "total 48\\ndrwxr-xr-x  12 user  staff  384 Oct 10 10:00 .", "stderr": "", "exit_code": 0, "cwd": "/home/user", "session_id": "abc123"}' [/EXAMPLES]
+            The command blocks until completion or timeout. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] '{"success": true, "stdout": "total 48\\ndrwxr-xr-x  12 user  staff  384 Oct 10 10:00 .", "stderr": "", "exit_code": 0, "cwd": "/home/user", "session_id": "abc123"}' [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         TimeoutExpired:
@@ -320,10 +320,10 @@ def list_terminal_sessions() -> str:
 
     Returns:
         str:
-            [BRIEF] JSON string with list of all active terminal sessions. [/BRIEF]
-            [DETAILED] A JSON-formatted string containing an array of session objects, each with session ID, current working directory, number of commands executed, and creation timestamp.
-            Provides complete overview of terminal session state for management and debugging. [/DETAILED]
-            [EXAMPLES] '{"sessions": [{"session_id": "abc123", "cwd": "/home/user/project", "command_count": 5, "created_at": 1696956000.0}]}' [/EXAMPLES]
+            [RETURNS_BRIEF] JSON string with list of all active terminal sessions. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] A JSON-formatted string containing an array of session objects, each with session ID, current working directory, number of commands executed, and creation timestamp.
+            Provides complete overview of terminal session state for management and debugging. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] '{"sessions": [{"session_id": "abc123", "cwd": "/home/user/project", "command_count": 5, "created_at": 1696956000.0}]}' [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:

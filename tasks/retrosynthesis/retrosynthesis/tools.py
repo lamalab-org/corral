@@ -1295,7 +1295,7 @@ def check_smiles_reaction_template_matching(smiles: str, template_id: str) -> bo
             [ERROR_RECOVERY] Ensure the SMILES string is correctly formatted. [/ERROR_RECOVERY]
 
         ValueError:
-            [ERROR_WHEN] Raised when the provided template ID is invalid or not found. [//ERROR_WHEN]
+            [ERROR_WHEN] Raised when the provided template ID is invalid or not found. [/ERROR_WHEN]
             [ERROR_DETAILS] This occurs if the template ID does not correspond to any known reaction template. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Verify that the template ID is correct and exists in the template catalog. [/ERROR_RECOVERY]
 
