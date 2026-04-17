@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 import lama_aesthetics
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
+from datasets import load_dataset
 from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from matplotlib.ticker import MaxNLocator, NullLocator
@@ -30,12 +30,8 @@ from matplotlib.ticker import MaxNLocator, NullLocator
 lama_aesthetics.get_style("main")
 plt.rcParams["font.size"] = 10
 
-DATA_PATH = (
-    Path(__file__).parent
-    / "openalex"
-    / "openalex_ai_scientists_output"
-    / "yearly_counts.csv"
-)
+HF_REPO = "jablonkagroup/rise_ai_scientists"
+HF_CONFIG = "yearly_counts"
 OUTPUT_DIR = Path(__file__).parent / "results" / "figures" / "openalex"
 
 STRICT_COLOR = "#7150e0"
@@ -289,7 +285,8 @@ def _plot_comparison_cumulative(
 
 
 def main() -> None:
-    counts_df = pd.read_csv(DATA_PATH)
+    ds = load_dataset(HF_REPO, HF_CONFIG, split="train")
+    counts_df = ds.to_pandas()
 
     years = counts_df["publication_year"].to_numpy()
     strict = counts_df["strict_papers"].to_numpy()
