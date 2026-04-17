@@ -211,7 +211,10 @@ def retrieve_protons_shifts() -> str:
             [RETURNS_EXAMPLES] "[{"Proton": "Aldehyde", "delta / ppm": "9.5 - 10.5"}, {"Proton": "Aromatic", "delta / ppm": "6.5 - 8.2"}, ...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -286,7 +289,10 @@ def retrieve_aromatic_protons_shifts() -> str:
             [RETURNS_EXAMPLES] "[{"Substituent": "NO2", "Ortho": 0.95, "Meta": 0.17, "Para": 0.33}, {"Substituent": "CHO", "Ortho": 0.58, "Meta": 0.21, "Para": 0.27}, ...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -372,7 +378,10 @@ def retrieve_carbon_shifts() -> str:
             [RETURNS_EXAMPLES] "[{"Group": "CH3-", "Shift (ppm)": "10-30 ppm"}, {"Group": "R3C-, R₂CH, RCH₂", "Shift (ppm)": "25-50 ppm"}, ...]" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -737,7 +746,10 @@ def retrieve_isotope_distribution() -> str:
             [RETURNS_EXAMPLES] "{"Carbon": {"isotopes": {"12C": {"abundance": 98.89, "m/z": 12},"13C": {"abundance": 1.11, "m/z": 13}<more elements...}}}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -852,7 +864,10 @@ def retrieve_dbe_formula() -> str:
             [RETURNS_EXAMPLES] "Double Bond Equivalent (DBE) = <more details>." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -914,9 +929,9 @@ def obtain_isomers_from_molecular_formula(
     - Recommended for tasks that require understanding the structural diversity of a molecule, such as chemical structure elucidation or database searches. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. Obtain the molecular formula for the compound of interest. You can use the `get_formula_from_smiles` tool to convert a SMILES string to its molecular formula.
-        2. Call this tool with the molecular formula to retrieve isomers.
-        3. Use the list of isomers for further analysis or processing.
+        1. [PREREQUISITE] Obtain the molecular formula for the compound of interest. You can use the `get_formula_from_smiles` tool to convert a SMILES string to its molecular formula. [/PREREQUISITE]
+        2. [CURRENT] Call this tool with the molecular formula to retrieve isomers. [/CURRENT]
+        3. [FOLLOW_UP] Use the list of isomers for further analysis or processing. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
@@ -955,7 +970,10 @@ def obtain_isomers_from_molecular_formula(
             [RETURNS_EXAMPLES] `["CCO", "C1=CC=CC=C1"]` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        Exception:
+            [ERROR_WHEN] If the remote call to PubChem fails or returns an error. [/ERROR_WHEN]
+            [ERROR_DETAILS] This can occur due to network connectivity issues, PubChem API unavailability, an invalid molecular formula, or timeouts when querying formulas with many isomers. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the molecular formula is valid (e.g., "C6H6" not "XYZ"). If the error is a timeout, try reducing the `limit` parameter. If it is a network issue, retry after some time. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -981,9 +999,9 @@ def validate_smiles(smiles: str) -> bool:
     - Recommended for tasks that require checking the validity of chemical structures represented in SMILES format, such as chemical database searches or structure-based predictions. [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. Obtain a good guess for the molecule in the sample at hand.
-    2. Call this tool with the SMILES string to validate it.
-    3. If the SMILES string is valid, proceed with further analysis or submit the final answer.
+    1. [PREREQUISITE] Obtain a good guess for the molecule in the sample at hand. [/PREREQUISITE]
+    2. [CURRENT] Call this tool with the SMILES string to validate it. [/CURRENT]
+    3. [FOLLOW_UP] If the SMILES string is valid, proceed with further analysis or submit the final answer. [/FOLLOW_UP]
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
@@ -1016,7 +1034,10 @@ def validate_smiles(smiles: str) -> bool:
             [RETURNS_EXAMPLES] `True`, `False` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions. [/ERROR_WHEN]
+            [ERROR_DETAILS] The tool returns precomputed reference data and has no failure modes. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] No recovery needed. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -1068,7 +1089,10 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
             [RETURNS_EXAMPLES] Example SMILES strings: ["C1=CC=CC=C1", "C1=CC=CC=C1O", ...] [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        ValueError:
+            [ERROR_WHEN] If the provided SMILES string is invalid or cannot be parsed by RDKit. [/ERROR_WHEN]
+            [ERROR_DETAILS] Raised when `Chem.MolFromSmiles` returns None, indicating the input SMILES does not represent a valid molecular structure. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the SMILES string is valid using the `validate_smiles` tool before calling this tool. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -1136,19 +1160,19 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
 
     Args:
         smiles (str):
-            [BRIEF] The SMILES representation of the compound to simulate spectra for [/BRIEF]
-            [DETAILED] The SMILES string representing the chemical structure of the molecule for which the spectra will be simulated.
-            It should be a valid SMILES notation that can be processed by the remote function. [/DETAILED]
-            [SYNTACTICAL] Format: "valid SMILES string" [/SYNTACTICAL]
-            [EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O"[/EXAMPLES]
+            [ARGS_BRIEF] The SMILES representation of the compound to simulate spectra for [/ARGS_BRIEF]
+            [ARGS_DETAILED] The SMILES string representing the chemical structure of the molecule for which the spectra will be simulated.
+            It should be a valid SMILES notation that can be processed by the remote function. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: "valid SMILES string" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/ARGS_EXAMPLES]
 
     Returns:
         dict[str, str]:
-            [BRIEF] The simulated spectra of the compound [/BRIEF]
-            [DETAILED] A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
+            [RETURNS_BRIEF] The simulated spectra of the compound [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
             Each key corresponds to a type of spectrum, and the value is a string representation of the simulated spectrum.
-            If some spectra are not available, the value will be None for those keys. [/DETAILED]
-            [EXAMPLES] Examples: {"1H NMR": "simulated_1H_NMR_spectrum", "13C NMR": "simulated_13C_NMR_spectrum", "IR": "simulated_IR_spectrum"} [/EXAMPLES]
+            If some spectra are not available, the value will be None for those keys. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] Examples: {"1H NMR": "simulated_1H_NMR_spectrum", "13C NMR": "simulated_13C_NMR_spectrum", "IR": "simulated_IR_spectrum"} [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:

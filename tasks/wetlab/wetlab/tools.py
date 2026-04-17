@@ -101,7 +101,10 @@ def possible_cations() -> str:
             [RETURNS_EXAMPLES] "Ag+ Al+3 Ba+2 ..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions under normal usage. [/ERROR_WHEN]
+            [ERROR_DETAILS] N/A [/ERROR_DETAILS]
+            [ERROR_RECOVERY] N/A [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -150,7 +153,10 @@ def possible_anions() -> str:
             [RETURNS_EXAMPLES] "Br- Cl- CO3-2 HPO4-2 ..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions under normal usage. [/ERROR_WHEN]
+            [ERROR_DETAILS] N/A [/ERROR_DETAILS]
+            [ERROR_RECOVERY] N/A [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -198,7 +204,7 @@ def measure_pH(compositions, label: str) -> str:
         label (str):
             [ARGS_BRIEF] label of the target solution [/ARGS_BRIEF]
             [ARGS_DETAILED] a string representing the label of the solution in the Inventory, for which the pH will be measured [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] the label of supernatant solutions after filtration are appended with "_filtrate" [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] the label of supernatant solutions after filtration are appended with "_filtrate" [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate" [/ARGS_EXAMPLES]
 
     Returns:
@@ -276,7 +282,7 @@ def perform_flame_test(compositions, label: str) -> str:
         label (str):
             [ARGS_BRIEF] label of the target solution [/ARGS_BRIEF]
             [ARGS_DETAILED] a string representing the label of the solution in the Inventory, for which the flame test will be performed [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] the label of supernatant solutions after filtration are appended with "_filtrate" [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] the label of supernatant solutions after filtration are appended with "_filtrate" [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate" [/ARGS_EXAMPLES]
 
     Returns:
@@ -370,7 +376,10 @@ def lookup_flame_colors() -> str:
             [RETURNS_EXAMPLES] "Ba+2     green\nCa+2     orange-red\n..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None  
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions under normal usage. [/ERROR_WHEN]
+            [ERROR_DETAILS] N/A [/ERROR_DETAILS]
+            [ERROR_RECOVERY] N/A [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -419,7 +428,7 @@ def checkout_color(compositions, label: str) -> str:
         label (str):
             [ARGS_BRIEF] label of the target object [/ARGS_BRIEF]
             [ARGS_DETAILED] a string representing the label of the object in the Inventory which can be a solution (with or without a precipitate), a reagent, or a filtered precipitate [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] after filtration, the supernatant's label is appended with "_filtrate" and the precipitate is appended with "_precipitate" [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] after filtration, the supernatant's label is appended with "_filtrate" and the precipitate is appended with "_precipitate" [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "sample", "test2_filtrate", "test3_precipitate" [/ARGS_EXAMPLES]
 
     Returns:
@@ -497,7 +506,10 @@ def lookup_precipitate_colors() -> str:
             [RETURNS_EXAMPLES] "AgBr     pale yellow\nAg2CO3     pale yellow\nAg2CrO4     brick red\n..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions under normal usage. [/ERROR_WHEN]
+            [ERROR_DETAILS] N/A [/ERROR_DETAILS]
+            [ERROR_RECOVERY] N/A [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -548,7 +560,7 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
         mixture (list[tuple[str, float]]):
             [ARGS_BRIEF] mixture components and their fractions as a list of tuples [/ARGS_BRIEF]
             [ARGS_DETAILED] a list of tuples, where the first element of the tuple is the color name and the second element its fraction in the mixture. The maximum allowed number of tuples in the list is three. [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] list of tuples, each formatted as (<color>, <fraction>) [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] list of tuples, each formatted as (<color>, <fraction>) [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] [("yellow", 0.5), ("red", 0.5)] , [("turquoise", 0.4), ("black", 0.3), ("dark blue", 0.3)] [/ARGS_EXAMPLES]
 
     Returns:
@@ -631,7 +643,10 @@ def get_available_reagents(compositions) -> str:
             [RETURNS_EXAMPLES] "reagent label: HCl(0.02M)     composition: HCl 0.02 M, in water\nreagent label: KOH(6M)     composition: KOH 6.0 M, in water\n..." [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions under normal usage. [/ERROR_WHEN]
+            [ERROR_DETAILS] N/A [/ERROR_DETAILS]
+            [ERROR_RECOVERY] N/A [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
@@ -685,29 +700,31 @@ def mix_two_solutions(compositions, test_label: str, sol1_label: str, sol1_vol: 
         test_label (str):
             [ARGS_BRIEF] label of the resulting solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the label given to the resulting solution after the mixing. Use this label to refer to the resulting solution in further tests [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] use descriptive labels [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] use descriptive labels [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "test1_HCl", "test2_NH3_filt_iodide", "test3_excess_KOH" [/ARGS_EXAMPLES]
 
         sol1_label (str):
             [ARGS_BRIEF] label of the first solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the label of the first solution (or reagent). This is how the solution (or reagent) is referred to in the Inventory (or reagent list). `sol1_vol` mL of this solution will be drawn [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] label string matching an entry in the Inventory or reagent list [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate", "NH4I", "HCl(1M)" [/ARGS_EXAMPLES]
 
         sol1_vol (int):
             [ARGS_BRIEF] volume of the first solution to draw [/ARGS_BRIEF]
             [ARGS_DETAILED] the volume (in mL) of the first solution, labeled `sol1_label`, to draw and mix with the second solution. The minimum allowed volume is 1 mL. [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] integer value [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] integer value [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
 
         sol2_label (str):
             [ARGS_BRIEF] label of the second solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the label of the second solution (or reagent). This is how the solution (or reagent) is referred to in the Inventory (or reagent list). `sol2_vol` mL of this solution will be drawn [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] label string matching an entry in the Inventory or reagent list [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate", "NH4I", "HCl(1M)" [/ARGS_EXAMPLES]
 
         sol2_vol (int):
             [ARGS_BRIEF] volume of the second solution to draw [/ARGS_BRIEF]
             [ARGS_DETAILED] the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL. [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] integer value [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] integer value [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
 
     Returns:
@@ -833,23 +850,25 @@ def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: s
         test_label (str):
             [ARGS_BRIEF] label of the resulting solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the label given to the resulting solution after the mixing. Use this label to refer to the resulting solution in further tests [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] use descriptive labels [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] use descriptive labels [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "test1_HCl", "test2_NH3_filt_iodide", "test3_excess_KOH"  [/ARGS_EXAMPLES]
 
         sol1_label (str):
             [ARGS_BRIEF] label of the first solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the label of the first (host) solution. This is how the solution is referred to in the Inventory. This cannot be a reagent. The remaining volume of this solution will be set to 0 mL after and it is replaced with `test_label` [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] label string matching a non-reagent solution in the Inventory [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "test_1", "test2_filtrate" [/ARGS_EXAMPLES]
 
         sol2_label (str):
             [ARGS_BRIEF] label of the second solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the label of the second solution (or reagent), the one being added to `sol1_label`. This is how the solution (or reagent) is referred to in the Inventory (or reagent list). `sol2_vol` mL of this solution will be drawn and added to the host solution [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] label string matching an entry in the Inventory or reagent list [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "sample", "test_1", "test2_filtrate", "NH4I", "HCl(1M)" [/ARGS_EXAMPLES]
 
         sol2_vol (int):
             [ARGS_BRIEF] volume of the second solution to draw [/ARGS_BRIEF]
             [ARGS_DETAILED] the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] integer value [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] integer value [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
   
     Returns:
@@ -1033,7 +1052,7 @@ def filter_solution(compositions, label: str) -> str:
         label (str):
             [ARGS_BRIEF] label of the target solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the label given to the solution being filtered. This label is appended by '_filtrate' or '_precipitate' to refer to the separated phases. [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] label of unfiltered solutions does not end with "_filtrate" [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] label of unfiltered solutions does not end with "_filtrate" [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "test1_HCl", "test_NH3_filt_iodide" [/ARGS_EXAMPLES]
   
     Returns:
@@ -1125,24 +1144,25 @@ def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, 
         test_label (str):
             [ARGS_BRIEF] label of the resulting mixture [/ARGS_BRIEF]
             [ARGS_DETAILED] the label given to the resulting mixture after adding the precipitate. Use this label to refer to the resulting mixture in further tests [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] use descriptive labels [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] use descriptive labels [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "test1_HCl_precipitate_NH3", "test4_carbonate_precipitate_HNO3", "test3_excess_KOH_precipitate_HNO3"  [/ARGS_EXAMPLES]
 
         prec_label (str):
             [ARGS_BRIEF] label of the precipitate [/ARGS_BRIEF]
             [ARGS_DETAILED] the label of the precipitate to add. This is how the precipitate is referred to in the Inventory. All of the precipitate will be added to the `sol_label` solution and `prec_label` will be removed from the Inventory [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] label of filtered precipitates always end with "_precipitate" [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] label of filtered precipitates always end with "_precipitate" [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "test1_HCl_precipitate", "test4_carbonate_precipitate", "test3_excess_KOH_precipitate" [/ARGS_EXAMPLES]
 
         sol_label (str):
             [ARGS_BRIEF] label of the solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the label of the solution (or reagent) that will receive the precipitate. This is how the solution (or reagent) is referred to in the Inventory (or reagent list). It must not contain any pre-existing precipitates [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] label string matching a clear solution in the Inventory or reagent list [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "test_1", "test2_filtrate", "NH4I", "HCl(1M)" [/ARGS_EXAMPLES]
         
         sol_vol (int):
             [ARGS_BRIEF] volume of the solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the volume (in mL) of the host solution, labeled `sol_label`. This volume will be drawn from the solution and the precipitate is then added to the drawn volume. The minimum allowed volume is 4 mL [/ARGS_DETAILED]
-            [ARGS_SYNTACTIC] integer value [/ARGS_SYNTACTIC]
+            [ARGS_SYNTACTICAL] integer value [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
   
     Returns:
@@ -1309,7 +1329,10 @@ def check_inventory(compositions) -> str:
             [RETURNS_EXAMPLES] "{'label': 'sample', 'type': 'clear solution', 'description': 'unknown', 'remaining_volume': '11 mL'}\n{'label': 'test_1', 'type': 'clear solution', 'description': '9 mL sample + 1 mL HCl(1M)', 'remaining_volume': '0 mL'}\n{'label': 'test_2_filtrate', 'type': 'clear solution', 'description': '5 mL test_1 + 1 mL NH4I --> filtered', 'remaining_volume': '6 mL'}\n{'label': 'test_2_precipitate', 'type': 'precipitate', 'description': '5 mL test_1 + 1 mL NH4I --> precipitate collected'}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
-        None
+        None:
+            [ERROR_WHEN] This tool does not raise exceptions under normal usage. [/ERROR_WHEN]
+            [ERROR_DETAILS] N/A [/ERROR_DETAILS]
+            [ERROR_RECOVERY] N/A [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
