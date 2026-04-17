@@ -1,4 +1,4 @@
-name: Docs
+name: Deploy Site & Docs
 
 on:
   push:
@@ -6,57 +6,72 @@ on:
   pull_request:
     paths:
       - docs/**
+      - site/**
+      - tasks/**/tools.py
+      - tasks/**/score.py
+      - tasks/**/env.py
+      - tasks/**/environments/**/tasks_json/**
+      - tasks/**/environments/**/subtasks_json/**
       - pyproject.toml
+      - mkdocs.yaml
   workflow_dispatch:
 
-jobs:
-  docs:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-          cache: "pip"
-          cache-dependency-path: |
-            pyproject.toml
-            requirements*.txt
 
-      - name: Get pip cache dir
-        id: pip-cache
-        run: echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v5
-        with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip-docs-${{ hashFiles('pyproject.toml', 'requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-docs-
-
-      - name: Cache mkdocs
-        uses: actions/cache@v5
-        with:
-          path: .cache/mkdocs
-          key: ${{ runner.os }}-mkdocs-${{ hashFiles('docs/**') }}
-          restore-keys: |
-            ${{ runner.os }}-mkdocs-
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip wheel setuptools
-          pip install -e ".[docs]"
+          uv sync --extra docs
 
-      - name: Build docs
-        run: mkdocs build
+      - name: Generate landing-page data
+        run: uv run python site/extract_data.py
 
-      - name: Deploy docs
-        run: mkdocs gh-deploy --force
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Build MkDocs into docs/ subdirectory
+        run: uv run mkdocs build --site-dir _build/docs
+
+      - name: Assemble site
+        run: |
+          mkdir -p _build
+          cp site/index.html _build/
+          cp site/data.js _build/
+          cp site/corral_logo.png _build/
+          cp site/corral_arch.png _build/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _build
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -32,9 +32,9 @@ from corral.utils.io_tools import (
     WriteFileTool,
 )
 from score import (
-    check_equation,
     check_file_exists,
     check_image_quality,
+    check_mathematical_eq,
     check_numerical,
     check_params_function,
     check_roughness_function,
@@ -60,7 +60,7 @@ SCORING_FUNCTIONS = {
     "check_params_function": check_params_function,
     "check_file_exists": check_file_exists,
     "check_roughness_function": check_roughness_function,
-    "check_mathematical_eq": check_equation,
+    "check_mathematical_eq": check_mathematical_eq,
 }
 
 
