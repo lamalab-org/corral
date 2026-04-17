@@ -204,10 +204,10 @@ def write_latex(summary: dict, out_path: Path) -> None:
 
     n_model_cols = len(models)
     # column spec: description | per-model counts | total | %
-    col_spec = "l" + "c" * n_model_cols + "cc"
+    col_spec = "X" + "c" * n_model_cols + "cc"
 
     lines: list[str] = []
-    lines.append(r"\begin{tabular}{" + col_spec + "}")
+    lines.append(r"\begin{tabularx}{\textwidth}{" + col_spec + "}")
     lines.append(r"  \toprule")
 
     # Header
@@ -255,7 +255,7 @@ def write_latex(summary: dict, out_path: Path) -> None:
     )
     lines.append("  " + " & ".join(total_cells) + r" \\")
     lines.append(r"  \bottomrule")
-    lines.append(r"\end{tabular}")
+    lines.append(r"\end{tabularx}")
 
     tex = "\n".join(lines) + "\n"
     out_path.write_text(tex, encoding="utf-8")

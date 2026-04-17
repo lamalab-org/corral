@@ -51,7 +51,6 @@ _SUBGRAPH_SET: set[str] = {
     "evidence_led_hypothesis_generation",
     "explore_then_test_transition",
     "convergent_multi_test_evidence",
-    "precommitted_test_plan",
     "evidence_guided_test_redesign",
     "fixed_hypothesis_test_tuning",
 }
@@ -85,12 +84,12 @@ GROUPS: dict[str, dict[str, list[str]]] = {
     },
     "inquiry_control": {
         "productive": [
-            "precommitted_test_plan",
+            "fixed_hypothesis_test_tuning",
             "evidence_guided_test_redesign",
         ],
         "breakdowns": [
             "fixed_belief_trace",
-            "fixed_hypothesis_test_tuning",
+            "precommitted_test_plan",
             "stalled_revision",
         ],
     },

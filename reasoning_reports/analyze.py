@@ -112,10 +112,6 @@ SUBGRAPH_DESCRIPTIONS: dict[str, str] = {
         "One hypothesis is evaluated via multiple independent tests "
         "[H -tests-> T1/T2/T3..., each -> E]."
     ),
-    "precommitted_test_plan": (
-        "A commitment is stated before evidence collection begins "
-        "[C before E; then H -tests-> T]."
-    ),
     "evidence_guided_test_redesign": (
         "A judgment motivates a new test, which then produces new evidence "
         "[J -tests-> T -observes-> E]."
@@ -131,7 +127,6 @@ SUBGRAPH_NAMES = list(SUBGRAPH_DESCRIPTIONS.keys())
     SG_HYPOTHESIS_RERANKING,
     SG_EVIDENCE_LED_HYPOTHESIS_GENERATION,
     SG_CONVERGENT_MULTI_TEST_EVIDENCE,
-    SG_PRECOMMITTED_TEST_PLAN,
     SG_EVIDENCE_GUIDED_TEST_REDESIGN,
 ) = SUBGRAPH_NAMES
 
@@ -164,6 +159,10 @@ ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
         "Commitment reached without considering contradicting evidence "
         "[J -informs-> C, J -informs-> H, H has support but no contradicts]."
     ),
+    "precommitted_test_plan": (
+        "A commitment is done before evidence collection begins "
+        "[C before E; then H -tests-> T]."
+    ),
 }
 
 ANTIPATTERN_NAMES = list(ANTIPATTERN_DESCRIPTIONS.keys())
@@ -179,6 +178,7 @@ ANTIPATTERN_NAMES = list(ANTIPATTERN_DESCRIPTIONS.keys())
     AP_FIXED_BELIEF_TRACE,
     AP_DISCONNECTED_EVIDENCE,
     AP_ONE_SIDED_CONFIRMATION,
+    AP_PRECOMMITTED_TEST_PLAN,
 ) = ANTIPATTERN_NAMES
 
 ANTIPATTERN_FAMILIES: dict[str, list[str]] = {
@@ -197,6 +197,7 @@ ANTIPATTERN_FAMILIES: dict[str, list[str]] = {
         AP_STALLED_REVISION,
         AP_FIXED_BELIEF_TRACE,
         AP_PREMATURE_COMMITMENT,
+        AP_PRECOMMITTED_TEST_PLAN,
     ],
 }
 ANTIPATTERN_FAMILY_NAMES = list(ANTIPATTERN_FAMILIES.keys())
@@ -213,7 +214,6 @@ SUBGRAPH_FAMILIES: dict[str, list[str]] = {
     ],
     "experimental_strategy": [
         SG_FIXED_HYPOTHESIS_TEST_TUNING,
-        SG_PRECOMMITTED_TEST_PLAN,
         SG_EVIDENCE_GUIDED_TEST_REDESIGN,
     ],
 }
@@ -406,15 +406,6 @@ _TIKZ_SUBGRAPH_PATTERNS: dict[str, str] = {
 \draw[->] (t2) -- (e);
 \draw[->] (t3) -- (e);"""
     ),
-    SG_PRECOMMITTED_TEST_PLAN: _make_tikz(
-        r"""\node[rnode] (c) {C};
-\node[right=4mm of c, draw=none, font=\scriptsize] (dots) {\ldots};
-\node[rnode, right=4mm of dots] (h) {H};
-\node[rnode, right=of h] (t) {T};
-\node[rnode, right=of t] (e) {E};
-\draw[->] (h) -- node[rlbl] {tests} (t);
-\draw[->] (t) -- node[rlbl] {obs.} (e);"""
-    ),
     SG_EVIDENCE_GUIDED_TEST_REDESIGN: _make_tikz(
         r"""\node[rnode] (j) {J};
 \node[rnode, right=of j] (t) {T};
@@ -517,6 +508,15 @@ _TIKZ_ANTIPATTERN_PATTERNS: dict[str, str] = {
 \draw[->, missing] (ec) -- node[right, font=\tiny, text=gray] {contr.} (h);
 \draw[red, thick] (ec.north west) -- (ec.south east);
 \draw[red, thick] (ec.north east) -- (ec.south west);"""
+    ),
+    AP_PRECOMMITTED_TEST_PLAN: _make_tikz(
+        r"""\node[rnode] (c) {C};
+\node[right=4mm of c, draw=none, font=\scriptsize] (dots) {\ldots};
+\node[rnode, right=4mm of dots] (h) {H};
+\node[rnode, right=of h] (t) {T};
+\node[rnode, right=of t] (e) {E};
+\draw[->] (h) -- node[rlbl] {tests} (t);
+\draw[->] (t) -- node[rlbl] {obs.} (e);"""
     ),
 }
 
@@ -1077,7 +1077,7 @@ def _match_triangulation(node_type_map, _node_by_id, out_edges):
     return count
 
 
-def _match_preregistered(node_type_map, node_by_id, out_edges):
+def _match_preregistered(node_type_map, node_by_id, out_edges, _in_edges=None):
     count = 0
     Cs = _nodes_of_type("C", node_type_map)
     Es = _nodes_of_type("E", node_type_map)
@@ -1119,7 +1119,6 @@ _SUBGRAPH_MATCHERS = {
     SG_HYPOTHESIS_RERANKING: _match_bayesian,
     SG_EVIDENCE_LED_HYPOTHESIS_GENERATION: _match_abductive,
     SG_CONVERGENT_MULTI_TEST_EVIDENCE: _match_triangulation,
-    SG_PRECOMMITTED_TEST_PLAN: _match_preregistered,
     SG_EVIDENCE_GUIDED_TEST_REDESIGN: _match_active_learning,
 }
 
@@ -1173,7 +1172,6 @@ def detect_subgraphs_global(nodes: list, edges: list) -> dict[str, int]:
     t_first_H = earliest_time_of_type(nodes, "H")
     t_first_T = earliest_time_of_type(nodes, "T")
     t_first_E = earliest_time_of_type(nodes, "E")
-    t_first_C = earliest_time_of_type(nodes, "C")
 
     has_HT_tests = _typed_edge_exists("H", "T", "tests", node_by_id, out_edges)
     has_TE_observes = _typed_edge_exists("T", "E", "observes", node_by_id, out_edges)
@@ -1210,9 +1208,6 @@ def detect_subgraphs_global(nodes: list, edges: list) -> dict[str, int]:
         t_first_E is not None and t_first_H is not None and t_first_E < t_first_H
     )
     results[SG_CONVERGENT_MULTI_TEST_EVIDENCE] = int(fan_out_H_T >= 3)
-    results[SG_PRECOMMITTED_TEST_PLAN] = int(
-        t_first_C is not None and t_first_E is not None and t_first_C < t_first_E
-    )
     results[SG_EVIDENCE_GUIDED_TEST_REDESIGN] = int(has_JT_tests and has_TE_observes)
     return results
 
@@ -1439,6 +1434,7 @@ _ANTIPATTERN_MATCHERS = {
     AP_FIXED_BELIEF_TRACE: _ap_no_belief_revision,
     AP_DISCONNECTED_EVIDENCE: _ap_orphan_evidence,
     AP_ONE_SIDED_CONFIRMATION: _ap_confirmation_only,
+    AP_PRECOMMITTED_TEST_PLAN: _match_preregistered,
 }
 
 
@@ -1581,6 +1577,13 @@ def detect_antipatterns_global(
             dead_revised += 1
     ap_local_counts = detect_antipatterns_local(nodes, edges)
 
+    # Precommitted test plan: C appears before any E
+    t_first_C = earliest_time_of_type(nodes, "C")
+    t_first_E = earliest_time_of_type(nodes, "E")
+    precommitted = (
+        t_first_C is not None and t_first_E is not None and t_first_C < t_first_E
+    )
+
     binary: dict[str, bool] = {
         AP_UNTESTED_CLAIM: (n_H - h_tested) > 0,
         AP_EVIDENCE_NON_UPTAKE: (n_E - e_used) > 0,
@@ -1593,6 +1596,7 @@ def detect_antipatterns_global(
         AP_DISCONNECTED_EVIDENCE: e_orphan > 0,
         AP_ONE_SIDED_CONFIRMATION: ap_local_counts.get(AP_ONE_SIDED_CONFIRMATION, 0)
         > 0,
+        AP_PRECOMMITTED_TEST_PLAN: precommitted,
     }
     counts: dict[str, int] = {
         AP_UNTESTED_CLAIM: n_H - h_tested,
@@ -1605,6 +1609,7 @@ def detect_antipatterns_global(
         AP_FIXED_BELIEF_TRACE: 1 if n_updates_to == 0 else 0,
         AP_DISCONNECTED_EVIDENCE: e_orphan,
         AP_ONE_SIDED_CONFIRMATION: ap_local_counts.get(AP_ONE_SIDED_CONFIRMATION, 0),
+        AP_PRECOMMITTED_TEST_PLAN: 1 if precommitted else 0,
     }
     return binary, counts
 
@@ -2713,7 +2718,6 @@ _SUBGRAPH_TABLE_ORDER: list[tuple[str | None, list[str]]] = [
         "Iterative test refinement",
         [SG_FIXED_HYPOTHESIS_TEST_TUNING, SG_EVIDENCE_GUIDED_TEST_REDESIGN],
     ),
-    (None, [SG_PRECOMMITTED_TEST_PLAN]),
 ]
 
 _ANTIPATTERN_TABLE_ORDER: list[tuple[str | None, list[str]]] = [
@@ -2724,6 +2728,7 @@ _ANTIPATTERN_TABLE_ORDER: list[tuple[str | None, list[str]]] = [
     (None, [AP_UNINFORMATIVE_TEST]),
     ("Absent/Stalled revision", [AP_STALLED_REVISION, AP_FIXED_BELIEF_TRACE]),
     (None, [AP_ONE_SIDED_CONFIRMATION]),
+    (None, [AP_PRECOMMITTED_TEST_PLAN]),
 ]
 
 
