@@ -137,12 +137,15 @@ VALIDATION_TOOLS = {
     "verify_route",
     "check_smiles_reaction_template_matching",
     "evaluate_xgboost_model",
+    "simulate_color_mixture",
 }
 EXPERIMENT_TOOLS = {
     "image_analyzer",
     "calculate_parallel_resistance",
     "calculate_series_resistance",
     "run_lammps",
+    "scan_grain_area",
+    "image_optimizer",
     "train_xgboost_model",
     "perform_cross_validation",
     "simulate_circuit_resistance",
@@ -153,6 +156,12 @@ EXPERIMENT_TOOLS = {
     "hsqc_nmr_spectra",
     "mass_spectrometry_spectra",
     "generate_test_measurements",
+    "mix_two_solutions",
+    "add_a_solution",
+    "add_precipitate_to_solution",
+    "filter_solution",
+    "measure_pH",
+    "perform_flame_test",
 }
 RETRIEVAL_TOOLS = {
     "document_retrieval",
@@ -161,6 +170,11 @@ RETRIEVAL_TOOLS = {
     "visualisation_tool",
     "head_file",
     "head",
+    "visualize_grain_boxes",
+    "lookup_precipitate_colors",
+    "lookup_flame_colors",
+    "check_inventory",
+    "checkout_color",
 }
 IGNORED_TOOL_NAMES = {
     "tool-calling-error",

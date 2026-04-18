@@ -31,9 +31,11 @@ import matplotlib.ticker as mticker
 import numpy as np
 from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
 from loguru import logger
-from matplotlib.patches import FancyBboxPatch, Patch
+from matplotlib.patches import FancyBboxPatch, Patch, Rectangle
+from matplotlib.transforms import ScaledTranslation
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
 lama_aesthetics.get_style("main")
@@ -44,7 +46,7 @@ DEFAULT_SUMMARY_PATH = (
 )
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "analysis" / "results" / "figures" / "fig_epistemology"
 
-# Pattern keys whose data lives under "subgraph_presence_global" in the JSON.
+# Pattern keys stored under the `subgraph_presence_global` section of the summary JSON.
 _SUBGRAPH_SET: set[str] = {
     "refutation_driven_belief_revision",
     "hypothesis_reranking",
@@ -55,7 +57,7 @@ _SUBGRAPH_SET: set[str] = {
     "fixed_hypothesis_test_tuning",
 }
 
-# Three conceptual groups, each containing productive motifs and breakdowns.
+# Group patterns by the reasoning capability they primarily probe.
 GROUPS: dict[str, dict[str, list[str]]] = {
     "hypothesis_handling": {
         "productive": [
@@ -97,8 +99,8 @@ GROUPS: dict[str, dict[str, list[str]]] = {
 
 GROUP_ORDER: list[str] = list(GROUPS.keys())
 
-GOOD_COLOR = "#3C77B1"
-BAD_COLOR = "#C62828"
+GOOD_COLOR = "#4C78A8"
+BAD_COLOR = "#E07A5F"
 
 GROUP_DISPLAY: dict[str, str] = {
     "hypothesis_handling": "Hypothesis handling",
@@ -107,7 +109,6 @@ GROUP_DISPLAY: dict[str, str] = {
 }
 
 PATTERN_SHORT: dict[str, str] = {
-    # Antipatterns
     "untested_claim": "Untested claim",
     "contradiction_without_repair": "Contradiction without repair",
     "one_sided_confirmation": "One-sided confirmation",
@@ -118,7 +119,6 @@ PATTERN_SHORT: dict[str, str] = {
     "stalled_revision": "Stalled revision",
     "fixed_belief_trace": "Fixed belief trace",
     "premature_commitment": "Premature commitment",
-    # Productive subgraphs
     "refutation_driven_belief_revision": "Refutation-driven belief revision",
     "hypothesis_reranking": "Hypothesis reranking",
     "evidence_led_hypothesis_generation": "Evidence-led\nhypothesis generation",
@@ -274,13 +274,11 @@ def _build_individual_bars(overall: dict) -> tuple[list[dict], list[float]]:
                     }
                 )
                 x += bar_width + intra_gap
-            # after finishing a kind block, add the kind gap (unless last kind)
             if ki == 0:
                 x += kind_gap
 
         group_end = x - bar_width - intra_gap  # last bar centre
         group_centres.append((group_start + group_end) / 2)
-        # add group gap before next group
         x += group_gap
 
     return bars, group_centres
@@ -373,13 +371,11 @@ def plot(summary: dict, out: Path) -> None:
         ha="right",
         rotation_mode="anchor",
     )
-    # Nudge multiline labels leftward so they don't crowd neighbours
+    # Shift the widest multiline labels slightly left so the rotated text stays legible.
     _shift_labels = {
         "evidence_led_hypothesis_generation",
         "convergent_multi_test_evidence",
     }
-    from matplotlib.transforms import ScaledTranslation
-
     dx_pt = -4  # points
     for tick_label, b in zip(ax_bar.get_xticklabels(), bars, strict=False):
         if b["pattern"] in _shift_labels:
@@ -428,7 +424,7 @@ def plot(summary: dict, out: Path) -> None:
                 continue
             norm_val = (val - vmin) / (vmax - vmin) if vmax > vmin else 0.0
             fc = cmap(norm_val)
-            rect = plt.Rectangle(
+            rect = Rectangle(
                 (x_arr[bi] - cell_w / 2, gi - cell_h / 2),
                 cell_w,
                 cell_h,
@@ -519,8 +515,10 @@ def _save_table_per_model(
 ) -> None:
     """Write a tabularx table with one overall column per model."""
     by_model = summary["groupings"]["by_model"]
-    model_keys = sorted(by_model.keys())
-    model_labels = [MODEL_DISPLAY.get(m, m) for m in model_keys]
+    model_keys: list[str] = sorted(str(model_key) for model_key in by_model)
+    model_labels: list[str] = [
+        MODEL_DISPLAY.get(model_key, model_key) for model_key in model_keys
+    ]
     model_cols = " ".join("c" for _ in model_keys)
     header_cells = " & ".join(model_labels)
     n_data_cols = len(model_keys)
@@ -598,7 +596,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
     """
     by_mel = summary["groupings"]["by_model_env_level"]
 
-    # Collect all env/level combos, ordered by group then env then level
     scopes: list[dict] = [
         {
             "env": env,
@@ -615,13 +612,11 @@ def plot_env_level(summary: dict, out: Path) -> None:
     if n_scopes == 0:
         return
 
-    # Compute all pattern fractions per scope
     all_pats: list[str] = []
     for gk in GROUP_ORDER:
         for kind in ("productive", "breakdowns"):
             all_pats.extend(GROUPS[gk][kind])
 
-    # Build matrix: rows = scopes, cols = patterns
     mat = np.zeros((n_scopes, len(all_pats)))
     for si, sc in enumerate(scopes):
         for pi, pat in enumerate(all_pats):
@@ -629,7 +624,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
                 by_mel, sc["env"], sc["level"], _data_section(pat), pat
             )
 
-    # Average across all patterns for each scope (overall prevalence)
     productive_idx = []
     breakdown_idx = []
     for pi, pat in enumerate(all_pats):
@@ -647,7 +641,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
         mat[:, breakdown_idx].mean(axis=1) if breakdown_idx else np.zeros(n_scopes)
     )
 
-    # Vertical lollipop chart
     bar_width = 0.28
     gap_width = 0.12
     x_centers = np.arange(n_scopes) * (2 * bar_width + gap_width)
@@ -658,15 +651,12 @@ def plot_env_level(summary: dict, out: Path) -> None:
         x_prod = x_centers[si] - bar_width / 2
         x_break = x_centers[si] + bar_width / 2
 
-        # Productive (vertical)
         ax.vlines(x_prod, 0, prod_mean[si], color=GOOD_COLOR, alpha=0.75, linewidth=5)
         ax.plot(x_prod, prod_mean[si], "o", markersize=5, color=GOOD_COLOR)
 
-        # Breakdowns (vertical)
         ax.vlines(x_break, 0, break_mean[si], color=BAD_COLOR, alpha=0.75, linewidth=5)
         ax.plot(x_break, break_mean[si], "o", markersize=5, color=BAD_COLOR)
 
-    # x-axis labels: just Sn
     ax.set_xticks(x_centers)
     ax.set_xticklabels(
         [f"S{sc['level'].replace('level_', '')}" for sc in scopes],
@@ -674,7 +664,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
     )
     ax.set_ylabel("Mean prevalence")
 
-    # Spine adjustments
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["bottom"].set_bounds(x_centers[0], x_centers[-1])
@@ -683,7 +672,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
     ax.set_ylim(0, 0.6)
     ax.set_yticks([0, 0.2, 0.4, 0.6])
 
-    # Legend
     legend_elements = [
         Patch(facecolor=GOOD_COLOR, alpha=0.7, label="Productive motifs"),
         Patch(facecolor=BAD_COLOR, alpha=0.7, label="Reasoning breakdowns"),
@@ -695,7 +683,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
         frameon=False,
     )
 
-    # Draw per-environment brackets below the x-axis
     env_idx = 0
     prev_env = None
     env_start = 0
@@ -709,7 +696,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
     if prev_env is not None:
         _draw_env_bracket(ax, prev_env, x_centers[env_start], x_centers[n_scopes - 1])
 
-    # Draw environment group brackets below the env brackets
     prev_group = None
     group_start = 0
     for si, sc in enumerate(scopes):
@@ -730,7 +716,7 @@ def plot_env_level(summary: dict, out: Path) -> None:
 
 
 def _draw_group_bracket(
-    ax: plt.Axes, group_name: str, x_left: float, x_right: float
+    ax: Axes, group_name: str, x_left: float, x_right: float
 ) -> None:
     """Draw a coloured bracket and label below the env brackets."""
     color = ENV_GROUP_COLORS.get(group_name, "#333333")
@@ -759,7 +745,7 @@ def _draw_group_bracket(
     )
 
 
-def _draw_env_bracket(ax: plt.Axes, env: str, x_left: float, x_right: float) -> None:
+def _draw_env_bracket(ax: Axes, env: str, x_left: float, x_right: float) -> None:
     """Draw a bracket and environment label below the x-axis tick labels."""
     display = ENV_SHORT_NAME.get(env, env.replace("_", " ").title())
     color = "#333333"
@@ -778,7 +764,7 @@ def _draw_env_bracket(ax: plt.Axes, env: str, x_left: float, x_right: float) -> 
         clip_on=False,
         solid_capstyle="round",
     )
-    # Shift catalyst label slightly left to avoid overlap
+    # Catalyst needs a small offset because its multiline label collides with the neighbouring bracket.
     x_text = (x_left + x_right) / 2
     if env == "catalyst":
         x_text -= 0.15
