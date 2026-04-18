@@ -23,9 +23,7 @@ MODEL_DISPLAY = {
     "gpt_oss_120b": "GPT-OSS-120B",
 }
 
-MAX_NODE_TEXT_LEN = 200
-MAX_QUOTE_LEN = 150
-MAX_TRACES_PER_CONFIG = 18
+MAX_TRACES_PER_CONFIG = 10
 MAX_PATTERN_INSTANCES = 5
 MIN_NODES = 5
 MAX_NODES = 80
@@ -56,34 +54,14 @@ def _parse_json(val):
     return val
 
 
-def truncate(s: str, max_len: int) -> str:
-    if len(s) <= max_len:
-        return s
-    return s[: max_len - 3] + "..."
-
-
 def build_trace_record(row: dict, idx: int, config: str) -> dict:
-    """Build a trimmed trace record for the JS output."""
+    """Build a trace record for the JS output."""
     nodes = _parse_json(row["nodes"])
     edges = _parse_json(row["edges"])
     subgraph_counts = _parse_json(row.get("subgraph_counts", "{}"))
     subgraph_nodes = _parse_json(row.get("subgraph_nodes", "{}"))
     antipattern_counts = _parse_json(row.get("antipattern_counts", "{}"))
     antipattern_nodes = _parse_json(row.get("antipattern_nodes", "{}"))
-
-    for node in nodes:
-        if "text" in node:
-            node["text"] = truncate(node["text"], MAX_NODE_TEXT_LEN)
-        if "support" in node:
-            for s in node["support"]:
-                if "quote" in s:
-                    s["quote"] = truncate(s["quote"], MAX_QUOTE_LEN)
-
-    for edge in edges:
-        if "support" in edge:
-            for s in edge["support"]:
-                if "quote" in s:
-                    s["quote"] = truncate(s["quote"], MAX_QUOTE_LEN)
 
     for key in subgraph_nodes:
         if (
@@ -116,7 +94,7 @@ def build_trace_record(row: dict, idx: int, config: str) -> dict:
 
 
 def curate_traces(ds, config: str) -> list[dict]:
-    """Select representative traces for a given dataset config."""
+    """Select representative traces guaranteeing environment coverage."""
     from collections import defaultdict
 
     env_level_traces = defaultdict(list)
@@ -126,14 +104,31 @@ def curate_traces(ds, config: str) -> list[dict]:
         s = score_trace(row)
         env_level_traces[(row["env"], row["level"])].append((s, i, row))
 
+    # First pass: 1 best trace per environment (not per env+level) for coverage
+    selected_ids = set()
     selected = []
+    env_traces = defaultdict(list)
     for (_env, _level), traces in sorted(env_level_traces.items()):
-        traces.sort(key=lambda x: x[0], reverse=True)
-        for _s, i, row in traces[:2]:
-            selected.append((_s, i, row))
+        env_traces[_env].extend(traces)
 
-    selected.sort(key=lambda x: x[0], reverse=True)
-    selected = selected[:MAX_TRACES_PER_CONFIG]
+    for _env in sorted(env_traces):
+        best = max(env_traces[_env], key=lambda x: x[0])
+        selected.append(best)
+        selected_ids.add(best[1])
+
+    # Second pass: fill remaining slots by score from all (env, level) pairs
+    remaining = [
+        item
+        for (_env, _level), traces in sorted(env_level_traces.items())
+        for item in traces
+        if item[1] not in selected_ids
+    ]
+    remaining.sort(key=lambda x: x[0], reverse=True)
+
+    for item in remaining:
+        if len(selected) >= MAX_TRACES_PER_CONFIG:
+            break
+        selected.append(item)
 
     records = []
     for _s, i, row in selected:
