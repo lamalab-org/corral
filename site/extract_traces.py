@@ -23,7 +23,7 @@ MODEL_DISPLAY = {
     "gpt_oss_120b": "GPT-OSS-120B",
 }
 
-MAX_TRACES_PER_CONFIG = 10
+MAX_TRACES_PER_CONFIG = 20
 MAX_PATTERN_INSTANCES = 5
 MIN_NODES = 5
 MAX_NODES = 80
@@ -94,7 +94,7 @@ def build_trace_record(row: dict, idx: int, config: str) -> dict:
 
 
 def curate_traces(ds, config: str) -> list[dict]:
-    """Select representative traces guaranteeing environment coverage."""
+    """Select representative traces guaranteeing environment and scope coverage."""
     from collections import defaultdict
 
     env_level_traces = defaultdict(list)
@@ -104,19 +104,16 @@ def curate_traces(ds, config: str) -> list[dict]:
         s = score_trace(row)
         env_level_traces[(row["env"], row["level"])].append((s, i, row))
 
-    # First pass: 1 best trace per environment (not per env+level) for coverage
     selected_ids = set()
     selected = []
-    env_traces = defaultdict(list)
-    for (_env, _level), traces in sorted(env_level_traces.items()):
-        env_traces[_env].extend(traces)
 
-    for _env in sorted(env_traces):
-        best = max(env_traces[_env], key=lambda x: x[0])
+    # First pass: 1 best trace per (env, level) pair for full coverage
+    for (_env, _level), traces in sorted(env_level_traces.items()):
+        best = max(traces, key=lambda x: x[0])
         selected.append(best)
         selected_ids.add(best[1])
 
-    # Second pass: fill remaining slots by score from all (env, level) pairs
+    # Second pass: fill remaining slots by score
     remaining = [
         item
         for (_env, _level), traces in sorted(env_level_traces.items())
