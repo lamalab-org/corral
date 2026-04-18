@@ -136,7 +136,7 @@ def main(
     lines: list[str] = []
     lines.append(r"\begin{tabular}{l c c c c}")
     lines.append(r"  \toprule")
-    lines.append(r"  Environment & Scopes & Tasks / scope & Tools & Trace length \\")
+    lines.append(r"  Environment & Scopes & Tasks per scope & Tools & Trace length \\")
     lines.append(r"  \midrule")
 
     for env in ENV_ORDER:

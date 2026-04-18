@@ -54,8 +54,8 @@ MARKER_CATEGORY = {
 }
 
 SENTIMENT_COLORS = {
-    "positive": "#3C77B1",  # green
-    "negative": "#C62828",  # red
+    "positive": "#4C78A8",  # green
+    "negative": "#E07A5F",  # red
     "neutral": "#7A7A7A",  # grey
 }
 
@@ -434,6 +434,109 @@ def make_combined_plot(marker_names, model_imp, scaffold_imp, filename):
     _save_fig(fig, filename)
 
 
+def make_marker_counts_table(filename="marker_counts_table"):
+    """Generate a LaTeX table of total marker counts per model and scaffold.
+
+    Args:
+        filename: Output filename (without extension) for the saved .tex file.
+    """
+    POSITIVE_MARKERS = [
+        "validation_attempt",
+        "backtrack_trigger",
+        "planning_statement",
+        "reasoning_statement",
+        "correct_submission",
+        "todo_list",
+    ]
+    NEUTRAL_MARKERS = ["neutral"]
+    NEGATIVE_MARKERS = [
+        "missing_validation",
+        "unnecessary_tool_use",
+        "non_sense",
+        "loop_instance",
+        "hallucination",
+        "wrong_planning",
+        "wrong_reasoning",
+        "syntax_error",
+        "early_final_answer",
+        "give_up",
+        "inefficient_tool_call",
+        "iteration_limit",
+        "misunderstood_tool",
+    ]
+
+    combos = [(m, s) for m in models for s in scaffolds]
+    n_cols = 1 + len(combos)
+    col_format = "l" + "c" * len(combos)
+
+    lines = []
+    lines.append(r"\begin{tabular}{" + col_format + r"}")
+    lines.append(r"\toprule")
+
+    # First header row: Marker + model multicolumns
+    header1 = [r"\textbf{Marker}"] + [
+        r"\multicolumn{"
+        + str(len(scaffolds))
+        + r"}{c}{\textbf{"
+        + MODEL_DISPLAY.get(m, m)
+        + r"}}"
+        for m in models
+    ]
+    lines.append(" & ".join(header1) + r" \\")
+
+    # cmidrule separators under each model group
+    cmidrules = []
+    for col_idx, _m in enumerate(models):
+        start = 2 + col_idx * len(scaffolds)
+        end = start + len(scaffolds) - 1
+        cmidrules.append(rf"\cmidrule(lr){{{start}-{end}}}")
+    lines.append("".join(cmidrules))
+
+    # Second header row: scaffold names
+    header2 = [""] + [
+        r"\textbf{" + SCAFFOLD_DISPLAY.get(s, s) + r"}"
+        for _m in models
+        for s in scaffolds
+    ]
+    lines.append(" & ".join(header2) + r" \\")
+    lines.append(r"\midrule")
+
+    def _marker_rows(markers, sentiment_label):
+        group = []
+        group.append(
+            r"\multicolumn{"
+            + str(n_cols)
+            + r"}{l}{\textit{"
+            + sentiment_label
+            + r"}} \\"
+        )
+        group.append(r"\midrule")
+        for marker in markers:
+            if marker not in all_markers:
+                continue
+            counts = {(m, s): sum(raw_counts[m][s][marker]) for m, s in combos}
+            parts = [r"\texttt{" + marker.replace("_", r"\_") + r"}"]
+            for m, s in combos:
+                c = counts[(m, s)]
+                parts.append(str(c))
+            group.append(" & ".join(parts) + r" \\")
+        return group
+
+    lines.extend(_marker_rows(POSITIVE_MARKERS, "Positive"))
+    lines.append(r"\midrule")
+    lines.extend(_marker_rows(NEUTRAL_MARKERS, "Neutral"))
+    lines.append(r"\midrule")
+    lines.extend(_marker_rows(NEGATIVE_MARKERS, "Negative"))
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    out_dir = Path(__file__).parent / "results" / "tables"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    save_path = out_dir / Path(filename).with_suffix(".tex")
+    save_path.write_text("\n".join(lines))
+    logger.info(f"Saved → {save_path}")
+
+
 names_raw, mi_raw, si_raw = compute_impacts(raw_counts)
 make_combined_plot(
     names_raw,
@@ -441,6 +544,14 @@ make_combined_plot(
     si_raw,
     "marker_impact_raw_counts.pdf",
 )
+make_marker_counts_table()
+
+total_traces = len(data)
+logger.info(f"\nTotal traces labeled: {total_traces}")
+for m in models:
+    for s in scaffolds:
+        n = sum(1 for d in data if d["model"] == m and d["scaffold"] == s)
+        logger.info(f"  {MODEL_DISPLAY.get(m, m)} / {SCAFFOLD_DISPLAY.get(s, s)}: {n}")
 
 logger.info("\n=== Original normalised effect sizes (raw counts) ===")
 logger.info(
