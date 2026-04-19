@@ -9,7 +9,6 @@ Gradient coloring from #BF092F (least negative) to #16476A (most negative).
 from pathlib import Path
 
 import lama_aesthetics
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -19,8 +18,11 @@ from loguru import logger
 from plot_config import ENVIRONMENT_GROUPS, FONT_SIZES
 from plot_utils import load_logprobs_stats
 
-COLOR_HIGH = "#BF092F"  # largest (least negative) mean
-COLOR_LOW = "#16476A"  # lowest (most negative) mean
+GROUP_COLORS = {
+    "Hypothesis-driven inquiry": "#8B5CF6",
+    "Strategic reasoning": "#E07A5F",
+    "Workflow construction": "#4C78A8",
+}
 
 lama_aesthetics.get_style("main")
 
@@ -31,14 +33,6 @@ OUT_FILE_1COL = OUT_DIR / "panel2_logprobs_grouped_1col.pdf"
 
 
 # ── Data ─────────────────────────────────────────────────────────────────────
-
-
-def _make_gradient(n: int):
-    """Return n colors linearly interpolated from COLOR_HIGH to COLOR_LOW."""
-    cmap = mcolors.LinearSegmentedColormap.from_list(
-        "custom", [COLOR_HIGH, COLOR_LOW], N=n
-    )
-    return [mcolors.to_hex(cmap(i / max(n - 1, 1))) for i in range(n)]
 
 
 def compute_group_stats(df: pd.DataFrame) -> pd.DataFrame:
@@ -67,7 +61,7 @@ def compute_group_stats(df: pd.DataFrame) -> pd.DataFrame:
     stats = (
         pd.DataFrame(rows).sort_values("mean", ascending=False).reset_index(drop=True)
     )
-    stats["color"] = _make_gradient(len(stats))
+    stats["color"] = stats["group"].map(GROUP_COLORS)
     return stats
 
 

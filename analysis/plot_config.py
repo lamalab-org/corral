@@ -71,9 +71,9 @@ DEFAULT_ENV_LEVEL_MAP = {
 
 # ---------- Colours per environment group ----------
 GROUP_COLOURS = {
-    "Hypothesis-driven inquiry": "#7150e0",
-    "Strategic reasoning": "#fd00ff",
-    "Workflow construction": "#0051ff",
+    "Hypothesis-driven inquiry": "#8B5CF6",
+    "Strategic reasoning": "#E07A5F",
+    "Workflow construction": "#4C78A8",
 }
 
 # ---------- Primary / secondary colour lists ----------
@@ -120,9 +120,9 @@ ENVIRONMENT_COLOURS = {
 
 # ---------- Domain group colours (for scatter plots) ----------
 GROUP_COLOURS = {
-    "Hypothesis-driven inquiry": "#7150e0",
-    "Strategic reasoning": "#fd00ff",
-    "Workflow construction": "#0051ff",
+    "Hypothesis-driven inquiry": "#8B5CF6",
+    "Strategic reasoning": "#E07A5F",
+    "Workflow construction": "#4C78A8",
 }
 
 # Reverse lookup: env_id -> group colour

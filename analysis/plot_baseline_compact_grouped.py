@@ -9,7 +9,6 @@ Reads from results/data/intervention_reports.jsonl (downloaded from HF).
 from pathlib import Path
 
 import lama_aesthetics
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 from intervention_utils import avg_matched_baseline, load_reports
@@ -20,9 +19,6 @@ from loguru import logger
 lama_aesthetics.get_style("main")
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
-
-COLOR_HIGH = "#BF092F"
-COLOR_LOW = "#16476A"
 
 ENVIRONMENT_GROUPS = {
     "Hypothesis-driven inquiry": {
@@ -39,16 +35,11 @@ ENVIRONMENT_GROUPS = {
     },
 }
 
-def _make_gradient(n: int):
-    cmap = mcolors.LinearSegmentedColormap.from_list(
-        "custom", [COLOR_HIGH, COLOR_LOW], N=n
-    )
-    return [mcolors.to_hex(cmap(i / max(n - 1, 1))) for i in range(n)]
-
-
-GROUP_COLORS = dict(
-    zip(ENVIRONMENT_GROUPS.keys(), _make_gradient(len(ENVIRONMENT_GROUPS)))
-)
+GROUP_COLORS = {
+    "Hypothesis-driven inquiry": "#8B5CF6",
+    "Strategic reasoning": "#E07A5F",
+    "Workflow construction": "#4C78A8",
+}
 
 
 def _filter_available_envs(reports, envs):
@@ -143,15 +134,13 @@ def main():
 
     # 2. One-col: Pass@k only
     fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT))
-    _plot_grouped_metric(ax, "pass_at", "Pass@k", reports)
-    ax.legend(fontsize=5, framealpha=0.9, loc="lower right")
+    _plot_grouped_metric(ax, "pass_at", "Pass@k", reports, annotate_lines=True)
     fig.tight_layout()
     _save_fig(fig, out_dir / "baseline_grouped_pass_at.png")
 
     # 3. One-col: Pass^k only
     fig, ax = plt.subplots(figsize=(ONE_COL_WIDTH, ONE_COL_HEIGHT))
-    _plot_grouped_metric(ax, "pass_caret", "Pass^k", reports)
-    ax.legend(fontsize=5, framealpha=0.9, loc="upper right")
+    _plot_grouped_metric(ax, "pass_caret", "Pass^k", reports, annotate_lines=True)
     fig.tight_layout()
     _save_fig(fig, out_dir / "baseline_grouped_pass_caret.png")
 

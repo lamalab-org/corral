@@ -26,8 +26,8 @@ STEP_ORDER = {1: "Step 1", 2: "Step 2", -2: "Step n-2", -1: "Step n-1"}
 AGENTS = ["react", "toolcalling"]
 AGENT_LABELS = {"react": "ReAct", "toolcalling": "ToolCalling"}
 
-SUCCESS_COLOR = "#16476A"
-FAILED_COLOR = "#BF092F"
+SUCCESS_COLOR = "#4C78A8"
+FAILED_COLOR = "#E07A5F"
 BASELINE_COLOR = "#7A7A7A"
 
 AGENT_MARKERS = {"react": "o", "toolcalling": "s"}
@@ -328,8 +328,8 @@ def plot_grouped_recovery_react_only(results_df, output_dir):
             alpha=0.4,
             label="Baseline",
         ),
-        Line2D([0], [0], color=SUCCESS_COLOR, marker="o", label="Success trace intervention"),
-        Line2D([0], [0], color=FAILED_COLOR, marker="o", label="Failed trace intervention"),
+        Line2D([0], [0], color=SUCCESS_COLOR, marker="o", label="Intervention with successful trace"),
+        Line2D([0], [0], color=FAILED_COLOR, marker="o", label="Intervention with failed trace"),
     ]
     fig.legend(
         handles=legend_elements,
