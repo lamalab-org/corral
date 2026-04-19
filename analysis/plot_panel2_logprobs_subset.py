@@ -16,7 +16,7 @@ from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_WIDTH
 from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 from plot_config import FONT_SIZES
-from plot_utils import load_logprobs_data
+from plot_utils import load_logprobs_stats
 
 SUBSET_ENVS = {"spectra", "wetlab", "retro", "resistor", "ml"}
 
@@ -41,19 +41,6 @@ OUT_FILE = OUT_DIR / "panel2_logprobs_subset.pdf"
 # ── Data ─────────────────────────────────────────────────────────────────────
 
 
-def _pool_nonzero_tokens(series) -> np.ndarray:
-    """Concatenate all non-zero, finite token logprobs across all messages."""
-    arrays = []
-    for lp in series:
-        if not isinstance(lp, list | np.ndarray) or len(lp) == 0:
-            continue
-        arr = np.asarray(lp, dtype=np.float32)
-        arr = arr[np.isfinite(arr) & (arr != 0.0)]
-        if arr.size > 0:
-            arrays.append(arr)
-    return np.concatenate(arrays) if arrays else np.array([], dtype=np.float32)
-
-
 def _make_gradient(n: int):
     """Return n colors linearly interpolated from COLOR_HIGH to COLOR_LOW."""
     cmap = mcolors.LinearSegmentedColormap.from_list(
@@ -63,30 +50,27 @@ def _make_gradient(n: int):
 
 
 def compute_env_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-environment stats from a flat pool of all non-zero tokens.
-
-    Returns DataFrame sorted descending by mean (least negative first = top).
-    """
+    """Per-environment token-weighted mean from pre-aggregated (sum, count) rows."""
     rows = []
     for env, grp in df.groupby("environment"):
         if env not in SUBSET_ENVS:
             continue
-        tokens = _pool_nonzero_tokens(grp["per_token_logprob"])
-        if tokens.size == 0:
+        total_count = int(grp["logprob_count"].sum())
+        if total_count == 0:
             continue
+        mean = float(grp["logprob_sum"].sum()) / total_count
         rows.append(
             {
                 "environment": env,
                 "display_name": ENVIRONMENT_NAMES.get(env, env),
-                "mean": float(np.mean(tokens)),
-                "n_tokens": int(tokens.size),
+                "mean": mean,
+                "n_tokens": total_count,
             }
         )
 
     stats = (
         pd.DataFrame(rows).sort_values("mean", ascending=False).reset_index(drop=True)
     )
-
     stats["color"] = _make_gradient(len(stats))
     return stats
 
@@ -144,7 +128,7 @@ def plot_mean_logprobs(stats: pd.DataFrame, output_path: Path):
 
 def main() -> None:
     logger.info("Loading logprobs data …")
-    logprobs_df = load_logprobs_data()
+    logprobs_df = load_logprobs_stats()
     logger.info(
         f"  {len(logprobs_df):,} rows | environments: {sorted(logprobs_df['environment'].unique())}"
     )

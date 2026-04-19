@@ -11,7 +11,7 @@ from loguru import logger
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATASET_ID = "jablonkagroup/corral-traces"
-MODELS = ("claude_sonnet_45", "gpt_4o")
+MODELS = ("claude_sonnet_45", "gpt_4o", "gpt_oss_120b")
 AGENT = "ReActAgent"
 VERBOSITY = "brief"
 COMPLEXITY = ("tasks", "task")
@@ -73,10 +73,18 @@ def group_by_env(configs: list[dict]) -> dict[str, list[dict]]:
 
 
 def sample_diverse(rows: list[dict], k: int) -> list[dict]:
-    """Sample *k* rows maximising task_name diversity.
+    """Sample *k* rows favouring task-name diversity.
 
-    Takes one row per unique task_name first (shuffled), then fills remaining
-    slots from leftover rows at random.
+    Iterates over unique task names in random order, taking one representative
+    row per name until the quota is met; remaining slots are filled from
+    leftover rows so the quota is always honoured when enough data is available.
+
+    Args:
+        rows: Pool of trace records to sample from.
+        k: Desired sample size.
+
+    Returns:
+        A list of at most *k* rows, biased toward unique task names.
     """
     if k <= 0:
         return []
@@ -112,10 +120,22 @@ def sample_env(
     n: int,
     output_dir: Path,
 ) -> int:
-    """Sample *n* traces for a single env and save them as JSON files.
+    """Sample *n* traces for a single environment and write them as JSON files.
 
-    If *n* exceeds the total number of available traces for this env, it is
-    clamped to the available amount.  Returns the number of files saved.
+    Distributes the quota evenly across all (model, level) combinations for
+    the environment; any remainder is allocated to earlier combos. If *n*
+    exceeds total available traces the quota is silently clamped.
+
+    Args:
+        env_configs: Config dicts for the environment, one per (model, level)
+            combination.
+        env_name: Environment name used for sub-directory naming and logging.
+        n: Requested number of traces to sample.
+        output_dir: Root directory under which `model/env/level/` subdirs
+            are created.
+
+    Returns:
+        The number of trace files actually written.
     """
     combos = [(c["model"], c["level"], c["config_name"]) for c in env_configs]
     num_combos = len(combos)
@@ -127,7 +147,11 @@ def sample_env(
     total_available = 0
     for model, level, config_name in combos:
         logger.info(f"    Loading {config_name} …")
-        ds = load_dataset(DATASET_ID, config_name, split="train")
+        try:
+            ds = load_dataset(DATASET_ID, config_name, split="train")
+        except ValueError:
+            logger.warning(f"    ⚠ Config {config_name} not loadable - skipping.")
+            continue
         rows = [dict(row) for row in ds]
         combo_rows.append((model, level, config_name, rows))
         total_available += len(rows)
@@ -185,6 +209,7 @@ def sample_files(
     output_dir: str | None = None,
     n: int = 10,
     env: str | None = None,
+    model: str | None = None,
     seed: int | None = None,
 ) -> None:
     """Sample traces from the HF dataset and save as individual JSON files."""
@@ -196,6 +221,13 @@ def sample_files(
 
     logger.info("Discovering configs …")
     all_configs = discover_configs()
+
+    if model is not None:
+        all_configs = [c for c in all_configs if c["model"] == model]
+        if not all_configs:
+            raise ValueError(f"Model '{model}' not found. Known models: {MODELS}")
+        logger.info(f"Filtered to model: {model}")
+
     by_env = group_by_env(all_configs)
 
     if env is not None:
@@ -216,6 +248,7 @@ def main(
     output_dir: str | None = None,
     n: int = 90,
     env: str | None = None,
+    model: str | None = None,
     seed: int | None = None,
 ) -> None:
     """Sample trace files from the Hugging Face dataset into JSON files.
@@ -230,9 +263,11 @@ def main(
         n: Number of traces to sample per environment.
         env: Optional environment name to restrict sampling to a single
             environment, such as "catalyst".
+        model: Optional model name to restrict sampling to a single model,
+            such as "gpt_oss_120b".
         seed: Optional random seed used to make sampling reproducible.
     """
-    sample_files(output_dir=output_dir, n=n, env=env, seed=seed)
+    sample_files(output_dir=output_dir, n=n, env=env, model=model, seed=seed)
 
 
 if __name__ == "__main__":

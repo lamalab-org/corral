@@ -12,6 +12,7 @@ from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
 from corral.agents.utils import (
     LiteLLMMessage,
+    LLMResponse,
     count_tokens_and_add,
     llm_call,
     save_agent_messages,
@@ -194,7 +195,9 @@ class BaseAgent(ABC):
 
             error_message = f"{type(e).__name__}: {e!s}"
 
-            return Message(role="user", content=error_message, tool_calls=[])
+            return LLMResponse(
+                Message(role="user", content=error_message, tool_calls=[])
+            )
 
         except Exception as e:
             logger.error(f"Error getting LLM response: {e}")

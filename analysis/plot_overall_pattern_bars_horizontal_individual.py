@@ -29,11 +29,14 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
-from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics.plotutils import range_frame
 from loguru import logger
-from matplotlib.patches import FancyBboxPatch, Patch
+from matplotlib.patches import FancyBboxPatch, Patch, Rectangle
+from matplotlib.transforms import ScaledTranslation
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
 lama_aesthetics.get_style("main")
@@ -44,19 +47,18 @@ DEFAULT_SUMMARY_PATH = (
 )
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "analysis" / "results" / "figures" / "fig_epistemology"
 
-# Pattern keys whose data lives under "subgraph_presence_global" in the JSON.
+# Pattern keys stored under the `subgraph_presence_global` section of the summary JSON.
 _SUBGRAPH_SET: set[str] = {
     "refutation_driven_belief_revision",
     "hypothesis_reranking",
     "evidence_led_hypothesis_generation",
     "explore_then_test_transition",
     "convergent_multi_test_evidence",
-    "precommitted_test_plan",
     "evidence_guided_test_redesign",
     "fixed_hypothesis_test_tuning",
 }
 
-# Three conceptual groups, each containing productive motifs and breakdowns.
+# Group patterns by the reasoning capability they primarily probe.
 GROUPS: dict[str, dict[str, list[str]]] = {
     "hypothesis_handling": {
         "productive": [
@@ -85,12 +87,12 @@ GROUPS: dict[str, dict[str, list[str]]] = {
     },
     "inquiry_control": {
         "productive": [
-            "precommitted_test_plan",
+            "fixed_hypothesis_test_tuning",
             "evidence_guided_test_redesign",
         ],
         "breakdowns": [
             "fixed_belief_trace",
-            "fixed_hypothesis_test_tuning",
+            "precommitted_test_plan",
             "stalled_revision",
         ],
     },
@@ -98,8 +100,8 @@ GROUPS: dict[str, dict[str, list[str]]] = {
 
 GROUP_ORDER: list[str] = list(GROUPS.keys())
 
-GOOD_COLOR = "#3C77B1"
-BAD_COLOR = "#C62828"
+GOOD_COLOR = "#4C78A8"
+BAD_COLOR = "#E07A5F"
 
 GROUP_DISPLAY: dict[str, str] = {
     "hypothesis_handling": "Hypothesis handling",
@@ -108,7 +110,6 @@ GROUP_DISPLAY: dict[str, str] = {
 }
 
 PATTERN_SHORT: dict[str, str] = {
-    # Antipatterns
     "untested_claim": "Untested claim",
     "contradiction_without_repair": "Contradiction without repair",
     "one_sided_confirmation": "One-sided confirmation",
@@ -119,7 +120,6 @@ PATTERN_SHORT: dict[str, str] = {
     "stalled_revision": "Stalled revision",
     "fixed_belief_trace": "Fixed belief trace",
     "premature_commitment": "Premature commitment",
-    # Productive subgraphs
     "refutation_driven_belief_revision": "Refutation-driven belief revision",
     "hypothesis_reranking": "Hypothesis reranking",
     "evidence_led_hypothesis_generation": "Evidence-led\nhypothesis generation",
@@ -173,6 +173,7 @@ ENV_GROUP_COLORS: dict[str, str] = {
 MODEL_DISPLAY: dict[str, str] = {
     "claude_sonnet_45": "Claude-4.5-Sonnet",
     "gpt_4o": "GPT-4o",
+    "gpt_oss_120b": "GPT-OSS-120B",
 }
 
 
@@ -229,11 +230,20 @@ def _group_frac(by_env: dict, envs: list[str], section: str, field: str) -> floa
 
 
 def _build_individual_bars(overall: dict) -> tuple[list[dict], list[float]]:
-    """Return one bar dict per individual pattern, ordered by group then kind.
+    """Build per-pattern bar layout data ordered by conceptual group and kind.
 
-    Within each group the productive patterns come first (blue), then the
-    breakdowns (red).  Returns the list of bar dicts and a parallel list of
-    group-centre x positions for labelling.
+    Within each group productive motifs come before reasoning breakdowns. X
+    positions are computed using fixed bar-width and gap constants so that bars
+    within the same kind cluster tightly while groups are visually separated.
+
+    Args:
+        overall: The `"overall"` grouping dict from `annotation_summary.json`.
+
+    Returns:
+        A tuple of `(bars, group_centres)` where `bars` is a list of dicts
+        with keys `group`, `kind`, `pattern`, `value`, `color`, and
+        `x`; and `group_centres` is a list of x-axis midpoints suitable for
+        group bracket labels.
     """
     bars: list[dict] = []
     group_centres: list[float] = []
@@ -265,13 +275,11 @@ def _build_individual_bars(overall: dict) -> tuple[list[dict], list[float]]:
                     }
                 )
                 x += bar_width + intra_gap
-            # after finishing a kind block, add the kind gap (unless last kind)
             if ki == 0:
                 x += kind_gap
 
         group_end = x - bar_width - intra_gap  # last bar centre
         group_centres.append((group_start + group_end) / 2)
-        # add group gap before next group
         x += group_gap
 
     return bars, group_centres
@@ -353,7 +361,6 @@ def plot(summary: dict, out: Path) -> None:
         [_pretty(b["pattern"]) for b in bars],
         fontsize=10,
     )
-    # Color-code x-tick labels to match bar colors
     for tick_label, b in zip(ax_bar.get_xticklabels(), bars, strict=False):
         tick_label.set_color(b["color"])
     ax_bar.set_yticks([0, 50, 100])
@@ -365,13 +372,11 @@ def plot(summary: dict, out: Path) -> None:
         ha="right",
         rotation_mode="anchor",
     )
-    # Nudge multiline labels leftward so they don't crowd neighbours
+    # Shift the widest multiline labels slightly left so the rotated text stays legible.
     _shift_labels = {
         "evidence_led_hypothesis_generation",
         "convergent_multi_test_evidence",
     }
-    from matplotlib.transforms import ScaledTranslation
-
     dx_pt = -4  # points
     for tick_label, b in zip(ax_bar.get_xticklabels(), bars, strict=False):
         if b["pattern"] in _shift_labels:
@@ -392,6 +397,7 @@ def plot(summary: dict, out: Path) -> None:
         fontsize=10,
         frameon=False,
         bbox_to_anchor=(1.0, 1.1),
+        ncol=2,
     )
 
     heat_matrix = np.full((n_env_groups, n_bars), np.nan)
@@ -419,7 +425,7 @@ def plot(summary: dict, out: Path) -> None:
                 continue
             norm_val = (val - vmin) / (vmax - vmin) if vmax > vmin else 0.0
             fc = cmap(norm_val)
-            rect = plt.Rectangle(
+            rect = Rectangle(
                 (x_arr[bi] - cell_w / 2, gi - cell_h / 2),
                 cell_w,
                 cell_h,
@@ -456,6 +462,7 @@ def plot(summary: dict, out: Path) -> None:
     _save_table(bars, heat_matrix, env_group_names, out)
     _save_table_per_model(summary, out)
     plot_env_level(summary, out)
+    plot_scope_invariance(summary, out)
 
 
 def _save_table(
@@ -510,8 +517,10 @@ def _save_table_per_model(
 ) -> None:
     """Write a tabularx table with one overall column per model."""
     by_model = summary["groupings"]["by_model"]
-    model_keys = sorted(by_model.keys())
-    model_labels = [MODEL_DISPLAY.get(m, m) for m in model_keys]
+    model_keys: list[str] = sorted(str(model_key) for model_key in by_model)
+    model_labels: list[str] = [
+        MODEL_DISPLAY.get(model_key, model_key) for model_key in model_keys
+    ]
     model_cols = " ".join("c" for _ in model_keys)
     header_cells = " & ".join(model_labels)
     n_data_cols = len(model_keys)
@@ -576,15 +585,19 @@ def _env_level_frac(
 
 
 def plot_env_level(summary: dict, out: Path) -> None:
-    """Horizontal lollipop chart of pattern prevalence per environment and level.
+    """Render and save a lollipop chart of pattern prevalence per environment and level.
 
-    Each env/level scope (e.g. "Spectroscopic structure elucidation S1") gets a
-    row.  Three colour-coded groups are shown: Workflow execution, Strategic
-    reasoning, and Hypothesis-driven enquiry.
+    Productive motifs and reasoning breakdowns are plotted as paired vertical
+    stems for each environment/level scope. Bracket annotations below the
+    x-axis indicate both individual environments and their parent task-type
+    group (Workflow, Strategic, Hypothesis-driven).
+
+    Args:
+        summary: Parsed `annotation_summary.json` as a dict.
+        out: Directory where the output PDF will be written.
     """
     by_mel = summary["groupings"]["by_model_env_level"]
 
-    # Collect all env/level combos, ordered by group then env then level
     scopes: list[dict] = [
         {
             "env": env,
@@ -601,13 +614,11 @@ def plot_env_level(summary: dict, out: Path) -> None:
     if n_scopes == 0:
         return
 
-    # Compute all pattern fractions per scope
     all_pats: list[str] = []
     for gk in GROUP_ORDER:
         for kind in ("productive", "breakdowns"):
             all_pats.extend(GROUPS[gk][kind])
 
-    # Build matrix: rows = scopes, cols = patterns
     mat = np.zeros((n_scopes, len(all_pats)))
     for si, sc in enumerate(scopes):
         for pi, pat in enumerate(all_pats):
@@ -615,7 +626,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
                 by_mel, sc["env"], sc["level"], _data_section(pat), pat
             )
 
-    # Average across all patterns for each scope (overall prevalence)
     productive_idx = []
     breakdown_idx = []
     for pi, pat in enumerate(all_pats):
@@ -633,7 +643,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
         mat[:, breakdown_idx].mean(axis=1) if breakdown_idx else np.zeros(n_scopes)
     )
 
-    # Vertical lollipop chart
     bar_width = 0.28
     gap_width = 0.12
     x_centers = np.arange(n_scopes) * (2 * bar_width + gap_width)
@@ -644,15 +653,12 @@ def plot_env_level(summary: dict, out: Path) -> None:
         x_prod = x_centers[si] - bar_width / 2
         x_break = x_centers[si] + bar_width / 2
 
-        # Productive (vertical)
         ax.vlines(x_prod, 0, prod_mean[si], color=GOOD_COLOR, alpha=0.75, linewidth=5)
         ax.plot(x_prod, prod_mean[si], "o", markersize=5, color=GOOD_COLOR)
 
-        # Breakdowns (vertical)
         ax.vlines(x_break, 0, break_mean[si], color=BAD_COLOR, alpha=0.75, linewidth=5)
         ax.plot(x_break, break_mean[si], "o", markersize=5, color=BAD_COLOR)
 
-    # x-axis labels: just Sn
     ax.set_xticks(x_centers)
     ax.set_xticklabels(
         [f"S{sc['level'].replace('level_', '')}" for sc in scopes],
@@ -660,7 +666,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
     )
     ax.set_ylabel("Mean prevalence")
 
-    # Spine adjustments
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["bottom"].set_bounds(x_centers[0], x_centers[-1])
@@ -669,7 +674,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
     ax.set_ylim(0, 0.6)
     ax.set_yticks([0, 0.2, 0.4, 0.6])
 
-    # Legend
     legend_elements = [
         Patch(facecolor=GOOD_COLOR, alpha=0.7, label="Productive motifs"),
         Patch(facecolor=BAD_COLOR, alpha=0.7, label="Reasoning breakdowns"),
@@ -681,7 +685,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
         frameon=False,
     )
 
-    # Draw per-environment brackets below the x-axis
     env_idx = 0
     prev_env = None
     env_start = 0
@@ -695,7 +698,6 @@ def plot_env_level(summary: dict, out: Path) -> None:
     if prev_env is not None:
         _draw_env_bracket(ax, prev_env, x_centers[env_start], x_centers[n_scopes - 1])
 
-    # Draw environment group brackets below the env brackets
     prev_group = None
     group_start = 0
     for si, sc in enumerate(scopes):
@@ -716,7 +718,7 @@ def plot_env_level(summary: dict, out: Path) -> None:
 
 
 def _draw_group_bracket(
-    ax: plt.Axes, group_name: str, x_left: float, x_right: float
+    ax: Axes, group_name: str, x_left: float, x_right: float
 ) -> None:
     """Draw a coloured bracket and label below the env brackets."""
     color = ENV_GROUP_COLORS.get(group_name, "#333333")
@@ -745,10 +747,9 @@ def _draw_group_bracket(
     )
 
 
-def _draw_env_bracket(ax: plt.Axes, env: str, x_left: float, x_right: float) -> None:
+def _draw_env_bracket(ax: Axes, env: str, x_left: float, x_right: float) -> None:
     """Draw a bracket and environment label below the x-axis tick labels."""
     display = ENV_SHORT_NAME.get(env, env.replace("_", " ").title())
-    # Find which group this env belongs to, use that colour
     color = "#333333"
     for gname, envs in ENV_GROUPS.items():
         if env in envs:
@@ -765,7 +766,7 @@ def _draw_env_bracket(ax: plt.Axes, env: str, x_left: float, x_right: float) -> 
         clip_on=False,
         solid_capstyle="round",
     )
-    # Shift catalyst label slightly left to avoid overlap
+    # Catalyst needs a small offset because its multiline label collides with the neighbouring bracket.
     x_text = (x_left + x_right) / 2
     if env == "catalyst":
         x_text -= 0.15
@@ -781,6 +782,187 @@ def _draw_env_bracket(ax: plt.Axes, env: str, x_left: float, x_right: float) -> 
         color=color,
         clip_on=False,
     )
+
+
+_EPISTEMIC_COLORS: dict[str, str] = {
+    "hypothesis_handling": "#7570B3",
+    "evidence_handling": "#D95F02",
+    "inquiry_control": "#1B9E77",
+}
+
+
+def plot_scope_invariance(summary: dict, out: Path) -> None:
+    """Single-panel line chart: epistemic-group prevalence vs scope level,
+    averaged across all multi-level environments.
+
+    Lines show the mean prevalence of productive motifs (solid) and reasoning
+    breakdowns (dashed) within each of the three epistemic groups.  Flat lines
+    demonstrate that increasing problem scope produces no corresponding shift
+    in the agent's epistemic operations.
+    """
+    from collections import defaultdict as _defaultdict
+
+    from matplotlib.lines import Line2D
+
+    by_mel = summary["groupings"]["by_model_env_level"]
+
+    # Discover which envs have >1 scope level
+    _env_lvls: dict[str, set[str]] = _defaultdict(set)
+    for k in by_mel:
+        _, env, lvl = k.split("/")
+        _env_lvls[env].add(lvl)
+    env_lvls = {e: sorted(ls) for e, ls in _env_lvls.items() if len(ls) > 1}
+
+    if not env_lvls:
+        return
+
+    # Union of all scope levels present (level_1 .. level_4)
+    all_levels = sorted({lvl for ls in env_lvls.values() for lvl in ls})
+
+    # For each epistemic group, compute prod/break values at each level,
+    # averaged across all envs that have that level.
+    fig, ax = plt.subplots(figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
+
+    x = np.arange(len(all_levels))
+
+    for gk in GROUP_ORDER:
+        c = _EPISTEMIC_COLORS[gk]
+        prod_pats = GROUPS[gk]["productive"]
+        break_pats = GROUPS[gk]["breakdowns"]
+
+        prod_vals: list[float] = []
+        break_vals: list[float] = []
+        prod_errs: list[float] = []
+        break_errs: list[float] = []
+
+        for lvl in all_levels:
+            env_prod: list[float] = []
+            env_break: list[float] = []
+            for env, levels in env_lvls.items():
+                if lvl not in levels:
+                    continue
+                pf = [
+                    _env_level_frac(by_mel, env, lvl, _data_section(p), p)
+                    for p in prod_pats
+                ]
+                bf = [
+                    _env_level_frac(by_mel, env, lvl, _data_section(p), p)
+                    for p in break_pats
+                ]
+                env_prod.append(float(np.mean(pf)) * 100)
+                env_break.append(float(np.mean(bf)) * 100)
+
+            prod_vals.append(float(np.mean(env_prod)) if env_prod else 0.0)
+            break_vals.append(float(np.mean(env_break)) if env_break else 0.0)
+            prod_errs.append(
+                float(np.std(env_prod, ddof=1) / np.sqrt(len(env_prod)))
+                if len(env_prod) > 1
+                else 0.0
+            )
+            break_errs.append(
+                float(np.std(env_break, ddof=1) / np.sqrt(len(env_break)))
+                if len(env_break) > 1
+                else 0.0
+            )
+
+        ax.errorbar(
+            x,
+            prod_vals,
+            yerr=prod_errs,
+            fmt="-o",
+            color=c,
+            markersize=6,
+            linewidth=2,
+            capsize=3,
+            label=f"{GROUP_DISPLAY[gk]}",
+        )
+        ax.errorbar(
+            x,
+            break_vals,
+            yerr=break_errs,
+            fmt="--s",
+            color=c,
+            markersize=5,
+            linewidth=1.5,
+            capsize=3,
+            alpha=0.8,
+        )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(
+        [f"S{lvl.replace('level_', '')}" for lvl in all_levels], fontsize=10
+    )
+    ax.set_xlabel("Problem scope", fontsize=10)
+    ax.set_ylabel("Mean prevalence", fontsize=10)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=100, decimals=0))
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(labelsize=10)
+
+    # Collect all plotted y-values for range_frame
+    all_y: list[float] = []
+    for gk in GROUP_ORDER:
+        c = _EPISTEMIC_COLORS[gk]
+        # re-gather values (lightweight) for range_frame bounds
+        for line in ax.get_lines():
+            all_y.extend(line.get_ydata().tolist())
+
+    range_frame(
+        ax,
+        np.array([0, 3]),
+        np.array([0, 60]),
+        pad=0.05,
+    )
+    # range_frame may introduce padded x-spine bounds → reset to exact tick positions
+    ax.spines["bottom"].set_bounds(x.min(), x.max())
+    ax.set_xticks(x)
+    ax.xaxis.set_minor_locator(mticker.NullLocator())
+
+    # Combined legend: colour = epistemic group, style = motif kind
+    color_handles = [
+        Line2D(
+            [0],
+            [0],
+            color=_EPISTEMIC_COLORS[gk],
+            linewidth=2,
+            label=GROUP_DISPLAY[gk],
+        )
+        for gk in GROUP_ORDER
+    ]
+    style_handles = [
+        Line2D(
+            [0],
+            [0],
+            color="grey",
+            linewidth=2,
+            linestyle="-",
+            marker="o",
+            markersize=5,
+            label="Productive motifs",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color="grey",
+            linewidth=1.5,
+            linestyle="--",
+            marker="s",
+            markersize=4,
+            label="Reasoning breakdowns",
+        ),
+    ]
+    fig.legend(
+        handles=color_handles + style_handles,
+        loc="upper center",
+        ncol=5,
+        fontsize=8,
+        frameon=False,
+        bbox_to_anchor=(0.5, 1.02),
+    )
+    fig.subplots_adjust(bottom=0.14, left=0.14, right=0.96, top=0.88)
+
+    _save(fig, out / "scope_invariance.pdf")
+    _save(fig, out / "scope_invariance.png")
 
 
 def main(
