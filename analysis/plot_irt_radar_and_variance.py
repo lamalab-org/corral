@@ -123,15 +123,15 @@ def main(best_model="model7_abilities_env_level"):
     posterior = idata.posterior
 
     EFFECT_LABELS = {
-        "knowledge":        r"Knowledge ($\tilde{\theta}_K$)",
-        "reasoning":        r"Reasoning ($\tilde{\theta}_R$)",
-        "scaffold_effect":  r"Scaffold ($\gamma_s$)",
-        "level_effect":     r"Scope ($\delta_\ell$)",
+        "knowledge": r"Knowledge ($\tilde{\theta}_K$)",
+        "reasoning": r"Reasoning ($\tilde{\theta}_R$)",
+        "scaffold_effect": r"Scaffold ($\gamma_s$)",
+        "level_effect": r"Scope ($\delta_\ell$)",
         "verbosity_effect": r"Verbosity ($\xi_v$)",
-        "category_effect":  r"Category ($\kappa_c$)",
+        "category_effect": r"Category ($\kappa_c$)",
         "env_level_effect": r"Env ($e$) $\times$ Scope ($\delta_\ell$)",
         "environment_effect": r"Environment ($e$)",
-        "task_effect":      r"Task ($t$)",
+        "task_effect": r"Task ($t$)",
     }
 
     contributions = {}
@@ -163,7 +163,9 @@ def main(best_model="model7_abilities_env_level"):
     ]:
         if effect_name in posterior:
             effect_var = float(posterior[effect_name].var().mean().values)
-            label = EFFECT_LABELS.get(effect_name, effect_name.replace("_effect", "").title())
+            label = EFFECT_LABELS.get(
+                effect_name, effect_name.replace("_effect", "").title()
+            )
             contributions[label] = effect_var
 
     total_var = sum(contributions.values())

@@ -228,12 +228,16 @@ def plot_grouped_recovery_react_only(results_df, output_dir):
     n_groups = len(group_names)
     react_df = results_df[results_df["agent"] == "react"]
 
-    fig, axes = plt.subplots(1, n_groups, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT), sharey=True)
+    fig, axes = plt.subplots(
+        1, n_groups, figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT), sharey=True
+    )
 
     # Collect global y range for consistent range_frame across shared axes
     global_y = []
-    for col, gname in enumerate(group_names):
-        envs = _filter_available_envs(react_df, ENVIRONMENT_GROUPS[gname]["environments"])
+    for _col, gname in enumerate(group_names):
+        envs = _filter_available_envs(
+            react_df, ENVIRONMENT_GROUPS[gname]["environments"]
+        )
         group_df = react_df[react_df["env"].isin(envs)]
         for intervention_type in ["success", "failed"]:
             int_df = group_df[group_df["intervention"] == intervention_type]
@@ -328,8 +332,20 @@ def plot_grouped_recovery_react_only(results_df, output_dir):
             alpha=0.4,
             label="Baseline",
         ),
-        Line2D([0], [0], color=SUCCESS_COLOR, marker="o", label="Intervention with successful trace"),
-        Line2D([0], [0], color=FAILED_COLOR, marker="o", label="Intervention with failed trace"),
+        Line2D(
+            [0],
+            [0],
+            color=SUCCESS_COLOR,
+            marker="o",
+            label="Intervention with successful trace",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=FAILED_COLOR,
+            marker="o",
+            label="Intervention with failed trace",
+        ),
     ]
     fig.legend(
         handles=legend_elements,
