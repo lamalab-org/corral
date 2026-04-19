@@ -33,8 +33,8 @@ AGENTS = ["react", "toolcalling"]
 FAILED_STEPS = ["failed_step1", "failed_step2", "failed_stepn1", "failed_stepn2"]
 SUCCESS_STEPS = ["success_step1", "success_step2", "success_stepn1", "success_stepn2"]
 
-FAILED_COLOR = "#BF092F"
-SUCCESS_COLOR = "#16476A"
+FAILED_COLOR = "#E07A5F"
+SUCCESS_COLOR = "#4C78A8"
 BASELINE_COLOR = "#7A7A7A"
 
 STEP_ALPHA = {"step1": 0.85, "step2": 0.6, "stepn1": 0.4, "stepn2": 0.25}

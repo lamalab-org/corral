@@ -35,8 +35,8 @@ ENV_LABELS = {
 AGENTS = ["react", "toolcalling"]
 AGENT_LABELS = {"react": "ReAct", "toolcalling": "ToolCalling"}
 
-SUCCESS_COLOR = "#16476A"
-FAILED_COLOR = "#BF092F"
+SUCCESS_COLOR = "#4C78A8"
+FAILED_COLOR = "#E07A5F"
 BASELINE_COLOR = "#7A7A7A"
 
 AGENT_MARKERS = {"react": "o", "toolcalling": "s"}
