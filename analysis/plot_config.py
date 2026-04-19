@@ -13,14 +13,14 @@ MODEL_NAMES = {
 }
 
 ENVIRONMENT_NAMES = {
-    "afm": "AFM Operation",
-    "catalyst": "Surface Construction",
-    "md": "Molecular Simulation",
-    "ml": "ML Property Prediction",
-    "resistor": "Circuit Inference",
-    "retro": "Retrosynthetic Planning",
-    "spectra": "Spectra Elucidation",
-    "wetlab": "Qualitative Analysis",
+    "afm": "AFM Experiment\nExecution",
+    "catalyst": "Adsorption Surface\nConstruction",
+    "md": "Molecular\nSimulation",
+    "ml": "ML-based Property\nPrediction",
+    "resistor": "Circuit\nInference",
+    "retro": "Retrosynthetic\nPlanning",
+    "spectra": "Spectroscopic Structure\nElucidation",
+    "wetlab": "Inorganic Qualitative\nAnalysis",
 }
 
 AGENT_NAMES = {
@@ -36,11 +36,11 @@ ENVIRONMENT_GROUPS = {
     },
     "Strategic reasoning": {
         "description": "Navigate combinatorial spaces under constraints",
-        "environments": ["retro", "afm"],
+        "environments": ["retro"],
     },
     "Workflow construction": {
         "description": "Assemble and execute computational protocols",
-        "environments": ["md", "catalyst", "ml"],
+        "environments": ["afm", "md", "catalyst", "ml"],
     },
 }
 
@@ -66,6 +66,14 @@ DEFAULT_ENV_LEVEL_MAP = {
     "retro": 2,
     "spectra": 1,
     "wetlab": 2,
+}
+
+
+# ---------- Colours per environment group ----------
+GROUP_COLOURS = {
+    "Hypothesis-driven inquiry": "#b000ff",
+    "Strategic reasoning": "#fd00ff",
+    "Workflow construction": "#0051ff",
 }
 
 # ---------- Primary / secondary colour lists ----------
@@ -109,6 +117,19 @@ ENVIRONMENT_COLOURS = {
     "ml": "#16a34a",
     "md": "#0891b2",
 }
+
+# ---------- Domain group colours (for scatter plots) ----------
+GROUP_COLOURS = {
+    "Hypothesis-driven inquiry": "#b000ff",
+    "Strategic reasoning": "#fd00ff",
+    "Workflow construction": "#0051ff",
+}
+
+# Reverse lookup: env_id -> group colour
+ENV_GROUP_COLOUR_MAP = {}
+for _group_name, _group_info in ENVIRONMENT_GROUPS.items():
+    for _env in _group_info["environments"]:
+        ENV_GROUP_COLOUR_MAP[_env] = GROUP_COLOURS[_group_name]
 
 # ---------- Font sizes ----------
 FONT_SIZES = {
