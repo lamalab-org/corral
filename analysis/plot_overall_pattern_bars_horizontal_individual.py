@@ -29,7 +29,8 @@ import lama_aesthetics
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
-from lama_aesthetics import TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics import ONE_COL_HEIGHT, TWO_COL_HEIGHT, TWO_COL_WIDTH
+from lama_aesthetics.plotutils import range_frame
 from loguru import logger
 from matplotlib.patches import FancyBboxPatch, Patch, Rectangle
 from matplotlib.transforms import ScaledTranslation
@@ -461,6 +462,7 @@ def plot(summary: dict, out: Path) -> None:
     _save_table(bars, heat_matrix, env_group_names, out)
     _save_table_per_model(summary, out)
     plot_env_level(summary, out)
+    plot_scope_invariance(summary, out)
 
 
 def _save_table(
@@ -780,6 +782,187 @@ def _draw_env_bracket(ax: Axes, env: str, x_left: float, x_right: float) -> None
         color=color,
         clip_on=False,
     )
+
+
+_EPISTEMIC_COLORS: dict[str, str] = {
+    "hypothesis_handling": "#7570B3",
+    "evidence_handling": "#D95F02",
+    "inquiry_control": "#1B9E77",
+}
+
+
+def plot_scope_invariance(summary: dict, out: Path) -> None:
+    """Single-panel line chart: epistemic-group prevalence vs scope level,
+    averaged across all multi-level environments.
+
+    Lines show the mean prevalence of productive motifs (solid) and reasoning
+    breakdowns (dashed) within each of the three epistemic groups.  Flat lines
+    demonstrate that increasing problem scope produces no corresponding shift
+    in the agent's epistemic operations.
+    """
+    from collections import defaultdict as _defaultdict
+
+    from matplotlib.lines import Line2D
+
+    by_mel = summary["groupings"]["by_model_env_level"]
+
+    # Discover which envs have >1 scope level
+    _env_lvls: dict[str, set[str]] = _defaultdict(set)
+    for k in by_mel:
+        _, env, lvl = k.split("/")
+        _env_lvls[env].add(lvl)
+    env_lvls = {e: sorted(ls) for e, ls in _env_lvls.items() if len(ls) > 1}
+
+    if not env_lvls:
+        return
+
+    # Union of all scope levels present (level_1 .. level_4)
+    all_levels = sorted({lvl for ls in env_lvls.values() for lvl in ls})
+
+    # For each epistemic group, compute prod/break values at each level,
+    # averaged across all envs that have that level.
+    fig, ax = plt.subplots(figsize=(TWO_COL_WIDTH, ONE_COL_HEIGHT))
+
+    x = np.arange(len(all_levels))
+
+    for gk in GROUP_ORDER:
+        c = _EPISTEMIC_COLORS[gk]
+        prod_pats = GROUPS[gk]["productive"]
+        break_pats = GROUPS[gk]["breakdowns"]
+
+        prod_vals: list[float] = []
+        break_vals: list[float] = []
+        prod_errs: list[float] = []
+        break_errs: list[float] = []
+
+        for lvl in all_levels:
+            env_prod: list[float] = []
+            env_break: list[float] = []
+            for env, levels in env_lvls.items():
+                if lvl not in levels:
+                    continue
+                pf = [
+                    _env_level_frac(by_mel, env, lvl, _data_section(p), p)
+                    for p in prod_pats
+                ]
+                bf = [
+                    _env_level_frac(by_mel, env, lvl, _data_section(p), p)
+                    for p in break_pats
+                ]
+                env_prod.append(float(np.mean(pf)) * 100)
+                env_break.append(float(np.mean(bf)) * 100)
+
+            prod_vals.append(float(np.mean(env_prod)) if env_prod else 0.0)
+            break_vals.append(float(np.mean(env_break)) if env_break else 0.0)
+            prod_errs.append(
+                float(np.std(env_prod, ddof=1) / np.sqrt(len(env_prod)))
+                if len(env_prod) > 1
+                else 0.0
+            )
+            break_errs.append(
+                float(np.std(env_break, ddof=1) / np.sqrt(len(env_break)))
+                if len(env_break) > 1
+                else 0.0
+            )
+
+        ax.errorbar(
+            x,
+            prod_vals,
+            yerr=prod_errs,
+            fmt="-o",
+            color=c,
+            markersize=6,
+            linewidth=2,
+            capsize=3,
+            label=f"{GROUP_DISPLAY[gk]}",
+        )
+        ax.errorbar(
+            x,
+            break_vals,
+            yerr=break_errs,
+            fmt="--s",
+            color=c,
+            markersize=5,
+            linewidth=1.5,
+            capsize=3,
+            alpha=0.8,
+        )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(
+        [f"S{lvl.replace('level_', '')}" for lvl in all_levels], fontsize=10
+    )
+    ax.set_xlabel("Problem scope", fontsize=10)
+    ax.set_ylabel("Mean prevalence", fontsize=10)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=100, decimals=0))
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(labelsize=10)
+
+    # Collect all plotted y-values for range_frame
+    all_y: list[float] = []
+    for gk in GROUP_ORDER:
+        c = _EPISTEMIC_COLORS[gk]
+        # re-gather values (lightweight) for range_frame bounds
+        for line in ax.get_lines():
+            all_y.extend(line.get_ydata().tolist())
+
+    range_frame(
+        ax,
+        np.array([0, 3]),
+        np.array([0, 60]),
+        pad=0.05,
+    )
+    # range_frame may introduce padded x-spine bounds → reset to exact tick positions
+    ax.spines["bottom"].set_bounds(x.min(), x.max())
+    ax.set_xticks(x)
+    ax.xaxis.set_minor_locator(mticker.NullLocator())
+
+    # Combined legend: colour = epistemic group, style = motif kind
+    color_handles = [
+        Line2D(
+            [0],
+            [0],
+            color=_EPISTEMIC_COLORS[gk],
+            linewidth=2,
+            label=GROUP_DISPLAY[gk],
+        )
+        for gk in GROUP_ORDER
+    ]
+    style_handles = [
+        Line2D(
+            [0],
+            [0],
+            color="grey",
+            linewidth=2,
+            linestyle="-",
+            marker="o",
+            markersize=5,
+            label="Productive motifs",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color="grey",
+            linewidth=1.5,
+            linestyle="--",
+            marker="s",
+            markersize=4,
+            label="Reasoning breakdowns",
+        ),
+    ]
+    fig.legend(
+        handles=color_handles + style_handles,
+        loc="upper center",
+        ncol=5,
+        fontsize=8,
+        frameon=False,
+        bbox_to_anchor=(0.5, 1.02),
+    )
+    fig.subplots_adjust(bottom=0.14, left=0.14, right=0.96, top=0.88)
+
+    _save(fig, out / "scope_invariance.pdf")
+    _save(fig, out / "scope_invariance.png")
 
 
 def main(

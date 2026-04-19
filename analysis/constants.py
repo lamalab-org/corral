@@ -15,6 +15,8 @@ HF_REPO_QA_TOPIC = "jablonkagroup/corral-QAs-topic_reports"
 # push_trace_to_hf
 HF_REPO_TRACE = "jablonkagroup/corral-oss-trace-logprobs"
 
+# download_traces_from_hf
+HF_REPO_TRACES = "jablonkagroup/corral-traces"
 # push_intervention_reports_to_hf / push_intervention_traces_to_hf
 HF_REPO_INTERVENTION_REPORTS = "jablonkagroup/corral-intervention-reports"
 HF_REPO_INTERVENTION_TRACES = "jablonkagroup/corral-intervention-traces"
