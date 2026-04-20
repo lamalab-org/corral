@@ -36,13 +36,14 @@ OUT_FILE_AGENT = OUT_DIR / "action_distribution_by_environment_and_agent.pdf"
 OUT_FILE_MODEL = OUT_DIR / "action_distribution_by_environment_and_model.pdf"
 
 ENV_LABELS = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "MD",
-    "ml": "ML",
-    "resistor": "Resistor",
-    "retro": "Retro",
-    "spectra": "Spectra",
+    "afm": "AFM experimental execution",
+    "catalyst": "Adsorption Surface Construction",
+    "md": "Molecular Simulation",
+    "ml": "ML-based property",
+    "resistor": "Circuit Inference",
+    "retro": "Retrosynthetic Planning",
+    "spectra": "Spectroscopic Structure Elucidation",
+    "wetlab": "Inorganic Qualitative Analysis",
 }
 MODEL_LABELS = {
     "claude-4.5": "Claude 4.5",
@@ -51,7 +52,7 @@ MODEL_LABELS = {
 }
 AGENT_TYPE_LABELS = {
     "react": "ReAct",
-    "tool_calling": "Tool Calling",
+    "tool_calling": "Tool calling",
 }
 
 ACTION_ORDER = [
@@ -136,12 +137,15 @@ VALIDATION_TOOLS = {
     "verify_route",
     "check_smiles_reaction_template_matching",
     "evaluate_xgboost_model",
+    "simulate_color_mixture",
 }
 EXPERIMENT_TOOLS = {
     "image_analyzer",
     "calculate_parallel_resistance",
     "calculate_series_resistance",
     "run_lammps",
+    "scan_grain_area",
+    "image_optimizer",
     "train_xgboost_model",
     "perform_cross_validation",
     "simulate_circuit_resistance",
@@ -152,6 +156,12 @@ EXPERIMENT_TOOLS = {
     "hsqc_nmr_spectra",
     "mass_spectrometry_spectra",
     "generate_test_measurements",
+    "mix_two_solutions",
+    "add_a_solution",
+    "add_precipitate_to_solution",
+    "filter_solution",
+    "measure_pH",
+    "perform_flame_test",
 }
 RETRIEVAL_TOOLS = {
     "document_retrieval",
@@ -160,6 +170,11 @@ RETRIEVAL_TOOLS = {
     "visualisation_tool",
     "head_file",
     "head",
+    "visualize_grain_boxes",
+    "lookup_precipitate_colors",
+    "lookup_flame_colors",
+    "check_inventory",
+    "checkout_color",
 }
 IGNORED_TOOL_NAMES = {
     "tool-calling-error",

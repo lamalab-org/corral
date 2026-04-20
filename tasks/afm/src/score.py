@@ -475,7 +475,7 @@ def fit_power_law(area, roughness):
     return C, k
 
 
-def check_equation(final_params, tolerance):
+def check_mathematical_eq(final_params, tolerance):
     def score_fn(result: str) -> float:
         try:
             data = json.loads(result)

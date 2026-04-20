@@ -7,14 +7,15 @@ _lammps_image = (
     # modal.Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.12")
     .apt_install(
         "git",
-        "cmake",
         "wget",
         "build-essential",
         "liblapack-dev",
         "libfftw3-dev",
         "libopenmpi-dev",
         "openmpi-bin",
+        "libssl-dev",
     )
+    .pip_install("cmake>=3.20")
     .pip_install(
         "loguru",
         "fsspec",
@@ -53,14 +54,14 @@ def _install_lammps():
         logger.debug("Changing to lammps/build")
         os.chdir("lammps/build")
 
-        logger.debug("Running CMAKE for MANY BODY PACKAGE")
+        logger.debug("Running CMAKE with presets and packages")
         subprocess.check_call(
-            "cmake ../cmake -D BUILD_MPI=ON PKG_MANYBODY=on -D PKG_ATC=yes", shell=True
-        )
-        logger.debug("Running CMake with presets and GPU support...")
-        subprocess.check_call(
-            "cmake -C ../cmake/presets/most.cmake "
+            "cmake "
+            "-C ../cmake/presets/most.cmake "
             "-C ../cmake/presets/nolib.cmake "
+            "-DBUILD_MPI=ON "
+            "-DPKG_MANYBODY=on "
+            "-DPKG_ATC=yes "
             "../cmake",
             shell=True,
         )

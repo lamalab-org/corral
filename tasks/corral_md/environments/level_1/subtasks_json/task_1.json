@@ -1,0 +1,115 @@
+[
+  {
+    "name": "Silicon Structure Retrieval for Melting - Level 1",
+    "description": "Retrieve structure of Silicon and convert it to LAMMPs data format. Return the absolute path of the final structure.",
+    "tools": [
+      "get_structure_from_mp_text",
+      "convert_structure_to_lammps_data"
+    ],
+    "scoring_function": "check_structure",
+    "submission_format": "absolute path to structure file (eg. /results/structure/structure.data)",
+    "input_from_tasks": [],
+    "initial_input": {
+      "materials_project_id": "mp-149",
+      "atom_style": "full"
+    },
+    "scoring_params": {
+      "target": "/eval_structures/Si.data",
+      "atom_style": "full"
+    },
+    "id": "silicon_melting_1_subtask_structure_retrieval",
+    "uuid": "b040770a-adcc-44c9-b78d-81e9b6264abc"
+  },
+  {
+    "name": "Silicon Potential File for Melting - Level 1",
+    "description": "Procure the appropriate Stillinger\u2013Weber (SW) potential file for Silicon for MD simulations. Return the absolute path to the potential file.",
+    "tools": [
+      "get_potential_metadata"
+    ],
+    "scoring_function": "check_potential_file",
+    "submission_format": "absolute path to potential file (eg. /results/ffield.reax)",
+    "input_from_tasks": [],
+    "initial_input": {},
+    "scoring_params": {
+      "target": "/potentials/SW/Si.sw"
+    },
+    "id": "silicon_melting_1_subtask_potential_file",
+    "uuid": "1aa8967f-4ecc-49c1-a5ee-9fee77125e6a"
+  },
+  {
+    "name": "Silicon NPT Melting - Level 1",
+    "description": "Given paths to LAMMPs compatible Silicon structure file and Stillinger\u2013Weber potential file, perform NPT melting simulation of Silicon using LAMMPS. Replicate the system three times in each direction. Heat the system from 300K to 2500K at a rate of 2.2 K/ps under NPT ensemble at zero isotropic external pressure control. The log file from this simulation will be used for further analysis, so make sure Step, Temperature are appropriately logged at every 1000 time steps in the log file. As a final output, return the absolute paths to the the simulation log file and the restart file of the final melt.",
+    "tools": [
+      "get_potential_metadata",
+      "run_lammps",
+      "get_nth_run_log",
+      "keyword_log_extractor"
+    ],
+    "scoring_function": "check_log",
+    "submission_format": "{\"log_file\": \"<absolute_path>\", \"restart_file\": \"<absolute_path>\"} e.g. {\"log_file\": \"/results/log.lammps\", \"restart_file\": \"/results/melting/melt.restart\"}",
+    "input_from_tasks": [
+      "silicon_melting_1_subtask_structure_retrieval",
+      "silicon_melting_1_subtask_potential_file"
+    ],
+    "initial_input": {
+      "atom style": "full",
+      "units": "metal",
+      "pbc": "true"
+    },
+    "scoring_params": {
+      "variable": "Temp",
+      "target": 2500.0,
+      "tolerance": 0.04,
+      "window": 10
+    },
+    "id": "silicon_melting_1_subtask_melting",
+    "uuid": "0a54be03-3b92-4977-981e-f502e95aec22"
+  },
+  {
+    "name": "Silicon MSD - Level 1",
+    "description": "Given paths to LAMMPs restart file for liquid silicon at 2500K and Stillinger\u2013Weber potential file, equilibrate the liquid silicon under NPT ensemble at 2500K for 500 ps at zero isotropic external pressure control. Compute the mean squared displacement (MSD) of Si atoms over the trajectory. As a file output, return the absolute path to the final MSD data file, where first column is time in ps, second column is msd data.",
+    "tools": [
+      "get_potential_metadata",
+      "run_lammps",
+      "get_nth_run_log",
+      "keyword_log_extractor"
+    ],
+    "scoring_function": "check_msd",
+    "submission_format": "absolute path to MSD data file (eg. /results/msd.dat)",
+    "input_from_tasks": [
+      "silicon_melting_1_subtask_potential_file",
+      "silicon_melting_1_subtask_melting"
+    ],
+    "initial_input": {
+      "atom style": "full",
+      "units": "metal",
+      "pbc": "true"
+    },
+    "scoring_params": {
+      "target": 0.99
+    },
+    "id": "silicon_melting_1_subtask_diffusivity",
+    "uuid": "189a7ddb-78c1-471c-9eb4-9d7531783ae2"
+  },
+  {
+    "name": "Silicon Diffusion Coefficient Calculation - Level 1",
+    "description": "Using the MSD data file from the equilibration of liquid silicon at 2500K, compute the average self diffusion coefficient using the Einstein relation. The first column is of time in ps, and second column is msd data. Report the diffusion coefficient in units of m\u00b2/s.",
+    "tools": [
+      "visualisation_tool",
+      "get_nth_run_log",
+      "keyword_log_extractor"
+    ],
+    "scoring_function": "check_numerical",
+    "submission_format": "numerical value without units (eg. 56.00)",
+    "input_from_tasks": [
+      "silicon_melting_1_subtask_diffusivity"
+    ],
+    "initial_input": {},
+    "scoring_params": {
+      "target": 1.74e-08,
+      "tolerance": 0.1
+    },
+    "id": "silicon_melting_1_subtask_diffusion_coefficient",
+    "uuid": "25dc9c2c-32c9-4d07-b570-f2032e7954bb"
+  }
+]

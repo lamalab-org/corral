@@ -19,6 +19,21 @@ from matplotlib.transforms import blended_transform_factory
 
 lama_aesthetics.get_style("main")
 
+
+def to_title_case_label(text: str) -> str:
+    """Capitalize the first alphabetic character in the full label.
+
+    The requested label style uses an initial capital letter followed by
+    lowercase text rather than conventional title case.
+    """
+
+    lowered = text.lower()
+    for idx, char in enumerate(lowered):
+        if char.isalpha():
+            return f"{lowered[:idx]}{char.upper()}{lowered[idx + 1:]}"
+    return lowered
+
+
 DATA_PATH = Path(__file__).parent / "results" / "data" / "reports.jsonl"
 OUT_DIR = Path(__file__).parent / "results" / "figures" / "fig_5_app"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -53,30 +68,31 @@ agg = performance_df.groupby(["environment", "Tool Verbosity"], as_index=False)[
 
 VERBOSITIES = ["brief", "workflow", "comprehensive"]
 VERBOSITY_LABELS = {
-    "brief": "Brief",
-    "workflow": "Workflow",
-    "comprehensive": "Comprehensive",
+    "brief": to_title_case_label("brief"),
+    "workflow": to_title_case_label("workflow"),
+    "comprehensive": to_title_case_label("comprehensive"),
 }
 COLORS = {"brief": "#4C72B0", "workflow": "#DD8452", "comprehensive": "#55A868"}
 MARKERS = {"workflow": "D", "comprehensive": "o"}
 
 ENV_LABELS = {
-    "afm": "AFM",
-    "catalyst": "Catalyst",
-    "md": "MD",
-    "ml": "ML",
-    "resistor": "Resistor",
-    "retro": "Retro",
-    "spectra": "Spectra",
+    "afm": to_title_case_label("afm experimental\nexecution"),
+    "catalyst": to_title_case_label("adsorption surface\nconstruction"),
+    "md": to_title_case_label("molecular\nsimulation"),
+    "ml": to_title_case_label("ml-based\nproperty"),
+    "resistor": to_title_case_label("circuit inference"),
+    "retro": to_title_case_label("retrosynthetic\nplanning"),
+    "spectra": to_title_case_label("spectroscopic\nstructure elucidation"),
+    "wetlab": to_title_case_label("inorganic\nqualitative analysis"),
 }
 MODEL_LABELS = {
-    "claude-4.5": "Claude 4.5",
+    "claude-4.5": "Claude-4.5-Sonnet",
     "gpt-4o": "GPT-4o",
-    "gpt-oss-120b": "GPT-OSS-120B",
+    "gpt-oss-120b": "gpt-oss-120b",
 }
 AGENT_TYPE_LABELS = {
     "react": "ReAct",
-    "tool_calling": "Tool Calling",
+    "tool_calling": to_title_case_label("tool calling"),
 }
 
 
@@ -139,7 +155,7 @@ def plot_horizontal_verbosity_bars(
     pivot_df: pd.DataFrame,
     groups: list[str],
     group_labels: list[str],
-    y_label: str,
+    y_label: str | None = None,
     *,
     bar_width: float = 0.22,
     gap_width: float = 0.1,
@@ -192,8 +208,9 @@ def plot_horizontal_verbosity_bars(
             alpha=0.6,
         )
 
-    ax.set_xlabel("Average Score")
-    ax.set_ylabel(y_label)
+    ax.set_xlabel(to_title_case_label("average score"))
+    if y_label is not None:
+        ax.set_ylabel(y_label)
     range_frame(ax, np.array([0, 1]), y_centers)
     # Override y-axis: spine bounds must match categorical tick positions
     ax.spines["left"].set_bounds(y_centers[0], y_centers[-1])
@@ -204,7 +221,12 @@ def plot_horizontal_verbosity_bars(
 
     if show_legend:
         handles, labels = ax.get_legend_handles_labels()
-        ax.legend(handles, labels, title="Tool Verbosity", loc="upper right")
+        ax.legend(
+            handles,
+            labels,
+            title=to_title_case_label("tool verbosity"),
+            loc="upper right",
+        )
 
     return y_centers
 
@@ -236,7 +258,9 @@ def add_panel_label(ax: plt.Axes, label: str, x: float = -0.18) -> None:
 
 
 envs = sorted(agg["environment"].unique())
-yticklabels = [ENV_LABELS.get(e, e.capitalize()) for e in envs]
+yticklabels = [
+    ENV_LABELS.get(e, to_title_case_label(e.replace("_", " "))) for e in envs
+]
 
 env_pivot = build_pivot(performance_df, "environment")
 
@@ -268,7 +292,6 @@ def plot_environment_summary(ax_bar: plt.Axes, ax_delta: plt.Axes) -> None:
         env_pivot,
         envs,
         yticklabels,
-        "Environment",
         show_legend=False,
     )
 
@@ -307,7 +330,7 @@ def plot_environment_summary(ax_bar: plt.Axes, ax_delta: plt.Axes) -> None:
                     zorder=2,
                 )
 
-    ax_delta.set_xlabel("Δ Average Score (Vs. Brief)")
+    ax_delta.set_xlabel(to_title_case_label("Δ average score (vs. brief)"))
     range_frame(ax_delta, np.array([-0.05, 0.05]), x_centers, nice=False)
     ax_delta.set_xticks([-0.05, 0, 0.05])
     # Override y-axis to match environment bar plot
@@ -318,7 +341,12 @@ def plot_environment_summary(ax_bar: plt.Axes, ax_delta: plt.Axes) -> None:
     ax_delta.set_yticklabels([])
 
     bar_handles, bar_labels = ax_bar.get_legend_handles_labels()
-    ax_bar.legend(bar_handles, bar_labels, title="Tool Verbosity", loc="upper right")
+    ax_bar.legend(
+        bar_handles,
+        bar_labels,
+        title=to_title_case_label("tool verbosity"),
+        loc="upper right",
+    )
 
 
 models = sorted(performance_df["model"].dropna().unique())
@@ -335,7 +363,14 @@ def plot_model_summary(ax: plt.Axes) -> None:
     Returns:
         None: The function mutates the provided axis.
     """
-    ax.set_ylabel("")
+    plot_horizontal_verbosity_bars(
+        ax,
+        model_pivot,
+        models,
+        model_labels,
+        to_title_case_label("model"),
+        show_legend=False,
+    )
 
 
 fig = plt.figure(figsize=(TWO_COL_WIDTH, 3 * ONE_COL_HEIGHT))
@@ -373,7 +408,14 @@ def plot_agent_summary(ax: plt.Axes) -> None:
     Returns:
         None: The function mutates the provided axis.
     """
-    ax.set_ylabel("")
+    plot_horizontal_verbosity_bars(
+        ax,
+        agent_type_pivot,
+        agent_types,
+        agent_type_labels,
+        to_title_case_label("agent type"),
+        show_legend=False,
+    )
 
 
 plot_agent_summary(ax_agent_grid)

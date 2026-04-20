@@ -15,9 +15,11 @@ HF_REPO_QA_TOPIC = "jablonkagroup/corral-QAs-topic_reports"
 # push_trace_to_hf
 HF_REPO_TRACE = "jablonkagroup/corral-oss-trace-logprobs"
 
-# ---------------------------------------------------------------------------
-# Report file-walking
-# ---------------------------------------------------------------------------
+# download_traces_from_hf
+HF_REPO_TRACES = "jablonkagroup/corral-traces"
+# push_intervention_reports_to_hf / push_intervention_traces_to_hf
+HF_REPO_INTERVENTION_REPORTS = "jablonkagroup/corral-intervention-reports"
+HF_REPO_INTERVENTION_TRACES = "jablonkagroup/corral-intervention-traces"
 
 # Prevents accidentally ingesting agent logs, W&B artefacts, or cache files
 # that share the .json extension.
@@ -42,16 +44,18 @@ MODEL_CANONICAL: dict[str, str] = {
     "gpt-4o": "gpt_4o",
     "gpt_4o": "gpt_4o",
     "gpt4o": "gpt_4o",
+    "gpt": "gpt_4o",
     "gpt_oss_120b": "gpt_oss_120b",
     "gpt_oss_120": "gpt_oss_120b",
     "gpt-oss-120b": "gpt_oss_120b",
+    "gpt_oss": "gpt_oss_120b",
 }
 
 # Display names use dashes (human-readable form) while canonical keys use
 # underscores (safe for column names and config identifiers).
 MODEL_DISPLAY: dict[str, str] = {
-    "claude_4_5": "claude-4.5",
-    "gpt_4o": "gpt-4o",
+    "claude_4_5": "Claude-4.5-Sonnet",
+    "gpt_4o": "GPT-4o",
     "gpt_oss_120b": "gpt-oss-120b",
 }
 
@@ -106,7 +110,8 @@ TASK_KEY_MAP: dict[str, str] = {
     **{f"pass^{i}": f"Task Pass^{i}" for i in range(1, 6)},
 }
 
-# Keys that receive special handling (token-usage & tool-calls).
+# Token and tool-call counts are summed, not averaged, so they bypass METRICS_KEY_MAP
+# normalization and are aggregated separately by the calling script.
 METRICS_SKIP_KEYS: frozenset[str] = frozenset(
     {
         "total_token_usage",
@@ -118,7 +123,8 @@ METRICS_SKIP_KEYS: frozenset[str] = frozenset(
     }
 )
 
-# Full dataset schema
+# Declared upfront so downstream code (e.g. pandas DataFrame construction) gets
+# deterministic column ordering and correct dtype inference for all fields.
 ALL_COLUMNS: list[str] = [
     "model",
     "agent_type",
