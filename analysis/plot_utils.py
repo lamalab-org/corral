@@ -11,6 +11,7 @@ import json
 import re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from loguru import logger
 from plot_config import DEFAULT_ENV_LEVEL_MAP
@@ -105,6 +106,50 @@ def load_logprobs_data() -> pd.DataFrame:
 
     df = pd.read_json(LOGPROBS_PATH, lines=True)  # noqa: PD901
     logger.info(f"Loaded {len(df)} rows from logprobs.jsonl")
+    return df
+
+
+def load_logprobs_stats() -> pd.DataFrame:
+    """Stream logprobs.jsonl and return per-row (environment, logprob_sum, logprob_count).
+
+    This avoids loading the full per-token arrays into memory.  Each row's
+    ``per_token_logprob`` list is reduced to a (sum, count) pair on the fly so
+    the caller can compute any token-weighted statistic without holding all
+    ~20 M token values in RAM simultaneously.
+
+    Returns
+    -------
+    DataFrame with columns: environment, logprob_sum, logprob_count
+    """
+    if not LOGPROBS_PATH.exists():
+        msg = f"Logprobs file not found: {LOGPROBS_PATH}"
+        raise FileNotFoundError(msg)
+
+    rows = []
+    with LOGPROBS_PATH.open() as fh:
+        for line in fh:
+            record = json.loads(line)
+            env = record.get("environment", "")
+            lp = record.get("per_token_logprob", [])
+            if lp:
+                arr = np.asarray(lp, dtype=np.float32)
+                mask = np.isfinite(arr) & (arr != 0.0)
+                arr = arr[mask]
+            else:
+                arr = np.array([], dtype=np.float32)
+            rows.append(
+                {
+                    "environment": env,
+                    "logprob_sum": float(arr.sum()) if arr.size else 0.0,
+                    "logprob_count": int(arr.size),
+                }
+            )
+
+    df = pd.DataFrame(rows)  # noqa: PD901
+    logger.info(
+        f"Streamed {len(df)} rows from logprobs.jsonl "
+        f"(total tokens: {df['logprob_count'].sum():,})"
+    )
     return df
 
 

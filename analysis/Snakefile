@@ -27,10 +27,15 @@ rule all:
         "results/figures/analysis/avg_tool_calls_per_task_by_agent_type.pdf",
         "results/figures/analysis/action_distribution_by_environment_and_agent.pdf",
         "results/figures/analysis/action_distribution_by_environment_and_model.pdf",
-        # Epistemology & annotation plots (from dev)
+        # Epistemology & annotation plots
         "results/figures/fig_epistemology/overall_pattern_bars_horizontal_individual.pdf",
         "results/figures/fig_epistemology/epst_combined.pdf",
+        "results/tables/qa_example_tables.tex",
         "results/tables/qa_scores_table.tex",
+        "results/figures/openalex/yearly_strict_counts.pdf",
+        "results/figures/openalex/yearly_expanded_counts.pdf",
+        "results/figures/openalex/yearly_strict_counts_cumulative.pdf",
+        "results/figures/openalex/yearly_expanded_counts_cumulative.pdf",
         # Panel 2 plots
         "results/figures/panel_2/panel2_coverage_heatmap.pdf",
         "results/figures/panel_2/panel2_coverage_heatmap.png",
@@ -52,6 +57,14 @@ rule all:
         # Panel 6 plots
         "results/figures/panel_6/panel6_logprob_score_correlation.pdf",
         "results/figures/panel_6/panel6_logprob_score_correlation.png",
+        # Intervention analysis
+        "results/data/intervention_reports.jsonl",
+        "results/data/intervention_results.csv",
+        "results/data/statistical_tests.csv",
+        "results/figures/intervention/intervention_pass_at_per_agent.pdf",
+        "results/figures/intervention/intervention_pass_caret_per_agent.pdf",
+        "results/figures/intervention/recovery_curves.pdf",
+        "results/figures/intervention/baseline_compact_twocol.pdf",
 
 
 # ── Data downloads ───────────────────────────────────────────────────────────
@@ -408,6 +421,7 @@ rule plot_marker_vs_scaffold:
         "python plot_marker_vs_scaffold.py > {log} 2>&1"
 
 
+
 # ── Existing analysis plots ─────────────────────────────────────────────────
 
 
@@ -511,6 +525,15 @@ rule combine_epist_panel:
         "python combine_epist_panel.py > {log} 2>&1"
 
 
+rule generate_qa_example_table:
+    output:
+        "results/tables/qa_example_tables.tex",
+    log:
+        "results/logs/generate_qa_example_table.log",
+    shell:
+        "python generate_qa_example_table.py > {log} 2>&1"
+
+
 rule generate_qa_latex_table:
     input:
         "results/data/qa_topic_reports.jsonl",
@@ -522,6 +545,18 @@ rule generate_qa_latex_table:
         "python generate_qa_latex_table.py > {log} 2>&1"
 
 
+rule plot_ai_scientists_yearly:
+    input:
+        "openalex/results_ai_scientists/yearly_counts.csv",
+    output:
+        "results/figures/openalex/yearly_strict_counts.pdf",
+        "results/figures/openalex/yearly_expanded_counts.pdf",
+        "results/figures/openalex/yearly_strict_counts_cumulative.pdf",
+        "results/figures/openalex/yearly_expanded_counts_cumulative.pdf",
+    log:
+        "results/logs/plot_ai_scientists_yearly.log",
+    shell:
+        "python plot_ai_scientists_yearly.py > {log} 2>&1"
 # ── Panel 2 plots ───────────────────────────────────────────────────────────
 
 
@@ -650,3 +685,129 @@ rule plot_panel6_logprob_score_correlation:
         "results/logs/plot_panel6_logprob_score_correlation.log",
     shell:
         "{PYTHON} plot_panel6_logprob_score_correlation.py > {log} 2>&1"
+
+
+### Intervention analysis rules
+
+
+rule download_intervention_reports:
+    output:
+        "results/data/intervention_reports.jsonl",
+    log:
+        "results/logs/download_intervention_reports.log",
+    shell:
+        "python download_intervention_reports_from_hf.py > {log} 2>&1"
+
+
+rule aggregate_intervention_results:
+    input:
+        "results/data/intervention_reports.jsonl",
+    output:
+        "results/data/intervention_results.csv",
+    log:
+        "results/logs/aggregate_intervention_results.log",
+    shell:
+        "python aggregate_intervention_results.py > {log} 2>&1"
+
+
+rule plot_intervention_pass_at:
+    input:
+        "results/data/intervention_reports.jsonl",
+    output:
+        "results/figures/intervention/intervention_pass_at_per_agent.pdf",
+        "results/figures/intervention/intervention_pass_at_per_agent.png",
+        "results/figures/intervention/intervention_pass_at_plot.pdf",
+        "results/figures/intervention/intervention_pass_at_plot.png",
+    log:
+        "results/logs/plot_intervention_pass_at.log",
+    shell:
+        "python plot_intervention_pass_at.py --no-md > {log} 2>&1"
+
+
+rule plot_intervention_pass_caret:
+    input:
+        "results/data/intervention_reports.jsonl",
+    output:
+        "results/figures/intervention/intervention_pass_caret_per_agent.pdf",
+        "results/figures/intervention/intervention_pass_caret_per_agent.png",
+        "results/figures/intervention/intervention_pass_caret_per_agent_nomarkers.pdf",
+        "results/figures/intervention/intervention_pass_caret_per_agent_nomarkers.png",
+        "results/figures/intervention/intervention_pass_caret_plot.pdf",
+        "results/figures/intervention/intervention_pass_caret_plot.png",
+    log:
+        "results/logs/plot_intervention_pass_caret.log",
+    shell:
+        "python plot_intervention_pass_caret.py --no-md > {log} 2>&1"
+
+
+rule plot_recovery_curves:
+    input:
+        "results/data/intervention_results.csv",
+    output:
+        "results/figures/intervention/recovery_curves.pdf",
+        "results/figures/intervention/recovery_curves.png",
+        "results/figures/intervention/recovery_curves_averaged.pdf",
+        "results/figures/intervention/recovery_curves_averaged.png",
+        "results/figures/intervention/recovery_curves_react_only_1row.pdf",
+        "results/figures/intervention/recovery_curves_react_only_1row.png",
+    log:
+        "results/logs/plot_recovery_curves.log",
+    shell:
+        "python plot_recovery_curves.py --no-md > {log} 2>&1"
+
+
+rule plot_baseline_compact:
+    input:
+        "results/data/intervention_reports.jsonl",
+    output:
+        "results/figures/intervention/baseline_compact_twocol.pdf",
+        "results/figures/intervention/baseline_compact_twocol.png",
+        "results/figures/intervention/baseline_compact_pass_at.pdf",
+        "results/figures/intervention/baseline_compact_pass_at.png",
+        "results/figures/intervention/baseline_compact_pass_caret.pdf",
+        "results/figures/intervention/baseline_compact_pass_caret.png",
+    log:
+        "results/logs/plot_baseline_compact.log",
+    shell:
+        "python plot_baseline_compact.py --no-md > {log} 2>&1"
+
+
+rule plot_recovery_curves_grouped:
+    input:
+        "results/data/intervention_results.csv",
+    output:
+        "results/figures/intervention/recovery_curves_grouped.pdf",
+        "results/figures/intervention/recovery_curves_grouped.png",
+        "results/figures/intervention/recovery_curves_grouped_react_only.pdf",
+        "results/figures/intervention/recovery_curves_grouped_react_only.png",
+    log:
+        "results/logs/plot_recovery_curves_grouped.log",
+    shell:
+        "python plot_recovery_curves_grouped.py > {log} 2>&1"
+
+
+rule plot_baseline_compact_grouped:
+    input:
+        "results/data/intervention_reports.jsonl",
+    output:
+        "results/figures/intervention/baseline_grouped_twocol.pdf",
+        "results/figures/intervention/baseline_grouped_twocol.png",
+        "results/figures/intervention/baseline_grouped_pass_at.pdf",
+        "results/figures/intervention/baseline_grouped_pass_at.png",
+        "results/figures/intervention/baseline_grouped_pass_caret.pdf",
+        "results/figures/intervention/baseline_grouped_pass_caret.png",
+    log:
+        "results/logs/plot_baseline_compact_grouped.log",
+    shell:
+        "python plot_baseline_compact_grouped.py > {log} 2>&1"
+
+
+rule statistical_tests:
+    input:
+        "results/data/intervention_results.csv",
+    output:
+        "results/data/statistical_tests.csv",
+    log:
+        "results/logs/statistical_tests.log",
+    shell:
+        "python statistical_tests.py > {log} 2>&1"
