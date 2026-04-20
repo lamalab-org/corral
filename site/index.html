@@ -240,11 +240,110 @@
       -ms-overflow-style: none;
       scrollbar-width: none;
     }
+
+    /* ── Epistemic Trace Explorer ── */
+    .node-glow {
+      animation: pulseGlow 2s ease-in-out infinite;
+    }
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.35; }
+      50% { opacity: 0.75; }
+    }
+    .trace-nodes text {
+      font-family: 'Space Grotesk', system-ui, sans-serif;
+      pointer-events: none;
+      user-select: none;
+    }
+    .trace-edges line, .trace-edges path {
+      fill: none;
+    }
+    .trace-list::-webkit-scrollbar { width: 3px; }
+    .trace-list::-webkit-scrollbar-track { background: transparent; }
+    .trace-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+    .dark .trace-list::-webkit-scrollbar-thumb { background: #475569; }
+    @media (prefers-reduced-motion: reduce) {
+      .node-glow { animation: none; opacity: 0.6; }
+    }
+
+    /* ── Annotator Tab ── */
+    .ann-node { cursor: pointer; }
+    .ann-node circle { stroke-width: 3px; transition: all 0.2s ease; }
+    .ann-node:hover circle { stroke-width: 4px; filter: brightness(1.1); }
+    .ann-node text { font-size: 12px; font-weight: 600; pointer-events: none; }
+    .ann-link { fill: none; stroke-width: 2px; stroke-opacity: 0.6; }
+    #ann-graph-container svg { display: block; }
+    .ann-detail-item {
+      padding: 10px 12px;
+      border-radius: 8px;
+      border-left: 3px solid #3b82f6;
+      margin-bottom: 10px;
+    }
+    .ann-detail-item pre {
+      max-height: 260px;
+      overflow-y: auto;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-size: 12px;
+      line-height: 1.5;
+      border-radius: 6px;
+      padding: 8px;
+      margin-top: 6px;
+    }
+    .ann-marker-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .ann-filter-btn {
+      border: 1px solid;
+    }
+    .ann-filter-btn:not(.active) {
+      border-color: #e2e8f0;
+      color: #64748b;
+      background: white;
+    }
+    .ann-filter-btn:not(.active):hover {
+      border-color: #93c5fd;
+      color: #2563eb;
+    }
+    .ann-filter-btn.active {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: white;
+    }
+    .dark .ann-filter-btn:not(.active) {
+      border-color: #475569;
+      color: #94a3b8;
+      background: #1e293b;
+    }
+    .dark .ann-filter-btn:not(.active):hover {
+      border-color: #60a5fa;
+      color: #60a5fa;
+    }
+    .dark .ann-filter-btn.active {
+      border-color: #60a5fa;
+      background: #2563eb;
+      color: white;
+    }
+    .ann-marker-tag-remove { cursor: pointer; font-weight: bold; font-size: 14px; line-height: 1; transition: opacity 0.15s; }
+    .ann-marker-tag-remove:hover { opacity: 0.6; }
+    .ann-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+    .ann-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .ann-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+    .dark .ann-scrollbar::-webkit-scrollbar-thumb { background: #475569; }
   </style>
 </head>
 
 <body class="bg-surface text-ink font-serif antialiased min-h-screen flex flex-col dark:bg-[#0f172a] dark:text-slate-200 transition-colors duration-300">
   <script src="data.js"></script>
+  <script src="traces.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="annotator.js" defer></script>
 
   <div x-data="corralApp()" x-cloak class="flex flex-col min-h-screen">
 
@@ -254,7 +353,7 @@
         <div class="px-4 sm:px-6">
           <div class="flex items-center justify-between h-14">
             <!-- Logo -->
-            <a href="#" @click.prevent="activeTab = 'home'" class="flex items-center gap-3 cursor-pointer group">
+            <a href="#" @click.prevent="activeTab = 'home'; history.pushState(null, '', window.location.pathname)" class="flex items-center gap-3 cursor-pointer group">
               <img src="corral_logo.png" alt="Corral logo" class="h-8 w-auto">
               <div class="hidden sm:block">
                 <span class="text-lg font-bold tracking-tight text-slate-900">Corral</span>
@@ -274,7 +373,7 @@
               </template>
             </template>
             <!-- Documentation external link -->
-            <a href="https://lamalab-org.github.io/corral/" target="_blank" rel="noopener"
+            <a href="https://lamalab-org.github.io/corral/docs/" target="_blank" rel="noopener"
               class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 cursor-pointer transition-all duration-150 flex items-center gap-1.5">
               Docs
               <svg class="w-3.5 h-3.5 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -335,7 +434,7 @@
               deployment, and evaluation of scientific agents and environments.
             </p>
             <div class="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-              <a href="https://lamalab-org.github.io/corral/" target="_blank" rel="noopener"
+              <a href="https://lamalab-org.github.io/corral/docs/" target="_blank" rel="noopener"
                 class="inline-flex items-center gap-2 px-6 py-3 bg-brand-600 text-white font-semibold rounded-xl shadow-lg shadow-brand-600/25 hover:bg-brand-700 hover:shadow-brand-700/30 transition-all duration-200 cursor-pointer text-sm">
                 Get Started
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -536,7 +635,7 @@
             benchmark?</h2>
           <p class="mt-4 text-lg text-slate-500">Start evaluating AI agents on scientific tasks in minutes.</p>
           <div class="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-            <a href="https://lamalab-org.github.io/corral/" target="_blank" rel="noopener"
+            <a href="https://lamalab-org.github.io/corral/docs/" target="_blank" rel="noopener"
               class="inline-flex items-center gap-2 px-6 py-3 bg-brand-600 text-white font-semibold rounded-xl shadow-lg shadow-brand-600/25 hover:bg-brand-700 transition-all duration-200 cursor-pointer text-sm">
               Read the Docs
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -611,10 +710,10 @@
           </div>
           <p class="text-sm text-slate-500 leading-relaxed max-w-3xl" x-text="currentEnvData?.description"></p>
 
-          <!-- Level selector (for tasks and subtasks) -->
+          <!-- Scope selector (for tasks and subtasks) -->
           <div x-show="(envSection === 'tasks' || envSection === 'subtasks') && envLevelNames.length > 1"
             class="mt-4 flex items-center gap-2">
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Level:</span>
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Scope:</span>
             <div class="flex gap-1.5">
               <button @click="selectedLevel = 'all'" :class="selectedLevel === 'all'
                   ? 'bg-brand-600 text-white'
@@ -627,7 +726,7 @@
                     ? 'bg-brand-600 text-white'
                     : 'bg-white text-slate-600 border border-slate-200 hover:border-brand-300'"
                   class="px-3 py-1 rounded-md text-xs font-medium cursor-pointer transition-all duration-150"
-                  x-text="lvl.replace('_', ' ')">
+                  x-text="lvl.replace('level', 'scope').replace('_', ' ')">
                 </button>
               </template>
             </div>
@@ -726,7 +825,7 @@
                   : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-brand-300 hover:text-brand-600'"
                 class="px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all duration-150 focus-visible:outline-2 focus-visible:outline-brand-500">
                 <span x-text="task.name || task.id"></span>
-                <span class="opacity-40 ml-1" x-text="task.level ? '(' + task.level.replace('_',' ') + ')' : ''"></span>
+                <span class="opacity-40 ml-1" x-text="task.level ? '(' + task.level.replace('level','scope').replace('_',' ') + ')' : ''"></span>
               </button>
             </template>
             <a x-show="filteredTasks.length > 25"
@@ -740,7 +839,7 @@
               </svg>
             </a>
           </div>
-          <p x-show="filteredTasks.length === 0" class="text-sm text-slate-400">No tasks at this level.</p>
+          <p x-show="filteredTasks.length === 0" class="text-sm text-slate-400">No tasks at this scope.</p>
 
           <div x-show="selectedTask && currentTaskData" class="fade-in">
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 items-stretch">
@@ -751,7 +850,7 @@
                   </h3>
                   <template x-if="currentTaskData?.level">
                     <span class="text-[11px] font-mono text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md font-medium"
-                      x-text="currentTaskData.level.replace('_',' ')"></span>
+                      x-text="currentTaskData.level.replace('level','scope').replace('_',' ')"></span>
                   </template>
                 </div>
                 <div class="p-6 space-y-5 max-h-[480px] overflow-y-auto">
@@ -807,7 +906,7 @@
                   : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-brand-300 hover:text-brand-600'"
                 class="px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all duration-150 focus-visible:outline-2 focus-visible:outline-brand-500">
                 <span x-text="st.name || st.id"></span>
-                <span class="opacity-40 ml-1" x-text="st.level ? '(' + st.level.replace('_',' ') + ')' : ''"></span>
+                <span class="opacity-40 ml-1" x-text="st.level ? '(' + st.level.replace('level','scope').replace('_',' ') + ')' : ''"></span>
               </button>
             </template>
             <a x-show="filteredSubtasks.length > 25"
@@ -821,7 +920,7 @@
               </svg>
             </a>
           </div>
-          <p x-show="filteredSubtasks.length === 0" class="text-sm text-slate-400">No subtasks at this level.</p>
+          <p x-show="filteredSubtasks.length === 0" class="text-sm text-slate-400">No subtasks at this scope.</p>
 
           <div x-show="selectedSubtask && currentSubtaskData" class="fade-in">
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 items-stretch">
@@ -832,7 +931,7 @@
                     x-text="currentSubtaskData?.name || currentSubtaskData?.id"></h3>
                   <template x-if="currentSubtaskData?.level">
                     <span class="text-[11px] font-mono text-violet-700 bg-violet-50 px-2 py-0.5 rounded-md font-medium"
-                      x-text="currentSubtaskData.level.replace('_',' ')"></span>
+                      x-text="currentSubtaskData.level.replace('level','scope').replace('_',' ')"></span>
                   </template>
                   <span class="text-[11px] font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md">subtask</span>
                 </div>
@@ -883,49 +982,482 @@
     </div>
 
     <!-- ================================================================ -->
-    <!-- RESULTS TAB                                                       -->
+    <!-- EXPLAINERS TAB                                                    -->
     <!-- ================================================================ -->
-    <div x-show="activeTab === 'results'" class="flex-1 fade-in">
-      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <h2 class="text-3xl font-extrabold text-slate-900 mb-2">Results</h2>
-        <p class="text-slate-500 text-sm mb-10">Benchmark results across models, agent types, and verbosity levels.</p>
+    <div x-show="activeTab === 'explainers'" x-cloak class="flex-1 flex flex-col" style="min-height: calc(100vh - 80px);">
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-12">
-          <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <p class="text-[11px] text-slate-400 uppercase tracking-wider font-bold mb-4">Models</p>
-            <div class="space-y-2">
-              <p class="text-sm font-medium text-slate-700">GPT-4o</p>
-              <p class="text-sm font-medium text-slate-700">Claude 4.5</p>
-              <p class="text-sm font-medium text-slate-700">GPT-OSS (120B)</p>
-            </div>
-          </div>
-          <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <p class="text-[11px] text-slate-400 uppercase tracking-wider font-bold mb-4">Agent Types</p>
-            <div class="space-y-2">
-              <p class="text-sm font-medium text-slate-700">ReAct</p>
-              <p class="text-sm font-medium text-slate-700">ToolCalling</p>
-            </div>
-          </div>
-          <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <p class="text-[11px] text-slate-400 uppercase tracking-wider font-bold mb-4">Verbosity Levels</p>
-            <div class="space-y-2">
-              <p class="text-sm font-medium text-slate-700">Brief</p>
-              <p class="text-sm font-medium text-slate-700">Workflow</p>
-              <p class="text-sm font-medium text-slate-700">Comprehensive</p>
-            </div>
-          </div>
-        </div>
+      <!-- 3-column layout -->
+      <div class="flex-1 flex" x-data="traceExplorer()">
 
-        <div class="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-20 text-center">
-          <svg class="w-12 h-12 mx-auto text-slate-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-          </svg>
-          <p class="text-slate-400 font-medium">Charts and detailed result tables coming soon.</p>
-        </div>
+        <!-- LEFT SIDEBAR -->
+        <aside class="w-[280px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 overflow-y-auto bg-white dark:bg-[#1e293b] p-4 space-y-5">
+          <div>
+            <h2 class="text-base font-bold text-slate-900 font-sans">Epistemic Traces</h2>
+            <p class="text-[11px] text-slate-400 mt-1">Epistemological graph analysis of LLM agent reasoning.</p>
+          </div>
+
+          <!-- Model filter -->
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Model</label>
+            <div class="flex flex-wrap gap-1.5">
+              <button @click="filterModel = filterModel === '' ? '' : ''"
+                :class="filterModel === '' ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:border-brand-300'"
+                class="px-2.5 py-1 rounded-md text-[11px] font-medium cursor-pointer transition-all duration-150">All</button>
+              <template x-for="m in availableModels" :key="m">
+                <button @click="filterModel = filterModel === m ? '' : m"
+                  :class="filterModel === m ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:border-brand-300'"
+                  class="px-2.5 py-1 rounded-md text-[11px] font-medium cursor-pointer transition-all duration-150"
+                  x-text="m"></button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Environment filter -->
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Environment</label>
+            <select x-model="filterEnv"
+              class="w-full text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 cursor-pointer focus:outline-none focus:border-brand-400">
+              <option value="">All Environments</option>
+              <template x-for="e in availableEnvs" :key="e">
+                <option :value="e" x-text="envName(e)"></option>
+              </template>
+            </select>
+          </div>
+
+          <!-- Scope filter -->
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Scope</label>
+            <div class="flex flex-wrap gap-1.5">
+              <button @click="filterLevel = ''"
+                :class="filterLevel === '' ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600'"
+                class="px-2.5 py-1 rounded-md text-[11px] font-medium cursor-pointer transition-all duration-150">All</button>
+              <template x-for="l in availableLevels" :key="l">
+                <button @click="filterLevel = filterLevel === l ? '' : l"
+                  :class="filterLevel === l ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600'"
+                  class="px-2.5 py-1 rounded-md text-[11px] font-medium cursor-pointer transition-all duration-150"
+                  x-text="l.replace('level','scope').replace('_', ' ')"></button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Trace list -->
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
+              Traces <span class="text-slate-300 dark:text-slate-500" x-text="'(' + filteredTraces.length + ')'"></span>
+            </label>
+            <div class="space-y-1 max-h-[calc(100vh-480px)] overflow-y-auto trace-list">
+              <template x-for="trace in filteredTraces" :key="trace.id">
+                <button @click="selectTrace(trace)"
+                  :class="selectedTrace?.id === trace.id
+                    ? 'bg-brand-50 dark:bg-brand-600/20 border-brand-300 dark:border-brand-500 ring-1 ring-brand-200 dark:ring-brand-700'
+                    : 'border-slate-200 dark:border-slate-700 hover:border-brand-300 dark:hover:border-brand-600'"
+                  class="w-full text-left p-2.5 rounded-lg border transition-all duration-150 cursor-pointer">
+                  <div class="text-xs font-medium text-slate-900 dark:text-slate-100 truncate" x-text="envName(trace.env) + ' / ' + trace.level.replace('level','scope').replace('_', ' ')"></div>
+                  <div class="text-[10px] text-slate-400 mt-0.5 truncate" x-text="trace.model"></div>
+                  <div class="text-[10px] mt-1 flex items-center gap-2">
+                    <span class="text-slate-400" x-text="trace.n_nodes + 'N / ' + trace.n_edges + 'E'"></span>
+                    <span class="text-emerald-600 dark:text-emerald-400" x-text="sumPatterns(trace.subgraph_counts) + ' prod'"></span>
+                    <span class="text-rose-600 dark:text-rose-400" x-text="sumPatterns(trace.antipattern_counts) + ' break'"></span>
+                  </div>
+                </button>
+              </template>
+            </div>
+          </div>
+        </aside>
+
+        <!-- CENTER GRAPH PANEL -->
+        <main class="flex-1 relative overflow-hidden grid-bg bg-slate-50 dark:bg-[#0f172a]" x-ref="graphContainer">
+
+          <!-- Toolbar (top-right floating) -->
+          <div class="absolute top-3 right-3 z-10 flex items-center gap-1.5">
+            <button @click="toggleLayout()"
+              class="glass-card px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors text-[10px] font-medium"
+              x-text="layoutMode === 'force' ? 'Temporal' : 'Force'"></button>
+            <button @click="zoomIn()"
+              class="glass-card w-7 h-7 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors flex items-center justify-center text-sm font-bold">+</button>
+            <button @click="zoomOut()"
+              class="glass-card w-7 h-7 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors flex items-center justify-center text-sm font-bold">&minus;</button>
+            <button @click="zoomReset()"
+              class="glass-card px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors text-[10px] font-mono font-medium">Fit</button>
+          </div>
+
+          <!-- Legend (bottom-left floating) -->
+          <div class="absolute bottom-3 left-3 z-10 glass-card rounded-xl border border-slate-200 dark:border-slate-700 p-3" x-show="selectedTrace">
+            <div class="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-2">Node Types</div>
+            <div class="grid grid-cols-3 gap-x-4 gap-y-1">
+              <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-violet-200 dark:bg-violet-500/30 ring-1 ring-violet-500"></span><span class="text-[10px] text-slate-500 dark:text-slate-400">Hypothesis</span></div>
+              <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-blue-200 dark:bg-blue-500/30 ring-1 ring-blue-500"></span><span class="text-[10px] text-slate-500 dark:text-slate-400">Test</span></div>
+              <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-amber-200 dark:bg-amber-500/30 ring-1 ring-amber-500"></span><span class="text-[10px] text-slate-500 dark:text-slate-400">Evidence</span></div>
+              <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-cyan-200 dark:bg-cyan-500/30 ring-1 ring-cyan-500"></span><span class="text-[10px] text-slate-500 dark:text-slate-400">Judgment</span></div>
+              <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-emerald-200 dark:bg-emerald-500/30 ring-1 ring-emerald-500"></span><span class="text-[10px] text-slate-500 dark:text-slate-400">Update</span></div>
+              <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-rose-200 dark:bg-rose-500/30 ring-1 ring-rose-500"></span><span class="text-[10px] text-slate-500 dark:text-slate-400">Commitment</span></div>
+            </div>
+          </div>
+
+          <!-- Empty state -->
+          <div x-show="!selectedTrace" class="absolute inset-0 flex items-center justify-center">
+            <div class="text-center">
+              <svg class="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              <p class="text-slate-400 dark:text-slate-500 font-medium text-sm">Select a trace from the sidebar</p>
+              <p class="text-slate-300 dark:text-slate-600 text-xs mt-1">to visualize its epistemological graph</p>
+            </div>
+          </div>
+
+          <!-- SVG graph -->
+          <svg x-ref="graphSvg" x-show="selectedTrace" style="width: 100%; height: 100%; min-height: 500px; display: block;"></svg>
+        </main>
+
+        <!-- RIGHT DETAIL PANEL -->
+        <aside class="w-[340px] flex-shrink-0 border-l border-slate-200 dark:border-slate-700 overflow-y-auto bg-white dark:bg-[#1e293b] p-4 space-y-4">
+
+          <!-- Node Detail -->
+          <div x-show="selectedNode" x-cloak>
+            <div class="flex items-center gap-2 mb-3">
+              <span class="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold ring-2"
+                :class="nodeColorClass(selectedNode?.type)"
+                x-text="selectedNode?.type"></span>
+              <span class="text-sm font-bold text-slate-900 dark:text-slate-100" x-text="selectedNode?.node_id"></span>
+              <span class="text-[10px] font-mono text-slate-400" x-text="'t=' + selectedNode?.time"></span>
+            </div>
+
+            <!-- Collapsible node text -->
+            <div class="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden"
+              :style="nodeTextBoxStyle(selectedNode?.type)">
+              <button @click="nodeTextExpanded = !nodeTextExpanded"
+                class="w-full flex items-center justify-between px-3 py-2 transition-colors cursor-pointer"
+                :style="nodeTextHeaderStyle(selectedNode?.type)">
+                <span class="text-[10px] font-bold text-slate-500 dark:text-slate-300 uppercase tracking-wider">Node Text</span>
+                <svg class="w-3.5 h-3.5 text-slate-400 transition-transform duration-200" :class="nodeTextExpanded ? 'rotate-180' : ''"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+                </svg>
+              </button>
+              <div x-show="nodeTextExpanded"
+                x-transition:enter="transition ease-out duration-150"
+                x-transition:enter-start="opacity-0 -translate-y-1"
+                x-transition:enter-end="opacity-100 translate-y-0"
+                x-transition:leave="transition ease-in duration-100"
+                x-transition:leave-start="opacity-100"
+                x-transition:leave-end="opacity-0">
+                <div class="px-3 py-3 max-h-64 overflow-y-auto">
+                  <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap" x-text="selectedNode?.text"></p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Support quotes -->
+            <div class="mt-3" x-show="selectedNode?.support?.length > 0">
+              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Supporting Evidence</p>
+              <template x-for="s in (selectedNode?.support || [])" :key="s.msg_idx + (s.quote || '').slice(0,20)">
+                <div class="code-panel rounded-lg p-3 text-[11px] font-mono leading-relaxed mb-2 max-h-48 overflow-y-auto">
+                  <span class="text-brand-400">msg[<span x-text="s.msg_idx"></span>]</span>
+                  <span class="text-slate-300 dark:text-slate-400 block mt-1 whitespace-pre-wrap" x-text="s.quote"></span>
+                </div>
+              </template>
+            </div>
+
+            <!-- Connected edges -->
+            <div class="mt-3">
+              <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Connections</p>
+              <div class="space-y-1 max-h-40 overflow-y-auto">
+                <template x-for="e in nodeEdges(selectedNode?.node_id)" :key="e.src + e.dst + e.relation">
+                  <button @click="selectNodeById(e.src === selectedNode?.node_id ? e.dst : e.src)"
+                    class="w-full text-left text-[11px] p-1.5 rounded-md border border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors flex items-center gap-1">
+                    <span class="font-mono text-slate-500 dark:text-slate-400" x-text="e.src"></span>
+                    <span class="text-brand-500 dark:text-brand-400 font-mono" x-text="e.relation"></span>
+                    <span class="font-mono text-slate-500 dark:text-slate-400" x-text="e.dst"></span>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- No node selected hint -->
+          <div x-show="selectedTrace && !selectedNode" class="text-center py-6">
+            <p class="text-xs text-slate-400 dark:text-slate-500">Click a node in the graph to see details</p>
+          </div>
+
+          <!-- Patterns section -->
+          <div x-show="selectedTrace" :class="selectedNode ? 'pt-4 border-t border-slate-200 dark:border-slate-700' : ''">
+            <!-- Productive patterns -->
+            <template x-if="productivePatterns.length > 0">
+              <div class="mb-4">
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Productive Patterns</p>
+                <div class="space-y-1">
+                  <template x-for="[name, count] in productivePatterns" :key="name">
+                    <button @click="togglePatternHighlight('productive', name)"
+                      :class="activePatternHighlight === 'productive:' + name
+                        ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 dark:border-emerald-600'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-600'"
+                      class="w-full text-left p-2 rounded-lg border transition-all duration-150 cursor-pointer flex items-center justify-between">
+                      <span class="text-[11px] text-slate-700 dark:text-slate-300" x-text="formatPatternName(name)"></span>
+                      <span class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded" x-text="count"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- Antipatterns -->
+            <template x-if="antiPatterns.length > 0">
+              <div>
+                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Reasoning Breakdowns</p>
+                <div class="space-y-1">
+                  <template x-for="[name, count] in antiPatterns" :key="name">
+                    <button @click="togglePatternHighlight('antipattern', name)"
+                      :class="activePatternHighlight === 'antipattern:' + name
+                        ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-300 dark:border-rose-600'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-600'"
+                      class="w-full text-left p-2 rounded-lg border transition-all duration-150 cursor-pointer flex items-center justify-between">
+                      <span class="text-[11px] text-slate-700 dark:text-slate-300" x-text="formatPatternName(name)"></span>
+                      <span class="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 px-1.5 py-0.5 rounded" x-text="count"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Empty state -->
+          <div x-show="!selectedTrace" class="flex items-center justify-center h-40">
+            <p class="text-xs text-slate-400 dark:text-slate-500">Select a trace to see details</p>
+          </div>
+        </aside>
       </div>
     </div>
 
+
+    <!-- ================================================================ -->
+    <!-- ANNOTATE TAB                                                      -->
+    <!-- ================================================================ -->
+    <div x-show="activeTab === 'annotate'" x-cloak class="flex-1 flex flex-col" style="min-height: calc(100vh - 80px);">
+      <div class="flex-1 flex flex-col max-w-[1600px] w-full mx-auto">
+
+        <!-- Top Controls Bar -->
+        <div class="border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-[#1e293b] px-5 py-4">
+          <div class="flex flex-wrap items-center gap-5">
+            <!-- Load directory -->
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Load Trace Directory</label>
+              <input type="file" id="ann-folderInput" webkitdirectory directory multiple
+                class="text-xs file:mr-3 file:px-3 file:py-1.5 file:border-0 file:rounded-lg file:bg-brand-600 file:text-white file:font-medium file:cursor-pointer file:text-xs hover:file:bg-brand-700 cursor-pointer border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-1" />
+            </div>
+
+            <!-- File navigation -->
+            <div id="ann-fileSelectorGroup" class="flex flex-col gap-1.5" style="display: none;">
+              <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Navigate Traces</label>
+              <div class="flex items-center gap-2">
+                <button id="ann-prevBtn" class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-300 text-xs font-medium cursor-pointer hover:border-brand-400 hover:text-brand-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Prev</button>
+                <select id="ann-fileSelect" class="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 cursor-pointer focus:outline-none focus:border-brand-400 min-w-[200px]"></select>
+                <button id="ann-nextBtn" class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-300 text-xs font-medium cursor-pointer hover:border-brand-400 hover:text-brand-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
+                <span class="text-[10px] text-slate-400 ml-1">File <span id="ann-currentFile" class="font-bold text-brand-600">0</span> of <span id="ann-totalFiles" class="font-bold text-brand-600">0</span></span>
+              </div>
+            </div>
+
+            <!-- View mode -->
+            <div class="flex flex-col gap-1.5">
+              <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">View Mode</label>
+              <div class="flex gap-1.5">
+                <button class="ann-filter-btn active px-2.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150" data-filter="all">All</button>
+                <button class="ann-filter-btn px-2.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150" data-filter="tools">Tools</button>
+                <button class="ann-filter-btn px-2.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150" data-filter="no-tools">No Tools</button>
+              </div>
+            </div>
+
+            <!-- Agent type -->
+            <div class="flex flex-col items-center gap-0.5 px-4">
+              <span id="ann-agentType" class="text-lg font-bold text-brand-600 dark:text-brand-400">-</span>
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider">Agent Type</span>
+            </div>
+
+            <!-- Stats -->
+            <div class="flex gap-4 ml-auto">
+              <div class="text-center px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                <div id="ann-totalNodes" class="text-lg font-bold text-brand-600 dark:text-brand-400">0</div>
+                <div class="text-[10px] text-slate-400 uppercase">Nodes</div>
+              </div>
+              <div class="text-center px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                <div id="ann-toolCalls" class="text-lg font-bold text-brand-600 dark:text-brand-400">0</div>
+                <div class="text-[10px] text-slate-400 uppercase">Tool Calls</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3-column layout: Details | Graph | Annotation -->
+        <div class="flex-1 flex" style="min-height: calc(100vh - 200px);">
+
+          <!-- LEFT: Node Details Panel -->
+          <aside id="ann-detailsPanel" class="w-[320px] flex-shrink-0 border-r border-slate-200 dark:border-slate-700 overflow-y-auto ann-scrollbar bg-white dark:bg-[#1e293b] p-4 space-y-2">
+            <h3 class="text-sm font-bold text-brand-600 dark:text-brand-400 mb-3">Node Details</h3>
+            <div id="ann-detailsContent" class="space-y-2">
+              <p class="text-xs text-slate-400 text-center py-8">Click on a node in the graph to view its details</p>
+            </div>
+          </aside>
+
+          <!-- CENTER: Graph Panel -->
+          <main class="flex-1 relative bg-slate-50 dark:bg-[#0f172a] grid-bg overflow-hidden">
+            <!-- Floating toolbar: node nav + actions -->
+            <div class="absolute top-3 left-3 right-3 z-10 flex items-center justify-between">
+              <button id="ann-clearCacheBtn" title="Clear cached annotations"
+                class="glass-card px-2.5 py-1.5 rounded-lg border border-rose-300 dark:border-rose-700 text-rose-600 dark:text-rose-400 text-[11px] font-medium cursor-pointer hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors">
+                Clear Cache
+              </button>
+              <div class="flex items-center gap-2">
+                <button id="ann-prevNodeBtn" disabled
+                  class="glass-card px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 text-[11px] font-medium cursor-pointer hover:border-brand-400 hover:text-brand-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                  Prev Node
+                </button>
+                <button id="ann-nextNodeBtn" disabled
+                  class="glass-card px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 text-[11px] font-medium cursor-pointer hover:border-brand-400 hover:text-brand-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                  Next Node
+                </button>
+              </div>
+              <button id="ann-submitBtn"
+                class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold cursor-pointer shadow-md shadow-emerald-600/25 transition-all duration-200 uppercase tracking-wider">
+                Submit
+              </button>
+            </div>
+
+            <!-- Graph container -->
+            <div id="ann-graph-container" class="w-full h-full" style="min-height: 500px;">
+              <div class="flex items-center justify-center h-full">
+                <div class="text-center">
+                  <svg class="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  <p class="text-slate-400 dark:text-slate-500 font-medium text-sm">Load a trace directory to begin</p>
+                  <p class="text-slate-300 dark:text-slate-600 text-xs mt-1">Select a folder with JSON trace files</p>
+                </div>
+              </div>
+            </div>
+          </main>
+
+          <!-- RIGHT: Annotation Panel -->
+          <aside class="w-[340px] flex-shrink-0 border-l border-slate-200 dark:border-slate-700 overflow-y-auto ann-scrollbar bg-white dark:bg-[#1e293b] flex flex-col">
+            <!-- Annotator info -->
+            <div class="p-4 border-b border-slate-200 dark:border-slate-700">
+              <div class="flex gap-3">
+                <div class="flex-1 flex flex-col gap-1">
+                  <label for="ann-annotatorName" class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Annotator</label>
+                  <input type="text" id="ann-annotatorName" placeholder="Your name"
+                    class="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-brand-400 transition-colors" />
+                </div>
+                <div class="flex-1 flex flex-col gap-1">
+                  <label for="ann-mongodbKey" class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Identifier</label>
+                  <input type="password" id="ann-mongodbKey" placeholder="Personal ID"
+                    class="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-brand-400 transition-colors" />
+                </div>
+              </div>
+              <div class="mt-2 flex flex-col gap-1">
+                <label for="ann-apiEndpoint" class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">API Endpoint <span class="font-normal">(optional)</span></label>
+                <input type="text" id="ann-apiEndpoint" placeholder="Custom endpoint URL"
+                  class="text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-brand-400 transition-colors" />
+              </div>
+            </div>
+
+            <!-- Behavioral markers -->
+            <div class="p-4 border-b border-slate-200 dark:border-slate-700">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="text-xs font-bold text-brand-600 dark:text-brand-400">Behavioral Markers</h3>
+                <button id="ann-helpToggleBtn" class="text-[10px] px-2 py-1 rounded-md border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:text-brand-600 hover:border-brand-400 cursor-pointer transition-colors">
+                  Show Descriptions
+                </button>
+              </div>
+
+              <!-- Help descriptions (hidden by default) -->
+              <div id="ann-helpDescriptions" style="display:none" class="mb-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-[11px] text-slate-500 dark:text-slate-400 space-y-1 max-h-48 overflow-y-auto ann-scrollbar">
+                <p class="font-bold text-emerald-600 dark:text-emerald-400 uppercase text-[10px] tracking-wider mt-1">Positive</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">validation_attempt</span> — explicit validation</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">backtrack_trigger</span> — recognizes dead end, pivots</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">planning_statement</span> — explicit plan/subgoal</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">reasoning_statement</span> — joins hypotheses and evidence</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">correct_submission</span> — follows required format</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">todo_list</span> — creates/checks a todo list</p>
+                <p class="font-bold text-slate-500 dark:text-slate-400 uppercase text-[10px] tracking-wider mt-2">Neutral</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">neutral</span> — nothing notable happens</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">iteration_limit</span> — max iterations reached</p>
+                <p class="font-bold text-rose-600 dark:text-rose-400 uppercase text-[10px] tracking-wider mt-2">Negative</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">missing_validation</span> — lack of validation</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">unnecessary_tool_use</span> — unneeded tool use</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">non_sense</span> — incoherent content</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">loop_instance</span> — repeated tool pattern</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">hallucination</span> — fabricated content</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">wrong_planning</span> — incorrect planning</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">wrong_reasoning</span> — incorrect reasoning</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">syntax_error</span> — syntax is incorrect</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">early_final_answer</span> — premature submission</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">give_up</span> — agent gives up</p>
+                <p><span class="font-mono text-brand-600 dark:text-brand-400">inefficient_tool_call</span> — vague/incomplete tool use</p>
+              </div>
+
+              <!-- Marker dropdowns (3 columns) -->
+              <div class="grid grid-cols-3 gap-2 mb-3">
+                <div>
+                  <label class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block mb-1">Positive</label>
+                  <select id="ann-positiveMarkerSelect" disabled
+                    class="w-full text-[11px] font-mono border border-emerald-300 dark:border-emerald-700 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-400 cursor-pointer focus:outline-none focus:border-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    <option value="">Select...</option>
+                    <option value="validation_attempt">validation_attempt</option>
+                    <option value="backtrack_trigger">backtrack_trigger</option>
+                    <option value="planning_statement">planning_statement</option>
+                    <option value="reasoning_statement">reasoning_statement</option>
+                    <option value="correct_submission">correct_submission</option>
+                    <option value="todo_list">todo_list</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-1">Neutral</label>
+                  <select id="ann-neutralMarkerSelect" disabled
+                    class="w-full text-[11px] font-mono border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 cursor-pointer focus:outline-none focus:border-slate-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    <option value="">Select...</option>
+                    <option value="neutral">neutral</option>
+                    <option value="iteration_limit">iteration_limit</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider block mb-1">Negative</label>
+                  <select id="ann-negativeMarkerSelect" disabled
+                    class="w-full text-[11px] font-mono border border-rose-300 dark:border-rose-700 rounded-lg px-2 py-1.5 bg-white dark:bg-slate-800 text-rose-700 dark:text-rose-400 cursor-pointer focus:outline-none focus:border-rose-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    <option value="">Select...</option>
+                    <option value="missing_validation">missing_validation</option>
+                    <option value="unnecessary_tool_use">unnecessary_tool_use</option>
+                    <option value="non_sense">non_sense</option>
+                    <option value="loop_instance">loop_instance</option>
+                    <option value="hallucination">hallucination</option>
+                    <option value="wrong_planning">wrong_planning</option>
+                    <option value="wrong_reasoning">wrong_reasoning</option>
+                    <option value="syntax_error">syntax_error</option>
+                    <option value="early_final_answer">early_final_answer</option>
+                    <option value="give_up">give_up</option>
+                    <option value="inefficient_tool_call">inefficient_tool_call</option>
+                  </select>
+                </div>
+              </div>
+
+              <div id="ann-annotationDisabledMsg" style="display:none" class="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 mb-2 italic"></div>
+              <div id="ann-selectedMarkers" class="flex flex-wrap gap-1.5 min-h-[24px]"></div>
+            </div>
+
+            <!-- Notes -->
+            <div class="p-4 border-b border-slate-200 dark:border-slate-700">
+              <h3 class="text-xs font-bold text-brand-600 dark:text-brand-400 mb-2">Node Observations</h3>
+              <textarea id="ann-notesTextarea" disabled placeholder="Add observations for this node..."
+                class="w-full min-h-[70px] text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-brand-400 resize-y disabled:opacity-40 disabled:cursor-not-allowed transition-colors"></textarea>
+            </div>
+
+            <!-- Trace comments -->
+            <div class="p-4 flex-1">
+              <h3 class="text-xs font-bold text-brand-600 dark:text-brand-400 mb-2">Trace Comments</h3>
+              <textarea id="ann-traceCommentsTextarea" placeholder="Overall trace comments..."
+                class="w-full min-h-[60px] text-xs border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-brand-400 resize-y transition-colors"></textarea>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
 
     <!-- ===== FOOTER ===== -->
     <footer class="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 mt-auto">
@@ -939,7 +1471,7 @@
               class="hover:text-slate-600 transition-colors">M3RG Lab</a> &middot; MIT License</p>
         </div>
         <div class="flex items-center gap-4">
-          <a href="https://lamalab-org.github.io/corral/" target="_blank" rel="noopener"
+          <a href="https://lamalab-org.github.io/corral/docs/" target="_blank" rel="noopener"
             class="text-xs text-slate-400 hover:text-slate-600 transition-colors cursor-pointer">Documentation</a>
           <a href="https://github.com/lamalab-org/corral" target="_blank" rel="noopener"
             class="text-xs text-slate-400 hover:text-slate-600 transition-colors cursor-pointer">GitHub</a>
@@ -956,7 +1488,8 @@
         tabs: [
           { id: 'home', label: 'Home' },
           { id: 'environments', label: 'Environments' },
-          { id: 'results', label: 'Results' },
+          { id: 'explainers', label: 'Explainers' },
+          { id: 'annotate', label: 'Annotate' },
           { id: 'docs', label: 'Docs' },
         ],
 
@@ -1175,6 +1708,469 @@
 
         init() {
           if (this.envNames.length) this.selectEnv(this.envNames[0]);
+
+          const validTabs = this.tabs.map(t => t.id);
+          const hash = window.location.hash.slice(1);
+          if (hash && validTabs.includes(hash)) this.activeTab = hash;
+
+          this.$watch('activeTab', (tab) => {
+            const target = tab === 'home' ? '' : '#' + tab;
+            if (window.location.hash !== (target || '#')) {
+              history.pushState(null, '', target || window.location.pathname);
+            }
+          });
+          window.addEventListener('popstate', () => {
+            const h = window.location.hash.slice(1);
+            if (h && validTabs.includes(h)) this.activeTab = h;
+            else this.activeTab = 'home';
+          });
+        },
+      };
+    }
+
+    /* ── Epistemic Trace Explorer ── */
+    const NODE_COLORS = {
+      H: { light: '#ede9fe', dark: '#4c1d95', ring: '#8b5cf6', textL: '#6d28d9', textD: '#c4b5fd' },
+      T: { light: '#dbeafe', dark: '#1e3a5f', ring: '#3b82f6', textL: '#1d4ed8', textD: '#93c5fd' },
+      E: { light: '#fef3c7', dark: '#78350f', ring: '#f59e0b', textL: '#b45309', textD: '#fcd34d' },
+      J: { light: '#cffafe', dark: '#164e63', ring: '#06b6d4', textL: '#0e7490', textD: '#67e8f9' },
+      U: { light: '#d1fae5', dark: '#064e3b', ring: '#10b981', textL: '#047857', textD: '#6ee7b7' },
+      C: { light: '#ffe4e6', dark: '#881337', ring: '#f43f5e', textL: '#be123c', textD: '#fda4af' },
+    };
+    const EDGE_STYLES = {
+      tests:         { color: '#3b82f6', dash: '',    width: 1.5, key: 'blue' },
+      observes:      { color: '#f59e0b', dash: '',    width: 1.5, key: 'amber' },
+      uses:          { color: '#06b6d4', dash: '6,3', width: 1.5, key: 'cyan' },
+      updates_to:    { color: '#10b981', dash: '',    width: 1.5, key: 'emerald' },
+      contradicts:   { color: '#ef4444', dash: '8,4', width: 2.5, key: 'red' },
+      competes_with: { color: '#8b5cf6', dash: '3,3', width: 1.5, key: 'violet' },
+    };
+    function _isDark() { return document.documentElement.classList.contains('dark'); }
+    function _nc(type) { const c = NODE_COLORS[type]; return c ? (_isDark() ? c.dark : c.light) : '#e2e8f0'; }
+    function _nr(type) { return NODE_COLORS[type]?.ring || '#94a3b8'; }
+    function _nt(type) { const c = NODE_COLORS[type]; return c ? (_isDark() ? c.textD : c.textL) : '#334155'; }
+    function _ec(rel) { return EDGE_STYLES[rel]?.color || '#94a3b8'; }
+    function _ed(rel) { return EDGE_STYLES[rel]?.dash || ''; }
+    function _ew(rel) { return EDGE_STYLES[rel]?.width || 1.5; }
+    function _ek(rel) { return EDGE_STYLES[rel]?.key || 'blue'; }
+
+    const ENV_DISPLAY = {
+      afm: 'AFM Experiment Execution',
+      catalyst: 'Adsorption Surface Construction',
+      md: 'Molecular Simulation',
+      ml: 'ML-based Property Prediction',
+      resistor: 'Circuit Inference',
+      retrosynthesis: 'Retrosynthetic Planning',
+      spectra: 'Spectroscopic Structure Elucidation',
+      wetlab: 'Inorganic Qualitative Analysis',
+    };
+
+    function traceExplorer() {
+      return {
+        filterModel: '',
+        filterEnv: '',
+        filterLevel: '',
+        selectedTrace: null,
+        selectedNode: null,
+        nodeTextExpanded: true,
+        activePatternHighlight: null,
+        layoutMode: 'temporal',
+        simulation: null,
+        svgZoom: null,
+        svgGroup: null,
+
+        get availableModels() {
+          return [...new Set(TRACE_DATA.map(t => t.model))].sort();
+        },
+        get availableEnvs() {
+          let d = TRACE_DATA;
+          if (this.filterModel) d = d.filter(t => t.model === this.filterModel);
+          return [...new Set(d.map(t => t.env))].sort();
+        },
+        get availableLevels() {
+          let d = TRACE_DATA;
+          if (this.filterModel) d = d.filter(t => t.model === this.filterModel);
+          if (this.filterEnv) d = d.filter(t => t.env === this.filterEnv);
+          return [...new Set(d.map(t => t.level))].sort();
+        },
+        get filteredTraces() {
+          return TRACE_DATA.filter(t => {
+            if (this.filterModel && t.model !== this.filterModel) return false;
+            if (this.filterEnv && t.env !== this.filterEnv) return false;
+            if (this.filterLevel && t.level !== this.filterLevel) return false;
+            return true;
+          });
+        },
+        get productivePatterns() {
+          if (!this.selectedTrace) return [];
+          const sc = this.selectedTrace.subgraph_counts;
+          return Object.entries(sc).filter(([_, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+        },
+        get antiPatterns() {
+          if (!this.selectedTrace) return [];
+          const ac = this.selectedTrace.antipattern_counts;
+          return Object.entries(ac).filter(([_, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+        },
+
+        envName(key) {
+          return ENV_DISPLAY[key] || key;
+        },
+        sumPatterns(counts) {
+          if (!counts) return 0;
+          return Object.values(counts).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+        },
+        formatPatternName(name) {
+          return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        },
+        nodeColorClass(type) {
+          const map = {
+            H: 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 ring-violet-400',
+            T: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 ring-blue-400',
+            E: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 ring-amber-400',
+            J: 'bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 ring-cyan-400',
+            U: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 ring-emerald-400',
+            C: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 ring-rose-400',
+          };
+          return map[type] || 'bg-slate-100 text-slate-700 ring-slate-400';
+        },
+        nodeTextBoxStyle(type) {
+          const dark = document.documentElement.classList.contains('dark');
+          const colors = {
+            H: { border: '#8b5cf6', lightBg: 'rgba(139,92,246,0.06)',  darkBg: 'rgba(139,92,246,0.1)' },
+            T: { border: '#3b82f6', lightBg: 'rgba(59,130,246,0.06)',  darkBg: 'rgba(59,130,246,0.1)' },
+            E: { border: '#f59e0b', lightBg: 'rgba(245,158,11,0.06)',  darkBg: 'rgba(245,158,11,0.1)' },
+            J: { border: '#06b6d4', lightBg: 'rgba(6,182,212,0.06)',   darkBg: 'rgba(6,182,212,0.1)' },
+            U: { border: '#10b981', lightBg: 'rgba(16,185,129,0.06)',  darkBg: 'rgba(16,185,129,0.1)' },
+            C: { border: '#f43f5e', lightBg: 'rgba(244,63,94,0.06)',   darkBg: 'rgba(244,63,94,0.1)' },
+          };
+          const c = colors[type] || colors.H;
+          return `border-left: 3px solid ${c.border}`;
+        },
+        nodeTextHeaderStyle(type) {
+          const dark = document.documentElement.classList.contains('dark');
+          const colors = {
+            H: { light: 'rgba(139,92,246,0.08)', dark: 'rgba(139,92,246,0.12)' },
+            T: { light: 'rgba(59,130,246,0.08)',  dark: 'rgba(59,130,246,0.12)' },
+            E: { light: 'rgba(245,158,11,0.08)',  dark: 'rgba(245,158,11,0.12)' },
+            J: { light: 'rgba(6,182,212,0.08)',    dark: 'rgba(6,182,212,0.12)' },
+            U: { light: 'rgba(16,185,129,0.08)',  dark: 'rgba(16,185,129,0.12)' },
+            C: { light: 'rgba(244,63,94,0.08)',    dark: 'rgba(244,63,94,0.12)' },
+          };
+          const c = colors[type] || colors.H;
+          return `background: ${dark ? c.dark : c.light}`;
+        },
+        nodeEdges(nodeId) {
+          if (!this.selectedTrace || !nodeId) return [];
+          return this.selectedTrace.edges.filter(e => e.src === nodeId || e.dst === nodeId);
+        },
+
+        selectTrace(trace) {
+          if (this.simulation) { this.simulation.stop(); this.simulation = null; }
+          this.selectedTrace = trace;
+          this.selectedNode = null;
+          this.activePatternHighlight = null;
+          this.$nextTick(() => this.renderGraph());
+        },
+        selectNodeById(nodeId) {
+          if (!this.selectedTrace) return;
+          const n = this.selectedTrace.nodes.find(n => n.node_id === nodeId);
+          if (n) {
+            this.selectedNode = n;
+            this.nodeTextExpanded = true;
+            this._highlightSelectedNode(nodeId);
+          }
+        },
+
+        togglePatternHighlight(kind, name) {
+          const key = kind + ':' + name;
+          const svg = d3.select(this.$refs.graphSvg);
+          svg.selectAll('.node-glow').remove();
+
+          if (this.activePatternHighlight === key) {
+            this.activePatternHighlight = null;
+            svg.selectAll('.trace-nodes g').attr('opacity', 1);
+            svg.selectAll('.trace-edges line, .trace-edges path').attr('opacity', 1);
+            return;
+          }
+          this.activePatternHighlight = key;
+
+          const src = kind === 'productive'
+            ? this.selectedTrace.subgraph_nodes
+            : this.selectedTrace.antipattern_nodes;
+          const instances = src?.[name] || [];
+          const involvedIds = new Set();
+          for (const inst of instances) {
+            if (Array.isArray(inst)) {
+              for (const id of inst) {
+                if (id !== '__trace__') involvedIds.add(id);
+              }
+            }
+          }
+          const glowColor = kind === 'productive' ? '#10b981' : '#f43f5e';
+
+          svg.selectAll('.trace-nodes g').attr('opacity', d => involvedIds.has(d.node_id) ? 1 : 0.2);
+          svg.selectAll('.trace-edges line, .trace-edges path').attr('opacity', 0.15);
+
+          svg.selectAll('.trace-nodes g')
+            .filter(d => involvedIds.has(d.node_id))
+            .insert('circle', ':first-child')
+            .attr('class', 'node-glow')
+            .attr('r', 24)
+            .attr('fill', 'none')
+            .attr('stroke', glowColor)
+            .attr('stroke-width', 3)
+            .attr('opacity', 0.6)
+            .style('filter', `drop-shadow(0 0 8px ${glowColor})`);
+        },
+
+        toggleLayout() {
+          if (this.simulation) { this.simulation.stop(); this.simulation = null; }
+          this.layoutMode = this.layoutMode === 'force' ? 'temporal' : 'force';
+          if (this.selectedTrace) this.$nextTick(() => this.renderGraph());
+        },
+        zoomIn() {
+          if (this.svgZoom) {
+            const svg = d3.select(this.$refs.graphSvg);
+            svg.transition().duration(300).call(this.svgZoom.scaleBy, 1.3);
+          }
+        },
+        zoomOut() {
+          if (this.svgZoom) {
+            const svg = d3.select(this.$refs.graphSvg);
+            svg.transition().duration(300).call(this.svgZoom.scaleBy, 0.7);
+          }
+        },
+        zoomReset() {
+          if (!this.svgZoom || !this.svgGroup) return;
+          const svg = d3.select(this.$refs.graphSvg);
+          const bounds = this.svgGroup.node().getBBox();
+          if (!bounds.width || !bounds.height) return;
+          const container = this.$refs.graphContainer;
+          const w = container.clientWidth;
+          const h = container.clientHeight || 600;
+          const pad = 40;
+          const scale = Math.min(
+            (w - pad * 2) / bounds.width,
+            (h - pad * 2) / bounds.height,
+            1.5
+          );
+          const tx = w / 2 - scale * (bounds.x + bounds.width / 2);
+          const ty = h / 2 - scale * (bounds.y + bounds.height / 2);
+          svg.transition().duration(500).call(
+            this.svgZoom.transform,
+            d3.zoomIdentity.translate(tx, ty).scale(scale)
+          );
+        },
+
+        _highlightSelectedNode(nodeId) {
+          const svg = d3.select(this.$refs.graphSvg);
+          svg.selectAll('.trace-nodes g circle.node-ring').remove();
+          svg.selectAll('.trace-nodes g')
+            .filter(d => d.node_id === nodeId)
+            .append('circle')
+            .attr('class', 'node-ring')
+            .attr('r', 20)
+            .attr('fill', 'none')
+            .attr('stroke', '#2563eb')
+            .attr('stroke-width', 2.5)
+            .attr('opacity', 0.8);
+        },
+
+        renderGraph() {
+          if (!this.selectedTrace) return;
+          const svg = d3.select(this.$refs.graphSvg);
+          svg.selectAll('*').remove();
+
+          const container = this.$refs.graphContainer;
+          const width = container.clientWidth;
+          const height = container.clientHeight || 600;
+          svg.attr('width', width).attr('height', height);
+
+          this.svgZoom = d3.zoom()
+            .scaleExtent([0.15, 5])
+            .on('zoom', (event) => { this.svgGroup.attr('transform', event.transform); });
+          svg.call(this.svgZoom);
+
+          this.svgGroup = svg.append('g');
+
+          const defs = svg.append('defs');
+          const markerColors = { blue: '#3b82f6', amber: '#f59e0b', cyan: '#06b6d4', emerald: '#10b981', red: '#ef4444', violet: '#8b5cf6' };
+          Object.entries(markerColors).forEach(([name, color]) => {
+            defs.append('marker')
+              .attr('id', `arrow-${name}`)
+              .attr('viewBox', '0 -5 10 10')
+              .attr('refX', 26).attr('refY', 0)
+              .attr('markerWidth', 6).attr('markerHeight', 6)
+              .attr('orient', 'auto')
+              .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', color);
+          });
+
+          const nodes = this.selectedTrace.nodes.map(n => ({...n}));
+          const nodeSet = new Set(nodes.map(n => n.node_id));
+          const edges = this.selectedTrace.edges
+            .filter(e => nodeSet.has(e.src) && nodeSet.has(e.dst))
+            .map(e => ({ ...e, source: e.src, target: e.dst }));
+
+          const self = this;
+          if (this.layoutMode === 'force') {
+            this._buildForceLayout(nodes, edges, width, height, self);
+          } else {
+            this._buildTemporalLayout(nodes, edges, width, height, self);
+          }
+        },
+
+        _buildForceLayout(nodes, edges, width, height, self) {
+          if (this.simulation) this.simulation.stop();
+
+          this.simulation = d3.forceSimulation(nodes)
+            .force('link', d3.forceLink(edges).id(d => d.node_id).distance(70).strength(0.6))
+            .force('charge', d3.forceManyBody().strength(-250).distanceMax(350))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collision', d3.forceCollide().radius(28))
+            .alphaDecay(0.04);
+
+          const edgeGroup = this.svgGroup.append('g').attr('class', 'trace-edges');
+          const linkEls = edgeGroup.selectAll('line').data(edges).join('line')
+            .attr('stroke', d => _ec(d.relation))
+            .attr('stroke-width', d => _ew(d.relation))
+            .attr('stroke-dasharray', d => _ed(d.relation))
+            .attr('marker-end', d => `url(#arrow-${_ek(d.relation)})`)
+            .attr('opacity', 0.7);
+
+          const nodeGroup = this.svgGroup.append('g').attr('class', 'trace-nodes');
+          const nodeEls = nodeGroup.selectAll('g').data(nodes).join('g')
+            .attr('cursor', 'pointer')
+            .call(d3.drag()
+              .on('start', (e, d) => { if (!e.active) self.simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+              .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+              .on('end', (e, d) => { if (!e.active) self.simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+          nodeEls.append('circle').attr('r', 16)
+            .attr('fill', d => _nc(d.type))
+            .attr('stroke', d => _nr(d.type))
+            .attr('stroke-width', 2);
+          nodeEls.append('text').text(d => d.type)
+            .attr('text-anchor', 'middle').attr('dy', '0.35em')
+            .attr('font-size', '11px').attr('font-weight', '600')
+            .attr('fill', d => _nt(d.type));
+
+          nodeEls.on('click', (event, d) => {
+            event.stopPropagation();
+            self.selectedNode = d;
+            self._highlightSelectedNode(d.node_id);
+          });
+          nodeEls.append('title').text(d => `${d.node_id}: ${d.text || ''}`);
+
+          this.simulation.on('tick', () => {
+            linkEls.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+              .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+            nodeEls.attr('transform', d => `translate(${d.x},${d.y})`);
+          });
+        },
+
+        _buildTemporalLayout(nodes, edges, width, height, self) {
+          const typeLanes = ['H', 'T', 'E', 'J', 'U', 'C'];
+          const times = nodes.map(n => n.time);
+          const minT = Math.min(...times), maxT = Math.max(...times);
+          const pad = 80;
+
+          const xScale = d3.scaleLinear()
+            .domain([minT - 0.5, maxT + 0.5])
+            .range([pad, width - pad]);
+          const yScale = d3.scaleBand()
+            .domain(typeLanes)
+            .range([pad, height - pad])
+            .padding(0.3);
+
+          const jitter = new Map();
+          const timeTypeCount = {};
+          nodes.forEach(n => {
+            const key = `${n.time}_${n.type}`;
+            timeTypeCount[key] = (timeTypeCount[key] || 0);
+            const offset = timeTypeCount[key] * 22;
+            timeTypeCount[key]++;
+            n.x = xScale(n.time) + offset;
+            n.y = (yScale(n.type) || 0) + yScale.bandwidth() / 2;
+            jitter.set(n.node_id, { x: n.x, y: n.y });
+          });
+
+          // Lane labels
+          const labelGroup = this.svgGroup.append('g').attr('class', 'lane-labels');
+          const typeNames = { H: 'Hypothesis', T: 'Test', E: 'Evidence', J: 'Judgment', U: 'Update', C: 'Commitment' };
+          typeLanes.forEach(t => {
+            const yPos = (yScale(t) || 0) + yScale.bandwidth() / 2;
+            labelGroup.append('text')
+              .attr('x', 12).attr('y', yPos)
+              .attr('text-anchor', 'start').attr('dy', '0.35em')
+              .attr('font-size', '10px').attr('font-weight', '600')
+              .attr('fill', _isDark() ? '#64748b' : '#94a3b8')
+              .attr('font-family', "'Space Grotesk', sans-serif")
+              .text(typeNames[t]);
+          });
+
+          const nodeById = new Map(nodes.map(n => [n.node_id, n]));
+
+          // Edges as curved paths
+          const edgeGroup = this.svgGroup.append('g').attr('class', 'trace-edges');
+          edges.forEach(e => {
+            const s = nodeById.get(e.source || e.src);
+            const t = nodeById.get(e.target || e.dst);
+            if (!s || !t) return;
+            const dx = t.x - s.x, dy = t.y - s.y;
+            const dr = Math.sqrt(dx * dx + dy * dy) * 0.6;
+            const sweep = dy >= 0 ? 1 : 0;
+            edgeGroup.append('path')
+              .attr('d', `M${s.x},${s.y} A${dr},${dr} 0 0,${sweep} ${t.x},${t.y}`)
+              .attr('fill', 'none')
+              .attr('stroke', _ec(e.relation))
+              .attr('stroke-width', _ew(e.relation))
+              .attr('stroke-dasharray', _ed(e.relation))
+              .attr('marker-end', `url(#arrow-${_ek(e.relation)})`)
+              .attr('opacity', 0.65);
+          });
+
+          // Nodes
+          const nodeGroup = this.svgGroup.append('g').attr('class', 'trace-nodes');
+          const nodeEls = nodeGroup.selectAll('g').data(nodes).join('g')
+            .attr('transform', d => `translate(${d.x},${d.y})`)
+            .attr('cursor', 'pointer');
+
+          nodeEls.append('circle').attr('r', 16)
+            .attr('fill', d => _nc(d.type))
+            .attr('stroke', d => _nr(d.type))
+            .attr('stroke-width', 2);
+          nodeEls.append('text').text(d => d.type)
+            .attr('text-anchor', 'middle').attr('dy', '0.35em')
+            .attr('font-size', '11px').attr('font-weight', '600')
+            .attr('fill', d => _nt(d.type));
+
+          nodeEls.on('click', (event, d) => {
+            event.stopPropagation();
+            self.selectedNode = d;
+            self._highlightSelectedNode(d.node_id);
+          });
+          nodeEls.append('title').text(d => `${d.node_id}: ${d.text || ''}`);
+
+          // Time axis labels
+          const axisGroup = this.svgGroup.append('g');
+          const uniqueTimes = [...new Set(times)].sort((a, b) => a - b);
+          const step = Math.max(1, Math.floor(uniqueTimes.length / 15));
+          uniqueTimes.filter((_, i) => i % step === 0).forEach(t => {
+            axisGroup.append('text')
+              .attr('x', xScale(t)).attr('y', height - 20)
+              .attr('text-anchor', 'middle')
+              .attr('font-size', '9px')
+              .attr('fill', _isDark() ? '#475569' : '#94a3b8')
+              .attr('font-family', "'JetBrains Mono', monospace")
+              .text(`t${t}`);
+          });
+        },
+
+        init() {
+          const observer = new MutationObserver(() => {
+            if (this.selectedTrace) this.$nextTick(() => this.renderGraph());
+          });
+          observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
         },
       };
     }
