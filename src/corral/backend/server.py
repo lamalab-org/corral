@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from copy import deepcopy
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -119,11 +120,10 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         verbosity: ToolVerbosity | None = None,
     ):
         """
-        Get available tools for a task, returning a structured JSON object.
+        Get available tools for a task in OpenAI function-calling format.
 
-        This endpoint provides tool definitions in a format compatible with modern
-        LLM function-calling APIs. The structure of the returned argument
-        dictionaries will vary based on the requested verbosity level.
+        Returns tool definitions directly usable with LLM function-calling APIs.
+        Descriptions are filtered based on the requested verbosity level.
         """
         if verbosity is None:
             verbosity = Query(
@@ -135,44 +135,36 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         env = environments[task_id]
         tools_info = []
 
-        for tool in env.tools.values():
+        for tool_obj in env.tools.values():
             filtered_description = VerbosityConfig.filter_tool_description(
-                tool.description, verbosity
+                tool_obj.description, verbosity
             )
 
-            structured_args = []
-            for arg in tool.arguments:
-                # Conditionally build the argument dictionary based on verbosity.
-                if verbosity == ToolVerbosity.MINIMAL:
-                    # For MINIMAL, provide only the essential keys.
-                    structured_args.append(
-                        {
-                            "name": arg.name,
-                            "type": arg.type,
-                            "required": arg.required,
-                        }
-                    )
-                else:
-                    # For FULL (or other levels), provide all details.
-                    filtered_arg_desc = VerbosityConfig.filter_argument_description(
-                        arg.description, verbosity
-                    )
-                    structured_args.append(
-                        {
-                            "name": arg.name,
-                            "type": arg.type,
-                            "description": filtered_arg_desc,
-                            "required": arg.required,
-                            "default": arg.default,
-                            "choices": arg.choices,
-                        }
-                    )
+            schema = deepcopy(tool_obj.params_json_schema)
+            schema.pop("additionalProperties", None)
+            schema.pop("title", None)
+
+            # Filter argument descriptions based on verbosity
+            if verbosity == ToolVerbosity.MINIMAL:
+                for prop in schema.get("properties", {}).values():
+                    prop.pop("description", None)
+            else:
+                for prop in schema.get("properties", {}).values():
+                    if "description" in prop:
+                        prop["description"] = (
+                            VerbosityConfig.filter_argument_description(
+                                prop["description"], verbosity
+                            )
+                        )
 
             tools_info.append(
                 {
-                    "name": tool.name,
-                    "description": filtered_description,
-                    "arguments": structured_args,
+                    "type": "function",
+                    "function": {
+                        "name": tool_obj.name,
+                        "description": filtered_description,
+                        "parameters": schema,
+                    },
                 }
             )
 

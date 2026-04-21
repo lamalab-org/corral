@@ -5,6 +5,7 @@ from typing import ClassVar
 from loguru import logger
 
 from corral.backend.env import Environment
+from corral.backend.tool_utils import format_json_schema_type
 
 
 class MalformedDocstringError(ValueError):
@@ -470,16 +471,20 @@ def get_tools_guide_with_verbosity(
             )
         else:
             args_desc = []
+            properties = tool.params_json_schema.get("properties", {})
             for arg in tool.arguments:
                 filtered_arg_desc = VerbosityConfig.filter_argument_description(
                     arg.description, verbosity
                 )
 
+                prop = properties.get(arg.name, {})
+                type_str = format_json_schema_type(prop) if prop else arg.type
+
                 required = (
                     "required" if arg.required else f"optional, default: {arg.default}"
                 )
                 args_desc.append(
-                    f"- {arg.name} ({arg.type}, {required}): {filtered_arg_desc}"
+                    f"- {arg.name} ({type_str}, {required}): {filtered_arg_desc}"
                 )
 
             tool_guide = f"""Tool: {tool.name}

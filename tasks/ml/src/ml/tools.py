@@ -849,7 +849,7 @@ def select_polymorphs_with_strategy(
 
 @tool(hidden_args=["work_dir"])
 def consolidate_polymorph_datasets(
-    composition_files: dict[str, str],
+    composition_files: str,
     output_path: str = "consolidated_polymorphs.json",
     work_dir: str | None = None,
 ) -> str:
@@ -889,11 +889,11 @@ def consolidate_polymorph_datasets(
     [/SYNTACTICAL]
 
     Args:
-        composition_files: [ARGS_BRIEF] Dictionary mapping compositions to their JSON file paths. [/ARGS_BRIEF]
-                          [ARGS_DETAILED] A dictionary where keys are composition names/formulas and values are file paths to their corresponding JSON files containing polymorph data.
+        composition_files: [ARGS_BRIEF] JSON string mapping compositions to their file paths. [/ARGS_BRIEF]
+                          [ARGS_DETAILED] A JSON-encoded string where keys are composition names/formulas and values are file paths to their corresponding JSON files containing polymorph data.
                           The tool will attempt to read each file and integrate the data while maintaining composition information. [/ARGS_DETAILED]
-                          [ARGS_SYNTACTICAL] "{"composition1": "path1.json", "composition2": "path2.json", ...}" [/ARGS_SYNTACTICAL]
-                          [ARGS_EXAMPLES] {"TiO2": "data/tio2_polymorphs.json", "SiO2": "data/sio2_polymorphs.json"} [/ARGS_EXAMPLES]
+                          [ARGS_SYNTACTICAL] "{\"composition1\": \"path1.json\", \"composition2\": \"path2.json\", ...}" [/ARGS_SYNTACTICAL]
+                          [ARGS_EXAMPLES] "{\"TiO2\": \"data/tio2_polymorphs.json\", \"SiO2\": \"data/sio2_polymorphs.json\"}" [/ARGS_EXAMPLES]
         output_path: [ARGS_BRIEF] Path for the consolidated dataset file. Defaults to "consolidated_polymorphs.json". [/ARGS_BRIEF]
                     [ARGS_DETAILED] File path where the consolidated dataset will be saved.
                     The file will contain all polymorphs from all compositions in a single JSON structure with added source composition information.
@@ -926,6 +926,9 @@ def consolidate_polymorph_datasets(
     - Does not validate data consistency across files
     [/LIMITATIONS]
     """
+    if isinstance(composition_files, str):
+        composition_files = json.loads(composition_files)
+
     all_polymorphs = []
     stats = {
         "total_polymorphs": 0,
@@ -1740,7 +1743,7 @@ def train_xgboost_model(
     test_data_path: str,
     model_save_path: str,
     target_column: str = "formation_energy_per_atom",
-    hyperparameters: dict | None = None,
+    hyperparameters: str | None = None,
     work_dir: str | None = None,
 ) -> str:
     """[BRIEF] Train XGBoost regression model for property prediction with evaluation. [/BRIEF]
@@ -1799,13 +1802,13 @@ def train_xgboost_model(
                       Common targets include formation energy, band gap, bulk modulus, and other materials properties. [/ARGS_DETAILED]
                       [ARGS_SYNTACTICAL] "String matching column name in CSV files" [/ARGS_SYNTACTICAL]
                       [ARGS_EXAMPLES] "formation_energy_per_atom", "band_gap", "bulk_modulus", "density" [/ARGS_EXAMPLES]
-        hyperparameters: [ARGS_BRIEF] Optional dictionary of XGBoost hyperparameters. [/ARGS_BRIEF]
-                        [ARGS_DETAILED] Dictionary containing XGBoost hyperparameters to override default values.
+        hyperparameters: [ARGS_BRIEF] Optional JSON string of XGBoost hyperparameters. [/ARGS_BRIEF]
+                        [ARGS_DETAILED] JSON-encoded string containing XGBoost hyperparameters to override default values.
                         Can include parameters like n_estimators, max_depth, learning_rate, subsample, etc.
                         If None, optimized default parameters will be used.
                         Proper hyperparameter tuning can significantly improve model performance. [/ARGS_DETAILED]
-                        [ARGS_SYNTACTICAL] "{"param_name": value, ...} or None' [/ARGS_SYNTACTICAL]
-                        [ARGS_EXAMPLES] {"n_estimators": 200, "max_depth": 8}, {"learning_rate": 0.05}, None [/ARGS_EXAMPLES]
+                        [ARGS_SYNTACTICAL] "{\"param_name\": value, ...} or None" [/ARGS_SYNTACTICAL]
+                        [ARGS_EXAMPLES] "{\"n_estimators\": 200, \"max_depth\": 8}", "{\"learning_rate\": 0.05}", None [/ARGS_EXAMPLES]
 
     Returns:
         str: [RETURNS_BRIEF] JSON string with comprehensive training results and model performance metrics. [/RETURNS_BRIEF]
@@ -1854,7 +1857,11 @@ def train_xgboost_model(
         }
 
         if hyperparameters:
-            default_params.update(hyperparameters)
+            default_params.update(
+                json.loads(hyperparameters)
+                if isinstance(hyperparameters, str)
+                else hyperparameters
+            )
 
         # Train model
         model = xgb.XGBRegressor(**default_params)
@@ -2092,7 +2099,7 @@ def perform_cross_validation(
     train_data_path: str,
     target_column: str = "formation_energy_per_atom",
     cv_folds: int = 5,
-    hyperparameters: dict | None = None,
+    hyperparameters: str | None = None,
 ) -> str:
     """[BRIEF] Perform k-fold cross-validation to assess model stability and generalization performance. [/BRIEF]
 
@@ -2200,7 +2207,11 @@ def perform_cross_validation(
             "random_state": 42,
         }
         if hyperparameters:
-            default_params.update(hyperparameters)
+            default_params.update(
+                json.loads(hyperparameters)
+                if isinstance(hyperparameters, str)
+                else hyperparameters
+            )
 
         # Create model
         model = xgb.XGBRegressor(**default_params)

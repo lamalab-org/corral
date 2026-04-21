@@ -1,16 +1,18 @@
+import argparse
 import json
+import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from loguru import logger
-from score import (
+from corral_md.score import (
     check_log,
     check_msd,
     check_numerical,
     check_potential_file,
     check_structure,
 )
-from tools import (
+from corral_md.tools import (
     convert_structure_to_lammps_data,
     execute_python_script,
     get_nth_run_log,
@@ -20,6 +22,7 @@ from tools import (
     run_lammps,
     visualisation_tool,
 )
+from loguru import logger
 
 from corral.backend.env import Environment
 from corral.backend.server import run_server
@@ -36,6 +39,8 @@ from corral.utils.io_tools import (
     ReadFileTool,
     WriteFileTool,
 )
+
+BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/corral_md")
 
 SCORING_FUNCTIONS = {
     "check_numerical": check_numerical,
@@ -65,7 +70,11 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
 
 
 def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefinition]:
-    task_files = json_path.glob("*.json")
+    json_path = Path(json_path)
+    if not json_path.exists():
+        raise FileNotFoundError(f"Task definition path not found: {json_path}")
+
+    task_files = sorted(json_path.glob("*.json")) if json_path.is_dir() else [json_path]
 
     if not task_files:
         raise FileNotFoundError(f"No task definition files found in: {json_path}")
@@ -75,7 +84,10 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
     for task_file in task_files:
         with task_file.open() as f:
             task_data = json.load(f)
-        for task_id, task_info in task_data.items():
+
+        items = {task["id"]: task for task in task_data}
+
+        for task_id, task_info in items.items():
             # Get the scoring function by name from the registry
             scoring_fn_name = task_info.get("scoring_function", "default")
             scoring_params = task_info.get("scoring_params", {})
@@ -297,10 +309,9 @@ Required submission format:
 
 
 def create_environments(
-    work_dir: str,
-    subtask_level: bool,
-    environment: str,
-    level: str,
+    work_dir: str = BASE_WORK_DIR,
+    subtask_level: bool = False,
+    level: int = 1,
     taskgroup_common_tools: dict[str, Tool] | None = None,
 ) -> dict[str, TaskGroupEnvironment]:
     logger.info("Creating environments for MD")
@@ -310,24 +321,26 @@ def create_environments(
         json_path = (
             Path(__file__).parent.parent.parent
             / "environments"
-            / environment
-            / level
-            / "subtasks"
+            / f"level_{level}"
+            / "subtasks_json"
         )
     else:
         json_path = (
             Path(__file__).parent.parent.parent
             / "environments"
-            / environment
-            / level
-            / "tasks"
+            / f"level_{level}"
+            / "tasks_json"
         )
+
+    if not json_path.exists():
+        logger.error(f"Task config not found: {json_path}")
+        sys.exit(1)
 
     # Load tasks from JSON
     tasks = load_tasks_from_json(json_path, work_dir)
 
     # Create task group
-    group_id = f"MD-{environment}"
+    group_id = f"MD-level_{level}"
     logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
     task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
@@ -367,23 +380,39 @@ def create_environments(
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", required=True)
-    parser.add_argument("--port", type=int, required=True)
+    parser = argparse.ArgumentParser(description="Corral MD Benchmark Server")
     parser.add_argument(
-        "--subtask_level", type=lambda x: x.lower() == "true", required=True
+        "--host",
+        type=str,
+        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
+        help="Host to run the server on",
     )
-    parser.add_argument("--environment", required=True)
-    parser.add_argument("--level", required=True)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("CORRAL_PORT", "8000")),
+        help="Port to run the server on",
+    )
+    parser.add_argument(
+        "--level",
+        type=int,
+        default=1,
+        help="Level of the benchmark to run",
+    )
+    parser.add_argument(
+        "--subtask_level",
+        type=bool,
+        default=False,
+        help="Whether to use subtask level",
+    )
     args = parser.parse_args()
+
+    Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
 
     # Create all environments with file system tools
     environments = create_environments(
-        work_dir=args.dir,
+        work_dir=BASE_WORK_DIR,
         subtask_level=args.subtask_level,
-        environment=args.environment,
         level=args.level,
     )
 
@@ -396,5 +425,6 @@ if __name__ == "__main__":
 
     run_server(
         environments=environments,
+        host=args.host,
         port=args.port,
     )

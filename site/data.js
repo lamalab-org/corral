@@ -1,5 +1,5 @@
 const CORRAL_DATA = {
-  "AFM Operation": {
+  "AFM Experiment Execution": {
     "description": "Analyze and interpret atomic force microscopy data for nanoscale surface characterization. Tools provide image analysis and data processing capabilities for topographical and mechanical property measurements.",
     "tools": [
       {
@@ -1202,7 +1202,7 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "Surface Construction": {
+  "Adsorption Surface Construction": {
     "description": "Build adsorbate-slab configurations from bulk crystal structures and molecules for heterogeneous catalysis studies. Tools integrate with the Materials Project to retrieve structures, generate surface slabs for specified Miller indices, and enumerate adsorption sites.",
     "tools": [
       {
@@ -3865,7 +3865,7 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "ML Property Prediction": {
+  "ML-based Property Prediction": {
     "description": "Assemble a complete machine-learning pipeline to predict formation energies of material polymorphs. Tools cover data retrieval from the Materials Project, dataset filtering, tabular feature engineering, XGBoost model training, evaluation, and cross-validation.",
     "tools": [
       {
@@ -11893,7 +11893,7 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "Spectra Elucidation": {
+  "Spectroscopic Structure Elucidation": {
     "description": "Determine the molecular structure of an unknown compound by requesting and interpreting spectroscopic data. Available tools include mass spectrometry, NMR, HSQC, and IR spectroscopy, alongside reference databases for chemical shifts, isotope distributions, and degree-of-unsaturation calculations.",
     "tools": [
       {
@@ -26745,7 +26745,7 @@ const CORRAL_DATA = {
       }
     ]
   },
-  "Qualitative Analysis": {
+  "Inorganic Qualitative Analysis": {
     "description": "The agent identifies unknown cations in solution through systematic wet-laboratory procedures. Tools include adding reagents, performing flame tests, measuring pH, centrifuging, decanting, heating, and observing colour and precipitate changes. The environment simulates real chemical equilibria; observations are computed from thermodynamic data rather than scripted. Three scopes increase the number of candidate ions from 3–5 common species with distinct chemistry to 15 or more including ions with overlapping reactivity, progressively requiring the agent to design discriminating experimental sequences rather than follow a decision tree. Sample volume is limited, penalizing redundant experiments.",
     "tools": [
       {

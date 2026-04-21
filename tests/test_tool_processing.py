@@ -415,3 +415,68 @@ class TestEnvironmentPreprocessing:
 
         # Ensure no cross-contamination
         assert result1["data"] != result2["data"]
+
+
+class TestGetAvailableTools:
+    """Tests for Environment.get_available_tools()"""
+
+    def setup_method(self):
+        self.env = TestEnv(
+            task_id="test_task", base_work_dir="/tmp/test", fs_manager=None
+        )
+
+    def _make_tool(self, name: str, openai_format: dict) -> Mock:
+        t = Mock(spec=Tool)
+        t.name = name
+        t.get_openai_tool_format.return_value = openai_format
+        return t
+
+    def test_returns_empty_list_when_no_tools(self):
+        """get_available_tools returns an empty list when no tools have been added."""
+        assert self.env.get_available_tools() == []
+
+    def test_returns_openai_format_for_single_tool(self):
+        """get_available_tools delegates to each tool's get_openai_tool_format."""
+        expected = {
+            "type": "function",
+            "function": {
+                "name": "my_tool",
+                "description": "Does something",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        self.env.tools["my_tool"] = self._make_tool("my_tool", expected)
+
+        result = self.env.get_available_tools()
+
+        assert result == [expected]
+
+    def test_returns_one_entry_per_tool(self):
+        """get_available_tools returns one entry for each registered tool."""
+        for name in ("tool_a", "tool_b", "tool_c"):
+            fmt = {
+                "type": "function",
+                "function": {"name": name, "description": "", "parameters": {}},
+            }
+            self.env.tools[name] = self._make_tool(name, fmt)
+
+        result = self.env.get_available_tools()
+
+        assert len(result) == 3
+        names = {entry["function"]["name"] for entry in result}
+        assert names == {"tool_a", "tool_b", "tool_c"}
+
+    def test_each_tool_get_openai_tool_format_called_once(self):
+        """get_available_tools calls get_openai_tool_format exactly once per tool."""
+        mock_tool = self._make_tool(
+            "t",
+            {
+                "type": "function",
+                "function": {"name": "t", "description": "", "parameters": {}},
+            },
+        )
+        self.env.tools["t"] = mock_tool
+
+        self.env.get_available_tools()
+
+        mock_tool.get_openai_tool_format.assert_called_once()

@@ -55,42 +55,53 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
 def load_tasks_from_json(
     json_path: str | Path, work_dir: str
 ) -> dict[str, TaskDefinition]:
-    """Load task definitions from a JSON file.
+    """Load task definitions from a directory of JSON files.
 
     Args:
-        json_path: Path to the JSON file containing task definitions
+        json_path: Path to a directory containing JSON files with task definitions.
+                   Each file contains a list of task objects with an "id" field.
         work_dir: Working directory to use for task execution
 
     Returns:
         dictionary of task definitions keyed by task ID
     """
-    if not Path(json_path).exists():
-        raise FileNotFoundError(f"Task definition file not found: {json_path}")
+    json_path = Path(json_path)
+    if not json_path.exists():
+        raise FileNotFoundError(f"Task definition path not found: {json_path}")
 
-    with Path(json_path).open() as f:
-        task_data = json.load(f)
+    task_files = sorted(json_path.glob("*.json")) if json_path.is_dir() else [json_path]
 
     tasks = {}
-    for task_id, task_info in task_data.items():
-        # Get the scoring function by name from the registry
-        scoring_fn_name = task_info.get("scoring_function", "default")
-        scoring_params = task_info.get("scoring_params", {})
-        scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
+    for task_file in task_files:
+        with task_file.open() as f:
+            task_data = json.load(f)
 
-        # Add work_dir to initial input if not already present
-        initial_input = task_info.get("initial_input", {}).copy()
-        if "work_dir" not in initial_input:
-            initial_input["work_dir"] = work_dir
+        # Support both list format (new) and dict format (legacy)
+        if isinstance(task_data, list):
+            items = {task["id"]: task for task in task_data}
+        else:
+            items = task_data
 
-        tasks[task_id] = TaskDefinition(
-            name=task_info["name"],
-            description=task_info["description"],
-            tools=task_info.get("tools", []),
-            scoring_fn=scoring_fn,
-            submission_format=task_info.get("submission_format", ""),
-            input_from_tasks=task_info.get("input_from_tasks", []),
-            initial_input=initial_input,
-        )
+        for task_id, task_info in items.items():
+            # Get the scoring function by name from the registry
+            scoring_fn_name = task_info.get("scoring_function", "default")
+            scoring_params = task_info.get("scoring_params", {})
+            scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
+
+            # Add work_dir to initial input if not already present
+            initial_input = task_info.get("initial_input", {}).copy()
+            if "work_dir" not in initial_input:
+                initial_input["work_dir"] = work_dir
+
+            tasks[task_id] = TaskDefinition(
+                name=task_info["name"],
+                description=task_info["description"],
+                tools=task_info.get("tools", []),
+                scoring_fn=scoring_fn,
+                submission_format=task_info.get("submission_format", ""),
+                input_from_tasks=task_info.get("input_from_tasks", []),
+                initial_input=initial_input,
+            )
 
     return tasks
 
@@ -117,7 +128,8 @@ def create_environments(
     tasks = load_tasks_from_json(task_json_path, work_dir)
 
     # Create task group
-    group_id = Path(task_json_path).stem  # Use filename (without extension) as group ID
+    task_json_path = Path(task_json_path)
+    group_id = task_json_path.name if task_json_path.is_dir() else task_json_path.stem
     logger.info(f"Creating task group with ID: {group_id}")
     task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
@@ -185,17 +197,36 @@ if __name__ == "__main__":
     if args.tasks_json_path:
         tasks_json_path = args.tasks_json_path
     elif args.mode:
-        tasks_json_path = (
-            Path(__file__).resolve().parents[2]
-            / "config"
-            / args.mode
-            / f"{args.mode}.json"
-        )
+        if args.mode == "single":
+            tasks_json_path = (
+                Path(__file__).resolve().parents[2]
+                / "environments"
+                / "level_1"
+                / "tasks_json"
+            )
+        elif args.mode == "chained":
+            tasks_json_path = (
+                Path(__file__).resolve().parents[2]
+                / "environments"
+                / "level_1"
+                / "subtasks_json"
+            )
+        else:
+            raise ValueError(f"Unsupported mode: {args.mode}")
+
         if not Path(tasks_json_path).exists():
             logger.error(f"Task config not found: {tasks_json_path}")
             sys.exit(1)
     else:
-        parser.error("Either tasks_json_path or --mode must be provided")
+        tasks_json_path = (
+            Path(__file__).resolve().parents[2]
+            / "environments"
+            / "level_1"
+            / "tasks_json"
+        )
+        if not Path(tasks_json_path).exists():
+            logger.error(f"Task config not found: {tasks_json_path}")
+            sys.exit(1)
 
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)

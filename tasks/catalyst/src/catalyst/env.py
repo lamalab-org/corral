@@ -158,26 +158,73 @@ def create_environments(
 
 
 if __name__ == "__main__":
-    # --- Argument Parsing ---
+    import argparse as _argparse
 
-    # Determine tasks file path (optional: for backwards compat with direct JSON path)
-    local_dir = None
-    if len(sys.argv) > 1:
-        local_dir = sys.argv[1]
+    parser = _argparse.ArgumentParser(description="Catalyst Benchmark Server")
+    parser.add_argument(
+        "tasks_json_path",
+        nargs="?",
+        default=None,
+        help="Path to tasks JSON file or directory (optional if --mode is provided)",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
+        help="Host to run the server on",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("CORRAL_PORT", "8000")),
+        help="Port to run the server on",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["single", "chained"],
+        default=None,
+        help="Task mode (auto-discovers environments/level_1/{tasks_json|subtasks_json})",
+    )
+    args = parser.parse_args()
 
-    # Determine port number
-    if len(sys.argv) > 2:
-        try:
-            port = int(sys.argv[2])
-        except ValueError:
-            logger.error(
-                f"Error: Invalid port number provided: {sys.argv[2]}. Using default port."
+    # Resolve tasks JSON path
+    if args.tasks_json_path:
+        local_dir = args.tasks_json_path
+    elif args.mode:
+        if args.mode == "single":
+            local_dir = (
+                Path(__file__).resolve().parents[2]
+                / "environments"
+                / "level_1"
+                / "tasks_json"
             )
-            port = int(os.environ.get("CORRAL_PORT", "8000"))
-    else:
-        port = int(os.environ.get("CORRAL_PORT", "8000"))
+        elif args.mode == "chained":
+            local_dir = (
+                Path(__file__).resolve().parents[2]
+                / "environments"
+                / "level_1"
+                / "subtasks_json"
+            )
+        else:
+            raise ValueError(f"Unsupported mode: {args.mode}")
 
-    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
+        if not Path(local_dir).exists():
+            logger.error(f"Task config not found: {local_dir}")
+            sys.exit(1)
+    else:
+        local_dir = (
+            Path(__file__).resolve().parents[2]
+            / "environments"
+            / "level_1"
+            / "tasks_json"
+        )
+        if not Path(local_dir).exists():
+            logger.error(f"Task config not found: {local_dir}")
+            sys.exit(1)
+
+    host = args.host
+    port = args.port
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
 

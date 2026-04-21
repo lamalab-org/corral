@@ -1,6 +1,7 @@
 from corral.backend.schema import ToolArgument
 from corral.backend.tool import (
     Tool,
+    arguments_to_schema,
     tool,
 )
 
@@ -151,11 +152,13 @@ class UnitConverterTool(Tool):
         super().__init__(
             name="unit_converter",
             description="Convert between different units",
-            arguments=[
-                ToolArgument("value", "float", "Value to convert"),
-                ToolArgument("from_unit", "str", "Original unit (m, kg, s)"),
-                ToolArgument("to_unit", "str", "Target unit (cm, g, ms)"),
-            ],
+            params_json_schema=arguments_to_schema(
+                [
+                    ToolArgument("value", "float", "Value to convert"),
+                    ToolArgument("from_unit", "str", "Original unit (m, kg, s)"),
+                    ToolArgument("to_unit", "str", "Target unit (cm, g, ms)"),
+                ]
+            ),
         )
 
     def execute(self, value: float, from_unit: str, to_unit: str) -> str:

@@ -32,16 +32,21 @@ class MockBenchmarkInterface:
         self.available_tools = {
             "tools": [
                 {
-                    "name": "test_tool",
-                    "description": "A test tool",
-                    "arguments": [
-                        {
-                            "name": "query",
-                            "type": "str",
-                            "description": "Test query",
-                            "required": True,
-                        }
-                    ],
+                    "type": "function",
+                    "function": {
+                        "name": "test_tool",
+                        "description": "A test tool",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "Test query",
+                                }
+                            },
+                            "required": ["query"],
+                        },
+                    },
                 }
             ]
         }
