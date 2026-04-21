@@ -5,15 +5,14 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from loguru import logger
-from score import (
+from corral_md.score import (
     check_log,
     check_msd,
     check_numerical,
     check_potential_file,
     check_structure,
 )
-from tools import (
+from corral_md.tools import (
     convert_structure_to_lammps_data,
     execute_python_script,
     get_nth_run_log,
@@ -23,6 +22,7 @@ from tools import (
     run_lammps,
     visualisation_tool,
 )
+from loguru import logger
 
 from corral.backend.env import Environment
 from corral.backend.server import run_server
