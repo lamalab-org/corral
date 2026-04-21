@@ -147,7 +147,7 @@ ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
         "[E -contradicts-> H, no updates_to/competes_with]."
     ),
     "premature_commitment": (
-        "Hypothesis committed without intermediate testing "
+        "Commitment (explicit or inferred) to a hypothesis without testing it first "
         "[J -informs-> C, J -informs-> H, H with no tests]."
     ),
     "uninformative_test": ("Test produces no observed evidence [T with no E]."),
@@ -156,11 +156,11 @@ ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
     ),
     "disconnected_evidence": ("Evidence node with no edges [Isolated E]."),
     "one_sided_confirmation": (
-        "Commitment reached without considering contradicting evidence "
+        "Commitment (explicit or inferred) without contradicting evidence "
         "[J -informs-> C, J -informs-> H, H has support but no contradicts]."
     ),
     "precommitted_test_plan": (
-        "A commitment is done before evidence collection begins "
+        "Commitment (explicit or inferred) before evidence collection "
         "[C before E; then H -tests-> T]."
     ),
 }
@@ -2707,28 +2707,57 @@ def _split_description(desc: str) -> tuple[str, str]:
 # Each entry is (merge_label | None, [pattern_keys]).
 # When *merge_label* is not None, \multirow groups the constituent rows.
 _SUBGRAPH_TABLE_ORDER: list[tuple[str | None, list[str]]] = [
-    (None, [SG_REFUTATION_DRIVEN_BELIEF_REVISION]),
     (
-        "Data-first hypothesis",
-        [SG_EXPLORE_THEN_TEST_TRANSITION, SG_EVIDENCE_LED_HYPOTHESIS_GENERATION],
+        "Hypothesis handling",
+        [
+            SG_EVIDENCE_LED_HYPOTHESIS_GENERATION,
+            SG_HYPOTHESIS_RERANKING,
+            SG_REFUTATION_DRIVEN_BELIEF_REVISION,
+            SG_EXPLORE_THEN_TEST_TRANSITION,
+        ],
     ),
-    (None, [SG_HYPOTHESIS_RERANKING]),
-    (None, [SG_CONVERGENT_MULTI_TEST_EVIDENCE]),
     (
-        "Iterative test refinement",
-        [SG_FIXED_HYPOTHESIS_TEST_TUNING, SG_EVIDENCE_GUIDED_TEST_REDESIGN],
+        "Evidence handling",
+        [
+            SG_CONVERGENT_MULTI_TEST_EVIDENCE,
+        ],
+    ),
+    (
+        "Inquiry control",
+        [
+            SG_FIXED_HYPOTHESIS_TEST_TUNING,
+            SG_EVIDENCE_GUIDED_TEST_REDESIGN,
+        ],
     ),
 ]
 
 _ANTIPATTERN_TABLE_ORDER: list[tuple[str | None, list[str]]] = [
-    ("Untested hypothesis", [AP_UNTESTED_CLAIM, AP_PREMATURE_COMMITMENT]),
-    ("Unused evidence", [AP_EVIDENCE_NON_UPTAKE, AP_DISCONNECTED_EVIDENCE]),
-    (None, [AP_UNSUPPORTED_JUDGMENT]),
-    (None, [AP_CONTRADICTION_WITHOUT_REPAIR]),
-    (None, [AP_UNINFORMATIVE_TEST]),
-    ("Absent/Stalled revision", [AP_STALLED_REVISION, AP_FIXED_BELIEF_TRACE]),
-    (None, [AP_ONE_SIDED_CONFIRMATION]),
-    (None, [AP_PRECOMMITTED_TEST_PLAN]),
+    (
+        "Hypothesis handling",
+        [
+            AP_UNTESTED_CLAIM,
+            AP_ONE_SIDED_CONFIRMATION,
+            AP_CONTRADICTION_WITHOUT_REPAIR,
+            AP_PREMATURE_COMMITMENT,
+        ],
+    ),
+    (
+        "Evidence handling",
+        [
+            AP_EVIDENCE_NON_UPTAKE,
+            AP_DISCONNECTED_EVIDENCE,
+            AP_UNSUPPORTED_JUDGMENT,
+            AP_UNINFORMATIVE_TEST,
+        ],
+    ),
+    (
+        "Inquiry control",
+        [
+            AP_FIXED_BELIEF_TRACE,
+            AP_PRECOMMITTED_TEST_PLAN,
+            AP_STALLED_REVISION,
+        ],
+    ),
 ]
 
 
@@ -2743,29 +2772,28 @@ def _emit_group(
     for i, key in enumerate(keys):
         prose, graph_text = _split_description(descriptions[key])
         prose = _latex_escape(prose)
+        name = _pretty_name(key)
+        name_and_desc = rf"\textbf{{{name}}}. {prose}"
         if tikz_patterns and key in tikz_patterns:
             graph = tikz_patterns[key]
         else:
             graph = _latex_escape(graph_text)
-        if n == 1:
-            name = _pretty_name(key)
-            rows.append(rf"{name} & {graph} & {prose} \\")
+        if i == 0:
+            rows.append(
+                rf"\multirow{{{n}}}{{=}}{{{merge_name}}} & {graph} & {name_and_desc} \\"
+            )
         else:
-            if i == 0:
-                rows.append(
-                    rf"\multirow{{{n}}}{{=}}{{{merge_name}}} & {graph} & {prose} \\"
-                )
-            else:
-                rows.append(rf" & {graph} & {prose} \\")
+            rows.append(rf" & {graph} & {name_and_desc} \\")
     return rows
 
 
 def build_productive_motifs_latex() -> str:
     """Return a LaTeX tabularx table with definitions of productive motifs.
 
-    Column layout: Topic (p{2.2cm}), Graph (TikZ picture, c), Description (X).
-    Related patterns share a merged row label via `\\multirow`. Each graph
-    cell contains an inline TikZ diagram from `_TIKZ_SUBGRAPH_PATTERNS`.
+    Column layout: Group (p{2.2cm}), Graph (TikZ picture, c), Name + Description (X).
+    Patterns are grouped by reasoning capability (Hypothesis handling,
+    Evidence handling, Inquiry control) matching the GROUPS structure used
+    in analysis plots. Each graph cell contains an inline TikZ diagram.
 
     Returns:
         A string of LaTeX source for the complete tabularx environment,
@@ -2775,7 +2803,7 @@ def build_productive_motifs_latex() -> str:
     lines.append(_TIKZ_STYLE_DEFS)
     lines.append(r"\begin{tabularx}{\textwidth}{p{2.2cm}cX}")
     lines.append(r"\toprule")
-    lines.append(r"Pattern & Graph & Description \\")
+    lines.append(r"Group & Graph & Description \\")
     lines.append(r"\midrule")
 
     for idx, (merge_name, keys) in enumerate(_SUBGRAPH_TABLE_ORDER):
@@ -2795,9 +2823,10 @@ def build_productive_motifs_latex() -> str:
 def build_reasoning_breakdowns_latex() -> str:
     """Return a LaTeX tabularx table with definitions of reasoning breakdowns.
 
-    Column layout: Topic (X), Graph (TikZ picture, c), Description (X).
-    Related breakdowns share a merged row label via `\\multirow`. Each graph
-    cell contains an inline TikZ diagram from `_TIKZ_ANTIPATTERN_PATTERNS`.
+    Column layout: Group (p{2.2cm}), Graph (TikZ picture, c), Name + Description (X).
+    Patterns are grouped by reasoning capability (Hypothesis handling,
+    Evidence handling, Inquiry control) matching the GROUPS structure used
+    in analysis plots. Each graph cell contains an inline TikZ diagram.
 
     Returns:
         A string of LaTeX source for the complete tabularx environment,
@@ -2805,9 +2834,9 @@ def build_reasoning_breakdowns_latex() -> str:
     """
     lines: list[str] = []
     lines.append(_TIKZ_STYLE_DEFS)
-    lines.append(r"\begin{tabularx}{\textwidth}{XcX}")
+    lines.append(r"\begin{tabularx}{\textwidth}{p{1.6cm}cX}")
     lines.append(r"\toprule")
-    lines.append(r"Pattern & Graph & Description \\")
+    lines.append(r"Group & Graph & Description \\")
     lines.append(r"\midrule")
 
     for idx, (merge_name, keys) in enumerate(_ANTIPATTERN_TABLE_ORDER):
