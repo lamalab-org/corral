@@ -4,7 +4,7 @@ import pytest
 from pydantic import Field
 
 from corral.backend.tool import Tool, tool
-from corral.backend.tool_utils import format_type_annotation
+from corral.backend.tool_utils import format_json_schema_type, format_type_annotation
 
 
 # Sample functions for testing (new Field-based style)
@@ -151,6 +151,91 @@ def test_format_type_annotation():
 
     # Tuple with mixed types
     assert format_type_annotation(tuple[str, int]) == "tuple[str, int]"
+
+
+def test_format_json_schema_type():
+    """Test converting JSON Schema property dicts to human-readable type strings."""
+    assert format_json_schema_type({"type": "string"}) == "string"
+    assert format_json_schema_type({"type": "integer"}) == "integer"
+    assert format_json_schema_type({"type": "number"}) == "number"
+    assert format_json_schema_type({"type": "boolean"}) == "boolean"
+    assert format_json_schema_type({"type": "null"}) == "null"
+
+    assert (
+        format_json_schema_type({"type": "array", "items": {"type": "string"}})
+        == "list[string]"
+    )
+
+    assert format_json_schema_type({"type": "array"}) == "list"
+
+    assert (
+        format_json_schema_type(
+            {
+                "type": "array",
+                "prefixItems": [{"type": "string"}, {"type": "number"}],
+                "minItems": 2,
+                "maxItems": 2,
+            }
+        )
+        == "tuple[string, number]"
+    )
+
+    assert (
+        format_json_schema_type(
+            {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "prefixItems": [{"type": "string"}, {"type": "number"}],
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+            }
+        )
+        == "list[tuple[string, number]]"
+    )
+
+    assert (
+        format_json_schema_type(
+            {
+                "anyOf": [
+                    {"type": "array", "items": {"type": "number"}},
+                    {"type": "null"},
+                ]
+            }
+        )
+        == "list[number] | null"
+    )
+
+    assert (
+        format_json_schema_type(
+            {
+                "type": "string",
+                "enum": ["fast", "slow"],
+            }
+        )
+        == "Literal['fast', 'slow']"
+    )
+
+    assert format_json_schema_type({"type": ["string", "null"]}) == "string | null"
+
+    assert format_json_schema_type({}) == "any"
+
+
+def test_usage_guide_uses_rich_types():
+    """Test that get_usage_guide renders structured types from the JSON schema."""
+
+    @tool
+    def rich_tool(
+        mixture: list[tuple[str, float]] = Field(description="mixture components"),
+        name: str = Field(description="a name"),
+    ) -> str:
+        """A tool with complex types."""
+        return "ok"
+
+    guide = rich_tool.get_usage_guide()
+    assert "list[tuple[string, number]]" in guide
+    assert "string," in guide
 
 
 def test_integration_with_field_annotations():

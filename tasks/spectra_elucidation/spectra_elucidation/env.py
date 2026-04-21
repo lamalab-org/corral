@@ -74,7 +74,7 @@ def load_tasks_from_json(
                 name=data["name"],
                 description=data["input"]["prompt"],
                 tools=data.get("tools", []),
-                scoring_fn=SCORING_FUNCTIONS[str(data["scoring_fn"])],
+                scoring_fn=SCORING_FUNCTIONS[str(data["scoring_function"])],
                 scoring_inputs=data["output"][0]["target"],
                 submission_format=data.get("submission_format", ""),
                 input_from_tasks=input_from_tasks,

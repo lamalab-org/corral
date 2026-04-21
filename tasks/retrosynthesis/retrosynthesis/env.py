@@ -64,7 +64,7 @@ def load_tasks_from_json(
                 name=task["name"],
                 description=task["input"]["prompt"],
                 tools=task.get("tools", []),
-                scoring_fn=SCORING_FUNCTIONS[str(task["scoring_fn"])],
+                scoring_fn=SCORING_FUNCTIONS[str(task["scoring_function"])],
                 scoring_inputs=task["output"][0]["target"],
                 submission_format=task.get("submission_format", ""),
                 input_from_tasks=input_from_tasks,
@@ -199,11 +199,11 @@ def create_rethrosynthesis_environments(
             Path(__file__).parent.parent
             / "environments"
             / f"level_{level}"
-            / "subtasks"
+            / "subtasks_json"
         )
     else:
         json_path = (
-            Path(__file__).parent.parent / "environments" / f"level_{level}" / "tasks"
+            Path(__file__).parent.parent / "environments" / f"level_{level}" / "tasks_json"
         )
     if not json_path.exists():
         raise ValueError(f"Task file {json_path} does not exist.")

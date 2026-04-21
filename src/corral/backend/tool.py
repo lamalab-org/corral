@@ -81,12 +81,17 @@ class Tool:
         for param_name, prop in properties.items():
             raw_type = prop.get("type", "any")
             has_default = "default" in prop
+            is_nullable = any(
+                variant.get("type") == "null" for variant in prop.get("anyOf", [])
+            )
             args.append(
                 ToolArgument(
                     name=param_name,
                     type=raw_type,
                     description=prop.get("description", ""),
-                    required=(param_name in required_set) and not has_default,
+                    required=(param_name in required_set)
+                    and not has_default
+                    and not is_nullable,
                     default=prop.get("default"),
                     choices=prop.get("enum"),
                 )
@@ -193,13 +198,18 @@ class Tool:
 
     def get_usage_guide(self) -> str:
         """Generate a human-readable usage guide for the tool."""
+        from corral.backend.tool_utils import format_json_schema_type
+
+        properties = self._params_json_schema.get("properties", {})
         args_desc = []
         for arg in self.arguments:
+            prop = properties.get(arg.name, {})
+            type_str = format_json_schema_type(prop) if prop else arg.type
             required = (
                 "required" if arg.required else f"optional, default: {arg.default}"
             )
             args_desc.append(
-                f"- {arg.name} ({arg.type}, {required}): {arg.description}"
+                f"- {arg.name} ({type_str}, {required}): {arg.description}"
             )
 
         return f"""Tool: {self.name}
@@ -212,10 +222,16 @@ Arguments:
 def _extract_field_defaults(func: Callable) -> dict[str, Any]:
     """Extract actual default values from parameters that use pydantic.Field.
 
-    When a function parameter has `Field(default=X, ...)` as its default, Python
-    sees the default as a `FieldInfo` object.  This helper returns a mapping of
-    parameter name → real default value for those parameters so that `execute()`
-    can inject them when the caller omits them.
+    When a function parameter has Field(default=X, ...) as its default, Python
+    sees the default as a FieldInfo object. This helper returns a mapping of
+    parameter name to real default value so that execute() can inject them
+    when the caller omits them.
+
+    Args:
+        func: The function whose signature will be inspected.
+
+    Returns:
+        A dict mapping parameter names to their resolved default values.
     """
     from pydantic.fields import FieldInfo
 
@@ -223,7 +239,6 @@ def _extract_field_defaults(func: Callable) -> dict[str, Any]:
     sig = inspect.signature(func)
     for param_name, param in sig.parameters.items():
         if isinstance(param.default, FieldInfo) and param.default.default is not None:
-            # Skip required fields, which use PydanticUndefined instead of a real default.
             from pydantic_core import PydanticUndefined
 
             if param.default.default is not PydanticUndefined:
@@ -236,8 +251,8 @@ def tool(
 ) -> Tool | Callable[[Callable], Tool]:
     """Decorator to convert a function into a Tool.
 
-    Uses the OpenAI Agents SDK `function_tool` under the hood to generate
-    the JSON Schema from the function signature (including `pydantic.Field`
+    Uses the OpenAI Agents SDK function_tool under the hood to generate
+    the JSON Schema from the function signature (including pydantic.Field
     annotations for descriptions, defaults, and constraints).
 
     The function must have:
@@ -245,7 +260,7 @@ def tool(
     2. Type hints for all parameters and the return type.
 
     Parameter metadata (description, choices, defaults) should be declared
-    via `pydantic.Field` default values::
+    via pydantic.Field default values::
 
         from pydantic import Field
         from typing import Literal
@@ -260,13 +275,13 @@ def tool(
             ...
 
     Args:
-        func: The function to convert into a tool.
+        func: The function to convert into a Tool.
         hidden_args: List of parameter names that should be excluded from
             the schema exposed to the agent. Their default values are
             recorded so the environment can inject them at call time.
 
     Returns:
-        A `Tool` instance wrapping the function.
+        A Tool instance wrapping the function.
     """
 
     def decorator(func: Callable) -> Tool:
@@ -275,13 +290,10 @@ def tool(
                 f"Function {func.__name__} must have a docstring describing its purpose."
             )
 
-        # Use the Agents SDK schema so decorator-based tools stay aligned with runtime behavior.
         ft = openai_function_tool(func)
 
-        # Copy the schema before removing hidden arguments or other internal details.
         schema = deepcopy(ft.params_json_schema)
 
-        # Capture hidden argument defaults so the environment can inject them at execution time.
         hidden_args_dict: dict[str, Any] = {}
         if hidden_args:
             sig = inspect.signature(func)
@@ -296,7 +308,6 @@ def tool(
                     if param.default is not inspect.Parameter.empty
                     else None
                 )
-            # Exclude hidden arguments from the schema exposed to the agent.
             hidden_set = set(hidden_args)
             if "properties" in schema:
                 for ha in hidden_set:
@@ -310,7 +321,6 @@ def tool(
             def __init__(self):
                 self._func = func
                 self._openai_function_tool = ft
-                # Resolve FieldInfo defaults once so execute() can apply them consistently.
                 self._field_defaults = _extract_field_defaults(func)
                 super().__init__(
                     name=ft.name,
@@ -320,7 +330,6 @@ def tool(
                 )
 
             def execute(self, **kwargs):
-                # Apply FieldInfo defaults when the caller omits those parameters.
                 for param_name, default_val in self._field_defaults.items():
                     if param_name not in kwargs:
                         kwargs[param_name] = default_val
