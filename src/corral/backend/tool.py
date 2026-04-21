@@ -11,6 +11,30 @@ if TYPE_CHECKING:
     from corral.router.verbosity import ToolVerbosity
 
 
+def arguments_to_schema(arguments: list[ToolArgument]) -> dict[str, Any]:
+    """Convert a list of :class:`ToolArgument` into a JSON Schema dict.
+
+    Useful when migrating legacy class-based tools off the deprecated
+    `arguments=` constructor kwarg: build the schema with this helper and
+    pass it via `params_json_schema=`.
+    """
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    for arg in arguments:
+        prop: dict[str, Any] = {
+            "type": arg.type,
+            "description": arg.description,
+        }
+        if arg.choices is not None:
+            prop["enum"] = arg.choices
+        if arg.default is not None:
+            prop["default"] = arg.default
+        properties[arg.name] = prop
+        if arg.required:
+            required.append(arg.name)
+    return {"type": "object", "properties": properties, "required": required}
+
+
 class Tool:
     """Base class for tools.
 
@@ -28,45 +52,17 @@ class Tool:
         self,
         name: str,
         description: str,
-        arguments: list[ToolArgument] | None = None,
         params_json_schema: dict[str, Any] | None = None,
         hidden_args: dict[str, Any] | None = None,
     ):
         self.name = name
         self.description = description
         self.hidden_args = hidden_args or {}
-
-        # Prefer an explicit schema when one is provided; otherwise derive it from
-        # the ToolArgument list used by class-based tools.
-        if params_json_schema is not None:
-            self._params_json_schema = params_json_schema
-        elif arguments is not None:
-            self._params_json_schema = self._arguments_to_schema(arguments)
-        else:
-            self._params_json_schema = {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            }
-
-    @staticmethod
-    def _arguments_to_schema(arguments: list[ToolArgument]) -> dict[str, Any]:
-        """Convert a list of ToolArgument into a JSON Schema dict."""
-        properties: dict[str, Any] = {}
-        required: list[str] = []
-        for arg in arguments:
-            prop: dict[str, Any] = {
-                "type": arg.type,
-                "description": arg.description,
-            }
-            if arg.choices is not None:
-                prop["enum"] = arg.choices
-            if arg.default is not None:
-                prop["default"] = arg.default
-            properties[arg.name] = prop
-            if arg.required:
-                required.append(arg.name)
-        return {"type": "object", "properties": properties, "required": required}
+        self._params_json_schema = params_json_schema or {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
 
     @property
     def params_json_schema(self) -> dict[str, Any]:
@@ -120,8 +116,6 @@ class Tool:
                         int(value)
                     elif arg.type == "number":
                         float(value)
-                    elif arg.type == "boolean":
-                        isinstance(value, bool)
                 except ValueError:
                     return (
                         False,

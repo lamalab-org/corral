@@ -64,7 +64,7 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
 def load_tasks_from_json(
     json_path: str | Path, work_dir: str | Path
 ) -> dict[str, TaskDefinition]:
-    """Load task definitions from a directory of JSON files.
+    """Load task definitions from several JSON files.
 
     Args:
         json_path: Path to a directory containing JSON files with task definitions.

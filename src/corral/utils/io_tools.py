@@ -6,7 +6,7 @@ import fsspec
 import modal
 
 from corral.backend.schema import ToolArgument
-from corral.backend.tool import Tool
+from corral.backend.tool import Tool, arguments_to_schema
 
 
 class FSManager:
@@ -174,14 +174,16 @@ class ReadFileTool(Tool):
         super().__init__(
             name="read_file",
             description="Read the contents of a file into a string",
-            arguments=[
-                ToolArgument(
-                    name="path",
-                    type="str",
-                    description="Path to the file to read",
-                    required=True,
-                )
-            ],
+            params_json_schema=arguments_to_schema(
+                [
+                    ToolArgument(
+                        name="path",
+                        type="str",
+                        description="Path to the file to read",
+                        required=True,
+                    )
+                ]
+            ),
         )
         self.fs_manager = fs_manager
 
@@ -196,21 +198,23 @@ class ListFilesTool(Tool):
         super().__init__(
             name="list_files",
             description="List files in a directory",
-            arguments=[
-                ToolArgument(
-                    name="path",
-                    type="str",
-                    description="Path to the directory",
-                    required=True,
-                ),
-                ToolArgument(
-                    name="recursive",
-                    type="bool",
-                    description="Whether to list files recursively",
-                    required=False,
-                    default=False,
-                ),
-            ],
+            params_json_schema=arguments_to_schema(
+                [
+                    ToolArgument(
+                        name="path",
+                        type="str",
+                        description="Path to the directory",
+                        required=True,
+                    ),
+                    ToolArgument(
+                        name="recursive",
+                        type="bool",
+                        description="Whether to list files recursively",
+                        required=False,
+                        default=False,
+                    ),
+                ]
+            ),
         )
         self.fs_manager = fs_manager
 
@@ -228,20 +232,22 @@ class WriteFileTool(Tool):
         super().__init__(
             name="write_file",
             description="Write content to a file",
-            arguments=[
-                ToolArgument(
-                    name="path",
-                    type="str",
-                    description="Path to the file to write",
-                    required=True,
-                ),
-                ToolArgument(
-                    name="content",
-                    type="str",
-                    description="Content to write to the file",
-                    required=True,
-                ),
-            ],
+            params_json_schema=arguments_to_schema(
+                [
+                    ToolArgument(
+                        name="path",
+                        type="str",
+                        description="Path to the file to write",
+                        required=True,
+                    ),
+                    ToolArgument(
+                        name="content",
+                        type="str",
+                        description="Content to write to the file",
+                        required=True,
+                    ),
+                ]
+            ),
         )
         self.fs_manager = fs_manager
 
@@ -257,14 +263,16 @@ class FileInfoTool(Tool):
         super().__init__(
             name="file_info",
             description="Get information about a file or directory",
-            arguments=[
-                ToolArgument(
-                    name="path",
-                    type="str",
-                    description="Path to the file or directory",
-                    required=True,
-                )
-            ],
+            params_json_schema=arguments_to_schema(
+                [
+                    ToolArgument(
+                        name="path",
+                        type="str",
+                        description="Path to the file or directory",
+                        required=True,
+                    )
+                ]
+            ),
         )
         self.fs_manager = fs_manager
 
@@ -280,21 +288,23 @@ class CatFilesTool(Tool):
         super().__init__(
             name="cat_files",
             description="Concatenate and display contents of one or more files",
-            arguments=[
-                ToolArgument(
-                    name="paths",
-                    type="list[str]",
-                    description="List of file paths to concatenate",
-                    required=True,
-                ),
-                ToolArgument(
-                    name="separator",
-                    type="str",
-                    description="Separator between file contents",
-                    required=False,
-                    default="\n",
-                ),
-            ],
+            params_json_schema=arguments_to_schema(
+                [
+                    ToolArgument(
+                        name="paths",
+                        type="list[str]",
+                        description="List of file paths to concatenate",
+                        required=True,
+                    ),
+                    ToolArgument(
+                        name="separator",
+                        type="str",
+                        description="Separator between file contents",
+                        required=False,
+                        default="\n",
+                    ),
+                ]
+            ),
         )
         self.fs_manager = fs_manager
 
@@ -323,20 +333,22 @@ class CopyFileTool(Tool):
         super().__init__(
             name="copy_file",
             description="Copy a file from a source to destination",
-            arguments=[
-                ToolArgument(
-                    name="source",
-                    type="str",
-                    description="Source file path",
-                    required=True,
-                ),
-                ToolArgument(
-                    name="destination",
-                    type="str",
-                    description="Destination file path",
-                    required=True,
-                ),
-            ],
+            params_json_schema=arguments_to_schema(
+                [
+                    ToolArgument(
+                        name="source",
+                        type="str",
+                        description="Source file path",
+                        required=True,
+                    ),
+                    ToolArgument(
+                        name="destination",
+                        type="str",
+                        description="Destination file path",
+                        required=True,
+                    ),
+                ]
+            ),
         )
         self.fs_manager = fs_manager
 
@@ -355,21 +367,23 @@ class MkdirTool(Tool):
         super().__init__(
             name="mkdir",
             description="Create a directory. Optionally create parent directories.",
-            arguments=[
-                ToolArgument(
-                    name="path",
-                    type="str",
-                    description="Path of the directory to create",
-                    required=True,
-                ),
-                ToolArgument(
-                    name="create_parents",
-                    type="bool",
-                    description="If true, create parent directories as needed.",
-                    required=False,
-                    default=False,
-                ),
-            ],
+            params_json_schema=arguments_to_schema(
+                [
+                    ToolArgument(
+                        name="path",
+                        type="str",
+                        description="Path of the directory to create",
+                        required=True,
+                    ),
+                    ToolArgument(
+                        name="create_parents",
+                        type="bool",
+                        description="If true, create parent directories as needed.",
+                        required=False,
+                        default=False,
+                    ),
+                ]
+            ),
         )
         self.fs_manager = fs_manager
 
@@ -388,55 +402,57 @@ class GrepTool(Tool):
         super().__init__(
             name="grep",
             description="Search for patterns in files using Python regular expressions",
-            arguments=[
-                ToolArgument(
-                    name="pattern",
-                    type="str",
-                    description="Regular expression pattern to search for",
-                    required=True,
-                ),
-                ToolArgument(
-                    name="path",
-                    type="str",
-                    description="Path to file or directory to search",
-                    required=True,
-                ),
-                ToolArgument(
-                    name="recursive",
-                    type="bool",
-                    description="Search recursively in directories (like grep -r)",
-                    required=False,
-                    default=False,
-                ),
-                ToolArgument(
-                    name="ignore_case",
-                    type="bool",
-                    description="Perform case-insensitive matching (like grep -i)",
-                    required=False,
-                    default=False,
-                ),
-                ToolArgument(
-                    name="line_numbers",
-                    type="bool",
-                    description="Show line numbers for matches (like grep -n)",
-                    required=False,
-                    default=True,
-                ),
-                ToolArgument(
-                    name="context_lines",
-                    type="int",
-                    description="Number of context lines to show before and after each match (like grep -C)",
-                    required=False,
-                    default=0,
-                ),
-                ToolArgument(
-                    name="max_matches",
-                    type="int",
-                    description="Maximum number of matches to return (0 for unlimited)",
-                    required=False,
-                    default=0,
-                ),
-            ],
+            params_json_schema=arguments_to_schema(
+                [
+                    ToolArgument(
+                        name="pattern",
+                        type="str",
+                        description="Regular expression pattern to search for",
+                        required=True,
+                    ),
+                    ToolArgument(
+                        name="path",
+                        type="str",
+                        description="Path to file or directory to search",
+                        required=True,
+                    ),
+                    ToolArgument(
+                        name="recursive",
+                        type="bool",
+                        description="Search recursively in directories (like grep -r)",
+                        required=False,
+                        default=False,
+                    ),
+                    ToolArgument(
+                        name="ignore_case",
+                        type="bool",
+                        description="Perform case-insensitive matching (like grep -i)",
+                        required=False,
+                        default=False,
+                    ),
+                    ToolArgument(
+                        name="line_numbers",
+                        type="bool",
+                        description="Show line numbers for matches (like grep -n)",
+                        required=False,
+                        default=True,
+                    ),
+                    ToolArgument(
+                        name="context_lines",
+                        type="int",
+                        description="Number of context lines to show before and after each match (like grep -C)",
+                        required=False,
+                        default=0,
+                    ),
+                    ToolArgument(
+                        name="max_matches",
+                        type="int",
+                        description="Maximum number of matches to return (0 for unlimited)",
+                        required=False,
+                        default=0,
+                    ),
+                ]
+            ),
         )
         self.fs_manager = fs_manager
 
