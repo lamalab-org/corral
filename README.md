@@ -508,3 +508,16 @@ for task_id, task_result in result.task_results.items():
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE.md) file for details.
+
+## Citation
+
+If you use Corral in your research, please consider citing:
+
+```bibtex
+@article{ríos-garcía2026ai,
+  title   = {AI scientists produce results without reasoning scientifically},
+  author  = {Martiño Ríos-García and Nawaf Alampara and Chandan Gupta and Indrajeet Mandal and Sajid Mannan and Ali Asghar Aghajani and N. M. Anoop Krishnan and Kevin Maik Jablonka},
+  year    = {2026},
+  journal = {arXiv preprint arXiv: 2604.18805}
+}
+```
