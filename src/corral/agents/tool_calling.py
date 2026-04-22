@@ -7,10 +7,7 @@ from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
 from corral.agents.schema import Action
-from corral.agents.utils import (
-    LiteLLMMessage,
-    convert_to_openai_tool_format,
-)
+from corral.agents.utils import LiteLLMMessage
 from corral.router.routes import CorralRouter
 
 
@@ -92,7 +89,6 @@ class ToolCallingAgent(BaseAgent):
         self,
         interface: CorralRouter,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         enable_surrender: bool = False,
@@ -103,7 +99,6 @@ class ToolCallingAgent(BaseAgent):
         Args:
             interface (CorralRouter): The interface to use
             task_id (str): The task ID to solve
-            history (list[LiteLLMMessage]], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
@@ -111,26 +106,26 @@ class ToolCallingAgent(BaseAgent):
         Returns:
             str: The final answer to the task
         """
-        tools = convert_to_openai_tool_format(
-            interface.get_available_tools_for_task(task_id)
-        )
+        tools = interface.get_available_tools_for_task(task_id).get("tools", [])
         # Store tools for logging
         self._available_tools = tools
 
-        if task_prompt is None:
-            task_guide = interface.get_task_prompt(task_id)
+        if self._initial_messages is not None:
+            self.messages = list(self._initial_messages)
         else:
-            task_guide = task_prompt
+            if task_prompt is None:
+                task_guide = interface.get_task_prompt(task_id)
+            else:
+                task_guide = task_prompt
 
-        self.messages = create_prompt(
-            system_prompt=self.system_prompt,
-            user_prompt=self.user_prompt,
-            task_guide=task_guide,
-            history=history,
-            examples=examples,
-            surrender_prompt=self.surrender_prompt,
-            enable_surrender=enable_surrender,
-        )
+            self.messages = create_prompt(
+                system_prompt=self.system_prompt,
+                user_prompt=self.user_prompt,
+                task_guide=task_guide,
+                examples=examples,
+                surrender_prompt=self.surrender_prompt,
+                enable_surrender=enable_surrender,
+            )
 
         # Execute BEFORE_TASK hooks
         self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
@@ -141,7 +136,8 @@ class ToolCallingAgent(BaseAgent):
             # Execute BEFORE_ITERATION hooks
             self._execute_hooks(HookPoint.BEFORE_ITERATION, interface, task_id)
             try:
-                llm_response = self.get_llm_response(tools)
+                full_llm_response = self.get_llm_response(tools)
+                llm_response = full_llm_response
 
                 content = llm_response.content
                 if content:
@@ -153,22 +149,39 @@ class ToolCallingAgent(BaseAgent):
                         if surrender_match:
                             logger.info(f"Agent retiring from task {task_id}")
                             self.messages.append(
-                                LiteLLMMessage(role="assistant", content=content)
+                                LiteLLMMessage(
+                                    role="assistant",
+                                    content=content,
+                                    id=full_llm_response.id,
+                                )
                             )
                             return "GIVE UP"
 
                     final_answer_match = re.search(
-                        r"Final Answer:\s*(.*)", content, re.IGNORECASE
+                        r"Final Answer: (.*)", content, re.DOTALL | re.IGNORECASE
+                    )
+                    self._execute_hooks(
+                        HookPoint.AFTER_ITERATION,
+                        interface,
+                        task_id,
+                        llm_response=full_llm_response,
                     )
                     if final_answer_match:
                         self.messages.append(
-                            LiteLLMMessage(role="assistant", content=content)
+                            LiteLLMMessage(
+                                role="assistant",
+                                content=content,
+                                id=full_llm_response.id,
+                            )
                         )
                         return final_answer_match.group(1).strip()
 
                 tool_calls = llm_response.tool_calls
                 if tool_calls:
-                    self.messages.append(llm_response)
+                    # Append the underlying message object with id from metadata
+                    message_with_id = llm_response.message
+                    message_with_id.id = full_llm_response.id
+                    self.messages.append(message_with_id)
 
                     for called_tool in tool_calls:
                         # Initialize variables for error handling
@@ -215,7 +228,11 @@ class ToolCallingAgent(BaseAgent):
                         )
                 else:
                     self.messages.append(
-                        LiteLLMMessage(role="assistant", content=llm_response.content)
+                        LiteLLMMessage(
+                            role="assistant",
+                            content=llm_response.content,
+                            id=full_llm_response.id,
+                        )
                     )
             except Exception as e:
                 # Append error message but continue with the next iteration

@@ -1,6 +1,7 @@
 import importlib.resources
+import traceback
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Self
 
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import Message
@@ -11,11 +12,13 @@ from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
 from corral.agents.utils import (
     LiteLLMMessage,
+    LLMResponse,
     count_tokens_and_add,
     llm_call,
     save_agent_messages,
 )
 from corral.router.routes import CorralRouter
+from corral.types import BudgetExhaustedError
 
 
 class BaseAgent(ABC):
@@ -83,6 +86,7 @@ class BaseAgent(ABC):
         self.token_usage: dict = {}  # Track token usage per LLM call
         self.hooks = hooks or AgentHooks()
         self._current_iteration = 0  # Track current iteration for hooks
+        self._initial_messages: list[LiteLLMMessage] | None = None
 
         with importlib.resources.path("corral.agents", "") as style_path:
             self.store = PromptStore(f"{style_path}/prompts")
@@ -121,6 +125,33 @@ class BaseAgent(ABC):
         else:
             self.surrender_prompt = None
 
+    @classmethod
+    def from_trace(
+        cls,
+        trace: list[LiteLLMMessage],
+        **init_kwargs,
+    ) -> Self:
+        """Construct an agent pre-loaded with a previous conversation trace.
+
+        This classmethod creates a new agent instance whose message history is
+        initialised from ``trace``.  When the agent's ``run()`` method is
+        called it will use these messages instead of building a fresh prompt,
+        allowing benchmarks to be replayed from saved traces.
+
+        Args:
+            trace: A list of ``LiteLLMMessage`` dicts representing the
+                conversation history from a previous run.
+            **init_kwargs: All remaining keyword arguments are forwarded to
+                the class ``__init__``.
+
+        Returns:
+            A new agent instance with ``_initial_messages`` set to the
+            provided trace.
+        """
+        agent = cls(**init_kwargs)
+        agent._initial_messages = list(trace)
+        return agent
+
     def get_llm_response(self, tools: list[dict[str, Any]] | None = None) -> Any:
         """Get response from the LLM using LiteLLM
 
@@ -128,13 +159,13 @@ class BaseAgent(ABC):
             tools (dict[str, Any], optional): Optional tools/functions for function calling
 
         Returns:
-            Any: The response from the LLM
+            Any: The LLMResponse wrapper containing the message and metadata
         """
         self.messages = count_tokens_and_add(
             self.messages, self.model, self.token_usage.get("total_tokens", 0)
         )
         try:
-            response, usage_info = llm_call(
+            response = llm_call(
                 model=self.model,
                 messages=self.messages,
                 tools=tools,
@@ -144,8 +175,9 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
 
-            # Track token usage
-            self.token_usage = usage_info
+            # Track token usage from metadata
+            if response.usage:
+                self.token_usage = response.usage
 
             return response
 
@@ -163,7 +195,9 @@ class BaseAgent(ABC):
 
             error_message = f"{type(e).__name__}: {e!s}"
 
-            return Message(role="user", content=error_message, tool_calls=[])
+            return LLMResponse(
+                Message(role="user", content=error_message, tool_calls=[])
+            )
 
         except Exception as e:
             logger.error(f"Error getting LLM response: {e}")
@@ -174,7 +208,6 @@ class BaseAgent(ABC):
         self,
         interface: CorralRouter,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         **kwargs,
@@ -182,12 +215,15 @@ class BaseAgent(ABC):
         """
         Run the agent to solve a task
 
-        This method must be implemented by all subclasses
+        This method must be implemented by all subclasses.
+
+        If the agent was created via ``from_trace()``, ``self._initial_messages``
+        will contain the conversation history and should be used instead of
+        building a fresh prompt.
 
         Args:
             interface (BenchmarkInterface): The benchmark interface to use
             task_id (str): The task ID to solve
-            history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             **kwargs: Additional keyword arguments that may include:
@@ -203,13 +239,12 @@ class BaseAgent(ABC):
         self,
         interface: CorralRouter,
         task_id: str,
-        history: list[LiteLLMMessage] | None = None,
         task_prompt: str | None = None,
         examples: list[str] | None = None,
         verbose: bool = False,
         tool_verbosity: str = "brief",
         enable_surrender: bool = False,
-    ) -> tuple[str, dict[str, int]]:
+    ) -> tuple[str, list[dict[str, Any]], dict[str, int]]:
         """Run the agent to solve a task
 
         This method is a wrapper around run to provide a consistent interface
@@ -217,7 +252,6 @@ class BaseAgent(ABC):
         Args:
             interface (BenchmarkInterface): The benchmark interface to use
             task_id (str): The task ID to solve
-            history (list[LiteLLMMessage], optional): The history items to include. Defaults to None.
             task_prompt (str, optional): The task prompt to use. Defaults to None.
             examples (list[str], optional): List with the few-shot examples to use. Defaults to None.
             verbose (bool, optional): Whether to save agent messages. Defaults to False.
@@ -225,18 +259,17 @@ class BaseAgent(ABC):
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
 
         Returns:
-            str: The final answer from the agent
+            tuple[str, list[dict[str, Any]], dict[str, int]]: A tuple containing:
+                - The final answer from the agent
+                - The list of messages exchanged during the task
+                - A dictionary with total token usage information
         """
         self.reset_token_usage()
-
-        if history is None:
-            history = []
 
         try:
             final_answer = self.run(
                 interface,
                 task_id,
-                history,
                 task_prompt,
                 examples,
                 enable_surrender=enable_surrender,
@@ -245,8 +278,29 @@ class BaseAgent(ABC):
             # Check if agent decided to surrender
             if final_answer == "GIVE UP":
                 logger.info(f"Agent surrender from task {task_id}")
-                return "GIVE UP", self.get_total_token_usage()
+                return "GIVE UP", self.messages, self.get_total_token_usage()
 
+            if "Error" in final_answer:
+                logger.error(f"Error in agent response: {final_answer}")
+                return final_answer, self.messages, self.get_total_token_usage()
+
+        except BudgetExhaustedError:
+            # Re-raise to stop the benchmark immediately
+            raise
+        except Exception:
+            full_error = traceback.format_exc()
+            logger.error(f"Error running agent: {full_error}")
+            self.messages.append(
+                LiteLLMMessage(
+                    role="user", content=f"Error running agent: {full_error}"
+                )
+            )
+            return (
+                f"Error running agent: {full_error}",
+                self.messages,
+                self.get_total_token_usage(),
+            )
+        finally:
             if verbose:
                 # Check if agent has stored tools information
                 tools = getattr(self, "_available_tools", None)
@@ -258,14 +312,6 @@ class BaseAgent(ABC):
                     tools=tools,
                     tool_verbosity=tool_verbosity,
                 )
-
-            if "Error" in final_answer:
-                logger.error(f"Error in agent response: {final_answer}")
-                return final_answer, self.get_total_token_usage()
-
-        except Exception as e:
-            logger.error(f"Error running agent: {e}")
-            return f"Error running agent: {e}", self.get_total_token_usage()
 
         message = "The task is to:\n" + self.messages[0]["content"]
         if self.messages[0]["role"] == "system":
@@ -280,19 +326,20 @@ class BaseAgent(ABC):
         )
 
         try:
-            answer = llm_call(
+            response = llm_call(
                 model=self.model,
                 messages=[LiteLLMMessage(role="user", content=prompt)],
                 temperature=0.0,
                 api_endpoint=self.api_endpoint,
+                return_usage=False,  # No need for usage tracking in extractor
                 **self.kwargs,
             )
 
-            return answer.content, self.get_total_token_usage()
+            return response.content, self.messages, self.get_total_token_usage()
 
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
-            return final_answer, self.get_total_token_usage()
+            return final_answer, self.messages, self.get_total_token_usage()
 
     def get_total_token_usage(self) -> dict[str, int]:
         """Calculate total token usage across all LLM calls
@@ -341,6 +388,6 @@ class BaseAgent(ABC):
             interface=interface,
             messages=self.messages,
             iteration=self._current_iteration,
-            **extra_context,
+            iteration_data=extra_context,
         )
         return self.hooks.execute(hook_point, context)

@@ -3,7 +3,7 @@ from collections.abc import Callable, Sequence
 import modal
 from modal import App, Image, Secret, Volume
 
-from corral.backend.tool import Tool, ToolArgument
+from corral.backend.tool import Tool, ToolArgument, arguments_to_schema
 from corral.backend.tool_utils import parse_docstring
 
 MODAL_TOOL_REGISTRY = {}
@@ -20,7 +20,7 @@ class ModalTool(Tool):
         super().__init__(
             name=name,
             description=description,
-            arguments=arguments,
+            params_json_schema=arguments_to_schema(arguments),
         )
         self._modal_func = modal_func
 

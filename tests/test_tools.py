@@ -1,43 +1,36 @@
-from typing import Union
+from typing import Literal, Union
 
 import pytest
+from pydantic import Field
 
 from corral.backend.tool import Tool, tool
-from corral.backend.tool_utils import format_type_annotation
+from corral.backend.tool_utils import format_json_schema_type, format_type_annotation
 
 
-# Sample functions for testing
-def sample_valid_tool(operation: str, x: float, y: float) -> float:
-    """Perform basic math operations.
-
-    Args:
-        operation: Operation to perform (choices: ["add", "subtract", "multiply", "divide"])
-        x: First number to operate on
-        y: Second number to operate on
-
-    Returns:
-        float: Result of the mathematical operation
-    """
+# Sample functions for testing (new Field-based style)
+def sample_valid_tool(
+    operation: Literal["add", "subtract", "multiply", "divide"] = Field(
+        description="Operation to perform"
+    ),
+    x: float = Field(description="First number to operate on"),
+    y: float = Field(description="Second number to operate on"),
+) -> str:
+    """Perform basic math operations."""
     operations = {
         "add": lambda: x + y,
         "subtract": lambda: x - y,
         "multiply": lambda: x * y,
         "divide": lambda: x / y if y != 0 else "Error: Division by zero",
     }
-    return operations[operation]()
+    return str(operations[operation]())
 
 
-def sample_tool_with_defaults(x: float, y: float = 1.0) -> float:
-    """Add two numbers, with optional second number.
-
-    Args:
-        x: First number to add
-        y: Second number to add (defaults to 1.0)
-
-    Returns:
-        float: Sum of the numbers
-    """
-    return x + y
+def sample_tool_with_defaults(
+    x: float = Field(description="First number to add"),
+    y: float = Field(default=1.0, description="Second number to add"),
+) -> str:
+    """Add two numbers, with optional second number."""
+    return str(x + y)
 
 
 # Fixtures
@@ -104,11 +97,6 @@ class TestArgumentValidation:
         ("args", "expected_valid", "error_message"),
         [
             ({"x": 1.0}, False, "Missing required argument"),
-            (
-                {"operation": "add", "x": "not a number", "y": 1.0},
-                False,
-                "Invalid type",
-            ),
             ({"operation": "invalid_op", "x": 1.0, "y": 2.0}, False, "Must be one of"),
         ],
     )
@@ -126,75 +114,12 @@ class TestDocstringValidation:
     def test_missing_docstring(self):
         """Test rejection of functions without docstrings"""
 
-        def no_docstring(x: int) -> int:
-            return x
+        def no_docstring(x: int = Field(description="X")) -> str:
+            return str(x)
 
         with pytest.raises(ValueError) as exc_info:
             tool(no_docstring)
         assert "docstring" in str(exc_info.value)
-
-    def test_missing_args_section(self):
-        """Test rejection of docstrings without Args section"""
-
-        def bad_docs(x: int) -> int:
-            """Just does something."""
-            return x
-
-        with pytest.raises(ValueError) as exc_info:
-            tool(bad_docs)
-        assert "Args" in str(exc_info.value)
-
-    def test_missing_type_hints(self):
-        """Test rejection of functions without type hints"""
-
-        def no_types(x, y):
-            """Do something.
-
-            Args:
-                x: First number
-                y: Second number
-            """
-            return x + y
-
-        with pytest.raises(TypeError) as exc_info:
-            tool(no_types)
-        assert "type hints" in str(exc_info.value)
-
-    @pytest.mark.parametrize("missing_param", ["x", "y", "operation"])
-    def test_missing_parameter_docs(self, missing_param):
-        """Test rejection of missing parameter documentation"""
-        params = {
-            "operation": "Math operation",
-            "x": "First number",
-            "y": "Second number",
-        }
-
-        # Remove the specified parameter's documentation
-        del params[missing_param]
-
-        # Create docstring with missing parameter
-        arg_docs = []
-        for param, desc in params.items():
-            arg_docs.append(f"{param}: {desc}")
-
-        docstring = """Do math.
-
-        Args:
-            {}
-
-        Returns:
-            float: The result
-        """.format("\n        ".join(arg_docs))
-
-        def test_func(operation: str, x: float, y: float) -> float:
-            pass
-
-        # Assign the docstring
-        test_func.__doc__ = docstring
-
-        with pytest.raises(ValueError) as exc_info:
-            tool(test_func)
-        assert "Missing documentation for parameters" in str(exc_info.value)
 
 
 def test_format_type_annotation():
@@ -228,34 +153,112 @@ def test_format_type_annotation():
     assert format_type_annotation(tuple[str, int]) == "tuple[str, int]"
 
 
-def test_integration_with_actual_docstring():
-    """Test with a docstring similar to the original function.
+def test_format_json_schema_type():
+    """Test converting JSON Schema property dicts to human-readable type strings."""
+    assert format_json_schema_type({"type": "string"}) == "string"
+    assert format_json_schema_type({"type": "integer"}) == "integer"
+    assert format_json_schema_type({"type": "number"}) == "number"
+    assert format_json_schema_type({"type": "boolean"}) == "boolean"
+    assert format_json_schema_type({"type": "null"}) == "null"
 
-    This test verifies that a function with union types like `list[float] | None`
-    is properly parsed and the tool is correctly created with appropriate
-    type information.
+    assert (
+        format_json_schema_type({"type": "array", "items": {"type": "string"}})
+        == "list[string]"
+    )
+
+    assert format_json_schema_type({"type": "array"}) == "list"
+
+    assert (
+        format_json_schema_type(
+            {
+                "type": "array",
+                "prefixItems": [{"type": "string"}, {"type": "number"}],
+                "minItems": 2,
+                "maxItems": 2,
+            }
+        )
+        == "tuple[string, number]"
+    )
+
+    assert (
+        format_json_schema_type(
+            {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "prefixItems": [{"type": "string"}, {"type": "number"}],
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+            }
+        )
+        == "list[tuple[string, number]]"
+    )
+
+    assert (
+        format_json_schema_type(
+            {
+                "anyOf": [
+                    {"type": "array", "items": {"type": "number"}},
+                    {"type": "null"},
+                ]
+            }
+        )
+        == "list[number] | null"
+    )
+
+    assert (
+        format_json_schema_type(
+            {
+                "type": "string",
+                "enum": ["fast", "slow"],
+            }
+        )
+        == "Literal['fast', 'slow']"
+    )
+
+    assert format_json_schema_type({"type": ["string", "null"]}) == "string | null"
+
+    assert format_json_schema_type({}) == "any"
+
+
+def test_usage_guide_uses_rich_types():
+    """Test that get_usage_guide renders structured types from the JSON schema."""
+
+    @tool
+    def rich_tool(
+        mixture: list[tuple[str, float]] = Field(description="mixture components"),
+        name: str = Field(description="a name"),
+    ) -> str:
+        """A tool with complex types."""
+        return "ok"
+
+    guide = rich_tool.get_usage_guide()
+    assert "list[tuple[string, number]]" in guide
+    assert "string," in guide
+
+
+def test_integration_with_field_annotations():
+    """Test with Field annotations and union types.
+
+    This test verifies that a function with complex types like `list[float] | None`
+    is properly handled and the tool is correctly created.
     """
 
     @tool
     def test_function(
-        slab_cif: str,
-        adsorbate_cif: str,
-        height: float = 2.0,
-        site: list[float] | None = None,
+        slab_cif: str = Field(description="CIF string of the slab."),
+        adsorbate_cif: str = Field(description="CIF string of the adsorbate."),
+        height: float = Field(
+            default=2.0,
+            description="Height above the slab surface where the adsorbate should be placed.",
+        ),
+        site: list[float] | None = Field(
+            default=None,
+            description="Optional fractional coordinate [x, y, z] for placement.",
+        ),
     ) -> str:
-        """
-        Place an adsorbate on a slab at a specified adsorption site.
-        If no site is specified, choose one from the top sites automatically.
-
-        Args:
-            slab_cif: CIF string of the slab.
-            adsorbate_cif: CIF string of the adsorbate.
-            height: Height (Å) above the slab surface where the adsorbate should be placed.
-            site: Optional fractional coordinate [x, y, z] for placement.
-                If None, the first top site will be used.
-        Returns:
-            str: CIF string of the combined structure.
-        """
+        """Place an adsorbate on a slab at a specified adsorption site."""
         return "Test result"
 
     # Verify all arguments were correctly parsed
@@ -266,15 +269,6 @@ def test_integration_with_actual_docstring():
     assert "adsorbate_cif" in args
     assert "height" in args
     assert "site" in args
-
-    # Check specific properties of the site parameter
-    site_param = args["site"]
-    expected_type = format_type_annotation(list[float] | None)
-
-    # Then make the assertion strict
-    assert (
-        site_param.type == expected_type
-    ), f"Expected type '{expected_type}', got '{site_param.type}'"
 
     # Verify the docstring description was properly captured
     assert "place an adsorbate on a slab" in test_function.description.lower()
@@ -342,11 +336,11 @@ def test_tool_for_mcp_with_choices():
     """Test MCP conversion with parameter choices"""
 
     @tool
-    def tool_with_choices(mode: str) -> str:
+    def tool_with_choices(mode: Literal["fast", "accurate", "balanced"]) -> str:
         """Tool with restricted parameter values
 
         Args:
-            mode: Operation mode (choices: ["fast", "accurate", "balanced"])
+            mode: Operation mode
 
         Returns:
             Result

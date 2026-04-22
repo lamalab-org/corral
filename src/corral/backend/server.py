@@ -1,11 +1,16 @@
 from collections.abc import Mapping
+from copy import deepcopy
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from loguru import logger
 
 from corral.backend.env import Environment
-from corral.backend.schema import ToolRequest, TrialCompletionResponse
+from corral.backend.schema import (
+    ToLatexRequest,
+    ToolRequest,
+    TrialCompletionResponse,
+)
 from corral.router.verbosity import (
     ToolVerbosity,
     VerbosityConfig,
@@ -69,7 +74,8 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         """Get the task prompt for the agent"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
-        return {"prompt": environments[task_id].get_task_prompt()}
+        env = environments[task_id]
+        return {"prompt": env.get_task_prompt()}
 
     @app.get("/tasks/{task_id}/guide")
     def get_environment_guide(
@@ -114,11 +120,10 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         verbosity: ToolVerbosity | None = None,
     ):
         """
-        Get available tools for a task, returning a structured JSON object.
+        Get available tools for a task in OpenAI function-calling format.
 
-        This endpoint provides tool definitions in a format compatible with modern
-        LLM function-calling APIs. The structure of the returned argument
-        dictionaries will vary based on the requested verbosity level.
+        Returns tool definitions directly usable with LLM function-calling APIs.
+        Descriptions are filtered based on the requested verbosity level.
         """
         if verbosity is None:
             verbosity = Query(
@@ -130,44 +135,36 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         env = environments[task_id]
         tools_info = []
 
-        for tool in env.tools.values():
+        for tool_obj in env.tools.values():
             filtered_description = VerbosityConfig.filter_tool_description(
-                tool.description, verbosity
+                tool_obj.description, verbosity
             )
 
-            structured_args = []
-            for arg in tool.arguments:
-                # Conditionally build the argument dictionary based on verbosity.
-                if verbosity == ToolVerbosity.MINIMAL:
-                    # For MINIMAL, provide only the essential keys.
-                    structured_args.append(
-                        {
-                            "name": arg.name,
-                            "type": arg.type,
-                            "required": arg.required,
-                        }
-                    )
-                else:
-                    # For FULL (or other levels), provide all details.
-                    filtered_arg_desc = VerbosityConfig.filter_argument_description(
-                        arg.description, verbosity
-                    )
-                    structured_args.append(
-                        {
-                            "name": arg.name,
-                            "type": arg.type,
-                            "description": filtered_arg_desc,
-                            "required": arg.required,
-                            "default": arg.default,
-                            "choices": arg.choices,
-                        }
-                    )
+            schema = deepcopy(tool_obj.params_json_schema)
+            schema.pop("additionalProperties", None)
+            schema.pop("title", None)
+
+            # Filter argument descriptions based on verbosity
+            if verbosity == ToolVerbosity.MINIMAL:
+                for prop in schema.get("properties", {}).values():
+                    prop.pop("description", None)
+            else:
+                for prop in schema.get("properties", {}).values():
+                    if "description" in prop:
+                        prop["description"] = (
+                            VerbosityConfig.filter_argument_description(
+                                prop["description"], verbosity
+                            )
+                        )
 
             tools_info.append(
                 {
-                    "name": tool.name,
-                    "description": filtered_description,
-                    "arguments": structured_args,
+                    "type": "function",
+                    "function": {
+                        "name": tool_obj.name,
+                        "description": filtered_description,
+                        "parameters": schema,
+                    },
                 }
             )
 
@@ -286,6 +283,46 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             "task_id": task_id,
             "trial_id": env.state.trial_id,
         }
+
+    @app.post("/tasks/{task_id}/latex")
+    def generate_latex(task_id: str, request: ToLatexRequest):
+        """Generate LaTeX documentation for this task
+
+        Args:
+            task_id: The task identifier
+            request: LaTeX generation parameters including:
+                - output_dir: Directory for output .tex files
+                - level: Task level identifier (e.g., 1, 2, "advanced")
+                - env_name: Optional environment name (e.g., "afm", "catalyst")
+                - task_name: Optional custom name for the task
+
+        Returns:
+            Paths to the generated .tex files (task_path, tools_path, and scoring_path)
+        """
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        env = environments[task_id]
+
+        try:
+            task_path, tools_path, scoring_path = env.to_latex(
+                output_dir=request.output_dir,
+                level=request.level,
+                env_name=request.env_name,
+                task_name=request.task_name,
+                verbosity=request.verbosity,
+            )
+            return {
+                "status": "success",
+                "task_id": task_id,
+                "output_path": task_path,
+                "tools_output_path": tools_path,
+                "scoring_output_path": scoring_path,
+            }
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to generate LaTeX: {e!s}"
+            ) from e
 
     return app
 

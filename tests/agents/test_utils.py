@@ -8,15 +8,11 @@ import pytest
 
 from corral.agents.utils import (
     RETRY_EXCEPTIONS,
-    TYPE_MAPPING,
     LiteLLMMessage,
-    _parse_argument_string_to_dict,
+    LLMResponse,
     before_sleep_loguru,
-    convert_dict_arg,
-    convert_to_openai_tool_format,
     format_examples,
     llm_call,
-    parse_string_argument,
     save_agent_messages,
     serialize_messages,
 )
@@ -28,12 +24,20 @@ from .conftest import MockFunction, MockToolCall
 class MockLiteLLMMessage:
     """Mock message class for LiteLLM responses."""
 
+    def __init__(self):
+        self.role = "assistant"
+        self.content = "This is a response"
+        self.tool_call_id = None
+        self.name = None
+        self.reasoning_content = None
+
 
 class MockLiteLLMChoice:
     """Mock choice class for LiteLLM responses."""
 
     def __init__(self):
         self.message = MockLiteLLMMessage()
+        self.logprobs = None
 
 
 class MockLiteLLMResponse:
@@ -41,8 +45,9 @@ class MockLiteLLMResponse:
 
     def __init__(self, include_usage=False):
         self.choices = [MockLiteLLMChoice()]
-        if include_usage:
-            self.usage = MockLiteLLMUsage()
+        self.id = "mock_response_id"
+        # Always have usage attribute, but set to None if not included
+        self.usage = MockLiteLLMUsage() if include_usage else None
 
 
 class MockLiteLLMUsage:
@@ -96,32 +101,14 @@ class MockSerializableMessage:
         tool_calls=None,
         tool_call_id=None,
         name=None,
+        msg_id=None,
     ):
         self.role = role
         self.content = content
         self.tool_calls = tool_calls or []
         self.tool_call_id = tool_call_id
         self.name = name
-
-
-def test_type_mapping_functionality():
-    """Test that TYPE_MAPPING correctly maps Python types to JSON types."""
-    # Test that common Python types are correctly mapped
-    test_cases = [
-        ("str", "string"),
-        ("bool", "boolean"),
-        ("int", "integer"),
-        ("float", "number"),
-        ("list[str]", "array"),
-        ("none", "null"),
-        ("dict", "object"),
-    ]
-
-    for python_type, expected_json_type in test_cases:
-        assert TYPE_MAPPING.get(python_type) == expected_json_type
-
-    # Test that unknown types return None (graceful fallback)
-    assert TYPE_MAPPING.get("unknown_type") is None
+        self.id = msg_id
 
 
 def test_retry_exceptions_are_openai_exceptions():
@@ -161,9 +148,11 @@ def test_litellm_message_structure():
         "content": "Hi there",
         "tool_call_id": "call_123",
         "name": "assistant",
+        "id": "msg_123",
     }
     assert msg2["tool_call_id"] == "call_123"
     assert msg2["name"] == "assistant"
+    assert msg2["id"] == "msg_123"
 
 
 def test_llm_call_basic(monkeypatch):
@@ -174,7 +163,11 @@ def test_llm_call_basic(monkeypatch):
 
     result = llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
 
-    assert result == mock_response.choices[0].message
+    # Check that result is LLMResponse wrapper
+    assert isinstance(result, LLMResponse)
+    assert result.message == mock_response.choices[0].message
+    assert result.content == "This is a response"
+    assert result.id == "mock_response_id"  # ID should always be included
     mock_litellm.completion.assert_called_once_with(
         model="gpt-3.5-turbo",
         messages=messages,
@@ -194,7 +187,10 @@ def test_llm_call_with_tools(monkeypatch):
         model="gpt-3.5-turbo", messages=messages, temperature=0.7, tools=tools
     )
 
-    assert result == mock_response.choices[0].message
+    # Check that result is LLMResponse wrapper
+    assert isinstance(result, LLMResponse)
+    assert result.message == mock_response.choices[0].message
+    assert result.id == "mock_response_id"
     mock_litellm.completion.assert_called_once_with(
         model="gpt-3.5-turbo",
         messages=messages,
@@ -215,7 +211,10 @@ def test_llm_call_anthropic_model(monkeypatch):
         model="anthropic/claude-3-sonnet", messages=messages, temperature=0.7
     )
 
-    assert result == mock_response.choices[0].message
+    # Check that result is LLMResponse wrapper
+    assert isinstance(result, LLMResponse)
+    assert result.message == mock_response.choices[0].message
+    assert result.id == "mock_response_id"
     mock_litellm.completion.assert_called_once_with(
         model="anthropic/claude-3-sonnet",
         messages=messages,
@@ -235,14 +234,51 @@ def test_llm_call_with_usage_info(monkeypatch):
         model="gpt-3.5-turbo", messages=messages, temperature=0.7, return_usage=True
     )
 
-    assert isinstance(result, tuple)
-    message, usage_info = result
-    assert message == mock_response.choices[0].message
-    assert usage_info == {
+    # Check that result is LLMResponse wrapper with usage metadata
+    assert isinstance(result, LLMResponse)
+    assert result.message == mock_response.choices[0].message
+    assert result.id == "mock_response_id"
+    assert result.usage == {
         "prompt_tokens": 10,
         "completion_tokens": 20,
         "total_tokens": 30,
     }
+
+
+def test_llm_call_with_logprobs(monkeypatch):
+    """Test llm_call with logprobs=True in kwargs."""
+    mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
+    # Set logprobs on the mock response
+    mock_response.choices[0].logprobs = {"token": "test", "logprob": -0.5}
+
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+
+    result = llm_call(
+        model="gpt-3.5-turbo",
+        messages=messages,
+        temperature=0.7,
+        logprobs=True,
+        top_logprobs=20,
+    )
+
+    # Check that result includes logprobs when requested
+    assert isinstance(result, LLMResponse)
+    assert result.logprobs == {"token": "test", "logprob": -0.5}
+    assert result.id == "mock_response_id"
+
+
+def test_llm_call_without_logprobs(monkeypatch):
+    """Test llm_call without logprobs (default behavior)."""
+    mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
+
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+
+    result = llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
+
+    # Check that result does NOT include logprobs when not requested
+    assert isinstance(result, LLMResponse)
+    assert result.logprobs is None
+    assert result.id == "mock_response_id"
 
 
 def test_llm_call_exception_handling(monkeypatch):
@@ -290,438 +326,6 @@ def test_format_examples_multiple_examples():
     assert result == expected
 
 
-def test_convert_dict_arg_basic_string():
-    """Test convert_dict_arg with basic string argument."""
-    arg = {"name": "test_arg", "type": "str", "description": "A test argument"}
-    result = convert_dict_arg(arg)
-    expected = {"description": "A test argument", "type": "string"}
-    assert result == expected
-
-
-def test_convert_dict_arg_list_str():
-    """Test convert_dict_arg with list[str] type."""
-    arg = {"name": "items", "type": "list[str]", "description": "A list of items"}
-    result = convert_dict_arg(arg)
-    expected = {
-        "description": 'A list of items - Provide as an array of strings, e.g., ["item1", "item2"]',
-        "type": "array",
-        "items": {"type": "string"},
-    }
-    assert result == expected
-
-
-def test_convert_dict_arg_with_choices():
-    """Test convert_dict_arg with choices."""
-    arg = {
-        "name": "operation",
-        "type": "str",
-        "description": "Math operation",
-        "choices": ["add", "subtract", "multiply"],
-    }
-    result = convert_dict_arg(arg)
-    expected = {
-        "description": "Math operation",
-        "type": "string",
-        "enum": ["add", "subtract", "multiply"],
-    }
-    assert result == expected
-
-
-def test_convert_dict_arg_with_default():
-    """Test convert_dict_arg with default value."""
-    arg = {
-        "name": "count",
-        "type": "int",
-        "description": "Number of items",
-        "default": 5,
-    }
-    result = convert_dict_arg(arg)
-    expected = {"description": "Number of items", "type": "integer", "default": 5}
-    assert result == expected
-
-
-def test_convert_dict_arg_unknown_type(monkeypatch):
-    """Test convert_dict_arg with unknown type."""
-    mock_logger = setup_mock_logger(monkeypatch)
-
-    arg = {
-        "name": "unknown",
-        "type": "unknown_type",
-        "description": "Unknown type argument",
-    }
-    result = convert_dict_arg(arg)
-    expected = {"description": "Unknown type argument", "type": "string"}
-    assert result == expected
-    assert mock_logger.warning.call_count == 1
-
-
-def test_convert_dict_arg_not_dict():
-    """Test convert_dict_arg with non-dict input."""
-    with pytest.raises(TypeError) as exc_info:
-        convert_dict_arg(cast("dict", "not a dict"))
-
-    assert "Expected argument specification to be a dictionary" in str(exc_info.value)
-
-
-def test_convert_dict_arg_missing_type():
-    """Test convert_dict_arg with missing type."""
-    arg = {"name": "test", "description": "Test argument"}
-    with pytest.raises(ValueError) as exc_info:
-        convert_dict_arg(arg)
-
-    assert "Argument 'type' is missing" in str(exc_info.value)
-
-
-def test_parse_argument_string_required():
-    """Test parsing required argument string."""
-    arg_string = "name (str, required): The name of the item"
-    result = _parse_argument_string_to_dict(arg_string)
-    expected = {
-        "name": "name",
-        "type": "str",
-        "required": True,
-        "description": "The name of the item",
-    }
-    assert result == expected
-
-
-def test_parse_argument_string_optional():
-    """Test parsing optional argument string."""
-    arg_string = "count (int, optional): Number of items"
-    result = _parse_argument_string_to_dict(arg_string)
-    expected = {
-        "name": "count",
-        "type": "int",
-        "required": False,
-        "description": "Number of items",
-    }
-    assert result == expected
-
-
-def test_parse_argument_string_with_default():
-    """Test parsing argument string with default value."""
-    arg_string = "timeout (float, optional, default: 30.0): Timeout in seconds"
-    result = _parse_argument_string_to_dict(arg_string)
-    expected = {
-        "name": "timeout",
-        "type": "float",
-        "required": False,
-        "description": "Timeout in seconds",
-        "default": "30.0",
-    }
-    assert result == expected
-
-
-def test_parse_argument_string_invalid_format(monkeypatch):
-    """Test parsing invalid argument string format."""
-    mock_logger = setup_mock_logger(monkeypatch)
-
-    arg_string = "invalid format"
-    result = _parse_argument_string_to_dict(arg_string)
-    assert result is None
-    assert mock_logger.warning.call_count == 1
-
-
-def test_convert_to_openai_tool_format_basic():
-    """Test basic tool conversion."""
-    tools_dict = {
-        "tools": [
-            {
-                "name": "calculator",
-                "description": "Perform basic math operations",
-                "arguments": [
-                    {
-                        "name": "operation",
-                        "type": "str",
-                        "description": "Math operation",
-                        "required": True,
-                    },
-                    {
-                        "name": "x",
-                        "type": "float",
-                        "description": "First number",
-                        "required": True,
-                    },
-                ],
-            }
-        ]
-    }
-
-    result = convert_to_openai_tool_format(tools_dict)
-
-    assert len(result) == 1
-    tool = result[0]
-    assert tool["type"] == "function"
-    assert tool["function"]["name"] == "calculator"
-    assert tool["function"]["description"] == "Perform basic math operations"
-    assert "operation" in tool["function"]["parameters"]["properties"]
-    assert "x" in tool["function"]["parameters"]["properties"]
-    assert tool["function"]["parameters"]["required"] == ["operation", "x"]
-
-
-def test_convert_to_openai_tool_format_string_arguments():
-    """Test tool conversion with string arguments."""
-    tools_dict = {
-        "tools": [
-            {
-                "name": "test_tool",
-                "description": "A test tool",
-                "arguments": [
-                    "name (str, required): The name",
-                    "count (int, optional): Number of items",
-                ],
-            }
-        ]
-    }
-
-    result = convert_to_openai_tool_format(tools_dict)
-
-    assert len(result) == 1
-    tool = result[0]
-    assert tool["function"]["name"] == "test_tool"
-    assert "name" in tool["function"]["parameters"]["properties"]
-    assert "count" in tool["function"]["parameters"]["properties"]
-    assert tool["function"]["parameters"]["required"] == ["name"]
-
-
-def test_convert_to_openai_tool_format_no_tools(monkeypatch):
-    """Test tool conversion with no tools."""
-    mock_logger = setup_mock_logger(monkeypatch)
-
-    tools_dict = {}
-
-    result = convert_to_openai_tool_format(tools_dict)
-    assert result == []
-    assert mock_logger.warning.call_count == 1
-
-
-def test_convert_to_openai_tool_format_malformed_tool(monkeypatch):
-    """Test tool conversion with malformed tool."""
-    mock_logger = setup_mock_logger(monkeypatch)
-
-    tools_dict = {
-        "tools": [{"name": "incomplete_tool", "description": "Missing arguments"}]
-    }
-
-    result = convert_to_openai_tool_format(tools_dict)
-    assert result == []
-    assert mock_logger.warning.call_count == 1
-
-
-def test_convert_to_openai_tool_format_dict_arguments():
-    """Test tool conversion with dict/object arguments."""
-    tools_dict = {
-        "tools": [
-            {
-                "name": "config_processor",
-                "description": "Process configuration data",
-                "arguments": [
-                    {
-                        "name": "config",
-                        "type": "dict",
-                        "description": "Configuration dictionary",
-                        "required": True,
-                    },
-                    {
-                        "name": "metadata",
-                        "type": "dict",
-                        "description": "Optional metadata",
-                        "required": False,
-                    },
-                ],
-            }
-        ]
-    }
-
-    result = convert_to_openai_tool_format(tools_dict)
-
-    assert len(result) == 1
-    tool = result[0]
-    assert tool["type"] == "function"
-    assert tool["function"]["name"] == "config_processor"
-    assert tool["function"]["description"] == "Process configuration data"
-
-    # Check dict type conversion
-    config_prop = tool["function"]["parameters"]["properties"]["config"]
-    assert config_prop["type"] == "object"
-    assert config_prop["description"] == "Configuration dictionary"
-
-    metadata_prop = tool["function"]["parameters"]["properties"]["metadata"]
-    assert metadata_prop["type"] == "object"
-    assert metadata_prop["description"] == "Optional metadata"
-
-    # Check required fields
-    assert tool["function"]["parameters"]["required"] == ["config"]
-
-
-def test_convert_to_openai_tool_format_mixed_argument_types():
-    """Test tool conversion with multiple argument types in one tool."""
-    tools_dict = {
-        "tools": [
-            {
-                "name": "complex_processor",
-                "description": "Process data with various types",
-                "arguments": [
-                    {
-                        "name": "name",
-                        "type": "str",
-                        "description": "Process name",
-                        "required": True,
-                    },
-                    {
-                        "name": "count",
-                        "type": "int",
-                        "description": "Number of items",
-                        "required": True,
-                    },
-                    {
-                        "name": "threshold",
-                        "type": "float",
-                        "description": "Processing threshold",
-                        "required": False,
-                    },
-                    {
-                        "name": "enabled",
-                        "type": "bool",
-                        "description": "Whether processing is enabled",
-                        "required": False,
-                    },
-                    {
-                        "name": "tags",
-                        "type": "list[str]",
-                        "description": "Processing tags",
-                        "required": False,
-                    },
-                    {
-                        "name": "options",
-                        "type": "dict",
-                        "description": "Processing options",
-                        "required": False,
-                    },
-                ],
-            }
-        ]
-    }
-
-    result = convert_to_openai_tool_format(tools_dict)
-
-    assert len(result) == 1
-    tool = result[0]
-    assert tool["type"] == "function"
-    assert tool["function"]["name"] == "complex_processor"
-    assert tool["function"]["description"] == "Process data with various types"
-
-    properties = tool["function"]["parameters"]["properties"]
-
-    # Check string type
-    assert properties["name"]["type"] == "string"
-    assert properties["name"]["description"] == "Process name"
-
-    # Check integer type
-    assert properties["count"]["type"] == "integer"
-    assert properties["count"]["description"] == "Number of items"
-
-    # Check float type
-    assert properties["threshold"]["type"] == "number"
-    assert properties["threshold"]["description"] == "Processing threshold"
-
-    # Check boolean type
-    assert properties["enabled"]["type"] == "boolean"
-    assert properties["enabled"]["description"] == "Whether processing is enabled"
-
-    # Check array type
-    assert properties["tags"]["type"] == "array"
-    assert properties["tags"]["items"]["type"] == "string"
-    assert "Provide as an array of strings" in properties["tags"]["description"]
-
-    # Check object type
-    assert properties["options"]["type"] == "object"
-    assert properties["options"]["description"] == "Processing options"
-
-    # Check required fields (only name and count are required)
-    assert tool["function"]["parameters"]["required"] == ["name", "count"]
-
-
-def test_convert_to_openai_tool_format_array_arguments():
-    """Test tool conversion with array/list arguments."""
-    tools_dict = {
-        "tools": [
-            {
-                "name": "list_processor",
-                "description": "Process a list of items",
-                "arguments": [
-                    {
-                        "name": "items",
-                        "type": "list[str]",
-                        "description": "List of items to process",
-                        "required": True,
-                    },
-                    {
-                        "name": "categories",
-                        "type": "list[str]",
-                        "description": "Optional categories",
-                        "required": False,
-                    },
-                ],
-            }
-        ]
-    }
-
-    result = convert_to_openai_tool_format(tools_dict)
-
-    assert len(result) == 1
-    tool = result[0]
-    assert tool["type"] == "function"
-    assert tool["function"]["name"] == "list_processor"
-    assert tool["function"]["description"] == "Process a list of items"
-
-    # Check array type conversion
-    items_prop = tool["function"]["parameters"]["properties"]["items"]
-    assert items_prop["type"] == "array"
-    assert items_prop["items"]["type"] == "string"
-    assert "Provide as an array of strings" in items_prop["description"]
-
-    categories_prop = tool["function"]["parameters"]["properties"]["categories"]
-    assert categories_prop["type"] == "array"
-    assert categories_prop["items"]["type"] == "string"
-
-    # Check required fields
-    assert tool["function"]["parameters"]["required"] == ["items"]
-
-
-def test_parse_string_argument_required():
-    """Test parsing required string argument."""
-    arg_string = "path (str, required): Path to the directory"
-    result = parse_string_argument(arg_string)
-    expected = {
-        "name": "path",
-        "type": "str",
-        "description": "Path to the directory",
-        "required": True,
-    }
-    assert result == expected
-
-
-def test_parse_string_argument_optional():
-    """Test parsing optional string argument."""
-    arg_string = "timeout (int, optional): Timeout value"
-    result = parse_string_argument(arg_string)
-    expected = {
-        "name": "timeout",
-        "type": "int",
-        "description": "Timeout value",
-        "required": False,
-    }
-    assert result == expected
-
-
-def test_parse_string_argument_invalid_format():
-    """Test parsing invalid string argument format."""
-    arg_string = "invalid format"
-    result = parse_string_argument(arg_string)
-    assert result is None
-
-
 def test_serialize_messages_dict_messages():
     """Test serializing dictionary messages."""
     messages = cast(
@@ -752,6 +356,21 @@ def test_serialize_messages_with_tool_calls():
     assert message["tool_calls"][0]["id"] == "call_123"
     assert message["tool_calls"][0]["function"]["name"] == "test_function"
     assert message["tool_calls"][0]["function"]["arguments"] == '{"arg": "value"}'
+
+
+def test_serialize_messages_with_id():
+    """Test serializing messages with id field."""
+    mock_message = MockSerializableMessage(
+        role="assistant", content="Hi there", msg_id="msg_12345"
+    )
+
+    result = serialize_messages([mock_message])
+
+    assert len(result) == 1
+    message = result[0]
+    assert message["role"] == "assistant"
+    assert message["content"] == "Hi there"
+    assert message["id"] == "msg_12345"
 
 
 def test_save_agent_messages_basic():
@@ -852,40 +471,6 @@ def test_save_agent_messages_filename_format(monkeypatch):
 
         expected_filename = "test_task_20240101_120000.json"
         assert Path(result_path).name == expected_filename
-
-
-def test_tool_conversion_pipeline():
-    """Test the complete tool conversion pipeline."""
-    tools_dict = {
-        "tools": [
-            {
-                "name": "calculator",
-                "description": "Perform math operations",
-                "arguments": [
-                    "operation (str, required): The operation to perform",
-                    "x (float, required): First number",
-                    "y (float, optional, default: 1.0): Second number",
-                ],
-            }
-        ]
-    }
-
-    # Convert to OpenAI format
-    openai_tools = convert_to_openai_tool_format(tools_dict)
-
-    # Verify the conversion worked correctly
-    assert len(openai_tools) == 1
-    tool = openai_tools[0]
-    assert tool["type"] == "function"
-    assert tool["function"]["name"] == "calculator"
-
-    # Check parameters
-    params = tool["function"]["parameters"]
-    assert "operation" in params["properties"]
-    assert "x" in params["properties"]
-    assert "y" in params["properties"]
-    assert params["required"] == ["operation", "x"]
-    assert params["properties"]["y"]["default"] == "1.0"
 
 
 def test_message_serialization_and_saving():

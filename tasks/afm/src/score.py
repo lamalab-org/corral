@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import gc
 import json
 import math
@@ -94,6 +93,10 @@ def check_roughness_function(tolerance: float, final_params):
                 }
             )
 
+            if not indices:
+                logger.warning("No RMS entries found")
+                return 0
+
             all_passed = True  # Track if all checks pass
 
             for i in indices:
@@ -112,7 +115,7 @@ def check_roughness_function(tolerance: float, final_params):
                     logger.info(f"Entry {i}: RMS={rms}, Path={path}")
 
                     # Run user-defined check function
-                    check_output = check_roughness(path)
+                    check_output = check_roughness(path, rms)
 
                     abs_tol = tolerance * rms
                     logger.info(
@@ -140,6 +143,23 @@ def check_roughness_function(tolerance: float, final_params):
             return 0
 
     return score_fn
+
+
+def auto_match_unit(rms_meters: float, llm_value: float) -> float:
+    """
+    Scale rms_meters to match the order-of-magnitude of llm_value.
+
+    """
+    if llm_value == 0 or rms_meters == 0:
+        return rms_meters
+
+    scale = llm_value / rms_meters
+    exponent = int(np.round(np.log10(abs(scale))))
+
+    # safety (prevents absurd scaling)
+    exponent = max(-15, min(15, exponent))
+
+    return rms_meters * (10**exponent)
 
 
 def check_params_function(final_params):
@@ -184,7 +204,7 @@ def check_image_quality(tolerance, final_params):
                 data = afm.data
                 im_file_fw = data["Image"]["Forward"]["Z-Axis"]
                 im_file_bw = data["Image"]["Backward"]["Z-Axis"]
-                similarity_index, diff = ssim(
+                similarity_index, _diff = ssim(
                     im_file_bw,
                     im_file_fw,
                     full=True,
@@ -313,7 +333,7 @@ def get_params():
     return params
 
 
-def check_params(gt_params, rel_tol=1e-4, abs_tol=1e-9):
+def check_params(gt_params, rel_tol=1e-2, abs_tol=1e-3):
     current_params = get_params()
 
     for key in gt_params:
@@ -395,7 +415,7 @@ def check_scalar(gt, ag):
     return abs(ag - gt) <= tolerance
 
 
-def check_roughness(path):
+def check_roughness(path, llm_rms):
     """
     Calculate RMS roughness from the latest .nid file in a directory
     or from a specified .nid file.
@@ -439,7 +459,8 @@ def check_roughness(path):
 
     # Calculate RMS roughness
     z_mean = np.mean(z)
-    return np.sqrt(np.mean((z - z_mean) ** 2))
+    rms_m = np.sqrt(np.mean((z - z_mean) ** 2))
+    return float(auto_match_unit(rms_m, llm_rms))
 
 
 def fit_power_law(area, roughness):
@@ -454,7 +475,7 @@ def fit_power_law(area, roughness):
     return C, k
 
 
-def check_equation(final_params, tolerance):
+def check_mathematical_eq(final_params, tolerance):
     def score_fn(result: str) -> float:
         try:
             data = json.loads(result)

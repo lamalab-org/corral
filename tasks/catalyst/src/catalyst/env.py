@@ -1,11 +1,10 @@
-import json
 import os
 import sys
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 from catalyst.score import (
+    BASE_WORK_DIR,
     check_adsorption_sites,
     check_adsorption_structure,
     check_mp_structure,
@@ -20,14 +19,10 @@ from corral.backend.server import run_server
 from corral.backend.task import TaskDefinition, TaskGroup
 from corral.backend.tool import Tool
 from corral.utils.task_group import TaskGroupEnvironment
-
-# Base working directory
-if "CORRAL_WORK_DIR" not in os.environ:
-    BASE_WORK_DIR = tempfile.mkdtemp(prefix="catalyst_")
-    logger.info(f"CORRAL_WORK_DIR not set, using temporary directory: {BASE_WORK_DIR}")
-else:
-    BASE_WORK_DIR = os.environ["CORRAL_WORK_DIR"]
-
+from corral.utils.task_loader import (
+    load_task_entries,
+    load_task_entries_from_env_package,
+)
 
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
@@ -39,6 +34,8 @@ SCORING_FUNCTIONS = {
     "file_exists": check_valid_json_file,
 }
 
+logger.info(f"Using BASE_WORK_DIR: {BASE_WORK_DIR}")
+
 
 def get_scoring_function(name: str, params: dict | None = None) -> Callable:
     """Get a scoring function by name from the registry, with optional parameters"""
@@ -46,7 +43,6 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
     if fn is None:
         raise ValueError(f"Scoring function '{name}' not found in the registry")
 
-    # If it's a factory function (i.e., takes arguments), call with params
     if params:
         try:
             logger.info(f"Initializing scoring function '{name}' with params: {params}")
@@ -60,43 +56,36 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
         return fn
 
 
-def load_tasks_from_json(
-    json_path: str | Path, work_dir: str
+def entries_to_task_definitions(
+    entries: list[dict], work_dir: str
 ) -> dict[str, TaskDefinition]:
-    """Load task definitions from a JSON file.
+    """Convert standardized task entries to TaskDefinition objects.
 
     Args:
-        json_path: Path to the JSON file containing task definitions
-        work_dir: Working directory to use for task execution
+        entries: List of task entry dicts from task_loader.
+        work_dir: Working directory for task execution.
 
     Returns:
-        dictionary of task definitions keyed by task ID
+        Dictionary of TaskDefinition objects keyed by task ID.
     """
-    if not Path(json_path).exists():
-        raise FileNotFoundError(f"Task definition file not found: {json_path}")
-
-    with Path(json_path).open() as f:
-        task_data = json.load(f)
-
     tasks = {}
-    for task_id, task_info in task_data.items():
-        # Get the scoring function by name from the registry
-        scoring_fn_name = task_info.get("scoring_function", "default")
-        scoring_params = task_info.get("scoring_params", {})
+    for entry in entries:
+        task_id = entry["id"]
+        scoring_fn_name = entry.get("scoring_function", "default")
+        scoring_params = entry.get("scoring_params", {})
         scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
 
-        # Add work_dir to initial input if not already present
-        initial_input = task_info.get("initial_input", {}).copy()
+        initial_input = entry.get("initial_input", {}).copy()
         if "work_dir" not in initial_input:
             initial_input["work_dir"] = work_dir
 
         tasks[task_id] = TaskDefinition(
-            name=task_info["name"],
-            description=task_info["description"],
-            tools=task_info.get("tools", []),
+            name=entry["name"],
+            description=entry["description"],
+            tools=entry.get("tools", []),
             scoring_fn=scoring_fn,
-            submission_format=task_info.get("submission_format", ""),
-            input_from_tasks=task_info.get("input_from_tasks", []),
+            submission_format=entry.get("submission_format", ""),
+            input_from_tasks=entry.get("input_from_tasks", []),
             initial_input=initial_input,
         )
 
@@ -104,46 +93,56 @@ def load_tasks_from_json(
 
 
 def create_environments(
-    task_json_path: str | Path,
+    *,
+    local_dir: str | Path | None = None,
+    environment: str | None = None,
+    level: int = 1,
+    task_type: str = "task",
     taskgroup_common_tools: dict[str, Tool] | None = None,
     work_dir: str = BASE_WORK_DIR,
+    group_id: str = "catalyst",
 ) -> dict[str, TaskGroupEnvironment]:
-    """Create environments for tasks defined in a JSON file
+    """Create environments from HuggingFace or local task configs.
 
     Args:
-        task_json_path: Path to the JSON file with task definitions
-        taskgroup_common_tools: dictionary of Tools which are common for subtasks, for example file system tools
-        work_dir: Working directory for task execution
+        local_dir: Path to local JSON directory (mutually exclusive with environment).
+        environment: HF environment name (mutually exclusive with local_dir).
+        level: Level number (for HF loading or env-package resolution).
+        task_type: "task" or "subtask".
+        taskgroup_common_tools: Tools common to all subtasks.
+        work_dir: Working directory for task execution.
+        group_id: Task group identifier.
 
     Returns:
-        dictionary of environments keyed by task ID
+        Dictionary of environments keyed by task ID.
     """
+    if local_dir is not None:
+        entries = load_task_entries(local_dir=local_dir)
+    elif environment is not None:
+        entries = load_task_entries(
+            environment=environment, level=level, task_type=task_type
+        )
+    else:
+        # Default: load from standard directory layout relative to this package
+        entries = load_task_entries_from_env_package(
+            Path(__file__).parent, level=level, subtask=(task_type == "subtask")
+        )
 
-    logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
+    tasks = entries_to_task_definitions(entries, work_dir)
 
-    # Load tasks from JSON
-    tasks = load_tasks_from_json(task_json_path, work_dir)
-
-    # Create task group
-    group_id = Path(task_json_path).stem  # Use filename (without extension) as group ID
-    logger.info(f"Creating task group with ID: {group_id}")
+    logger.info(f"Creating task group '{group_id}' with {len(tasks)} tasks")
     task_group = TaskGroup(group_id=group_id, tasks=tasks)
 
-    # Print task dependencies for reference
-    logger.info("\nTask Dependencies:")
+    logger.info("Task Dependencies:")
     for task_id, deps in task_group.get_task_dependencies().items():
         logger.info(f"- {task_id}: depends on {deps}")
 
-    # Print ordering of tasks
     ordered_tasks = task_group.get_ordered_tasks()
-    logger.info("\nTask Execution Order:")
+    logger.info("Task Execution Order:")
     for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i+1}. {task_id}")
+        logger.info(f"{i + 1}. {task_id}")
 
-    # Create all available tools
     subtask_specific_tools = create_tools()
-
-    # Create environments for all tasks
 
     environments = {}
     for task_id in task_group.tasks:
@@ -159,30 +158,79 @@ def create_environments(
 
 
 if __name__ == "__main__":
-    # Determine tasks file path
-    if len(sys.argv) > 1:
-        tasks_json_path = sys.argv[1]
-    else:
-        tasks_json_path = os.environ.get(
-            "CORRAL_TASKS_PATH",
-            Path(__file__).parent / "tasks" / "catalysis_tasks.json",
-        )
+    import argparse as _argparse
 
-    # Get server settings from environment if provided
-    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
-    port = int(os.environ.get("CORRAL_PORT", "8000"))
+    parser = _argparse.ArgumentParser(description="Catalyst Benchmark Server")
+    parser.add_argument(
+        "tasks_json_path",
+        nargs="?",
+        default=None,
+        help="Path to tasks JSON file or directory (optional if --mode is provided)",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
+        help="Host to run the server on",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("CORRAL_PORT", "8000")),
+        help="Port to run the server on",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["single", "chained"],
+        default=None,
+        help="Task mode (auto-discovers environments/level_1/{tasks_json|subtasks_json})",
+    )
+    args = parser.parse_args()
+
+    # Resolve tasks JSON path
+    if args.tasks_json_path:
+        local_dir = args.tasks_json_path
+    elif args.mode:
+        if args.mode == "single":
+            local_dir = (
+                Path(__file__).resolve().parents[2]
+                / "environments"
+                / "level_1"
+                / "tasks_json"
+            )
+        elif args.mode == "chained":
+            local_dir = (
+                Path(__file__).resolve().parents[2]
+                / "environments"
+                / "level_1"
+                / "subtasks_json"
+            )
+        else:
+            raise ValueError(f"Unsupported mode: {args.mode}")
+
+        if not Path(local_dir).exists():
+            logger.error(f"Task config not found: {local_dir}")
+            sys.exit(1)
+    else:
+        local_dir = (
+            Path(__file__).resolve().parents[2]
+            / "environments"
+            / "level_1"
+            / "tasks_json"
+        )
+        if not Path(local_dir).exists():
+            logger.error(f"Task config not found: {local_dir}")
+            sys.exit(1)
+
+    host = args.host
+    port = args.port
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
-    # Create environments
-    # taskgroup_common_tools = {
-    #     "execute_python_code": execute_python_code,
-    #     "execute_python_script": execute_python_script,
-    # }
-    taskgroup_common_tools = None
+
     environments = create_environments(
-        task_json_path=tasks_json_path,
+        local_dir=local_dir,
         work_dir=work_dir,
-        taskgroup_common_tools=taskgroup_common_tools,
     )
 
     logger.info("\nCreated Environments:")
@@ -192,5 +240,6 @@ if __name__ == "__main__":
         if env.current_task.input_from_tasks:
             logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
 
-    # Run server
+    # --- Run Server ---
+    logger.info(f"Running server on {host}:{port}")
     run_server(environments, host, port)

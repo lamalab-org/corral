@@ -34,7 +34,7 @@ jobs:
           uv pip install pre-commit
 
       - name: Cache pre-commit hooks
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -128,8 +128,7 @@ jobs:
       - name: Install task dependencies
         run: |
           # Install the task package in development mode
-          # For src layouts, ensure editable install works properly
-          uv pip install -e . --force-reinstall
+          uv pip install -e .
         working-directory: ./tasks/${{ matrix.task }}
 
       - name: Run task tests
@@ -140,19 +139,89 @@ jobs:
           uv run python -m pytest tests -v --rootdir=.
         working-directory: ./tasks/${{ matrix.task }}
 
+  # Discover tasks with env.py files for server setup checking
+  discover-env-tasks:
+    needs: code-quality
+    runs-on: ubuntu-latest
+    outputs:
+      tasks: ${{ steps.discover.outputs.tasks }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Discover tasks with env.py (excluding those requiring special setup)
+        id: discover
+        run: |
+          # Excluded tasks:
+          #   retrosynthesis - requires a running database
+          #   afm            - requires nanosurf (Windows-only hardware library)
+          #   wetlab         - requires reaktoro (conda-only, not on PyPI)
+          #   samplemath     - uses bare imports incompatible with package-level import
+          EXCLUDED="retrosynthesis afm wetlab samplemath"
+          tasks=$(find tasks -maxdepth 1 -type d | while read task_dir; do
+            task_name=$(basename "$task_dir")
+            if [[ "$task_name" == "tasks" ]]; then continue; fi
+            if echo "$EXCLUDED" | grep -qw "$task_name"; then continue; fi
+            if [[ ! -f "$task_dir/pyproject.toml" ]]; then continue; fi
+            if find "$task_dir" -name "env.py" -maxdepth 4 -type f | grep -q .; then
+              echo "$task_name"
+            fi
+          done | sort | jq -R -s -c 'split("\n")[:-1]')
+          echo "tasks=$tasks" >> $GITHUB_OUTPUT
+          echo "Found env tasks: $tasks"
+
+  # Check that each task's env server can be set up correctly
+  check-env-servers:
+    needs: [discover-env-tasks, code-quality]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: ${{ fromJson(needs.discover-env-tasks.outputs.tasks) }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Ensure Git LFS is initialized
+        run: |
+          git lfs install
+          git lfs pull --exclude="" || echo "Some LFS objects missing, continuing..."
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install root project (corral)
+        run: uv sync --all-extras --dev
+
+      - name: Install task dependencies
+        run: uv pip install -e .
+        working-directory: ./tasks/${{ matrix.task }}
+
+      - name: Check env server setup
+        run: |
+          uv run python -c "from ${{ matrix.task }} import env; print('Server setup OK')"
+        working-directory: ./tasks/${{ matrix.task }}
+
   # Summary job to check all results
   test-summary:
-    needs: [test-main, test-tasks]
+    needs: [test-main, test-tasks, check-env-servers]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check test results
         run: |
-          if [[ "${{ needs.test-main.result }}" == "success" ]] && [[ "${{ needs.test-tasks.result }}" == "success" ]]; then
+          env_result="${{ needs.check-env-servers.result }}"
+          if [[ "${{ needs.test-main.result }}" == "success" ]] && \
+             [[ "${{ needs.test-tasks.result }}" == "success" ]] && \
+             [[ "$env_result" == "success" || "$env_result" == "skipped" ]]; then
             echo "✅ All tests passed!"
           else
             echo "❌ Some tests failed:"
             echo "Main tests: ${{ needs.test-main.result }}"
             echo "Task tests: ${{ needs.test-tasks.result }}"
+            echo "Env server checks: $env_result"
             exit 1
           fi

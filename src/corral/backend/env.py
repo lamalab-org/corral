@@ -1,3 +1,4 @@
+import inspect
 import time
 from abc import ABC, abstractmethod
 from copy import deepcopy
@@ -40,8 +41,10 @@ class TaskState:
     submitted_answer: str | None = None
     feedback: str | None = None
     surrendered: bool = False
-    start_time: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
-    end_time: datetime | None = None
+    env_start_time: datetime = field(
+        default_factory=lambda: datetime.now(tz=timezone.utc)
+    )
+    env_end_time: datetime | None = None
 
     def get_tool_statistics(self) -> dict[str, Any]:
         """Get statistics about tool usage"""
@@ -61,10 +64,10 @@ class TaskState:
             },
         }
 
-    def get_duration(self) -> float | None:
-        """Get trial duration in seconds"""
-        if self.end_time and self.start_time:
-            return (self.end_time - self.start_time).total_seconds()
+    def get_env_duration(self) -> float | None:
+        """Get how long the environment was active (not task duration)."""
+        if self.env_end_time and self.env_start_time:
+            return (self.env_end_time - self.env_start_time).total_seconds()
         return None
 
 
@@ -93,8 +96,8 @@ class Environment(ABC):
     def reset_state(self) -> str:
         """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
         if hasattr(self, "state") and self.state is not None:
-            if self.state.is_attempted and self.state.end_time is None:
-                self.state.end_time = datetime.now(tz=timezone.utc)
+            if self.state.is_attempted and self.state.env_end_time is None:
+                self.state.env_end_time = datetime.now(tz=timezone.utc)
             archived_snapshot = self.save_current_state()
             self.trial_states[self.state.trial_id] = archived_snapshot
 
@@ -139,25 +142,9 @@ class Environment(ABC):
         """Add a tool to the environment"""
         self.tools[tool.name] = tool
 
-    def get_available_tools(self) -> list[dict[str, str | list[dict]]]:
-        return [
-            {
-                "name": t.name,
-                "description": t.description,
-                "arguments": [
-                    {
-                        "name": arg.name,
-                        "type": arg.type,
-                        "description": arg.description,
-                        "required": arg.required,
-                        "default": arg.default,
-                        "choices": arg.choices,
-                    }
-                    for arg in t.arguments
-                ],
-            }
-            for t in self.tools.values()
-        ]
+    def get_available_tools(self) -> list[dict[str, Any]]:
+        """Return tools in OpenAI function-calling format."""
+        return [t.get_openai_tool_format() for t in self.tools.values()]
 
     def get_tools_guide(self) -> str:
         """Generate a guide for the available tools"""
@@ -358,24 +345,16 @@ class Environment(ABC):
         score = self.score()  # Using existing abstract score method
         self.state.score = score
         self.state.is_attempted = True
-        if self.state.end_time is None:
-            self.state.end_time = datetime.now(tz=timezone.utc)
         return score
 
     def surrender(self) -> float:
         """Surrender from the current task without submitting an answer"""
         self.state.surrendered = True
         self.state.is_attempted = True
-        if self.state.end_time is None:
-            self.state.end_time = datetime.now(tz=timezone.utc)
         return 0.0 if self.state.score is None else self.state.score
 
     def get_completed_trial_data(self) -> dict:
         """Get all data for the completed trial"""
-        # Calculate duration
-        duration = None
-        if self.state.start_time and self.state.end_time:
-            duration = (self.state.end_time - self.state.start_time).total_seconds()
 
         # Build state dict with all needed data
         state_data = {
@@ -385,7 +364,6 @@ class Environment(ABC):
             "score": self.state.score,
             "submitted_answer": self.state.submitted_answer,
             "surrendered": self.state.surrendered,
-            "duration": duration,
             "tool_statistics": self._get_complete_tool_statistics(),
         }
 
@@ -417,3 +395,289 @@ class Environment(ABC):
         # This can be overridden by subclasses to set up external dependencies
 
         return "No external app/service configuration needed for this trial."
+
+    def _extract_scoring_fn_details(self, fn: Any) -> dict[str, Any]:
+        """
+        Extract details from a scoring function for LaTeX documentation.
+
+        Args:
+            fn: The scoring function to extract details from
+
+        Returns:
+            Dictionary with name, description, arguments, and returns info
+        """
+        fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
+        docstring = fn.__doc__ or ""
+
+        # Parse docstring to extract description, args, and returns
+        description = ""
+        args_section = ""
+        returns_section = ""
+
+        if docstring:
+            lines = docstring.strip().split("\n")
+            current_section = "description"
+            description_lines = []
+            args_lines = []
+            returns_lines = []
+
+            for line in lines:
+                stripped = line.strip()
+                if stripped.lower().startswith("args:"):
+                    current_section = "args"
+                    continue
+                if stripped.lower().startswith("returns:"):
+                    current_section = "returns"
+                    continue
+                if stripped.lower().startswith("raises:"):
+                    current_section = "raises"
+                    continue
+
+                if current_section == "description":
+                    description_lines.append(line)
+                elif current_section == "args":
+                    args_lines.append(line)
+                elif current_section == "returns":
+                    returns_lines.append(line)
+
+            description = "\n".join(description_lines).strip()
+            args_section = "\n".join(args_lines).strip()
+            returns_section = "\n".join(returns_lines).strip()
+
+        # Extract arguments from signature
+        structured_args = []
+        try:
+            sig = inspect.signature(fn)
+            for param_name, param in sig.parameters.items():
+                arg_type = ""
+                if param.annotation != inspect.Parameter.empty:
+                    arg_type = (
+                        param.annotation.__name__
+                        if hasattr(param.annotation, "__name__")
+                        else str(param.annotation)
+                    )
+
+                required = param.default == inspect.Parameter.empty
+                default = (
+                    None if param.default == inspect.Parameter.empty else param.default
+                )
+
+                # Try to find description in docstring args section
+                arg_description = ""
+                if args_section:
+                    # Look for pattern like "param_name (type): description" or "param_name: description"
+                    for raw_arg_line in args_section.split("\n"):
+                        stripped_arg_line = raw_arg_line.strip()
+                        if stripped_arg_line.startswith(param_name):
+                            # Extract description after the colon
+                            if ":" in stripped_arg_line:
+                                arg_description = stripped_arg_line.split(":", 1)[
+                                    1
+                                ].strip()
+                            break
+
+                structured_args.append(
+                    {
+                        "name": param_name,
+                        "type": arg_type,
+                        "description": arg_description,
+                        "required": required,
+                        "default": default,
+                    }
+                )
+        except (ValueError, TypeError):
+            # If we can't get signature, just use empty args
+            pass
+
+        return {
+            "name": fn_name,
+            "description": description,
+            "arguments": structured_args,
+            "returns": returns_section,
+        }
+
+    def to_latex(
+        self,
+        output_dir: str,
+        level: int | str,
+        env_name: str | None = None,
+        task_name: str | None = None,
+        verbosity: str | None = None,
+    ) -> tuple[str, str, str | None]:
+        """
+        Generate LaTeX documentation for this task.
+
+        This method creates a `TaskDefinition` from the environment's task data
+        and delegates to `Code2Latex.colorbox()` for generating formatted LaTeX files
+        and `Code2Latex.longtable()` for generating tools documentation.
+
+        If the environment has a `current_task` attribute (e.g., `TaskGroupEnvironment`),
+        it will automatically detect:
+        - Whether this is a subtask (based on `input_from_tasks`)
+        - Dependencies on other tasks
+        - `env_name` from `task_group.group_id` if not provided
+
+        Args:
+            output_dir: Directory for output .tex files
+            level: Task level identifier (e.g., 1, 2, "advanced")
+            env_name: Environment name (e.g., "afm", "catalyst"). If not provided,
+                     will try to get from task_group.group_id
+            task_name: Optional custom name for the task (defaults to task_id)
+            verbosity: Tool verbosity level used to filter tool descriptions and
+                       return sections. Accepts a `ToolVerbosity` value string
+                       (e.g. "brief", "detailed"). Defaults to
+                       `ToolVerbosity.DETAILED` when not provided.
+
+        Returns:
+            Tuple of (task_tex_path, tools_tex_path, scoring_tex_path) - paths to the generated .tex files
+        """
+        # Import here to avoid circular imports
+        from corral.router.verbosity import ToolVerbosity, VerbosityConfig
+        from corral.utils.code2latex import Code2Latex, LatexMetadata
+
+        # Resolve verbosity level (default to DETAILED)
+        if verbosity is None:
+            resolved_verbosity = ToolVerbosity.DETAILED
+        elif isinstance(verbosity, ToolVerbosity):
+            resolved_verbosity = verbosity
+        else:
+            resolved_verbosity = ToolVerbosity.FULL
+
+        # Map verbosity levels to the RETURNS_* sections that should be included.
+        RETURNS_VERBOSITY_MAP: dict[ToolVerbosity, list[str]] = {
+            ToolVerbosity.BRIEF: ["RETURNS_BRIEF"],
+            ToolVerbosity.DETAILED: ["RETURNS_BRIEF", "RETURNS_DETAILED"],
+        }
+
+        # Get task description from prompt
+        description = str(self.get_task_prompt())
+
+        # Get list of tool names
+        tools = list(self.tools.keys())
+
+        # Get detailed tool information for longtable using the resolved verbosity
+        tools_details = []
+
+        for tool in self.tools.values():
+            filtered_description = VerbosityConfig.filter_tool_description(
+                tool.description, resolved_verbosity
+            )
+
+            # Extract RETURNS section from the original description and filter it
+            sections = VerbosityConfig.extract_all_sections(tool.description)
+            return_keys = RETURNS_VERBOSITY_MAP.get(
+                resolved_verbosity,
+                ["RETURNS_BRIEF", "RETURNS_DETAILED", "RETURNS_EXAMPLES"],
+            )
+            returns_parts = [sections.get(key, "") for key in return_keys]
+            returns_raw = "\n\n".join(part for part in returns_parts if part)
+            returns_info = (
+                VerbosityConfig.filter_argument_description(
+                    returns_raw, resolved_verbosity
+                )
+                if returns_raw
+                else ""
+            )
+
+            structured_args = []
+            for arg in tool.arguments:
+                filtered_arg_desc = VerbosityConfig.filter_argument_description(
+                    arg.description, resolved_verbosity
+                )
+                structured_args.append(
+                    {
+                        "name": arg.name,
+                        "type": arg.type,
+                        "description": filtered_arg_desc,
+                        "required": arg.required,
+                        "default": arg.default,
+                        "choices": arg.choices,
+                    }
+                )
+
+            tools_details.append(
+                {
+                    "name": tool.name,
+                    "description": filtered_description,
+                    "arguments": structured_args,
+                    "returns": returns_info,
+                }
+            )
+
+        # Check if this is a TaskGroupEnvironment with current_task
+        scoring_fn = self.score
+        if (
+            hasattr(self, "current_task")
+            and self.current_task is not None
+            and hasattr(self.current_task, "scoring_fn")
+            and self.current_task.scoring_fn is not None
+        ):
+            scoring_fn = self.current_task.scoring_fn
+
+        # Try to get env_name from task_group if not provided
+        if env_name is None:
+            if hasattr(self, "task_group") and self.task_group is not None:
+                env_name = self.task_group.group_id
+            else:
+                env_name = "unknown"
+
+        # Create LatexMetadata
+        metadata = LatexMetadata(
+            env_name=env_name,
+            level=level,
+        )
+
+        # Generate LaTeX via Code2Latex.colorbox for tasks
+        task_tex_path = Code2Latex.colorbox(
+            name=task_name or self.task_id,
+            description=description,
+            tools=tools,
+            scoring_fn=scoring_fn,
+            metadata=metadata,
+            output_dir=output_dir,
+        )
+
+        # Generate LaTeX via Code2Latex.longtable for tools
+        tools_tex_path = Code2Latex.longtable(
+            tools=tools_details,
+            metadata=metadata,
+            output_dir=output_dir,
+        )
+
+        # Collect scoring functions from all tasks in the task group
+        scoring_fns_details = []
+        seen_scoring_fns = set()  # Track by function name to deduplicate
+
+        if hasattr(self, "task_group") and self.task_group is not None:
+            for task in self.task_group.tasks.values():
+                if task.scoring_fn is not None:
+                    fn = task.scoring_fn
+                    fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
+
+                    # Skip if we've already processed this function
+                    if fn_name in seen_scoring_fns:
+                        continue
+                    seen_scoring_fns.add(fn_name)
+
+                    # Extract function details
+                    fn_details = self._extract_scoring_fn_details(fn)
+                    scoring_fns_details.append(fn_details)
+        else:
+            # Single task environment - use self.score method
+            if hasattr(self, "score") and callable(self.score):
+                fn = self.score
+                fn_name = fn.__name__ if hasattr(fn, "__name__") else "score"
+                if fn_name not in seen_scoring_fns:
+                    fn_details = self._extract_scoring_fn_details(fn)
+                    scoring_fns_details.append(fn_details)
+
+        # Generate LaTeX via Code2Latex.scoring_longtable for scoring functions
+        scoring_tex_path = None
+        if scoring_fns_details:
+            scoring_tex_path = Code2Latex.scoring_longtable(
+                scoring_functions=scoring_fns_details,
+                metadata=metadata,
+                output_dir=output_dir,
+            )
+
+        return task_tex_path, tools_tex_path, scoring_tex_path

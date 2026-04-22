@@ -74,7 +74,7 @@ def load_tasks_from_json(
                 name=data["name"],
                 description=data["input"]["prompt"],
                 tools=data.get("tools", []),
-                scoring_fn=SCORING_FUNCTIONS[str(data["scoring_fn"])],
+                scoring_fn=SCORING_FUNCTIONS[str(data["scoring_function"])],
                 scoring_inputs=data["output"][0]["target"],
                 submission_format=data.get("submission_format", ""),
                 input_from_tasks=input_from_tasks,
@@ -129,10 +129,6 @@ class TaskEnvironment(Environment):
                 logger.warning(
                     f"Tool {tool_name} not found in available tools for task {self.task_id}"
                 )
-        if "subtask" not in self.current_task.name:
-            # Add file system tools if not already included
-            for tool in self.available_tools.values():
-                self.add_tool(self.available_tools[tool.name])
 
     def get_task_prompt(self) -> str:
         prompt = (
@@ -191,13 +187,24 @@ class TaskEnvironment(Environment):
 def create_spectra_elu_environments(
     work_dir: str = BASE_WORK_DIR,
     subtask_level: bool = False,
+    level: int = 1,
 ) -> dict[str, Environment]:
     """Create environments for the spectra elucidation benchmark tasks."""
     logger.info("Creating environments for spectra elucidation tasks...")
     if subtask_level:
-        json_path = Path(__file__).parent / "subtasks_json"
+        json_path = (
+            Path(__file__).parent.parent
+            / "environments"
+            / f"level_{level}"
+            / "subtasks_json"
+        )
     else:
-        json_path = Path(__file__).parent / "tasks_json"
+        json_path = (
+            Path(__file__).parent.parent
+            / "environments"
+            / f"level_{level}"
+            / "tasks_json"
+        )
     if not json_path.exists():
         raise ValueError(f"Task file {json_path} does not exist.")
 
@@ -221,7 +228,7 @@ def create_spectra_elu_environments(
     ordered_tasks = task_group.get_ordered_tasks()
     logger.info("\nTask Execution Order:")
     for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i+1}. {task_id}")
+        logger.info(f"{i + 1}. {task_id}")
 
     environments = {}
     for task_id in task_group.tasks:
@@ -249,6 +256,12 @@ if __name__ == "__main__":
         help="Port to run the server on",
     )
     parser.add_argument(
+        "--level",
+        type=int,
+        default=1,
+        help="Level of the benchmark to run (1-2)",
+    )
+    parser.add_argument(
         "--subtask_level",
         type=bool,
         default=False,
@@ -260,7 +273,7 @@ if __name__ == "__main__":
 
     # Create all environments with file system tools
     environments = create_spectra_elu_environments(
-        work_dir=BASE_WORK_DIR, subtask_level=args.subtask_level
+        work_dir=BASE_WORK_DIR, subtask_level=args.subtask_level, level=args.level
     )
 
     logger.info("\nCreated Environments:")

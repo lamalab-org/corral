@@ -9,7 +9,6 @@ from corral.agents.prompt_utils import (
     create_prompt,
     get_prompt,
 )
-from corral.agents.utils import LiteLLMMessage
 
 
 class TestValidatedPrompt:
@@ -173,30 +172,6 @@ class TestCreatePrompt:
         assert result[1].get("role") == "user"
         assert result[1].get("content") == "filled user content"
 
-    def test_create_prompt_with_history(self, mock_system_prompt, mock_user_prompt):
-        """Test creating a prompt with message history."""
-        history = [
-            LiteLLMMessage(role="user", content="previous message"),
-            LiteLLMMessage(role="assistant", content="previous response"),
-        ]
-
-        result = create_prompt(
-            mock_system_prompt,
-            mock_user_prompt,
-            "test task guide",
-            history=history,
-        )
-
-        assert len(result) == 4
-        assert result[0].get("role") == "user"
-        assert result[0].get("content") == "previous message"
-        assert result[1].get("role") == "assistant"
-        assert result[1].get("content") == "previous response"
-        assert result[2].get("role") == "system"
-        assert result[2].get("content") == mock_system_prompt
-        assert result[3].get("role") == "user"
-        assert result[3].get("content") == "filled user content"
-
     def test_create_prompt_with_none_system_prompt(self, mock_user_prompt):
         """Test creating a prompt with None system prompt."""
         result = create_prompt(None, mock_user_prompt, "test task guide")
@@ -221,21 +196,6 @@ class TestCreatePrompt:
             "surrender_instructions": "",
         }
         mock_user_prompt.fill.assert_called_once_with(expected_call_args)
-
-    def test_create_prompt_with_empty_history(
-        self, mock_system_prompt, mock_user_prompt
-    ):
-        """Test creating a prompt with empty history list."""
-        result = create_prompt(
-            mock_system_prompt,
-            mock_user_prompt,
-            "test task guide",
-            history=[],
-        )
-
-        assert len(result) == 2
-        assert result[0].get("role") == "system"
-        assert result[1].get("role") == "user"
 
 
 class TestBuildUserContent:

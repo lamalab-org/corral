@@ -32,9 +32,9 @@ from corral.utils.io_tools import (
     WriteFileTool,
 )
 from score import (
-    check_equation,
     check_file_exists,
     check_image_quality,
+    check_mathematical_eq,
     check_numerical,
     check_params_function,
     check_roughness_function,
@@ -51,7 +51,7 @@ from tools import (
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt_4o").strip()
 logger.info(f"[SERVER] Using LLM_MODEL={LLM_MODEL}")
 ENVIRONMENT = "enviroment"
-TASK_TYPE = "subtasks_2"  # "single_task" or "subtasks"
+TASK_TYPE = "subtasks_1"  # "single_task" or "subtasks"
 BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\{TASK_TYPE}"
 
 SCORING_FUNCTIONS = {
@@ -60,7 +60,7 @@ SCORING_FUNCTIONS = {
     "check_params_function": check_params_function,
     "check_file_exists": check_file_exists,
     "check_roughness_function": check_roughness_function,
-    "check_mathematical_eq": check_equation,
+    "check_mathematical_eq": check_mathematical_eq,
 }
 
 
@@ -379,7 +379,7 @@ def create_environments(
     ordered_tasks = task_group.get_ordered_tasks()
     logger.info("\nTask Execution Order:")
     for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i+1}. {task_id}")
+        logger.info(f"{i + 1}. {task_id}")
 
     subtask_specific_tools = {
         "visualize_grain_boxes": visualize_grain_boxes,

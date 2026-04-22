@@ -9,6 +9,49 @@ from loguru import logger
 from corral.backend.schema import ToolArgument
 
 
+def format_json_schema_type(prop: dict[str, Any]) -> str:
+    """Convert a JSON Schema property dict into a human-readable type string.
+
+    Recursively resolves nested schemas (arrays, tuples via prefixItems,
+    anyOf unions, enum literals, and scalar types) into a compact
+    representation suitable for text-based tool guides.
+
+    Args:
+        prop: A single property dict from a JSON Schema.
+
+    Returns:
+        A formatted type string, e.g. "list[tuple[string, number]]".
+    """
+    if "anyOf" in prop:
+        parts = [format_json_schema_type(variant) for variant in prop["anyOf"]]
+        return " | ".join(parts)
+
+    if "enum" in prop:
+        choices = ", ".join(repr(c) for c in prop["enum"])
+        return f"Literal[{choices}]"
+
+    raw_type = prop.get("type")
+
+    if raw_type == "array":
+        if "prefixItems" in prop:
+            inner = ", ".join(
+                format_json_schema_type(item) for item in prop["prefixItems"]
+            )
+            return f"tuple[{inner}]"
+        if "items" in prop:
+            inner = format_json_schema_type(prop["items"])
+            return f"list[{inner}]"
+        return "list"
+
+    if isinstance(raw_type, str):
+        return raw_type
+
+    if isinstance(raw_type, list):
+        return " | ".join(raw_type)
+
+    return "any"
+
+
 def format_type_annotation(annotation) -> str:
     """Formats type annotations to readable strings with proper error handling."""
     try:

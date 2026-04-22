@@ -31,6 +31,7 @@ def _parse_trial_completion(task_id: str, response_data: dict) -> TaskTrialResul
         state=completion.state,
         tool_statistics=completion.state["tool_statistics"],
         surrendered=completion.surrendered,
+        duration=completion.state.get("duration"),
     )
 
 
@@ -167,5 +168,44 @@ class CorralRouter:
             response = requests.post(
                 f"{self.base_url}/tasks/{task_id}/configure", timeout=timeout
             )
+        response.raise_for_status()
+        return response.json()
+
+    def generate_latex(
+        self,
+        task_id: str,
+        output_dir: str,
+        level: int | str,
+        env_name: str | None = None,
+        task_name: str | None = None,
+        verbosity: str | None = None,
+    ) -> dict[str, str]:
+        """Generate LaTeX documentation for a task.
+
+        Args:
+            task_id: The task identifier.
+            output_dir: Directory for output .tex files.
+            level: Task level identifier (e.g., 1, 2, "advanced").
+            env_name: Environment name (e.g., "afm", "catalyst").
+            task_name: Optional custom name for the task.
+            verbosity: Tool verbosity level used to filter descriptions and
+                       return sections (e.g. ``"brief"``, ``"detailed"``). Defaults
+                       to ``"detailed"`` when not provided.
+
+        Returns:
+            Dictionary with 'output_path' (task .tex), 'tools_output_path' (tools .tex),
+            and 'scoring_output_path' (scoring functions .tex, may be None).
+        """
+        payload = {
+            "output_dir": output_dir,
+            "level": level,
+            "env_name": env_name,
+            "task_name": task_name,
+            "verbosity": verbosity,
+        }
+        response = requests.post(
+            f"{self.base_url}/tasks/{task_id}/latex",
+            json=payload,
+        )
         response.raise_for_status()
         return response.json()

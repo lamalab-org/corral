@@ -249,39 +249,39 @@ def execute_python_code(
     [/SYNTACTICAL]
 
     Args:
-        python_code: [BRIEF] Python code string to be executed. [/BRIEF]
-                    [DETAILED] A string containing valid Python code to be executed in this environment.
+        python_code: [ARGS_BRIEF] Python code string to be executed. [/ARGS_BRIEF]
+                    [ARGS_DETAILED] A string containing valid Python code to be executed in this environment.
                     For best results, assign your main output to a variable named 'result' or 'output'.
                     The code can import standard libraries and perform complex calculations.
-                    The tool will attempt to capture user-defined variables as execution results. [/DETAILED]
-                    [SYNTACTIC] Valid Python code string [/SYNTACTIC]
-                    [EXAMPLES] "result = 2 + 2", "import json; result = json.loads(data)", "filtered = [x for x in data if x > threshold]" [/EXAMPLES]
-        input_data: [BRIEF] Optional JSON string to inject as input_data variable. [/BRIEF]
-                   [DETAILED] An optional JSON string that will be loaded into a Python variable named 'input_data' within the executed script.
+                    The tool will attempt to capture user-defined variables as execution results. [/ARGS_DETAILED]
+                    [ARGS_SYNTACTICAL] Valid Python code string [/ARGS_SYNTACTICAL]
+                    [ARGS_EXAMPLES] "result = 2 + 2", "import json; result = json.loads(data)", "filtered = [x for x in data if x > threshold]" [/ARGS_EXAMPLES]
+        input_data: [ARGS_BRIEF] Optional JSON string to inject as input_data variable. [/ARGS_BRIEF]
+                   [ARGS_DETAILED] An optional JSON string that will be loaded into a Python variable named 'input_data' within the executed script.
                    This allows the script to process external data.
-                   The JSON will be parsed and made available as a Python object (dict, list, etc.) depending on the JSON structure. [/DETAILED]
-                   [SYNTACTIC] Valid JSON string or None [/SYNTACTIC]
-                   [EXAMPLES] "{"data": [1, 2, 3]}", '[1, 2, 3, 4, 5]', "{"threshold": 0.5, "values": [...]}" [/EXAMPLES]
-        save_output_to: [BRIEF] Optional file path to save execution results. [/BRIEF]
-                       [DETAILED] An optional file path where the captured execution results will be saved as a JSON file.
+                   The JSON will be parsed and made available as a Python object (dict, list, etc.) depending on the JSON structure. [/ARGS_DETAILED]
+                   [ARGS_SYNTACTICAL] Valid JSON string or None [/ARGS_SYNTACTICAL]
+                   [ARGS_EXAMPLES] "{"data": [1, 2, 3]}", '[1, 2, 3, 4, 5]', "{"threshold": 0.5, "values": [...]}" [/ARGS_EXAMPLES]
+        save_output_to: [ARGS_BRIEF] Optional file path to save execution results. [/ARGS_BRIEF]
+                       [ARGS_DETAILED] An optional file path where the captured execution results will be saved as a JSON file.
                        If provided and execution is successful, the results will be written to this file for persistence and later use.
-                       The directory will be created if it doesn't exist. [/DETAILED]
-                       [SYNTACTIC] "Valid file path or None" [/SYNTACTIC]
-                       [EXAMPLES] "results.json", "output/analysis_results.json", "data/processed_output.json" [/EXAMPLES]
-        timeout: [BRIEF] Maximum execution time in seconds. Defaults to 300. [/BRIEF]
-                [DETAILED] The maximum time in seconds the subprocess is allowed to run before being terminated.
+                       The directory will be created if it doesn't exist. [/ARGS_DETAILED]
+                       [ARGS_SYNTACTICAL] "Valid file path or None" [/ARGS_SYNTACTICAL]
+                       [ARGS_EXAMPLES] "results.json", "output/analysis_results.json", "data/processed_output.json" [/ARGS_EXAMPLES]
+        timeout: [ARGS_BRIEF] Maximum execution time in seconds. Defaults to 300. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The maximum time in seconds the subprocess is allowed to run before being terminated.
                 This prevents infinite loops and runaway processes from consuming system resources.
                 If the execution exceeds this limit, a timeout error will be returned.
-                Choose appropriate values based on expected computation time. [/DETAILED]
-                [SYNTACTIC] positive integer representing seconds [/SYNTACTIC]
-                [EXAMPLES] 30 (quick calculations), 300 (standard), 1800 (long processing) [/EXAMPLES]
+                Choose appropriate values based on expected computation time. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] positive integer representing seconds [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] 30 (quick calculations), 300 (standard), 1800 (long processing) [/ARGS_EXAMPLES]
 
     Returns:
-        str: [BRIEF] JSON string with detailed execution results and captured output. [/BRIEF]
-             [DETAILED] A comprehensive JSON string containing execution status, standard output, error messages, return code, captured execution results, and file save status.
+        str: [RETURNS_BRIEF] JSON string with detailed execution results and captured output. [/RETURNS_BRIEF]
+             [RETURNS_DETAILED] A comprehensive JSON string containing execution status, standard output, error messages, return code, captured execution results, and file save status.
              The execution_result field contains variables captured from the executed code.
-             This enables full visibility into the execution process and results. [/DETAILED]
-             [EXAMPLES] "{"success": true, "execution_result": {"result": 10}, "stdout": "...", "stderr": "", "return_code": 0}" [/EXAMPLES]
+             This enables full visibility into the execution process and results. [/RETURNS_DETAILED]
+             [RETURNS_EXAMPLES] "{"success": true, "execution_result": {"result": 10}, "stdout": "...", "stderr": "", "return_code": 0}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         TimeoutExpired: [ERROR_WHEN] When code execution exceeds the specified timeout [/ERROR_WHEN]
@@ -445,40 +445,40 @@ def execute_python_script(
     [/SYNTACTICAL]
 
     Args:
-        script_path: [BRIEF] Path to the Python script file to execute. [/BRIEF]
-                    [DETAILED] Complete file path to the Python script that should be executed.
+        script_path: [ARGS_BRIEF] Path to the Python script file to execute. [/ARGS_BRIEF]
+                    [ARGS_DETAILED] Complete file path to the Python script that should be executed.
                     The script must exist and be readable.
                     The path can be relative to the current working directory or absolute.
-                    The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/DETAILED]
-                    [SYNTACTIC] "Valid file path to Python script" [/SYNTACTIC]
-                    [EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/EXAMPLES]
-        args: [BRIEF] Optional list of command-line arguments for the script. [/BRIEF]
-             [DETAILED] A list of strings representing command-line arguments to pass to the script.
+                    The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/ARGS_DETAILED]
+                    [ARGS_SYNTACTICAL] "Valid file path to Python script" [/ARGS_SYNTACTICAL]
+                    [ARGS_EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/ARGS_EXAMPLES]
+        args: [ARGS_BRIEF] Optional list of command-line arguments for the script. [/ARGS_BRIEF]
+             [ARGS_DETAILED] A list of strings representing command-line arguments to pass to the script.
              These arguments will be passed to the script in the order provided.
              Common arguments include input files, output paths, configuration parameters, and processing options.
-             If None, the script will be executed without arguments. [/DETAILED]
-             [SYNTACTIC] ["arg1", "arg2", "arg3", ...] or None [/SYNTACTIC]
-             [EXAMPLES] ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/EXAMPLES]
-        timeout: [BRIEF] Maximum execution time in seconds. Defaults to 600. [/BRIEF]
-                [DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
+             If None, the script will be executed without arguments. [/ARGS_DETAILED]
+             [ARGS_SYNTACTICAL] ["arg1", "arg2", "arg3", ...] or None [/ARGS_SYNTACTICAL]
+             [ARGS_EXAMPLES] ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/ARGS_EXAMPLES]
+        timeout: [ARGS_BRIEF] Maximum execution time in seconds. Defaults to 600. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
                 This prevents runaway processes and ensures resource management.
                 Choose appropriate values based on expected script execution time.
-                For computational simulations, longer timeouts may be necessary. [/DETAILED]
-                [SYNTACTIC] positive integer representing seconds [/SYNTACTIC]
-                [EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/EXAMPLES]
-        working_dir: [BRIEF] Optional working directory for script execution. [/BRIEF]
-                    [DETAILED] The directory from which the script should be executed.
+                For computational simulations, longer timeouts may be necessary. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] positive integer representing seconds [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/ARGS_EXAMPLES]
+        working_dir: [ARGS_BRIEF] Optional working directory for script execution. [/ARGS_BRIEF]
+                    [ARGS_DETAILED] The directory from which the script should be executed.
                     This affects relative path resolution and file I/O operations within the script.
                     If None, the current working directory will be used.
-                    This is useful when scripts expect to run from specific directories or access relative files. [/DETAILED]
-                    [SYNTACTIC] Valid directory path or None [/SYNTACTIC]
-                    [EXAMPLES] "/path/to/project", "data/analysis", None [/EXAMPLES]
+                    This is useful when scripts expect to run from specific directories or access relative files. [/ARGS_DETAILED]
+                    [ARGS_SYNTACTICAL] Valid directory path or None [/ARGS_SYNTACTICAL]
+                    [ARGS_EXAMPLES] "/path/to/project", "data/analysis", None [/ARGS_EXAMPLES]
 
     Returns:
-        str: [BRIEF] JSON string with comprehensive execution results and monitoring data. [/BRIEF]
-             [DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
-             This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/DETAILED]
-             [EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/EXAMPLES]
+        str: [RETURNS_BRIEF] JSON string with comprehensive execution results and monitoring data. [/RETURNS_BRIEF]
+             [RETURNS_DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
+             This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/RETURNS_DETAILED]
+             [RETURNS_EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError: [ERROR_WHEN] When the specified script file doesn't exist [/ERROR_WHEN]

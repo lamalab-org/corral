@@ -32,14 +32,20 @@ class MockBenchmarkInterface:
         self.available_tools = {
             "tools": [
                 {
-                    "name": "test_tool",
-                    "description": "A test tool",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {"type": "string", "description": "Test query"}
+                    "type": "function",
+                    "function": {
+                        "name": "test_tool",
+                        "description": "A test tool",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "Test query",
+                                }
+                            },
+                            "required": ["query"],
                         },
-                        "required": ["query"],
                     },
                 }
             ]
@@ -91,12 +97,57 @@ class MockBenchmarkInterface:
         ), f"{method_name} was called when it shouldn't have been"
 
 
-class MockLLMResponse:
-    """Mock LLM response for testing."""
+class MockMessage:
+    """Mock message class that mimics litellm's Message object."""
 
     def __init__(self, content: str | None = None, tool_calls: list | None = None):
         self.content = content
         self.tool_calls = tool_calls or []
+        self.role = "assistant"
+        self.id = None  # Can be set later
+
+
+class MockLLMResponse:
+    """Mock LLM response for testing, matching the LLMResponse interface."""
+
+    def __init__(
+        self,
+        content: str | None = None,
+        tool_calls: list | None = None,
+        usage: dict | None = None,
+        response_id: str | None = None,
+        logprobs: Any | None = None,
+    ):
+        # Create underlying message object
+        self.message = MockMessage(content=content, tool_calls=tool_calls or [])
+        self._usage = usage
+        self._id = response_id
+        self._logprobs = logprobs
+
+    @property
+    def content(self) -> str | None:
+        """Get message content"""
+        return self.message.content
+
+    @property
+    def tool_calls(self) -> list:
+        """Get tool calls from the message"""
+        return self.message.tool_calls
+
+    @property
+    def usage(self) -> dict | None:
+        """Get token usage from metadata"""
+        return self._usage
+
+    @property
+    def id(self) -> str | None:
+        """Get message ID from metadata"""
+        return self._id
+
+    @property
+    def logprobs(self) -> Any:
+        """Get logprobs from metadata"""
+        return self._logprobs
 
 
 class MockToolCall:

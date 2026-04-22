@@ -1,11 +1,11 @@
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
 
 import litellm
 import openai
+from litellm.exceptions import BudgetExceededError, RateLimitError
 from litellm.types.utils import Message
 from loguru import logger
 from tenacity import (
@@ -16,6 +16,8 @@ from tenacity import (
     wait_fixed,
 )
 
+from corral.types import BudgetExhaustedError
+
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
     openai.APIConnectionError,
@@ -24,16 +26,20 @@ RETRY_EXCEPTIONS = (
     openai.InternalServerError,
 )
 
+# Exceptions that should stop the benchmark immediately (not retry or continue)
+STOP_BENCHMARK_EXCEPTIONS = (
+    BudgetExceededError,  # litellm budget exceeded
+    openai.AuthenticationError,  # Invalid API key
+)
 
-TYPE_MAPPING = {
-    "str": "string",
-    "bool": "boolean",
-    "int": "integer",
-    "float": "number",
-    "list[str]": "array",
-    "none": "null",
-    "dict": "object",
-}
+# Keywords in error messages that indicate quota/credits exhausted (not a temporary rate limit)
+QUOTA_EXHAUSTED_KEYWORDS = (
+    "insufficient_quota",
+    "exceeded your current quota",
+    "billing",
+    "spending limit",
+    "budget",
+)
 
 
 def before_sleep_loguru(retry_state):
@@ -42,11 +48,78 @@ def before_sleep_loguru(retry_state):
     )
 
 
+class LLMResponseMetadata(TypedDict, total=False):
+    """Metadata for LLM responses"""
+
+    id: str | None
+    logprobs: Any | None
+    usage: dict[str, int] | None
+
+
+class LLMResponse:
+    """
+    Wrapper for LLM responses with optional metadata.
+
+    This class wraps the raw LLM message response and includes optional metadata
+    like logprobs, message ID, and token usage.
+
+    Args:
+        message (Message): The raw LLM message response
+        metadata (LLMResponseMetadata | None): Optional metadata including logprobs, id, and usage
+
+    Properties:
+        content: Access message content
+        role: Access message role
+        tool_calls: Access tool calls (if any)
+        logprobs: Access logprobs from metadata
+        id: Access message ID from metadata
+        usage: Access token usage from metadata
+    """
+
+    def __init__(
+        self, message: Message, metadata: LLMResponseMetadata | None = None
+    ) -> None:
+        self.message = message
+        self.metadata = metadata or LLMResponseMetadata()
+
+    @property
+    def content(self) -> str | None:
+        """Get the message content"""
+        return self.message.content
+
+    @property
+    def role(self) -> str:
+        """Get the message role"""
+        return self.message.role
+
+    @property
+    def tool_calls(self) -> Any:
+        """Get tool calls from the message"""
+        return getattr(self.message, "tool_calls", None)
+
+    # Access to metadata
+    @property
+    def logprobs(self) -> Any:
+        """Get logprobs from metadata"""
+        return self.metadata.get("logprobs")
+
+    @property
+    def id(self) -> str | None:
+        """Get message ID from metadata"""
+        return self.metadata.get("id")
+
+    @property
+    def usage(self) -> dict[str, int] | None:
+        """Get token usage from metadata"""
+        return self.metadata.get("usage")
+
+
 class LiteLLMMessage(TypedDict, total=False):
     role: str
     content: str | list
     tool_call_id: str | None
     name: str | None
+    id: str | None
 
 
 @retry(
@@ -62,9 +135,9 @@ def llm_call(
     temperature: float,
     tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
-    return_usage: bool = False,
+    return_usage: bool = True,
     **kwargs,
-) -> Message | tuple[Message, dict[str, Any]]:
+) -> LLMResponse:
     """
     Call LiteLLM API with or without tools based on parameters
 
@@ -74,11 +147,12 @@ def llm_call(
         temperature (float): The temperature to use.
         tools (dict[str, Any], optional): The tools to use. If provided, will use tool calling.
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
-        return_usage (bool, optional): If True, returns tuple of (message, usage_info). Defaults to False.
+        return_usage (bool, optional): If True, includes token usage in metadata. Defaults to True.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
+            If 'logprobs' is True in kwargs, logprobs will be included in response metadata.
 
     Returns:
-        Message | tuple[Message, dict]: The response from the LiteLLM API, optionally with usage info.
+        LLMResponse: Wrapper containing the message and optional metadata (id, logprobs if requested, usage).
     """
     try:
         params = {
@@ -106,9 +180,23 @@ def llm_call(
 
         message = response.choices[0].message
 
+        # If message content is None, try to get reasoning_content
+        if message.content is None:
+            reasoning_content = getattr(message, "reasoning_content", None)
+            if reasoning_content is not None:
+                # Ensure reasoning_content is a string
+                message.content = str(reasoning_content) if reasoning_content else None
+
+        metadata = LLMResponseMetadata()
+        metadata["id"] = response.id
+
+        # Include logprobs if requested via kwargs
+        if kwargs.get("logprobs"):
+            metadata["logprobs"] = response.choices[0].logprobs
+
+        # Include usage info if requested
         if return_usage:
-            # Extract usage information from the response
-            usage_info = {
+            metadata["usage"] = {
                 "prompt_tokens": getattr(response.usage, "prompt_tokens", 0)
                 if response.usage
                 else 0,
@@ -119,9 +207,26 @@ def llm_call(
                 if response.usage
                 else 0,
             }
-            return message, usage_info
 
-        return message
+        return LLMResponse(message, metadata)
+
+    except STOP_BENCHMARK_EXCEPTIONS as e:
+        # Re-raise as BudgetExhaustedError to stop benchmark immediately
+        logger.error(f"Budget/credits exhausted or authentication failed: {e}")
+        raise BudgetExhaustedError(
+            f"Benchmark stopped: {type(e).__name__} - {e}"
+        ) from e
+
+    except RateLimitError as e:
+        # Check if this is a quota exhaustion (not a temporary rate limit)
+        error_str = str(e).lower()
+        if any(keyword in error_str for keyword in QUOTA_EXHAUSTED_KEYWORDS):
+            logger.error(f"API quota/credits exhausted: {e}")
+            raise BudgetExhaustedError(
+                f"Benchmark stopped - quota exhausted: {e}"
+            ) from e
+        # Otherwise, it's a temporary rate limit - re-raise to let retry handle it
+        raise
 
     except Exception as e:
         raise e
@@ -139,175 +244,10 @@ def format_examples(examples: list[str] | None) -> str:
     if examples is None:
         return ""
     else:
-        example_prompt = f"To help you in understanding this task, the next {
-            len(examples)} examples are provided:\n\n"
+        example_prompt = f"""To help you in understanding this task, the next {
+            len(examples)
+        } examples are provided:\n\n"""
         return example_prompt + "\n\n".join(examples)
-
-
-def convert_dict_arg(arg: dict) -> dict:
-    """
-    Convert a single argument dictionary (from our ToolArgument format)
-    to an OpenAI-compatible JSON schema property.
-    """
-    if not isinstance(arg, dict):
-        raise TypeError(
-            f"Expected argument specification to be a dictionary, but got {type(arg)}: {arg}"
-        )
-
-    arg_type = arg.get("type")
-    if not arg_type:
-        raise ValueError(
-            f"Argument 'type' is missing for argument: {arg.get('name', 'unknown')}"
-        )
-
-    prop = {"description": arg.get("description", "")}
-
-    if arg_type == "list[str]":
-        prop["type"] = "array"
-        prop["items"] = {"type": "string"}
-        prop["description"] += (
-            ' - Provide as an array of strings, e.g., ["item1", "item2"]'
-        )
-    else:
-        json_type = TYPE_MAPPING.get(arg_type)
-        if not json_type:
-            logger.warning(
-                f"Unknown argument type '{arg_type}'. Defaulting to 'string'."
-            )
-            prop["type"] = "string"
-        else:
-            prop["type"] = json_type
-
-    if arg.get("choices"):
-        prop["enum"] = arg["choices"]
-
-    if "default" in arg and arg["default"] is not None:
-        prop["default"] = arg["default"]
-
-    return prop
-
-
-def _parse_argument_string_to_dict(arg_string: str) -> dict | None:
-    """
-    Parses a human-readable argument string back into a structured dictionary.
-    Handles formats like: "name (type, required): description"
-    or "name (type, optional, default: value): description"
-    """
-    # Regex to capture the different parts of the argument string
-    pattern = re.compile(
-        r"^(?P<name>\w+)\s+\((?P<type>[^,]+),\s*(?P<req_opt>required|optional(?:,\s*default:\s*(?P<default>.*?))?)\):\s*(?P<desc>.*)$",
-        re.DOTALL,
-    )
-    match = pattern.match(arg_string)
-
-    if not match:
-        logger.warning(f"Could not parse argument string: {arg_string}")
-        return None
-
-    data = match.groupdict()
-
-    arg_dict = {
-        "name": data["name"],
-        "type": data["type"],
-        "required": data["req_opt"] == "required",
-        "description": data["desc"],
-    }
-
-    if data["default"] is not None:
-        # Here we are just storing the default as a string. A more robust
-        # implementation might try to cast it to the correct type.
-        arg_dict["default"] = data["default"]
-
-    return arg_dict
-
-
-def convert_to_openai_tool_format(tools_dict: dict) -> list[dict]:
-    """
-    Convert a dictionary of tools into the OpenAI tool calling format.
-    This is now robust and can handle arguments as a list of dicts OR a list of strings.
-    """
-    if "tools" not in tools_dict or not isinstance(tools_dict["tools"], list):
-        logger.warning(
-            "No 'tools' list found in the provided dictionary. Returning empty list."
-        )
-        return []
-
-    openai_tools = []
-    for tool in tools_dict["tools"]:
-        if not all(k in tool for k in ["name", "description", "arguments"]):
-            logger.warning(f"Skipping malformed tool, missing required keys: {tool}")
-            continue
-
-        function_spec = {
-            "name": tool["name"],
-            "description": tool["description"],
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        }
-
-        if not isinstance(tool["arguments"], list):
-            logger.warning(
-                f"Skipping tool '{tool['name']}' because its arguments are not a list. Got: {type(tool['arguments'])}"
-            )
-            continue
-
-        for arg_spec in tool["arguments"]:
-            arg_dict = None
-            # UPDATED LOGIC: Handle both string and dict formats
-            if isinstance(arg_spec, str):
-                arg_dict = _parse_argument_string_to_dict(arg_spec)
-            elif isinstance(arg_spec, dict):
-                arg_dict = arg_spec
-            else:
-                logger.error(
-                    f"Argument spec for tool '{tool['name']}' is neither a string nor a dictionary: {arg_spec}"
-                )
-                continue
-
-            if not arg_dict:
-                continue  # Skip if parsing failed or spec was invalid
-
-            try:
-                property_entry = convert_dict_arg(arg_dict)
-                arg_name = arg_dict["name"]
-                function_spec["parameters"]["properties"][arg_name] = property_entry
-
-                if arg_dict.get("required", True):
-                    function_spec["parameters"]["required"].append(arg_name)
-            except (TypeError, ValueError, KeyError) as e:
-                logger.error(
-                    f"Skipping invalid argument in tool '{tool['name']}': {arg_dict}. Error: {e}"
-                )
-                continue
-
-        if function_spec["name"] and function_spec["description"]:
-            openai_tools.append({"type": "function", "function": function_spec})
-
-    return openai_tools
-
-
-def parse_string_argument(arg_string: str) -> dict | None:
-    """
-    Parse a string argument format like "path (str, required): Path to the directory"
-    This is a fallback for malformed API responses.
-    """
-    # Pattern to match "name (type, required/optional): description"
-    pattern = r"^(\w+)\s*\(([^,]+)(?:,\s*(required|optional))?\):\s*(.+)$"
-    match = re.match(pattern, arg_string.strip())
-
-    if match:
-        name = match.group(1)
-        arg_type = match.group(2).strip()
-        required_str = match.group(3)
-        description = match.group(4).strip()
-
-        return {
-            "name": name,
-            "type": arg_type,
-            "description": description,
-            "required": required_str != "optional" if required_str else True,
-        }
-
-    return None
 
 
 def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
@@ -327,6 +267,8 @@ def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
         else:
             message_dict = {"role": msg.role, "content": msg.content}
 
+            if hasattr(msg, "id") and msg.id:
+                message_dict["id"] = msg.id
             if hasattr(msg, "tool_call_id") and msg.tool_call_id:
                 message_dict["tool_call_id"] = msg.tool_call_id
             if hasattr(msg, "name") and msg.name:
@@ -428,6 +370,11 @@ def get_context_window(model: str) -> int:
     Returns:
         int: The max input tokens for the model, or None if unknown.
     """
+    if (
+        model
+        == "openai/1 - GPT-OSS-120b - an open model released by OpenAI in August 2025"
+    ):
+        return 131072
     return litellm.model_cost.get(model, {}).get("max_input_tokens", None)
 
 
@@ -472,7 +419,7 @@ def count_tokens_and_add(
     """
     window = get_context_window(model=model)
     if window is None:
-        window = get_context_window(model=model.split("/")[-1])
+        window = get_context_window(model=model.rsplit("/", maxsplit=1)[-1])
 
     if window is None:
         window = 8192  # Default to 8k if unknown

@@ -272,82 +272,6 @@ class TestReflexionAgentRun:
         )  # Generate reflection after first 2 failures
         assert len(reflexion_agent.memory.reflections) == 2
 
-    def test_memory_injection_into_history(
-        self, mock_interface, monkeypatch, mock_promptstore_module
-    ):
-        """Test that reflections are injected into actor's history."""
-        base_agent = ReActAgent(
-            model="test-model",
-            max_iterations=3,
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
-        )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
-        )
-
-        # First trial fails, second trial succeeds
-        responses = [
-            MockLLMResponse(content="Error solving the task: failed"),
-            MockLLMResponse(
-                content="Thought: <thought>Got it.</thought>\nFinal Answer: <final_answer>Success</final_answer>"
-            ),
-        ]
-
-        captured_history = []
-
-        def mock_actor_run(self, interface, task_id, history=None, **kwargs):
-            # Capture the history passed to actor
-            captured_history.append(history)
-
-            # Return responses
-            if len(captured_history) == 1:
-                self.messages = [
-                    LiteLLMMessage(role="assistant", content=responses[0].content)
-                ]
-                return responses[0].content
-            else:
-                self.messages = [
-                    LiteLLMMessage(role="assistant", content=responses[1].content)
-                ]
-                return "Success"
-
-        def mock_reflection_generate(*args, **kwargs):
-            return "Important lesson learned", {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            }
-
-        def mock_get_last_score(task_id):
-            # Only return score after first trial
-            if len(captured_history) > 0:
-                return {"score": 0.0, "trial_id": "trial_1"}
-            raise AttributeError("No previous score")
-
-        monkeypatch.setattr("corral.agents.react.ReActAgent.run", mock_actor_run)
-        monkeypatch.setattr(
-            "corral.agents.reflection.ReflectionModule.generate_reflection",
-            mock_reflection_generate,
-        )
-        monkeypatch.setattr(mock_interface, "get_last_score", mock_get_last_score)
-
-        # Run first trial
-        reflexion_agent.run(mock_interface, "test_task")
-
-        # Run second trial (with reflection)
-        reflexion_agent.run(mock_interface, "test_task")
-
-        # Check that history was injected on second trial
-        assert len(captured_history) == 2
-        assert (
-            captured_history[0] is None or len(captured_history[0]) == 0
-        )  # First trial: no history
-        assert captured_history[1] is not None  # Second trial: history with reflection
-        assert len(captured_history[1]) > 0
-        assert captured_history[1][0]["role"] == "system"
-        assert "LESSONS FROM PREVIOUS ATTEMPTS" in captured_history[1][0]["content"]
-
     def test_memory_clears_for_new_task(
         self, mock_interface, monkeypatch, mock_promptstore_module
     ):
@@ -364,7 +288,7 @@ class TestReflexionAgentRun:
 
         trial_count = {"count": 0}
 
-        def mock_actor_run(self, interface, task_id, history=None, **kwargs):
+        def mock_actor_run(self, interface, task_id, **kwargs):
             self.messages = [LiteLLMMessage(role="assistant", content="Error")]
             return "Error solving the task"
 
@@ -534,7 +458,7 @@ class TestReflexionAgentEdgeCases:
 
         call_count = {"attempt": 0}
 
-        def mock_actor_run(self, interface, task_id, history=None, **kwargs):
+        def mock_actor_run(self, interface, task_id, **kwargs):
             call_count["attempt"] += 1
             if call_count["attempt"] == 1:
                 raise ValueError("Simulated error")

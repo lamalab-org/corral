@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 AFM Tools Module
 This module provides tools for operating an Atomic Force Microscope (AFM) using the Nanosurf API.
@@ -71,16 +70,16 @@ def visualize_grain_boxes(image_path: str) -> list:
 
     Args:
         image_path (str):
-            [BRIEF] Path to the microscopy image file. [/BRIEF]
-            [DETAILED] File path pointing to the image to be processed. The image should represent a microstructural scan with visible grains to enable detection. [/DETAILED]
-            [SYNTACTICAL] Format: A string ending in `.nid`. [/SYNTACTICAL]
-            [EXAMPLES] `"sample_grains.nid"`, `"/scans/run5_scan_topo.nid"` [/EXAMPLES]
+            [ARGS_BRIEF] Path to the microscopy image file. [/ARGS_BRIEF]
+            [ARGS_DETAILED] File path pointing to the image to be processed. The image should represent a microstructural scan with visible grains to enable detection. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: A string ending in `.nid`. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] `"sample_grains.nid"`, `"/scans/run5_scan_topo.nid"` [/ARGS_EXAMPLES]
 
     Returns:
         list:
-            [BRIEF] A list of indexed grain bounding boxes. [/BRIEF]
-            [DETAILED] Each entry in the list is a tuple of the form `(index, x1, y1, x2, y2)`, where `index` is the grain number (starting from 1), and `(x1, y1)` and `(x2, y2)` represent the bottom-left and top-right coordinates of the bounding box in microns. This data can be used for grain-by-grain analysis or scan targeting. [/DETAILED]
-            [EXAMPLES] `[(1, 2.1, 3.4, 4.2, 5.5), (2, 6.0, 7.2, 7.8, 8.9)]` [/EXAMPLES]
+            [RETURNS_BRIEF] A list of indexed grain bounding boxes. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Each entry in the list is a tuple of the form `(index, x1, y1, x2, y2)`, where `index` is the grain number (starting from 1), and `(x1, y1)` and `(x2, y2)` represent the bottom-left and top-right coordinates of the bounding box in microns. This data can be used for grain-by-grain analysis or scan targeting. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] `[(1, 2.1, 3.4, 4.2, 5.5), (2, 6.0, 7.2, 7.8, 8.9)]` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -96,7 +95,7 @@ def visualize_grain_boxes(image_path: str) -> list:
 
     plt.use("Agg")  # Use non-GUI backend for saving
 
-    indexed_boxes, extents, Z_flat2, labeled = image_process(image_path)  # noqa: F405
+    indexed_boxes, extents, Z_flat2, _labeled = image_process(image_path)  # noqa: F405
 
     fig, ax = plt.subplots()
     ax.imshow(Z_flat2, cmap="afmhot", origin="lower", extent=extents)
@@ -191,20 +190,22 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
 
     Args:
         grain_id (int):
-            [BRIEF] Index of the grain to be scanned. [/BRIEF]
-            [DETAILED] This should correspond to the `index` returned by `visualize_grain_boxes`. Indexing starts from 1 and follows the order of detection. [/DETAILED]
-            [EXAMPLES] "1", "5", "12" [/EXAMPLES]
+            [ARGS_BRIEF] Index of the grain to be scanned. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This should correspond to the `index` returned by `visualize_grain_boxes`. Indexing starts from 1 and follows the order of detection. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: Positive integer. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "1", "5", "12" [/ARGS_EXAMPLES]
 
         image_path (str):
-            [BRIEF] Path to the `.nid` image that contains the grain. [/BRIEF]
-            [DETAILED] This should be the same image file used in `visualize_grain_boxes`, from which the grain indices were derived. It must be in `.nid` format. [/DETAILED]
-            [EXAMPLES] "grains_overview.nid", "/data/surface1.nid" [/EXAMPLES]
+            [ARGS_BRIEF] Path to the `.nid` image that contains the grain. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This should be the same image file used in `visualize_grain_boxes`, from which the grain indices were derived. It must be in `.nid` format. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: A string ending in `.nid`. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "grains_overview.nid", "/data/surface1.nid" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] Path to the latest `.nid` file produced from the scan. [/BRIEF]
-            [DETAILED] After the scan completes, this tool returns the full path to the `.nid` file corresponding to the localized grain scan. [/DETAILED]
-            [EXAMPLES] `"/data/scans/local_grain_12.nid"` [/EXAMPLES]
+            [RETURNS_BRIEF] Path to the latest `.nid` file produced from the scan. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] After the scan completes, this tool returns the full path to the `.nid` file corresponding to the localized grain scan. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] `"/data/scans/local_grain_12.nid"` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         FileNotFoundError:
@@ -304,19 +305,19 @@ def Document_Retrieval(query: str) -> str:
 
     Args:
         query (str):
-            [BRIEF] Search string describing the desired AFM control routine. [/BRIEF]
-            [DETAILED] This is a plain-language or command-style string that specifies what kind of control code is needed. The system matches it against documented and tested control snippets used in prior AFM workflows. [/DETAILED]
-            [SYNTACTICAL] Format: String containing keywords or phrases (e.g., "initialize AFM", "set Z controller gains"). [/SYNTACTICAL]
-            [EXAMPLES] "load application", "configure scan parameters", "set contact mode", "move head to (x=5, y=5)" [/EXAMPLES]
+            [ARGS_BRIEF] Search string describing the desired AFM control routine. [/ARGS_BRIEF]
+            [ARGS_DETAILED] This is a plain-language or command-style string that specifies what kind of control code is needed. The system matches it against documented and tested control snippets used in prior AFM workflows. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: String containing keywords or phrases (e.g., "initialize AFM", "set Z controller gains"). [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "load application", "configure scan parameters", "set contact mode", "move head to (x=5, y=5)" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] The AFM control code snippet matching the query. [/BRIEF]
-            [DETAILED] Returns a formatted string of Python code that matches the request. This code is typically suitable for direct use with the `Code_Executor` tool and interacts with the AFM system using nanosurf's Python API. [/DETAILED]
-            [EXAMPLES]
+            [RETURNS_BRIEF] The AFM control code snippet matching the query. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Returns a formatted string of Python code that matches the request. This code is typically suitable for direct use with the `Code_Executor` tool and interacts with the AFM system using nanosurf's Python API. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES]
                 `"spm = nanosurf.SPM()\nscan = spm.application.Scan\nscan.StartFrameUp()"`,
                 `"zcontrol.PGain = 120\nzcontrol.IGain = 7000\nzcontrol.DGain = 8"`
-            [/EXAMPLES]
+            [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -368,16 +369,16 @@ def Image_optimizer(baseline: bool = False) -> str:
 
     Args:
         baseline (bool):
-            [BRIEF] Whether to enable baseline correction during optimization. [/BRIEF]
-            [DETAILED] When set to `True`, baseline leveling is applied to each image before it is evaluated for sharpness. This improves results in cases where scanner drift or sample tilt introduces bias. [/DETAILED]
-            [SYNTACTICAL] Format: Boolean. Default is `False`. [/SYNTACTICAL]
-            [EXAMPLES] "True" [/EXAMPLES]
+            [ARGS_BRIEF] Whether to enable baseline correction during optimization. [/ARGS_BRIEF]
+            [ARGS_DETAILED] When set to `True`, baseline leveling is applied to each image before it is evaluated for sharpness. This improves results in cases where scanner drift or sample tilt introduces bias. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: Boolean. Default is `False`. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "True" [/ARGS_EXAMPLES]
 
     Returns:
         str:
-            [BRIEF] Best PID settings and corresponding image error value. [/BRIEF]
-            [DETAILED] Returns a summary of the optimal Proportional, Integral, and Derivative gains found via the genetic algorithm, along with the error metric. The image associated with these gains is saved as the most recent `.nid` file in the current working directory. [/DETAILED]
-            [EXAMPLES] "Best solution found: [Pgain Igain Dgain] = [120 8000 12], [Error] = 0.014" [/EXAMPLES]
+            [RETURNS_BRIEF] Best PID settings and corresponding image error value. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Returns a summary of the optimal Proportional, Integral, and Derivative gains found via the genetic algorithm, along with the error metric. The image associated with these gains is saved as the most recent `.nid` file in the current working directory. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "Best solution found: [Pgain Igain Dgain] = [120 8000 12], [Error] = 0.014" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         ValueError:
@@ -468,18 +469,18 @@ def Code_Executor(code: str) -> int:
 
     Args:
         code (str):
-            [BRIEF] Python code string to be executed. [/BRIEF]
-            [DETAILED] Raw Python instructions that will be executed in the current runtime context. This code typically contains AFM operation logic and must be syntactically correct and safe to run. [/DETAILED]
-            [SYNTACTICAL] Format: Valid Python code as a string. [/SYNTACTICAL]
-            [EXAMPLES] "import nanosurf\nspm=nanosurf.SPM()\napplication = spm.application\nscan=application.scan\nscan.StartFrameUp()\ndel spm\n" [/EXAMPLES]
+            [ARGS_BRIEF] Python code string to be executed. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Raw Python instructions that will be executed in the current runtime context. This code typically contains AFM operation logic and must be syntactically correct and safe to run. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: Valid Python code as a string. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "import nanosurf\nspm=nanosurf.SPM()\napplication = spm.application\nscan=application.scan\nscan.StartFrameUp()\ndel spm\n" [/ARGS_EXAMPLES]
 
     Returns:
         int:
-            [BRIEF] Current AFM parameters status or error information from code execution. [/BRIEF]
-            [DETAILED] Returns a success message with current AFM parameters or the captured exception details if execution fails. The result may be logged or used to troubleshoot control scripts. [/DETAILED]
-            [EXAMPLES]
+            [RETURNS_BRIEF] Current AFM parameters status or error information from code execution. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Returns a success message with current AFM parameters or the captured exception details if execution fails. The result may be logged or used to troubleshoot control scripts. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES]
                 `"Code executed successfully with current AFM parameters: {'Pgain': 100, 'Igain': 6000, 'Dgain': 10, 'ScanMode': 'Contact', 'ImageWidth': 5e-06, 'ImageHeight': 5e-06}"`,
-                `"Error: NameError: name 'afm' is not defined"` [/EXAMPLES]
+                `"Error: NameError: name 'afm' is not defined"` [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
@@ -561,42 +562,42 @@ def Image_Analyzer(
 
     Args:
         path (str):
-            [BRIEF] Path to the `.nid` AFM image file. [/BRIEF]
-            [DETAILED] Full file path to a Nanosurf `.nid` AFM image file. This file is read and processed to extract imaging data. [/DETAILED]
-            [SYNTACTICAL] Format: "string ending in .nid" [/SYNTACTICAL]
-            [EXAMPLES] Examples: "scan.nid", "/data/images/sample3.nid" [/EXAMPLES]
+            [ARGS_BRIEF] Path to the `.nid` AFM image file. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Full file path to a Nanosurf `.nid` AFM image file. This file is read and processed to extract imaging data. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: "string ending in .nid" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] Examples: "scan.nid", "/data/images/sample3.nid" [/ARGS_EXAMPLES]
 
         dynamic_code (str):
-            [BRIEF] Custom Python code to modify image data access logic. [/BRIEF]
-            [DETAILED] Executed at runtime to override the default image channel. Useful for switching to different imaging modes such as Deflection or Friction Force, or for accessing Backward scan data. [/DETAILED]
-            [SYNTACTICAL] Format: A string of valid Python code that assigns a value to `image_data`, based on the internal data dictionary structure. Must be compatible with the Nanosurf AFM `.nid` data schema. [/SYNTACTICAL]
-            [EXAMPLES] 'image_data = data["Image"]["Backward"]["Deflection"]' [/EXAMPLES]
+            [ARGS_BRIEF] Custom Python code to modify image data access logic. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Executed at runtime to override the default image channel. Useful for switching to different imaging modes such as Deflection or Friction Force, or for accessing Backward scan data. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: A string of valid Python code that assigns a value to `image_data`, based on the internal data dictionary structure. Must be compatible with the Nanosurf AFM `.nid` data schema. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] 'image_data = data["Image"]["Backward"]["Deflection"]' [/ARGS_EXAMPLES]
 
         calculate_friction (bool):
-            [BRIEF] If True, computes the average friction force. [/BRIEF]
-            [DETAILED] Computes the average of the difference between Forward and Backward friction force images. [/DETAILED]
-            [SYNTACTICAL] Format: Boolean flag. Default is `False`. Set to `True` to trigger friction force computation. [/SYNTACTICAL]
-            [EXAMPLES] "True" [/EXAMPLES]
+            [ARGS_BRIEF] If True, computes the average friction force. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Computes the average of the difference between Forward and Backward friction force images. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: Boolean flag. Default is `False`. Set to `True` to trigger friction force computation. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "True" [/ARGS_EXAMPLES]
 
         calculate_mean_roughness (bool):
-            [BRIEF] If True, computes mean surface roughness (Ra). [/BRIEF]
-            [DETAILED] Calculates the arithmetic average of absolute deviations from the mean surface height. [/DETAILED]
-            [SYNTACTICAL] Format: Boolean flag. Default is `False`. Set to `True` to enable mean roughness computation. [/SYNTACTICAL]
-            [EXAMPLES] "True" [/EXAMPLES]
+            [ARGS_BRIEF] If True, computes mean surface roughness (Ra). [/ARGS_BRIEF]
+            [ARGS_DETAILED] Calculates the arithmetic average of absolute deviations from the mean surface height. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: Boolean flag. Default is `False`. Set to `True` to enable mean roughness computation. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "True" [/ARGS_EXAMPLES]
 
         calculate_rms_roughness (bool):
-            [BRIEF] If True, computes root-mean-square surface roughness (Rq). [/BRIEF]
-            [DETAILED] Measures the standard deviation of the surface height distribution. Useful for quantifying surface texture. [/DETAILED]
-            [SYNTACTICAL] Format: Boolean flag. Default is `False`. Set to `True` to enable RMS roughness computation. [/SYNTACTICAL]
-            [EXAMPLES] "False" [/EXAMPLES]
+            [ARGS_BRIEF] If True, computes root-mean-square surface roughness (Rq). [/ARGS_BRIEF]
+            [ARGS_DETAILED] Measures the standard deviation of the surface height distribution. Useful for quantifying surface texture. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Format: Boolean flag. Default is `False`. Set to `True` to enable RMS roughness computation. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "False" [/ARGS_EXAMPLES]
 
     Returns:
         Dict[str, Any]:
-            [BRIEF] Dictionary with image data, computation results, and status messages. [/BRIEF]
-            [DETAILED] Contains raw image data extracted from the file, and optionally, values for average friction, mean roughness, and RMS roughness if requested. In case of error, includes a detailed message. [/DETAILED]
-            [EXAMPLES] Example outputs:
+            [RETURNS_BRIEF] Dictionary with image data, computation results, and status messages. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Contains raw image data extracted from the file, and optionally, values for average friction, mean roughness, and RMS roughness if requested. In case of error, includes a detailed message. [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] Example outputs:
                 - "{"status": "Success", "image_data": [...], "mean_roughness": 2.4e-9}"
-                - "{"status": "Error", "message": "An error occurred: File not found"}" [/EXAMPLES]
+                - "{"status": "Error", "message": "An error occurred: File not found"}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
