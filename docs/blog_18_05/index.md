@@ -30,7 +30,7 @@ In a QA benchmark, the model receives a question and gives an answer. The evalua
 
 That difference shaped the whole design of the benchmark engine. It also made the engineering much more involved than we first expected. Even a simple ablation, such as changing the verbosity of tool descriptions, required changes in the environment and evaluation code. Adding the W&B logger, and making it adaptable to new metrics defined by users, required changes in the core engine. The same was true for parsers, error handling, trace recording, and many other components. Each part had to be flexible enough to support new tasks, tools, agents, and metrics without breaking the rest of the system.
 
-We decided to built the benchmark engine from scratch, keeping a strict separation between environments and agents inspired by Aviary [[10]](#ref-10). During the evaluation runs, environments are accessed through API endpoints: they own task state, hidden variables, tools, reset behavior, and scoring. Agents, in contrast, receive task prompts and tool observations, and  then choose tool calls or final answers. This separation follows a more Markovian evaluation, and clearly allow to ablate the impact of the different components of these systems. It also gives us control over which information is visible to the model and which information remains hidden.
+We decided to build the benchmark engine from scratch, keeping a strict separation between environments and agents inspired by Aviary [[10]](#ref-10). During the evaluation runs, environments are accessed through API endpoints: they own task state, hidden variables, tools, reset behavior, and scoring. Agents, in contrast, receive task prompts and tool observations, and then choose tool calls or final answers. This separation follows a more Markovian evaluation, and clearly allows us to ablate the impact of the different components of these systems. It also gives us control over which information is visible to the model and which information remains hidden.
 
 ![Corral framework](figures/figure_corral_framewor.png)
 
@@ -70,7 +70,7 @@ The aggregate numbers are in the paper: agents ignored gathered evidence in 68% 
 
 ### **The molecular formula belief is never updated**
 
-One very illuminating failure case among several traces were about not updating some initial belief, and make the evidence fit that belief instead of the other way around.
+One very illuminating failure case among several traces was about not updating some initial belief, and making the evidence fit that belief instead of the other way around.
 
 This happened repeatedly in the spectroscopy environment, where the agent is asked to identify an unknown compound from its spectra. The initial hypothesis in this environment usually comes from the mass spectrum, which gives a strong clue about the molecular formula. The agent then tries to find a structure that matches that formula and the other spectra. If the other spectra contradict the initial formula, the agent should update its belief about the formula. But in many cases, it does not. Instead, it tries to explain away the contradictions or find a different structure that fits the initial formula.
 
