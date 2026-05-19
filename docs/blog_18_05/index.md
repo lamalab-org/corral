@@ -60,7 +60,7 @@ The aggregate numbers are in the paper: agents ignored gathered evidence in 68% 
 
 ![Molecular formula belief is not updated](figures/stick2firstbelief.png)
 
-One very illuminating failure case among several traces were about not updating some initial belief, and make the evidence fit that belief instead of the other way around.
+One very illuminating failure case among several traces was about not updating some initial belief, and making the evidence fit that belief instead of the other way around.
 
 This happened repeatedly in the spectroscopy environment, where the agent is asked to identify an unknown compound from its spectra. The initial hypothesis in this environment usually comes from the mass spectrum, which gives a strong clue about the molecular formula. The agent then tries to find a structure that matches that formula and the other spectra. If the other spectra contradict the initial formula, the agent should update its belief about the formula. But in many cases, it does not. Instead, it tries to explain away the contradictions or find a different structure that fits the initial formula.
 
