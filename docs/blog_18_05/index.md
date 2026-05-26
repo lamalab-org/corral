@@ -426,7 +426,7 @@ Run 4: 0.06
 Run 5: 0.06
 ```
 
-Underconvergence is recoverable — four of the five runs recovered from it. The behaviour that singles out run 2 is not that it underconverged; it is that, having noticed the underconvergence, the agent treated the format requirement as the binding constraint and let the answer collapse to zero.
+Underconvergence is recoverable — four of the five runs recovered from it. The behaviour that singles out it is that, having noticed the underconvergence, the agent treated the format requirement as the binding constraint and let the answer collapse to zero.
 
 This is one realisation of the 68% number. Evidence was gathered. Evidence was named in the trace. The action that the evidence licensed — re-run the minimisation — was not the action that was taken.
 
