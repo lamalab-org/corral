@@ -316,7 +316,7 @@ In the next paragraph it walks the conclusion back, because committing to Ag⁺ 
 Let me look up: FeCrO4 is reported as brick red to brown. So both Ag+ and Fe+2 could give brick red with chromate.
 ```
 
-This is not standard. Ferrous chromate is usually described as yellow or yellow-brown, not brick red, and it is not a diagnostic test for Fe²⁺. The "look up" verb is doing real work here. Despite some tools in the environment allowing to consult the color of the different compounds and precipitates, there is no tool call, no reference, no database. The phrase is being used to manufacture a piece of evidence in support of an already-preferred hypothesis. The agent then commits:
+This is not standard. Ferrous chromate is usually described as yellow or yellow-brown, not brick red, and it is not a diagnostic test for Fe²⁺.  Despite some tools in the environment allowing to consult the color of the different compounds and precipitates, there is no tool call, no reference, no database. The phrase "let me look up" is being used to manufacture a piece of evidence in support of an already-preferred hypothesis. The agent then commits:
 
 ```plaintext
 <final_answer>{"cation": "Fe+2", "anion": "HCO3-"}</final_answer>
