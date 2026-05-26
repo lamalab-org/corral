@@ -6,7 +6,7 @@ Our project did not start as an epistemology project. It started as a more ordin
 
 Then we started going through them.
 
-Some failures looked normal. The agent made a bad decision. It chose the wrong formula. It misunderstood a tool. But other failures had a different direction. The agent would gather evidence and then ignore it. It would notice a contradiction and then explain it away. It would never update its initial belief, but instead force the evidence to fit some weak validation. It would test one hypothesis, reject it, invent a new one, and submit the new one without testing. At that point the question became less like “how accurate are these agents?” and more like “what kind of reasoning process is this?”
+Some failures looked normal. The agent made a bad decision. It chose the wrong path. It misunderstood a tool. But other failures had a different direction. The agent would gather evidence and then ignore it. It would notice a contradiction and then explain it away. It would never update its initial belief, but instead force the evidence to fit some weak validation. It would test one hypothesis, reject it, invent a new one, and submit the new one without testing. At that point the question became less like “how accurate are these agents?” and more like “what kind of reasoning process is this?”
 
 That is how a benchmark project became, partly, an epistemology project: to show the concerning behaviors we observed in the traces.
 
@@ -64,13 +64,13 @@ Finally, adding context helped only in the easiest cases. Injecting partial succ
 
 ## **What the traces show**
 
-The aggregate numbers are in the paper: agents ignored gathered evidence in 68% of traces, left beliefs unchanged in 71%, and revised their beliefs after refutation in only 26%. But the numbers are only a map of the problem. The more revealing part is what those percentages look like inside a single run: an observation noticed and then dismissed, a contradiction explained away, a weak hypothesis protected by bending the evidence around it. Below, we zoom in on those moments, because they are what made the epistemic failure visible in the traces.
+The aggregate numbers are in the paper: agents ignored gathered evidence in 68% of traces, left beliefs unchanged in 71%, and revised their beliefs after refutation in only 26%. But the numbers are only a map of the problem. The more revealing part is what those percentages look like inside a single run: an experiment run and then dismissed, a contradiction explained away, a weak hypothesis protected by bending the evidence around it. Below, we zoom in on those moments, because they are what made the epistemic failure visible in the traces.
 
 ![Overall trace behavior summary](figures/final_overall.png)
 
 ### **The molecular formula belief is never updated**
 
-One very illuminating failure case among several traces was about not updating some initial belief, and making the evidence fit that belief instead of the other way around.
+One very illuminating failure case among several traces was about not updating some initial hypothesis, and making the evidence from experiments fit that belief instead of the other way around.
 
 This happened repeatedly in the spectroscopy environment, where the agent is asked to identify an unknown compound from its spectra. The initial hypothesis in this environment usually comes from the mass spectrum, which gives a strong clue about the molecular formula. The agent then tries to find a structure that matches that formula and the other spectra. If the other spectra contradict the initial formula, the agent should update its belief about the formula. But in many cases, it does not. Instead, it tries to explain away the contradictions or find a different structure that fits the initial formula.
 
