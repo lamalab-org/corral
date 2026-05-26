@@ -380,7 +380,7 @@ Then it submits anyway:
 "A": [256*256]}
 ```
 
-This is not just an incomplete answer. It changes the type of claim being made. The agent has evidence for one roughness measurement, but it submits an equation. It also treats the image matrix shape, `256 × 256`, as if it were the scan area, even though the task asks for the physical area of the AFM scan. The missing experiment is converted into a constant "relationship"; the missing area metadata is replaced by a pixel count.
+The agent has evidence for one roughness measurement, but it submits an equation. It also treats the image matrix shape, `256 × 256`, as if it were the scan area, even though the task asks for the physical area of the AFM scan. The missing experiment is converted into a constant "relationship"; the missing area metadata is replaced by a pixel count.
 
 The interesting part is that the trace already contains the refutation. The agent knows one point is insufficient. It knows the submitted relationship will not be meaningful. But the final-answer pressure still wins: the run ends not by reporting that the task cannot be completed from the gathered evidence, and not by running additional scans at different areas, but by packaging insufficient evidence into the requested output schema.
 
