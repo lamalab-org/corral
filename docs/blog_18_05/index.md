@@ -410,7 +410,7 @@ But the task asks for the numerical value without units. Let me check what preci
 So my answer would be: 0.00
 ```
 
-The submitted answer is `0.00`. Rounding 0.0042 to two decimal places does give 0.00, but the answer it produces is not just inaccurate — it is unphysical. A clean aluminium surface with literally zero surface energy would not be a surface. The "0.05-0.10" range that the agent had quoted as a sanity check, and that its own number missed by more than 10×, disappears from the workflow; the format example survives.
+The submitted answer is `0.00`. Rounding 0.0042 to two decimal places does give 0.00, but the answer it produces is unphysical. A clean aluminium surface with literally zero surface energy would not be a surface. The "0.05-0.10" range that the agent had quoted as a sanity check, and that its own number missed by more than 10×, disappears from the workflow; the format example survives.
 
 There are two failures stacked here, and only the second is the one we want to point at. The first is a routine numerical mistake — the minimisation did not converge, so 0.0042 was already wrong before any rounding. The second is the one the trace shows: the agent diagnoses that first mistake, names the order-of-magnitude gap, names the most likely cause, and then resolves the situation by rounding rather than by fixing. The cross-run table makes the contrast sharp:
 
