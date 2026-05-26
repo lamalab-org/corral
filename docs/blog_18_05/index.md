@@ -342,7 +342,7 @@ Every run sees the same colorless solution, the same pH 8, the same flame test. 
 
 ### **A single measurement became a scaling law**
 
-The AFM domain also contains a more structural version of the same problem. In `afm_experiment_level_4`, the agent is asked to determine the scale-dependent relationship between surface roughness, Rq, and scan area, A. The required answer is not just a roughness value. It is an equation of the form `Rb = expression_in_A`, together with the measured roughness and area values used to fit or justify that relationship.
+The AFM domain also contains another version of the same problem. In `afm_experiment_level_4`, the agent is asked to determine the scale-dependent relationship between surface roughness, Rq, and scan area, A. The required answer is not just a roughness value, but an equation of the form `Rb = expression_in_A`, together with the measured roughness and area values used to fit or justify that relationship.
 
 That means the task needs multiple scan areas. A single image can give one roughness value. It cannot establish how roughness changes with area. The [example trace](traces/afm_experiment_level_4_20251111_143615.json) shows the agent recognizing this limitation and then submitting anyway.
 
