@@ -129,7 +129,7 @@ And later:
 Let me try different values:
 ```
 
-Across the run, `validate_measurements` is called **eighteen** times. The trace becomes a sequence of topologies and resistor values, each adjusted in response to the aggregate error. Some changes improve one measured pair and worsen another. The agent notices local improvements:
+Across the run, `validate_measurements` is called **eighteen** times, **90.0%** of all tool calls in the trace (18 of 20). The trace becomes a sequence of topologies and resistor values, each adjusted in response to the aggregate error. Some changes improve one measured pair and worsen another. The agent notices local improvements:
 
 ```plaintext
 Better!
