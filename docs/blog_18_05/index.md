@@ -20,51 +20,9 @@ Our recent work [[5]](#ref-5) studies this gap. We ran LLM agents through scient
 
 The headline is simple. Present-day LLM agents can produce outputs that look like scientific progress, while the process that produced them often does not look like scientific reasoning.
 
-Most of the work, though, was not the epistemology. It was infrastructure. We had to build environments where agents could run, fail, and leave traces we could inspect. We had to compute ground truths for molecular dynamics. We had to build the wet-lab color and thermodynamics simulator. We had to write templates that kept tasks and tool interfaces consistent.
+This blog illustrates such gaps with examples from the traces. Cases as the ones described below are the ones that made us carry out the epistemology analysis in the first place.
 
-So this post has two parts. First, the machinery: tasks, tools, agents, traces, and evaluation. Then, the behaviors hidden behind the aggregate numbers. Those behaviors changed how we read the benchmark. It was not only measuring performance. It was exposing how these systems produce their results.
-
-## **Learning from evaluation design**
-
-We did not enter this project from scratch. We had built scientific QA benchmarks before, including ChemBench [[6]](#ref-6) and MaCBench [[7]](#ref-7). There, much of the work was designing good questions. That helped. But agent evaluation was a different problem.
-
-In a QA benchmark, the model gets a question and returns an answer. Evaluation is often a comparison with a reference answer. In an agent benchmark, the final answer is only the last move. Before it, the model chooses tools. It receives observations. It decides what to inspect next. Then it commits. The benchmark is therefore not only a question set. It is a set of environments where actions change what happens next. Even comparability became work. Docstrings, tool descriptions, observations, and scoring rules had to align across environments.
-
-That difference shaped the engine. It also made the engineering larger than we expected. A small ablation, such as changing tool-description verbosity, touched the environment and evaluation code. Adding the W&B logger required changes in the core engine such that users could define new metrics. Parsers, error handling, trace recording, and other components had the same shape. Each part had to flex for new tasks, tools, agents, and metrics. It also had to keep the rest of the system stable.
-
-We decided to build the benchmark engine from scratch, keeping a strict separation between environments and agents inspired by Aviary [[8]](#ref-8). During the evaluation runs, environments are accessed through API endpoints: they own task state, hidden variables, tools, reset behavior, and scoring. Agents, in contrast, receive task prompts and tool observations, and then choose tool calls or final answers. This separation follows a more Markovian evaluation, and clearly allows us to ablate the impact of the different components of these systems. It also gives us control over which information is visible to the model and which information remains hidden.
-
-![Corral framework](figures/figure_corral_framewor.png)
-
-This became important very quickly. In the Spectroscopy and Inorganic Analysis environments, for example, the system needs to know the identity of the unknown sample, but the agent must not see it. Tool calls therefore have an internal side that is hidden from the agent. The environment can use the sample ID, the ground-truth molecule, the reagent state, or simulated instrument settings. The agent only receives the kind of observation that a scientist would get from an experiment.
-
-Long evaluations also needed checkpointing. Some tasks, especially molecular-dynamics simulations, can take hours. During that time, runs can fail for reasons unrelated to reasoning. Restarting from the failed point made evaluation feasible. It also made the experimental process more robust.
-
-For molecular dynamics, the hard part was making remote LAMMPS runs feel like ordinary tool calls. The simulations are compute-heavy. We used [Modal](https://modal.com/) to host a custom LAMMPS image. We used persistent volumes for potentials, structures, and outputs. We added remote helpers for log parsing and scoring. The environment could then run from any machine, while the heavy computation happened remotely. Most of the engineering was state management. Each tool call needed the right files. Each trial needed an isolated workspace. Failed simulations needed useful errors. Outputs had to persist for later tools and scorers without leaking into other runs.
-
-Once the environments were stable, the agents became the next source of friction. We kept them simple on purpose. That follows a common recommendation in current agent work: avoid too much scaffolding and let the model drive the process [[9]](#ref-9). But simple agents still needed serious parsing infrastructure. Models do not always follow the requested format. ReAct made this clear. We first used `Thought: Action: Action Input:`. XML tags worked better. Even then, models sometimes broke the expected structure.
-
-Tool-calling agents reduced some of these problems, but did not remove them completely. We still saw parsing errors. With GPT-OSS-120B, even using the OpenAI parser through vLLM, sometimes produced calls that did not match the expected schema.
-
-Context length was another practical limit. We did not add context-management tools. The tasks were meant to fit in the model’s window. But agents sometimes loaded huge tool outputs anyway. In molecular dynamics, they tried to read full report files when focused parsing tools were available. That caused context-window errors. Our solution was to remove the oversized output from the context and return the error. The agent could then recover and choose a better tool call.
-
-The lesson was simple. These details are evaluation design. Hidden state, resets, checkpointing, remote execution, logging, parsing, schemas, error handling, trace recording, and context limits all shape what is measured. They had to live in the framework. Otherwise the benchmark would not be fair, stable, reusable, or interpretable. The result is a system where new tasks, tools, agents, and metrics can be added without changing the core engine. It also records full traces. Those traces later became the key to understanding how the agents reasoned.
-
-The code is open source at: https://github.com/lamalab-org/corral.
-
-## **What the results do not show**
-
-Across more than 25,000 agent runs, the broad result is that current scientific agents can often produce useful outputs, but their performance depends strongly on the kind of scientific work they are asked to do. In relatively procedural workflow tasks, such as Molecular Simulation and Adsorption Surface Construction, the best configurations approached ceiling performance. In broader tasks that required hypothesis generation, testing, and revision, performance dropped sharply; in the hardest spectroscopy and inorganic analysis settings, even the strongest configuration stayed below 60%.
-
-The strongest predictor of success was the base model, not the agent wrapper. We compared GPT-4o, Claude Sonnet 4.5, and GPT-OSS-120B under both ReAct and structured tool-calling scaffolds. Through IRT analysis of diagnostic question-answer items, followed by a latent-factor model of benchmark success, we found that model reasoning ability accounted for 41.4% of the explained variance. The interaction between environment and task scope explained 30.1%. By comparison, the scaffold explained only 1.5%, and tool-description verbosity explained only 0.1%.
-
-![Model is the main source of variance](figures/image_results.png)
-
-The agents also did not adapt reliably to different scientific settings. Human scientists reason differently when running a molecular simulation, planning a synthesis, identifying ions, or inferring a circuit, but the agents' reasoning topology stayed broadly similar across workflow, strategic, and hypothesis-driven domains. Stronger models retrieved better information and executed procedures more accurately, but the shape of the reasoning process did not change as much as the task changed.
-
-Finally, adding context helped only in the easiest cases. Injecting partial successful trajectories improved workflow-style tasks when the previous steps gave the agent a useful procedural path. But in strategic and hypothesis-driven domains, partial traces helped little unless the agent was given an almost complete successful trajectory. Reliability also degraded quickly across repeated trials: in spectroscopy and inorganic analysis, the probability that all repeated attempts succeeded fell below 0.05 after only four to six attempts. This again confirms that the choice of model was the dominant factor, while the specific agent design, or the level of description provided had a much smaller impact.
-
-## **What the traces show**
+## **What the traces do not show**
 
 The aggregate numbers are in the paper: agents ignored gathered evidence in 68% of traces, left beliefs unchanged in 71%, and revised their beliefs after refutation in only 26%. But the numbers are only a map of the problem. The more revealing part is what those percentages look like inside a single run: an experiment run and then dismissed, a contradiction explained away, a weak hypothesis protected by bending the evidence around it. Below, we zoom in on those moments, because they are what made the epistemic failure visible in the traces.
 
@@ -440,9 +398,9 @@ This is one realisation of the 68% number. Evidence was gathered. Evidence was n
 
 While the traces above are individual stories, they point to a broader pattern. Across more than 25,000 agent runs, the final answer often looked like the end of a scientific workflow, but the reasoning that produced it was much weaker than the workflow implied. In our experiments, the base model mattered far more than the scaffold, evidence was ignored in most traces, beliefs were often left unchanged, and refutation-driven revision was the exception rather than the rule. This is why outcome-only evaluation is not enough: a correct-looking answer can hide a process that did not actually test, revise, or justify the claim.
 
-This pattern is not only appearing in chemistry, or only in the environments we built. Neighboring scientific-agent benchmarks are starting to report a similar gap. In STARGAZER, agents fitting radial-velocity data could often obtain statistically good fits while failing to recover the correct physical system [[10]](#ref-10). They could spend many more tokens without meaningfully improving, sometimes entering recursive failure loops rather than exploring better hypotheses. Different domain, same warning: optimization is not the same as understanding; activity is not the same as evidence-based reasoning.
+This pattern is not only appearing in chemistry, or only in the environments we built. Neighboring scientific-agent benchmarks are starting to report a similar gap. In STARGAZER, agents fitting radial-velocity data could often obtain statistically good fits while failing to recover the correct physical system [[6]](#ref-6). They could spend many more tokens without meaningfully improving, sometimes entering recursive failure loops rather than exploring better hypotheses. Different domain, same warning: optimization is not the same as understanding; activity is not the same as evidence-based reasoning.
 
-This matters because we have seen versions of this failure before, long before LLM agents. Xerox scanners once produced PDFs that looked visually plausible while silently substituting characters and numbers, not because of OCR, but because image patches were reused by lossy pattern-matching compression [[11]](#ref-11). Excel silently converted gene symbols such as `SEPT2` and `MARCH1` into dates; a later scan of genomics papers found erroneous gene-name conversions in about one-fifth of papers with supplementary Excel gene lists [[12]](#ref-12). In both cases, the system gave users something that looked routine and trustworthy. The danger was precisely that it looked routine and trustworthy. The error was not obvious until someone checked.
+This matters because we have seen versions of this failure before, long before LLM agents. Xerox scanners once produced PDFs that looked visually plausible while silently substituting characters and numbers, not because of OCR, but because image patches were reused by lossy pattern-matching compression [[7]](#ref-7). Excel silently converted gene symbols such as `SEPT2` and `MARCH1` into dates; a later scan of genomics papers found erroneous gene-name conversions in about one-fifth of papers with supplementary Excel gene lists [[8]](#ref-8). In both cases, the system gave users something that looked routine and trustworthy. The danger was precisely that it looked routine and trustworthy. The error was not obvious until someone checked.
 
 That is the lesson we take from these traces. The problem is not that AI scientists fail sometimes; human scientists fail too. The problem is when the surface form of science, e.g., tool calls, calculations, plots, confident summaries, final answers, becomes a substitute for the epistemic work that makes science reliable. AI scientists do not need to reason exactly like humans. But they do need to be constrained by evidence. They need to notice when observations break a hypothesis, to update rather than rationalize, to test the answer they finally submit, and to be more robust than a system that merely produces the appearance of a solution. Otherwise, we risk being fooled not by the absence of reasoning, but by its performance.
 
@@ -458,16 +416,8 @@ That is the lesson we take from these traces. The problem is not that AI scienti
 
 <a id="ref-5"></a>[5] Ríos-García, M., Alampara, N., Gupta, C., Mandal, I., Mannan, S., Aghajani, A. A., Krishnan, N. M. A., & Jablonka, K. M. (2026). [AI scientists produce results without reasoning scientifically](https://arxiv.org/abs/2604.18805). arXiv:2604.18805.
 
-<a id="ref-6"></a>[6] Mirza, A., Alampara, N., Kunchapu, S., Ríos-García, M., et al. (2025). [A framework for evaluating the chemical knowledge and reasoning abilities of large language models against the expertise of chemists](https://www.nature.com/articles/s41557-025-01815-x). *Nature Chemistry*, 17, 1027–1034.
+<a id="ref-6"></a>[6] Liu, X., Zhang, T. J., Schölkopf, B., Jin, Z., & Menou, K. (2026). [Stargazer: A scalable model-fitting benchmark environment for AI agents under astrophysical constraints](https://arxiv.org/abs/2604.15664). arXiv:2604.15664.
 
-<a id="ref-7"></a>[7] Alampara, N., Schilling-Wilhelmi, M., Ríos-García, M., Mandal, I., et al. (2025). [Probing the limitations of multimodal language models for chemistry and materials research](https://www.nature.com/articles/s43588-025-00836-3). *Nature Computational Science*, 5, 952–961.
+<a id="ref-7"></a>[7] Chiang, T. (2023, February 9). [ChatGPT is a blurry JPEG of the web](https://www.newyorker.com/tech/annals-of-technology/chatgpt-is-a-blurry-jpeg-of-the-web). *The New Yorker*.
 
-<a id="ref-8"></a>[8] Narayanan, S., Braza, J. D., Griffiths, R.-R., Ponnapati, M., Bou, A., Laurent, J., Kabeli, O., Wellawatte, G., Cox, S., Rodriques, S. G., & White, A. D. (2024). [Aviary: training language agents on challenging scientific tasks](https://arxiv.org/abs/2412.21154). arXiv:2412.21154.
-
-<a id="ref-9"></a>[9] Anthropic. (2024, December 19). [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents).
-
-<a id="ref-10"></a>[10] Liu, X., Zhang, T. J., Schölkopf, B., Jin, Z., & Menou, K. (2026). [Stargazer: A scalable model-fitting benchmark environment for AI agents under astrophysical constraints](https://arxiv.org/abs/2604.15664). arXiv:2604.15664.
-
-<a id="ref-11"></a>[11] Chiang, T. (2023, February 9). [ChatGPT is a blurry JPEG of the web](https://www.newyorker.com/tech/annals-of-technology/chatgpt-is-a-blurry-jpeg-of-the-web). *The New Yorker*.
-
-<a id="ref-12"></a>[12] Ziemann, M., Eren, Y., & El-Osta, A. (2016). [Gene name errors are widespread in the scientific literature](https://doi.org/10.1186/s13059-016-1044-7). *Genome Biology*, 17, 177.
+<a id="ref-8"></a>[8] Ziemann, M., Eren, Y., & El-Osta, A. (2016). [Gene name errors are widespread in the scientific literature](https://doi.org/10.1186/s13059-016-1044-7). *Genome Biology*, 17, 177.
