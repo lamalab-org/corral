@@ -343,6 +343,15 @@
 <body class="bg-surface text-ink font-serif antialiased min-h-screen flex flex-col dark:bg-[#0f172a] dark:text-slate-200 transition-colors duration-300">
   <script src="data.js"></script>
   <script src="traces.js"></script>
+  <script src="blog_traces.js"></script>
+  <script>
+    /* Merge blog deep-link traces into the explorer dataset (separate file so the
+       paper-curated traces.js stays untouched). */
+    if (typeof BLOG_TRACE_DATA !== 'undefined' && Array.isArray(TRACE_DATA)) {
+      const seen = new Set(TRACE_DATA.map(t => t.id));
+      for (const t of BLOG_TRACE_DATA) if (!seen.has(t.id)) TRACE_DATA.push(t);
+    }
+  </script>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="annotator.js" defer></script>
 
@@ -1735,17 +1744,20 @@
           if (this.envNames.length) this.selectEnv(this.envNames[0]);
 
           const validTabs = this.tabs.map(t => t.id);
-          const hash = window.location.hash.slice(1);
-          if (hash && validTabs.includes(hash)) this.activeTab = hash;
+          // The hash may carry a deep-link query (e.g. "explainers?trace=<id>");
+          // only the part before "?" names the tab.
+          const tabPart = window.location.hash.slice(1).split('?')[0];
+          if (tabPart && validTabs.includes(tabPart)) this.activeTab = tabPart;
 
           this.$watch('activeTab', (tab) => {
             const target = tab === 'home' ? '' : '#' + tab;
-            if (window.location.hash !== (target || '#')) {
+            const current = window.location.hash.slice(1).split('?')[0];
+            if (current !== (tab === 'home' ? '' : tab)) {
               history.pushState(null, '', target || window.location.pathname);
             }
           });
           window.addEventListener('popstate', () => {
-            const h = window.location.hash.slice(1);
+            const h = window.location.hash.slice(1).split('?')[0];
             if (h && validTabs.includes(h)) this.activeTab = h;
             else this.activeTab = 'home';
           });
@@ -1803,6 +1815,17 @@
         simulation: null,
         svgZoom: null,
         svgGroup: null,
+
+        init() {
+          // Deep-link: "#explainers?trace=<id>" auto-selects that trace.
+          const raw = window.location.hash.slice(1);
+          const qi = raw.indexOf('?');
+          if (qi === -1) return;
+          const tid = new URLSearchParams(raw.slice(qi + 1)).get('trace');
+          if (!tid) return;
+          const t = TRACE_DATA.find(x => x.id === tid);
+          if (t) this.$nextTick(() => this.selectTrace(t));
+        },
 
         get availableModels() {
           return [...new Set(TRACE_DATA.map(t => t.model))].sort();
@@ -1894,6 +1917,10 @@
           this.selectedTrace = trace;
           this.selectedNode = null;
           this.activePatternHighlight = null;
+          // Keep the URL shareable: reflect the selected trace as a deep-link.
+          if (trace?.id) {
+            history.replaceState(null, '', '#explainers?trace=' + encodeURIComponent(trace.id));
+          }
           this.$nextTick(() => this.renderGraph());
         },
         selectNodeById(nodeId) {

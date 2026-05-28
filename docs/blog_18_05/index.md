@@ -36,7 +36,7 @@ This happened repeatedly in the spectroscopy environment, where the agent is ask
 
 What is more concerning is that in the Scope 1 of this environment, the agent is given with the `return_possible_fragments` tool, which returns fragments of the actual sample. This tool can provide direct evidence about the presence of certain atoms or groups in the molecule. We observed that in some traces the agent would receive fragments that clearly indicate the presence of some heteroatom not considered in the initial formula, but it would ignore that evidence and stick to the original belief. The agent would then try to rationalize the mass spectrum as an adduct of a different formula, rather than updating the formula to include the heteroatom.
 
-The [example trace](traces/22_22222_orgsyn_222_2222_20251217_194546.json) illustrates this behavior. It corresponds to the model Claude Sonnet 4.5 with a ReAct scaffold. The objective is the molecule shown in the image.
+The [example trace](https://lamalab-org.github.io/corral/#explainers?trace=blog_formula_fixation) illustrates this behavior. It corresponds to the model Claude Sonnet 4.5 with a ReAct scaffold. The objective is the molecule shown in the image.
 
 ![Molecular formula belief is not updated](figures/stick2firstbelief.png)
 
@@ -99,7 +99,7 @@ This is one realisation of the 71% number.
 
 A second pattern is less about refusing one particular refutation and more about replacing scientific inference with search. The agent has a space of possible answers. It samples one, asks a validation tool whether it looks good, samples another, asks again, and keeps going. This can look superficially empirical because experiments are being run. But the role of the experiment has changed. Instead of testing an informed hypothesis derived from the evidence, the tool becomes a scoring function for guesses.
 
-This [resistor trace](traces/task_3_20251111_112807.json) makes this especially visible. Resistor is about inferring the topology of a network from resistance measurements. This task gives the agent ten exact node-to-node resistance measurements between five nodes: A, B, N_b1, X1, and X2. The correct scientific move is to infer constraints on the topology from the full resistance matrix. The environment also provides `validate_measurements`, which can compare a proposed topology against all measurements.
+This [resistor trace](https://lamalab-org.github.io/corral/#explainers?trace=blog_resistor_sampling) makes this especially visible. Resistor is about inferring the topology of a network from resistance measurements. This task gives the agent ten exact node-to-node resistance measurements between five nodes: A, B, N_b1, X1, and X2. The correct scientific move is to infer constraints on the topology from the full resistance matrix. The environment also provides `validate_measurements`, which can compare a proposed topology against all measurements.
 
 In the Claude trace, the agent begins with a reasonable-sounding observation: look at the smallest measured resistances, then infer likely direct connections. But almost immediately the trace becomes a generate-and-test loop:
 
@@ -147,7 +147,7 @@ Error: Maximum iterations reached without finding a final answer.
 
 The problem is not that validation is bad. Validation is exactly what the agent should do. The problem is that validation has become the main method of discovery. The trace contains little evidence that the agent is using the resistance matrix to rule out classes of topologies or derive necessary constraints. It is mostly proposing, validating, nudging, and proposing again.
 
-The same pattern appears in this [spectroscopy trace](traces/10_15227_orgsyn_102_0001_20251218_212824.json).
+The same pattern appears in this [spectroscopy trace](https://lamalab-org.github.io/corral/#explainers?trace=blog_spectra_sampling).
 
 In the spectra task, the agent has to infer a SMILES string from mass spectrometry, proton NMR, and carbon NMR. It starts by doing the right kind of analysis. The mass peak suggests a molecular formula near C5H9NO. The NMR has two vinyl carbons, a carbon around 70 ppm, and another around 54 ppm. The agent concludes that the molecule likely contains a terminal alkene and a small N/O-containing ring.
 
@@ -189,7 +189,7 @@ This is a different failure mode from the molecular-formula example above. There
 
 In the Inorganic Analysis environment, the agent is given a 20 mL solution made by dissolving one unknown, pure inorganic salt in water, and a panel of standard reagents (AgNO₃, Ba(NO₃)₂, NH₃, KOH, K₂CrO₄, sulfide, and so on). It precipitates, filters, measures pH, runs flame tests, and submits a cation/anion pair. The correct answer in this task is **AgF** (`{"cation": "Ag+", "anion": "F-"}`), so the answer must also satisfy the basic solubility constraint implied by the prompt: the salt has to exist as the initial aqueous sample.
 
-This is the domain where the agent contradicts itself most visibly. The [example trace](traces/qualysis_lvl1_02_20251204_212358.json) shows this inside one run, and the repeated runs show the same instability across runs.
+This is the domain where the agent contradicts itself most visibly. The [example trace](https://lamalab-org.github.io/corral/#explainers?trace=blog_wetlab_contradiction) shows this inside one run, and the repeated runs show the same instability across runs.
 
 ![Contradiction in wetlab trace](figures/contradiction_wetlab.png)
 
@@ -306,7 +306,7 @@ Every run sees the same colorless solution, the same pH 8, the same flame test. 
 
 In the task `afm_experiment_level_4`, the agent is asked to determine the scale-dependent relationship between surface roughness, Rq, and scan area, A. The required answer is not just a roughness value, but an equation of the form `Rb = expression_in_A`, together with the measured roughness and area values used to fit or justify that relationship.
 
-That means the task needs multiple scan areas. A single image can give one roughness value. It cannot establish how roughness changes with area. The [example trace](traces/afm_experiment_level_4_20251111_143615.json) shows the agent recognizing this limitation and then submitting anyway.
+That means the task needs multiple scan areas. A single image can give one roughness value. It cannot establish how roughness changes with area. The [example trace](https://lamalab-org.github.io/corral/#explainers?trace=blog_afm_scaling) shows the agent recognizing this limitation and then submitting anyway.
 
 ![AFM trace example](figures/afm.png)
 
@@ -350,7 +350,7 @@ We did consider adding an explicit surrender option: an agent could say that the
 
 ### **Rounding its own warning to zero**
 
-The molecular-dynamics domain asks an agent to compute the surface energy of an Aluminium slab with LAMMPS and a certain potential. The standard recipe is to minimise the energy of a periodic bulk cell, then minimise an otherwise identical slab with vacuum added along the surface normal, and report (E_slab - E_bulk) divided by twice the cross-sectional area. The expected answer is in eV/Å². Aluminium with this potential lands in the well-known 0.05-0.10 eV/Å² range; in our reruns, four of the five instances of this task submit `0.06`, which we treat as the right answer. The [example trace](traces/aluminum_surface_energy_2_20260213_042422.json) shows the outlier run.
+The molecular-dynamics domain asks an agent to compute the surface energy of an Aluminium slab with LAMMPS and a certain potential. The standard recipe is to minimise the energy of a periodic bulk cell, then minimise an otherwise identical slab with vacuum added along the surface normal, and report (E_slab - E_bulk) divided by twice the cross-sectional area. The expected answer is in eV/Å². Aluminium with this potential lands in the well-known 0.05-0.10 eV/Å² range; in our reruns, four of the five instances of this task submit `0.06`, which we treat as the right answer. The [example trace](https://lamalab-org.github.io/corral/#explainers?trace=blog_md_rounding) shows the outlier run.
 
 ![Molecular dynamics surface energy trace](figures/MD_approx.png)
 
