@@ -1,0 +1,39 @@
+## **Learning from evaluation design**
+
+We did not enter this project from scratch. We had built scientific QA benchmarks before, including ChemBench [[6]](#ref-6) and MaCBench [[7]](#ref-7). There, much of the work was designing good questions. That helped. But agent evaluation was a different problem.
+
+In a QA benchmark, the model gets a question and returns an answer. Evaluation is often a comparison with a reference answer. In an agent benchmark, the final answer is only the last move. Before it, the model chooses tools. It receives observations. It decides what to inspect next. Then it commits. The benchmark is therefore not only a question set. It is a set of environments where actions change what happens next. Even comparability became work. Docstrings, tool descriptions, observations, and scoring rules had to align across environments.
+
+That difference shaped the engine. It also made the engineering larger than we expected. A small ablation, such as changing tool-description verbosity, touched the environment and evaluation code. Adding the W&B logger required changes in the core engine such that users could define new metrics. Parsers, error handling, trace recording, and other components had the same shape. Each part had to flex for new tasks, tools, agents, and metrics. It also had to keep the rest of the system stable.
+
+We decided to build the benchmark engine from scratch, keeping a strict separation between environments and agents inspired by Aviary [[8]](#ref-8). During the evaluation runs, environments are accessed through API endpoints: they own task state, hidden variables, tools, reset behavior, and scoring. Agents, in contrast, receive task prompts and tool observations, and then choose tool calls or final answers. This separation follows a more Markovian evaluation, and clearly allows us to ablate the impact of the different components of these systems. It also gives us control over which information is visible to the model and which information remains hidden.
+
+![Corral framework](figures/figure_corral_framewor.png)
+
+This became important very quickly. In the Spectroscopy and Inorganic Analysis environments, for example, the system needs to know the identity of the unknown sample, but the agent must not see it. Tool calls therefore have an internal side that is hidden from the agent. The environment can use the sample ID, the ground-truth molecule, the reagent state, or simulated instrument settings. The agent only receives the kind of observation that a scientist would get from an experiment.
+
+Long evaluations also needed checkpointing. Some tasks, especially molecular-dynamics simulations, can take hours. During that time, runs can fail for reasons unrelated to reasoning. Restarting from the failed point made evaluation feasible. It also made the experimental process more robust.
+
+For molecular dynamics, the hard part was making remote LAMMPS runs feel like ordinary tool calls. The simulations are compute-heavy. We used [Modal](https://modal.com/) to host a custom LAMMPS image. We used persistent volumes for potentials, structures, and outputs. We added remote helpers for log parsing and scoring. The environment could then run from any machine, while the heavy computation happened remotely. Most of the engineering was state management. Each tool call needed the right files. Each trial needed an isolated workspace. Failed simulations needed useful errors. Outputs had to persist for later tools and scorers without leaking into other runs.
+
+Once the environments were stable, the agents became the next source of friction. We kept them simple on purpose. That follows a common recommendation in current agent work: avoid too much scaffolding and let the model drive the process [[9]](#ref-9). But simple agents still needed serious parsing infrastructure. Models do not always follow the requested format. ReAct made this clear. We first used `Thought: Action: Action Input:`. XML tags worked better. Even then, models sometimes broke the expected structure.
+
+Tool-calling agents reduced some of these problems, but did not remove them completely. We still saw parsing errors. With GPT-OSS-120B, even using the OpenAI parser through vLLM, sometimes produced calls that did not match the expected schema.
+
+Context length was another practical limit. We did not add context-management tools. The tasks were meant to fit in the model’s window. But agents sometimes loaded huge tool outputs anyway. In molecular dynamics, they tried to read full report files when focused parsing tools were available. That caused context-window errors. Our solution was to remove the oversized output from the context and return the error. The agent could then recover and choose a better tool call.
+
+The lesson was simple. These details are evaluation design. Hidden state, resets, checkpointing, remote execution, logging, parsing, schemas, error handling, trace recording, and context limits all shape what is measured. They had to live in the framework. Otherwise the benchmark would not be fair, stable, reusable, or interpretable. The result is a system where new tasks, tools, agents, and metrics can be added without changing the core engine. It also records full traces. Those traces later became the key to understanding how the agents reasoned.
+
+The code is open source at: https://github.com/lamalab-org/corral.
+
+## **What the results do not show**
+
+Across more than 25,000 agent runs, the broad result is that current scientific agents can often produce useful outputs, but their performance depends strongly on the kind of scientific work they are asked to do. In relatively procedural workflow tasks, such as Molecular Simulation and Adsorption Surface Construction, the best configurations approached ceiling performance. In broader tasks that required hypothesis generation, testing, and revision, performance dropped sharply; in the hardest spectroscopy and inorganic analysis settings, even the strongest configuration stayed below 60%.
+
+The strongest predictor of success was the base model, not the agent wrapper. We compared GPT-4o, Claude Sonnet 4.5, and GPT-OSS-120B under both ReAct and structured tool-calling scaffolds. Through IRT analysis of diagnostic question-answer items, followed by a latent-factor model of benchmark success, we found that model reasoning ability accounted for 41.4% of the explained variance. The interaction between environment and task scope explained 30.1%. By comparison, the scaffold explained only 1.5%, and tool-description verbosity explained only 0.1%.
+
+![Model is the main source of variance](figures/image_results.png)
+
+The agents also did not adapt reliably to different scientific settings. Human scientists reason differently when running a molecular simulation, planning a synthesis, identifying ions, or inferring a circuit, but the agents' reasoning topology stayed broadly similar across workflow, strategic, and hypothesis-driven domains. Stronger models retrieved better information and executed procedures more accurately, but the shape of the reasoning process did not change as much as the task changed.
+
+Finally, adding context helped only in the easiest cases. Injecting partial successful trajectories improved workflow-style tasks when the previous steps gave the agent a useful procedural path. But in strategic and hypothesis-driven domains, partial traces helped little unless the agent was given an almost complete successful trajectory. Reliability also degraded quickly across repeated trials: in spectroscopy and inorganic analysis, the probability that all repeated attempts succeeded fell below 0.05 after only four to six attempts. This again confirms that the choice of model was the dominant factor, while the specific agent design, or the level of description provided had a much smaller impact.
