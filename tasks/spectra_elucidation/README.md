@@ -1,6 +1,6 @@
 # Spectra Elucidation Task Environment
 
-This directory contains the spectra elucidation task environment for Corral. It provides organic-structure elucidation benchmarks where agents interpret spectroscopic evidence, use chemistry tools, and submit molecular hypotheses that are scored against hidden target structures.
+This directory contains the spectra elucidation task environment for Corral. It provides organic structure-elucidation benchmarks where agents use simulated spectroscopy tools, chemical reference helpers, and structure validators to infer a target molecule and submit a SMILES answer.
 
 ## Setup
 
@@ -8,12 +8,38 @@ Create and activate the virtual environment from this directory:
 
 ```bash
 cd tasks/spectra_elucidation
-uv venv --python 3.11.0
+uv venv --python 3.12
 source .venv/bin/activate
 uv sync
 ```
 
 If you prefer not to activate the environment, use `uv run` to prefix the commands below.
+
+## Node.js Dependency
+
+The `mass_spectrometry_spectra` tool calls a local Node.js isotopic-distribution predictor. Python dependencies are installed by `uv sync`, but this JavaScript dependency must be installed separately.
+
+> **Why isn't this in `pyproject.toml`?** `pyproject.toml`/`uv` only manage Python packages — they cannot install the Node.js runtime or npm packages. Node must therefore be installed through your OS package manager (e.g. `brew install node`, `apt-get install nodejs`, or [nodejs.org](https://nodejs.org)), and the `isotopic-distribution` package installed with `npm` as shown below. The predictor resolves the `node` executable from `PATH` (via `shutil.which("node")`), so any Node ≥ 20 on the `PATH` works.
+
+Install Node.js 20 or newer, then create a small npm project for the predictor:
+
+```bash
+cd tasks/spectra_elucidation
+mkdir -p CORRAL_WORK_DIR/js
+cd CORRAL_WORK_DIR/js
+npm init -y
+npm pkg set type=module
+npm i --omit=dev isotopic-distribution
+```
+
+Point the spectra environment at that npm project before running the server:
+
+```bash
+cd tasks/spectra_elucidation
+export CORRAL_SPECTRA_JS_DIR="$PWD/CORRAL_WORK_DIR/js"
+```
+
+If `CORRAL_SPECTRA_JS_DIR` is not set, the code falls back to `/srv/js`. The unit tests mock this predictor, so passing tests do not prove the runtime Node.js setup is available.
 
 ## Run The Server
 
@@ -22,32 +48,113 @@ Start the spectra elucidation environment server from this directory:
 ```bash
 cd tasks/spectra_elucidation
 source .venv/bin/activate
+export CORRAL_WORK_DIR="$PWD/CORRAL_WORK_DIR"
+export CORRAL_SPECTRA_JS_DIR="$PWD/CORRAL_WORK_DIR/js"
 python -m spectra_elucidation.env --level 1
 ```
 
-To run the subtask benchmark instead:
+To run level 2:
 
 ```bash
-cd tasks/spectra_elucidation
-source .venv/bin/activate
+python -m spectra_elucidation.env --level 2
+```
+
+To run the chained subtask benchmark instead:
+
+```bash
 python -m spectra_elucidation.env --level 1 --subtask_level True
 ```
 
-The server also accepts these options:
+The server accepts these options:
 
 - `--host`: Bind host. Defaults to `CORRAL_HOST` or `0.0.0.0`.
 - `--port`: Bind port. Defaults to `CORRAL_PORT` or `8000`.
-- `--level`: Benchmark level to load. Available task sets are stored under `environments/level_1` and `environments/level_2`.
+- `--level`: Benchmark level to load. Levels are stored under `environments/level_1` and `environments/level_2`.
 - `--subtask_level`: Set to `True` to load `subtasks_json/` instead of `tasks_json/` for the selected level.
 
+The environment also reads these variables:
+
+- `CORRAL_WORK_DIR`: Base directory for task workspaces and generated files. Setting it explicitly to `tasks/spectra_elucidation/CORRAL_WORK_DIR` keeps task output inside this task directory.
+- `CORRAL_SPECTRA_JS_DIR`: Directory containing the npm project with `isotopic-distribution`.
+
 ## See The Tasks
+
+With the server running:
 
 ```bash
 curl http://localhost:8000/tasks/
 ```
 
-## Notes
+## Task Layout
 
-- The environment exposes tools for interpreting and simulating mass spectrometry, IR, and NMR data, as well as structure-validation utilities.
-- Each task gets an isolated work directory under `CORRAL_WORK_DIR` if that environment variable is set.
-- Levels provide different benchmark collections, while subtask mode exposes chained decomposition tasks rather than the main task set.
+Task definitions live under:
+
+- `environments/level_1/tasks_json/`: complete molecule-identification tasks with fragment-support tooling.
+- `environments/level_1/subtasks_json/`: chained subtasks for the same level 1 molecules.
+- `environments/level_2/tasks_json/`: complete molecule-identification tasks without fragment hints.
+- `environments/level_2/subtasks_json/`: chained subtasks for the same level 2 molecules.
+
+Each complete task asks the agent to determine the target molecule as a SMILES string. Each subtask group decomposes the same problem into intermediate spectroscopy and chemistry questions, ending with a final molecule submission.
+
+## Tools
+
+The environment exposes tools for:
+
+- Formula and SMILES validation: `get_formula_from_smiles`, `validate_smiles`.
+- Reference chemistry: `retrieve_dbe_formula`, `retrieve_isotope_distribution`, `retrieve_protons_shifts`, `retrieve_aromatic_protons_shifts`, `retrieve_carbon_shifts`.
+- Spectra simulation: `carbon_nmr_spectra`, `proton_nmr_spectra`, `ir_spectra`, `hsqc_nmr_spectra`, `mass_spectrometry_spectra`, `simulate_spectra`.
+- Structure search and enumeration: `search_by_smiles`, `obtain_isomers_from_molecular_formula`, `return_possible_fragments`.
+
+Some tools call external spectroscopy or chemistry services, so benchmark runs need network access.
+
+## Subtask Flow
+
+In subtask mode, each molecule is represented by 10 linked subtasks:
+
+| Step | Goal | Main Scoring Function |
+|------|------|-----------------------|
+| 1 | Molecular formula | `score_formula_match` |
+| 2 | Double bond equivalents | `validate_dbe_consistency` |
+| 3 | Isotopic-distribution elements | `score_isotopic_distribution` |
+| 4 | Carbon symmetry classes | `score_num_carbon_symmetry_classes` |
+| 5 | Hydrogen symmetry classes | `score_num_hydrogen_symmetry_classes` |
+| 6 | Aromatic carbon count | `score_num_aromatic_carbons` |
+| 7 | Methyl group count | `score_num_ch3_groups` |
+| 8 | Carbonyl group count | `score_num_carbonyl_groups` |
+| 9 | Molecular fragments | `score_molecule_fragments` |
+| 10 | Complete molecule SMILES | `score_molecule` |
+
+Subtasks 1 through 8 can be solved independently. Subtask 9 consumes the earlier intermediate answers, and subtask 10 consumes the full chain.
+
+## Run With Corral
+
+After starting the server, point a Corral runner at the local endpoint:
+
+```python
+from corral import CorralRouter, CorralRunner
+from corral.agents import ReActAgent
+
+interface = CorralRouter("http://localhost:8000")
+agent = ReActAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
+
+runner = CorralRunner(interface, agent)
+result = runner.bench()
+print(result.total_score)
+```
+
+## Testing
+
+Run the task test suite from this directory:
+
+```bash
+cd tasks/spectra_elucidation
+source .venv/bin/activate
+pytest
+```
+
+or without activating the virtual environment:
+
+```bash
+cd tasks/spectra_elucidation
+uv run pytest
+```

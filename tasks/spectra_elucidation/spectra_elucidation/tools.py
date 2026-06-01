@@ -3,7 +3,6 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-import modal
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
 from spectra_elucidation.spectra_utils import (
@@ -11,13 +10,13 @@ from spectra_elucidation.spectra_utils import (
     enumerate_fragments_from_smiles,
     format_hsqc_spectrum,
     make_api_call,
+    predict_isotopic_distribution,
 )
 
 from corral.backend.tool import Tool, tool
 from corral.utils.modal import remote_call
 from corral.utils.rag import vector_database_search
 
-get_isomers = modal.Function.from_name("chemenv", "get_compound_isomers_pubchem")
 
 @tool
 def get_formula_from_smiles(smiles: str) -> str:
@@ -650,7 +649,7 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
 def mass_spectrometry_spectra(h_smiles: str) -> str:
     """[BRIEF] Returns the mass spectrometry spectra for the sample at hand using the Electrospray Ionization (ESI) technique. [/BRIEF]
 
-    [DETAILED] This function returns the mass spectrometry spectra for the sample at hand by making a POST request to an external API that measures the mass spectrometry experiment. The function returns the mass spectrometry spectra as a string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ...". [/DETAILED]
+    [DETAILED] This function returns the mass spectrometry spectra for the sample at hand by running the local isotopic distribution predictor. The function returns the mass spectrometry spectra as a string in the format "m/z 100.1 (intensity 500), 101.2 (intensity 450), ...". [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use it when you want to measure the mass spectrometry spectra for the sample to elucidate its structure.
@@ -665,8 +664,8 @@ def mass_spectrometry_spectra(h_smiles: str) -> str:
     3. [FOLLOW_UP] Use the resulting mass spectrometry spectra to analyze the mass-to-charge ratio (m/z) of the proposed molecule. You can use the `retrieve_isotope_distribution` tool to obtain complementary information about the isotopic distribution of the molecule. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - It makes a POST request to an external API that measures the mass spectrometry experiment for the sample at hand.
-    - The API returns the mass spectrometry spectra data as a JSON response.
+    - It runs the local isotopic distribution predictor used by the deployed spectra service.
+    - The predictor returns the mass spectrometry spectra data as JSON-compatible peak data.
     - The function then parses the response to extract the mass spectrometry spectrum data and formats it in a string format.
     - If some error occurs during the experiment, it returns an appropriate message. [/CONTEXTUAL]
 
@@ -687,8 +686,8 @@ def mass_spectrometry_spectra(h_smiles: str) -> str:
 
     [RAISES] Exceptions:
         Exception:
-            [ERROR_WHEN] If an error occurs during the API call to retrieve the mass spectrometry spectrum data. [/ERROR_WHEN]
-            [ERROR_DETAILS] This exception is raised when there is an error in performing the API call to retrieve the mass spectrometry spectrum data. [/ERROR_DETAILS]
+            [ERROR_WHEN] If an error occurs during isotopic distribution prediction. [/ERROR_WHEN]
+            [ERROR_DETAILS] This exception is raised when there is an error while generating the mass spectrometry spectrum data. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Try another tool. Try elucidate the mass spectrum with the other tools. [/ERROR_RECOVERY]
     [/RAISES]
 
@@ -702,10 +701,7 @@ def mass_spectrometry_spectra(h_smiles: str) -> str:
     if mol is None:
         return "Invalid SMILES string provided."
 
-    URL = "https://lamalab-org--nmr-prediction-api-predict-isotopic-distribution.modal.run"
-    payload = {"smiles": h_smiles}
-
-    return convert_ms_spectrum_to_string(make_api_call(URL, payload))
+    return convert_ms_spectrum_to_string(predict_isotopic_distribution(h_smiles))
 
 
 @tool
