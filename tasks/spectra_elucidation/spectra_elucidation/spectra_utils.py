@@ -324,7 +324,7 @@ class SpectraAPI:
     _request_lock = asyncio.Lock()
     _last_request_time: float = 0
     _min_request_interval = 1
-    _timeout = 360
+    _timeout = 60
 
     @staticmethod
     def format_c13_nmr(json_response: dict) -> str:
