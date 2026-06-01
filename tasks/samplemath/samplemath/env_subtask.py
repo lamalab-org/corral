@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from tools import calculator, number_converter
+from tools import calculator, percentage_calculator
 
 from corral.backend.env import Environment
 from corral.backend.server import run_server
@@ -393,7 +393,7 @@ def create_environments(
             task_group=task_group,
             subtask_specific_tools={
                 "calculator": calculator,
-                "number_converter": number_converter,
+                "percentage_calculator": percentage_calculator,
             },
             taskgroup_common_tools=taskgroup_common_tools,
             base_work_dir=work_dir,
