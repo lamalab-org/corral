@@ -4,15 +4,12 @@ from collections import Counter, defaultdict
 
 from loguru import logger
 from rdkit import Chem
-from rdkit.Chem import rdMolDescriptors
-from rdkit.Chem import rdmolfiles
-from rdkit.Chem.MolStandardize import rdMolStandardize
-from rdkit import Chem
+from rdkit.Chem import rdMolDescriptors, rdmolfiles
 from rdkit.Chem.EnumerateStereoisomers import (
     EnumerateStereoisomers,
     StereoEnumerationOptions,
 )
-from rdkit.Chem import rdmolfiles
+from rdkit.Chem.MolStandardize import rdMolStandardize
 
 _ELEMENTS_WITH_ISOTOPIC_DISTRIBUTION = [
     "C",  # Carbon
@@ -446,13 +443,13 @@ def count_h_env(mol: Chem.Mol) -> int:
 
     # Group hydrogens by their parent's canonical rank
     rank_to_parents = defaultdict(set)
-    for h_idx, parent_idx, parent_rank in h_data:
+    for _h_idx, parent_idx, parent_rank in h_data:
         rank_to_parents[parent_rank].add(parent_idx)
 
     # Check which parent ranks have multiple distinct parent atoms
     # (these are potentially diastereotopic groups around a double bond)
     diastereotopic_parents = set()
-    for parent_rank, parent_indices in rank_to_parents.items():
+    for parent_indices in rank_to_parents.values():
         if len(parent_indices) > 1:
             # Multiple parents with same rank - check if attached to same sp2 carbon
             for pidx in parent_indices:
@@ -480,7 +477,7 @@ def count_h_env(mol: Chem.Mol) -> int:
 
     # Build unique environment signatures
     unique_envs = set()
-    for h_idx, parent_idx, parent_rank in h_data:
+    for _h_idx, parent_idx, parent_rank in h_data:
         if parent_idx in diastereotopic_parents:
             # For diastereotopic groups, each parent atom creates a distinct environment
             unique_envs.add((parent_rank, parent_idx))

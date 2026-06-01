@@ -403,25 +403,19 @@ class TestHSQCNMRSpectra:
 class TestMassSpectrometrySpectra:
     """Tests for the mass_spectrometry_spectra tool."""
 
-    @patch("spectra_elucidation.tools.make_api_call")
-    def test_mass_spectrometry_spectra_success(self, mock_api_call):
+    @patch("spectra_elucidation.tools.predict_isotopic_distribution")
+    def test_mass_spectrometry_spectra_success(self, mock_predict):
         """Test successful mass spectrometry spectra prediction."""
-        # Mock the API response with correct format (x, y keys)
-        mock_api_call.return_value = [
+        # Mock the predictor response with correct format (x, y keys)
+        mock_predict.return_value = [
             {"x": 46.0, "y": 1000},
             {"x": 47.0, "y": 50},
         ]
 
         result = mass_spectrometry_spectra.execute(h_smiles="CCO")
 
-        # Check that the API was called
-        mock_api_call.assert_called_once()
-        call_args = mock_api_call.call_args[0]
-        assert (
-            call_args[0]
-            == "https://lamalab-org--nmr-prediction-api-predict-isotopic-distribution.modal.run"
-        )
-        assert call_args[1]["smiles"] == "CCO"
+        # Check that the local predictor was called with the SMILES
+        mock_predict.assert_called_once_with("CCO")
 
         # Check the result
         assert isinstance(result, str)
