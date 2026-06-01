@@ -156,32 +156,24 @@ def load_tasks_from_json(
     with Path(json_path).open() as f:
         task_data = json.load(f)
 
-    # Standardized format is a list of entries each with an "id"; older inline
-    # dicts keyed by task id are also accepted.
-    if isinstance(task_data, list):
-        items = [(entry["id"], entry) for entry in task_data]
-    else:
-        items = list(task_data.items())
-
     tasks = {}
-    for task_id, task_info in items:
-        # Get the scoring function by name from the registry
-        scoring_fn_name = task_info.get("scoring_function", "default")
-        scoring_params = task_info.get("scoring_params", {})
+    for entry in task_data:
+        task_id = entry["id"]
+        scoring_fn_name = entry.get("scoring_function", "default")
+        scoring_params = entry.get("scoring_params", {})
         scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
 
-        # Add work_dir to initial input if not already present
-        initial_input = task_info.get("initial_input", {}).copy()
+        initial_input = entry.get("initial_input", {}).copy()
         if "work_dir" not in initial_input:
             initial_input["work_dir"] = work_dir
 
         tasks[task_id] = TaskDefinition(
-            name=task_info["name"],
-            description=task_info["description"],
-            tools=task_info.get("tools", []),
+            name=entry["name"],
+            description=entry["description"],
+            tools=entry.get("tools", []),
             scoring_fn=scoring_fn,
-            submission_format=task_info.get("submission_format", ""),
-            input_from_tasks=task_info.get("input_from_tasks", []),
+            submission_format=entry.get("submission_format", ""),
+            input_from_tasks=entry.get("input_from_tasks", []),
             initial_input=initial_input,
         )
 
