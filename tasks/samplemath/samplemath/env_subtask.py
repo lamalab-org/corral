@@ -156,8 +156,15 @@ def load_tasks_from_json(
     with Path(json_path).open() as f:
         task_data = json.load(f)
 
+    # Standardized format is a list of entries each with an "id"; older inline
+    # dicts keyed by task id are also accepted.
+    if isinstance(task_data, list):
+        items = [(entry["id"], entry) for entry in task_data]
+    else:
+        items = list(task_data.items())
+
     tasks = {}
-    for task_id, task_info in task_data.items():
+    for task_id, task_info in items:
         # Get the scoring function by name from the registry
         scoring_fn_name = task_info.get("scoring_function", "default")
         scoring_params = task_info.get("scoring_params", {})
