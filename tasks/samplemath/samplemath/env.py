@@ -1,4 +1,4 @@
-from tools import UnitConverterTool, calculator, number_converter
+from tools import UnitConverterTool, calculator, percentage_calculator
 
 from corral.backend.env import Environment
 from corral.backend.server import run_server
@@ -12,7 +12,7 @@ class MathEnvironment(Environment):
 
         # Add multiple tools
         self.add_tool(calculator)
-        self.add_tool(number_converter)
+        self.add_tool(percentage_calculator)
         self.add_tool(UnitConverterTool())
 
     def get_task_prompt(self) -> str:
