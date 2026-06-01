@@ -49,5 +49,6 @@ curl http://localhost:8000/tasks/
 ## Notes
 
 - The environment exposes tools for interpreting and simulating mass spectrometry, IR, and NMR data, as well as structure-validation utilities.
+- IR simulation uses the code in [cheminfo-py/xtbservice](https://github.com/cheminfo-py/xtbservice); deploy that service yourself if the public API is unavailable.
 - Each task gets an isolated work directory under `CORRAL_WORK_DIR` if that environment variable is set.
 - Levels provide different benchmark collections, while subtask mode exposes chained decomposition tasks rather than the main task set.
