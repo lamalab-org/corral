@@ -126,6 +126,10 @@ In subtask mode, each molecule is represented by 10 linked subtasks:
 
 Subtasks 1 through 8 can be solved independently. Subtask 9 consumes the earlier intermediate answers, and subtask 10 consumes the full chain.
 
+## Notes
+
+- IR simulation uses the code in [cheminfo-py/xtbservice](https://github.com/cheminfo-py/xtbservice); deploy that service yourself if the public API is unavailable.
+
 ## Run With Corral
 
 After starting the server, point a Corral runner at the local endpoint:
