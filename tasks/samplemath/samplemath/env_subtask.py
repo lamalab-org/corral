@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from tools import calculator, percentage_calculator
+from samplemath.tools import calculator, percentage_calculator
 
 from corral.backend.env import Environment
 from corral.backend.server import run_server
@@ -159,7 +159,12 @@ def load_tasks_from_json(
     tasks = {}
     for entry in task_data:
         task_id = entry["id"]
-        scoring_fn_name = entry.get("scoring_function", "default")
+        scoring_fn_name = entry.get("scoring_function")
+        if scoring_fn_name is None:
+            raise ValueError(
+                f"Task '{task_id}' is missing a 'scoring_function'. "
+                f"Available scoring functions: {sorted(SCORING_FUNCTIONS)}"
+            )
         scoring_params = entry.get("scoring_params", {})
         scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
 
