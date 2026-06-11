@@ -1,18 +1,20 @@
-from tools import UnitConverterTool, calculator, number_converter
+import os
+
+from samplemath.tools import UnitConverterTool, calculator, percentage_calculator
 
 from corral.backend.env import Environment
 from corral.backend.server import run_server
 
 
 class MathEnvironment(Environment):
-    def __init__(self, task_id: str, question: str, answer: float):
+    def __init__(self, task_id: str, question: str, answer: float, base_work_dir: str = ""):
         self.question = question
         self.correct_answer = answer
-        super().__init__(task_id)
+        super().__init__(task_id, base_work_dir=base_work_dir)
 
         # Add multiple tools
         self.add_tool(calculator)
-        self.add_tool(number_converter)
+        self.add_tool(percentage_calculator)
         self.add_tool(UnitConverterTool())
 
     def get_task_prompt(self) -> str:
@@ -30,15 +32,29 @@ class MathEnvironment(Environment):
 
 
 if __name__ == "__main__":
+    base_work_dir = os.environ.get(
+        "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/samplemath"
+    )
+
     # Create environments for different tasks
     environments = {
-        "math_1": MathEnvironment("math_1", "What is 23 + 45?", 68),
-        "math_2": MathEnvironment("math_2", "What is 12 * 8?", 96),
-        "math_3": MathEnvironment("math_3", "What is 99 * 63 * 999 * 111?", 691614693),
+        "math_1": MathEnvironment(
+            "math_1", "What is 23 + 45?", 68, base_work_dir=base_work_dir
+        ),
+        "math_2": MathEnvironment(
+            "math_2", "What is 12 * 8?", 96, base_work_dir=base_work_dir
+        ),
+        "math_3": MathEnvironment(
+            "math_3",
+            "What is 99 * 63 * 999 * 111?",
+            691614693,
+            base_work_dir=base_work_dir,
+        ),
         "math_4": MathEnvironment(
             "math_4",
             "What is twenty one thousand four hundred and seventy three * twenty one thousand four hundred and seventy three?",
             4666829,
+            base_work_dir=base_work_dir,
         ),
     }
 

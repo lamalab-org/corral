@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from tools import calculator, number_converter
+from samplemath.tools import calculator, percentage_calculator
 
 from corral.backend.env import Environment
 from corral.backend.server import run_server
@@ -157,24 +157,28 @@ def load_tasks_from_json(
         task_data = json.load(f)
 
     tasks = {}
-    for task_id, task_info in task_data.items():
-        # Get the scoring function by name from the registry
-        scoring_fn_name = task_info.get("scoring_function", "default")
-        scoring_params = task_info.get("scoring_params", {})
+    for entry in task_data:
+        task_id = entry["id"]
+        scoring_fn_name = entry.get("scoring_function")
+        if scoring_fn_name is None:
+            raise ValueError(
+                f"Task '{task_id}' is missing a 'scoring_function'. "
+                f"Available scoring functions: {sorted(SCORING_FUNCTIONS)}"
+            )
+        scoring_params = entry.get("scoring_params", {})
         scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
 
-        # Add work_dir to initial input if not already present
-        initial_input = task_info.get("initial_input", {}).copy()
+        initial_input = entry.get("initial_input", {}).copy()
         if "work_dir" not in initial_input:
             initial_input["work_dir"] = work_dir
 
         tasks[task_id] = TaskDefinition(
-            name=task_info["name"],
-            description=task_info["description"],
-            tools=task_info.get("tools", []),
+            name=entry["name"],
+            description=entry["description"],
+            tools=entry.get("tools", []),
             scoring_fn=scoring_fn,
-            submission_format=task_info.get("submission_format", ""),
-            input_from_tasks=task_info.get("input_from_tasks", []),
+            submission_format=entry.get("submission_format", ""),
+            input_from_tasks=entry.get("input_from_tasks", []),
             initial_input=initial_input,
         )
 
@@ -393,7 +397,7 @@ def create_environments(
             task_group=task_group,
             subtask_specific_tools={
                 "calculator": calculator,
-                "number_converter": number_converter,
+                "percentage_calculator": percentage_calculator,
             },
             taskgroup_common_tools=taskgroup_common_tools,
             base_work_dir=work_dir,
