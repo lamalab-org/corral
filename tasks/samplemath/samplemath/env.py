@@ -1,5 +1,4 @@
 import os
-import tempfile
 
 from tools import UnitConverterTool, calculator, percentage_calculator
 
@@ -34,7 +33,7 @@ class MathEnvironment(Environment):
 
 if __name__ == "__main__":
     base_work_dir = os.environ.get(
-        "CORRAL_WORK_DIR", tempfile.mkdtemp(prefix="samplemath_")
+        "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/samplemath"
     )
 
     # Create environments for different tasks
