@@ -1,120 +1,175 @@
 import inspect
 import time
-from abc import ABC, abstractmethod
-from copy import deepcopy
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from corral.backend.schema import ToolCall, ToolCallStatus
+from corral.backend.state import CorralState, TaskRunState
+from corral.backend.task import (
+    TaskDefinition,
+    build_dependency_graph,
+    connected_components,
+    topological_order,
+    validate_task_graph,
+)
 from corral.backend.tool import Tool
 
 
-class Role(StrEnum):
-    """Defines the role type of a component in the system."""
-
-    AGENT = "agent"
-    ENVIRONMENT = "environment"
-    TOOL = "tool"
-
-
-@dataclass
-class LLMMessage:
-    role: Role  # 'agent' or 'environment'
-    content: str
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
-
-
-@dataclass
-class TaskState:
-    task_id: str
-    task_prompt: str
-    trial_id: str = "0"
-    messages: list[LLMMessage] = field(default_factory=list)
-    tool_calls: list[ToolCall] = field(default_factory=list)
-    is_attempted: bool = False
-    score: float | None = None
-    submitted_answer: str | None = None
-    feedback: str | None = None
-    surrendered: bool = False
-    env_start_time: datetime = field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
+def default_file_tools(workspace: str) -> dict[str, Tool]:
+    """Build the standard filesystem tools bound to a trial workspace."""
+    # Imported lazily to avoid a circular import at module load time.
+    from corral.utils.io_tools import (
+        CatFilesTool,
+        CopyFileTool,
+        FileInfoTool,
+        FSManager,
+        ListFilesTool,
+        ReadFileTool,
+        WriteFileTool,
     )
-    env_end_time: datetime | None = None
 
-    def get_tool_statistics(self) -> dict[str, Any]:
-        """Get statistics about tool usage"""
-        return {
-            "total_calls": len(self.tool_calls),
-            "successful_calls": len(
-                [t for t in self.tool_calls if t.status == ToolCallStatus.SUCCESS]
-            ),
-            "failed_calls": len(
-                [t for t in self.tool_calls if t.status != ToolCallStatus.SUCCESS]
-            ),
-            "tools_used": {t.tool_name for t in self.tool_calls},
-            "error_types": {
-                status: len([t for t in self.tool_calls if t.status == status])
-                for status in ToolCallStatus
-                if status != ToolCallStatus.SUCCESS
-            },
-        }
-
-    def get_env_duration(self) -> float | None:
-        """Get how long the environment was active (not task duration)."""
-        if self.env_end_time and self.env_start_time:
-            return (self.env_end_time - self.env_start_time).total_seconds()
-        return None
+    fs_manager = FSManager("file", base_path=workspace)
+    return {
+        "list_files": ListFilesTool(fs_manager),
+        "read_file": ReadFileTool(fs_manager),
+        "write_file": WriteFileTool(fs_manager),
+        "file_info": FileInfoTool(fs_manager),
+        "cat_files": CatFilesTool(fs_manager),
+        "copy_file": CopyFileTool(fs_manager),
+    }
 
 
-class Environment(ABC):
-    """Base class for task environments"""
+@dataclass(frozen=True)
+class Toolset:
+    """A single description of "the tools for this benchmark."
 
-    def __init__(self, task_id: str, base_work_dir: str, fs_manager=None):
+    Collapses the old ``available_tools`` / ``common_tools`` / ``file_tools`` /
+    ``file_tool_factory`` quartet into one value object. Every tool falls on two
+    axes: *when* it can be built (statically, or bound per-trial to a workspace
+    path) and *how* it is selected (by name from the pool, or for every task).
+    The environment owns resolution; callers pass one ``Toolset``.
+    """
+
+    # Named pool: a task selects from this via ``task.tools``.
+    pool: dict[str, Tool] = field(default_factory=dict)
+    # Tools every task receives regardless of its ``tools`` list.
+    common: dict[str, Tool] = field(default_factory=dict)
+    # Per-trial, workspace-bound tools. ``None`` => no workspace tools
+    # (replaces ``file_tools=False``); a custom callable replaces the old
+    # ``file_tool_factory``; the default reproduces today's file tools.
+    workspace_factory: Callable[[str], dict[str, Tool]] | None = default_file_tools
+    # Opt-in: an empty ``task.tools`` means "the whole pool" (wetlab semantics).
+    select_all_when_unspecified: bool = False
+
+    def resolve(self, task: TaskDefinition, workspace: str | None) -> dict[str, Tool]:
+        """Resolve the concrete tools for ``task`` in ``workspace``.
+
+        Named tools are picked from the pool (or the whole pool when
+        ``select_all_when_unspecified`` and ``task.tools`` is empty), minus any
+        ``task.excluded_tools``; ``common`` tools are always added; and
+        workspace-bound tools are appended when a workspace exists.
+        """
+        excluded = set(getattr(task, "excluded_tools", ()) or ())
+        names = task.tools or (
+            list(self.pool) if self.select_all_when_unspecified else []
+        )
+        tools: dict[str, Tool] = {}
+        for name in names:
+            if name in excluded:
+                continue
+            tool = self.pool.get(name)
+            if tool is None:
+                logger.warning(f"Tool {name!r} not in pool for task {task.name!r}")
+                continue
+            tools[tool.name] = tool
+        tools.update(self.common)
+        if workspace and self.workspace_factory is not None:
+            tools.update(self.workspace_factory(workspace))
+        return tools
+
+
+class Environment:
+    """Runtime engine for a single task (chained or standalone).
+
+    There is one concrete environment, not a hierarchy. A task is just a
+    `TaskDefinition`; chaining is expressed through `input_map` and grouping is
+    derived (see `build_environments`). Custom behaviour is injected through the
+    definition's hooks (`prompt_fn`, `setup_fn`, `scoring_fn`) rather than by
+    subclassing — subclassing remains only as an escape hatch for genuinely
+    stateful integrations (hardware, pickled inventories).
+
+    All mutable runtime data lives in a single `CorralState` instance
+    (`self.state`); the environment itself only holds immutable configuration
+    (task id, task definition, tool pools, base workspace dir). Linked tasks
+    share the same `task_runs` store so each one sees its dependencies' outputs
+    through `self.state`.
+    """
+
+    def __init__(
+        self,
+        task_id: str,
+        task: TaskDefinition,
+        base_work_dir: str = "",
+        *,
+        toolset: Toolset | None = None,
+        group_tasks: dict[str, TaskDefinition] | None = None,
+        component_id: str | None = None,
+        shared_task_runs: dict[str, TaskRunState] | None = None,
+        fs_manager=None,
+    ):
         self.task_id = task_id
+        self.current_task = task
         self.base_work_dir = base_work_dir
-        self.tools: dict[str, Tool] = {}
-        self.trial_states: dict[str, TaskState] = {}
-        self.trial_counter = -1
+        self.toolset = toolset or Toolset()
+        self.group_tasks = group_tasks or {task_id: task}
         self.fs_manager = fs_manager
+        self.tools: dict[str, Tool] = {}
+
+        # task_prompt stays an empty placeholder; the real prompt is fetched
+        # live via get_task_prompt() and recorded in the agent's messages.
+        self.state = CorralState(
+            task_id=task_id,
+            task_prompt="",
+            task_group_id=component_id,
+        )
+        # Linked tasks share this dict (same object across environments)
+        if shared_task_runs is not None:
+            self.state.task_runs = shared_task_runs
+
+        # reset_state resolves the tools for the first trial (named + common +
+        # workspace-bound), so there is no separate tool-setup step here.
         self.reset_state()
 
-    def save_current_state(self) -> TaskState:
-        """
-        Archive the current state as a snapshot.
-
-        Returns:
-            TaskState: A deep copy of the current task state
-        """
-        # Create a deep copy of the entire TaskState object
-        return deepcopy(self.state)
+    def save_current_state(self) -> dict[str, Any]:
+        """Snapshot the current trial state as a plain dict."""
+        return self.state.snapshot(include_trials=False)
 
     def reset_state(self) -> str:
-        """Reset the environment state with a new trial id and fresh TaskState and return finished trail id."""
-        if hasattr(self, "state") and self.state is not None:
-            if self.state.is_attempted and self.state.env_end_time is None:
-                self.state.env_end_time = datetime.now(tz=timezone.utc)
-            archived_snapshot = self.save_current_state()
-            self.trial_states[self.state.trial_id] = archived_snapshot
+        """Archive the finished trial (if any) and start a fresh one.
 
-        self.trial_counter += 1
-        new_trial_id = str(self.trial_counter)
+        Returns the new trial id.
+        """
+        next_trial_id = str(self.state.trial_counter + 1)
 
-        if self.base_work_dir:
-            self.current_work_dir = self._create_trial_workspace(new_trial_id)
-        else:
-            self.current_work_dir = None
-
-        self.state = TaskState(
-            task_id=self.task_id,
-            trial_id=new_trial_id,
-            task_prompt=self.get_task_prompt(),
+        workspace = (
+            self._create_trial_workspace(next_trial_id) if self.base_work_dir else None
         )
-        return self.state.trial_id
+
+        trial_id = self.state.start_new_trial(task_prompt="", workspace=workspace)
+        # Resolve all tools for the new trial: named tools from the pool, common
+        # tools, and workspace-bound tools rebound to the fresh workspace.
+        self.tools = self._resolve_tools(self.state.workspace)
+        # The prompt is intentionally NOT built here: at construction time deps
+        # have not run yet. It is fetched live when actually requested (agent,
+        # guide, LaTeX) — always after dependencies are satisfied under the
+        # runner's enforced topological order — and is captured in the agent's
+        # messages, which is what the trace is saved from. `state.task_prompt`
+        # stays an empty placeholder; nothing downstream reads it.
+        return trial_id
 
     def _create_trial_workspace(self, trial_id: str) -> str:
         """Create workspace directory for this trial"""
@@ -126,17 +181,131 @@ class Environment(ABC):
             workspace.mkdir(parents=True, exist_ok=True)
         return str(workspace)
 
+    @property
+    def current_work_dir(self) -> str | None:
+        """Workspace of the active trial (proxy for `state.workspace`)."""
+        return self.state.workspace
+
+    @current_work_dir.setter
+    def current_work_dir(self, value: str | None) -> None:
+        self.state.workspace = value
+
+    @property
+    def hidden_args(self) -> dict[str, Any]:
+        """Hidden tool arguments (proxy for `state.hidden_args`)."""
+        return self.state.hidden_args
+
+    @hidden_args.setter
+    def hidden_args(self, value: dict[str, Any] | None) -> None:
+        self.state.hidden_args = value or {}
+
+    @property
+    def trial_states(self) -> dict[str, dict[str, Any]]:
+        """Archived trial snapshots (proxy for `state.trials`)."""
+        return self.state.trials
+
     def get_current_work_dir(self) -> str:
         """Get the current working directory for this trial"""
-        return self.current_work_dir or self.base_work_dir or ""
+        return self.state.workspace or self.base_work_dir or ""
 
-    @abstractmethod
     def get_task_prompt(self) -> str | list[dict]:
-        """Return the task prompt for the agent"""
+        """Return the task prompt, using the definition's hook if provided."""
+        if self.current_task.prompt_fn is not None:
+            return self.current_task.prompt_fn(self)
+        return self._default_task_prompt()
 
-    @abstractmethod
+    def _default_task_prompt(self) -> str:
+        """Render description + submission format + resolved inputs.
+
+        Dependency inputs are resolved strictly: by the time the prompt is
+        requested every dependency has run (the runner enforces topological
+        order), so an unsatisfied dependency is a misuse error rather than a
+        state to render. There is therefore no "not yet available" placeholder.
+        """
+        task = self.current_task
+        prompt = (
+            f"Task: {task.name}\n"
+            f"Description: {task.description}\n\n"
+            f"Required submission format:\n{task.submission_format}\n\n"
+        )
+
+        # Strict resolution: raises if a dependency has not produced an output.
+        resolved = self.state.resolve_inputs(task)
+
+        prompt += "\nAvailable input data:\n"
+
+        # Display resolved inputs from dependencies
+        for input_name, ref in task.input_map.items():
+            prompt += f"- {input_name} (from {ref.task_id}): {resolved[input_name]}\n"
+
+        # Display initial input data
+        for key, value in task.initial_input.items():
+            if key != "work_dir":
+                prompt += f"- {key}: {value}\n"
+
+        # Add workspace info
+        if self.state.workspace:
+            prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
+
+        return prompt
+
     def score(self) -> float:
-        """Evaluate the agent's solution and return a score"""
+        """Score the submitted answer with the definition's scoring function.
+
+        An output is *always* stored — including on the no-submission and
+        scoring-error paths — so the run store never has holes for a task that
+        ran. Dependent tasks then either consume a real output or are skipped by
+        the runner's broken-chain short-circuit; ``resolve_inputs`` never raises
+        by accident.
+        """
+        task = self.current_task
+        if not self.state.submitted_answer:
+            logger.warning(f"No submission found for task {self.task_id}")
+            self.state.store_task_output(
+                self.task_id, "", 0.0, feedback="no submission"
+            )
+            return 0.0
+
+        try:
+            answer = self.state.submitted_answer.strip()
+            resolved = self._resolve_answer(answer)
+            score = task.scoring_fn(resolved)
+            # Store the output in the shared state so dependent tasks can use it
+            self.state.store_task_output(self.task_id, resolved, score)
+            logger.info(f"Task {self.task_id} scored: {score}")
+            return score
+        except Exception as e:
+            logger.error(
+                f"Error scoring submission for task {self.task_id}: {e!s}",
+                exc_info=True,
+            )
+            logger.error(f"Submission was: {self.state.submitted_answer!r}")
+            self.state.store_task_output(
+                self.task_id,
+                self.state.submitted_answer,
+                0.0,
+                feedback=f"scoring error: {e}",
+            )
+            return 0.0
+
+    def _resolve_answer(self, answer: str) -> str:
+        """Resolve a submitted answer to a file path when the task expects one."""
+        if not self.current_task.resolve_answer:
+            return answer
+        # JSON submissions are values, not file paths.
+        if answer.startswith("{") and answer.endswith("}"):
+            return answer
+        from corral.utils.tool_helpers import smart_resolve_path
+
+        return smart_resolve_path(answer)
+
+    def _resolve_tools(self, workspace: str | None) -> dict[str, Tool]:
+        """Resolve the trial's tools — overridable seam over the toolset.
+
+        Subclasses needing bespoke tool policy override this; the default
+        delegates to ``self.toolset`` (named pool + common + workspace tools).
+        """
+        return self.toolset.resolve(self.current_task, workspace)
 
     def add_tool(self, tool: Tool):
         """Add a tool to the environment"""
@@ -277,7 +446,7 @@ class Environment(ABC):
                 error_message=f"Tool {tool_name} not found",
                 duration=duration,
             )
-            self.state.tool_calls.append(tool_call)
+            self.state.record_tool_call(tool_call)
             return tool_call
 
         tool = self.tools[tool_name]
@@ -286,13 +455,9 @@ class Environment(ABC):
         call_args = arguments.copy()
         if hasattr(tool, "hidden_args") and tool.hidden_args:
             # tool.hidden_args is a list of argument names to hide
-            if not hasattr(self, "hidden_args") or self.hidden_args is None:
-                raise AttributeError(
-                    "Environment is missing required 'hidden_args' attribute."
-                )
             for hidden_arg in tool.hidden_args:
-                if hidden_arg in self.hidden_args:
-                    call_args[hidden_arg] = self.hidden_args[hidden_arg]
+                if hidden_arg in self.state.hidden_args:
+                    call_args[hidden_arg] = self.state.hidden_args[hidden_arg]
                 else:
                     raise KeyError(
                         f"Hidden argument '{hidden_arg}' required by tool '{tool_name}' not found in environment's hidden_args."
@@ -310,7 +475,7 @@ class Environment(ABC):
                 error_message=error_message,
                 duration=duration,
             )
-            self.state.tool_calls.append(tool_call)
+            self.state.record_tool_call(tool_call)
             return tool_call
 
         # Execute tool
@@ -336,64 +501,38 @@ class Environment(ABC):
                 duration=duration,
             )
 
-        self.state.tool_calls.append(tool_call)
+        self.state.record_tool_call(tool_call)
         return tool_call
 
     def submit_answer(self, answer: str) -> float:
         """Submit final answer and get score"""
-        self.state.submitted_answer = answer
-        score = self.score()  # Using existing abstract score method
-        self.state.score = score
-        self.state.is_attempted = True
+        self.state.submit(answer)
+        score = self.score()
+        self.state.set_score(score)
         return score
 
     def surrender(self) -> float:
         """Surrender from the current task without submitting an answer"""
-        self.state.surrendered = True
-        self.state.is_attempted = True
-        return 0.0 if self.state.score is None else self.state.score
+        return self.state.surrender()
 
     def get_completed_trial_data(self) -> dict:
         """Get all data for the completed trial"""
-
-        # Build state dict with all needed data
-        state_data = {
-            "task_id": self.state.task_id,
+        return {
             "trial_id": self.state.trial_id,
-            "is_attempted": self.state.is_attempted,
-            "score": self.state.score,
-            "submitted_answer": self.state.submitted_answer,
-            "surrendered": self.state.surrendered,
-            "tool_statistics": self._get_complete_tool_statistics(),
+            "state": self.state.snapshot(include_trials=False),
         }
 
-        return {"trial_id": self.state.trial_id, "state": state_data}
-
-    def _get_complete_tool_statistics(self) -> dict:
-        """Get complete tool statistics including individual tool calls"""
-        stats = self.state.get_tool_statistics()
-
-        # Add individual tool calls with duration
-        stats["tool_calls"] = [
-            {
-                "tool_name": call.tool_name,
-                "arguments": call.arguments,
-                "result": call.result,
-                "status": call.status.value,
-                "error_message": call.error_message,
-                "duration": call.duration,
-                "timestamp": call.timestamp.isoformat() if call.timestamp else None,
-            }
-            for call in self.state.tool_calls
-        ]
-
-        return stats
-
     def configure_additional_apps(self):
-        """Configure any external apps/services (for example, experimental instruments or robots) needed for the environment.
-        This method is called at the start of each trial."""
-        # This can be overridden by subclasses to set up external dependencies
+        """Configure any external apps/services (for example, experimental
+        instruments or robots) needed for the environment, and populate any
+        hidden tool arguments. Called at the start of each trial.
 
+        Behaviour is supplied by the definition's `setup_fn`; the default is a
+        no-op.
+        """
+        if self.current_task.setup_fn is not None:
+            result = self.current_task.setup_fn(self)
+            return result or "Additional apps/services configured for this trial."
         return "No external app/service configuration needed for this trial."
 
     def _extract_scoring_fn_details(self, fn: Any) -> dict[str, Any]:
@@ -507,21 +646,18 @@ class Environment(ABC):
         """
         Generate LaTeX documentation for this task.
 
-        This method creates a `TaskDefinition` from the environment's task data
-        and delegates to `Code2Latex.colorbox()` for generating formatted LaTeX files
-        and `Code2Latex.longtable()` for generating tools documentation.
+        This method creates LaTeX from the environment's task data and delegates
+        to `Code2Latex.colorbox()` for the task block, `Code2Latex.longtable()`
+        for tools, and `Code2Latex.scoring_longtable()` for scoring functions.
 
-        If the environment has a `current_task` attribute (e.g., `TaskGroupEnvironment`),
-        it will automatically detect:
-        - Whether this is a subtask (based on `input_from_tasks`)
-        - Dependencies on other tasks
-        - `env_name` from `task_group.group_id` if not provided
+        It automatically detects dependencies from the definition's `input_map`
+        and falls back to `state.task_group_id` for `env_name` when not provided.
 
         Args:
             output_dir: Directory for output .tex files
             level: Task level identifier (e.g., 1, 2, "advanced")
             env_name: Environment name (e.g., "afm", "catalyst"). If not provided,
-                     will try to get from task_group.group_id
+                     will try to get from state.task_group_id
             task_name: Optional custom name for the task (defaults to task_id)
             verbosity: Tool verbosity level used to filter tool descriptions and
                        return sections. Accepts a `ToolVerbosity` value string
@@ -604,22 +740,12 @@ class Environment(ABC):
                 }
             )
 
-        # Check if this is a TaskGroupEnvironment with current_task
-        scoring_fn = self.score
-        if (
-            hasattr(self, "current_task")
-            and self.current_task is not None
-            and hasattr(self.current_task, "scoring_fn")
-            and self.current_task.scoring_fn is not None
-        ):
-            scoring_fn = self.current_task.scoring_fn
+        # The scoring function comes straight from the (immutable) definition
+        scoring_fn = self.current_task.scoring_fn
 
-        # Try to get env_name from task_group if not provided
+        # Try to get env_name from the task group id if not provided
         if env_name is None:
-            if hasattr(self, "task_group") and self.task_group is not None:
-                env_name = self.task_group.group_id
-            else:
-                env_name = "unknown"
+            env_name = self.state.task_group_id or "unknown"
 
         # Create LatexMetadata
         metadata = LatexMetadata(
@@ -644,32 +770,23 @@ class Environment(ABC):
             output_dir=output_dir,
         )
 
-        # Collect scoring functions from all tasks in the task group
+        # Collect scoring functions from all linked tasks in this component
         scoring_fns_details = []
         seen_scoring_fns = set()  # Track by function name to deduplicate
 
-        if hasattr(self, "task_group") and self.task_group is not None:
-            for task in self.task_group.tasks.values():
-                if task.scoring_fn is not None:
-                    fn = task.scoring_fn
-                    fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
+        for task in self.group_tasks.values():
+            if task.scoring_fn is None:
+                continue
+            fn = task.scoring_fn
+            fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
 
-                    # Skip if we've already processed this function
-                    if fn_name in seen_scoring_fns:
-                        continue
-                    seen_scoring_fns.add(fn_name)
+            # Skip if we've already processed this function
+            if fn_name in seen_scoring_fns:
+                continue
+            seen_scoring_fns.add(fn_name)
 
-                    # Extract function details
-                    fn_details = self._extract_scoring_fn_details(fn)
-                    scoring_fns_details.append(fn_details)
-        else:
-            # Single task environment - use self.score method
-            if hasattr(self, "score") and callable(self.score):
-                fn = self.score
-                fn_name = fn.__name__ if hasattr(fn, "__name__") else "score"
-                if fn_name not in seen_scoring_fns:
-                    fn_details = self._extract_scoring_fn_details(fn)
-                    scoring_fns_details.append(fn_details)
+            # Extract function details
+            scoring_fns_details.append(self._extract_scoring_fn_details(fn))
 
         # Generate LaTeX via Code2Latex.scoring_longtable for scoring functions
         scoring_tex_path = None
@@ -681,3 +798,68 @@ class Environment(ABC):
             )
 
         return task_tex_path, tools_tex_path, scoring_tex_path
+
+
+def build_environments(
+    tasks: Mapping[str, TaskDefinition],
+    *,
+    base_work_dir: str = "",
+    name: str | None = None,
+    toolset: Toolset | None = None,
+    fs_manager=None,
+    env_cls: type[Environment] = Environment,
+    **env_kwargs: Any,
+) -> dict[str, Environment]:
+    """Build one environment per task from a flat collection of definitions.
+
+    Grouping is derived, not declared: each weakly-connected component of the
+    dependency graph shares one run store, so chained tasks see their
+    dependencies' outputs while independent tasks stay isolated. A single task
+    is just the degenerate case of a one-node component.
+
+    Args:
+        tasks: Task definitions keyed by task id.
+        base_work_dir: Base directory for per-trial workspaces.
+        name: Optional benchmark label used for tracing/LaTeX (replaces the old
+            ``group_id`` argument; never used to namespace task ids).
+        toolset: Single description of the benchmark's tools (named pool, common
+            tools, and the per-trial workspace tool factory). The environment
+            resolves each task's concrete tools from it.
+        fs_manager: Optional FSManager used to create trial workspaces. This is a
+            storage backend, not a tool — kept separate from ``toolset``.
+        env_cls: Environment class to instantiate (escape hatch for stateful
+            subclasses such as AFM/wetlab).
+        **env_kwargs: Extra keyword arguments forwarded to ``env_cls``.
+
+    Returns:
+        Environments keyed by task id, ready to serve.
+    """
+    validate_task_graph(tasks)
+
+    logger.info("Task Dependencies:")
+    for task_id, deps in build_dependency_graph(tasks).items():
+        logger.info(f"- {task_id}: depends on {deps}")
+
+    logger.info("Task Execution Order:")
+    for i, task_id in enumerate(topological_order(tasks)):
+        logger.info(f"{i + 1}. {task_id}")
+
+    environments: dict[str, Environment] = {}
+    for component in connected_components(tasks):
+        component_tasks = {task_id: tasks[task_id] for task_id in component}
+        # One shared run store per component; chained tasks read through it.
+        shared_task_runs: dict[str, TaskRunState] = {}
+        for task_id in component:
+            environments[task_id] = env_cls(
+                task_id=task_id,
+                task=tasks[task_id],
+                base_work_dir=base_work_dir,
+                toolset=toolset,
+                group_tasks=component_tasks,
+                component_id=name,
+                shared_task_runs=shared_task_runs,
+                fs_manager=fs_manager,
+                **env_kwargs,
+            )
+
+    return environments

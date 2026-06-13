@@ -66,6 +66,12 @@ class CorralRouter:
         except Exception:
             return False
 
+    def get_dependency_graph(self) -> dict[str, list[str]]:
+        """Fetch the task dependency graph as a ``{task_id: [deps]}`` dict."""
+        response = requests.get(f"{self.base_url}/dependency_graph")
+        response.raise_for_status()
+        return response.json()
+
     def get_available_tools_for_task(
         self, task_id: str, verbosity: str | None = None
     ) -> dict[str, Any]:
