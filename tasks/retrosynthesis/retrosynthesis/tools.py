@@ -25,6 +25,27 @@ from corral.backend.tool import Tool, tool
 from corral.utils.modal import remote_call
 
 
+def _coerce_to_list(value: Any) -> Any:
+    """Best-effort coercion of a stringified list back into a real list.
+
+    Some tool-calling providers (e.g. DeepSeek on Bedrock) serialize list-typed
+    arguments as a JSON string such as ``'["alcohol", "alkene"]'`` instead of a
+    JSON array. When ``value`` is such a string, parse it and return the list;
+    otherwise return ``value`` unchanged so downstream validation still rejects
+    genuinely malformed input.
+    """
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not (stripped.startswith("[") and stripped.endswith("]")):
+        return value
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, TypeError):
+        return value
+    return parsed if isinstance(parsed, list) else value
+
+
 # TODO: Include reaction type in the search_template_catalog tool
 @tool
 def search_template_catalog_by_criteria(
@@ -160,6 +181,16 @@ def search_template_catalog_by_criteria(
         - The accuracy of the search results is dependent on the quality of the underlying reaction templates and algorithms used in the retrosynthetic analysis.
     [/LIMITATIONS]
     """
+    # Some tool-calling providers serialize list arguments as a JSON/Python
+    # string (e.g. '["alcohol"]') instead of a real array. Coerce those back to
+    # lists before validation so the search works regardless of how the model's
+    # tool-call transport encoded the argument.
+    functional_groups_broken = _coerce_to_list(functional_groups_broken)
+    functional_groups_formed = _coerce_to_list(functional_groups_formed)
+    bonds_formed = _coerce_to_list(bonds_formed)
+    bonds_broken = _coerce_to_list(bonds_broken)
+    bonds_order_changed = _coerce_to_list(bonds_order_changed)
+
     # Validate that list parameters are actually lists, not strings
     list_params = {
         "functional_groups_broken": functional_groups_broken,
@@ -174,7 +205,9 @@ def search_template_catalog_by_criteria(
             raise TypeError(
                 f"Parameter '{param_name}' must be a list of strings, not a {type(param_value).__name__}. "
                 f"Received: {param_value!r}. "
-                f"Example: If you want to search for 'alcohol', use [{param_value!r}] instead of {param_value!r}"
+                f"Example: to search for 'alcohol', pass the argument as a JSON "
+                f'array of strings, e.g. ["alcohol"] (not the string "alcohol" '
+                f'or a quoted list like \'["alcohol"]\').'
             )
         if param_value is not None and param_value and len(param_value) == 0:
             raise ValueError(
