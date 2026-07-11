@@ -224,6 +224,31 @@ def test_llm_call_anthropic_model(monkeypatch):
     )
 
 
+def test_llm_call_reasoning_effort_forces_temperature_one(monkeypatch):
+    """Reasoning effort must override temperature to 1 (Anthropic thinking rule)."""
+    mock_litellm, _ = setup_mock_litellm(monkeypatch)
+
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+
+    llm_call(
+        model="anthropic/claude-3-sonnet",
+        messages=messages,
+        temperature=0.0,
+        reasoning_effort="medium",
+    )
+
+    # Anthropic rejects any temperature other than 1 when thinking is enabled,
+    # so the requested 0.0 is overridden to 1 while reasoning_effort passes through.
+    mock_litellm.completion.assert_called_once_with(
+        model="anthropic/claude-3-sonnet",
+        messages=messages,
+        temperature=1,
+        max_tokens=8192,
+        api_base=None,
+        reasoning_effort="medium",
+    )
+
+
 def test_llm_call_with_usage_info(monkeypatch):
     """Test llm_call with return_usage=True."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch, return_usage=True)

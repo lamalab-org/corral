@@ -155,7 +155,7 @@ class ToolCallingAgent(BaseAgent):
                                     id=full_llm_response.id,
                                 )
                             )
-                            return "GIVE UP"
+                            return "SURRENDER"
 
                     final_answer_match = re.search(
                         r"Final Answer: (.*)", content, re.DOTALL | re.IGNORECASE

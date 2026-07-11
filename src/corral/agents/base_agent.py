@@ -83,7 +83,14 @@ class BaseAgent(ABC):
         self.api_endpoint = api_endpoint
         self.temperature = temperature
         self.messages: list = []
-        self.token_usage: dict = {}  # Track token usage per LLM call
+        # ``token_usage`` holds the *most recent* LLM call's usage. It doubles as
+        # the current context size for the context-budget message and Terminus-2
+        # compaction, so it must stay per-call and not accumulate.
+        self.token_usage: dict = {}
+        # ``cumulative_token_usage`` sums usage across every LLM call in the run,
+        # so ``get_total_token_usage`` reflects the whole conversation rather than
+        # only the last completion.
+        self.cumulative_token_usage: dict = {}
         self.hooks = hooks or AgentHooks()
         self._current_iteration = 0  # Track current iteration for hooks
         self._initial_messages: list[LiteLLMMessage] | None = None
@@ -152,11 +159,19 @@ class BaseAgent(ABC):
         agent._initial_messages = list(trace)
         return agent
 
-    def get_llm_response(self, tools: list[dict[str, Any]] | None = None) -> Any:
+    def get_llm_response(
+        self, tools: list[dict[str, Any]] | None = None, **call_kwargs: Any
+    ) -> Any:
         """Get response from the LLM using LiteLLM
 
         Args:
             tools (dict[str, Any], optional): Optional tools/functions for function calling
+            **call_kwargs: Per-call keyword arguments merged over (and taking
+                precedence over) the agent-wide ``self.kwargs`` for this single
+                request. Use this for options that must not leak into other LLM
+                calls made by the agent (e.g. passing ``response_format`` for a
+                structured-output turn without forcing the final-answer extractor
+                to use the same schema).
 
         Returns:
             Any: The LLMResponse wrapper containing the message and metadata
@@ -164,6 +179,7 @@ class BaseAgent(ABC):
         self.messages = count_tokens_and_add(
             self.messages, self.model, self.token_usage.get("total_tokens", 0)
         )
+        merged_kwargs = {**self.kwargs, **call_kwargs}
         try:
             response = llm_call(
                 model=self.model,
@@ -172,12 +188,16 @@ class BaseAgent(ABC):
                 temperature=self.temperature,
                 api_endpoint=self.api_endpoint,
                 return_usage=True,
-                **self.kwargs,
+                **merged_kwargs,
             )
 
-            # Track token usage from metadata
+            # Track token usage from metadata. ``token_usage`` keeps the latest
+            # call (current context size); ``cumulative_token_usage`` adds each
+            # call on top of the older usage so the run total spans the whole
+            # conversation, not just the last completion.
             if response.usage:
                 self.token_usage = response.usage
+                self._accumulate_token_usage(response.usage)
 
             return response
 
@@ -275,10 +295,13 @@ class BaseAgent(ABC):
                 enable_surrender=enable_surrender,
             )
 
-            # Check if agent decided to surrender
-            if final_answer == "GIVE UP":
+            # Check if agent decided to surrender. The sentinel is returned
+            # verbatim (without running the answer extractor) so surrender never
+            # depends on an extra model call. All agents emit "SURRENDER", which
+            # is what CorralRunner checks for before calling `surrender_task()`.
+            if final_answer == "SURRENDER":
                 logger.info(f"Agent surrender from task {task_id}")
-                return "GIVE UP", self.messages, self.get_total_token_usage()
+                return final_answer, self.messages, self.get_total_token_usage()
 
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")
@@ -341,15 +364,29 @@ class BaseAgent(ABC):
             logger.error(f"Error extracting final answer: {e}")
             return final_answer, self.messages, self.get_total_token_usage()
 
+    def _accumulate_token_usage(self, usage: dict[str, int]) -> None:
+        """Add one LLM call's usage on top of the running run total.
+
+        Sums ``prompt_tokens``/``completion_tokens``/``total_tokens`` into
+        ``cumulative_token_usage`` so the totals grow over the conversation
+        instead of being replaced by each call's usage.
+        """
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            self.cumulative_token_usage[key] = self.cumulative_token_usage.get(
+                key, 0
+            ) + int(usage.get(key, 0) or 0)
+
     def get_total_token_usage(self) -> dict[str, int]:
-        """Calculate total token usage across all LLM calls
+        """Calculate total token usage across all LLM calls in the run
 
         Returns:
             dict[str, int]: Dictionary with prompt_tokens, completion_tokens, and total_tokens
         """
-        total_prompt_tokens = self.token_usage.get("prompt_tokens", 0)
-        total_completion_tokens = self.token_usage.get("completion_tokens", 0)
-        total_tokens = self.token_usage.get("total_tokens", 0)
+        total_prompt_tokens = self.cumulative_token_usage.get("prompt_tokens", 0)
+        total_completion_tokens = self.cumulative_token_usage.get(
+            "completion_tokens", 0
+        )
+        total_tokens = self.cumulative_token_usage.get("total_tokens", 0)
 
         return {
             "prompt_tokens": total_prompt_tokens,
@@ -360,6 +397,7 @@ class BaseAgent(ABC):
     def reset_token_usage(self) -> None:
         """Reset token usage tracking"""
         self.token_usage = {}
+        self.cumulative_token_usage = {}
 
     def _execute_hooks(
         self,

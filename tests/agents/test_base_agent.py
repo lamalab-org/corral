@@ -457,7 +457,7 @@ def test_get_total_token_usage_empty(concrete_agent):
 
 def test_get_total_token_usage_with_data(concrete_agent):
     """Test token usage calculation with usage data."""
-    concrete_agent.token_usage = {
+    concrete_agent.cumulative_token_usage = {
         "prompt_tokens": 50,
         "completion_tokens": 25,
         "total_tokens": 75,
@@ -474,7 +474,7 @@ def test_get_total_token_usage_with_data(concrete_agent):
 
 def test_get_total_token_usage_with_missing_keys(concrete_agent):
     """Test token usage calculation with missing keys."""
-    concrete_agent.token_usage = {
+    concrete_agent.cumulative_token_usage = {
         "completion_tokens": 75,
         "total_tokens": 275,
     }  # Missing prompt_tokens
@@ -488,9 +488,43 @@ def test_get_total_token_usage_with_missing_keys(concrete_agent):
     }
 
 
+def test_get_total_token_usage_accumulates_across_calls(monkeypatch, concrete_agent):
+    """get_total_token_usage sums usage over the whole run, not just the last call."""
+
+    def mock_llm_call(*args, **kwargs):
+        return MockLLMResponse(
+            "response",
+            usage={
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+            },
+        )
+
+    monkeypatch.setattr("corral.agents.base_agent.llm_call", mock_llm_call)
+    concrete_agent.messages = [{"role": "user", "content": "Test message"}]
+
+    concrete_agent.get_llm_response()
+    concrete_agent.get_llm_response()
+
+    # Last call's usage is retained per-call for context-size tracking...
+    assert concrete_agent.token_usage["total_tokens"] == 150
+    # ...while the run total spans both calls.
+    assert concrete_agent.get_total_token_usage() == {
+        "prompt_tokens": 200,
+        "completion_tokens": 100,
+        "total_tokens": 300,
+    }
+
+
 def test_reset_token_usage(concrete_agent):
     """Test resetting token usage."""
     concrete_agent.token_usage = {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 150,
+    }
+    concrete_agent.cumulative_token_usage = {
         "prompt_tokens": 100,
         "completion_tokens": 50,
         "total_tokens": 150,
@@ -499,6 +533,7 @@ def test_reset_token_usage(concrete_agent):
     concrete_agent.reset_token_usage()
 
     assert not concrete_agent.token_usage
+    assert not concrete_agent.cumulative_token_usage
 
 
 # Tests for BaseAgent abstract methods
