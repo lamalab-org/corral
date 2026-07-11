@@ -10,6 +10,7 @@ from promptstore import PromptStore
 
 from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
+from corral.agents.schema import SURRENDER_SENTINEL, AgentRunResult
 from corral.agents.utils import (
     LiteLLMMessage,
     LLMResponse,
@@ -83,12 +84,12 @@ class BaseAgent(ABC):
         self.api_endpoint = api_endpoint
         self.temperature = temperature
         self.messages: list = []
-        # ``token_usage`` holds the *most recent* LLM call's usage. It doubles as
+        # `token_usage` holds the *most recent* LLM call's usage. It doubles as
         # the current context size for the context-budget message and Terminus-2
         # compaction, so it must stay per-call and not accumulate.
         self.token_usage: dict = {}
-        # ``cumulative_token_usage`` sums usage across every LLM call in the run,
-        # so ``get_total_token_usage`` reflects the whole conversation rather than
+        # `cumulative_token_usage` sums usage across every LLM call in the run,
+        # so `get_total_token_usage` reflects the whole conversation rather than
         # only the last completion.
         self.cumulative_token_usage: dict = {}
         self.hooks = hooks or AgentHooks()
@@ -141,18 +142,18 @@ class BaseAgent(ABC):
         """Construct an agent pre-loaded with a previous conversation trace.
 
         This classmethod creates a new agent instance whose message history is
-        initialised from ``trace``.  When the agent's ``run()`` method is
+        initialised from `trace`.  When the agent's `run()` method is
         called it will use these messages instead of building a fresh prompt,
         allowing benchmarks to be replayed from saved traces.
 
         Args:
-            trace: A list of ``LiteLLMMessage`` dicts representing the
+            trace: A list of `LiteLLMMessage` dicts representing the
                 conversation history from a previous run.
             **init_kwargs: All remaining keyword arguments are forwarded to
-                the class ``__init__``.
+                the class `__init__`.
 
         Returns:
-            A new agent instance with ``_initial_messages`` set to the
+            A new agent instance with `_initial_messages` set to the
             provided trace.
         """
         agent = cls(**init_kwargs)
@@ -167,9 +168,9 @@ class BaseAgent(ABC):
         Args:
             tools (dict[str, Any], optional): Optional tools/functions for function calling
             **call_kwargs: Per-call keyword arguments merged over (and taking
-                precedence over) the agent-wide ``self.kwargs`` for this single
+                precedence over) the agent-wide `self.kwargs` for this single
                 request. Use this for options that must not leak into other LLM
-                calls made by the agent (e.g. passing ``response_format`` for a
+                calls made by the agent (e.g. passing `response_format` for a
                 structured-output turn without forcing the final-answer extractor
                 to use the same schema).
 
@@ -191,8 +192,8 @@ class BaseAgent(ABC):
                 **merged_kwargs,
             )
 
-            # Track token usage from metadata. ``token_usage`` keeps the latest
-            # call (current context size); ``cumulative_token_usage`` adds each
+            # Track token usage from metadata. `token_usage` keeps the latest
+            # call (current context size); `cumulative_token_usage` adds each
             # call on top of the older usage so the run total spans the whole
             # conversation, not just the last completion.
             if response.usage:
@@ -223,6 +224,20 @@ class BaseAgent(ABC):
             logger.error(f"Error getting LLM response: {e}")
             raise e
 
+    @property
+    def requires_answer_extraction(self) -> bool:
+        """Whether :meth:`run_agent` runs the LiteLLM answer extractor.
+
+        Most agents return raw reasoning output from :meth:`run`, so the base
+        machinery makes a final, separate LiteLLM call to distil a clean answer.
+        Agents whose :meth:`run` already returns a final, submit-ready answer
+        (e.g. a black-box harness that extracts its own `Final Answer:`)
+        override this to `False`. That both avoids an extra, separately-billed
+        model call and guarantees the benchmark submits *exactly* the answer the
+        harness produced instead of an extractor's paraphrase of it.
+        """
+        return True
+
     @abstractmethod
     def run(
         self,
@@ -237,7 +252,7 @@ class BaseAgent(ABC):
 
         This method must be implemented by all subclasses.
 
-        If the agent was created via ``from_trace()``, ``self._initial_messages``
+        If the agent was created via `from_trace()`, `self._initial_messages`
         will contain the conversation history and should be used instead of
         building a fresh prompt.
 
@@ -264,7 +279,7 @@ class BaseAgent(ABC):
         verbose: bool = False,
         tool_verbosity: str = "brief",
         enable_surrender: bool = False,
-    ) -> tuple[str, list[dict[str, Any]], dict[str, int]]:
+    ) -> AgentRunResult:
         """Run the agent to solve a task
 
         This method is a wrapper around run to provide a consistent interface
@@ -279,10 +294,9 @@ class BaseAgent(ABC):
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
 
         Returns:
-            tuple[str, list[dict[str, Any]], dict[str, int]]: A tuple containing:
-                - The final answer from the agent
-                - The list of messages exchanged during the task
-                - A dictionary with total token usage information
+            AgentRunResult: A dataclass with named fields for the final
+                `answer`, the `messages` exchanged during the task, and the
+                total `token_usage` information.
         """
         self.reset_token_usage()
 
@@ -297,15 +311,23 @@ class BaseAgent(ABC):
 
             # Check if agent decided to surrender. The sentinel is returned
             # verbatim (without running the answer extractor) so surrender never
-            # depends on an extra model call. All agents emit "SURRENDER", which
-            # is what CorralRunner checks for before calling `surrender_task()`.
-            if final_answer == "SURRENDER":
+            # depends on an extra model call. All agents emit `SURRENDER_SENTINEL`,
+            # which is what CorralRunner checks for before calling `surrender_task()`.
+            if final_answer == SURRENDER_SENTINEL:
                 logger.info(f"Agent surrender from task {task_id}")
-                return final_answer, self.messages, self.get_total_token_usage()
+                return AgentRunResult(
+                    answer=final_answer,
+                    messages=self.messages,
+                    token_usage=self.get_total_token_usage(),
+                )
 
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")
-                return final_answer, self.messages, self.get_total_token_usage()
+                return AgentRunResult(
+                    answer=final_answer,
+                    messages=self.messages,
+                    token_usage=self.get_total_token_usage(),
+                )
 
         except BudgetExhaustedError:
             # Re-raise to stop the benchmark immediately
@@ -318,10 +340,10 @@ class BaseAgent(ABC):
                     role="user", content=f"Error running agent: {full_error}"
                 )
             )
-            return (
-                f"Error running agent: {full_error}",
-                self.messages,
-                self.get_total_token_usage(),
+            return AgentRunResult(
+                answer=f"Error running agent: {full_error}",
+                messages=self.messages,
+                token_usage=self.get_total_token_usage(),
             )
         finally:
             if verbose:
@@ -335,6 +357,16 @@ class BaseAgent(ABC):
                     tools=tools,
                     tool_verbosity=tool_verbosity,
                 )
+
+        # Agents that already return a submit-ready answer bypass the extra
+        # answer-extraction model call so the benchmark measures (and submits)
+        # exactly what the agent produced.
+        if not self.requires_answer_extraction:
+            return AgentRunResult(
+                answer=final_answer,
+                messages=self.messages,
+                token_usage=self.get_total_token_usage(),
+            )
 
         message = "The task is to:\n" + self.messages[0]["content"]
         if self.messages[0]["role"] == "system":
@@ -358,17 +390,25 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
 
-            return response.content, self.messages, self.get_total_token_usage()
+            return AgentRunResult(
+                answer=response.content,
+                messages=self.messages,
+                token_usage=self.get_total_token_usage(),
+            )
 
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
-            return final_answer, self.messages, self.get_total_token_usage()
+            return AgentRunResult(
+                answer=final_answer,
+                messages=self.messages,
+                token_usage=self.get_total_token_usage(),
+            )
 
     def _accumulate_token_usage(self, usage: dict[str, int]) -> None:
         """Add one LLM call's usage on top of the running run total.
 
-        Sums ``prompt_tokens``/``completion_tokens``/``total_tokens`` into
-        ``cumulative_token_usage`` so the totals grow over the conversation
+        Sums `prompt_tokens`/`completion_tokens`/`total_tokens` into
+        `cumulative_token_usage` so the totals grow over the conversation
         instead of being replaced by each call's usage.
         """
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):

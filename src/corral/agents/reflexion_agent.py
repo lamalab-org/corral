@@ -146,7 +146,7 @@ class ReflexionAgent(BaseAgent):
         This works with the framework's trial system:
         1. Retrieve the last score (if this is not the first trial)
         2. If previous trial exists, generate reflection and add to memory
-        3. Inject reflections from memory into the actor's ``_initial_messages``
+        3. Inject reflections from memory into the actor's _initial_messages
         4. Run the actor
         5. Return the answer (framework will submit and score it)
 

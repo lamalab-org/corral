@@ -11,29 +11,29 @@ from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from typing import Any, Literal
+from urllib.parse import quote, urlencode
 
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
+    ClaudeSDKClient,
     ResultMessage,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
-    create_sdk_mcp_server,
-    query,
-    tool,
 )
 from loguru import logger
 
 from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
+from corral.agents.schema import SURRENDER_SENTINEL
 from corral.agents.utils import LiteLLMMessage
 from corral.router.routes import CorralRouter
 
-# Name of the in-process MCP server that exposes the corral task tools to the
-# Claude Code harness. Tool names are namespaced by the SDK as
+# Name under which the corral MCP server is registered with the Claude Code
+# harness. Tool names are namespaced by the SDK as
 # `mcp__<server_name>__<tool_name>` when building the allowed-tools list.
 _MCP_SERVER_NAME = "corral"
 
@@ -214,9 +214,13 @@ class ClaudeCodeAgent(BaseAgent):
     (via the `Claude Agent SDK <https://code.claude.com/docs/en/agent-sdk>`_)
     as a black box: the harness owns the planning/acting loop, context
     management, and tool orchestration. The corral task tools are exposed to it
-    through an in-process MCP server so it can interact with the environment the
-    same way the native agents do, and the harness's final message is returned
-    as the answer.
+    through the environment server's own task-scoped MCP endpoint
+    (`{base_url}/tasks/{task_id}/mcp`), which the harness connects to directly
+    over Streamable HTTP, and the harness's final message is returned as the
+    answer. Routing tool calls through the server's MCP transport (rather than
+    an in-process bridge) means schemas and execution reuse the same
+    `Tool.to_mcp` / `Environment.call_tool` code paths as the REST API, with
+    no second tool-definition or dispatch layer to keep in sync.
 
     Because the harness is a black box, the `max_iterations`/prompt-format
     machinery used by the other agents does not directly apply. Instead the
@@ -252,9 +256,11 @@ class ClaudeCodeAgent(BaseAgent):
             `{"type": "adaptive"}` or `{"type": "enabled", "budget_tokens": N}`).
             Defaults to `{"type": "adaptive"}`; pass `{"type": "disabled"}`
             to turn extended thinking off.
-        tool_timeout_s (float, optional): Per-tool execution timeout. On
-            expiry the tool returns an error result to the harness rather than
-            blocking forever. Defaults to None (no timeout).
+        tool_timeout_s (float, optional): Recorded in the run metadata for
+            provenance. Tool execution is now delegated to the environment
+            server's MCP endpoint, so this is no longer enforced per-tool by the
+            agent; use `wall_clock_timeout_s` to bound the whole run. Kept for
+            interface compatibility. Defaults to None.
         wall_clock_timeout_s (float, optional): Hard wall-clock deadline for the
             whole harness run. On expiry the run is cancelled and reported with
             `status="timeout"`. Defaults to None (no timeout).
@@ -322,6 +328,19 @@ class ClaudeCodeAgent(BaseAgent):
         # Per-run scratch populated by `_run_harness` for the benchmark record.
         self._run_meta: dict[str, Any] = {}
 
+    @property
+    def requires_answer_extraction(self) -> bool:
+        """Submit the harness answer verbatim, without a second model call.
+
+        The harness is already instructed to emit Final Answer: and
+        :meth:`run` deterministically extracts and returns it, so running the
+        base class's LiteLLM answer extractor would add an extra, separately
+        billed model call whose output could differ from — or fail on — the
+        harness's actual answer. Bypassing it keeps this condition a faithful
+        measurement of the Claude Code harness alone.
+        """
+        return False
+
     def _build_system_prompt(self, enable_surrender: bool) -> dict[str, Any]:
         """Compose the harness system prompt.
 
@@ -330,73 +349,59 @@ class ClaudeCodeAgent(BaseAgent):
         harness prompt rather than replacing it with a custom string. (Passing a
         bare string to the SDK replaces the preset entirely.)
         """
+        # The harness output is submitted verbatim unless answer extraction is
+        # enabled, so only ask for the `Final Answer:` marker when something will
+        # actually strip it; otherwise that prefix would end up in the submitted
+        # answer. See :attr:`requires_answer_extraction`.
+        if self.requires_answer_extraction:
+            final_answer_directive = (
+                "When you have solved the task, reply with your final answer "
+                "prefixed exactly by 'Final Answer:' and nothing else."
+            )
+        else:
+            final_answer_directive = (
+                "When you have solved the task, reply with your final answer and "
+                "nothing else."
+            )
         append = (
             self.system_prompt
             + "\n\nYou are solving a task in a sandboxed environment. You may ONLY "
             f"interact with it through the provided `{_MCP_SERVER_NAME}` MCP tools; "
-            "do not attempt to use the filesystem, shell, web, or subagents. When "
-            "you have solved the task, reply with your final answer prefixed exactly "
-            "by 'Final Answer:' and nothing else."
+            "do not attempt to use the filesystem, shell, web, or subagents. "
+            + final_answer_directive
         )
         if enable_surrender and self.surrender_prompt is not None:
             append += "\n\n" + self.surrender_prompt.fill({})
         return {"type": "preset", "preset": "claude_code", "append": append}
 
-    def _build_mcp_tools(
-        self, interface: CorralRouter, task_id: str, tools: list[dict[str, Any]]
-    ) -> list[Any]:
-        """Wrap the corral task tools as Claude Agent SDK MCP tools."""
-        mcp_tools = []
+    def _mcp_server_config(
+        self, interface: CorralRouter, task_id: str
+    ) -> tuple[str, dict[str, Any], str]:
+        """Build the Streamable-HTTP MCP server config for this task.
 
-        for tool_def in tools:
-            function = tool_def.get("function", {})
-            name = function.get("name")
-            if not name:
-                continue
-            description = function.get("description", "")
-            schema = function.get("parameters") or {
-                "type": "object",
-                "properties": {},
-            }
+        Points the harness at the environment server's own task-scoped MCP
+        endpoint. Execution and tool schemas are served there (via
+        `Environment.call_tool` / `Tool.to_mcp`), so the agent does not bridge
+        tools itself.
 
-            def make_handler(tool_name: str):
-                async def handler(args: dict[str, Any]) -> dict[str, Any]:
-                    # `execute_tool` performs a blocking HTTP request; run it
-                    # off the event loop (bounded by `tool_timeout_s`) so the
-                    # harness transport is not stalled by a slow/hung tool.
-                    try:
-                        response = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                interface.execute_tool, task_id, tool_name, args
-                            ),
-                            timeout=self.tool_timeout_s,
-                        )
-                    except TimeoutError:
-                        return _tool_error(
-                            f"Tool {tool_name} exceeded its execution timeout."
-                        )
-                    except Exception as exc:  # report failure back to the model
-                        return _tool_error(f"Tool {tool_name} failed: {exc}")
+        The REST allowlist is fetched at the router's current tool verbosity, so
+        the same verbosity is forwarded to the MCP endpoint as a query parameter.
+        Otherwise the harness could see full tool descriptions while the
+        allowlist metadata reflects a briefer condition, silently breaking
+        tool-description ablations.
 
-                    if not response.success:
-                        return _tool_error(f"Tool {tool_name} failed: {response.error}")
-
-                    result = response.result
-                    # Pass strings through unchanged; JSON-encode structured
-                    # results so lists/dicts survive as valid JSON rather than
-                    # Python `repr`.
-                    text = (
-                        result
-                        if isinstance(result, str)
-                        else json.dumps(result, ensure_ascii=False, default=str)
-                    )
-                    return {"content": [{"type": "text", "text": text}]}
-
-                return handler
-
-            mcp_tools.append(tool(name, description, schema)(make_handler(name)))
-
-        return mcp_tools
+        Returns the endpoint URL, the SDK `mcp_servers` config entry, and the
+        resolved verbosity.
+        """
+        base_url = interface.base_url.rstrip("/")
+        # Percent-encode the task id so ids containing slashes or other reserved
+        # characters cannot produce a malformed path segment.
+        encoded_task_id = quote(str(task_id), safe="")
+        # Mirror the REST tool verbosity (defaults to the router's own "brief").
+        verbosity = getattr(interface, "current_verbosity", None) or "brief"
+        query = urlencode({"verbosity": verbosity})
+        url = f"{base_url}/tasks/{encoded_task_id}/mcp?{query}"
+        return url, {"type": "http", "url": url}, verbosity
 
     def _build_options(
         self,
@@ -415,8 +420,8 @@ class ClaudeCodeAgent(BaseAgent):
             # denylist, which would silently go stale as the SDK adds built-ins.
             "tools": [],
             "mcp_servers": {_MCP_SERVER_NAME: server},
-            # Ignore project `.mcp.json`, user settings, and plugin MCP
-            # servers so only our in-process server is loaded.
+            # Ignore project `.mcp.json`, user settings, and plugin MCP servers
+            # so only the corral task endpoint is loaded.
             "strict_mcp_config": True,
             "allowed_tools": allowed_tools,
             "permission_mode": "dontAsk",
@@ -445,7 +450,10 @@ class ClaudeCodeAgent(BaseAgent):
         append = (
             system_prompt.get("append", "") if isinstance(system_prompt, dict) else ""
         )
-        tool_schema = json.dumps(
+        # These are the OpenAI-function-format schemas from the REST allowlist,
+        # not the MCP `tools/list` payload the harness receives; named
+        # accordingly. The MCP-side digest is recorded by `_preflight_mcp`.
+        rest_tool_schema = json.dumps(
             [t.get("function", {}) for t in tools], sort_keys=True, default=str
         )
         return {
@@ -456,8 +464,8 @@ class ClaudeCodeAgent(BaseAgent):
             "system_prompt_append_sha256": hashlib.sha256(
                 append.encode("utf-8")
             ).hexdigest(),
-            "tool_schema_sha256": hashlib.sha256(
-                tool_schema.encode("utf-8")
+            "rest_tool_schema_sha256": hashlib.sha256(
+                rest_tool_schema.encode("utf-8")
             ).hexdigest(),
             "reasoning_effort": self.reasoning_effort,
             "thinking": self.thinking,
@@ -476,8 +484,7 @@ class ClaudeCodeAgent(BaseAgent):
         cwd: str,
     ) -> str:
         """Drive the Claude Code harness to completion and return its answer."""
-        mcp_tools = self._build_mcp_tools(interface, task_id, tools)
-        server = create_sdk_mcp_server(name=_MCP_SERVER_NAME, tools=mcp_tools)
+        mcp_url, server, verbosity = self._mcp_server_config(interface, task_id)
         allowed_tools = [
             f"mcp__{_MCP_SERVER_NAME}__{t['function']['name']}"
             for t in tools
@@ -486,83 +493,196 @@ class ClaudeCodeAgent(BaseAgent):
 
         options = self._build_options(server, allowed_tools, enable_surrender, cwd)
         self._run_meta = self._harness_metadata(options, tools)
+        self._run_meta["mcp_url"] = mcp_url
+        self._run_meta["tool_verbosity"] = verbosity
 
         assistant_text: list[str] = []
         result_text: str | None = None
 
-        async for message in query(
-            prompt=self._sdk_prompt(prompt_input), options=options
-        ):
-            if isinstance(message, AssistantMessage):
-                reported = getattr(message, "model", None)
-                if reported:
-                    self._run_meta["model_reported"] = reported
-                for block in message.content:
-                    if isinstance(block, TextBlock) and block.text:
-                        assistant_text.append(block.text)
-                        self.messages.append(
-                            LiteLLMMessage(role="assistant", content=block.text)
-                        )
-                    elif isinstance(block, ThinkingBlock):
-                        self.messages.append(
-                            LiteLLMMessage(
-                                role="assistant",
-                                content=block.thinking,
-                                name="thinking",
-                            )
-                        )
-                    elif isinstance(block, ToolUseBlock):
-                        self.messages.append(
-                            {
-                                "role": "assistant",
-                                "content": "",
-                                "tool_calls": [
-                                    {
-                                        "id": block.id,
-                                        "function": {
-                                            "name": block.name,
-                                            "arguments": json.dumps(
-                                                block.input, default=str
-                                            ),
-                                        },
-                                    }
-                                ],
-                            }
-                        )
-            elif isinstance(message, UserMessage):
-                content = getattr(message, "content", None)
-                if isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, ToolResultBlock):
-                            self.messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": block.tool_use_id,
-                                    "content": _stringify_tool_content(block.content),
-                                    "name": "tool_result",
-                                    "is_error": bool(getattr(block, "is_error", False)),
-                                }
-                            )
-            elif isinstance(message, ResultMessage):
-                self._record_result_meta(message)
-                usage = getattr(message, "usage", None)
-                if usage:
-                    self._record_usage(usage)
-                # Record metadata *before* raising: the SDK may emit an error
-                # ResultMessage (e.g. `error_max_turns`) and only then raise.
-                subtype = getattr(message, "subtype", "success")
-                if getattr(message, "is_error", False) or subtype != "success":
-                    raise _HarnessError(
-                        "Claude Agent SDK run did not succeed: "
-                        f"subtype={subtype!r}, "
-                        f"stop_reason={getattr(message, 'stop_reason', None)!r}, "
-                        f"result={getattr(message, 'result', None)!r}",
-                        subtype=subtype,
-                    )
-                if getattr(message, "result", None):
-                    result_text = message.result
+        # Use the persistent client (rather than the one-shot `query()`) so the
+        # corral MCP endpoint can be inspected before the model starts solving.
+        async with ClaudeSDKClient(options=options) as client:
+            await self._preflight_mcp(client, tools)
+            await client.query(self._sdk_prompt(prompt_input))
+            async for message in client.receive_response():
+                result_text = self._consume_message(
+                    message, assistant_text, result_text
+                )
 
         return result_text or ("\n".join(assistant_text)).strip()
+
+    async def _preflight_mcp(
+        self, client: ClaudeSDKClient, tools: list[dict[str, Any]]
+    ) -> None:
+        """Fail fast if the corral MCP endpoint is not usable for this run.
+
+        The server-side per-task tool check remains the real security boundary;
+        this client-side preflight only turns a broken benchmark run (endpoint
+        unreachable, or exposing a different tool set than the REST allowlist)
+        into an explicit infrastructure error *before* the model spends turns,
+        rather than a silent wrong answer. It also records the tool metadata the
+        harness actually receives via MCP `tools/list`.
+        """
+        corral = await self._wait_for_corral_mcp(client)
+
+        exposed_tools = corral.get("tools", []) or []
+        exposed = {self._bare_tool_name(t.get("name", "")) for t in exposed_tools}
+        expected = {
+            t["function"]["name"] for t in tools if t.get("function", {}).get("name")
+        }
+        if exposed != expected:
+            raise _HarnessError(
+                "Corral MCP tool mismatch: "
+                f"expected={sorted(expected)!r}, exposed={sorted(exposed)!r}",
+                subtype="error_mcp_tool_mismatch",
+            )
+
+        # Provenance: hash the tool *metadata* the harness sees over MCP
+        # (`name`/`description`/`annotations`). `get_mcp_status` does not expose
+        # the input schemas, so this is deliberately not called a schema digest;
+        # the REST-format schema digest is recorded separately as
+        # `rest_tool_schema_sha256`.
+        self._run_meta["mcp_tools_exposed"] = sorted(exposed)
+        self._run_meta["mcp_tool_metadata_sha256"] = hashlib.sha256(
+            json.dumps(
+                exposed_tools, sort_keys=True, separators=(",", ":"), default=str
+            ).encode("utf-8")
+        ).hexdigest()
+
+    async def _wait_for_corral_mcp(
+        self, client: ClaudeSDKClient, timeout_s: float = 15.0
+    ) -> dict[str, Any]:
+        """Poll MCP status until the corral server connects (or fails).
+
+        A Streamable-HTTP server can report a transient pending state before
+        it finishes connecting, so a single status snapshot would spuriously fail
+        an otherwise healthy run. Terminal-bad states (failed/needs-auth/
+        disabled) and a missing server are raised immediately; pending is
+        retried within a bounded deadline.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        last: dict[str, Any] | None = None
+        while True:
+            status = await client.get_mcp_status()
+            servers = status.get("mcpServers", []) if status else []
+            corral = next(
+                (s for s in servers if s.get("name") == _MCP_SERVER_NAME), None
+            )
+            if corral is None:
+                raise _HarnessError(
+                    f"Corral MCP server missing from status: {servers!r}",
+                    subtype="error_mcp_connection",
+                )
+            last = corral
+            state = corral.get("status")
+            if state == "connected":
+                return corral
+            if state in {"failed", "needs-auth", "disabled"}:
+                raise _HarnessError(
+                    "Corral MCP server did not connect: "
+                    f"status={state!r}, error={corral.get('error')!r}",
+                    subtype="error_mcp_connection",
+                )
+            # state == "pending" (or unknown): retry until the deadline.
+            if loop.time() >= deadline:
+                raise _HarnessError(
+                    f"Timed out waiting for Corral MCP server to connect: {last!r}",
+                    subtype="error_mcp_connection",
+                )
+            await asyncio.sleep(0.25)
+
+    @staticmethod
+    def _bare_tool_name(name: str) -> str:
+        """Strip the SDK `mcp__<server>__` namespace prefix if present."""
+        prefix = f"mcp__{_MCP_SERVER_NAME}__"
+        return name[len(prefix) :] if name.startswith(prefix) else name
+
+    def _consume_message(
+        self, message: Any, assistant_text: list[str], result_text: str | None
+    ) -> str | None:
+        """Fold one SDK message into the transcript; return the final result.
+
+        Raises :class:`_HarnessError` on a non-success `ResultMessage`.
+        """
+        if isinstance(message, AssistantMessage):
+            reported = getattr(message, "model", None)
+            if reported:
+                self._run_meta["model_reported"] = reported
+            for block in message.content:
+                if isinstance(block, TextBlock) and block.text:
+                    assistant_text.append(block.text)
+                    self.messages.append(
+                        LiteLLMMessage(role="assistant", content=block.text)
+                    )
+                elif isinstance(block, ThinkingBlock):
+                    self.messages.append(
+                        LiteLLMMessage(
+                            role="assistant",
+                            content=block.thinking,
+                            name="thinking",
+                        )
+                    )
+                elif isinstance(block, ToolUseBlock):
+                    self.messages.append(
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": block.id,
+                                    "function": {
+                                        "name": block.name,
+                                        "arguments": json.dumps(
+                                            block.input, default=str
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    )
+        elif isinstance(message, UserMessage):
+            content = getattr(message, "content", None)
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, ToolResultBlock):
+                        is_error = bool(getattr(block, "is_error", False))
+                        if is_error:
+                            # Count (but don't terminate on) MCP tool errors:
+                            # recovering from them is legitimate agent behaviour,
+                            # so this is provenance, not a failure by itself.
+                            self._run_meta["tool_errors"] = (
+                                self._run_meta.get("tool_errors", 0) + 1
+                            )
+                        self.messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": block.tool_use_id,
+                                "content": _stringify_tool_content(block.content),
+                                "name": "tool_result",
+                                "is_error": is_error,
+                            }
+                        )
+        elif isinstance(message, ResultMessage):
+            self._record_result_meta(message)
+            usage = getattr(message, "usage", None)
+            if usage:
+                self._record_usage(usage)
+            # Record metadata *before* raising: the SDK may emit an error
+            # ResultMessage (e.g. `error_max_turns`) and only then raise.
+            subtype = getattr(message, "subtype", "success")
+            if getattr(message, "is_error", False) or subtype != "success":
+                raise _HarnessError(
+                    "Claude Agent SDK run did not succeed: "
+                    f"subtype={subtype!r}, "
+                    f"stop_reason={getattr(message, 'stop_reason', None)!r}, "
+                    f"result={getattr(message, 'result', None)!r}",
+                    subtype=subtype,
+                )
+            if getattr(message, "result", None):
+                result_text = message.result
+
+        return result_text
 
     def _sdk_prompt(self, prompt_input: Any) -> Any:
         """Return the value to hand to `query(prompt=...)`.
@@ -624,7 +744,7 @@ class ClaudeCodeAgent(BaseAgent):
             "cache_creation_input_tokens": cache_creation,
         }
         # The harness reports usage already aggregated for the whole session, so
-        # mirror it into the run total that ``get_total_token_usage`` reads
+        # mirror it into the run total that `get_total_token_usage` reads
         # rather than summing (which would double-count on repeated results).
         self.cumulative_token_usage = dict(self.token_usage)
 
@@ -672,9 +792,9 @@ class ClaudeCodeAgent(BaseAgent):
                 up on an unsolvable task. Defaults to False.
 
         Returns:
-            str: The final answer produced by the harness, or `"SURRENDER"` if
-            the agent surrendered. Infrastructure failures return an
-            `"Error solving the task: ..."` string; inspect
+            str: The final answer produced by the harness, or the
+            `SURRENDER_SENTINEL` value if the agent surrendered. Infrastructure
+            failures return an `"Error solving the task: ..."` string; inspect
             `self.harness_result` for the structured status.
         """
         tools = interface.get_available_tools_for_task(task_id).get("tools", [])
@@ -712,34 +832,54 @@ class ClaudeCodeAgent(BaseAgent):
                 "timeout", f"harness timed out after {self.wall_clock_timeout_s}s", e
             )
         except _HarnessError as e:
-            status: HarnessStatus = (
-                "max_turns" if e.subtype == "error_max_turns" else "sdk_failure"
-            )
+            # Map the SDK/preflight subtype onto a precise terminal status so a
+            # budget exhaustion, an MCP transport failure, and a tool-set
+            # mismatch are not all collapsed into a generic SDK crash.
+            subtype_status: dict[str, HarnessStatus] = {
+                "error_max_turns": "max_turns",
+                "error_mcp_connection": "tool_failure",
+                "error_mcp_tool_mismatch": "sdk_failure",
+            }
+            status: HarnessStatus = subtype_status.get(e.subtype or "", "sdk_failure")
             return self._fail(status, str(e), e)
         except Exception as e:  # surface as infra failure, not a model answer
             return self._fail("sdk_failure", str(e), e)
         finally:
             shutil.rmtree(cwd, ignore_errors=True)
 
-        if enable_surrender and re.search(
-            r"(?:Final Answer:\s*)?SURRENDER", final_answer, re.IGNORECASE
+        # Normalize the harness output into a submit-ready answer. Answer
+        # extraction is disabled by default (`requires_answer_extraction` is
+        # False), so the harness output is submitted verbatim. When extraction is
+        # enabled, strip the declared "Final Answer:" marker, then reason about
+        # that normalized value.
+        if self.requires_answer_extraction:
+            final_answer_match = re.search(
+                r"Final Answer:\s*(.*)", final_answer, re.DOTALL | re.IGNORECASE
+            )
+            final_answer = (
+                final_answer_match.group(1).strip()
+                if final_answer_match
+                else final_answer.strip()
+            )
+        else:
+            final_answer = final_answer.strip()
+
+        # Surrender only on an *exact* sentinel answer, so the marker appearing
+        # inside a longer response is not mistaken for giving up.
+        if (
+            enable_surrender
+            and final_answer.casefold() == SURRENDER_SENTINEL.casefold()
         ):
             logger.info(f"Agent retiring from task {task_id}")
             self.harness_result = HarnessRunResult(
                 status="surrender",
-                answer="SURRENDER",
+                answer=SURRENDER_SENTINEL,
                 num_turns=self._run_meta.get("num_turns"),
                 usage=dict(self.token_usage),
                 total_cost_usd=self._run_meta.get("total_cost_usd"),
                 metadata=dict(self._run_meta),
             )
-            return "SURRENDER"
-
-        final_answer_match = re.search(
-            r"Final Answer:\s*(.*)", final_answer, re.DOTALL | re.IGNORECASE
-        )
-        if final_answer_match:
-            final_answer = final_answer_match.group(1).strip()
+            return SURRENDER_SENTINEL
 
         if not final_answer:
             self.messages.append(
@@ -759,8 +899,18 @@ class ClaudeCodeAgent(BaseAgent):
             )
             return "Error solving the task: the harness returned no answer."
 
-        # Ensure the last message holds the final answer for the extractor.
-        self.messages.append(LiteLLMMessage(role="assistant", content=final_answer))
+        # Ensure the submit-ready answer is in the transcript exactly once. The
+        # harness `ResultMessage` is not otherwise recorded, so append it unless
+        # the last streamed assistant message already equals it (ignoring
+        # surrounding whitespace). In verbatim mode this avoids the duplicate the
+        # `Final Answer:`-stripping used to produce, while still keeping the
+        # answer in the trace.
+        last_content = self.messages[-1].get("content") if self.messages else None
+        already_recorded = (
+            isinstance(last_content, str) and last_content.strip() == final_answer
+        )
+        if not already_recorded:
+            self.messages.append(LiteLLMMessage(role="assistant", content=final_answer))
         self.harness_result = HarnessRunResult(
             status="success",
             answer=final_answer,
@@ -795,8 +945,3 @@ class ClaudeCodeAgent(BaseAgent):
             metadata=dict(self._run_meta),
         )
         return f"Error solving the task: {error}"
-
-
-def _tool_error(text: str) -> dict[str, Any]:
-    """Build an MCP tool result flagged as an error for the harness."""
-    return {"content": [{"type": "text", "text": text}], "is_error": True}

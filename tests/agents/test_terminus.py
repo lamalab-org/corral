@@ -23,10 +23,10 @@ class FakeLLMResponse:
 
 
 def _install_responses(agent, responses, record_calls=None):
-    """Make ``agent.get_llm_response`` yield the given contents in order.
+    """Make agent.get_llm_response yield the given contents in order.
 
-    ``record_calls`` (optional list) captures the keyword arguments each call
-    received, so tests can assert that ``response_format`` is forwarded.
+    record_calls (optional list) captures the keyword arguments each call
+    received, so tests can assert that response_format is forwarded.
     """
     queue = [FakeLLMResponse(r) if isinstance(r, str) else r for r in responses]
 
@@ -50,7 +50,7 @@ def _resp(**kwargs) -> str:
 
 
 def test_extract_json_object_strips_code_fence():
-    text = '```json\n{"analysis": "a", "plan": "b", "final_answer": "42"}\n```'
+    text = '`json\n{"analysis": "a", "plan": "b", "final_answer": "42"}\n`'
     obj = _extract_json_object(text)
     assert obj["final_answer"] == "42"
 
@@ -58,8 +58,8 @@ def test_extract_json_object_strips_code_fence():
 def test_strip_code_fence_consumes_whole_triple_fence():
     # A standard three-backtick fence must be removed entirely; regressing to a
     # two-backtick match leaves a stray trailing backtick that breaks the strict
-    # ``model_validate_json`` fast path in ``_parse``.
-    text = '```json\n{"analysis": "a", "plan": "b", "final_answer": "42"}\n```'
+    # model_validate_json fast path in _parse.
+    text = '`json\n{"analysis": "a", "plan": "b", "final_answer": "42"}\n`'
     stripped = _strip_code_fence(text)
     assert not stripped.endswith("`")
     # The result must be valid JSON on its own (strict parse succeeds).
@@ -104,8 +104,8 @@ def test_response_requires_exactly_one_terminal_action():
 # run() behavior
 #
 # The merged agent defaults to Terminus-2 completion confirmation
-# (``confirmations_required=1``). Core-loop tests that only care about tool
-# dispatch or a single final answer disable it with ``confirmations_required=0``
+# (confirmations_required=1). Core-loop tests that only care about tool
+# dispatch or a single final answer disable it with confirmations_required=0
 # so one proposed answer is accepted immediately.
 # --------------------------------------------------------------------------- #
 

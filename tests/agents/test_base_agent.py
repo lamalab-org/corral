@@ -3,10 +3,16 @@
 import pytest
 
 from corral.agents.base_agent import BaseAgent
+from corral.agents.schema import AgentRunResult
 from corral.router import CorralRouter
 
 # Import shared mock classes from conftest.py
 from .conftest import MockBenchmarkInterface, MockLLMResponse, MockPrompt
+
+
+def _unpack(result: AgentRunResult) -> tuple:
+    """Unpack an AgentRunResult into (answer, messages, token_usage)."""
+    return result.answer, result.messages, result.token_usage
 
 
 class ConcreteAgent(BaseAgent):
@@ -288,10 +294,12 @@ def test_run_agent_success(monkeypatch, concrete_agent, mock_benchmark_interface
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, messages, usage = concrete_agent.run_agent(
-        interface=mock_benchmark_interface,
-        task_id="test_task",
-        verbose=True,
+    result, messages, usage = _unpack(
+        concrete_agent.run_agent(
+            interface=mock_benchmark_interface,
+            task_id="test_task",
+            verbose=True,
+        )
     )
 
     assert len(save_calls) == 1
@@ -310,8 +318,10 @@ def test_run_agent_success(monkeypatch, concrete_agent, mock_benchmark_interface
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, messages, usage = concrete_agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test_task"
+    result, messages, usage = _unpack(
+        concrete_agent.run_agent(
+            interface=mock_benchmark_interface, task_id="test_task"
+        )
     )
 
     # Check that extractor was called and the result is from the extractor
@@ -334,8 +344,10 @@ def test_run_agent_with_error_in_answer(
 
     monkeypatch.setattr(concrete_agent, "run", mock_run)
 
-    result, messages, usage = concrete_agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test_task"
+    result, messages, usage = _unpack(
+        concrete_agent.run_agent(
+            interface=mock_benchmark_interface, task_id="test_task"
+        )
     )
 
     assert "Error: Something went wrong" in result
@@ -358,8 +370,10 @@ def test_run_agent_with_exception(
 
     monkeypatch.setattr(concrete_agent, "run", mock_run_with_error)
 
-    result, messages, usage = concrete_agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test_task"
+    result, messages, usage = _unpack(
+        concrete_agent.run_agent(
+            interface=mock_benchmark_interface, task_id="test_task"
+        )
     )
 
     assert "Error running agent" in result
@@ -396,10 +410,12 @@ def test_run_agent_verbose_mode(monkeypatch, concrete_agent, mock_benchmark_inte
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, messages, usage = concrete_agent.run_agent(
-        interface=mock_benchmark_interface,
-        task_id="test_task",
-        verbose=True,
+    result, messages, usage = _unpack(
+        concrete_agent.run_agent(
+            interface=mock_benchmark_interface,
+            task_id="test_task",
+            verbose=True,
+        )
     )
 
     assert result == "extracted_answer"
@@ -437,8 +453,10 @@ def test_run_agent_extractor_error(
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, messages, usage = concrete_agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test_task"
+    result, messages, usage = _unpack(
+        concrete_agent.run_agent(
+            interface=mock_benchmark_interface, task_id="test_task"
+        )
     )
 
     assert result == "test_answer"  # Should return original answer
@@ -598,8 +616,10 @@ def test_extractor_prompt_filling(
         {"role": "assistant", "content": "Test response"},
     ]
 
-    result, messages, usage = concrete_agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test_task"
+    result, messages, usage = _unpack(
+        concrete_agent.run_agent(
+            interface=mock_benchmark_interface, task_id="test_task"
+        )
     )
 
     # Check that the extractor prompt was called with correct parameters
@@ -657,8 +677,10 @@ def test_agent_run_accepts_enable_surrender_via_kwargs(
     )
 
     # Call run_agent with enable_surrender=True
-    result, messages, usage = agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test", enable_surrender=True
+    result, messages, usage = _unpack(
+        agent.run_agent(
+            interface=mock_benchmark_interface, task_id="test", enable_surrender=True
+        )
     )
 
     # Verify kwargs were passed correctly
@@ -707,14 +729,18 @@ def test_agent_run_with_explicit_enable_surrender_parameter(
     )
 
     # Test with enable_surrender=True
-    result, messages, usage = agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test", enable_surrender=True
+    result, messages, usage = _unpack(
+        agent.run_agent(
+            interface=mock_benchmark_interface, task_id="test", enable_surrender=True
+        )
     )
     assert agent.received_enable_surrender is True
 
     # Test with enable_surrender=False (default)
-    result, messages, usage = agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test", enable_surrender=False
+    result, messages, usage = _unpack(
+        agent.run_agent(
+            interface=mock_benchmark_interface, task_id="test", enable_surrender=False
+        )
     )
     assert agent.received_enable_surrender is False
 
@@ -761,8 +787,8 @@ def test_agent_run_without_enable_surrender_uses_default(
     )
 
     # Call without enable_surrender parameter
-    result, messages, usage = agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test"
+    result, messages, usage = _unpack(
+        agent.run_agent(interface=mock_benchmark_interface, task_id="test")
     )
 
     # Should default to False
@@ -811,8 +837,10 @@ def test_agent_run_kwargs_dont_interfere_with_agents_not_using_them(
     )
 
     # Should not raise an error even when enable_surrender is passed
-    result, messages, usage = agent.run_agent(
-        interface=mock_benchmark_interface, task_id="test", enable_surrender=True
+    result, messages, usage = _unpack(
+        agent.run_agent(
+            interface=mock_benchmark_interface, task_id="test", enable_surrender=True
+        )
     )
 
     assert agent.run_called is True

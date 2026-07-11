@@ -6,7 +6,7 @@ from loguru import logger
 from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
-from corral.agents.schema import Action
+from corral.agents.schema import SURRENDER_SENTINEL, Action
 from corral.agents.utils import LiteLLMMessage
 from corral.router.routes import CorralRouter
 
@@ -144,7 +144,9 @@ class ToolCallingAgent(BaseAgent):
                     # Check for surrender if enabled
                     if enable_surrender:
                         surrender_match = re.search(
-                            r"(?:Final Answer:\s*)?SURRENDER", content, re.IGNORECASE
+                            rf"(?:Final Answer:\s*)?{re.escape(SURRENDER_SENTINEL)}",
+                            content,
+                            re.IGNORECASE,
                         )
                         if surrender_match:
                             logger.info(f"Agent retiring from task {task_id}")
@@ -155,7 +157,7 @@ class ToolCallingAgent(BaseAgent):
                                     id=full_llm_response.id,
                                 )
                             )
-                            return "SURRENDER"
+                            return SURRENDER_SENTINEL
 
                     final_answer_match = re.search(
                         r"Final Answer: (.*)", content, re.DOTALL | re.IGNORECASE

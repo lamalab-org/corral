@@ -1,12 +1,10 @@
 """Tests for the ClaudeCodeAgent (Claude Code harness wrapper)."""
 
 import asyncio
-import json
 
 from corral.agents import ClaudeCodeAgent
 from corral.agents import claude_code as claude_code_module
 from corral.agents.claude_code import _to_sdk_content_blocks
-from corral.types import ToolResponse
 
 
 class FakeAssistantMessage:
@@ -58,40 +56,54 @@ class FakeClaudeAgentOptions:
         self.__dict__.update(kwargs)
 
 
-def _install_fake_sdk(monkeypatch, message_factory):
-    """Patch the SDK names in ``claude_code`` with fakes.
+def _default_mcp_status(options):
+    """A healthy MCP status exposing exactly the run's allow-listed tools.
+
+    The agent's preflight compares the tools exposed by the (faked) MCP endpoint
+    against the REST allowlist, so by default we echo the allow-listed tools back
+    as bare (un-namespaced) names — the shape the real tools/list returns.
+    """
+    exposed = [
+        {"name": name.removeprefix("mcp__corral__")}
+        for name in getattr(options, "allowed_tools", [])
+    ]
+    return {"mcpServers": [{"name": "corral", "status": "connected", "tools": exposed}]}
+
+
+def _install_fake_sdk(monkeypatch, message_factory, mcp_status_factory=None):
+    """Patch the SDK names in claude_code with fakes.
 
     The agent imports the Claude Agent SDK symbols at the top of
-    ``corral.agents.claude_code``, so the fakes are patched onto that module's
-    namespace. ``message_factory`` receives the ``ClaudeAgentOptions`` and
-    returns the list of messages the fake ``query`` should yield. It also gets a
-    ``captured`` dict to record what the harness saw.
+    corral.agents.claude_code, so the fakes are patched onto that module's
+    namespace. message_factory receives the ClaudeAgentOptions and
+    returns the list of messages the fake client's receive_response should
+    yield. It also gets a captured dict to record what the harness saw.
+    mcp_status_factory (given the options) returns the value the fake
+    get_mcp_status reports; it defaults to a healthy, matching status.
     """
     captured: dict = {}
+    status_factory = mcp_status_factory or _default_mcp_status
 
-    def tool(name, description, input_schema):
-        def deco(fn):
-            return {
-                "name": name,
-                "description": description,
-                "schema": input_schema,
-                "fn": fn,
-            }
+    class FakeClaudeSDKClient:
+        def __init__(self, options=None):
+            self.options = options
+            captured["options"] = options
 
-        return deco
+        async def __aenter__(self):
+            return self
 
-    def create_sdk_mcp_server(name, tools=None, version="1.0.0"):
-        return {"name": name, "tools": tools or []}
+        async def __aexit__(self, *exc):
+            return False
 
-    def query(prompt, options):
-        captured["prompt"] = prompt
-        captured["options"] = options
+        async def get_mcp_status(self):
+            return status_factory(self.options)
 
-        async def gen():
-            for message in await message_factory(options, captured):
+        async def query(self, prompt):
+            captured["prompt"] = prompt
+
+        async def receive_response(self):
+            for message in await message_factory(self.options, captured):
                 yield message
-
-        return gen()
 
     monkeypatch.setattr(claude_code_module, "AssistantMessage", FakeAssistantMessage)
     monkeypatch.setattr(claude_code_module, "UserMessage", FakeUserMessage)
@@ -103,11 +115,7 @@ def _install_fake_sdk(monkeypatch, message_factory):
     monkeypatch.setattr(
         claude_code_module, "ClaudeAgentOptions", FakeClaudeAgentOptions
     )
-    monkeypatch.setattr(claude_code_module, "tool", tool)
-    monkeypatch.setattr(
-        claude_code_module, "create_sdk_mcp_server", create_sdk_mcp_server
-    )
-    monkeypatch.setattr(claude_code_module, "query", query)
+    monkeypatch.setattr(claude_code_module, "ClaudeSDKClient", FakeClaudeSDKClient)
     return captured
 
 
@@ -127,11 +135,8 @@ def test_explicit_extractor_model_and_provider_prefixed_model():
     assert agent2.model == "openai/gpt-4o"
 
 
-def test_run_returns_final_answer_and_bridges_tools(mock_interface, monkeypatch):
+def test_run_returns_final_answer_and_points_at_task_mcp(mock_interface, monkeypatch):
     async def factory(options, captured):
-        # Exercise the MCP tool bridge: call the wrapped corral tool.
-        corral_tool = options.mcp_servers["corral"]["tools"][0]
-        captured["tool_result"] = await corral_tool["fn"]({"query": "hi"})
         return [
             FakeAssistantMessage(
                 [
@@ -142,22 +147,34 @@ def test_run_returns_final_answer_and_bridges_tools(mock_interface, monkeypatch)
             ),
             FakeUserMessage([FakeToolResultBlock("tu-1", "tool-ok", is_error=False)]),
             FakeResultMessage(
-                "Final Answer: 42",
+                "42",
                 usage={"input_tokens": 100, "output_tokens": 25},
             ),
         ]
 
     captured = _install_fake_sdk(monkeypatch, factory)
-    mock_interface.tool_responses = [
-        ToolResponse(success=True, result="tool-ok", error=None)
-    ]
 
     agent = ClaudeCodeAgent(model="claude-opus-4-8", max_iterations=7)
     answer = agent.run(mock_interface, "task-1")
 
+    # Answer extraction is off by default: the harness answer is submitted
+    # verbatim and appears in the transcript exactly once (no duplicate append).
     assert answer == "42"
+    assert [m.get("content") for m in agent.messages].count("42") == 1
 
     options = captured["options"]
+    # The harness connects directly to the environment server's task-scoped MCP
+    # endpoint (Streamable HTTP); the agent no longer bridges tools in-process.
+    # The REST tool verbosity (defaulting to "brief") is forwarded to the MCP
+    # endpoint so the harness sees the same tool descriptions the allowlist used.
+    assert options.mcp_servers["corral"] == {
+        "type": "http",
+        "url": "http://test-server:8000/tasks/task-1/mcp?verbosity=brief",
+    }
+    assert agent.harness_result.metadata["mcp_url"] == (
+        "http://test-server:8000/tasks/task-1/mcp?verbosity=brief"
+    )
+    assert agent.harness_result.metadata["tool_verbosity"] == "brief"
     # Only the corral tool is allowed; built-ins are disabled by fail-closed
     # config (empty base tool set + dontAsk), not a stale denylist.
     assert options.allowed_tools == ["mcp__corral__test_tool"]
@@ -166,7 +183,7 @@ def test_run_returns_final_answer_and_bridges_tools(mock_interface, monkeypatch)
     assert options.max_turns == 7
     assert options.model == "claude-opus-4-8"
     # Fully isolated config: no filesystem settings/skills/plugins are loaded
-    # and only the in-process MCP server is used (strict_mcp_config).
+    # and only the corral MCP server is used (strict_mcp_config).
     assert options.setting_sources == []
     assert options.strict_mcp_config is True
     assert options.skills == []
@@ -180,10 +197,6 @@ def test_run_returns_final_answer_and_bridges_tools(mock_interface, monkeypatch)
     # The system prompt uses the real Claude Code preset (not a bare string).
     assert options.system_prompt["type"] == "preset"
     assert options.system_prompt["preset"] == "claude_code"
-
-    # The tool bridge actually invoked the corral interface.
-    assert mock_interface.tool_calls[0]["tool_name"] == "test_tool"
-    assert captured["tool_result"] == {"content": [{"type": "text", "text": "tool-ok"}]}
 
     # Thinking, tool-use, and tool-result blocks are recorded in the transcript.
     roles = [(m.get("role"), m.get("name")) for m in agent.messages]
@@ -213,7 +226,7 @@ def test_run_returns_final_answer_and_bridges_tools(mock_interface, monkeypatch)
     assert meta["reasoning_effort"] == "high"
     assert meta["max_turns_configured"] == 7
     assert "system_prompt_append_sha256" in meta
-    assert "tool_schema_sha256" in meta
+    assert "rest_tool_schema_sha256" in meta
 
     # First message is the task prompt; last message is the final answer.
     assert agent.messages[0]["role"] == "user"
@@ -270,7 +283,7 @@ def test_error_result_message_is_reported_as_failure(mock_interface, monkeypatch
 def test_wall_clock_timeout_is_reported(mock_interface, monkeypatch):
     async def factory(options, captured):
         await asyncio.sleep(1.0)
-        return [FakeResultMessage("Final Answer: too late")]
+        return [FakeResultMessage("too late")]
 
     _install_fake_sdk(monkeypatch, factory)
     agent = ClaudeCodeAgent(wall_clock_timeout_s=0.05)
@@ -290,26 +303,9 @@ def test_surrender_records_status(mock_interface, monkeypatch):
     assert agent.harness_result.status == "surrender"
 
 
-def test_structured_tool_result_is_json_encoded(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        corral_tool = options.mcp_servers["corral"]["tools"][0]
-        captured["tool_result"] = await corral_tool["fn"]({"query": "hi"})
-        return [FakeResultMessage("Final Answer: done")]
-
-    captured = _install_fake_sdk(monkeypatch, factory)
-    mock_interface.tool_responses = [
-        ToolResponse(success=True, result={"k": "v", "n": 1}, error=None)
-    ]
-    agent = ClaudeCodeAgent()
-    agent.run(mock_interface, "task-1")
-
-    text = captured["tool_result"]["content"][0]["text"]
-    assert json.loads(text) == {"k": "v", "n": 1}
-
-
 def test_multimodal_prompt_is_forwarded(mock_interface, monkeypatch):
     async def factory(options, captured):
-        return [FakeResultMessage("Final Answer: a cat")]
+        return [FakeResultMessage("a cat")]
 
     captured = _install_fake_sdk(monkeypatch, factory)
     agent = ClaudeCodeAgent()
@@ -331,6 +327,143 @@ def test_multimodal_prompt_is_forwarded(mock_interface, monkeypatch):
     )
 
 
+def test_claude_code_bypasses_answer_extraction():
+    # The harness returns a submit-ready answer, so the base class must not make
+    # a second answer-extraction model call.
+    agent = ClaudeCodeAgent(model="claude-opus-4-8")
+    assert agent.requires_answer_extraction is False
+
+
+def test_preflight_records_exposed_mcp_tool_metadata(mock_interface, monkeypatch):
+    async def factory(options, captured):
+        return [FakeResultMessage("ok")]
+
+    _install_fake_sdk(monkeypatch, factory)
+    agent = ClaudeCodeAgent()
+    agent.run(mock_interface, "task-1")
+
+    meta = agent.harness_result.metadata
+    # Provenance reflects the tools the harness actually sees via `tools/list`.
+    assert meta["mcp_tools_exposed"] == ["test_tool"]
+    # `get_mcp_status` exposes tool metadata, not input schemas — named honestly.
+    assert "mcp_tool_metadata_sha256" in meta
+
+
+def test_mcp_connection_failure_is_reported(mock_interface, monkeypatch):
+    async def factory(options, captured):
+        return [FakeResultMessage("unreachable")]
+
+    def bad_status(options):
+        return {
+            "mcpServers": [
+                {"name": "corral", "status": "failed", "error": "connection refused"}
+            ]
+        }
+
+    _install_fake_sdk(monkeypatch, factory, mcp_status_factory=bad_status)
+    agent = ClaudeCodeAgent()
+    answer = agent.run(mock_interface, "task-1")
+    assert answer.startswith("Error solving the task")
+    # A dead MCP transport is an infrastructure/tool failure, not a wrong answer.
+    assert agent.harness_result.status == "tool_failure"
+
+
+def test_mcp_tool_mismatch_is_reported(mock_interface, monkeypatch):
+    async def factory(options, captured):
+        return [FakeResultMessage("wrong tools")]
+
+    def mismatched_status(options):
+        return {
+            "mcpServers": [
+                {
+                    "name": "corral",
+                    "status": "connected",
+                    "tools": [{"name": "some_other_tool"}],
+                }
+            ]
+        }
+
+    _install_fake_sdk(monkeypatch, factory, mcp_status_factory=mismatched_status)
+    agent = ClaudeCodeAgent()
+    answer = agent.run(mock_interface, "task-1")
+    assert answer.startswith("Error solving the task")
+    assert agent.harness_result.status == "sdk_failure"
+
+
+def test_mcp_pending_state_is_retried(mock_interface, monkeypatch):
+    # A transient `pending` MCP state must be retried, not treated as a failure.
+    async def factory(options, captured):
+        return [FakeResultMessage("eventually")]
+
+    calls = {"n": 0}
+
+    def flaky_status(options):
+        calls["n"] += 1
+        state = "pending" if calls["n"] == 1 else "connected"
+        exposed = [
+            {"name": name.removeprefix("mcp__corral__")}
+            for name in options.allowed_tools
+        ]
+        return {"mcpServers": [{"name": "corral", "status": state, "tools": exposed}]}
+
+    _install_fake_sdk(monkeypatch, factory, mcp_status_factory=flaky_status)
+    agent = ClaudeCodeAgent()
+    answer = agent.run(mock_interface, "task-1")
+    assert answer == "eventually"
+    assert calls["n"] >= 2  # polled again after the initial pending status
+
+
+def test_tool_errors_are_counted(mock_interface, monkeypatch):
+    async def factory(options, captured):
+        return [
+            FakeAssistantMessage([FakeToolUseBlock("tu-1", "test_tool", {})]),
+            FakeUserMessage([FakeToolResultBlock("tu-1", "boom", is_error=True)]),
+            FakeResultMessage("recovered"),
+        ]
+
+    _install_fake_sdk(monkeypatch, factory)
+    agent = ClaudeCodeAgent()
+    answer = agent.run(mock_interface, "task-1")
+    # A recoverable tool error does not fail the run, but is recorded.
+    assert answer == "recovered"
+    assert agent.harness_result.status == "success"
+    assert agent.harness_result.metadata["tool_errors"] == 1
+
+
+def test_default_system_prompt_omits_final_answer_marker():
+    """With extraction off (default) the harness is not asked for the marker."""
+    agent = ClaudeCodeAgent()
+    assert agent.requires_answer_extraction is False
+    append = agent._build_system_prompt(enable_surrender=False)["append"]
+    assert "Final Answer:" not in append
+    assert "reply with your final answer and nothing else" in append
+
+
+def test_extraction_on_strips_marker_and_avoids_duplicate(mock_interface, monkeypatch):
+    """When extraction is enabled, the `Final Answer:` marker is stripped once."""
+    monkeypatch.setattr(
+        ClaudeCodeAgent, "requires_answer_extraction", property(lambda self: True)
+    )
+
+    async def factory(options, captured):
+        return [
+            FakeAssistantMessage([FakeTextBlock("Final Answer: 42")]),
+            FakeResultMessage("Final Answer: 42"),
+        ]
+
+    _install_fake_sdk(monkeypatch, factory)
+    agent = ClaudeCodeAgent()
+    # The harness is asked for the marker precisely because extraction will strip it.
+    append = agent._build_system_prompt(enable_surrender=False)["append"]
+    assert "Final Answer:" in append
+
+    answer = agent.run(mock_interface, "task-1")
+    assert answer == "42"
+    contents = [m.get("content") for m in agent.messages]
+    assert "Final Answer: 42" in contents
+    assert contents.count("42") == 1
+
+
 def test_data_uri_converted_to_sdk_image_block():
     blocks = _to_sdk_content_blocks(
         [
@@ -343,22 +476,3 @@ def test_data_uri_converted_to_sdk_image_block():
         "type": "image",
         "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
     }
-
-
-def test_tool_failure_is_reported_as_error(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        corral_tool = options.mcp_servers["corral"]["tools"][0]
-        captured["tool_result"] = await corral_tool["fn"]({"query": "hi"})
-        return [FakeResultMessage("Final Answer: done")]
-
-    captured = _install_fake_sdk(monkeypatch, factory)
-    mock_interface.tool_responses = [
-        ToolResponse(success=False, result=None, error="boom")
-    ]
-    agent = ClaudeCodeAgent()
-    agent.run(mock_interface, "task-1")
-
-    # A failed tool is flagged with is_error so the harness can distinguish it
-    # from ordinary content.
-    assert captured["tool_result"]["is_error"] is True
-    assert "boom" in captured["tool_result"]["content"][0]["text"]

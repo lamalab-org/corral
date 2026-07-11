@@ -36,12 +36,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
+from corral.agents.schema import SURRENDER_SENTINEL
 from corral.agents.utils import LiteLLMMessage, llm_call
 from corral.router.routes import CorralRouter
 
-# Sentinel returned by `run` when the agent gives up. `CorralRunner` checks
-# for exactly this string before calling `surrender_task()`.
-SURRENDER_SENTINEL = "SURRENDER"
+# `SURRENDER_SENTINEL` is the shared sentinel returned by `run` when the agent
+# gives up; `CorralRunner` checks for exactly this string before calling
+# `surrender_task()`. Re-exported here for backwards compatibility.
+__all__ = ["SURRENDER_SENTINEL", "TerminusAgent"]
 
 
 class TerminusToolCall(BaseModel):
@@ -96,7 +98,7 @@ def _strip_code_fence(text: str) -> str:
     consumed whole rather than leaving a stray backtick behind.
     """
     text = text.strip()
-    if text.startswith("``"):
+    if text.startswith("```"):
         # Drop the opening fence line (backticks optionally followed by a language).
         text = re.sub(r"^`+[^\n]*\n?", "", text)
         # Drop the closing fence.
