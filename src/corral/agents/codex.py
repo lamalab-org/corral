@@ -1,37 +1,3 @@
-"""Agent that delegates solving a corral task to the OpenAI Codex harness.
-
-Like :class:`~corral.agents.claude_code.ClaudeCodeAgent`, this agent does not
-implement its own reasoning loop. It drives the Codex harness (via the official
-`openai-codex` Python SDK, which controls a pinned local `codex app-server`
-over JSON-RPC) as a black box: the harness owns planning, context management,
-and tool orchestration, and its final message is returned as the answer.
-
-The corral task tools are exposed to Codex through the environment server's own
-task-scoped MCP endpoint (`{base_url}/tasks/{task_id}/mcp`), which Codex
-connects to directly over Streamable HTTP — the *same* endpoint the Claude Code
-agent uses. Routing tool calls through the server's MCP transport (rather than a
-local STDIO bridge) means schemas and execution reuse the same `Tool.to_mcp` /
-`Environment.call_tool` code paths as the REST API, with no second
-tool-definition or dispatch layer to keep in sync.
-
-The tool restriction is enforced in layers, strongest last:
-
-1. An isolated `CODEX_HOME` per run so no global MCP servers, plugins, skills,
-   hooks, or config are inherited from the developer's machine.
-2. A generated `config.toml` that disables Codex's built-in capabilities
-   (shell, unified exec, apps, multi-agent, web search, image view) and marks
-   the corral MCP server `required` with an exact `enabled_tools` allowlist.
-3. `Sandbox.read_only` + `ApprovalMode.deny_all` so Codex cannot obtain
-   extra filesystem or command permissions.
-4. The corral MCP endpoint itself is task-scoped by construction: a server for
-   task A can only ever execute task A's tools (see `backend.mcp_server`).
-
-For reproducibility, each run records a hash of the MCP tool schema the harness
-actually receives (fetched from the server's `/tasks/{id}/tools/mcp` endpoint,
-which serves the same `Tool.to_mcp` payload as `tools/list`), so it is well
-known what tools the agent saw.
-"""
-
 import hashlib
 import json
 import os
@@ -49,23 +15,14 @@ from urllib.parse import quote, urlencode
 
 from loguru import logger
 
+# The Codex SDK is declared as the `corral[codex]` extra and assumed installed.
+from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
+
 from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
 from corral.agents.schema import SURRENDER_SENTINEL
 from corral.agents.utils import LiteLLMMessage
 from corral.router.routes import CorralRouter
-
-# The Codex SDK is an optional dependency (install with `corral[codex]`). It
-# is imported at module load when available so tests can monkeypatch the names;
-# when it is missing the agent raises a clear install hint at run time rather
-# than failing to import the whole `corral.agents` package.
-try:
-    from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
-
-    _CODEX_IMPORT_ERROR: ImportError | None = None
-except ImportError as exc:  # pragma: no cover - exercised only without the SDK
-    ApprovalMode = Codex = CodexConfig = Sandbox = None  # type: ignore[assignment]
-    _CODEX_IMPORT_ERROR = exc
 
 # Name under which the corral MCP server is registered with the Codex harness
 # (the `[mcp_servers.<name>]` config table key).
@@ -654,12 +611,6 @@ class CodexAgent(BaseAgent):
             Infrastructure failures return an `"Error solving the task: ..."`
             string; inspect `self.harness_result` for the structured status.
         """
-        if Codex is None:  # SDK not installed
-            raise _CODEX_IMPORT_ERROR or ImportError(
-                "The Codex agent requires the 'openai-codex' package. Install it "
-                "with:  pip install 'corral[codex]'"
-            )
-
         # Each run uses an isolated CODEX_HOME, so an existing interactive Codex
         # login (stored under the developer's normal CODEX_HOME) is *not*
         # inherited. Require API-key auth explicitly for reproducible runs and a

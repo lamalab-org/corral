@@ -362,13 +362,3 @@ def test_extraction_on_strips_marker_and_avoids_duplicate(mock_interface, monkey
     contents = [m.get("content") for m in agent.messages]
     assert "Final Answer: 42" in contents
     assert contents.count("42") == 1
-
-
-def test_missing_sdk_raises_import_error(mock_interface, monkeypatch):
-    monkeypatch.setattr(codex_module, "Codex", None)
-    monkeypatch.setattr(
-        codex_module, "_CODEX_IMPORT_ERROR", ImportError("no openai-codex")
-    )
-    agent = CodexAgent(model="gpt-5.4")
-    with pytest.raises(ImportError, match="openai-codex"):
-        agent.run(mock_interface, "task-1")

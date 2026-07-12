@@ -315,19 +315,11 @@ class BaseAgent(ABC):
             # which is what CorralRunner checks for before calling `surrender_task()`.
             if final_answer == SURRENDER_SENTINEL:
                 logger.info(f"Agent surrender from task {task_id}")
-                return AgentRunResult(
-                    answer=final_answer,
-                    messages=self.messages,
-                    token_usage=self.get_total_token_usage(),
-                )
+                return self._agent_run_result(final_answer)
 
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")
-                return AgentRunResult(
-                    answer=final_answer,
-                    messages=self.messages,
-                    token_usage=self.get_total_token_usage(),
-                )
+                return self._agent_run_result(final_answer)
 
         except BudgetExhaustedError:
             # Re-raise to stop the benchmark immediately
@@ -340,10 +332,16 @@ class BaseAgent(ABC):
                     role="user", content=f"Error running agent: {full_error}"
                 )
             )
+            # An exception escaping `run()` is never a real model answer, so mark
+            # it as an infrastructure failure. `execute_single_trial` routes any
+            # non-submit-worthy status to the trial exception path instead of
+            # submitting the traceback string to the task scorer.
             return AgentRunResult(
                 answer=f"Error running agent: {full_error}",
                 messages=self.messages,
                 token_usage=self.get_total_token_usage(),
+                status="agent_error",
+                error_message=full_error,
             )
         finally:
             if verbose:
@@ -362,11 +360,7 @@ class BaseAgent(ABC):
         # answer-extraction model call so the benchmark measures (and submits)
         # exactly what the agent produced.
         if not self.requires_answer_extraction:
-            return AgentRunResult(
-                answer=final_answer,
-                messages=self.messages,
-                token_usage=self.get_total_token_usage(),
-            )
+            return self._agent_run_result(final_answer)
 
         message = "The task is to:\n" + self.messages[0]["content"]
         if self.messages[0]["role"] == "system":
@@ -390,19 +384,41 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
 
-            return AgentRunResult(
-                answer=response.content,
-                messages=self.messages,
-                token_usage=self.get_total_token_usage(),
-            )
+            return self._agent_run_result(response.content)
 
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
-            return AgentRunResult(
-                answer=final_answer,
-                messages=self.messages,
-                token_usage=self.get_total_token_usage(),
-            )
+            return self._agent_run_result(final_answer)
+
+    def _agent_run_result(self, answer: str) -> AgentRunResult:
+        """Build an :class:`AgentRunResult`, propagating a harness status.
+
+        Black-box harness agents (Codex, Claude Code, OpenHands) record a
+        structured `HarnessRunResult` on `self.harness_result` with a precise
+        terminal status. Surfacing that status (and its error/metadata) here lets
+        :func:`~corral.run.execute_single_trial` route an infrastructure failure
+        (timeout, SDK crash, MCP transport failure, budget/iteration exhaustion)
+        to the trial exception path instead of submitting the harness's error
+        string to the task scorer as if it were a model answer. Agents without a
+        `harness_result` keep the default `"success"` status, so their behaviour
+        is unchanged.
+        """
+        harness_result = getattr(self, "harness_result", None)
+        status = "success"
+        error_message: str | None = None
+        metadata: dict[str, Any] = {}
+        if harness_result is not None:
+            status = getattr(harness_result, "status", "success") or "success"
+            error_message = getattr(harness_result, "error", None)
+            metadata = dict(getattr(harness_result, "metadata", {}) or {})
+        return AgentRunResult(
+            answer=answer,
+            messages=self.messages,
+            token_usage=self.get_total_token_usage(),
+            status=status,
+            error_message=error_message,
+            metadata=metadata,
+        )
 
     def _accumulate_token_usage(self, usage: dict[str, int]) -> None:
         """Add one LLM call's usage on top of the running run total.

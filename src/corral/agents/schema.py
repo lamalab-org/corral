@@ -39,8 +39,23 @@ class AgentRunResult:
         messages: The full list of messages exchanged during the task.
         token_usage: Aggregate token usage for the run, with
             `prompt_tokens`, `completion_tokens` and `total_tokens` keys.
+        status: The terminal status of the run. `"success"` and `"surrender"`
+            are the only statuses whose `answer` should be submitted to the task
+            scorer; any other value (`"timeout"`, `"sdk_failure"`,
+            `"tool_failure"`, `"max_iterations"`/`"max_turns"`, `"stuck"`,
+            `"agent_error"`, ...) marks an infrastructure failure whose `answer`
+            is an error string, not a real model answer. Black-box harness
+            agents populate this from their `HarnessRunResult`; agents without a
+            structured result leave it at the `"success"` default.
+        error_message: Human-readable failure detail when `status` is not a
+            submit-worthy status; `None` otherwise.
+        metadata: Free-form run provenance (harness/SDK versions, tool schema
+            hashes, tool-call counts, ...) for the benchmark record.
     """
 
     answer: str
     messages: list[dict[str, Any]] = field(default_factory=list)
     token_usage: dict[str, int] = field(default_factory=dict)
+    status: str = "success"
+    error_message: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)

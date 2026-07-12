@@ -2,6 +2,7 @@ from .base_agent import BaseAgent
 from .claude_code import ClaudeCodeAgent
 from .codex import CodexAgent
 from .llm_planner import LLMPlanner
+from .openhands import OpenHandsAgent
 from .react import ReActAgent
 from .reflexion_agent import ReflexionAgent
 from .schema import SURRENDER_SENTINEL, Action, AgentRunResult, Thought
@@ -16,9 +17,10 @@ __all__ = [
     "ClaudeCodeAgent",
     "CodexAgent",
     "LLMPlanner",
+    "OpenHandsAgent",
     "ReActAgent",
     "ReflexionAgent",
-    "Thought",
     "TerminusAgent",
+    "Thought",
     "ToolCallingAgent",
 ]
