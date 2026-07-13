@@ -27,6 +27,8 @@ class MockBenchmarkInterface:
     """Mock BenchmarkInterface for testing."""
 
     def __init__(self):
+        self.base_url = "http://test-server:8000"
+        self.current_verbosity = "brief"
         self.task_guide = "Test task guide"
         self.task_prompt = "Test task prompt"
         self.available_tools = {
@@ -63,9 +65,15 @@ class MockBenchmarkInterface:
         self._record_call("get_task_prompt", task_id)
         return self.task_prompt
 
-    def get_available_tools_for_task(self, task_id: str) -> dict:
+    def get_available_tools_for_task(
+        self, task_id: str, verbosity: str | None = None
+    ) -> dict:
         self._record_call("get_available_tools_for_task", task_id)
         return self.available_tools
+
+    def get_mcp_tool_schema(self, task_id: str, verbosity: str | None = None) -> dict:
+        self._record_call("get_mcp_tool_schema", task_id)
+        return {"tools": [], "mcp_schema_sha256": "deadbeef"}
 
     def execute_tool(
         self, task_id: str, tool_name: str, arguments: dict

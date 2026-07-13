@@ -30,7 +30,10 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
   "numpy",
-  "litellm>=1.56.4,<1.82",
+  # Ceiling raised from <1.82 to admit the OpenHands SDK's litellm>=1.84.1
+  # requirement (corral[openhands]); bounded to the 1.84.x line so the bump
+  # stays deliberate rather than tracking every new litellm release.
+  "litellm>=1.56.4,<1.85",
   "chromadb",
   "tenacity",
   "fastapi",
@@ -57,6 +60,7 @@ dependencies = [
   "snakemake[irt]>=7.32.4",
   "netcdf4>=1.7.3",
   "openai-agents==0.13.1",
+  "jsonschema>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +75,36 @@ docs = [
     "cairosvg>=2.7.1"
 ]
 db = ["rdkit", "torch", "transformers"]
+# The Codex agent (corral.agents.CodexAgent) drives the OpenAI Codex harness via
+# the official Python SDK, which bundles a pinned local Codex runtime. Pinned
+# exactly because the SDK is beta and the bundled runtime is tied to the SDK
+# release; upgrading can change harness behavior. Bump deliberately.
+# 0.1.0b3 is required: it pulls openai-codex-cli-bin==0.137.0a4, the first
+# runtime with glibc-Linux (manylinux) wheels. The prior 0.1.0b2 pinned
+# cli-bin==0.132.0, which only shipped musllinux/macOS/Windows wheels, so
+# `uv sync --all-extras` failed to resolve on glibc-Linux CI runners.
+# openai-codex-cli-bin is repeated here only to name its pre-release version
+# explicitly: it is a transitive dependency of openai-codex, but uv's default
+# prerelease policy will not accept the 0.137.0a4 pre-release from a transitive
+# `==` pin unless a direct dependency requests it explicitly.
+codex = ["openai-codex==0.1.0b3", "openai-codex-cli-bin==0.137.0a4"]
+# The Claude Code agent (corral.agents.ClaudeCodeAgent) drives the Claude Code
+# harness via the Claude Agent SDK, which bundles a specific Claude Code CLI.
+# Pinned exactly: upgrading the package can change harness behavior even with
+# identical source, so bump deliberately. Requires features newer than 0.1.0:
+# the claude_code system-prompt preset, the `tools` base tool set, and the
+# `dontAsk` permission mode.
+claude = ["claude-agent-sdk==0.2.115"]
+# The OpenHands agent (corral.agents.OpenHandsAgent) drives the OpenHands
+# Software Agent SDK as a black-box harness. Pinned exactly because the SDK is
+# changing rapidly and its behavior is tied to the release; bump deliberately.
+# 1.35.0 requires litellm>=1.84.1, which is why the base litellm ceiling above
+# was raised to <1.85. It also requires Python>=3.12, so the dependency is
+# gated behind a marker: on corral's lower supported Pythons (3.10/3.11) the
+# extra is empty and `OpenHandsAgent` raises a clear install hint at import.
+# `openhands-tools` is intentionally *not* required: the harness receives no
+# terminal/file-editor/browser tools, only the corral MCP endpoint.
+openhands = ["openhands-sdk==1.35.0; python_version >= '3.12'"]
 irt = [
     "pymc>=5.0.0",
     "arviz>=0.18.0",

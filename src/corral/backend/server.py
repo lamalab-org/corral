@@ -1,3 +1,5 @@
+import hashlib
+import json
 from collections.abc import Mapping
 from copy import deepcopy
 
@@ -6,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from loguru import logger
 
 from corral.backend.env import Environment
+from corral.backend.mcp_server import attach_task_mcp_servers
 from corral.backend.schema import (
     ToLatexRequest,
     ToolRequest,
@@ -179,6 +182,31 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
 
         return {"tools": tools_info}
 
+    @app.get("/tasks/{task_id}/tools/mcp")
+    def get_mcp_tool_schema(
+        task_id: str,
+        verbosity: ToolVerbosity | None = None,
+    ):
+        """Return the task's tools in the *MCP* representation, plus a digest.
+
+        This is the exact schema an MCP client (Codex, Claude Code, ...) receives
+        from tools/list — produced by :meth:`Tool.to_mcp` — so a harness can
+        record a hash of what it actually saw, rather than the REST/OpenAI
+        function-calling schema (which is only logically equivalent).
+        """
+        if verbosity is None:
+            verbosity = Query(
+                ToolVerbosity.FULL, description="Tool description verbosity level"
+            )
+        if task_id not in environments:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        env = environments[task_id]
+        tools = [tool_obj.to_mcp(verbosity) for tool_obj in env.tools.values()]
+        canonical = json.dumps(tools, sort_keys=True, default=str)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return {"tools": tools, "mcp_schema_sha256": digest}
+
     @app.post("/tasks/{task_id}/tools/execute")
     def execute_tool(task_id: str, request: ToolRequest):
         """Execute a tool in the environment"""
@@ -328,6 +356,12 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             raise HTTPException(
                 status_code=500, detail=f"Failed to generate LaTeX: {e!s}"
             ) from e
+
+    # Expose each task's tools over MCP (Streamable HTTP) at
+    # `/tasks/{task_id}/mcp`, alongside the REST API, so generic MCP clients
+    # can connect directly without a local proxy. Schemas and execution reuse
+    # `Tool.to_mcp` / `Environment.call_tool` (no duplicated tool system).
+    attach_task_mcp_servers(app, environments)
 
     return app
 

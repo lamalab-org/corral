@@ -166,6 +166,13 @@ def llm_call(
         if "anthropic" in model:
             params["max_tokens"] = 8192
 
+        # When extended thinking is on (LiteLLM turns `reasoning_effort` into an
+        # Anthropic `thinking` block), Anthropic rejects any `temperature` other
+        # than 1 with a 400. Force it so a reasoning run is not aborted; this also
+        # covers the base-class answer extractor, which reuses these kwargs.
+        if kwargs.get("reasoning_effort") or kwargs.get("thinking"):
+            params["temperature"] = 1
+
         if tools is not None:
             params.update(
                 {
