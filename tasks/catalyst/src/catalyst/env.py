@@ -15,10 +15,10 @@ from catalyst.score import (
 from catalyst.tools import create_tools
 from loguru import logger
 
+from corral.backend.env import Environment, Toolset, build_environments
 from corral.backend.server import run_server
-from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.task import InputRef, TaskDefinition
 from corral.backend.tool import Tool
-from corral.utils.task_group import TaskGroupEnvironment
 from corral.utils.task_loader import (
     load_task_entries,
     load_task_entries_from_env_package,
@@ -85,7 +85,7 @@ def entries_to_task_definitions(
             tools=entry.get("tools", []),
             scoring_fn=scoring_fn,
             submission_format=entry.get("submission_format", ""),
-            input_from_tasks=entry.get("input_from_tasks", []),
+            input_map={dep: InputRef(dep) for dep in entry.get("input_from_tasks", [])},
             initial_input=initial_input,
         )
 
@@ -100,8 +100,8 @@ def create_environments(
     task_type: str = "task",
     taskgroup_common_tools: dict[str, Tool] | None = None,
     work_dir: str = BASE_WORK_DIR,
-    group_id: str = "catalyst",
-) -> dict[str, TaskGroupEnvironment]:
+    name: str = "catalyst",
+) -> dict[str, Environment]:
     """Create environments from HuggingFace or local task configs.
 
     Args:
@@ -111,7 +111,7 @@ def create_environments(
         task_type: "task" or "subtask".
         taskgroup_common_tools: Tools common to all subtasks.
         work_dir: Working directory for task execution.
-        group_id: Task group identifier.
+        name: Benchmark label used for tracing/LaTeX.
 
     Returns:
         Dictionary of environments keyed by task ID.
@@ -130,31 +130,18 @@ def create_environments(
 
     tasks = entries_to_task_definitions(entries, work_dir)
 
-    logger.info(f"Creating task group '{group_id}' with {len(tasks)} tasks")
-    task_group = TaskGroup(group_id=group_id, tasks=tasks)
+    logger.info(f"Creating linked task environments '{name}' with {len(tasks)} tasks")
 
-    logger.info("Task Dependencies:")
-    for task_id, deps in task_group.get_task_dependencies().items():
-        logger.info(f"- {task_id}: depends on {deps}")
-
-    ordered_tasks = task_group.get_ordered_tasks()
-    logger.info("Task Execution Order:")
-    for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i + 1}. {task_id}")
-
-    subtask_specific_tools = create_tools()
-
-    environments = {}
-    for task_id in task_group.tasks:
-        environments[task_id] = TaskGroupEnvironment(
-            task_id=task_id,
-            task_group=task_group,
-            subtask_specific_tools=subtask_specific_tools,
-            taskgroup_common_tools=taskgroup_common_tools,
-            base_work_dir=work_dir,
-        )
-
-    return environments
+    # Create environments for all tasks; grouping is derived from the graph
+    return build_environments(
+        tasks,
+        base_work_dir=work_dir,
+        name=name,
+        toolset=Toolset(
+            pool=create_tools(),
+            common=taskgroup_common_tools or {},
+        ),
+    )
 
 
 if __name__ == "__main__":
@@ -237,8 +224,8 @@ if __name__ == "__main__":
     for env_id, env in environments.items():
         logger.info(f"- {env_id}")
         logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_from_tasks:
-            logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
+        if env.current_task.input_map:
+            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
 
     # --- Run Server ---
     logger.info(f"Running server on {host}:{port}")

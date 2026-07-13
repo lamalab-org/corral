@@ -8,8 +8,17 @@ from pydantic import Field
 from corral.backend.env import Environment
 from corral.backend.mcp_server import execute_task_tool, task_mcp_tools
 from corral.backend.server import create_benchmark_server
+from corral.backend.task import TaskDefinition
 from corral.backend.tool import tool
 from corral.router.verbosity import ToolVerbosity
+
+_DUMMY_TASK = TaskDefinition(
+    name="dummy",
+    description="dummy task",
+    tools=[],
+    scoring_fn=lambda answer: 1.0,
+    submission_format={},
+)
 
 _MCP_HEADERS = {
     "Accept": "application/json, text/event-stream",
@@ -27,6 +36,9 @@ def calc(
 
 
 class DummyEnv(Environment):
+    def __init__(self, task_id: str, base_work_dir: str = "", fs_manager=None):
+        super().__init__(task_id, _DUMMY_TASK, base_work_dir, fs_manager=fs_manager)
+
     def get_task_prompt(self) -> str | list[dict]:
         return "dummy prompt"
 

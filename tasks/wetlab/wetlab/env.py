@@ -16,15 +16,15 @@ from pathlib import Path
 from loguru import logger
 from dotenv import load_dotenv
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict
 
 from wetlab.score import score_ion_list, score_salt, none_checker
 from wetlab.tools import create_tools
 from wetlab.engine import set_chemical_system, Solution, StockSolution, Precipitate
 
-from corral.backend.env import Environment
+from corral.backend.env import Environment, Toolset, build_environments
 from corral.backend.server import run_server
-from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.task import InputRef, TaskDefinition
 
 SCORING_FUNCTIONS = {
     "none_checker": none_checker,
@@ -99,10 +99,9 @@ def _is_charge_neutral(solution: StockSolution | Solution, threshold: float=1e-1
     else:
         return True
 
-@dataclass
+@dataclass(frozen=True)
 class QualitativeAnalysisTask(TaskDefinition):
     task_sys: str = None
-    excluded_tools: List[str] = None
     sample_list: Dict[str, Solution] = None
     reagent_set: str = None
     additional_reagents: Dict[str, StockSolution] = None
@@ -171,11 +170,11 @@ def load_tasks_from_json(
                 name=data["name"],
                 description=data["input"]["prompt"],
                 tools=data.get("tools", []),
-                excluded_tools=data.get("excluded_tools", []),
+                excluded_tools=tuple(data.get("excluded_tools", [])),
                 scoring_fn=SCORING_FUNCTIONS[data["scoring_fn"]],
                 scoring_inputs=data["output"][0]["target"],
                 submission_format=data.get("submission_format", ""),
-                input_from_tasks=input_from_tasks,
+                input_map={dep: InputRef(dep) for dep in input_from_tasks},
                 initial_input=initial_input,
                 task_sys=data["input"]["sys"],
                 sample_list=data["input"]["samples"],
@@ -187,76 +186,36 @@ def load_tasks_from_json(
 
 
 class QualitativeAnalysisEnvironment(Environment):
-    """Environment that works with a QualitativeAnalysisTask group
+    """Environment for one QualitativeAnalysisTask.
+
+    Linked tasks are normal tasks: they share output/score stores through
+    their `CorralState` when created together.
 
     Args:
         task_id (str): ID of the task to work on
-        task_group (TaskGroup): Task group containing all the subtasks
-        available_tools (dict[str, Tool]): All tools available in the environment
-
-    Raises:
-        ValueError: If task ID is not found in the task group
+        task (TaskDefinition): Definition of the task
+        base_work_dir (str): Base working directory
+        group_tasks (dict[str, TaskDefinition]): All linked task definitions
+        shared_task_runs (dict): Run store shared between linked environments
     """
-
-    def __init__(
-        self,
-        task_id: str,
-        task_group: TaskGroup,
-        work_dir: str = "",
-    ):
-        self.task_id = task_id
-        self.task_group = task_group
-        self.available_tools = create_tools()
-        self.work_dir = work_dir
-
-        if task_id not in task_group.tasks:
-            raise ValueError(f"Task {task_id} not found in task group")
-
-        self.current_task = task_group.tasks[task_id]
-
-        # Initialize environment
-        super().__init__(f"{task_group.group_id}_{task_id}" , base_work_dir=work_dir)
-
-        logger.info(f"Initializing environment for task {self.task_id}")
-        logger.info(f"Task name: {self.current_task}")
-        self._add_task_tools()
 
     def configure_additional_apps(self):
         """Setting the Reaktoro chemical system and the Inventory"""
         set_chemical_system(self.current_task.chemical_system)
         logger.info(f"Reaktoro chemical system is set to '{self.current_task.sys}' for {self.task_id}.")
-        
+
         if self.current_task.initial:
             logger.info("Resetting the Inventory...")
             new_samples = {label: sample.clone() for label, sample in self.current_task.samples.items()} # cloning the original task samples to make trials independent
             compositions = new_samples | self.current_task.reagents
             self.hidden_args = {"compositions": compositions}
             try:
-                comp_file = Path(self.work_dir) / "compositions.pkl"
+                comp_file = Path(self.base_work_dir) / "compositions.pkl"
                 os.remove(comp_file)
             except FileNotFoundError:
                 logger.info("No leftover 'compositions.pkl' file to remove.")
         else:
             self.load_inventory()
-
-    def _add_task_tools(self):
-        """Add tools required for the current task to the environment"""
-        if len(self.current_task.tools) > 0:
-            for tool_name in self.current_task.tools:
-                if tool_name in self.available_tools: 
-                    if tool_name not in self.current_task.excluded_tools:
-                        self.add_tool(self.available_tools[tool_name])
-                    else:
-                        logger.warning(f"Tool `{tool_name}` is listed as both available and excluded for task {self.task_id}")
-                else:
-                    logger.warning(f"Tool `{tool_name}` not found in available tools for task {self.task_id}")
-        else:
-            # Adding all non-excluded tools if no tools are specified
-            for tool_name in self.available_tools:
-                if tool_name not in self.current_task.excluded_tools:
-                    self.add_tool(self.available_tools[tool_name])
-                else:
-                    logger.info(f"Excluding tool `{tool_name}` from the list of available tools for task {self.task_id}")
 
     def get_task_prompt(self) -> str:
         prompt = (
@@ -266,19 +225,15 @@ class QualitativeAnalysisEnvironment(Environment):
             f"{self.current_task.submission_format}\n\n"
         )
 
-        if len(self.current_task.input_from_tasks)>0:
+        if self.current_task.input_map:
             prompt += "\nAvailable data from previous subtasks:\n"
 
-        # Display input data from dependencies
-        for dep_task_id in self.current_task.input_from_tasks:
-            dep_key = f"{self.task_group.group_id}_{dep_task_id}"
-            if dep_key in self.task_group.results:
-                dep_result = self.task_group.results[dep_key]
-                task_prompt = self.task_group.tasks[dep_task_id].description
-                if isinstance(dep_result, dict) and "answer" in dep_result:
-                    prompt += f"- Input from '{dep_task_id}' with question: '{task_prompt}' and answer: '{dep_result['answer']}'\n"
-                else:
-                    prompt += f"- Input from '{dep_task_id}' with description: '{task_prompt}' and answer: '{dep_result}'\n"
+        # Display resolved inputs from dependencies
+        for ref in self.current_task.input_map.values():
+            if self.state.is_completed(ref.task_id):
+                value = self.state.get_output(ref.task_id, ref.key)
+                task_prompt = self.group_tasks[ref.task_id].description
+                prompt += f"- Input from '{ref.task_id}' with question: '{task_prompt}' and answer: '{value}'\n"
 
         # Display initial input data
         if self.current_task.initial_input:
@@ -291,13 +246,13 @@ class QualitativeAnalysisEnvironment(Environment):
 
     def save_inventory(self):
         comp = {name: obj.to_dict() for name,obj in self.hidden_args["compositions"].items()}
-        comp_file = Path(self.work_dir) / f"compositions.pkl"
+        comp_file = Path(self.base_work_dir) / f"compositions.pkl"
         logger.info(f"Saving inventory to file: {str(comp_file)}")
         with open(comp_file, 'wb') as f:
             pickle.dump(comp, f)
-    
+
     def load_inventory(self):
-        comp_file = Path(self.work_dir) / f"compositions.pkl"
+        comp_file = Path(self.base_work_dir) / f"compositions.pkl"
         logger.info(f"Loading inventory from file: {str(comp_file)}")
         with open(comp_file, 'rb') as f:
             data = pickle.load(f)
@@ -331,9 +286,7 @@ class QualitativeAnalysisEnvironment(Environment):
             score = self.current_task.scoring_fn(
                 prediction=submission_str, ground_truth=self.current_task.scoring_inputs
             )
-            self.task_group.store_result(
-                self.task_id, {"answer": submission_str}, score
-            )
+            self.state.store_task_output(self.task_id, submission_str, score)
             logger.info(f"Score for task {self.task_id}: {score}")
             return score
 
@@ -360,32 +313,22 @@ def create_qualysis_environments(
 
     tasks = load_tasks_from_json(json_path)
 
-    group_id = "wetlab"
-    logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
-    task_group = TaskGroup(
-        group_id=group_id,
-        tasks=tasks,
+    logger.info(f"Creating linked task environments with {len(tasks)} tasks")
+
+    # Wetlab keeps a subclass for its pickled inventory; grouping is derived.
+    # An empty `tools` list means "the whole pool" and `excluded_tools` (a base
+    # TaskDefinition field) is honoured generically by Toolset.resolve, so the
+    # old `_add_task_tools` override is gone.
+    return build_environments(
+        tasks,
+        name="wetlab",
+        toolset=Toolset(
+            pool=create_tools(),
+            workspace_factory=None,
+            select_all_when_unspecified=True,
+        ),
+        env_cls=QualitativeAnalysisEnvironment,
     )
-
-    # Print task dependencies for reference
-    logger.info("\nTask Dependencies:")
-    for task_id, deps in task_group.get_task_dependencies().items():
-        logger.info(f"- {task_id}: depends on {deps}")
-
-    # Print ordering of tasks
-    ordered_tasks = task_group.get_ordered_tasks()
-    logger.info("\nTask Execution Order:")
-    for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i+1}. {task_id}")
-
-    environments = {}
-    for task_id in task_group.tasks:
-        environments[task_id] = QualitativeAnalysisEnvironment(
-            task_id=task_id,
-            task_group=task_group,
-        )
-
-    return environments
 
 
 if __name__ == "__main__":
@@ -429,8 +372,8 @@ if __name__ == "__main__":
     for env_id, env in environments.items():
         logger.info(f"- {env_id}")
         logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_from_tasks:
-            logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
+        if env.current_task.input_map:
+            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
 
     run_server(
         environments=environments,

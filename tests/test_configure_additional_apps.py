@@ -4,7 +4,16 @@ from fastapi.testclient import TestClient
 
 from corral.backend.env import Environment
 from corral.backend.server import create_benchmark_server
+from corral.backend.task import TaskDefinition
 from corral.router.routes import CorralRouter
+
+_DUMMY_TASK = TaskDefinition(
+    name="dummy",
+    description="dummy task",
+    tools=[],
+    scoring_fn=lambda answer: 1.0,
+    submission_format={},
+)
 
 
 class DummyEnv(Environment):
@@ -19,7 +28,7 @@ class DummyEnv(Environment):
 
 
 def create_app_with_env(task_id: str = "task_a") -> TestClient:
-    env = DummyEnv(task_id=task_id, base_work_dir="", fs_manager=None)
+    env = DummyEnv(task_id=task_id, task=_DUMMY_TASK, base_work_dir="", fs_manager=None)
     app = create_benchmark_server({task_id: env})
     return TestClient(app)
 

@@ -1,107 +1,205 @@
-from collections.abc import Callable
-from copy import deepcopy
+from __future__ import annotations
+
+import functools
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from corral.backend.env import Environment
 
 
-@dataclass
+@dataclass(frozen=True)
+class InputRef:
+    """Reference to the output of another task.
+
+    `key` selects which output field the downstream task receives and supports
+    dotted paths into structured outputs (e.g. `"answer.smiles"`).
+    """
+
+    task_id: str
+    key: str = "answer"
+
+
+@dataclass(frozen=True)
 class TaskDefinition:
-    """Definition of a task with its requirements and scoring"""
+    """Definition of a task with its requirements and scoring.
+
+    Tasks are immutable configuration describing the static DAG: dependencies
+    are declared per input field via `input_map`. All runtime data (outputs,
+    scores, resolved dependency values) lives in
+    `corral.backend.state.CorralState`.
+
+    Behaviour is injected through the (immutable, callable) hooks rather than
+    by subclassing the environment:
+
+    - `prompt_fn(env)` overrides the default task prompt.
+    - `setup_fn(env)` runs per trial (`configure_additional_apps`) for
+      hardware/IO setup or to populate hidden tool arguments.
+    - `scoring_fn(answer)` scores the (resolved) submitted answer.
+    - `resolve_answer` controls whether the submitted answer is path-resolved
+      before scoring and storage (off for non-file answers such as numbers,
+      SMILES or JSON).
+    """
 
     name: str
     description: str
     tools: list[str]
-    scoring_fn: Callable[[dict | str], float]
+    scoring_fn: Callable[[Any], float]
     submission_format: dict[str, str]
+    # Tool names to withhold even if named in `tools` (or in the whole pool when
+    # a `Toolset` selects all for an empty `tools` list). Honoured generically
+    # by `Toolset.resolve`; defaults to "exclude nothing".
+    excluded_tools: tuple[str, ...] = ()
     scoring_inputs: dict[str, Any] = field(default_factory=dict)
-    # Either use output from another task or custom input
-    input_from_tasks: list[str] = field(
-        default_factory=list
-    )  # input required from some of the previous tasks in the group
-    initial_input: dict[str, Any] = field(
-        default_factory=dict
-    )  # initial input for the task, if required
+    # Static values available to the task
+    initial_input: dict[str, Any] = field(default_factory=dict)
+    # Named inputs that come from other tasks' outputs
+    input_map: dict[str, InputRef] = field(default_factory=dict)
+    # Optional behaviour hooks (immutable config, never mutated at runtime)
+    prompt_fn: Callable[[Environment], str | list[dict]] | None = None
+    setup_fn: Callable[[Environment], str | None] | None = None
+    resolve_answer: bool = True
 
-    # Helper method to check if task has dependencies
-    def has_dependencies(self) -> bool:
-        return len(self.input_from_tasks) > 0
+    def dependencies(self) -> set[str]:
+        return {ref.task_id for ref in self.input_map.values()}
 
 
-@dataclass
-class TaskGroup:
-    """Container for related tasks"""
+def with_fixed_inputs(
+    scoring_fn: Callable[..., float], **fixed: Any
+) -> Callable[[Any], float]:
+    """Adapt a scoring function to the single-argument form `score(answer)`.
 
-    group_id: str
-    tasks: dict[str, TaskDefinition]
-    results: dict[str, Any] = field(default_factory=dict)
-    scores: dict[str, float] = field(default_factory=dict)
-    chained_tasks: bool = field(default=False)  # Whether tasks can depend on each other
+    Extra keyword arguments (e.g. `ground_truth` or `target`) are bound up
+    front so the environment can always call `scoring_fn(answer)`. The
+    original function's name/docstring are preserved so documentation
+    generation still reports the underlying scorer.
+    """
 
-    def __post_init__(self):
-        """Auto-detect if tasks are chained"""
-        if not self.chained_tasks:  # Only auto-detect if not explicitly set
-            self.chained_tasks = any(
-                task.input_from_tasks for task in self.tasks.values()
+    @functools.wraps(scoring_fn)
+    def _scorer(answer: Any) -> float:
+        return scoring_fn(answer, **fixed)
+
+    return _scorer
+
+
+def build_dependency_graph(
+    tasks: Mapping[str, TaskDefinition],
+) -> dict[str, list[str]]:
+    """Derive the task dependency graph from a collection of task definitions."""
+    return {task_id: sorted(task.dependencies()) for task_id, task in tasks.items()}
+
+
+def assert_dependencies_selected(
+    task_ids: list[str], graph: Mapping[str, list[str]]
+) -> None:
+    """Raise if a selected task depends on one not in the selection.
+
+    A run must be *dependency-closed*: every dependency of every selected task
+    is also selected. Otherwise a task could never have its inputs satisfied,
+    which previously surfaced as `NOT YET AVAILABLE` text inside a prompt.
+    Raising here turns that into a clear, up-front error instead.
+    """
+    selected = set(task_ids)
+    missing = {
+        tid: [d for d in graph.get(tid, []) if d not in selected] for tid in task_ids
+    }
+    missing = {tid: deps for tid, deps in missing.items() if deps}
+    if missing:
+        lines = "; ".join(f"{t} needs {d}" for t, d in missing.items())
+        raise ValueError(
+            f"Selected tasks are not dependency-closed: {lines}. "
+            "Add the missing dependencies to task_ids or run the full set."
+        )
+
+
+def order_selected(task_ids: list[str], graph: Mapping[str, list[str]]) -> list[str]:
+    """Topologically order the selected ids, honouring only intra-selection edges.
+
+    Operates on a plain `{task_id: [deps]}` adjacency dict (the form the
+    runner receives over HTTP), so it does not need `TaskDefinition`s. Edges
+    pointing outside the selection are ignored. Raises `ValueError` on cycles.
+    """
+    selected = set(task_ids)
+    temporary: set[str] = set()
+    permanent: set[str] = set()
+    ordered: list[str] = []
+
+    def visit(tid: str) -> None:
+        if tid in permanent:
+            return
+        if tid in temporary:
+            raise ValueError(f"Cycle detected involving task {tid!r}")
+        temporary.add(tid)
+        for dep in graph.get(tid, []):
+            if dep in selected:
+                visit(dep)
+        temporary.discard(tid)
+        permanent.add(tid)
+        ordered.append(tid)
+
+    for tid in task_ids:
+        visit(tid)
+    return ordered
+
+
+def topological_order(tasks: Mapping[str, TaskDefinition]) -> list[str]:
+    """Return task ids in dependency order; raises ValueError on cycles."""
+    # Delegate to the graph-based implementation so there is one ordering algorithm.
+    return order_selected(list(tasks), build_dependency_graph(tasks))
+
+
+def connected_components(tasks: Mapping[str, TaskDefinition]) -> list[list[str]]:
+    """Group task ids into weakly-connected components of the dependency graph.
+
+    A "group" of chained tasks is exactly a connected component; tasks with no
+    edges form singleton components (today's "single task"). The framework
+    derives this instead of the author declaring a `group_id`.
+    """
+    parent = {task_id: task_id for task_id in tasks}
+
+    def find(node: str) -> str:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def union(a: str, b: str) -> None:
+        root_a, root_b = find(a), find(b)
+        if root_a != root_b:
+            parent[root_a] = root_b
+
+    for task_id, task in tasks.items():
+        for dep_id in task.dependencies():
+            if dep_id in parent:
+                union(task_id, dep_id)
+
+    order = list(tasks)
+    members: dict[str, list[str]] = {}
+    for task_id in order:
+        members.setdefault(find(task_id), []).append(task_id)
+
+    # Preserve the original task insertion order, both of components and within.
+    components: list[list[str]] = []
+    seen: set[str] = set()
+    for task_id in order:
+        root = find(task_id)
+        if root not in seen:
+            seen.add(root)
+            components.append(members[root])
+    return components
+
+
+def validate_task_graph(tasks: Mapping[str, TaskDefinition]) -> None:
+    """Check that all dependencies exist and the graph has no cycles."""
+    known = set(tasks)
+
+    for task_id, task in tasks.items():
+        missing = task.dependencies() - known
+        if missing:
+            raise ValueError(
+                f"Task {task_id!r} depends on unknown task(s): {sorted(missing)}"
             )
 
-    def get_task_input(self, task_id: str) -> dict[str, Any]:
-        """Get input for a task either from other tasks or initial input"""
-        task = self.tasks.get(task_id)
-        if not task:
-            return {}
-
-        # Start with the initial input
-        combined_input = deepcopy(task.initial_input) if task.initial_input else {}
-
-        # Add inputs from dependent tasks
-        for dep_task_id in task.input_from_tasks:
-            if dep_task_id in self.results:
-                # Add the dependent task's result to the input
-                dep_result = self.results[dep_task_id]
-                if isinstance(dep_result, dict) and "answer" in dep_result:
-                    # Extract the relevant part of the result
-                    combined_input[f"result_from_{dep_task_id}"] = dep_result["answer"]
-                else:
-                    combined_input[f"result_from_{dep_task_id}"] = dep_result
-
-        return combined_input
-
-    def store_result(self, task_id: str, result: dict[str, Any], score: float) -> None:
-        """Store task result and score"""
-        self.results[task_id] = result
-        self.scores[task_id] = score
-
-    def get_task_dependencies(self) -> dict[str, list[str]]:
-        """Get dictionary of task dependencies"""
-        return {task_id: task.input_from_tasks for task_id, task in self.tasks.items()}
-
-    def get_ordered_tasks(self) -> list[str]:
-        """Return tasks in dependency order"""
-        # Simple topological sort
-        dependencies = self.get_task_dependencies()
-        visited = set()
-        ordered = []
-
-        def visit(task_id):
-            if task_id in visited:
-                return
-            visited.add(task_id)
-            for dep in dependencies.get(task_id, []):
-                visit(dep)
-            ordered.append(task_id)
-
-        for task_id in self.tasks:
-            visit(task_id)
-
-        return ordered
-
-    def check_dependencies_satisfied(self, task_id: str) -> bool:
-        """Check if all dependencies for a task are satisfied"""
-        task = self.tasks.get(task_id)
-        if not task:
-            return False
-
-        return all(
-            dep_task_id in self.results and self.results[dep_task_id] is not None
-            for dep_task_id in task.input_from_tasks
-        )
+    topological_order(tasks)  # raises on cycles

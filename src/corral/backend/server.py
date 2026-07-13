@@ -64,13 +64,22 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
 
     @app.get("/dependency_chain")
     def get_dependency_chain_setting():
+        # The graph lives on the task definitions; every environment exposes
+        # its component's tasks through `group_tasks`.
         has_chained_tasks = any(
-            hasattr(env, "task_group")
-            and env.task_group
-            and env.task_group.chained_tasks
+            task.dependencies()
             for env in environments.values()
+            for task in env.group_tasks.values()
         )
         return {"dependency_chain": has_chained_tasks}
+
+    @app.get("/dependency_graph")
+    def get_dependency_graph():
+        """Expose the dependency graph so the runner can order/close the run."""
+        return {
+            task_id: sorted(env.current_task.dependencies())
+            for task_id, env in environments.items()
+        }
 
     @app.get("/tasks/{task_id}/prompt")
     def get_task_prompt(task_id: str):
@@ -217,7 +226,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         """Get the current state of the task"""
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
-        return environments[task_id].state
+        return environments[task_id].state.snapshot()
 
     @app.post("/tasks/{task_id}/submit")
     def submit_answer(task_id: str, answer: dict) -> TrialCompletionResponse:
@@ -252,7 +261,7 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
             "is_attempted": env.state.is_attempted,
             "score": env.state.score,
             "submitted_answer": env.state.submitted_answer,
-            "tool_statistics": env.state.get_tool_statistics(),
+            "tool_statistics": env.state.tool_statistics(),
         }
 
     @app.get("/tasks/{task_id}/last_score")
@@ -263,21 +272,17 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
 
         env = environments[task_id]
         # Get the most recent completed trial
-        if not env.trial_states:
-            raise HTTPException(status_code=404, detail="No trials completed yet")
-
-        # Get the most recent trial_id
-        trial_ids = sorted(env.trial_states.keys(), key=int)
+        trial_ids = sorted(env.state.trials.keys(), key=int)
         if not trial_ids:
             raise HTTPException(status_code=404, detail="No trials completed yet")
 
         latest_trial_id = trial_ids[-1]
-        latest_trial = env.trial_states[latest_trial_id]
+        latest_trial = env.state.trials[latest_trial_id]
 
         return {
             "task_id": task_id,
             "trial_id": latest_trial_id,
-            "score": latest_trial.score,
+            "score": latest_trial["score"],
         }
 
     @app.get("/tasks/{task_id}/trials")
@@ -285,14 +290,14 @@ def create_benchmark_server(environments: dict[str, Environment]) -> FastAPI:
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
         env = environments[task_id]
-        return {"trials": env.trial_states}
+        return {"trials": env.state.trials}
 
     @app.get("/tasks/{task_id}/trials/{trial_id}")
     def get_trial_state(task_id: str, trial_id: str):
         if task_id not in environments:
             raise HTTPException(status_code=404, detail="Task not found")
         env = environments[task_id]
-        trial_state = env.trial_states.get(trial_id)
+        trial_state = env.state.trials.get(trial_id)
         if trial_state is None:
             raise HTTPException(status_code=404, detail="Trial not found")
         return {"trial_state": trial_state}

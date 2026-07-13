@@ -1,5 +1,5 @@
 """
-Integration tests for the TaskGroupEnvironment and task execution system.
+Integration tests for the TaskEnvironment and task execution system.
 
 Tests the full workflow including path resolution, scoring, and task dependencies.
 """
@@ -7,6 +7,7 @@ Tests the full workflow including path resolution, scoring, and task dependencie
 import json
 import os
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -14,19 +15,20 @@ os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files" / "temp
 
 import pytest
 from catalyst.env import create_environments, entries_to_task_definitions
-from corral.utils.task_group import TaskGroupEnvironment
+from corral.backend.env import Environment, Toolset
 from corral.utils.task_loader import load_task_entries
 from catalyst.score import check_mp_structure, check_slabs_json, check_valid_json_file
 from hypothesis import given
 from hypothesis import strategies as st
 
-from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.state import TaskRunState
+from corral.backend.task import InputRef, TaskDefinition
 
 TEMP_DIR = Path(os.environ["CORRAL_WORK_DIR"])
 
 
-class TestTaskGroupEnvironment:
-    """Integration tests for TaskGroupEnvironment."""
+class TestTaskEnvironment:
+    """Integration tests for TaskEnvironment."""
 
     @pytest.fixture()
     def temp_workspace(self):
@@ -163,7 +165,6 @@ loop_
                 scoring_fn=check_mp_structure,
                 submission_format="/path/to/structure.cif",
                 initial_input={"mp_id": "mp-149"},
-                input_from_tasks=[],
             ),
             "task2": TaskDefinition(
                 name="Test Slab Enumeration",
@@ -172,7 +173,7 @@ loop_
                 scoring_fn=check_slabs_json,
                 submission_format="/path/to/slabs.json",
                 initial_input={"miller_index": [1, 1, 1]},
-                input_from_tasks=["task1"],
+                input_map={"task1": InputRef("task1")},
             ),
             "task3": TaskDefinition(
                 name="Test JSON Validation",
@@ -181,14 +182,13 @@ loop_
                 scoring_fn=check_valid_json_file,
                 submission_format="/path/to/file.json",
                 initial_input={},
-                input_from_tasks=[],
             ),
         }
 
     @pytest.fixture()
-    def task_group(self, sample_tasks):
-        """Create a TaskGroup with sample tasks."""
-        return TaskGroup("test_group", sample_tasks)
+    def shared_task_runs(self):
+        """Run store shared between linked environments."""
+        return {}
 
     @pytest.fixture()
     def mock_tools(self):
@@ -198,30 +198,34 @@ loop_
         return {"mock_tool": mock_tool}
 
     def test_environment_creation(
-        self, sample_tasks, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test basic environment creation."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             assert env.task_id == "task1"
             assert env.current_task == sample_tasks["task1"]
-            assert env.task_group == task_group
+            assert env.group_tasks == sample_tasks
             assert "mock_tool" in env.tools
 
-    def test_file_tools_setup(self, task_group, mock_tools, temp_workspace):
+    def test_file_tools_setup(self, sample_tasks, shared_task_runs, mock_tools, temp_workspace):
         """Test that file tools are properly set up."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             # Check that file tools are available
@@ -236,14 +240,16 @@ loop_
             for tool_name in expected_file_tools:
                 assert tool_name in env.tools
 
-    def test_task_prompt_generation(self, task_group, mock_tools, temp_workspace):
+    def test_task_prompt_generation(self, sample_tasks, shared_task_runs, mock_tools, temp_workspace):
         """Test task prompt generation."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             prompt = env.get_task_prompt()
@@ -253,35 +259,44 @@ loop_
             assert "mp_id: mp-149" in prompt
 
     def test_task_prompt_with_dependencies(
-        self, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test task prompt generation with dependencies."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
             # First complete task1
-            task_group.store_result("task1", {"answer": "bulk_structure.cif"}, 1.0)
+            shared_task_runs["task1"] = TaskRunState(
+                task_id="task1",
+                output={"answer": "bulk_structure.cif"},
+                score=1.0,
+            )
 
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task2",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task2"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             prompt = env.get_task_prompt()
             assert "Test Slab Enumeration" in prompt
-            assert "Input from task1: bulk_structure.cif" in prompt
-            assert "task1 (available)" in prompt
+            assert "task1 (from task1): bulk_structure.cif" in prompt
+            # The dependency is resolved strictly and rendered inline; the old
+            # trailing "task1 (available)" status line has been removed.
 
     def test_scoring_with_valid_submission(
-        self, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test scoring with a valid file submission."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             # Simulate submitting a valid CIF file path
@@ -289,21 +304,23 @@ loop_
             score = env.score()
 
             assert score == 1.0
-            assert "task1" in task_group.results
-            assert task_group.results["task1"]["answer"] == str(
+            assert env.state.is_completed("task1")
+            assert env.state.get_output("task1") == str(
                 temp_workspace / "bulk_structure.cif"
             )
 
     def test_scoring_with_markdown_formatted_submission(
-        self, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test scoring with markdown-formatted submission."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             # Submit with markdown formatting
@@ -311,20 +328,22 @@ loop_
             score = env.score()
 
             assert score == 1.0
-            assert task_group.results["task1"]["answer"] == str(
+            assert env.state.get_output("task1") == str(
                 temp_workspace / "bulk_structure.cif"
             )
 
     def test_scoring_with_quoted_submission(
-        self, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test scoring with quoted submission."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task3",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task3"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             # Submit with quotes
@@ -332,20 +351,22 @@ loop_
             score = env.score()
 
             assert score == 1.0
-            assert task_group.results["task3"]["answer"] == str(
+            assert env.state.get_output("task3") == str(
                 temp_workspace / "valid_data.json"
             )
 
     def test_scoring_with_absolute_path_submission(
-        self, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test scoring with absolute path submission."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             # Submit absolute path
@@ -354,18 +375,20 @@ loop_
             score = env.score()
 
             assert score == 1.0
-            assert task_group.results["task1"]["answer"] == abs_path
+            assert env.state.get_output("task1") == abs_path
 
     def test_scoring_with_nonexistent_file(
-        self, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test scoring with nonexistent file."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             env.state.submitted_answer = "nonexistent_file.cif"
@@ -373,14 +396,16 @@ loop_
 
             assert score == 0.0
 
-    def test_scoring_with_wrong_file_type(self, task_group, mock_tools, temp_workspace):
+    def test_scoring_with_wrong_file_type(self, sample_tasks, shared_task_runs, mock_tools, temp_workspace):
         """Test scoring with wrong file type."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task3",  # Expects JSON
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task3"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             env.state.submitted_answer = "invalid.txt"  # Not JSON
@@ -389,15 +414,17 @@ loop_
             assert score == 0.0
 
     def test_scoring_with_subdirectory_file(
-        self, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test scoring when file is in subdirectory."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             # Submit filename that exists in subdirectory
@@ -406,16 +433,18 @@ loop_
 
             assert score == 1.0
             # Should resolve to the file in the subdirectory
-            assert "results/output.cif" in task_group.results["task1"]["answer"]
+            assert "results/output.cif" in env.state.get_output("task1")
 
-    def test_scoring_with_no_submission(self, task_group, mock_tools, temp_workspace):
+    def test_scoring_with_no_submission(self, sample_tasks, shared_task_runs, mock_tools, temp_workspace):
         """Test scoring when no submission is made."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             # No submission made
@@ -424,15 +453,17 @@ loop_
             assert score == 0.0
 
     def test_scoring_with_empty_submission(
-        self, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test scoring with empty submission."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             env.state.submitted_answer = ""
@@ -441,7 +472,7 @@ loop_
             assert score == 0.0
 
     def test_scoring_error_handling(
-        self, sample_tasks, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test scoring error handling."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
@@ -449,13 +480,17 @@ loop_
             def failing_scorer():
                 raise ValueError("Test error")
 
-            sample_tasks["task1"].scoring_fn = failing_scorer
+            sample_tasks["task1"] = replace(
+                sample_tasks["task1"], scoring_fn=failing_scorer
+            )
 
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             env.state.submitted_answer = "bulk_structure.cif"
@@ -464,15 +499,17 @@ loop_
             assert score == 0.0
 
     def test_reset_state_updates_file_tools(
-        self, task_group, mock_tools, temp_workspace
+        self, sample_tasks, shared_task_runs, mock_tools, temp_workspace
     ):
         """Test that reset_state properly updates file tools for new workspace."""
         with patch.dict(os.environ, {"CORRAL_WORK_DIR": str(temp_workspace)}):
-            env = TaskGroupEnvironment(
+            env = Environment(
                 task_id="task1",
-                task_group=task_group,
-                subtask_specific_tools=mock_tools,
+                task=sample_tasks["task1"],
+                toolset=Toolset(pool=mock_tools),
                 base_work_dir=str(temp_workspace),
+                group_tasks=sample_tasks,
+                shared_task_runs=shared_task_runs,
             )
 
             # Get initial workspace
@@ -564,7 +601,7 @@ class TestTaskSystemIntegration:
             assert task1.initial_input["work_dir"] == str(temp_workspace)
 
             task2 = tasks["enumerate_slabs"]
-            assert "retrieve_structure" in task2.input_from_tasks
+            assert "retrieve_structure" in task2.dependencies()
 
     def test_create_environments(self, sample_task_dir, temp_workspace):
         """Test creating environments from task directory."""
@@ -580,7 +617,7 @@ class TestTaskSystemIntegration:
 
             # Check environment properties
             env1 = environments["retrieve_structure"]
-            assert isinstance(env1, TaskGroupEnvironment)
+            assert isinstance(env1, Environment)
             assert env1.task_id == "retrieve_structure"
 
     def test_task_dependency_workflow(self, sample_task_dir, temp_workspace):
@@ -636,7 +673,7 @@ loop_
             # Complete task 2 (depends on task 1)
             env2 = environments["enumerate_slabs"]
             prompt2 = env2.get_task_prompt()
-            assert "Input from retrieve_structure:" in prompt2
+            assert "(from retrieve_structure):" in prompt2
 
             env2.state.submitted_answer = "test_slabs.json"
             score2 = env2.score()
@@ -695,11 +732,10 @@ loop_
                     initial_input={},
                 )
 
-                task_group = TaskGroup("test", {"test": task})
-                env = TaskGroupEnvironment(
+                env = Environment(
                     task_id="test",
-                    task_group=task_group,
-                    subtask_specific_tools={},
+                    task=task,
+                    toolset=Toolset(pool={}),
                     base_work_dir=str(temp_path),
                 )
 
@@ -799,11 +835,10 @@ loop_
             initial_input={},
         )
 
-        task_group = TaskGroup("test", {"test": task})
-        env = TaskGroupEnvironment(
+        env = Environment(
             task_id="test",
-            task_group=task_group,
-            subtask_specific_tools={},
+            task=task,
+            toolset=Toolset(pool={}),
             base_work_dir=str(scoring_environment),
         )
 
@@ -813,7 +848,7 @@ loop_
         assert score == 1.0
 
         # Check that the resolved path is absolute
-        resolved_path = task_group.results["test"]["answer"]
+        resolved_path = env.state.get_output("test")
         assert Path(resolved_path).is_absolute()
         assert Path(resolved_path).exists()
 
@@ -828,11 +863,10 @@ loop_
             initial_input={},
         )
 
-        task_group = TaskGroup("test", {"test": task})
-        env = TaskGroupEnvironment(
+        env = Environment(
             task_id="test",
-            task_group=task_group,
-            subtask_specific_tools={},
+            task=task,
+            toolset=Toolset(pool={}),
             base_work_dir=str(scoring_environment),
         )
 
@@ -842,7 +876,7 @@ loop_
         assert score == 1.0
 
         # Should resolve to the subdirectory file
-        resolved_path = task_group.results["test"]["answer"]
+        resolved_path = env.state.get_output("test")
         assert "results" in resolved_path
         assert "output.cif" in resolved_path
 
@@ -857,11 +891,10 @@ loop_
             initial_input={},
         )
 
-        task_group = TaskGroup("test", {"test": task})
-        env = TaskGroupEnvironment(
+        env = Environment(
             task_id="test",
-            task_group=task_group,
-            subtask_specific_tools={},
+            task=task,
+            toolset=Toolset(pool={}),
             base_work_dir=str(scoring_environment),
         )
 
@@ -878,8 +911,8 @@ loop_
         ]
 
         for answer_format in test_cases:
-            # Reset the task group for each test
-            task_group.results.clear()
+            # Reset the shared results for each test
+            env.state.task_runs.clear()
             env.state.submitted_answer = answer_format
             score = env.score()
             assert score == 1.0, f"Failed for format: {answer_format}"
@@ -895,11 +928,10 @@ loop_
             initial_input={},
         )
 
-        task_group = TaskGroup("test", {"test": task})
-        env = TaskGroupEnvironment(
+        env = Environment(
             task_id="test",
-            task_group=task_group,
-            subtask_specific_tools={},
+            task=task,
+            toolset=Toolset(pool={}),
             base_work_dir=str(scoring_environment),
         )
 
@@ -912,7 +944,7 @@ loop_
         ]
 
         for answer_format in test_cases:
-            task_group.results.clear()
+            env.state.task_runs.clear()
             env.state.submitted_answer = answer_format
             score = env.score()
             assert score == 0.0, f"Should fail for nonexistent file: {answer_format}"
@@ -927,7 +959,6 @@ loop_
             scoring_fn=check_mp_structure,
             submission_format="/path/to/file",
             initial_input={},
-            input_from_tasks=[],
         )
 
         task2 = TaskDefinition(
@@ -937,18 +968,22 @@ loop_
             scoring_fn=check_valid_json_file,
             submission_format="/path/to/file",
             initial_input={},
-            input_from_tasks=["task1"],
+            input_map={"task1": InputRef("task1")},
         )
 
         tasks = {"task1": task1, "task2": task2}
-        task_group = TaskGroup("test", tasks)
+
+        # Linked tasks share this store through their state
+        shared_task_runs: dict = {}
 
         # Complete task1 with a relative path
-        env1 = TaskGroupEnvironment(
+        env1 = Environment(
             task_id="task1",
-            task_group=task_group,
-            subtask_specific_tools={},
+            task=tasks["task1"],
+            toolset=Toolset(pool={}),
             base_work_dir=str(scoring_environment),
+            group_tasks=tasks,
+            shared_task_runs=shared_task_runs,
         )
 
         env1.state.submitted_answer = "structure.cif"
@@ -956,15 +991,17 @@ loop_
         assert score1 == 1.0
 
         # Create task2 environment
-        env2 = TaskGroupEnvironment(
+        env2 = Environment(
             task_id="task2",
-            task_group=task_group,
-            subtask_specific_tools={},
+            task=tasks["task2"],
+            toolset=Toolset(pool={}),
             base_work_dir=str(scoring_environment),
+            group_tasks=tasks,
+            shared_task_runs=shared_task_runs,
         )
 
         # Check that task2 can see the resolved path from task1
         prompt = env2.get_task_prompt()
-        assert "Input from task1:" in prompt
+        assert "task1 (from task1):" in prompt
         # The resolved path should be absolute
         assert str(scoring_environment) in prompt

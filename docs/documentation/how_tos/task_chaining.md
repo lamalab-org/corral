@@ -4,10 +4,16 @@
 
 **When to use this**: Your problem requires multiple steps where each builds on previous results.
 
+Chained tasks are normal tasks: each dependency is declared at the input-field
+level on the task itself (`input_map`), and at runtime the linked environments
+share a single run store (`task_runs`) through their `CorralState`. The
+dependency graph is always derived from the task definitions — no separate
+group object holds runtime results.
+
 ## 1. Define dependent tasks
 
 ```python
-from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.task import InputRef, TaskDefinition
 
 # Task 1: Retrieve data
 retrieve_task = TaskDefinition(
@@ -26,58 +32,94 @@ analyze_task = TaskDefinition(
     tools=["structure_analyzer"],
     scoring_fn=lambda x: 1.0 if "properties" in x else 0.0,
     submission_format={"analysis": "dict"},
-    input_from_tasks=["retrieve"],  # Dependency
+    input_map={
+        # The task receives an input named "structure", taken from the
+        # "answer" key of the "retrieve" task's output
+        "structure": InputRef("retrieve", key="answer"),
+    },
 )
 
-task_group = TaskGroup(
-    group_id="workflow", tasks={"retrieve": retrieve_task, "analyze": analyze_task}
+tasks = {"retrieve": retrieve_task, "analyze": analyze_task}
+```
+
+`InputRef.key` supports dotted paths into structured outputs, e.g.
+`InputRef("retrieve", key="answer.smiles")`.
+
+## 2. Create the linked environments
+
+A single entry point takes the flat task collection and does everything —
+validates the graph, derives the grouping (each connected component of the
+dependency graph shares one run store) and returns server-ready environments:
+
+```python
+from corral.backend.env import build_environments
+
+environments = build_environments(
+    tasks,
+    base_work_dir="workdir",
+    name="workflow",  # optional label for tracing / docs
+    available_tools=my_tools,  # dict[str, Tool], resolved by each task's `tools`
 )
 ```
 
-## 2.  Create environments that use task results
+There is no separate authoring path for a single task: it is just the
+degenerate case of a one-node component, so `build_environments({"solo": task})`
+works too.
+
+## 3. Customize behaviour without subclassing
+
+Custom prompts, per-trial setup and scoring are injected through the
+(immutable) definition, not by subclassing the environment. Dependency outputs
+are always read through the shared `CorralState`:
 
 ```python
-class ChainedEnvironment(Environment):
-    def __init__(self, task_id: str, task_group: TaskGroup):
-        super().__init__(task_id)
-        self.task_group = task_group
-        self.current_task = task_group.tasks[task_id]
+from corral.backend.env import Environment
+from corral.backend.task import InputRef, TaskDefinition
 
-        # Add tools
-        for tool_name in self.current_task.tools:
-            self.add_tool(get_tool(tool_name))
 
-    def get_task_prompt(self) -> str:
-        # Get input from previous tasks
-        task_input = self.task_group.get_task_input(self.task_id)
+def analyze_prompt(env: Environment) -> str:
+    task = env.current_task
+    prompt = task.description
+    for name, ref in task.input_map.items():
+        if env.state.is_completed(ref.task_id):
+            prompt += f"\n{name}: {env.state.get_output(ref.task_id, ref.key)}"
+    return prompt
 
-        prompt = self.current_task.description
-        if task_input:
-            prompt += f"\n\nPrevious results:\n{task_input}"
 
-        return prompt
-
-    def score(self) -> float:
-        score = self.current_task.scoring_fn(self.state.submitted_answer)
-
-        # Store for next task
-        self.task_group.store_result(
-            self.task_id, {"answer": self.state.submitted_answer}, score
-        )
-
-        return score
+analyze_task = TaskDefinition(
+    name="analyze",
+    description="Analyze the molecule structure",
+    tools=["structure_analyzer"],
+    scoring_fn=score_analysis,
+    submission_format={"analysis": "dict"},
+    input_map={"structure": InputRef("retrieve", key="answer")},
+    prompt_fn=analyze_prompt,  # custom prompt
+    # setup_fn=...,               # per-trial setup / hidden tool args
+    resolve_answer=False,  # don't path-resolve a non-file answer
+)
 ```
 
-## 3. Run the chained workflow
+For genuinely stateful integrations (hardware, pickled inventories) you can
+still subclass `Environment` and pass the subclass to `build_environments`:
 
 ```python
-# Create environments for each task
-environments = {
-    task_id: ChainedEnvironment(task_id, task_group)
-    for task_id in task_group.tasks.keys()
-}
+class MyEnvironment(Environment):
+    def configure_additional_apps(self):
+        ...  # set up an instrument before each trial
+        return "configured"
 
-# The runner will execute in dependency order
+
+environments = build_environments(
+    tasks,
+    base_work_dir="workdir",
+    env_cls=MyEnvironment,
+)
+```
+
+## 4. Run the chained workflow
+
+```python
+# The runner executes in dependency order; grouping is automatic.
 runner.bench(task_ids=list(environments.keys()), trials_per_task=1)
 ```
 

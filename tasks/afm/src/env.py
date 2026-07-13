@@ -17,20 +17,11 @@ if platform.system() == "Windows":
 else:
     pythoncom = None
 
-from corral.backend.env import Environment
+from corral.backend.env import Environment, Toolset, build_environments
 from corral.backend.server import run_server
-from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.task import InputRef, TaskDefinition
 from corral.backend.tool import Tool
 from corral.utils.code_tools import execute_python_code
-from corral.utils.io_tools import (
-    CatFilesTool,
-    CopyFileTool,
-    FileInfoTool,
-    FSManager,
-    ListFilesTool,
-    ReadFileTool,
-    WriteFileTool,
-)
 from score import (
     check_file_exists,
     check_image_quality,
@@ -120,7 +111,9 @@ def load_tasks_from_json(
             tools=task_info.get("tools", []),
             scoring_fn=scoring_fn,
             submission_format=task_info.get("submission_format", ""),
-            input_from_tasks=task_info.get("input_from_tasks", []),
+            input_map={
+                dep: InputRef(dep) for dep in task_info.get("input_from_tasks", [])
+            },
             initial_input=initial_input,
         )
 
@@ -128,73 +121,20 @@ def load_tasks_from_json(
 
 
 class AFMEnvironment(Environment):
-    def __init__(
-        self,
-        task_id: str,
-        task_group: TaskGroup,
-        subtask_specific_tools: dict[str, Tool],
-        base_work_dir: str,
-        taskgroup_common_tools: dict[str, Tool] | None = None,
-    ):
-        self.task_group = task_group
-        self.subtask_specific_tools = subtask_specific_tools
-        self.taskgroup_common_tools = taskgroup_common_tools or {}
-        self.base_work_dir = base_work_dir
+    """Environment for AFM tasks (escape hatch: drives the Nanosurf API).
 
-        if task_id not in task_group.tasks:
-            raise ValueError(f"Task {task_id} not found in task group")
+    Behaviour beyond the stateful hardware reset is shared with the generic
+    `Environment`; only the prompt, the per-trial instrument reset and the
+    raw-answer scoring are specialised here.
+    """
 
-        self.current_task = task_group.tasks[task_id]
+    @property
+    def initial_params(self) -> dict:
+        return self.current_task.initial_input["params"]
 
-        self.initial_params = self.current_task.initial_input["params"]
-
-        self.afm_dir = self.base_work_dir
-
-        super().__init__(f"{task_id}", base_work_dir=base_work_dir)
-
-        # Add tools
-        self._add_task_tools()
-        self._setup_file_tools()
-
-    def _add_task_tools(self):
-        """Add required tools for the task"""
-        for tool_name in self.current_task.tools:
-            if tool_name in self.subtask_specific_tools:
-                # logger.info(f"tool name : {tool_name}")
-                self.add_tool(self.subtask_specific_tools[tool_name])
-            else:
-                logger.warning(
-                    f"Tool {tool_name} required for task {self.task_id} not found"
-                )
-
-        for tool in self.taskgroup_common_tools.values():
-            self.add_tool(tool)
-
-    def _setup_file_tools(self):
-        """Setup file tools for current workspace"""
-        if self.current_work_dir:
-            logger.info(
-                f"DEBUG: Setting up FSManager with base_path: {self.current_work_dir}"
-            )
-            # Create new FSManager for current workspace
-            fs_manager = FSManager("file", base_path=self.current_work_dir)
-
-            # Add/update file tools
-            self.tools.update(
-                {
-                    "list_files": ListFilesTool(fs_manager),
-                    "read_file": ReadFileTool(fs_manager),
-                    "write_file": WriteFileTool(fs_manager),
-                    "file_info": FileInfoTool(fs_manager),
-                    "cat_files": CatFilesTool(fs_manager),
-                    "copy_file": CopyFileTool(fs_manager),
-                }
-            )
-            logger.info(
-                f"DEBUG: File tools setup complete for workspace: {self.current_work_dir}"
-            )
-        else:
-            logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
+    @property
+    def afm_dir(self) -> str:
+        return self.base_work_dir
 
     def reset_params(self) -> None:
         if pythoncom:
@@ -252,17 +192,7 @@ class AFMEnvironment(Environment):
         if pythoncom:
             pythoncom.CoUninitialize()
 
-    def reset_state(self) -> str:
-        """Reset state and update file tools for new workspace"""
-        trial_id = super().reset_state()
-        # Recreate file tools for new workspace
-        # os.path.join(self.base_work_dir, trial_id)
-        self._setup_file_tools()
-        # self.reset_params()
-        return trial_id
-
     def get_task_prompt(self) -> str:
-        _combined_input = self.task_group.get_task_input(self.task_id)
         prompt = "You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API."
         prompt += f"""\nTask: {self.current_task.name}
         Description: {self.current_task.description}
@@ -273,37 +203,20 @@ class AFMEnvironment(Environment):
 
         prompt += "\nAvailable input data:\n"
 
-        # Display input data from dependencies
-        for dep_task_id in self.current_task.input_from_tasks:
-            if dep_task_id in self.task_group.results:
-                dep_result = self.task_group.results[dep_task_id]
-                if isinstance(dep_result, dict) and "answer" in dep_result:
-                    prompt += f"- Input from {dep_task_id}: {dep_result['answer']}\n"
-                else:
-                    prompt += f"- Input from {dep_task_id}: {dep_result}\n"
+        # Display resolved inputs from dependencies
+        for input_name, ref in self.current_task.input_map.items():
+            if self.state.is_completed(ref.task_id):
+                value = self.state.get_output(ref.task_id, ref.key)
+                prompt += f"- {input_name} (from {ref.task_id}): {value}\n"
 
         # Display initial input data
-        if self.current_task.initial_input:
-            for key, value in self.current_task.initial_input.items():
-                if key not in ["work_dir", "params"]:
-                    prompt += f"- {key}: {value}\n"
+        for key, value in self.current_task.initial_input.items():
+            if key not in ["work_dir", "params"]:
+                prompt += f"- {key}: {value}\n"
 
         # Add workspace info
         if self.afm_dir:
             prompt += f"\nIMPORTANT: You have access to filesystem tools. All image scans will automatically be saved in your isolated workspace which is {self.afm_dir}."
-
-        # Add note about dependencies
-        if self.current_task.input_from_tasks:
-            status = []
-            for dep_id in self.current_task.input_from_tasks:
-                status_text = (
-                    "available"
-                    if dep_id in self.task_group.results
-                    else "not yet available"
-                )
-                status.append(f"{dep_id} ({status_text})")
-
-            prompt += f"\n\nThis task uses output from tasks: {', '.join(status)}"
 
         # logger.info(f"PROMPT : {prompt}")
         return prompt
@@ -327,8 +240,8 @@ class AFMEnvironment(Environment):
             # Call the scoring function with the raw answer
             score = self.current_task.scoring_fn(answer_value)
 
-            # Store result in task group
-            self.task_group.store_result(self.task_id, {"answer": answer_value}, score)
+            # Store the output in the shared state so dependent tasks can use it
+            self.state.store_task_output(self.task_id, answer_value, score)
             logger.info(f"Task {self.task_id} scored: {score}")
 
             return score
@@ -363,23 +276,7 @@ def create_environments(
     # Load tasks from JSON
     tasks = load_tasks_from_json(task_json_path, work_dir)
 
-    # Create task group
-    group_id = Path(
-        task_json_path
-    ).parent  # Use filename (without extension) as group ID
-    logger.info(f"Creating task group with ID: {ENVIRONMENT}")
-    task_group = TaskGroup(group_id=group_id, tasks=tasks)
-
-    # Print task dependencies for reference
-    logger.info("\nTask Dependencies:")
-    for task_id, deps in task_group.get_task_dependencies().items():
-        logger.info(f"- {task_id}: depends on {deps}")
-
-    # Print ordering of tasks
-    ordered_tasks = task_group.get_ordered_tasks()
-    logger.info("\nTask Execution Order:")
-    for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i + 1}. {task_id}")
+    logger.info(f"Creating linked task environments with ID: {ENVIRONMENT}")
 
     subtask_specific_tools = {
         "visualize_grain_boxes": visualize_grain_boxes,
@@ -391,17 +288,17 @@ def create_environments(
         "execute_python_code": execute_python_code,
     }
 
-    environments = {}
-    for task_id in task_group.tasks:
-        environments[task_id] = AFMEnvironment(
-            task_id=task_id,
-            task_group=task_group,
-            subtask_specific_tools=subtask_specific_tools,
-            taskgroup_common_tools=taskgroup_common_tools,
-            base_work_dir=work_dir,
-        )
-
-    return environments
+    # Create environments for all tasks; grouping is derived from the graph
+    return build_environments(
+        tasks,
+        base_work_dir=work_dir,
+        name=ENVIRONMENT,
+        toolset=Toolset(
+            pool=subtask_specific_tools,
+            common=taskgroup_common_tools or {},
+        ),
+        env_cls=AFMEnvironment,
+    )
 
 
 if __name__ == "__main__":
@@ -424,8 +321,8 @@ if __name__ == "__main__":
     for env_id, env in environments.items():
         logger.info(f"- {env_id}")
         logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_from_tasks:
-            logger.info(f"Depends on: {env.current_task.input_from_tasks}")
+        if env.current_task.input_map:
+            logger.info(f"Depends on: {sorted(env.current_task.dependencies())}")
 
     # Run server
     run_server(environments, host, port)

@@ -282,19 +282,20 @@ Each environment is independent. No shared state.
 
 **Chained Tasks**:
 ```python
-task_group = TaskGroup(
-    tasks={
-        "task_1": TaskDefinition(...),
-        "task_2": TaskDefinition(..., input_from_tasks=["task_1"]),
-    }
-)
-
-environments = {
-    task_id: ChainedEnvironment(task_id, task_group) for task_id in task_group.tasks
+tasks = {
+    "task_1": TaskDefinition(...),
+    "task_2": TaskDefinition(..., input_map={"value": InputRef("task_1")}),
 }
+
+environments = build_environments(
+    tasks,
+    base_work_dir="workdir",
+    name="my_workflow",
+    available_tools=my_tools,
+)
 ```
 
-Environments share a `TaskGroup` that coordinates state passing.
+Linked environments share a single run store (`task_runs`) through their `CorralState`, which coordinates state passing; the dependency graph is derived from the task definitions.
 
 ### Scoring Implications
 
@@ -315,7 +316,7 @@ If you're evaluating general agent capabilities across diverse tasks, use indepe
 
 If you're evaluating agent performance on complex, structured problems requiring multiple steps, use chained tasks.
 
-You can even mix them - some tasks independent, some chained - by creating separate `TaskGroup` instances.
+You can even mix them - some tasks independent, some chained - by creating separate groups of linked environments.
 
 The key insight: *task independence vs. chaining is a property of the research question, not the implementation*. `Corral`'s architecture lets you model both.
 

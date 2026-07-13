@@ -4,8 +4,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from corral.backend.env import Environment
+from corral.backend.env import Environment, Toolset
 from corral.backend.schema import ToolArgument, ToolCall, ToolCallStatus
+from corral.backend.task import TaskDefinition
 from corral.backend.tool import Tool
 
 
@@ -13,7 +14,20 @@ class TestEnv(Environment):
     """Mock Environment for testing purposes"""
 
     def __init__(self, task_id: str, base_work_dir: str, fs_manager: Any):
-        super().__init__(task_id, base_work_dir, fs_manager)
+        task = TaskDefinition(
+            name="mock",
+            description="Mock task",
+            tools=[],
+            scoring_fn=lambda answer: 100,
+            submission_format={},
+        )
+        super().__init__(
+            task_id,
+            task,
+            base_work_dir,
+            fs_manager=fs_manager,
+            toolset=Toolset(workspace_factory=None),
+        )
 
     def get_task_prompt(self) -> str:
         return "Mock task prompt"

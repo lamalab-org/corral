@@ -24,9 +24,9 @@ from corral_md.tools import (
 )
 from loguru import logger
 
-from corral.backend.env import Environment
+from corral.backend.env import Environment, Toolset, build_environments
 from corral.backend.server import run_server
-from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.task import InputRef, TaskDefinition
 from corral.backend.tool import Tool
 from corral.utils.context7_tools import get_library_documentation
 from corral.utils.io_tools import (
@@ -120,192 +120,85 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
                 tools=task_info.get("tools", []),
                 scoring_fn=scoring_fn,
                 submission_format=task_info.get("submission_format", ""),
-                input_from_tasks=task_info.get("input_from_tasks", []),
+                input_map={
+                    dep: InputRef(dep) for dep in task_info.get("input_from_tasks", [])
+                },
                 initial_input=initial_input,
+                prompt_fn=_md_task_prompt,
+                resolve_answer=False,
             )
 
     return tasks
 
 
-class TaskGroupEnvironment(Environment):
-    """Environment that works with a task group - simple composition approach"""
+def _md_file_tools(workspace: str) -> dict[str, Tool]:
+    """MD-specific filesystem tools backed by the simagent FSManager."""
+    fs_manager = FSManager("file", base_path=workspace, app="simagent")
+    return {
+        "list_files": ListFilesTool(fs_manager),
+        "read_file": ReadFileTool(fs_manager),
+        "write_file": WriteFileTool(fs_manager),
+        "file_info": FileInfoTool(fs_manager),
+        "cat_files": CatFilesTool(fs_manager),
+        "copy_file": CopyFileTool(fs_manager),
+        "grep": GrepTool(fs_manager),
+        "library_docs": get_library_documentation,
+        "execute_python_script": execute_python_script,
+    }
 
-    def __init__(
-        self,
-        task_id: str,
-        task_group: TaskGroup,
-        subtask_specific_tools: dict[str, Tool],
-        base_work_dir: str,
-        taskgroup_common_tools: dict[str, Tool] | None = None,
-    ):
-        self.task_group = task_group
-        self.subtask_specific_tools = subtask_specific_tools
-        self.taskgroup_common_tools = taskgroup_common_tools or {}
 
-        if task_id not in task_group.tasks:
-            raise ValueError(f"Task {task_id} not found in task group")
+def _md_task_prompt(env: Environment) -> str:
+    """Generate the MD task prompt with resource and logging guidance."""
 
-        self.current_task = task_group.tasks[task_id]
-
-        super().__init__(
-            f"{task_id}",
-            base_work_dir=base_work_dir,
-            fs_manager=FSManager("file", base_path=base_work_dir, app="simagent"),
-        )
-
-        # Add tools
-        self._add_task_tools()
-        self._setup_file_tools()
-
-    def _add_task_tools(self):
-        """Add required tools for the task"""
-        for tool_name in self.current_task.tools:
-            if tool_name in self.subtask_specific_tools:
-                self.add_tool(self.subtask_specific_tools[tool_name])
-            else:
-                logger.warning(
-                    f"Tool {tool_name} required for task {self.task_id} not found"
-                )
-
-        for tool in self.taskgroup_common_tools.values():
-            self.add_tool(tool)
-
-    def _setup_file_tools(self):
-        """Setup file tools for current workspace"""
-        if self.current_work_dir:
-            logger.info(
-                f"DEBUG: Setting up FSManager with base_path: {self.current_work_dir}"
-            )
-            # Create new FSManager for current workspace
-            fs_manager = FSManager(
-                "file", base_path=self.current_work_dir, app="simagent"
-            )
-
-            # Add/update file tools
-            self.tools.update(
-                {
-                    "list_files": ListFilesTool(fs_manager),
-                    "read_file": ReadFileTool(fs_manager),
-                    "write_file": WriteFileTool(fs_manager),
-                    "file_info": FileInfoTool(fs_manager),
-                    "cat_files": CatFilesTool(fs_manager),
-                    "copy_file": CopyFileTool(fs_manager),
-                    "grep": GrepTool(fs_manager),
-                    "library_docs": get_library_documentation,
-                    "execute_python_script": execute_python_script,
-                }
-            )
-            logger.info(
-                f"DEBUG: File tools setup complete for workspace: {self.current_work_dir}"
-            )
-        else:
-            logger.warning("DEBUG: No current_work_dir set, skipping file tools setup")
-
-    def reset_state(self) -> str:
-        """Reset state and update file tools for new workspace"""
-        trial_id = super().reset_state()
-        # Recreate file tools for new workspace
-        self._setup_file_tools()
-        return trial_id
-
-    def get_task_prompt(self) -> str:
-        """Generate the task prompt for the current task"""
-
-        prompt = f"""\nTask: {self.current_task.name}
-Description: {self.current_task.description}
+    prompt = f"""\nTask: {env.current_task.name}
+Description: {env.current_task.description}
 
 Required submission format:
-{self.current_task.submission_format}
+{env.current_task.submission_format}
 
 """
 
-        prompt += "\nAvailable input data:\n"
+    prompt += "\nAvailable input data:\n"
 
-        prompt += "All the potentials, can be found at /potentials/.\n\n"
+    prompt += "All the potentials, can be found at /potentials/.\n\n"
 
-        # Display input data from dependencies
-        for dep_task_id in self.current_task.input_from_tasks:
-            if dep_task_id in self.task_group.results:
-                dep_result = self.task_group.results[dep_task_id]
-                if isinstance(dep_result, dict) and "answer" in dep_result:
-                    prompt += f"- Input from {dep_task_id}: {dep_result['answer']}\n"
-                else:
-                    prompt += f"- Input from {dep_task_id}: {dep_result}\n"
+    # Display resolved inputs from dependencies
+    for input_name, ref in env.current_task.input_map.items():
+        if env.state.is_completed(ref.task_id):
+            value = env.state.get_output(ref.task_id, ref.key)
+            prompt += f"- {input_name} (from {ref.task_id}): {value}\n"
 
-        # Display initial input data
-        if self.current_task.initial_input:
-            for key, value in self.current_task.initial_input.items():
-                if key != "work_dir":
-                    prompt += f"- {key}: {value}\n"
+    # Display initial input data
+    for key, value in env.current_task.initial_input.items():
+        if key != "work_dir":
+            prompt += f"- {key}: {value}\n"
 
-        # Add workspace info
-        if self.current_work_dir:
-            prompt += (
-                f"\nYour current workspace directory is: {self.current_work_dir}\n"
-                "All files you generate should be saved in this directory.\n\n"
-                "### Important Resource and File Access Guidelines ###\n"
-                "1. **Potential Files**:\n"
-                "   - These files are *fully verified and correct*.\n"
-                "   - You must **not attempt to read or parse them directly**.\n"
-                "   - Reading them is unnecessary and will waste important computational resources.\n\n"
-                "2. **Simulation Log Files**:\n"
-                "   - These files are *very large* and should **not be directly parsed**.\n"
-                "   - Direct parsing would cause excessive cost and resource usage.\n\n"
-                "Important: Files in /structures and /potentials should not be modified at any cost, including operations like copying or moving them. Doing this will immediately return in error.\n\n"
-                "### Simulation Logging Requirements ###\n"
-                "For every simulation run involving any ensemble (e.g., NVT, NPT, NVE, etc.), if applicable, the log file **must** record the following quantities:\n"
-                "   - Step\n"
-                "   - Temperature\n"
-                "   - Pressure\n"
-                "   - Density\n"
-                "These quantities should be written at an appropriate, user-configurable frequency (typically 1000 timesteps) suitable for monitoring equilibration and production behavior.\n"
-            )
-            # prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n Save all the files in {self.current_work_dir} when using tools use this path.\n"
+    # Add workspace info
+    if env.state.workspace:
+        prompt += (
+            f"\nYour current workspace directory is: {env.state.workspace}\n"
+            "All files you generate should be saved in this directory.\n\n"
+            "### Important Resource and File Access Guidelines ###\n"
+            "1. **Potential Files**:\n"
+            "   - These files are *fully verified and correct*.\n"
+            "   - You must **not attempt to read or parse them directly**.\n"
+            "   - Reading them is unnecessary and will waste important computational resources.\n\n"
+            "2. **Simulation Log Files**:\n"
+            "   - These files are *very large* and should **not be directly parsed**.\n"
+            "   - Direct parsing would cause excessive cost and resource usage.\n\n"
+            "Important: Files in /structures and /potentials should not be modified at any cost, including operations like copying or moving them. Doing this will immediately return in error.\n\n"
+            "### Simulation Logging Requirements ###\n"
+            "For every simulation run involving any ensemble (e.g., NVT, NPT, NVE, etc.), if applicable, the log file **must** record the following quantities:\n"
+            "   - Step\n"
+            "   - Temperature\n"
+            "   - Pressure\n"
+            "   - Density\n"
+            "These quantities should be written at an appropriate, user-configurable frequency (typically 1000 timesteps) suitable for monitoring equilibration and production behavior.\n"
+        )
 
-        # Add note about dependencies
-        if self.current_task.input_from_tasks:
-            status = []
-            for dep_id in self.current_task.input_from_tasks:
-                status_text = (
-                    "available"
-                    if dep_id in self.task_group.results
-                    else "not yet available"
-                )
-                status.append(f"{dep_id} ({status_text})")
+    logger.info(f"PROMPT : {prompt}")
 
-            prompt += f"\n\nThis task uses output from tasks: {', '.join(status)}"
-
-        logger.info(f"PROMPT : {prompt}")
-
-        return prompt
-
-    def score(self) -> float:
-        """Score the submitted answer"""
-        if not self.state.submitted_answer:
-            logger.warning(f"No submission found for task {self.task_id}")
-            return 0.0
-
-        try:
-            # Get and log the raw submission
-            answer_value = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
-
-            # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(answer_value)
-
-            # Store result in task group
-            self.task_group.store_result(self.task_id, {"answer": answer_value}, score)
-            logger.info(f"Task {self.task_id} scored: {score}")
-
-            return score
-
-        except Exception as e:
-            logger.error(
-                f"Error scoring submission for task {self.task_id}: {e!s}",
-                exc_info=True,
-            )
-            logger.error(f"Submission was: {self.state.submitted_answer!r}")
-            return 0.0
+    return prompt
 
 
 def create_environments(
@@ -313,7 +206,7 @@ def create_environments(
     subtask_level: bool = False,
     level: int = 1,
     taskgroup_common_tools: dict[str, Tool] | None = None,
-) -> dict[str, TaskGroupEnvironment]:
+) -> dict[str, Environment]:
     logger.info("Creating environments for MD")
 
     if subtask_level:
@@ -339,21 +232,8 @@ def create_environments(
     # Load tasks from JSON
     tasks = load_tasks_from_json(json_path, work_dir)
 
-    # Create task group
-    group_id = f"MD-level_{level}"
-    logger.info(f"Creating task group {group_id} with {len(tasks)} tasks")
-    task_group = TaskGroup(group_id=group_id, tasks=tasks)
-
-    # Print task dependencies for reference
-    logger.info("\nTask Dependencies:")
-    for task_id, deps in task_group.get_task_dependencies().items():
-        logger.info(f"- {task_id}: depends on {deps}")
-
-    # Print ordering of tasks
-    ordered_tasks = task_group.get_ordered_tasks()
-    logger.info("\nTask Execution Order:")
-    for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i+1}. {task_id}")
+    name = f"MD-level_{level}"
+    logger.info(f"Creating linked task environments {name} with {len(tasks)} tasks")
 
     # Create environments for all tasks
     subtask_specific_tools = {
@@ -366,17 +246,19 @@ def create_environments(
         "visualisation_tool": visualisation_tool,
     }
 
-    environments = {}
-    for task_id in task_group.tasks:
-        environments[task_id] = TaskGroupEnvironment(
-            task_id=task_id,
-            task_group=task_group,
-            subtask_specific_tools=subtask_specific_tools,
-            taskgroup_common_tools=taskgroup_common_tools,
-            base_work_dir=work_dir,
-        )
-
-    return environments
+    # Create environments for all tasks; grouping is derived from the graph.
+    # MD uses a simagent-backed FSManager for workspaces and file tools.
+    return build_environments(
+        tasks,
+        base_work_dir=work_dir,
+        name=name,
+        toolset=Toolset(
+            pool=subtask_specific_tools,
+            common=taskgroup_common_tools or {},
+            workspace_factory=_md_file_tools,
+        ),
+        fs_manager=FSManager("file", base_path=work_dir, app="simagent"),
+    )
 
 
 if __name__ == "__main__":
@@ -420,8 +302,8 @@ if __name__ == "__main__":
     for env_id, env in environments.items():
         logger.info(f"- {env_id}")
         logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_from_tasks:
-            logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
+        if env.current_task.input_map:
+            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
 
     run_server(
         environments=environments,

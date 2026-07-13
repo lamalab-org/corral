@@ -1,7 +1,7 @@
 import json
 import pickle
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -12,6 +12,7 @@ from loguru import logger
 from corral.agents import SURRENDER_SENTINEL, BaseAgent
 from corral.agents.hooks import AgentHooks
 from corral.agents.utils import LiteLLMMessage
+from corral.backend.task import assert_dependencies_selected, order_selected
 from corral.report import (
     BenchmarkResult,
     CorralWandbLogger,
@@ -149,6 +150,52 @@ def exception_trial_result(
         error_message=f"{error_type}: {error}",
         surrendered=surrendered,
     )
+
+
+def unreachable_trial_result(
+    task_id: str, trial_index: int, missing_dependency: str
+) -> TaskTrialResult:
+    """Record a task whose upstream chain broke, without invoking the agent.
+
+    A broken chain is a normal workflow failure (most often the upstream task
+    exhausted its iteration budget without a valid answer), not a harness error.
+    So the task is scored 0 (counts as a pass@k failure: the workflow never
+    reached this step) but records **0 iterations / 0 tokens and no
+    `error_message`** — it must not distort the iteration or error-rate
+    metrics. The explicit `unreachable` / `missing_dependency` markers let
+    analysis tell "chain broke upstream" from "agent tried and failed".
+    """
+    return TaskTrialResult(
+        task_id=task_id,
+        trial_id=f"attempt_{trial_index + 1}",
+        score=0.0,
+        state={"unreachable": True, "missing_dependency": missing_dependency},
+        tool_statistics={},
+        messages=None,
+        duration=0.0,
+        token_usage={},
+        error_message=None,
+        surrendered=False,
+    )
+
+
+def _unsatisfied_dependency(
+    task_id: str,
+    graph: Mapping[str, list[str]],
+    task_results: dict[str, TaskTrialResults],
+    trial_round: int,
+) -> str | None:
+    """Return the first dependency that did not produce a usable output this round.
+
+    A dependency is "usable" when its trial for this round succeeded (a real,
+    scored answer). A failed, surrendered, errored, or itself-unreachable
+    dependency means the chain is broken and the dependent is unreachable.
+    """
+    for dep_id in graph.get(task_id, []):
+        dep_trials = task_results[dep_id].trials
+        if trial_round >= len(dep_trials) or not dep_trials[trial_round].success:
+            return dep_id
+    return None
 
 
 def execute_single_trial(
@@ -299,8 +346,17 @@ def run_chained_trials(
     trial_executor: Callable[[str, int], TaskTrialResult],
     checkpoint_saver: Callable[[dict[str, TaskTrialResults], int], None],
     completed_rounds: int = 0,
+    graph: Mapping[str, list[str]] | None = None,
 ) -> None:
-    """Run trials in lockstep across all tasks"""
+    """Run trials in lockstep across all tasks.
+
+    `task_ids` must already be in topological order (the runner enforces this)
+    so a task's dependencies are always resolved by the time it runs. When
+    `graph` is provided, a task whose upstream chain broke this round is
+    recorded as *unreachable* without invoking the agent; this cascades for free
+    to its own dependents, giving "reached step N of M" semantics.
+    """
+    graph = graph or {}
     for trial_round in range(completed_rounds, trials_per_task):
         logger.info(f"Starting trial round {trial_round + 1}/{trials_per_task}")
 
@@ -308,6 +364,17 @@ def run_chained_trials(
         for task_id in task_ids:
             if len(task_results[task_id].trials) > trial_round:
                 continue  # Already completed
+
+            missing = _unsatisfied_dependency(task_id, graph, task_results, trial_round)
+            if missing is not None:
+                logger.warning(
+                    f"Skipping task {task_id}: dependency {missing!r} did not "
+                    f"produce a usable output this round (chain broken upstream)."
+                )
+                result = unreachable_trial_result(task_id, trial_round, missing)
+                task_results[task_id].trials.append(result)
+                success = False
+                continue
 
             logger.info(f"Running trial {trial_round + 1} for task {task_id}")
             result = trial_executor(task_id, trial_round)
@@ -495,8 +562,8 @@ class CorralRunner:
         """Generate LaTeX documentation for a list of tasks.
 
         The colorbox generation workflow:
-        1. First task (main task, no input_from_tasks): saves to cache only
-        2. Subsequent tasks (subtasks, have input_from_tasks): add to cache and generate .tex
+        1. First task (main task, no dependencies in `input_map`): saves to cache only
+        2. Subsequent tasks (subtasks, with `input_map` entries): add to cache and generate .tex
         3. After all tasks: clear the cache
 
         Args:
@@ -624,14 +691,14 @@ class CorralRunner:
         """Run benchmark from previously saved conversation traces.
 
         Instead of building prompts from scratch, each task is initialised
-        from the trace provided in traces.  A deep-copy of the prototype
-        agent (self.agent) is created per task with its
-        _initial_messages set to the corresponding trace so the agent
+        from the trace provided in `traces`.  A deep-copy of the prototype
+        agent (`self.agent`) is created per task with its
+        `_initial_messages` set to the corresponding trace so the agent
         continues from that conversation state.
 
         Args:
             traces: Mapping of task_id to the conversation trace (list of
-                LiteLLMMessage) to replay from.
+                `LiteLLMMessage`) to replay from.
             trials_per_task: Number of trials to run per task.
             k_values: k values for pass@k metrics.
             verbose: Whether to enable verbose logging.
@@ -692,7 +759,7 @@ class CorralRunner:
         run_name: str | None = None,
         extra_wandb_config: dict[str, Any] | None = None,
     ) -> BenchmarkResult:
-        """Shared benchmark execution logic used by bench and bench_from_traces.
+        """Shared benchmark execution logic used by `bench` and `bench_from_traces`.
 
         This method handles setup, logging, trial orchestration (independent or
         chained), result aggregation, checkpointing, and report generation.
@@ -700,7 +767,7 @@ class CorralRunner:
         Args:
             task_ids: List of task IDs to benchmark.
             trial_executor: Callable that runs a single trial given
-                (task_id, trial_index) and returns a TaskTrialResult.
+                `(task_id, trial_index)` and returns a `TaskTrialResult`.
             trials_per_task: Number of trials to run per task.
             k_values: k values for pass@k metrics.
             verbose: Whether to enable verbose logging.
@@ -755,13 +822,21 @@ class CorralRunner:
                     checkpoint.get("completed_trials", 0) if checkpoint else 0
                 )
 
+                # Enforce the chained invariant up front: the selection must be
+                # dependency-closed, and tasks must run in topological order so a
+                # task's dependencies are always satisfied by the time it runs.
+                graph = self.interface.get_dependency_graph()
+                assert_dependencies_selected(task_ids, graph)
+                ordered_ids = order_selected(task_ids, graph)
+
                 run_chained_trials(
-                    task_ids,
+                    ordered_ids,
                     trials_per_task,
                     task_results,
                     self._make_logging_trial_executor(trial_executor),
                     self._make_chained_checkpoint_saver(checkpoint_saver),
                     completed_rounds,
+                    graph=graph,
                 )
             else:
                 run_independent_trials(
