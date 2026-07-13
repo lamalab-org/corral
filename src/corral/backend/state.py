@@ -24,7 +24,7 @@ def utcnow() -> datetime:
 
 
 def get_path(data: Any, path: str) -> Any:
-    """Resolve a dotted path (e.g. ``"answer.smiles"``) into nested data."""
+    """Resolve a dotted path (e.g. `"answer.smiles"`) into nested data."""
     current = data
     for part in path.split("."):
         current = current[part]

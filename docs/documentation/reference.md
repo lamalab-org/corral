@@ -430,7 +430,7 @@ class HookPoint(Enum):
 
 ## TaskDefinition Dataclass
 
-Defines a task within a TaskGroup.
+Defines a task (immutable). A task that depends on other tasks is a normal task whose `input_map` references other tasks' outputs.
 
 **Fields**:
 - `name` (str): Task name
@@ -445,38 +445,77 @@ Defines a task within a TaskGroup.
 
 - `scoring_inputs` (dict): Additional scoring parameters
 
-- `input_from_tasks` (list[str]): Task dependencies
+- `initial_input` (dict): Static input values available to the task
 
-- `initial_input` (dict): Initial inputs
+- `input_map` (dict[str, InputRef]): Named inputs taken from other tasks' outputs
 
 **Methods**:
-- `has_dependencies() -> bool`: Returns True if task has dependencies
+- `dependencies() -> set[str]`: Ids of the tasks referenced by `input_map`
 
 ---
 
-## TaskGroup Dataclass
+## InputRef Dataclass
 
-Container for related tasks.
+Frozen reference to the output of another task.
 
 **Fields**:
-- `group_id` (str): Group identifier
+- `task_id` (str): The upstream task
 
-- `tasks` (dict[str, TaskDefinition]): Task definitions
+- `key` (str): Output key to read, default `"answer"`; supports dotted paths into structured outputs (e.g. `"answer.smiles"`)
 
-- `results` (dict[str, Any]): Stored results
+---
 
-- `scores` (dict[str, float]): Stored scores
+## Task helper functions
 
-- `chained_tasks` (bool): Whether tasks are chained
+- `build_dependency_graph(tasks: Mapping[str, TaskDefinition]) -> dict[str, list[str]]`: Derive the dependency graph from task definitions
+
+- `topological_order(tasks: Mapping[str, TaskDefinition]) -> list[str]`: Return task ids in dependency order; raises `ValueError` on cycles
+
+- `validate_task_graph(tasks: Mapping[str, TaskDefinition]) -> None`: Raise `ValueError` on unknown dependencies or cycles
+
+---
+
+## CorralState Dataclass
+
+Single source of truth for one environment's runtime state (`corral.backend.state`). Every `Environment` owns one instance as `env.state`; environments, tools, scoring, and the server read/write through it.
+
+**Fields** (selection):
+- `task_id`, `task_prompt`, `trial_id`, `trial_counter`: Identity of the current trial
+
+- `task_group_id`: Linked-task identity (optional)
+
+- `status`, `started_at`, `ended_at`: Trial lifecycle
+
+- `messages` (list[dict]), `tool_calls` (list[ToolCall]): Interaction trace
+
+- `submitted_answer`, `score`, `feedback`, `surrendered`, `is_attempted`: Submission/scoring
+
+- `task_runs` (dict[str, TaskRunState]): Per-task runtime outcomes (output, score, feedback); shared (same dict object) between linked environments
+
+- `workspace`, `artifacts`, `hidden_args`: Runtime resources
+
+- `trials` (dict[str, dict]): Archived snapshots of completed trials
 
 **Methods**:
-- `get_task_input(task_id: str) -> dict`: Get inputs for task
+- `start_new_trial(task_prompt, workspace=None) -> str`: Archive the finished trial and start a clean one
 
-- `store_result(task_id: str, result: dict, score: float) -> None`: Store result
+- `submit(answer)` / `surrender()` / `set_score(score, feedback=None)`: Submission lifecycle
 
-- `get_ordered_tasks() -> list[str]`: Get tasks in dependency order
+- `record_message(role, content, **metadata)` / `record_tool_call(call)`: Trace recording
 
-- `check_dependencies_satisfied(task_id: str) -> bool`: Check if dependencies met
+- `store_task_output(task_id, answer, score=None, feedback=None) -> None`: Record a task's output for dependent tasks
+
+- `get_output(task_id, key="answer") -> Any`: Read one field of a task's output; `key` may be a dotted path
+
+- `is_completed(task_id: str) -> bool`: Whether a task has stored output
+
+- `dependencies_satisfied(task: TaskDefinition) -> bool`: Check if all of a task's dependencies are completed
+
+- `resolve_inputs(task: TaskDefinition) -> dict`: Combine `initial_input` with resolved `input_map` values; raises if a dependency has not completed
+
+- `tool_statistics() -> dict`: Aggregated tool-call statistics
+
+- `snapshot(include_trials=True) -> dict`: Serializable snapshot (excludes `hidden_args`)
 
 ---
 

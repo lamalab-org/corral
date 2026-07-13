@@ -90,7 +90,7 @@ In `Corral` we have defined a container called `TaskDefinition` that could be us
 An example of defining  a task using `TaskDefintion`
 
 ```python
-from corral.backend.task import TaskGroup
+from corral.backend.task import TaskDefinition
 
 task1 = TaskDefinition(
     name="retrieve_data",
@@ -103,13 +103,14 @@ task1 = TaskDefinition(
 ```
 ///
 
-`Corral` also introduces the concept of `TaskGroups`, which are sequences of individual tasks chained together. These `TaskGroups` are solved in a predefined order, with the output or state from one task potentially serving as input or context for the subsequent tasks. This powerful capability allows for the construction of arbitrarily complex, multi-stage research challenges that mirror real-world problem-solving processes.
+`Corral` also supports chaining tasks together: a linked task is a normal task whose `input_map` references other tasks' outputs. Linked tasks are solved in dependency order, with the output from one task serving as input or context for the subsequent tasks. At runtime, the linked environments share a single run store through their `CorralState`, while the dependency graph is derived from the task definitions themselves. This powerful capability allows for the construction of arbitrarily complex, multi-stage research challenges that mirror real-world problem-solving processes.
 
 ///info
-An example of defining a `TaskGroup`
+An example of defining linked tasks
 
 ```python
-from corral.backend.task import TaskGroup, TaskDefinition
+from corral.backend.env import build_environments
+from corral.backend.task import InputRef, TaskDefinition
 
 # Define tasks with dependencies
 task1 = TaskDefinition(
@@ -127,18 +128,20 @@ task2 = TaskDefinition(
     tools=["structure_analyzer"],
     scoring_fn=analysis_score,
     submission_format={"result": "dict"},
-    input_from_tasks=["retrieve_data"],  # Depends on task1
+    input_map={"structure": InputRef("retrieve_data")},  # Depends on task1
 )
 
-# Create task group
-task_group = TaskGroup(
-    group_id="molecular_workflow",
-    tasks={"retrieve_data": task1, "analyze_structure": task2},
-    chained_tasks=True,  # Auto-detected from dependencies
+# Create one environment per task; grouping is derived from the graph and
+# linked tasks share their outputs through their state
+environments = build_environments(
+    {"retrieve_data": task1, "analyze_structure": task2},
+    base_work_dir="workdir",
+    name="molecular_workflow",
+    available_tools=my_tools,
 )
 
-# Access input from previous task
-task_input = task_group.get_task_input("analyze_structure")
+# Access input from previous task (resolved from the shared state)
+task_input = environments["analyze_structure"].state.resolve_inputs(task2)
 ```
 ///
 

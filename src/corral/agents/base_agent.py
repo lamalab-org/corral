@@ -134,18 +134,18 @@ class BaseAgent(ABC):
         """Construct an agent pre-loaded with a previous conversation trace.
 
         This classmethod creates a new agent instance whose message history is
-        initialised from ``trace``.  When the agent's ``run()`` method is
+        initialised from `trace`.  When the agent's `run()` method is
         called it will use these messages instead of building a fresh prompt,
         allowing benchmarks to be replayed from saved traces.
 
         Args:
-            trace: A list of ``LiteLLMMessage`` dicts representing the
+            trace: A list of `LiteLLMMessage` dicts representing the
                 conversation history from a previous run.
             **init_kwargs: All remaining keyword arguments are forwarded to
-                the class ``__init__``.
+                the class `__init__`.
 
         Returns:
-            A new agent instance with ``_initial_messages`` set to the
+            A new agent instance with `_initial_messages` set to the
             provided trace.
         """
         agent = cls(**init_kwargs)
@@ -217,7 +217,7 @@ class BaseAgent(ABC):
 
         This method must be implemented by all subclasses.
 
-        If the agent was created via ``from_trace()``, ``self._initial_messages``
+        If the agent was created via `from_trace()`, `self._initial_messages`
         will contain the conversation history and should be used instead of
         building a fresh prompt.
 

@@ -1,8 +1,8 @@
 """Tests for dependency-graph closure and topological ordering.
 
-Covers the invariant from ``better_execution_order.md``: a chained run executes
+Covers the invariant from `better_execution_order.md`: a chained run executes
 tasks in dependency order, and an incomplete selection is rejected up front
-rather than surfacing as ``NOT YET AVAILABLE`` text inside a prompt.
+rather than surfacing as `NOT YET AVAILABLE` text inside a prompt.
 """
 
 import pytest
@@ -95,7 +95,7 @@ class TestTopologicalOrderDelegates:
 
 
 class TestChainedShortCircuit:
-    """Broken-chain handling in ``run_chained_trials`` (no agent, no raise)."""
+    """Broken-chain handling in `run_chained_trials` (no agent, no raise)."""
 
     @staticmethod
     def _result(task_id, score):

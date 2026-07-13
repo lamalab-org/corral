@@ -15,10 +15,10 @@ from resistor_network.score import (
 )
 from resistor_network.tools import create_tools
 
+from corral.backend.env import Environment, Toolset, build_environments
 from corral.backend.server import run_server
-from corral.backend.task import TaskDefinition, TaskGroup
+from corral.backend.task import InputRef, TaskDefinition
 from corral.backend.tool import Tool
-from corral.utils.task_group import TaskGroupEnvironment
 
 logger.info(f"Using BASE_WORK_DIR: {BASE_WORK_DIR}")
 # Registry of scoring functions
@@ -99,7 +99,9 @@ def load_tasks_from_json(
                 tools=task_info.get("tools", []),
                 scoring_fn=scoring_fn,
                 submission_format=task_info.get("submission_format", ""),
-                input_from_tasks=task_info.get("input_from_tasks", []),
+                input_map={
+                    dep: InputRef(dep) for dep in task_info.get("input_from_tasks", [])
+                },
                 initial_input=initial_input,
             )
 
@@ -110,7 +112,7 @@ def create_environments(
     task_json_path: str | Path,
     taskgroup_common_tools: dict[str, Tool] | None = None,
     work_dir: str = BASE_WORK_DIR,
-) -> dict[str, TaskGroupEnvironment]:
+) -> dict[str, Environment]:
     """Create environments for tasks defined in a JSON file
 
     Args:
@@ -127,39 +129,20 @@ def create_environments(
     # Load tasks from JSON
     tasks = load_tasks_from_json(task_json_path, work_dir)
 
-    # Create task group
     task_json_path = Path(task_json_path)
-    group_id = task_json_path.name if task_json_path.is_dir() else task_json_path.stem
-    logger.info(f"Creating task group with ID: {group_id}")
-    task_group = TaskGroup(group_id=group_id, tasks=tasks)
+    name = task_json_path.name if task_json_path.is_dir() else task_json_path.stem
+    logger.info(f"Creating linked task environments for group: {name}")
 
-    # Print task dependencies for reference
-    logger.info("\nTask Dependencies:")
-    for task_id, deps in task_group.get_task_dependencies().items():
-        logger.info(f"- {task_id}: depends on {deps}")
-
-    # Print ordering of tasks
-    ordered_tasks = task_group.get_ordered_tasks()
-    logger.info("\nTask Execution Order:")
-    for i, task_id in enumerate(ordered_tasks):
-        logger.info(f"{i + 1}. {task_id}")
-
-    # Create all available tools
-    subtask_specific_tools = create_tools()
-
-    # Create environments for all tasks
-
-    environments = {}
-    for task_id in task_group.tasks:
-        environments[task_id] = TaskGroupEnvironment(
-            task_id=task_id,
-            task_group=task_group,
-            subtask_specific_tools=subtask_specific_tools,
-            taskgroup_common_tools=taskgroup_common_tools,
-            base_work_dir=work_dir,
-        )
-
-    return environments
+    # Create environments for all tasks; grouping is derived from the graph
+    return build_environments(
+        tasks,
+        base_work_dir=work_dir,
+        name=name,
+        toolset=Toolset(
+            pool=create_tools(),
+            common=taskgroup_common_tools or {},
+        ),
+    )
 
 
 if __name__ == "__main__":
@@ -242,8 +225,8 @@ if __name__ == "__main__":
     for env_id, env in environments.items():
         logger.info(f"- {env_id}")
         logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_from_tasks:
-            logger.info(f"  Depends on: {env.current_task.input_from_tasks}")
+        if env.current_task.input_map:
+            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
 
     # --- Run Server ---
     logger.info(f"Running server on {args.host}:{args.port}")

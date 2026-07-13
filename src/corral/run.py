@@ -161,8 +161,8 @@ def unreachable_trial_result(
     exhausted its iteration budget without a valid answer), not a harness error.
     So the task is scored 0 (counts as a pass@k failure: the workflow never
     reached this step) but records **0 iterations / 0 tokens and no
-    ``error_message``** — it must not distort the iteration or error-rate
-    metrics. The explicit ``unreachable`` / ``missing_dependency`` markers let
+    `error_message`** — it must not distort the iteration or error-rate
+    metrics. The explicit `unreachable` / `missing_dependency` markers let
     analysis tell "chain broke upstream" from "agent tried and failed".
     """
     return TaskTrialResult(
@@ -327,9 +327,9 @@ def run_chained_trials(
 ) -> None:
     """Run trials in lockstep across all tasks.
 
-    ``task_ids`` must already be in topological order (the runner enforces this)
+    `task_ids` must already be in topological order (the runner enforces this)
     so a task's dependencies are always resolved by the time it runs. When
-    ``graph`` is provided, a task whose upstream chain broke this round is
+    `graph` is provided, a task whose upstream chain broke this round is
     recorded as *unreachable* without invoking the agent; this cascades for free
     to its own dependents, giving "reached step N of M" semantics.
     """
@@ -668,14 +668,14 @@ class CorralRunner:
         """Run benchmark from previously saved conversation traces.
 
         Instead of building prompts from scratch, each task is initialised
-        from the trace provided in ``traces``.  A deep-copy of the prototype
-        agent (``self.agent``) is created per task with its
-        ``_initial_messages`` set to the corresponding trace so the agent
+        from the trace provided in `traces`.  A deep-copy of the prototype
+        agent (`self.agent`) is created per task with its
+        `_initial_messages` set to the corresponding trace so the agent
         continues from that conversation state.
 
         Args:
             traces: Mapping of task_id to the conversation trace (list of
-                ``LiteLLMMessage``) to replay from.
+                `LiteLLMMessage`) to replay from.
             trials_per_task: Number of trials to run per task.
             k_values: k values for pass@k metrics.
             verbose: Whether to enable verbose logging.
@@ -736,7 +736,7 @@ class CorralRunner:
         run_name: str | None = None,
         extra_wandb_config: dict[str, Any] | None = None,
     ) -> BenchmarkResult:
-        """Shared benchmark execution logic used by ``bench`` and ``bench_from_traces``.
+        """Shared benchmark execution logic used by `bench` and `bench_from_traces`.
 
         This method handles setup, logging, trial orchestration (independent or
         chained), result aggregation, checkpointing, and report generation.
@@ -744,7 +744,7 @@ class CorralRunner:
         Args:
             task_ids: List of task IDs to benchmark.
             trial_executor: Callable that runs a single trial given
-                ``(task_id, trial_index)`` and returns a ``TaskTrialResult``.
+                `(task_id, trial_index)` and returns a `TaskTrialResult`.
             trials_per_task: Number of trials to run per task.
             k_values: k values for pass@k metrics.
             verbose: Whether to enable verbose logging.

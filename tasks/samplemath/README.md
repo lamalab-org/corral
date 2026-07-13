@@ -17,15 +17,7 @@ If you prefer not to activate the environment, use `uv run` to prefix the comman
 
 ## Run The Server
 
-Start the standalone sample math benchmark from this directory:
-
-```bash
-cd tasks/samplemath
-source .venv/bin/activate
-python samplemath/env.py
-```
-
-To run the task-group benchmark using JSON task definitions:
+Run the task-group benchmark using JSON task definitions from this directory:
 
 ```bash
 cd tasks/samplemath
@@ -55,6 +47,5 @@ curl http://localhost:8000/tasks/
 
 ## Notes
 
-- The standalone server exposes a small set of built-in arithmetic tasks for quick smoke tests.
 - Available tools include arithmetic helpers, number conversion, and unit conversion.
 - The JSON-backed task-group mode is the better reference if you want to understand chained tasks and task dependencies in a minimal environment.

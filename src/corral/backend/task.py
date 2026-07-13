@@ -15,7 +15,7 @@ class InputRef:
     """Reference to the output of another task.
 
     `key` selects which output field the downstream task receives and supports
-    dotted paths into structured outputs (e.g. ``"answer.smiles"``).
+    dotted paths into structured outputs (e.g. `"answer.smiles"`).
     """
 
     task_id: str
@@ -35,7 +35,7 @@ class TaskDefinition:
     by subclassing the environment:
 
     - `prompt_fn(env)` overrides the default task prompt.
-    - `setup_fn(env)` runs per trial (``configure_additional_apps``) for
+    - `setup_fn(env)` runs per trial (`configure_additional_apps`) for
       hardware/IO setup or to populate hidden tool arguments.
     - `scoring_fn(answer)` scores the (resolved) submitted answer.
     - `resolve_answer` controls whether the submitted answer is path-resolved
@@ -69,10 +69,10 @@ class TaskDefinition:
 def with_fixed_inputs(
     scoring_fn: Callable[..., float], **fixed: Any
 ) -> Callable[[Any], float]:
-    """Adapt a scoring function to the single-argument form ``score(answer)``.
+    """Adapt a scoring function to the single-argument form `score(answer)`.
 
-    Extra keyword arguments (e.g. ``ground_truth`` or ``target``) are bound up
-    front so the environment can always call ``scoring_fn(answer)``. The
+    Extra keyword arguments (e.g. `ground_truth` or `target`) are bound up
+    front so the environment can always call `scoring_fn(answer)`. The
     original function's name/docstring are preserved so documentation
     generation still reports the underlying scorer.
     """
@@ -98,7 +98,7 @@ def assert_dependencies_selected(
 
     A run must be *dependency-closed*: every dependency of every selected task
     is also selected. Otherwise a task could never have its inputs satisfied,
-    which previously surfaced as ``NOT YET AVAILABLE`` text inside a prompt.
+    which previously surfaced as `NOT YET AVAILABLE` text inside a prompt.
     Raising here turns that into a clear, up-front error instead.
     """
     selected = set(task_ids)
@@ -117,9 +117,9 @@ def assert_dependencies_selected(
 def order_selected(task_ids: list[str], graph: Mapping[str, list[str]]) -> list[str]:
     """Topologically order the selected ids, honouring only intra-selection edges.
 
-    Operates on a plain ``{task_id: [deps]}`` adjacency dict (the form the
-    runner receives over HTTP), so it does not need ``TaskDefinition``s. Edges
-    pointing outside the selection are ignored. Raises ``ValueError`` on cycles.
+    Operates on a plain `{task_id: [deps]}` adjacency dict (the form the
+    runner receives over HTTP), so it does not need `TaskDefinition`s. Edges
+    pointing outside the selection are ignored. Raises `ValueError` on cycles.
     """
     selected = set(task_ids)
     temporary: set[str] = set()
@@ -155,7 +155,7 @@ def connected_components(tasks: Mapping[str, TaskDefinition]) -> list[list[str]]
 
     A "group" of chained tasks is exactly a connected component; tasks with no
     edges form singleton components (today's "single task"). The framework
-    derives this instead of the author declaring a ``group_id``.
+    derives this instead of the author declaring a `group_id`.
     """
     parent = {task_id: task_id for task_id in tasks}
 

@@ -47,30 +47,30 @@ def default_file_tools(workspace: str) -> dict[str, Tool]:
 class Toolset:
     """A single description of "the tools for this benchmark."
 
-    Collapses the old ``available_tools`` / ``common_tools`` / ``file_tools`` /
-    ``file_tool_factory`` quartet into one value object. Every tool falls on two
+    Collapses the old `available_tools` / `common_tools` / `file_tools` /
+    `file_tool_factory` quartet into one value object. Every tool falls on two
     axes: *when* it can be built (statically, or bound per-trial to a workspace
     path) and *how* it is selected (by name from the pool, or for every task).
-    The environment owns resolution; callers pass one ``Toolset``.
+    The environment owns resolution; callers pass one `Toolset`.
     """
 
-    # Named pool: a task selects from this via ``task.tools``.
+    # Named pool: a task selects from this via `task.tools`.
     pool: dict[str, Tool] = field(default_factory=dict)
-    # Tools every task receives regardless of its ``tools`` list.
+    # Tools every task receives regardless of its `tools` list.
     common: dict[str, Tool] = field(default_factory=dict)
-    # Per-trial, workspace-bound tools. ``None`` => no workspace tools
-    # (replaces ``file_tools=False``); a custom callable replaces the old
-    # ``file_tool_factory``; the default reproduces today's file tools.
+    # Per-trial, workspace-bound tools. `None` => no workspace tools
+    # (replaces `file_tools=False`); a custom callable replaces the old
+    # `file_tool_factory`; the default reproduces today's file tools.
     workspace_factory: Callable[[str], dict[str, Tool]] | None = default_file_tools
-    # Opt-in: an empty ``task.tools`` means "the whole pool" (wetlab semantics).
+    # Opt-in: an empty `task.tools` means "the whole pool" (wetlab semantics).
     select_all_when_unspecified: bool = False
 
     def resolve(self, task: TaskDefinition, workspace: str | None) -> dict[str, Tool]:
-        """Resolve the concrete tools for ``task`` in ``workspace``.
+        """Resolve the concrete tools for `task` in `workspace`.
 
         Named tools are picked from the pool (or the whole pool when
-        ``select_all_when_unspecified`` and ``task.tools`` is empty), minus any
-        ``task.excluded_tools``; ``common`` tools are always added; and
+        `select_all_when_unspecified` and `task.tools` is empty), minus any
+        `task.excluded_tools`; `common` tools are always added; and
         workspace-bound tools are appended when a workspace exists.
         """
         excluded = set(getattr(task, "excluded_tools", ()) or ())
@@ -255,7 +255,7 @@ class Environment:
         An output is *always* stored — including on the no-submission and
         scoring-error paths — so the run store never has holes for a task that
         ran. Dependent tasks then either consume a real output or are skipped by
-        the runner's broken-chain short-circuit; ``resolve_inputs`` never raises
+        the runner's broken-chain short-circuit; `resolve_inputs` never raises
         by accident.
         """
         task = self.current_task
@@ -303,7 +303,7 @@ class Environment:
         """Resolve the trial's tools — overridable seam over the toolset.
 
         Subclasses needing bespoke tool policy override this; the default
-        delegates to ``self.toolset`` (named pool + common + workspace tools).
+        delegates to `self.toolset` (named pool + common + workspace tools).
         """
         return self.toolset.resolve(self.current_task, workspace)
 
@@ -821,15 +821,15 @@ def build_environments(
         tasks: Task definitions keyed by task id.
         base_work_dir: Base directory for per-trial workspaces.
         name: Optional benchmark label used for tracing/LaTeX (replaces the old
-            ``group_id`` argument; never used to namespace task ids).
+            `group_id` argument; never used to namespace task ids).
         toolset: Single description of the benchmark's tools (named pool, common
             tools, and the per-trial workspace tool factory). The environment
             resolves each task's concrete tools from it.
         fs_manager: Optional FSManager used to create trial workspaces. This is a
-            storage backend, not a tool — kept separate from ``toolset``.
+            storage backend, not a tool — kept separate from `toolset`.
         env_cls: Environment class to instantiate (escape hatch for stateful
             subclasses such as AFM/wetlab).
-        **env_kwargs: Extra keyword arguments forwarded to ``env_cls``.
+        **env_kwargs: Extra keyword arguments forwarded to `env_cls`.
 
     Returns:
         Environments keyed by task id, ready to serve.
