@@ -37,9 +37,7 @@ def calc(
 
 class DummyEnv(Environment):
     def __init__(self, task_id: str, base_work_dir: str = "", fs_manager=None):
-        super().__init__(
-            task_id, _DUMMY_TASK, base_work_dir, fs_manager=fs_manager
-        )
+        super().__init__(task_id, _DUMMY_TASK, base_work_dir, fs_manager=fs_manager)
 
     def get_task_prompt(self) -> str | list[dict]:
         return "dummy prompt"
