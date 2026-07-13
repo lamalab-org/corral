@@ -6,7 +6,7 @@ from loguru import logger
 from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
 from corral.agents.prompt_utils import create_prompt
-from corral.agents.schema import Action, Thought
+from corral.agents.schema import SURRENDER_SENTINEL, Action, Thought
 from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 from corral.router.routes import CorralRouter
 
@@ -193,7 +193,7 @@ class ReActAgent(BaseAgent):
                 logger.info(
                     f"Agent surrendering from task {task_id}. Reason: {surrender_match[1].strip()}"
                 )
-                return "SURRENDER"
+                return SURRENDER_SENTINEL
 
             # Check for final answer (XML format)
             final_answer_match = re.search(

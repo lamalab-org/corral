@@ -10,6 +10,7 @@ from promptstore import PromptStore
 
 from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
+from corral.agents.schema import SURRENDER_SENTINEL, AgentRunResult
 from corral.agents.utils import (
     LiteLLMMessage,
     LLMResponse,
@@ -83,7 +84,14 @@ class BaseAgent(ABC):
         self.api_endpoint = api_endpoint
         self.temperature = temperature
         self.messages: list = []
-        self.token_usage: dict = {}  # Track token usage per LLM call
+        # `token_usage` holds the *most recent* LLM call's usage. It doubles as
+        # the current context size for the context-budget message and Terminus-2
+        # compaction, so it must stay per-call and not accumulate.
+        self.token_usage: dict = {}
+        # `cumulative_token_usage` sums usage across every LLM call in the run,
+        # so `get_total_token_usage` reflects the whole conversation rather than
+        # only the last completion.
+        self.cumulative_token_usage: dict = {}
         self.hooks = hooks or AgentHooks()
         self._current_iteration = 0  # Track current iteration for hooks
         self._initial_messages: list[LiteLLMMessage] | None = None
@@ -134,29 +142,37 @@ class BaseAgent(ABC):
         """Construct an agent pre-loaded with a previous conversation trace.
 
         This classmethod creates a new agent instance whose message history is
-        initialised from ``trace``.  When the agent's ``run()`` method is
+        initialised from `trace`.  When the agent's `run()` method is
         called it will use these messages instead of building a fresh prompt,
         allowing benchmarks to be replayed from saved traces.
 
         Args:
-            trace: A list of ``LiteLLMMessage`` dicts representing the
+            trace: A list of `LiteLLMMessage` dicts representing the
                 conversation history from a previous run.
             **init_kwargs: All remaining keyword arguments are forwarded to
-                the class ``__init__``.
+                the class `__init__`.
 
         Returns:
-            A new agent instance with ``_initial_messages`` set to the
+            A new agent instance with `_initial_messages` set to the
             provided trace.
         """
         agent = cls(**init_kwargs)
         agent._initial_messages = list(trace)
         return agent
 
-    def get_llm_response(self, tools: list[dict[str, Any]] | None = None) -> Any:
+    def get_llm_response(
+        self, tools: list[dict[str, Any]] | None = None, **call_kwargs: Any
+    ) -> Any:
         """Get response from the LLM using LiteLLM
 
         Args:
             tools (dict[str, Any], optional): Optional tools/functions for function calling
+            **call_kwargs: Per-call keyword arguments merged over (and taking
+                precedence over) the agent-wide `self.kwargs` for this single
+                request. Use this for options that must not leak into other LLM
+                calls made by the agent (e.g. passing `response_format` for a
+                structured-output turn without forcing the final-answer extractor
+                to use the same schema).
 
         Returns:
             Any: The LLMResponse wrapper containing the message and metadata
@@ -164,6 +180,7 @@ class BaseAgent(ABC):
         self.messages = count_tokens_and_add(
             self.messages, self.model, self.token_usage.get("total_tokens", 0)
         )
+        merged_kwargs = {**self.kwargs, **call_kwargs}
         try:
             response = llm_call(
                 model=self.model,
@@ -172,12 +189,16 @@ class BaseAgent(ABC):
                 temperature=self.temperature,
                 api_endpoint=self.api_endpoint,
                 return_usage=True,
-                **self.kwargs,
+                **merged_kwargs,
             )
 
-            # Track token usage from metadata
+            # Track token usage from metadata. `token_usage` keeps the latest
+            # call (current context size); `cumulative_token_usage` adds each
+            # call on top of the older usage so the run total spans the whole
+            # conversation, not just the last completion.
             if response.usage:
                 self.token_usage = response.usage
+                self._accumulate_token_usage(response.usage)
 
             return response
 
@@ -203,6 +224,20 @@ class BaseAgent(ABC):
             logger.error(f"Error getting LLM response: {e}")
             raise e
 
+    @property
+    def requires_answer_extraction(self) -> bool:
+        """Whether :meth:`run_agent` runs the LiteLLM answer extractor.
+
+        Most agents return raw reasoning output from :meth:`run`, so the base
+        machinery makes a final, separate LiteLLM call to distil a clean answer.
+        Agents whose :meth:`run` already returns a final, submit-ready answer
+        (e.g. a black-box harness that extracts its own `Final Answer:`)
+        override this to `False`. That both avoids an extra, separately-billed
+        model call and guarantees the benchmark submits *exactly* the answer the
+        harness produced instead of an extractor's paraphrase of it.
+        """
+        return True
+
     @abstractmethod
     def run(
         self,
@@ -217,7 +252,7 @@ class BaseAgent(ABC):
 
         This method must be implemented by all subclasses.
 
-        If the agent was created via ``from_trace()``, ``self._initial_messages``
+        If the agent was created via `from_trace()`, `self._initial_messages`
         will contain the conversation history and should be used instead of
         building a fresh prompt.
 
@@ -244,7 +279,7 @@ class BaseAgent(ABC):
         verbose: bool = False,
         tool_verbosity: str = "brief",
         enable_surrender: bool = False,
-    ) -> tuple[str, list[dict[str, Any]], dict[str, int]]:
+    ) -> AgentRunResult:
         """Run the agent to solve a task
 
         This method is a wrapper around run to provide a consistent interface
@@ -259,10 +294,9 @@ class BaseAgent(ABC):
             enable_surrender (bool, optional): Whether to enable the surrender option, which allows the agent to give up solving a task. Defaults to False.
 
         Returns:
-            tuple[str, list[dict[str, Any]], dict[str, int]]: A tuple containing:
-                - The final answer from the agent
-                - The list of messages exchanged during the task
-                - A dictionary with total token usage information
+            AgentRunResult: A dataclass with named fields for the final
+                `answer`, the `messages` exchanged during the task, and the
+                total `token_usage` information.
         """
         self.reset_token_usage()
 
@@ -275,14 +309,17 @@ class BaseAgent(ABC):
                 enable_surrender=enable_surrender,
             )
 
-            # Check if agent decided to surrender
-            if final_answer == "GIVE UP":
+            # Check if agent decided to surrender. The sentinel is returned
+            # verbatim (without running the answer extractor) so surrender never
+            # depends on an extra model call. All agents emit `SURRENDER_SENTINEL`,
+            # which is what CorralRunner checks for before calling `surrender_task()`.
+            if final_answer == SURRENDER_SENTINEL:
                 logger.info(f"Agent surrender from task {task_id}")
-                return "GIVE UP", self.messages, self.get_total_token_usage()
+                return self._agent_run_result(final_answer)
 
             if "Error" in final_answer:
                 logger.error(f"Error in agent response: {final_answer}")
-                return final_answer, self.messages, self.get_total_token_usage()
+                return self._agent_run_result(final_answer)
 
         except BudgetExhaustedError:
             # Re-raise to stop the benchmark immediately
@@ -295,10 +332,16 @@ class BaseAgent(ABC):
                     role="user", content=f"Error running agent: {full_error}"
                 )
             )
-            return (
-                f"Error running agent: {full_error}",
-                self.messages,
-                self.get_total_token_usage(),
+            # An exception escaping `run()` is never a real model answer, so mark
+            # it as an infrastructure failure. `execute_single_trial` routes any
+            # non-submit-worthy status to the trial exception path instead of
+            # submitting the traceback string to the task scorer.
+            return AgentRunResult(
+                answer=f"Error running agent: {full_error}",
+                messages=self.messages,
+                token_usage=self.get_total_token_usage(),
+                status="agent_error",
+                error_message=full_error,
             )
         finally:
             if verbose:
@@ -312,6 +355,12 @@ class BaseAgent(ABC):
                     tools=tools,
                     tool_verbosity=tool_verbosity,
                 )
+
+        # Agents that already return a submit-ready answer bypass the extra
+        # answer-extraction model call so the benchmark measures (and submits)
+        # exactly what the agent produced.
+        if not self.requires_answer_extraction:
+            return self._agent_run_result(final_answer)
 
         message = "The task is to:\n" + self.messages[0]["content"]
         if self.messages[0]["role"] == "system":
@@ -335,21 +384,65 @@ class BaseAgent(ABC):
                 **self.kwargs,
             )
 
-            return response.content, self.messages, self.get_total_token_usage()
+            return self._agent_run_result(response.content)
 
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
-            return final_answer, self.messages, self.get_total_token_usage()
+            return self._agent_run_result(final_answer)
+
+    def _agent_run_result(self, answer: str) -> AgentRunResult:
+        """Build an :class:`AgentRunResult`, propagating a harness status.
+
+        Black-box harness agents (Codex, Claude Code, OpenHands) record a
+        structured `HarnessRunResult` on `self.harness_result` with a precise
+        terminal status. Surfacing that status (and its error/metadata) here lets
+        :func:`~corral.run.execute_single_trial` route an infrastructure failure
+        (timeout, SDK crash, MCP transport failure, budget/iteration exhaustion)
+        to the trial exception path instead of submitting the harness's error
+        string to the task scorer as if it were a model answer. Agents without a
+        `harness_result` keep the default `"success"` status, so their behaviour
+        is unchanged.
+        """
+        harness_result = getattr(self, "harness_result", None)
+        status = "success"
+        error_message: str | None = None
+        metadata: dict[str, Any] = {}
+        if harness_result is not None:
+            status = getattr(harness_result, "status", "success") or "success"
+            error_message = getattr(harness_result, "error", None)
+            metadata = dict(getattr(harness_result, "metadata", {}) or {})
+        return AgentRunResult(
+            answer=answer,
+            messages=self.messages,
+            token_usage=self.get_total_token_usage(),
+            status=status,
+            error_message=error_message,
+            metadata=metadata,
+        )
+
+    def _accumulate_token_usage(self, usage: dict[str, int]) -> None:
+        """Add one LLM call's usage on top of the running run total.
+
+        Sums `prompt_tokens`/`completion_tokens`/`total_tokens` into
+        `cumulative_token_usage` so the totals grow over the conversation
+        instead of being replaced by each call's usage.
+        """
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            self.cumulative_token_usage[key] = self.cumulative_token_usage.get(
+                key, 0
+            ) + int(usage.get(key, 0) or 0)
 
     def get_total_token_usage(self) -> dict[str, int]:
-        """Calculate total token usage across all LLM calls
+        """Calculate total token usage across all LLM calls in the run
 
         Returns:
             dict[str, int]: Dictionary with prompt_tokens, completion_tokens, and total_tokens
         """
-        total_prompt_tokens = self.token_usage.get("prompt_tokens", 0)
-        total_completion_tokens = self.token_usage.get("completion_tokens", 0)
-        total_tokens = self.token_usage.get("total_tokens", 0)
+        total_prompt_tokens = self.cumulative_token_usage.get("prompt_tokens", 0)
+        total_completion_tokens = self.cumulative_token_usage.get(
+            "completion_tokens", 0
+        )
+        total_tokens = self.cumulative_token_usage.get("total_tokens", 0)
 
         return {
             "prompt_tokens": total_prompt_tokens,
@@ -360,6 +453,7 @@ class BaseAgent(ABC):
     def reset_token_usage(self) -> None:
         """Reset token usage tracking"""
         self.token_usage = {}
+        self.cumulative_token_usage = {}
 
     def _execute_hooks(
         self,

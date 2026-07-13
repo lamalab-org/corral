@@ -9,7 +9,7 @@ from typing import Any
 
 from loguru import logger
 
-from corral.agents import BaseAgent
+from corral.agents import SURRENDER_SENTINEL, BaseAgent
 from corral.agents.hooks import AgentHooks
 from corral.agents.utils import LiteLLMMessage
 from corral.report import (
@@ -168,17 +168,20 @@ def execute_single_trial(
         status = interface.configure_additional_apps(task_id, timeout=configure_timeout)
         logger.info(f"Task {task_id} additional apps/services configured: {status}")
 
-        # Agent always returns (answer, messages, token_usage)
-        answer, messages, token_usage = agent.run_agent(
+        # Agent always returns an AgentRunResult dataclass
+        run_result = agent.run_agent(
             interface,
             task_id,
             verbose=verbose,
             tool_verbosity=tool_verbosity or "brief",
             enable_surrender=enable_surrender,
         )
+        answer = run_result.answer
+        messages = run_result.messages
+        token_usage = run_result.token_usage
 
         # Check if agent decided to surrender
-        if answer == "SURRENDER":
+        if answer == SURRENDER_SENTINEL:
             try:
                 result = interface.surrender_task(task_id)
                 result.token_usage = token_usage
@@ -200,6 +203,26 @@ def execute_single_trial(
                 )
                 result.duration = (trial_end_time - trial_start_time).total_seconds()
                 return result
+
+        # An infrastructure failure (harness timeout, SDK crash, MCP transport
+        # failure, iteration/budget exhaustion, ...) surfaces as a non-submit
+        # status with an error string for `answer`. Record it as a trial error
+        # rather than submitting the error string to the task scorer as if it
+        # were a model answer. `"success"` and `"surrender"` are the only
+        # submit-worthy statuses (surrender is already handled above).
+        if run_result.status not in {"success", "surrender"}:
+            trial_end_time = datetime.now(tz=timezone.utc)
+            result = exception_trial_result(
+                task_id=task_id,
+                trial_index=trial_index,
+                interface=interface,
+                error=RuntimeError(run_result.error_message or answer),
+                error_type=f"Agent {run_result.status}",
+                token_usage=token_usage,
+                messages=messages,
+            )
+            result.duration = (trial_end_time - trial_start_time).total_seconds()
+            return result
 
         # Submit answer
         try:
@@ -601,14 +624,14 @@ class CorralRunner:
         """Run benchmark from previously saved conversation traces.
 
         Instead of building prompts from scratch, each task is initialised
-        from the trace provided in ``traces``.  A deep-copy of the prototype
-        agent (``self.agent``) is created per task with its
-        ``_initial_messages`` set to the corresponding trace so the agent
+        from the trace provided in traces.  A deep-copy of the prototype
+        agent (self.agent) is created per task with its
+        _initial_messages set to the corresponding trace so the agent
         continues from that conversation state.
 
         Args:
             traces: Mapping of task_id to the conversation trace (list of
-                ``LiteLLMMessage``) to replay from.
+                LiteLLMMessage) to replay from.
             trials_per_task: Number of trials to run per task.
             k_values: k values for pass@k metrics.
             verbose: Whether to enable verbose logging.
@@ -669,7 +692,7 @@ class CorralRunner:
         run_name: str | None = None,
         extra_wandb_config: dict[str, Any] | None = None,
     ) -> BenchmarkResult:
-        """Shared benchmark execution logic used by ``bench`` and ``bench_from_traces``.
+        """Shared benchmark execution logic used by bench and bench_from_traces.
 
         This method handles setup, logging, trial orchestration (independent or
         chained), result aggregation, checkpointing, and report generation.
@@ -677,7 +700,7 @@ class CorralRunner:
         Args:
             task_ids: List of task IDs to benchmark.
             trial_executor: Callable that runs a single trial given
-                ``(task_id, trial_index)`` and returns a ``TaskTrialResult``.
+                (task_id, trial_index) and returns a TaskTrialResult.
             trials_per_task: Number of trials to run per task.
             k_values: k values for pass@k metrics.
             verbose: Whether to enable verbose logging.

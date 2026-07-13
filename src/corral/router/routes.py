@@ -77,6 +77,22 @@ class CorralRouter:
         response.raise_for_status()
         return response.json()
 
+    def get_mcp_tool_schema(
+        self, task_id: str, verbosity: str | None = None
+    ) -> dict[str, Any]:
+        """Get the task's tools in MCP representation plus their schema digest.
+
+        Returns a dict with tools (the MCP tools/list payload) and
+        mcp_schema_sha256 (a hash of exactly what an MCP client sees).
+        """
+        verbosity = verbosity or self.current_verbosity
+        params = {"verbosity": verbosity}
+        response = requests.get(
+            f"{self.base_url}/tasks/{task_id}/tools/mcp", params=params
+        )
+        response.raise_for_status()
+        return response.json()
+
     def get_task_guide(self, task_id: str, verbosity: str | None = None) -> str:
         """Get complete guide for task including tools with specified verbosity"""
         verbosity = verbosity or self.current_verbosity
@@ -189,8 +205,8 @@ class CorralRouter:
             env_name: Environment name (e.g., "afm", "catalyst").
             task_name: Optional custom name for the task.
             verbosity: Tool verbosity level used to filter descriptions and
-                       return sections (e.g. ``"brief"``, ``"detailed"``). Defaults
-                       to ``"detailed"`` when not provided.
+                       return sections (e.g. "brief", "detailed"). Defaults
+                       to "detailed" when not provided.
 
         Returns:
             Dictionary with 'output_path' (task .tex), 'tools_output_path' (tools .tex),
