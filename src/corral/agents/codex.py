@@ -236,7 +236,10 @@ class CodexAgent(BaseAgent):
         base_url = interface.base_url.rstrip("/")
         encoded_task_id = quote(str(task_id), safe="")
         query = urlencode({"verbosity": verbosity})
-        return f"{base_url}/tasks/{encoded_task_id}/mcp?{query}"
+        # Trailing slash on `/mcp/` avoids a 307 redirect: the endpoint is a
+        # Starlette Mount, so a bare `/mcp` bounces to `/mcp/` (an extra
+        # round-trip per call). Hit the canonical path directly.
+        return f"{base_url}/tasks/{encoded_task_id}/mcp/?{query}"
 
     def _render_config_toml(self, mcp_url: str, tool_names: list[str]) -> str:
         """Generate the isolated Codex `config.toml` for a run.

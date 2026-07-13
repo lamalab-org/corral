@@ -1,30 +1,6 @@
-"""Task-scoped MCP transport mounted inside the Corral benchmark server.
-
-This exposes each task's tools over the Model Context Protocol (Streamable
-HTTP) *in the same FastAPI application* that already serves the REST API, so
-generic MCP clients (Claude Code, Codex, OpenHands, ...) can connect directly
-to a task without a local proxy:
-
-    [mcp_servers.corral]
-    url = "http://localhost:8000/tasks/<task_id>/mcp"
-
-Design properties:
-
-* **Single source of truth for schemas.** `tools/list` is served straight
-  from :meth:`corral.backend.tool.Tool.to_mcp`, so there is no second
-  hand-written OpenAI/MCP schema conversion to keep in sync.
-* **Reuses tool execution.** `tools/call` routes through the existing
-  :meth:`Environment.call_tool`, so recording, hidden-argument merging, and
-  validation behave identically to the REST `/tools/execute` path.
-* **Task-scoped by construction.** Each task gets its own MCP server closing
-  over its own :class:`Environment`, mounted at its own URL. The task boundary
-  is structural, not a runtime filter: a server for task A can only ever see
-  task A's tools. A defensive membership check is kept as a second line of
-  defence.
-"""
-
 import contextlib
 import json
+import logging
 from collections.abc import AsyncIterator, Mapping
 from contextvars import ContextVar
 from typing import Any
@@ -65,6 +41,19 @@ def _verbosity_from_scope(scope: Scope) -> ToolVerbosity | None:
     except ValueError:
         logger.warning(f"Ignoring unknown MCP verbosity {values[0]!r}")
         return None
+
+
+def _quiet_mcp_transport_logs() -> None:
+    """Silence the low-level MCP transport's per-request INFO chatter.
+
+    The Streamable-HTTP session manager and the low-level server each emit an
+    INFO line for *every* request ("Processing request of type ...",
+    "Terminating session: ..."). For our stateless, per-request benchmark
+    episodes that is pure noise, so raise those two loggers to WARNING while
+    leaving genuine warnings and errors intact.
+    """
+    for name in ("mcp.server.streamable_http", "mcp.server.lowlevel.server"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def task_mcp_tools(env: Environment, verbosity: ToolVerbosity) -> list[MCPTool]:
@@ -171,6 +160,8 @@ def attach_task_mcp_servers(
     }
     if not managers:
         return
+
+    _quiet_mcp_transport_logs()
 
     for task_id, manager in managers.items():
 

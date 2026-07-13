@@ -169,10 +169,10 @@ def test_run_returns_final_answer_and_points_at_task_mcp(mock_interface, monkeyp
     # endpoint so the harness sees the same tool descriptions the allowlist used.
     assert options.mcp_servers["corral"] == {
         "type": "http",
-        "url": "http://test-server:8000/tasks/task-1/mcp?verbosity=brief",
+        "url": "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief",
     }
     assert agent.harness_result.metadata["mcp_url"] == (
-        "http://test-server:8000/tasks/task-1/mcp?verbosity=brief"
+        "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief"
     )
     assert agent.harness_result.metadata["tool_verbosity"] == "brief"
     # Only the corral tool is allowed; built-ins are disabled by fail-closed

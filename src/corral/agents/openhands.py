@@ -25,9 +25,16 @@ from openhands.sdk import (
     LLMConvertibleEvent,
 )
 from openhands.sdk.conversation.state import ConversationExecutionStatus
-from openhands.sdk.event import ActionEvent, MessageEvent, ObservationEvent
+from openhands.sdk.event import (
+    ActionEvent,
+    MessageEvent,
+    ObservationEvent,
+    SystemPromptEvent,
+)
 from openhands.sdk.event.conversation_error import ConversationErrorEvent
 from openhands.sdk.mcp import MCPServer
+from openhands.sdk.mcp.exceptions import MCPError
+from openhands.sdk.mcp.tool import MCP_TOOL_TIMEOUT_SECONDS
 from openhands.sdk.tool.builtins import FinishAction
 from pydantic import SecretStr
 
@@ -50,6 +57,16 @@ _INCLUDED_DEFAULT_TOOLS = ["FinishTool", "ThinkTool"]
 # the `FinishTool`/`ThinkTool` specs to tools named `finish`/`think`). Used to
 # build the expected runtime tool allowlist for the isolation self-check.
 _INCLUDED_DEFAULT_TOOL_NAMES = frozenset({"finish", "think"})
+
+# OpenHands 1.35.0 caps every MCP tool call at a fixed *executor* timeout and
+# does NOT propagate `MCPServer.timeout` into that executor — the server-level
+# timeout only bounds the HTTP transport, while `MCPToolExecutor` wraps each call
+# in its own `MCP_TOOL_TIMEOUT_SECONDS` deadline and cancels first. So a per-call
+# timeout above this cap cannot actually be honored. The value is read from the
+# installed SDK (rather than hard-coded) so the recorded provenance tracks the
+# pinned version, and `tool_timeout_s` defaults to it so the configured timeout
+# is enforceable end-to-end out of the box.
+_OPENHANDS_EXECUTOR_TIMEOUT_S = float(MCP_TOOL_TIMEOUT_SECONDS)
 
 # Pinned agent identity, forwarded as `Agent.system_prompt_kwargs["soul_content"]`
 # so the system prompt cannot silently inherit a machine-local
@@ -132,6 +149,18 @@ def _content_to_text(content: Any) -> str:
     return str(content)
 
 
+def _truncate(text: Any, limit: int = 200) -> str:
+    """Collapse whitespace and cap `text` to one readable log line.
+
+    Tool results (e.g. NMR/mass-spectra payloads) can be large JSON blobs, so
+    live progress logs must be bounded to stay legible.
+    """
+    collapsed = " ".join(str(text).split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[:limit].rstrip() + "…"
+
+
 class OpenHandsAgent(BaseAgent):
     """Agent that delegates solving a task to the OpenHands harness.
 
@@ -148,8 +177,19 @@ class OpenHandsAgent(BaseAgent):
             compatibility. Defaults to None.
         temperature (float, optional): Sampling temperature for the harness
             `LLM`. Defaults to 0.7.
-        tool_timeout_s (float, optional): Per-call timeout OpenHands applies to
-            the corral MCP server. Defaults to 600.
+        reasoning_effort (str, optional): Reasoning effort forwarded to the
+            harness `LLM` (`"low"`, `"medium"`, `"high"`, `"xhigh"`, or
+            `"none"`). If None, the OpenHands SDK default (`"high"`) applies and
+            the value is left unset on the `LLM`. Defaults to None.
+        tool_timeout_s (float, optional): MCP transport (HTTP request) timeout
+            passed to `MCPServer.timeout`. NOTE: OpenHands separately caps each
+            MCP tool *call* at a fixed executor timeout
+            (`MCP_TOOL_TIMEOUT_SECONDS`) that `MCPServer.timeout` does not
+            override, so the effective per-call ceiling is
+            `min(tool_timeout_s, executor cap)`. Values above the cap are honored
+            only at the transport layer and log a warning. Defaults to the
+            executor cap (300) so the configured timeout is enforceable
+            end-to-end.
         wall_clock_timeout_s (float, optional): Hard wall-clock deadline for the
             whole harness run. On expiry the run is interrupted (cancelling the
             in-flight `arun()` task, mid-LLM-call safe) and the run is reported
@@ -176,7 +216,9 @@ class OpenHandsAgent(BaseAgent):
         api_key: str | None = None,
         api_endpoint: str | None = None,
         temperature: float = 0.7,
-        tool_timeout_s: float = 600.0,
+        reasoning_effort: Literal["low", "medium", "high", "xhigh", "none"]
+        | None = None,
+        tool_timeout_s: float = _OPENHANDS_EXECUTOR_TIMEOUT_S,
         wall_clock_timeout_s: float | None = None,
         interrupt_grace_s: float = 30.0,
         system_prompt: str | None = None,
@@ -211,7 +253,22 @@ class OpenHandsAgent(BaseAgent):
         # Model string handed to the OpenHands harness itself.
         self.harness_model = model
         self.api_key = api_key
+        self.reasoning_effort = reasoning_effort
         self.tool_timeout_s = tool_timeout_s
+        # OpenHands caps each MCP call at its own executor timeout regardless of
+        # `MCPServer.timeout`, so the value actually enforced per call is the
+        # smaller of the two. Warn loudly when a caller asks for more than the
+        # SDK can honor rather than silently under-delivering.
+        if tool_timeout_s > _OPENHANDS_EXECUTOR_TIMEOUT_S:
+            logger.warning(
+                f"tool_timeout_s={tool_timeout_s}s exceeds the OpenHands MCP "
+                f"executor cap of {_OPENHANDS_EXECUTOR_TIMEOUT_S}s; OpenHands does "
+                "not propagate MCPServer.timeout into its executor, so each MCP "
+                f"call will still be cancelled after {_OPENHANDS_EXECUTOR_TIMEOUT_S}s."
+            )
+        self.effective_tool_timeout_s = min(
+            tool_timeout_s, _OPENHANDS_EXECUTOR_TIMEOUT_S
+        )
         self.wall_clock_timeout_s = wall_clock_timeout_s
         self.interrupt_grace_s = interrupt_grace_s
         self._available_tools = None
@@ -277,7 +334,10 @@ class OpenHandsAgent(BaseAgent):
         base_url = interface.base_url.rstrip("/")
         encoded_task_id = quote(str(task_id), safe="")
         query = urlencode({"verbosity": verbosity})
-        return f"{base_url}/tasks/{encoded_task_id}/mcp?{query}"
+        # Trailing slash on `/mcp/` avoids a 307 redirect: the endpoint is a
+        # Starlette Mount, so a bare `/mcp` bounces to `/mcp/` (an extra
+        # round-trip per call). Hit the canonical path directly.
+        return f"{base_url}/tasks/{encoded_task_id}/mcp/?{query}"
 
     def _make_llm(self) -> Any:
         """Build the OpenHands `LLM` handed to the harness agent."""
@@ -288,6 +348,10 @@ class OpenHandsAgent(BaseAgent):
             "model": self.harness_model,
             "temperature": self.temperature,
         }
+        # Only set `reasoning_effort` when explicitly requested; leaving it unset
+        # defers to the SDK default rather than silently pinning a value.
+        if self.reasoning_effort is not None:
+            llm_kwargs["reasoning_effort"] = self.reasoning_effort
         if key:
             llm_kwargs["api_key"] = SecretStr(key)
         if self.api_endpoint:
@@ -313,7 +377,16 @@ class OpenHandsAgent(BaseAgent):
             },
             # Augment (do not replace) the OpenHands harness system prompt.
             agent_context=AgentContext(
-                system_message_suffix=self._system_message_suffix(enable_surrender)
+                # Pin the datetime off: `AgentContext.current_datetime` otherwise
+                # defaults to the machine's local wall-clock time and is injected
+                # into the system prompt, so two runs of the same task would see
+                # different prompts depending on the minute/timezone. `None`
+                # omits the datetime block, keeping the benchmarked prompt
+                # reproducible across machines. The actual rendered system prompt
+                # is additionally hashed from the `SystemPromptEvent` (see
+                # `_record_system_prompt_event`) to prove reproducibility.
+                current_datetime=None,
+                system_message_suffix=self._system_message_suffix(enable_surrender),
             ),
             # Pin the agent identity so the system prompt cannot inherit a
             # machine-local `~/.openhands/SOUL.md` (which OpenHands would
@@ -343,11 +416,20 @@ class OpenHandsAgent(BaseAgent):
         )
         return {
             "model_requested": self.harness_model,
+            # None records that the SDK default reasoning effort was left in place.
+            "reasoning_effort": self.reasoning_effort,
             "openhands_sdk_version": _sdk_version(),
             "python_version": platform.python_version(),
             "max_iterations_configured": self.max_iterations,
             "wall_clock_timeout_s": self.wall_clock_timeout_s,
-            "tool_timeout_s": self.tool_timeout_s,
+            # Timeout provenance, named for what OpenHands actually enforces. The
+            # configured value is the MCP transport (HTTP request) timeout passed
+            # to `MCPServer.timeout`; per-call execution is separately capped by
+            # the SDK's fixed executor timeout, which `MCPServer.timeout` does not
+            # override. The effective per-call ceiling is the smaller of the two.
+            "configured_mcp_timeout_s": self.tool_timeout_s,
+            "openhands_executor_timeout_s": _OPENHANDS_EXECUTOR_TIMEOUT_S,
+            "effective_tool_timeout_s": self.effective_tool_timeout_s,
             "mcp_url": mcp_url,
             "tool_verbosity": verbosity,
             "included_default_tools": list(_INCLUDED_DEFAULT_TOOLS),
@@ -562,6 +644,9 @@ class OpenHandsAgent(BaseAgent):
 
         def on_event(event: Any) -> None:
             events.append(event)
+            # Live progress first, so the run is observable even if transcript
+            # recording of an event fails.
+            self._log_event(event)
             try:
                 self._record_event(event)
             except Exception:
@@ -579,8 +664,9 @@ class OpenHandsAgent(BaseAgent):
             max_iteration_per_run=self.max_iterations,
             stuck_detection=True,
             persistence_dir=None,
-            # Silence the default console visualizer: benchmark runs are
-            # non-interactive and its output is noise.
+            # Silence the SDK's full-screen console visualizer; `on_event`
+            # emits concise per-event progress lines via `_log_event` instead,
+            # so the run stays observable without the TUI noise.
             visualizer=None,
         )
 
@@ -603,6 +689,49 @@ class OpenHandsAgent(BaseAgent):
 
         return self._extract_finish_message(events)
 
+    # -- Live progress logging -------------------------------------------
+
+    def _log_event(self, event: Any) -> None:
+        """Emit one concise loguru line for a meaningful OpenHands event.
+
+        The SDK's own console visualizer is disabled (`visualizer=None`) to
+        avoid its full-screen TUI, which otherwise leaves the harness a black
+        box while it runs — the only visible signal is the server-side MCP log.
+        This surfaces the key beats (the agent's reasoning, each tool call and
+        its result, run errors, and the final answer) as single lines so a run
+        is observable. Best-effort: live logging must never break a run.
+        """
+        try:
+            if isinstance(event, ActionEvent):
+                action = getattr(event, "action", None)
+                if isinstance(action, FinishAction):
+                    message = (getattr(action, "message", "") or "").strip()
+                    logger.info(f"[openhands] finish → {_truncate(message)}")
+                    return
+                thought = _content_to_text(getattr(event, "thought", "") or "").strip()
+                if thought:
+                    logger.info(f"[openhands] thinking: {_truncate(thought)}")
+                tool_name = getattr(event, "tool_name", "") or "?"
+                args = _truncate(json.dumps(self._action_arguments(event), default=str))
+                logger.info(f"[openhands] call {tool_name}({args})")
+            elif isinstance(event, ObservationEvent):
+                observation = getattr(event, "observation", None)
+                is_error = bool(getattr(event, "error", None)) or bool(
+                    getattr(observation, "is_error", False)
+                )
+                tool_name = getattr(event, "tool_name", "") or "tool"
+                text = _truncate(self._event_text(event))
+                if is_error:
+                    logger.warning(f"[openhands] {tool_name} error: {text}")
+                else:
+                    logger.info(f"[openhands] result {tool_name}: {text}")
+            elif isinstance(event, ConversationErrorEvent):
+                code = getattr(event, "code", None)
+                detail = getattr(event, "detail", None) or ""
+                logger.warning(f"[openhands] run error {code}: {_truncate(detail)}")
+        except Exception:
+            logger.debug("Could not log OpenHands event", exc_info=True)
+
     # -- Transcript recording --------------------------------------------
 
     def _record_event(self, event: Any) -> None:
@@ -617,6 +746,8 @@ class OpenHandsAgent(BaseAgent):
             self._record_action_event(event)
         elif isinstance(event, ObservationEvent):
             self._record_observation_event(event)
+        elif isinstance(event, SystemPromptEvent):
+            self._record_system_prompt_event(event)
         elif isinstance(event, MessageEvent):
             self._record_message_event(event)
         elif isinstance(event, LLMConvertibleEvent):
@@ -654,10 +785,40 @@ class OpenHandsAgent(BaseAgent):
             }
         )
 
+    def _record_system_prompt_event(self, event: Any) -> None:
+        """Record the actual rendered system prompt for reproducibility.
+
+        Hashing the *rendered* prompt OpenHands built — not just the pinned
+        soul/suffix — captures every input the model saw, so two runs of the
+        same task are demonstrably identical. `dropped`/`dynamic_context` is
+        flagged so any machine-dependent block (e.g. runtime info or secrets)
+        that would break reproducibility is visible in the run provenance rather
+        than silently changing the prompt.
+        """
+        prompt = getattr(event, "system_prompt", None)
+        text = getattr(prompt, "text", None)
+        if isinstance(text, str):
+            self._run_meta["system_prompt_sha256"] = hashlib.sha256(
+                text.encode("utf-8")
+            ).hexdigest()
+            self._run_meta["system_prompt_has_dynamic_context"] = (
+                getattr(event, "dynamic_context", None) is not None
+            )
+        # Keep the system prompt itself in the transcript as well.
+        self._record_generic_event(event)
+
     def _record_observation_event(self, event: Any) -> None:
-        """Record an MCP tool result as a `tool`-role transcript message."""
+        """Record an MCP tool result as a `tool`-role transcript message.
+
+        The error flag reads the observation's `is_error` field: OpenHands
+        `Observation`s (including `MCPToolObservation`, built with
+        `is_error=result.isError`) expose the failure flag there, not as an
+        `error` attribute, so a failed MCP call is recorded — and counted — as an
+        error instead of silently passing as success.
+        """
+        observation = getattr(event, "observation", None)
         is_error = bool(getattr(event, "error", None)) or bool(
-            getattr(getattr(event, "observation", None), "error", None)
+            getattr(observation, "is_error", False)
         )
         if is_error:
             self._run_meta["tool_errors"] = self._run_meta.get("tool_errors", 0) + 1
@@ -692,16 +853,34 @@ class OpenHandsAgent(BaseAgent):
 
     @staticmethod
     def _action_arguments(event: Any) -> Any:
-        """Best-effort structured arguments of a tool-call action."""
+        """Best-effort structured arguments of a tool-call action.
+
+        Dynamically-created MCP tools wrap the caller's arguments in
+        `MCPToolAction.data`, so return that verbatim: the transcript then
+        records the arguments actually sent to the tool (e.g. `{"query": ...}`)
+        rather than the SDK action envelope (`{"kind": ..., "data": {...}}`).
+        Non-MCP actions fall back to a `model_dump()` with the non-argument
+        envelope keys (`kind`/`summary`) stripped.
+        """
         action = getattr(event, "action", None)
         if action is None:
             return {}
+        data = getattr(action, "data", None)
+        if isinstance(data, dict):
+            return data
         dump = getattr(action, "model_dump", None)
         if callable(dump):
             try:
-                return dump(mode="json")
+                payload = dump(mode="json")
             except Exception:
                 return {"repr": str(action)}
+            if isinstance(payload, dict):
+                return {
+                    key: value
+                    for key, value in payload.items()
+                    if key not in {"kind", "summary"}
+                }
+            return payload
         return {"repr": str(action)}
 
     @staticmethod
@@ -865,11 +1044,14 @@ class OpenHandsAgent(BaseAgent):
     def _classify_error_code(code: Any, detail: Any) -> HarnessStatus:
         """Map a `ConversationErrorEvent` code onto a terminal status.
 
-        MCP transport/connection failures are `tool_failure` (the corral
-        endpoint was unreachable); everything else is a generic `sdk_failure`.
+        MCP/tool-execution failures are `tool_failure` (the corral endpoint
+        failed); everything else is a generic `sdk_failure`. Deliberately
+        narrower than "any mention of `connect`": a bare connection-error string
+        also matches unrelated LLM-provider or proxy failures, which are not the
+        corral tool surface and should stay `sdk_failure`.
         """
         text = f"{code} {detail}".casefold()
-        if "mcp" in text or "connect" in text:
+        if "mcp" in text or "tool execution" in text:
             return "tool_failure"
         return "sdk_failure"
 
@@ -921,13 +1103,17 @@ class OpenHandsAgent(BaseAgent):
     def _classify_error(exc: BaseException) -> HarnessStatus:
         """Classify an unexpected harness exception into a terminal status.
 
-        MCP transport/connection failures are reported as `tool_failure` (the
-        corral endpoint was unreachable), everything else as a generic
-        `sdk_failure`, so a broken benchmark run is not scored as a wrong model
-        answer.
+        MCP/tool failures are reported as `tool_failure` (the corral endpoint
+        failed), everything else as a generic `sdk_failure`, so a broken
+        benchmark run is not scored as a wrong model answer. Typed `MCPError`s
+        are authoritative; the string fallback is deliberately restricted to
+        MCP/tool-execution evidence, because a bare "connect" also matches
+        unrelated LLM-provider or proxy connection errors.
         """
+        if isinstance(exc, MCPError):
+            return "tool_failure"
         text = f"{type(exc).__name__}: {exc}".casefold()
-        if "mcp" in text or "connect" in text:
+        if "mcp" in text or "tool execution" in text:
             return "tool_failure"
         return "sdk_failure"
 

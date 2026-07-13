@@ -6,6 +6,8 @@ Conversation / event shapes. The real ``ConversationExecutionStatus`` enum is
 reused because it is a stable, dependency-free enum.
 """
 
+import hashlib
+import json
 import threading
 import time
 
@@ -38,19 +40,58 @@ class FakeMessageEvent(FakeLLMConvertibleEvent):
         return self._message
 
 
+class FakeTextContent:
+    """Mirrors an openhands `TextContent` (carries `.text`)."""
+
+    def __init__(self, text):
+        self.text = text
+
+
+class FakeSystemPromptEvent(FakeLLMConvertibleEvent):
+    """Mirrors `SystemPromptEvent`: rendered `system_prompt` + optional
+    per-conversation `dynamic_context`."""
+
+    def __init__(self, text, dynamic_context=None):
+        self.system_prompt = FakeTextContent(text)
+        self.dynamic_context = (
+            FakeTextContent(dynamic_context) if dynamic_context is not None else None
+        )
+
+    def to_llm_message(self):
+        return FakeMessage("system", self.system_prompt.text)
+
+
 class FakeFinishAction:
     def __init__(self, message):
         self.message = message
 
 
 class FakeToolAction:
-    """A non-finish action carrying structured tool arguments."""
+    """A non-finish, non-MCP action whose args come from `model_dump()`.
+
+    Mirrors a builtin/tool action envelope: `model_dump()` includes non-argument
+    keys (`kind`) that the recorder must strip.
+    """
 
     def __init__(self, **arguments):
         self._arguments = arguments
 
     def model_dump(self, mode=None):
-        return dict(self._arguments)
+        return {"kind": "tool_action", **self._arguments}
+
+
+class FakeMCPToolAction:
+    """Mirrors openhands `MCPToolAction`: the tool arguments live in `.data`.
+
+    The SDK envelope (`model_dump()`) wraps them under `kind`/`data`; the
+    recorder must surface the flat `.data` args, not the envelope.
+    """
+
+    def __init__(self, **data):
+        self.data = dict(data)
+
+    def model_dump(self, mode=None):
+        return {"kind": "mcp_tool_action", "data": dict(self.data)}
 
 
 class FakeActionEvent(FakeLLMConvertibleEvent):
@@ -65,15 +106,25 @@ class FakeActionEvent(FakeLLMConvertibleEvent):
         return FakeMessage("assistant", message)
 
 
+class FakeObservation:
+    """Mirrors an openhands `Observation`: failure is `is_error`, not `error`."""
+
+    def __init__(self, text, is_error=False):
+        self.text = text
+        self.is_error = is_error
+
+
 class FakeObservationEvent(FakeLLMConvertibleEvent):
-    def __init__(self, tool_name, tool_call_id, result, error=None):
+    def __init__(self, tool_name, tool_call_id, result, is_error=False):
         self.tool_name = tool_name
         self.tool_call_id = tool_call_id
-        self.observation = result
-        self.error = error
+        # Real `ObservationEvent` carries an `Observation` (with `is_error`) and
+        # has no event-level `error` attribute; mirror that here so the fake
+        # cannot silently agree with an implementation that reads `.error`.
+        self.observation = FakeObservation(result, is_error=is_error)
 
     def to_llm_message(self):
-        return FakeMessage("tool", self.observation)
+        return FakeMessage("tool", self.observation.text)
 
 
 class FakeConversationErrorEvent:
@@ -224,6 +275,7 @@ def _install_fake_sdk(
     )
     monkeypatch.setattr(openhands_module, "ActionEvent", FakeActionEvent)
     monkeypatch.setattr(openhands_module, "ObservationEvent", FakeObservationEvent)
+    monkeypatch.setattr(openhands_module, "SystemPromptEvent", FakeSystemPromptEvent)
     monkeypatch.setattr(openhands_module, "FinishAction", FakeFinishAction)
     monkeypatch.setattr(
         openhands_module, "ConversationErrorEvent", FakeConversationErrorEvent
@@ -271,7 +323,9 @@ def test_run_returns_final_answer_and_reuses_task_mcp(mock_interface, monkeypatc
     # The harness connects to the environment server's task-scoped MCP endpoint,
     # with the REST tool verbosity (default "brief") forwarded as a query param.
     meta = agent.harness_result.metadata
-    assert meta["mcp_url"] == "http://test-server:8000/tasks/task-1/mcp?verbosity=brief"
+    assert (
+        meta["mcp_url"] == "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief"
+    )
     assert meta["tool_verbosity"] == "brief"
     assert meta["mcp_tools_enabled"] == ["test_tool"]
     assert meta["model_requested"] == "openai/gpt-5.6"
@@ -314,7 +368,7 @@ def test_tool_isolation(mock_interface, monkeypatch):
     assert "corral" in agent_kwargs["mcp_config"]
     server = agent_kwargs["mcp_config"]["corral"]
     assert server.kwargs["url"] == (
-        "http://test-server:8000/tasks/task-1/mcp?verbosity=brief"
+        "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief"
     )
     assert server.kwargs["transport"] == "streamable-http"
 
@@ -358,14 +412,155 @@ def test_structured_tool_call_is_recorded(mock_interface, monkeypatch):
     assert '"query": "q"' in fn["arguments"]
     assert tool_calls[0]["tool_calls"][0]["id"] == "call_1"
 
+    # A non-MCP action's args come from model_dump(), with the envelope key
+    # ("kind") stripped so only the real arguments are recorded.
+    assert "kind" not in json.loads(fn["arguments"])
+
     tool_results = [m for m in agent.messages if m.get("role") == "tool"]
     assert len(tool_results) == 1
     assert tool_results[0]["name"] == "test_tool"
     assert tool_results[0]["tool_call_id"] == "call_1"
     assert tool_results[0]["content"] == "tool output"
+    # A successful observation is not flagged or counted as an error.
+    assert tool_results[0]["is_error"] is False
+    assert agent.harness_result.metadata.get("tool_errors", 0) == 0
 
     # The model's reasoning is preserved as a thinking message.
     assert any(m.get("name") == "thinking" for m in agent.messages)
+
+
+def test_mcp_tool_action_records_flat_data_not_envelope(mock_interface, monkeypatch):
+    """MCP tool args are recorded from `MCPToolAction.data`, not the envelope."""
+    events = [
+        FakeActionEvent(
+            FakeMCPToolAction(query="benzene", n=3),
+            tool_name="test_tool",
+            tool_call_id="call_1",
+        ),
+        _finish("42"),
+    ]
+    _install_fake_sdk(monkeypatch, events)
+
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
+    agent.run(mock_interface, "task-1")
+
+    fn = next(m for m in agent.messages if m.get("tool_calls"))
+    args = json.loads(fn["tool_calls"][0]["function"]["arguments"])
+    # The flat call arguments, not the SDK `{"kind": ..., "data": {...}}` wrapper.
+    assert args == {"query": "benzene", "n": 3}
+
+
+def test_tool_error_observation_is_recorded_and_counted(mock_interface, monkeypatch):
+    """A failed MCP observation (`is_error=True`) is flagged and counted."""
+    events = [
+        FakeActionEvent(
+            FakeMCPToolAction(query="q"),
+            tool_name="test_tool",
+            tool_call_id="c1",
+        ),
+        FakeObservationEvent("test_tool", "c1", "tool blew up", is_error=True),
+        _finish("42"),
+    ]
+    _install_fake_sdk(monkeypatch, events)
+
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
+    agent.run(mock_interface, "task-1")
+
+    tool_result = next(m for m in agent.messages if m.get("role") == "tool")
+    assert tool_result["is_error"] is True
+    assert agent.harness_result.metadata["tool_errors"] == 1
+
+
+def test_system_prompt_is_hashed_for_reproducibility(mock_interface, monkeypatch):
+    """The rendered system prompt is hashed into the run provenance."""
+    events = [FakeSystemPromptEvent("SYSTEM PROMPT TEXT"), _finish("42")]
+    _install_fake_sdk(monkeypatch, events)
+
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
+    agent.run(mock_interface, "task-1")
+
+    meta = agent.harness_result.metadata
+    assert (
+        meta["system_prompt_sha256"]
+        == hashlib.sha256(b"SYSTEM PROMPT TEXT").hexdigest()
+    )
+    assert meta["system_prompt_has_dynamic_context"] is False
+
+
+def test_agent_context_datetime_is_pinned_off(mock_interface, monkeypatch):
+    """The system-prompt datetime is pinned off so the prompt is reproducible."""
+    captured = _install_fake_sdk(monkeypatch, [_finish("ok")])
+
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
+    agent.run(mock_interface, "task-1")
+
+    ctx = captured["agent_kwargs"]["agent_context"]
+    assert ctx.kwargs["current_datetime"] is None
+
+
+def test_default_tool_timeout_matches_executor_cap():
+    """The default per-call timeout is enforceable (== the SDK executor cap)."""
+    cap = openhands_module._OPENHANDS_EXECUTOR_TIMEOUT_S
+    agent = OpenHandsAgent(model="openai/gpt-5.6")
+    assert agent.tool_timeout_s == cap
+    assert agent.effective_tool_timeout_s == cap
+
+
+def test_reasoning_effort_forwarded_to_llm(mock_interface, monkeypatch):
+    """An explicit reasoning_effort reaches the harness LLM and the metadata."""
+    captured = _install_fake_sdk(monkeypatch, [_finish("42")])
+
+    agent = OpenHandsAgent(
+        model="openai/gpt-5.6", api_key="test-key", reasoning_effort="low"
+    )
+    agent.run(mock_interface, "task-1")
+
+    assert captured["llm"].kwargs["reasoning_effort"] == "low"
+    assert agent.harness_result.metadata["reasoning_effort"] == "low"
+
+
+def test_reasoning_effort_unset_defers_to_sdk_default(mock_interface, monkeypatch):
+    """When unset, reasoning_effort is not pinned on the LLM (SDK default applies)."""
+    captured = _install_fake_sdk(monkeypatch, [_finish("42")])
+
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
+    agent.run(mock_interface, "task-1")
+
+    assert "reasoning_effort" not in captured["llm"].kwargs
+    assert agent.harness_result.metadata["reasoning_effort"] is None
+
+
+def test_timeout_metadata_records_executor_cap(mock_interface, monkeypatch):
+    """A configured timeout above the executor cap is recorded honestly."""
+    _install_fake_sdk(monkeypatch, [_finish("42")])
+    cap = openhands_module._OPENHANDS_EXECUTOR_TIMEOUT_S
+
+    agent = OpenHandsAgent(
+        model="openai/gpt-5.6", api_key="test-key", tool_timeout_s=cap + 300.0
+    )
+    agent.run(mock_interface, "task-1")
+
+    meta = agent.harness_result.metadata
+    assert meta["configured_mcp_timeout_s"] == cap + 300.0
+    assert meta["openhands_executor_timeout_s"] == cap
+    # The value OpenHands can actually enforce per call is capped at the executor.
+    assert meta["effective_tool_timeout_s"] == cap
+    assert agent.effective_tool_timeout_s == cap
+
+
+def test_generic_connection_error_is_sdk_failure(mock_interface, monkeypatch):
+    """A non-MCP connection error is an infra failure, not a tool failure."""
+    _install_fake_sdk(
+        monkeypatch,
+        [],
+        run_error=RuntimeError("Connection refused by the LLM provider proxy"),
+    )
+
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
+    answer = agent.run(mock_interface, "task-1")
+    assert "Error solving the task" in answer
+    # "connection" is no longer enough to look like a corral MCP/tool failure.
+    assert agent.harness_result.status == "sdk_failure"
 
 
 def test_mcp_url_encodes_task_id_and_verbosity(mock_interface, monkeypatch):
@@ -375,7 +570,7 @@ def test_mcp_url_encodes_task_id_and_verbosity(mock_interface, monkeypatch):
     agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
     url = agent._mcp_url(mock_interface, "task/with space", "full")
     assert url == (
-        "http://test-server:8000/tasks/task%2Fwith%20space/mcp?verbosity=full"
+        "http://test-server:8000/tasks/task%2Fwith%20space/mcp/?verbosity=full"
     )
 
 

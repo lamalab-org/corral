@@ -227,7 +227,7 @@ def test_run_returns_final_answer_and_reuses_task_mcp(mock_interface, monkeypatc
     # with the REST tool verbosity (default "brief") forwarded as a query param.
     meta = agent.harness_result.metadata
     assert meta["mcp_url"] == (
-        "http://test-server:8000/tasks/task-1/mcp?verbosity=brief"
+        "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief"
     )
     assert meta["tool_verbosity"] == "brief"
     assert meta["mcp_tools_enabled"] == ["test_tool"]

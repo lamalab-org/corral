@@ -400,7 +400,10 @@ class ClaudeCodeAgent(BaseAgent):
         # Mirror the REST tool verbosity (defaults to the router's own "brief").
         verbosity = getattr(interface, "current_verbosity", None) or "brief"
         query = urlencode({"verbosity": verbosity})
-        url = f"{base_url}/tasks/{encoded_task_id}/mcp?{query}"
+        # Trailing slash on `/mcp/` avoids a 307 redirect: the endpoint is a
+        # Starlette Mount, so a bare `/mcp` bounces to `/mcp/` (an extra
+        # round-trip per call). Hit the canonical path directly.
+        url = f"{base_url}/tasks/{encoded_task_id}/mcp/?{query}"
         return url, {"type": "http", "url": url}, verbosity
 
     def _build_options(

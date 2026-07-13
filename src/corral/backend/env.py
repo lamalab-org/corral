@@ -250,17 +250,19 @@ class Environment(ABC):
         with the hidden arguments taking precedence.
         This is needed for cases in which the arguments are fixed and should not be modified and/or provided by the agent."""
 
-        logger.debug(f"🔍 BEFORE preprocessing - {tool_name}:")
-        logger.debug(f"   Arguments: {arguments}")
-        for key, value in arguments.items():
-            logger.debug(f"   {key}: {type(value)} = {value!r}")
-
-        arguments = self._preprocess_arguments(tool_name, arguments)
-
-        logger.debug(f"✅ AFTER preprocessing - {tool_name}:")
-        logger.debug(f"   Arguments: {arguments}")
-        for key, value in arguments.items():
-            logger.debug(f"   {key}: {type(value)} = {value!r}")
+        # Preprocess (e.g. JSON-decode stringified args), then emit a single
+        # concise debug line per call. Only spell out the before/after when
+        # preprocessing actually changed something — the previous per-argument
+        # dump logged 4-6 lines for every call (4 lines of nothing for no-arg
+        # tools), which drowned the logs.
+        preprocessed = self._preprocess_arguments(tool_name, arguments)
+        if preprocessed != arguments:
+            logger.debug(
+                f"call_tool {tool_name}: preprocessed {arguments!r} -> {preprocessed!r}"
+            )
+        else:
+            logger.debug(f"call_tool {tool_name}({arguments!r})")
+        arguments = preprocessed
 
         # Store original arguments for the ToolCall record (after preprocessing)
         original_arguments = arguments.copy()
