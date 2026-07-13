@@ -1,8 +1,8 @@
 """Tests for the OpenHandsAgent (OpenHands harness wrapper).
 
 The OpenHands SDK is an optional dependency; these tests patch the SDK names on
-the ``corral.agents.openhands`` module with fakes that mimic the SDK's Agent /
-Conversation / event shapes. The real ``ConversationExecutionStatus`` enum is
+the `corral.agents.openhands` module with fakes that mimic the SDK's Agent /
+Conversation / event shapes. The real `ConversationExecutionStatus` enum is
 reused because it is a stable, dependency-free enum.
 """
 

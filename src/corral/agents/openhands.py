@@ -15,27 +15,36 @@ from urllib.parse import quote, urlencode
 
 from loguru import logger
 
-# The OpenHands SDK is declared as the `corral[openhands]` extra and assumed
-# installed.
-from openhands.sdk import (
-    LLM,
-    Agent,
-    AgentContext,
-    Conversation,
-    LLMConvertibleEvent,
-)
-from openhands.sdk.conversation.state import ConversationExecutionStatus
-from openhands.sdk.event import (
-    ActionEvent,
-    MessageEvent,
-    ObservationEvent,
-    SystemPromptEvent,
-)
-from openhands.sdk.event.conversation_error import ConversationErrorEvent
-from openhands.sdk.mcp import MCPServer
-from openhands.sdk.mcp.exceptions import MCPError
-from openhands.sdk.mcp.tool import MCP_TOOL_TIMEOUT_SECONDS
-from openhands.sdk.tool.builtins import FinishAction
+# The OpenHands SDK ships as the optional `corral[openhands]` extra, which is
+# gated to Python >= 3.12. Wrap the import so an environment without the extra
+# gets an actionable install hint instead of a bare ModuleNotFoundError deep in
+# the import chain.
+try:
+    from openhands.sdk import (
+        LLM,
+        Agent,
+        AgentContext,
+        Conversation,
+        LLMConvertibleEvent,
+    )
+    from openhands.sdk.conversation.state import ConversationExecutionStatus
+    from openhands.sdk.event import (
+        ActionEvent,
+        MessageEvent,
+        ObservationEvent,
+        SystemPromptEvent,
+    )
+    from openhands.sdk.event.conversation_error import ConversationErrorEvent
+    from openhands.sdk.mcp import MCPServer
+    from openhands.sdk.mcp.exceptions import MCPError
+    from openhands.sdk.mcp.tool import MCP_TOOL_TIMEOUT_SECONDS
+    from openhands.sdk.tool.builtins import FinishAction
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
+    raise ModuleNotFoundError(
+        "OpenHandsAgent requires the OpenHands SDK, which ships as the optional "
+        "'openhands' extra (Python >= 3.12 only). Install it with "
+        "`pip install 'corral[openhands]'`."
+    ) from exc
 from pydantic import SecretStr
 
 from corral.agents.base_agent import BaseAgent

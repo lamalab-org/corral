@@ -50,7 +50,7 @@ def _resp(**kwargs) -> str:
 
 
 def test_extract_json_object_strips_code_fence():
-    text = '`json\n{"analysis": "a", "plan": "b", "final_answer": "42"}\n`'
+    text = '```json\n{"analysis": "a", "plan": "b", "final_answer": "42"}\n```'
     obj = _extract_json_object(text)
     assert obj["final_answer"] == "42"
 
@@ -59,7 +59,7 @@ def test_strip_code_fence_consumes_whole_triple_fence():
     # A standard three-backtick fence must be removed entirely; regressing to a
     # two-backtick match leaves a stray trailing backtick that breaks the strict
     # model_validate_json fast path in _parse.
-    text = '`json\n{"analysis": "a", "plan": "b", "final_answer": "42"}\n`'
+    text = '```json\n{"analysis": "a", "plan": "b", "final_answer": "42"}\n```'
     stripped = _strip_code_fence(text)
     assert not stripped.endswith("`")
     # The result must be valid JSON on its own (strict parse succeeds).

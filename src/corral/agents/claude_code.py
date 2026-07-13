@@ -13,17 +13,26 @@ from importlib.metadata import version as _pkg_version
 from typing import Any, Literal
 from urllib.parse import quote, urlencode
 
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    ResultMessage,
-    TextBlock,
-    ThinkingBlock,
-    ToolResultBlock,
-    ToolUseBlock,
-    UserMessage,
-)
+# The Claude Agent SDK ships as the optional `corral[claude]` extra. Wrap the
+# import so an environment without the extra gets an actionable install hint
+# instead of a bare ModuleNotFoundError deep in the import chain.
+try:
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ClaudeAgentOptions,
+        ClaudeSDKClient,
+        ResultMessage,
+        TextBlock,
+        ThinkingBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+        UserMessage,
+    )
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
+    raise ModuleNotFoundError(
+        "ClaudeCodeAgent requires the Claude Agent SDK, which ships as the "
+        "optional 'claude' extra. Install it with `pip install 'corral[claude]'`."
+    ) from exc
 from loguru import logger
 
 from corral.agents.base_agent import BaseAgent

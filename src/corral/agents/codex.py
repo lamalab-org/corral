@@ -15,8 +15,16 @@ from urllib.parse import quote, urlencode
 
 from loguru import logger
 
-# The Codex SDK is declared as the `corral[codex]` extra and assumed installed.
-from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
+# The Codex SDK ships as the optional `corral[codex]` extra. Wrap the import so
+# an environment without the extra gets an actionable install hint instead of a
+# bare ModuleNotFoundError deep in the import chain.
+try:
+    from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
+    raise ModuleNotFoundError(
+        "CodexAgent requires the OpenAI Codex SDK, which ships as the optional "
+        "'codex' extra. Install it with `pip install 'corral[codex]'`."
+    ) from exc
 
 from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint

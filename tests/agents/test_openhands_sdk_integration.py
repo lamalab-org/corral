@@ -1,14 +1,14 @@
 """Real-SDK boundary tests for :class:`OpenHandsAgent`.
 
-Unlike ``test_openhands.py`` — which fakes the SDK to exercise the agent's
-control flow — these tests construct *real* ``openhands-sdk`` objects. They pin
+Unlike `test_openhands.py` — which fakes the SDK to exercise the agent's
+control flow — these tests construct *real* `openhands-sdk` objects. They pin
 down the exact SDK shapes the transcript/serialization code depends on
-(``Observation.is_error``, ``MCPToolAction.data``, ``AgentContext`` datetime,
+(`Observation.is_error`, `MCPToolAction.data`, `AgentContext` datetime,
 the MCP executor timeout), which fakes cannot catch: a fake that mirrors a buggy
 implementation would agree with it. If the SDK moves these, these tests fail
 instead of the trace silently going wrong.
 
-The ``openhands`` extra is gated to Python >= 3.12, so the whole module is
+The `openhands` extra is gated to Python >= 3.12, so the whole module is
 skipped when the SDK is not importable.
 """
 
