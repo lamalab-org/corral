@@ -27,6 +27,18 @@ from corral.backend.task import InputRef, TaskDefinition
 TEMP_DIR = Path(os.environ["CORRAL_WORK_DIR"])
 
 
+def _use_files_workspace(env, work_dir):
+    """Point a freshly built environment's trial workspace at ``work_dir``.
+
+    On construction an ``Environment`` creates an isolated ``{task}_trial_N``
+    subdirectory and scopes submitted-answer/path resolution to it. These tests
+    stage their files directly in the provided work dir, so we redirect the
+    trial workspace there so scoring resolves against the staged files.
+    """
+    env.current_work_dir = str(work_dir)
+    return env
+
+
 class TestTaskEnvironment:
     """Integration tests for TaskEnvironment."""
 
@@ -195,6 +207,10 @@ loop_
         """Create mock tools for testing."""
         mock_tool = Mock()
         mock_tool.name = "mock_tool"
+        # Not a background-capable tool: a bare Mock would otherwise auto-vivify
+        # this attribute to a truthy Mock, so the environment would try to build
+        # a `start_<tool>` background variant and fail on the Mock's metadata.
+        mock_tool.background_capable = False
         return {"mock_tool": mock_tool}
 
     def test_environment_creation(
@@ -299,6 +315,8 @@ loop_
                 shared_task_runs=shared_task_runs,
             )
 
+            _use_files_workspace(env, temp_workspace)
+
             # Simulate submitting a valid CIF file path
             env.state.submitted_answer = "bulk_structure.cif"
             score = env.score()
@@ -323,6 +341,8 @@ loop_
                 shared_task_runs=shared_task_runs,
             )
 
+            _use_files_workspace(env, temp_workspace)
+
             # Submit with markdown formatting
             env.state.submitted_answer = "The structure file is `bulk_structure.cif`."
             score = env.score()
@@ -345,6 +365,8 @@ loop_
                 group_tasks=sample_tasks,
                 shared_task_runs=shared_task_runs,
             )
+
+            _use_files_workspace(env, temp_workspace)
 
             # Submit with quotes
             env.state.submitted_answer = 'The JSON file is "valid_data.json".'
@@ -426,6 +448,8 @@ loop_
                 group_tasks=sample_tasks,
                 shared_task_runs=shared_task_runs,
             )
+
+            _use_files_workspace(env, temp_workspace)
 
             # Submit filename that exists in subdirectory
             env.state.submitted_answer = "output.cif"
@@ -666,12 +690,14 @@ loop_
 
             # Complete task 1
             env1 = environments["retrieve_structure"]
+            _use_files_workspace(env1, temp_workspace)
             env1.state.submitted_answer = "test_structure.cif"
             score1 = env1.score()
             assert score1 == 1.0
 
             # Complete task 2 (depends on task 1)
             env2 = environments["enumerate_slabs"]
+            _use_files_workspace(env2, temp_workspace)
             prompt2 = env2.get_task_prompt()
             assert "(from retrieve_structure):" in prompt2
 
@@ -681,6 +707,7 @@ loop_
 
             # Complete independent task 3
             env3 = environments["validate_json"]
+            _use_files_workspace(env3, temp_workspace)
             env3.state.submitted_answer = "test_data.json"
             score3 = env3.score()
             assert score3 == 1.0
@@ -841,6 +868,7 @@ loop_
             toolset=Toolset(pool={}),
             base_work_dir=str(scoring_environment),
         )
+        _use_files_workspace(env, scoring_environment)
 
         # Test relative path
         env.state.submitted_answer = "structure.cif"
@@ -869,6 +897,7 @@ loop_
             toolset=Toolset(pool={}),
             base_work_dir=str(scoring_environment),
         )
+        _use_files_workspace(env, scoring_environment)
 
         # Submit filename that exists in subdirectory
         env.state.submitted_answer = "output.cif"
@@ -897,6 +926,7 @@ loop_
             toolset=Toolset(pool={}),
             base_work_dir=str(scoring_environment),
         )
+        _use_files_workspace(env, scoring_environment)
 
         # Test various formatted answers
         test_cases = [
@@ -985,6 +1015,7 @@ loop_
             group_tasks=tasks,
             shared_task_runs=shared_task_runs,
         )
+        _use_files_workspace(env1, scoring_environment)
 
         env1.state.submitted_answer = "structure.cif"
         score1 = env1.score()
