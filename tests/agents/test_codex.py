@@ -5,6 +5,8 @@ tests patch the SDK names on the corral.agents.codex module with fakes that
 mimic the SDK's Codex / Thread / turn-stream shapes.
 """
 
+from pathlib import Path
+
 import pytest
 
 from corral.agents import CodexAgent
@@ -15,11 +17,6 @@ from corral.agents import codex as codex_module
 def _require_api_key(monkeypatch):
     """CodexAgent.run now requires OPENAI_API_KEY (isolated CODEX_HOME)."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-
-# ---------------------------------------------------------------------------
-# Fakes mirroring the openai_codex SDK surface the agent depends on.
-# ---------------------------------------------------------------------------
 
 
 class FakeApprovalMode:
@@ -182,11 +179,6 @@ def _completed_event(status="completed", error=None):
     )
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
 def test_model_split_between_harness_and_extractor():
     agent = CodexAgent(model="gpt-5.4")
     assert agent.harness_model == "gpt-5.4"
@@ -339,6 +331,32 @@ def test_default_instructions_omit_final_answer_marker():
     assert "reply with your final answer and nothing else" in instructions
 
 
+def test_relative_path_directive_only_with_file_tools():
+    """The relative-path directive appears iff a file-writing tool is available.
+
+    Codex advertises a throwaway temp dir as its sandbox cwd; an absolute path
+    built from it points outside the scored trial workspace and is lost. The
+    directive steers the model to relative paths, but only when a task actually
+    exposes a file-writing tool, so other tasks' prompts are unchanged.
+    """
+    agent = CodexAgent(model="gpt-5.4")
+
+    no_tools = agent._developer_instructions(enable_surrender=False, tool_names=[])
+    assert "RELATIVE path" not in no_tools
+
+    non_file = agent._developer_instructions(
+        enable_surrender=False, tool_names=["get_structure_from_mp_text"]
+    )
+    assert "RELATIVE path" not in non_file
+
+    with_write = agent._developer_instructions(
+        enable_surrender=False, tool_names=["write_file", "read_file"]
+    )
+    assert "RELATIVE path" in with_write
+    # The directive must not swallow the final-answer instruction that follows it.
+    assert "reply with your final answer and nothing else" in with_write
+
+
 def test_extraction_on_strips_marker_and_avoids_duplicate(mock_interface, monkeypatch):
     """When extraction is enabled, the `Final Answer:` marker is stripped once."""
     # Enable extraction so the deterministic marker-stripping path runs.
@@ -362,3 +380,79 @@ def test_extraction_on_strips_marker_and_avoids_duplicate(mock_interface, monkey
     contents = [m.get("content") for m in agent.messages]
     assert "Final Answer: 42" in contents
     assert contents.count("42") == 1
+
+
+def test_cwd_uses_trial_workspace_and_survives(mock_interface, monkeypatch, tmp_path):
+    """Codex's cwd is the trial's own workspace, which is not deleted on exit.
+
+    Regression test: when the model writes its answer file to the sandbox cwd,
+    that directory must be the *scored* trial workspace (so the file survives to
+    scoring), not a throwaway temp dir this agent removes when the turn ends.
+    """
+    workspace = tmp_path / "trial-ws"
+    workspace.mkdir()
+    mock_interface.trial_workspace = str(workspace)
+
+    events = [_agent_message_event("slab_with_co2.cif"), _completed_event()]
+    captured = _install_fake_sdk(monkeypatch, events)
+
+    agent = CodexAgent(model="gpt-5.4")
+    answer = agent.run(mock_interface, "task-1")
+
+    assert answer == "slab_with_co2.cif"
+    # Codex is pointed at the trial workspace both for the config and the thread.
+    assert captured["config"].cwd == str(workspace)
+    assert captured["thread_start_kwargs"]["cwd"] == str(workspace)
+    # The scored workspace is left intact (only CODEX_HOME is a throwaway dir).
+    assert workspace.is_dir()
+    assert agent.harness_result.metadata["codex_cwd"] == str(workspace)
+    assert agent.harness_result.metadata["codex_cwd_is_trial_workspace"] is True
+
+
+def test_cwd_is_absolute_when_server_reports_a_relative_workspace(
+    mock_interface, monkeypatch, tmp_path
+):
+    """A relative trial workspace is resolved before being handed to Codex.
+
+    `cwd` is interpreted by the `codex app-server` subprocess, whose working
+    directory need not match this process's, so a relative path would point the
+    sandbox at a different directory than the one the scorer reads.
+    """
+    workspace = tmp_path / "trial-ws"
+    workspace.mkdir()
+    # The server reports the workspace relative to the runner's cwd.
+    monkeypatch.chdir(tmp_path)
+    mock_interface.trial_workspace = "trial-ws"
+
+    events = [_agent_message_event("42"), _completed_event()]
+    captured = _install_fake_sdk(monkeypatch, events)
+
+    agent = CodexAgent(model="gpt-5.4")
+    agent.run(mock_interface, "task-1")
+
+    cwd = captured["config"].cwd
+    assert Path(cwd).is_absolute()
+    assert Path(cwd) == workspace.resolve()
+    assert captured["thread_start_kwargs"]["cwd"] == cwd
+    assert agent.harness_result.metadata["codex_cwd_is_trial_workspace"] is True
+
+
+def test_cwd_falls_back_to_temp_dir_and_is_cleaned_up(mock_interface, monkeypatch):
+    """Without a local trial workspace, cwd is an isolated temp dir, then removed."""
+    # The default mock interface exposes no `trial_workspace`.
+    assert getattr(mock_interface, "trial_workspace", None) is None
+
+    events = [_agent_message_event("42"), _completed_event()]
+    captured = _install_fake_sdk(monkeypatch, events)
+
+    agent = CodexAgent(model="gpt-5.4")
+    answer = agent.run(mock_interface, "task-1")
+
+    assert answer == "42"
+    cwd = captured["config"].cwd
+    # A throwaway per-run workspace under the corral-codex temp root.
+    assert "corral-codex-" in cwd
+    assert cwd.endswith("workspace")
+    assert agent.harness_result.metadata["codex_cwd_is_trial_workspace"] is False
+    # The temp root (and thus the temp workspace) is cleaned up on exit.
+    assert not Path(cwd).exists()

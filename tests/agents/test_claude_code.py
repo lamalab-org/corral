@@ -1,6 +1,9 @@
 """Tests for the ClaudeCodeAgent (Claude Code harness wrapper)."""
 
 import asyncio
+import threading
+
+import anyio
 
 from corral.agents import ClaudeCodeAgent
 from corral.agents import claude_code as claude_code_module
@@ -63,9 +66,13 @@ def _default_mcp_status(options):
     against the REST allowlist, so by default we echo the allow-listed tools back
     as bare (un-namespaced) names — the shape the real tools/list returns.
     """
+    # Only the corral HTTP server's tools appear in its `tools/list`; the
+    # in-process `mcp__submit__submit_answer` channel is a separate server and is
+    # not reported here (mirroring the real MCP status the preflight inspects).
     exposed = [
         {"name": name.removeprefix("mcp__corral__")}
         for name in getattr(options, "allowed_tools", [])
+        if name.startswith("mcp__corral__")
     ]
     return {"mcpServers": [{"name": "corral", "status": "connected", "tools": exposed}]}
 
@@ -175,9 +182,15 @@ def test_run_returns_final_answer_and_points_at_task_mcp(mock_interface, monkeyp
         "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief"
     )
     assert agent.harness_result.metadata["tool_verbosity"] == "brief"
-    # Only the corral tool is allowed; built-ins are disabled by fail-closed
-    # config (empty base tool set + dontAsk), not a stale denylist.
-    assert options.allowed_tools == ["mcp__corral__test_tool"]
+    # The corral task tool plus the agent-only submit channel are allowed;
+    # built-ins are disabled by fail-closed config (empty base tool set +
+    # dontAsk), not a stale denylist.
+    assert options.allowed_tools == [
+        "mcp__corral__test_tool",
+        "mcp__submit__submit_answer",
+    ]
+    # The in-process submit server is registered only by this agent.
+    assert "submit" in options.mcp_servers
     assert options.tools == []
     assert options.permission_mode == "dontAsk"
     assert options.max_turns == 7
@@ -403,6 +416,7 @@ def test_mcp_pending_state_is_retried(mock_interface, monkeypatch):
         exposed = [
             {"name": name.removeprefix("mcp__corral__")}
             for name in options.allowed_tools
+            if name.startswith("mcp__corral__")
         ]
         return {"mcpServers": [{"name": "corral", "status": state, "tools": exposed}]}
 
@@ -430,38 +444,58 @@ def test_tool_errors_are_counted(mock_interface, monkeypatch):
     assert agent.harness_result.metadata["tool_errors"] == 1
 
 
-def test_default_system_prompt_omits_final_answer_marker():
-    """With extraction off (default) the harness is not asked for the marker."""
+def test_default_system_prompt_instructs_submit_tool():
+    """The harness is told to return its answer via the `submit_answer` tool."""
     agent = ClaudeCodeAgent()
     assert agent.requires_answer_extraction is False
     append = agent._build_system_prompt(enable_surrender=False)["append"]
+    # No brittle chat-scraping convention: the answer comes back through the tool.
     assert "Final Answer:" not in append
-    assert "reply with your final answer and nothing else" in append
+    assert "submit_answer" in append
 
 
-def test_extraction_on_strips_marker_and_avoids_duplicate(mock_interface, monkeypatch):
-    """When extraction is enabled, the `Final Answer:` marker is stripped once."""
-    monkeypatch.setattr(
-        ClaudeCodeAgent, "requires_answer_extraction", property(lambda self: True)
-    )
+def test_submit_tool_answer_is_preferred_over_trailing_message(
+    mock_interface, monkeypatch
+):
+    """A tool-submitted answer wins over the harness's chatty final message.
+
+    This is the whole point of the submit channel: whatever prose the model
+    wraps around the answer in its trailing message, the run submits exactly the
+    value it passed to `submit_answer`.
+    """
+    holder: dict = {}
 
     async def factory(options, captured):
+        # Simulate the harness having called `submit_answer(answer="clean.cif")`
+        # while it worked; its final chat message is decoy prose to be ignored.
+        holder["agent"]._submitted_answer = "clean.cif"
         return [
-            FakeAssistantMessage([FakeTextBlock("Final Answer: 42")]),
-            FakeResultMessage("Final Answer: 42"),
+            FakeResultMessage("Perfect! I saved everything to **clean.cif** (2.0 A)."),
         ]
 
     _install_fake_sdk(monkeypatch, factory)
     agent = ClaudeCodeAgent()
-    # The harness is asked for the marker precisely because extraction will strip it.
-    append = agent._build_system_prompt(enable_surrender=False)["append"]
-    assert "Final Answer:" in append
+    holder["agent"] = agent
 
     answer = agent.run(mock_interface, "task-1")
+    assert answer == "clean.cif"
+    assert agent.harness_result.status == "success"
+    assert agent.harness_result.metadata["submit_tool_used"] is True
+
+
+def test_falls_back_to_trailing_message_when_submit_tool_unused(
+    mock_interface, monkeypatch
+):
+    """If the harness never calls the tool, the final message is still used."""
+
+    async def factory(options, captured):
+        return [FakeResultMessage("42")]
+
+    _install_fake_sdk(monkeypatch, factory)
+    agent = ClaudeCodeAgent()
+    answer = agent.run(mock_interface, "task-1")
     assert answer == "42"
-    contents = [m.get("content") for m in agent.messages]
-    assert "Final Answer: 42" in contents
-    assert contents.count("42") == 1
+    assert agent.harness_result.metadata["submit_tool_used"] is False
 
 
 def test_data_uri_converted_to_sdk_image_block():
@@ -476,3 +510,131 @@ def test_data_uri_converted_to_sdk_image_block():
         "type": "image",
         "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
     }
+
+
+def test_arun_matches_run_and_records_thread(mock_interface, monkeypatch):
+    """`arun` drives the SDK natively on the caller's loop, no worker thread."""
+    seen: dict = {}
+
+    async def factory(options, captured):
+        seen["thread"] = threading.current_thread().name
+        return [
+            FakeAssistantMessage(
+                [FakeToolUseBlock("tu-1", "test_tool", {"query": "x"})]
+            ),
+            FakeUserMessage([FakeToolResultBlock("tu-1", "ok", is_error=False)]),
+            FakeResultMessage("42", usage={"input_tokens": 5, "output_tokens": 2}),
+        ]
+
+    _install_fake_sdk(monkeypatch, factory)
+    agent = ClaudeCodeAgent(model="claude-opus-4-8")
+
+    answer = anyio.run(agent.arun, mock_interface, "task-1")
+
+    assert answer == "42"
+    assert agent.harness_result.status == "success"
+    # The SDK coroutine ran on the event-loop thread — no nested worker thread.
+    assert seen["thread"] == threading.current_thread().name
+
+
+def test_run_and_arun_produce_the_same_answer(mock_interface, monkeypatch):
+    async def factory(options, captured):
+        return [FakeResultMessage("same-answer")]
+
+    _install_fake_sdk(monkeypatch, factory)
+
+    sync_answer = ClaudeCodeAgent().run(mock_interface, "task-1")
+    async_answer = anyio.run(ClaudeCodeAgent().arun, mock_interface, "task-1")
+
+    assert sync_answer == async_answer == "same-answer"
+
+
+def test_arun_surrender_returns_give_up(mock_interface, monkeypatch):
+    async def factory(options, captured):
+        return [FakeResultMessage("SURRENDER")]
+
+    _install_fake_sdk(monkeypatch, factory)
+    agent = ClaudeCodeAgent()
+
+    async def _go():
+        return await agent.arun(mock_interface, "task-1", enable_surrender=True)
+
+    assert anyio.run(_go) == "SURRENDER"
+
+
+def test_arun_wall_clock_timeout_is_reported(mock_interface, monkeypatch):
+    """The async path enforces the deadline with a structured cancel scope."""
+
+    async def factory(options, captured):
+        await asyncio.sleep(1.0)
+        return [FakeResultMessage("too late")]
+
+    _install_fake_sdk(monkeypatch, factory)
+    agent = ClaudeCodeAgent(wall_clock_timeout_s=0.05)
+
+    answer = anyio.run(agent.arun, mock_interface, "task-1")
+
+    assert answer.startswith("Error solving the task")
+    assert agent.harness_result.status == "timeout"
+
+
+class AsyncMockInterface:
+    """A minimal async benchmark interface (mirrors the AsyncCorralRouter shape).
+
+    Its prompt/tools methods are `async def` and record the thread they ran on,
+    so a test can prove the native `arun` awaited them on the event-loop thread
+    rather than offloading to a worker thread.
+    """
+
+    def __init__(self):
+        self.base_url = "http://test-server:8000"
+        self.current_verbosity = "brief"
+        self.calls: list[tuple[str, str]] = []
+
+    async def get_available_tools_for_task(self, task_id, verbosity=None):
+        self.calls.append(("tools", threading.current_thread().name))
+        return {
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "test_tool",
+                        "description": "A test tool",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                        },
+                    },
+                }
+            ]
+        }
+
+    async def get_task_prompt(self, task_id):
+        self.calls.append(("prompt", threading.current_thread().name))
+        return "Test task prompt"
+
+    def mcp_url(self, task_id, verbosity=None):
+        verbosity = verbosity or self.current_verbosity or "brief"
+        return f"{self.base_url}/tasks/{task_id}/mcp/?verbosity={verbosity}"
+
+
+def test_arun_fetches_prompt_and_tools_through_async_router(monkeypatch):
+    """The native `arun` awaits prompts/tools directly on the async interface."""
+
+    async def factory(options, captured):
+        return [FakeResultMessage("42", usage={"input_tokens": 5, "output_tokens": 2})]
+
+    _install_fake_sdk(monkeypatch, factory)
+    interface = AsyncMockInterface()
+    agent = ClaudeCodeAgent(model="claude-opus-4-8")
+    main_thread = threading.current_thread().name
+
+    answer = anyio.run(agent.arun, interface, "task-1")
+
+    assert answer == "42"
+    assert agent.harness_result.status == "success"
+    # Both HTTP fetches were awaited on the loop thread — no worker-thread
+    # offload — proving the native path fetches through the async router.
+    assert ("tools", main_thread) in interface.calls
+    assert ("prompt", main_thread) in interface.calls

@@ -2,6 +2,7 @@
 
 import json
 from typing import Any
+from urllib.parse import quote, urlencode
 
 import pytest
 
@@ -74,6 +75,15 @@ class MockBenchmarkInterface:
     def get_mcp_tool_schema(self, task_id: str, verbosity: str | None = None) -> dict:
         self._record_call("get_mcp_tool_schema", task_id)
         return {"tools": [], "mcp_schema_sha256": "deadbeef"}
+
+    def mcp_url(self, task_id: str, verbosity: str | None = None) -> str:
+        # Mirror CorralRouter.mcp_url so agents get the task-scoped MCP URL.
+        self._record_call("mcp_url", task_id)
+        verbosity = verbosity or self.current_verbosity or "brief"
+        base_url = self.base_url.rstrip("/")
+        encoded_task_id = quote(str(task_id), safe="")
+        query = urlencode({"verbosity": verbosity})
+        return f"{base_url}/tasks/{encoded_task_id}/mcp/?{query}"
 
     def execute_tool(
         self, task_id: str, tool_name: str, arguments: dict

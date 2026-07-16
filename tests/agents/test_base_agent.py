@@ -380,6 +380,84 @@ def test_run_agent_with_exception(
     assert isinstance(usage, dict)
 
 
+def test_run_agent_cancelled_skips_transcript_save(
+    monkeypatch, concrete_agent, mock_benchmark_interface
+):
+    """A cancelled (Ctrl+C) run must NOT persist its partial transcript.
+
+    Cancellation surfaces as a `BaseException` (`KeyboardInterrupt` /
+    `CancelledError`), which is *not* caught by the `except Exception` arm.
+    The transcript save in the `finally` block must be skipped so an abandoned
+    trial is not recorded, and the cancellation must propagate untouched.
+    """
+
+    def mock_run_cancelled(
+        interface,
+        task_id,
+        task_prompt=None,
+        examples=None,
+        enable_surrender=False,
+    ):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(concrete_agent, "run", mock_run_cancelled)
+
+    save_calls = []
+    monkeypatch.setattr(
+        "corral.agents.base_agent.save_agent_messages",
+        lambda *args, **kwargs: save_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        concrete_agent.run_agent(
+            interface=mock_benchmark_interface,
+            task_id="test_task",
+            verbose=True,
+        )
+
+    assert save_calls == []
+
+
+def test_arun_agent_cancelled_skips_transcript_save(
+    monkeypatch, concrete_agent, mock_benchmark_interface
+):
+    """Async twin of :func:`test_run_agent_cancelled_skips_transcript_save`.
+
+    A cancelled concurrent trial (the `abench` path) must likewise skip the
+    verbose transcript save and re-raise the cancellation.
+    """
+    import anyio
+
+    async def mock_arun_cancelled(
+        interface,
+        task_id,
+        task_prompt=None,
+        examples=None,
+        enable_surrender=False,
+    ):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(concrete_agent, "arun", mock_arun_cancelled)
+
+    save_calls = []
+    monkeypatch.setattr(
+        "corral.agents.base_agent.save_agent_messages",
+        lambda *args, **kwargs: save_calls.append((args, kwargs)),
+    )
+
+    async def _go():
+        return await concrete_agent.arun_agent(
+            interface=mock_benchmark_interface,
+            task_id="test_task",
+            verbose=True,
+        )
+
+    with pytest.raises(KeyboardInterrupt):
+        anyio.run(_go)
+
+    assert save_calls == []
+
+
 def test_run_agent_verbose_mode(monkeypatch, concrete_agent, mock_benchmark_interface):
     """Test run_agent in verbose mode."""
 

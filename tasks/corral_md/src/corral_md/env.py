@@ -29,16 +29,7 @@ from corral.backend.server import run_server
 from corral.backend.task import InputRef, TaskDefinition
 from corral.backend.tool import Tool
 from corral.utils.context7_tools import get_library_documentation
-from corral.utils.io_tools import (
-    CatFilesTool,
-    CopyFileTool,
-    FileInfoTool,
-    FSManager,
-    GrepTool,
-    ListFilesTool,
-    ReadFileTool,
-    WriteFileTool,
-)
+from corral.utils.io_tools import FSManager, build_file_tools
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/corral_md")
 
@@ -134,14 +125,20 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
 def _md_file_tools(workspace: str) -> dict[str, Tool]:
     """MD-specific filesystem tools backed by the simagent FSManager."""
     fs_manager = FSManager("file", base_path=workspace, app="simagent")
+    tools = build_file_tools(fs_manager)
     return {
-        "list_files": ListFilesTool(fs_manager),
-        "read_file": ReadFileTool(fs_manager),
-        "write_file": WriteFileTool(fs_manager),
-        "file_info": FileInfoTool(fs_manager),
-        "cat_files": CatFilesTool(fs_manager),
-        "copy_file": CopyFileTool(fs_manager),
-        "grep": GrepTool(fs_manager),
+        **{
+            name: tools[name]
+            for name in (
+                "list_files",
+                "read_file",
+                "write_file",
+                "file_info",
+                "cat_files",
+                "copy_file",
+                "grep",
+            )
+        },
         "library_docs": get_library_documentation,
         "execute_python_script": execute_python_script,
     }

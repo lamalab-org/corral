@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from typing import Any, Literal
-from urllib.parse import quote, urlencode
 
+import anyio
 from loguru import logger
 
 # The OpenHands SDK ships as the optional `corral[openhands]` extra, which is
@@ -51,7 +51,7 @@ from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
 from corral.agents.schema import SURRENDER_SENTINEL
 from corral.agents.utils import LiteLLMMessage
-from corral.router.routes import CorralRouter
+from corral.router.routes import CorralRouter, acall
 
 # Name under which the corral MCP server is registered with the OpenHands
 # harness (the `mcp_config` table key).
@@ -170,6 +170,40 @@ def _truncate(text: Any, limit: int = 200) -> str:
     return collapsed[:limit].rstrip() + "…"
 
 
+def _run_coroutine(coro: Any) -> Any:
+    """Drive an async coroutine to completion from synchronous code.
+
+    :meth:`OpenHandsAgent.run` is the thin synchronous wrapper over the natively
+    async :meth:`OpenHandsAgent.arun`. When no event loop is running we use
+    :func:`asyncio.run`; if one is already running (the sync entry point was
+    called from async code) the coroutine is driven in a dedicated loop on a
+    background thread so the caller's loop is left intact. Exceptions raised
+    inside the coroutine propagate to the caller.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result: dict[str, Any] = {}
+    finished = threading.Event()
+
+    def _worker() -> None:
+        try:
+            result["value"] = asyncio.run(coro)
+        except BaseException as exc:  # propagate to the caller thread
+            result["exception"] = exc
+        finally:
+            finished.set()
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    finished.wait()
+    if "exception" in result:
+        raise result["exception"]
+    return result["value"]
+
+
 class OpenHandsAgent(BaseAgent):
     """Agent that delegates solving a task to the OpenHands harness.
 
@@ -216,6 +250,21 @@ class OpenHandsAgent(BaseAgent):
         extractor_model (str, optional): LiteLLM-compatible model used only by
             the base class machinery. If None it is derived from `model`.
         **kwargs: Additional keyword arguments forwarded to :class:`BaseAgent`.
+
+    Concurrency:
+        OpenHands is driven natively on the scheduler's event loop. The SDK
+        exposes an async `Conversation.arun()`, so :meth:`arun` awaits it
+        directly — no worker thread, no nested event loop — and enforces the
+        wall-clock deadline with a structured :meth:`_adrive_with_timeout` scope
+        (an `anyio` task group whose deadline interrupts the in-flight run and
+        waits out the `interrupt_grace_s` cleanup window on the loop, replacing
+        the old background-thread watchdog). The synchronous :meth:`run` is now
+        the thin wrapper that drives :meth:`arun` to completion via
+        :func:`_run_coroutine`, so both entry points share one driving/timeout
+        implementation and the answer is identical on either path. Under
+        concurrent benchmarking the async scheduler calls :meth:`arun` directly,
+        so a slow harness never blocks the loop that serves the other trials, and
+        a scheduler cancellation propagates into the in-flight SDK call.
     """
 
     def __init__(
@@ -340,13 +389,9 @@ class OpenHandsAgent(BaseAgent):
         OpenHands could see full tool descriptions while the allowlist metadata
         reflects a briefer condition, silently breaking ablations).
         """
-        base_url = interface.base_url.rstrip("/")
-        encoded_task_id = quote(str(task_id), safe="")
-        query = urlencode({"verbosity": verbosity})
-        # Trailing slash on `/mcp/` avoids a 307 redirect: the endpoint is a
-        # Starlette Mount, so a bare `/mcp` bounces to `/mcp/` (an extra
-        # round-trip per call). Hit the canonical path directly.
-        return f"{base_url}/tasks/{encoded_task_id}/mcp/?{query}"
+        # The router owns the URL convention (task-scoped, or trial-scoped when
+        # a trial router is passed) and handles encoding / trailing slash.
+        return interface.mcp_url(task_id, verbosity)
 
     def _make_llm(self) -> Any:
         """Build the OpenHands `LLM` handed to the harness agent."""
@@ -490,7 +535,13 @@ class OpenHandsAgent(BaseAgent):
         enable_surrender: bool = False,
         **kwargs,  # noqa: ARG002
     ) -> str:
-        """Run the OpenHands harness to solve the task.
+        """Run the OpenHands harness to solve the task (synchronous entry).
+
+        This is the blocking wrapper over the natively-async :meth:`arun`: the
+        harness coroutine is driven via :func:`_run_coroutine` (`asyncio.run`,
+        or a dedicated background loop when already inside one). Prefer
+        :meth:`arun` from async code so the SDK call runs directly on the caller's
+        loop instead of nesting an extra event loop.
 
         Args:
             interface (CorralRouter): The interface to the environment server.
@@ -508,42 +559,47 @@ class OpenHandsAgent(BaseAgent):
             Infrastructure failures return an `"Error solving the task: ..."`
             string; inspect `self.harness_result` for the structured status.
         """
-        self.harness_result = None
-        self.reset_token_usage()
-
-        # Resolve verbosity once and use the *same* value for the REST allowlist
-        # and the MCP endpoint, so what OpenHands sees and what the metadata
-        # records cannot drift apart (important for faithful ablations).
-        verbosity = getattr(interface, "current_verbosity", None) or "brief"
-        tools = interface.get_available_tools_for_task(
-            task_id, verbosity=verbosity
-        ).get("tools", [])
-        self._available_tools = tools
-
-        task_guide = (
-            task_prompt
-            if task_prompt is not None
-            else interface.get_task_prompt(task_id)
-        )
-        prompt, dropped_images = self._normalize_prompt(task_guide)
-
-        # Seed the message history so transcript saving has the task prompt first.
-        self.messages = [LiteLLMMessage(role="user", content=prompt)]
-
-        # Record the hash of the MCP tool schema the harness actually receives
-        # (`tools/list` == `Tool.to_mcp`), so the run provenance well and truly
-        # captures what tools the agent saw.
-        mcp_schema_sha256 = self._fetch_mcp_schema_digest(interface, task_id, verbosity)
-        mcp_url = self._mcp_url(interface, task_id, verbosity)
-        self._run_meta = self._harness_metadata(
-            mcp_url, verbosity, tools, mcp_schema_sha256
-        )
-        self._run_meta["dropped_image_parts"] = dropped_images
-
-        self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
-
+        prompt, mcp_url = self._prepare_run(interface, task_id, task_prompt)
         try:
-            return self._run_and_extract(
+            return _run_coroutine(
+                self._arun_and_extract(
+                    task_id=task_id,
+                    prompt=prompt,
+                    mcp_url=mcp_url,
+                    enable_surrender=enable_surrender,
+                )
+            )
+        finally:
+            # Lifecycle hooks run on *every* exit path (success, surrender,
+            # timeout, failure).
+            self._execute_hooks(HookPoint.AFTER_TASK, interface, task_id)
+
+    async def arun(
+        self,
+        interface: CorralRouter,
+        task_id: str,
+        task_prompt: str | None = None,
+        examples: list[str] | None = None,  # noqa: ARG002
+        enable_surrender: bool = False,
+        **kwargs,  # noqa: ARG002
+    ) -> str:
+        """Run the OpenHands harness natively on the caller's event loop.
+
+        The OpenHands SDK exposes an async `Conversation.arun()`, so this drives
+        it directly with `await` — no background thread and no nested event
+        loop — and enforces the wall-clock deadline with a structured
+        :meth:`_adrive_with_timeout` scope. A timeout (or a cancellation from the
+        scheduler) unwinds the run cleanly, cancelling the in-flight SDK call
+        rather than orphaning a worker thread. Behaviour and return value match
+        :meth:`run`; the synchronous :meth:`run` is the wrapper around this.
+
+        Tools and the task prompt are fetched through :meth:`_aprepare_run`, so
+        against an :class:`~corral.router.AsyncCorralRouter` the HTTP is awaited
+        on the loop and this path never touches a worker thread for HTTP.
+        """
+        prompt, mcp_url = await self._aprepare_run(interface, task_id, task_prompt)
+        try:
+            return await self._arun_and_extract(
                 task_id=task_id,
                 prompt=prompt,
                 mcp_url=mcp_url,
@@ -554,7 +610,102 @@ class OpenHandsAgent(BaseAgent):
             # timeout, failure).
             self._execute_hooks(HookPoint.AFTER_TASK, interface, task_id)
 
-    def _run_and_extract(
+    def _prepare_run(
+        self, interface: CorralRouter, task_id: str, task_prompt: str | None
+    ) -> tuple[str, str]:
+        """Fetch tools + prompt synchronously, then assemble the run (sync entry).
+
+        The setup for the synchronous :meth:`run`. Fetches the tool allowlist,
+        (unless one was supplied) the task prompt, and the MCP schema digest with
+        plain synchronous calls, then delegates the shared, no-I/O assembly to
+        :meth:`_assemble_run`.
+        """
+        self.harness_result = None
+        self.reset_token_usage()
+
+        # Resolve verbosity once and use the *same* value for the REST allowlist
+        # and the MCP endpoint, so what OpenHands sees and what the metadata
+        # records cannot drift apart (important for faithful ablations).
+        verbosity = getattr(interface, "current_verbosity", None) or "brief"
+        tools = interface.get_available_tools_for_task(
+            task_id, verbosity=verbosity
+        ).get("tools", [])
+        task_guide = (
+            task_prompt
+            if task_prompt is not None
+            else interface.get_task_prompt(task_id)
+        )
+        mcp_schema_sha256 = self._fetch_mcp_schema_digest(interface, task_id, verbosity)
+        return self._assemble_run(
+            interface, task_id, tools, task_guide, verbosity, mcp_schema_sha256
+        )
+
+    async def _aprepare_run(
+        self, interface: CorralRouter, task_id: str, task_prompt: str | None
+    ) -> tuple[str, str]:
+        """Fetch tools + prompt through the async router, then assemble the run.
+
+        The async twin of :meth:`_prepare_run` for the native :meth:`arun`. The
+        HTTP fetches go through :func:`acall`, so a run against an
+        :class:`~corral.router.AsyncCorralRouter` **awaits** them directly on the
+        scheduler loop (no worker thread for HTTP), while a synchronous router is
+        offloaded per call. The no-I/O assembly is shared verbatim with the sync
+        path via :meth:`_assemble_run`.
+        """
+        self.harness_result = None
+        self.reset_token_usage()
+
+        verbosity = getattr(interface, "current_verbosity", None) or "brief"
+        payload = await acall(
+            interface.get_available_tools_for_task, task_id, verbosity=verbosity
+        )
+        tools = payload.get("tools", [])
+        task_guide = (
+            task_prompt
+            if task_prompt is not None
+            else await acall(interface.get_task_prompt, task_id)
+        )
+        mcp_schema_sha256 = await self._afetch_mcp_schema_digest(
+            interface, task_id, verbosity
+        )
+        return self._assemble_run(
+            interface, task_id, tools, task_guide, verbosity, mcp_schema_sha256
+        )
+
+    def _assemble_run(
+        self,
+        interface: CorralRouter,
+        task_id: str,
+        tools: list[dict[str, Any]],
+        task_guide: Any,
+        verbosity: str,
+        mcp_schema_sha256: str | None,
+    ) -> tuple[str, str]:
+        """Shared, no-I/O run setup for :meth:`_prepare_run`/:meth:`_aprepare_run`.
+
+        Normalizes the (possibly multimodal) prompt, seeds the transcript, records
+        the run metadata (including the MCP schema digest the harness actually
+        receives), and fires the `BEFORE_TASK` hooks. Returns the flattened prompt
+        and the MCP endpoint URL, so the sync and async entry points behave
+        identically once the fetches are done.
+        """
+        self._available_tools = tools
+
+        prompt, dropped_images = self._normalize_prompt(task_guide)
+
+        # Seed the message history so transcript saving has the task prompt first.
+        self.messages = [LiteLLMMessage(role="user", content=prompt)]
+
+        mcp_url = self._mcp_url(interface, task_id, verbosity)
+        self._run_meta = self._harness_metadata(
+            mcp_url, verbosity, tools, mcp_schema_sha256
+        )
+        self._run_meta["dropped_image_parts"] = dropped_images
+
+        self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
+        return prompt, mcp_url
+
+    async def _arun_and_extract(
         self,
         *,
         task_id: str,
@@ -562,18 +713,39 @@ class OpenHandsAgent(BaseAgent):
         mcp_url: str,
         enable_surrender: bool,
     ) -> str:
-        """Drive the harness and turn its output into a submit-ready answer."""
+        """Drive the harness and turn its output into a submit-ready answer.
+
+        Async core shared by :meth:`run` (via :func:`_run_coroutine`) and the
+        native :meth:`arun`, so the driving/timeout logic lives in exactly one
+        place. Owns the per-episode working directory and maps a drive failure to
+        a precise terminal status via :meth:`_harness_failure_answer`.
+        """
         # Fresh, empty, per-episode working directory; cleaned up afterwards.
         cwd = tempfile.mkdtemp(prefix="corral-openhands-")
 
         try:
-            final_answer = self._run_openhands(
+            final_answer = await self._arun_openhands(
                 prompt=prompt,
                 mcp_url=mcp_url,
                 cwd=cwd,
                 enable_surrender=enable_surrender,
             )
-        except _OpenHandsError as e:
+        except Exception as e:  # surface as infra failure, not a model answer
+            return self._harness_failure_answer(e)
+        finally:
+            shutil.rmtree(cwd, ignore_errors=True)
+
+        return self._finalize_answer(final_answer, task_id, enable_surrender)
+
+    def _harness_failure_answer(self, exc: Exception) -> str:
+        """Map a harness-drive exception onto a `_fail` answer string.
+
+        Shared by both entry points. A typed :class:`_OpenHandsError` carries the
+        precise terminal subtype (timeout / tool_failure / max_iterations / stuck
+        / sdk_failure); any other exception is classified into a tool-vs-SDK
+        failure so a broken benchmark run is never scored as a wrong answer.
+        """
+        if isinstance(exc, _OpenHandsError):
             status_map: dict[str, HarnessStatus] = {
                 "timeout": "timeout",
                 "tool_failure": "tool_failure",
@@ -581,12 +753,18 @@ class OpenHandsAgent(BaseAgent):
                 "stuck": "stuck",
                 "sdk_failure": "sdk_failure",
             }
-            return self._fail(status_map.get(e.subtype or "", "sdk_failure"), str(e), e)
-        except Exception as e:  # surface as infra failure, not a model answer
-            return self._fail(self._classify_error(e), str(e), e)
-        finally:
-            shutil.rmtree(cwd, ignore_errors=True)
+            return self._fail(
+                status_map.get(exc.subtype or "", "sdk_failure"), str(exc), exc
+            )
+        return self._fail(self._classify_error(exc), str(exc), exc)
 
+    def _finalize_answer(
+        self, final_answer: str, task_id: str, enable_surrender: bool
+    ) -> str:
+        """Normalize the harness output into a submit-ready answer.
+
+        Shared post-processing for both entry points.
+        """
         # Normalize the harness output into a submit-ready answer. Answer
         # extraction is disabled by default (`requires_answer_extraction` is
         # False), so the harness output is submitted verbatim. When extraction is
@@ -639,15 +817,15 @@ class OpenHandsAgent(BaseAgent):
         self.harness_result = self._result("success", answer=final_answer)
         return final_answer
 
-    def _run_openhands(
+    async def _arun_openhands(
         self, *, prompt: str, mcp_url: str, cwd: str, enable_surrender: bool
     ) -> str:
         """Drive the OpenHands conversation to completion and return its answer.
 
-        Owns the full conversation lifecycle: builds the isolated agent, runs it
-        (under the wall-clock watchdog), records usage/transcript, validates the
-        runtime tool set and terminal state, extracts the terminal `FinishAction`
-        message, and always closes the conversation.
+        Owns the full conversation lifecycle: builds the isolated agent, drives
+        it on the loop (under the wall-clock deadline), records usage/transcript,
+        validates the runtime tool set and terminal state, extracts the terminal
+        `FinishAction` message, and always closes the conversation.
         """
         events: list[Any] = []
 
@@ -681,7 +859,7 @@ class OpenHandsAgent(BaseAgent):
 
         try:
             conversation.send_message(prompt)
-            self._drive_with_timeout(conversation)
+            await self._adrive_with_timeout(conversation)
             # Fail loudly on a capability leak or a non-clean terminal state
             # (max-iterations / stuck) that OpenHands does *not* raise for, so
             # they are recorded precisely instead of as a generic no-answer
@@ -697,8 +875,6 @@ class OpenHandsAgent(BaseAgent):
                 logger.warning("Failed to close OpenHands conversation", exc_info=True)
 
         return self._extract_finish_message(events)
-
-    # -- Live progress logging -------------------------------------------
 
     def _log_event(self, event: Any) -> None:
         """Emit one concise loguru line for a meaningful OpenHands event.
@@ -741,8 +917,6 @@ class OpenHandsAgent(BaseAgent):
         except Exception:
             logger.debug("Could not log OpenHands event", exc_info=True)
 
-    # -- Transcript recording --------------------------------------------
-
     def _record_event(self, event: Any) -> None:
         """Fold one OpenHands event into the inspectable corral transcript.
 
@@ -767,8 +941,8 @@ class OpenHandsAgent(BaseAgent):
     def _record_action_event(self, event: Any) -> None:
         """Record the model's reasoning and structured tool call."""
         # The terminal `FinishAction` carries the final answer, which is
-        # appended exactly once at the end of `_run_and_extract`; recording it
-        # here as a nameless tool call would only duplicate it.
+        # appended exactly once by `_finalize_answer`; recording it here as a
+        # nameless tool call would only duplicate it.
         if isinstance(getattr(event, "action", None), FinishAction):
             return
         thought = _content_to_text(getattr(event, "thought", "") or "")
@@ -813,8 +987,20 @@ class OpenHandsAgent(BaseAgent):
             self._run_meta["system_prompt_has_dynamic_context"] = (
                 getattr(event, "dynamic_context", None) is not None
             )
-        # Keep the system prompt itself in the transcript as well.
-        self._record_generic_event(event)
+        # Keep the system prompt itself in the transcript, at the *front*. The
+        # task prompt is pre-seeded as `messages[0]` before the harness runs, but
+        # the system message precedes it in the real conversation (OpenHands
+        # emits the `SystemPromptEvent` as its first event), so insert it ahead of
+        # the seeded prompt rather than appending — otherwise the saved transcript
+        # records the system message second, out of order.
+        message = event.to_llm_message()
+        self.messages.insert(
+            0,
+            LiteLLMMessage(
+                role=getattr(message, "role", "system"),
+                content=_content_to_text(getattr(message, "content", "")),
+            ),
+        )
 
     def _record_observation_event(self, event: Any) -> None:
         """Record an MCP tool result as a `tool`-role transcript message.
@@ -901,57 +1087,81 @@ class OpenHandsAgent(BaseAgent):
         except Exception:
             return _content_to_text(getattr(event, "observation", ""))
 
-    # -- Driving / termination -------------------------------------------
+    async def _adrive_with_timeout(self, conversation: Any) -> None:
+        """Drive `conversation.arun()` on the loop, enforcing the deadline.
 
-    def _drive_with_timeout(self, conversation: Any) -> None:
-        """Run the conversation, enforcing the wall-clock deadline.
+        A structured, native replacement for the old background-thread watchdog.
+        Cancelling an `await` alone is not a reliable stop for OpenHands, so the
+        run is a child task in an `anyio` task group while a
+        :func:`anyio.move_on_after` deadline watches it *concurrently* (the
+        deadline wraps only the wait, never the run, so the run keeps going until
+        we decide to stop it). On expiry we call `conversation.interrupt()` —
+        which cancels the tracked `arun()` task even mid-LLM-call, unlike the
+        cooperative `pause()` — then wait out `interrupt_grace_s` for the run to
+        actually unwind before reporting a `timeout`, so the caller can close the
+        conversation and delete the workspace without racing a still-running
+        harness. If it never stops we cancel the group and report `sdk_failure`.
 
-        A thread timeout alone is insufficient: it merely stops *waiting*, it
-        does not terminate the underlying OpenHands run. On expiry we call
-        `conversation.interrupt()`, which cancels the in-flight `arun()` task
-        (effective even mid-LLM-call, unlike the cooperative `pause()`), then
-        wait for the worker to actually unwind before returning so the caller
-        can close the conversation and delete the workspace without racing a
-        still-running harness.
+        The child task captures the run's own exception (if any) so a fast
+        failure (e.g. an MCP transport error before the deadline) still
+        propagates to the caller for precise classification, exactly as the sync
+        path did.
         """
         if self.wall_clock_timeout_s is None:
-            conversation.run()
+            await conversation.arun()
             return
 
-        error: dict[str, BaseException] = {}
-        done = threading.Event()
+        finished = anyio.Event()
+        run_error: dict[str, BaseException] = {}
+        timed_out = False
+        unresponsive = False
 
-        def _worker() -> None:
+        async def _run() -> None:
             try:
-                # Drive the *async* entrypoint so the wall-clock interrupt can
-                # cancel the tracked task mid-LLM-call.
-                asyncio.run(conversation.arun())
-            except BaseException as exc:  # propagate to the caller thread
-                error["exc"] = exc
+                await conversation.arun()
+            except BaseException as exc:  # captured; re-raised by the driver
+                run_error["exc"] = exc
             finally:
-                done.set()
+                finished.set()
 
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_run)
 
-        if not done.wait(self.wall_clock_timeout_s):
-            self._interrupt(conversation)
-            # Do not let the caller close the conversation / delete the
-            # workspace until the worker has unwound, else cleanup races a live
-            # run (leaking paid LLM/MCP calls past the reported timeout).
-            if not done.wait(self.interrupt_grace_s):
-                raise _OpenHandsError(
-                    "OpenHands did not terminate within "
-                    f"{self.interrupt_grace_s}s of the wall-clock interrupt",
-                    subtype="sdk_failure",
-                )
+            # Phase 1: wait for the run, bounded by the wall-clock deadline. The
+            # scope wraps only the wait, so a fired deadline leaves `_run` running.
+            with anyio.move_on_after(self.wall_clock_timeout_s):
+                await finished.wait()
+
+            if not finished.is_set():
+                # Phase 2: deadline exceeded. Interrupt the in-flight run, then
+                # wait out the grace window for it to unwind.
+                self._interrupt(conversation)
+                with anyio.move_on_after(self.interrupt_grace_s):
+                    await finished.wait()
+                if finished.is_set():
+                    timed_out = True
+                else:
+                    # The run ignored the interrupt; cancel the group (best
+                    # effort) and report an infra failure, not a clean timeout.
+                    unresponsive = True
+                    tg.cancel_scope.cancel()
+
+        # Raise the classified outcome *after* the task group has exited, so a
+        # deliberate stop is never re-wrapped in an `ExceptionGroup` (which
+        # would erase the precise `_OpenHandsError` subtype for the caller).
+        if unresponsive:
+            raise _OpenHandsError(
+                "OpenHands did not terminate within "
+                f"{self.interrupt_grace_s}s of the wall-clock interrupt",
+                subtype="sdk_failure",
+            )
+        if timed_out:
             raise _OpenHandsError(
                 f"OpenHands did not finish within {self.wall_clock_timeout_s}s",
                 subtype="timeout",
             )
-
-        if "exc" in error:
-            raise error["exc"]
+        if "exc" in run_error:
+            raise run_error["exc"]
 
     def _interrupt(self, conversation: Any) -> None:
         """Cancel the in-flight run (thread-safe), best effort."""
@@ -1104,6 +1314,26 @@ class OpenHandsAgent(BaseAgent):
             return None
         try:
             return fetch(task_id, verbosity=verbosity).get("mcp_schema_sha256")
+        except Exception as exc:
+            logger.warning(f"Could not fetch MCP tool schema digest: {exc}")
+            return None
+
+    async def _afetch_mcp_schema_digest(
+        self, interface: CorralRouter, task_id: str, verbosity: str
+    ) -> str | None:
+        """Async twin of :meth:`_fetch_mcp_schema_digest`.
+
+        Fetches through :func:`acall`, so the digest lookup is awaited on the
+        loop against an :class:`~corral.router.AsyncCorralRouter` and offloaded
+        for a synchronous router — the native :meth:`arun` never blocks the loop
+        on this HTTP call.
+        """
+        fetch = getattr(interface, "get_mcp_tool_schema", None)
+        if fetch is None:
+            return None
+        try:
+            result = await acall(fetch, task_id, verbosity=verbosity)
+            return result.get("mcp_schema_sha256")
         except Exception as exc:
             logger.warning(f"Could not fetch MCP tool schema digest: {exc}")
             return None

@@ -1,9 +1,4 @@
-from corral.backend.schema import ToolArgument
-from corral.backend.tool import (
-    Tool,
-    arguments_to_schema,
-    tool,
-)
+from corral.backend.tool import tool
 
 
 @tool
@@ -147,29 +142,80 @@ def percentage_calculator(value: float, percentage: float = 100.0) -> float:
     return (value * percentage) / 100.0
 
 
-class UnitConverterTool(Tool):
-    def __init__(self):
-        super().__init__(
-            name="unit_converter",
-            description="Convert between different units",
-            params_json_schema=arguments_to_schema(
-                [
-                    ToolArgument("value", "float", "Value to convert"),
-                    ToolArgument("from_unit", "str", "Original unit (m, kg, s)"),
-                    ToolArgument("to_unit", "str", "Target unit (cm, g, ms)"),
-                ]
-            ),
-        )
+@tool
+def unit_converter(value: float, from_unit: str, to_unit: str) -> str:
+    """[BRIEF] Convert a value between supported metric units. [/BRIEF]
 
-    def execute(self, value: float, from_unit: str, to_unit: str) -> str:
-        conversions = {
-            ("m", "cm"): lambda x: x * 100,
-            ("kg", "g"): lambda x: x * 1000,
-            ("s", "ms"): lambda x: x * 1000,
-        }
+    [DETAILED] This tool converts a numerical value from a source unit to a target unit for a fixed set of metric conversions: metres to centimetres, kilograms to grams, and seconds to milliseconds. It looks up the (from_unit, to_unit) pair in a conversion table and applies the corresponding scaling factor. Unsupported unit pairs raise an error rather than returning a best-effort guess. [/DETAILED]
 
-        key = (from_unit, to_unit)
-        if key not in conversions:
-            raise ValueError(f"Unsupported conversion: {from_unit} to {to_unit}")
+    [PROCEDURAL] When to use this tool:
+    - When you need to convert a value between one of the supported metric unit pairs.
+    - When a task expresses quantities in one unit but requires them in another (e.g. metres vs centimetres).
+    - Recommended as the primary tool for any supported metric unit conversion. [/PROCEDURAL]
 
-        return str(conversions[key](value))
+    [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Identify the value to convert and its current and target units from the task description. [/PREREQUISITE]
+        2. [CURRENT] Call this tool with the value, the source unit, and the target unit. [/CURRENT]
+        3. [FOLLOW_UP] Use the converted value in further calculations (e.g. feed it into `calculator`) or report it as the final answer. [/FOLLOW_UP]
+    [/WORKFLOW_INTEGRATION]
+
+    [CONTEXTUAL] How this tool works:
+    - Builds a lookup table keyed by the (from_unit, to_unit) pair.
+    - Retrieves the scaling function for the requested pair and applies it to the value.
+    - Raises ValueError if the requested (from_unit, to_unit) pair is not in the table.
+    - Returns the converted value as a string. [/CONTEXTUAL]
+
+    [SYNTACTICAL] Usage examples:
+    [
+        `unit_converter(1.5, "m", "cm")`,
+        `unit_converter(2.0, "kg", "g")`,
+        `unit_converter(0.25, "s", "ms")`,
+    ]
+    [/SYNTACTICAL]
+
+    Args:
+        value (float):
+            [ARGS_BRIEF] The numerical value to convert. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The magnitude expressed in the source unit that will be scaled into the target unit. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Any valid floating-point number. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] 1.5, 2.0, 0.25, 100.0 [/ARGS_EXAMPLES]
+        from_unit (str):
+            [ARGS_BRIEF] The unit the value is currently expressed in. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The source unit of the value. Must be the first element of a supported conversion pair. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] One of: "m", "kg", "s" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "m", "kg", "s" [/ARGS_EXAMPLES]
+        to_unit (str):
+            [ARGS_BRIEF] The unit to convert the value into. [/ARGS_BRIEF]
+            [ARGS_DETAILED] The target unit of the conversion. Must pair with from_unit as a supported conversion (m->cm, kg->g, s->ms). [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] One of: "cm", "g", "ms" [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "cm", "g", "ms" [/ARGS_EXAMPLES]
+
+    Returns:
+        str:
+            [RETURNS_BRIEF] The converted value as a string. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] The result of applying the scaling factor for the (from_unit, to_unit) pair to value, formatted as a string. For example, converting 1.5 m to cm returns "150.0". [/RETURNS_DETAILED]
+            [RETURNS_EXAMPLES] "150.0" for (1.5, "m", "cm"), "2000.0" for (2.0, "kg", "g"), "250.0" for (0.25, "s", "ms") [/RETURNS_EXAMPLES]
+
+    [RAISES] Exceptions:
+        ValueError:
+            [ERROR_WHEN] If the (from_unit, to_unit) pair is not one of the supported conversions. [/ERROR_WHEN]
+            [ERROR_DETAILS] Raised when the requested source and target unit combination has no entry in the conversion table (only m->cm, kg->g, and s->ms are supported). [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Ensure from_unit and to_unit form one of the supported pairs: m->cm, kg->g, or s->ms. [/ERROR_RECOVERY]
+    [/RAISES]
+
+    [LIMITATIONS] Known Limitations:
+    - Supports only three fixed conversion pairs (m->cm, kg->g, s->ms); no inverse or chained conversions.
+    - Returns the result as a string rather than a numeric type, which may require parsing before further arithmetic.
+    [/LIMITATIONS]
+    """
+    conversions = {
+        ("m", "cm"): lambda x: x * 100,
+        ("kg", "g"): lambda x: x * 1000,
+        ("s", "ms"): lambda x: x * 1000,
+    }
+
+    key = (from_unit, to_unit)
+    if key not in conversions:
+        raise ValueError(f"Unsupported conversion: {from_unit} to {to_unit}")
+
+    return str(conversions[key](value))

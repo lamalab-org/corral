@@ -11,7 +11,7 @@ from mp_api.client import MPRester
 from corral.backend.tool import Tool, tool
 
 if "MP_API_KEY" not in os.environ:
-    load_dotenv("../.env")
+    load_dotenv("../../.env")
 
 
 # utility function
