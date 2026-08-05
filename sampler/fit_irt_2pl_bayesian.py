@@ -21,7 +21,7 @@ import pymc as pm
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fit_irt_2pl import build_trial_counts  # noqa: E402
+from fit_irt_2pl import build_trial_counts
 
 OUT_DIR = Path(__file__).parent / "data"
 LEGACY_MODELS = ["claude-4.5", "gpt-4o", "gpt-oss-120b"]
@@ -39,7 +39,7 @@ def fit_2pl_bayesian(
     seed: int = 0,
 ) -> az.InferenceData:
     n_subj, n_item = K.shape
-    with pm.Model() as model:
+    with pm.Model():
         theta = pm.Normal("theta", mu=0, sigma=theta_sd, shape=n_subj)
         b = pm.Normal("b", mu=0, sigma=b_sd, shape=n_item)
         log_a = pm.Normal("log_a", mu=0, sigma=log_a_sd, shape=n_item)
@@ -49,10 +49,9 @@ def fit_2pl_bayesian(
         p = pm.math.sigmoid(logit_p)
         pm.Binomial("obs", n=N, p=p, observed=K)
 
-        trace = pm.sample(
+        return pm.sample(
             draws=draws, tune=tune, chains=chains, random_seed=seed, target_accept=0.9
         )
-    return trace
 
 
 def main(
@@ -96,7 +95,7 @@ def main(
     trace.to_netcdf(trace_path)
     logger.success(f"Saved trace -> {trace_path}")
 
-    ci_cols = [c for c in summary.columns if c.startswith("eti") or c.startswith("hdi")]
+    ci_cols = [c for c in summary.columns if c.startswith(("eti", "hdi"))]
     theta_summary = summary.loc[[f"theta[{i}]" for i in range(len(subjects))]].copy()
     theta_summary.index = subjects
     logger.info(

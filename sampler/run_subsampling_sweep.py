@@ -9,7 +9,6 @@ from pathlib import Path
 
 import fire
 from loguru import logger
-
 from subsampling_core import SAMPLERS, run_sweep
 
 OUT_DIR = Path(__file__).parent / "data"
@@ -42,9 +41,13 @@ def main(
     excluded = [e.strip() for e in exclude_environments.split(",") if e.strip()]
 
     budgets = sorted(set(range(budget_min, budget_max, budget_step)) | {budget_max})
-    logger.info(f"sampler={sampler} budgets={budgets} n_repeats={n_repeats} excluded={excluded}")
+    logger.info(
+        f"sampler={sampler} budgets={budgets} n_repeats={n_repeats} excluded={excluded}"
+    )
 
-    results = run_sweep(sampler, budgets, n_repeats, seed=seed, exclude_environments=excluded)
+    results = run_sweep(
+        sampler, budgets, n_repeats, seed=seed, exclude_environments=excluded
+    )
     logger.info(f"{len(results)} (budget, repeat) rows")
 
     tag = f"_excl-{'-'.join(excluded)}" if excluded else ""

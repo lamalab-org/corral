@@ -25,7 +25,11 @@ import pandas as pd
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent))
-from plot_final_ranking_comparison import METHOD_COLOURS, METHOD_LABELS, _band  # noqa: E402
+from plot_final_ranking_comparison import (
+    METHOD_COLOURS,
+    METHOD_LABELS,
+    _band,
+)
 
 DATA_DIR = Path(__file__).parent / "data"
 OUT_DIR = Path(__file__).parent / "figures"
@@ -36,7 +40,11 @@ def plot(df: pd.DataFrame, output_path: Path) -> None:
 
     n_draws = df.groupby(["method", "budget"]).size().min()
     panels = [
-        (axes[0], "rho_new_per_env", "New models only (6 subjects, never seen during item selection)"),
+        (
+            axes[0],
+            "rho_new_per_env",
+            "New models only (6 subjects, never seen during item selection)",
+        ),
         (axes[1], "rho_all_per_env", "All 12 subjects (6 legacy + 6 new)"),
     ]
     for ax, col, title in panels:
@@ -46,8 +54,18 @@ def plot(df: pd.DataFrame, output_path: Path) -> None:
                 continue
             colour = METHOD_COLOURS[method]
             b = _band(sub, col)
-            ax.plot(b.index, b["median"], color=colour, linewidth=2, marker="o", markersize=3, label=METHOD_LABELS[method])
-            ax.fill_between(b.index, b["p25"], b["p75"], color=colour, alpha=0.15, linewidth=0)
+            ax.plot(
+                b.index,
+                b["median"],
+                color=colour,
+                linewidth=2,
+                marker="o",
+                markersize=3,
+                label=METHOD_LABELS[method],
+            )
+            ax.fill_between(
+                b.index, b["p25"], b["p75"], color=colour, alpha=0.15, linewidth=0
+            )
         ax.axhline(1.0, color="gray", linewidth=0.8, linestyle="--")
         ax.set_xlabel("budget (# items)")
         ax.set_title(title, fontsize=9.5)
@@ -69,7 +87,9 @@ def plot(df: pd.DataFrame, output_path: Path) -> None:
 
 
 def main(results: str | None = None, output: str | None = None) -> None:
-    path = Path(results) if results else DATA_DIR / "final_ranking_comparison_results.csv"
+    path = (
+        Path(results) if results else DATA_DIR / "final_ranking_comparison_results.csv"
+    )
     logger.info(f"Loading {path}")
     df = pd.read_csv(path)
 

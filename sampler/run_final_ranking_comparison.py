@@ -52,8 +52,13 @@ from loguru import logger
 from scipy.stats import spearmanr
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fit_irt_2pl import build_trial_counts  # noqa: E402
-from subsampling_core import SAMPLERS, allocate_budget, greedy_order_from_info_matrix, load_matrix  # noqa: E402
+from fit_irt_2pl import build_trial_counts
+from subsampling_core import (
+    SAMPLERS,
+    allocate_budget,
+    greedy_order_from_info_matrix,
+    load_matrix,
+)
 
 DATA_DIR = Path(__file__).parent / "data"
 LEGACY_MODELS = ["claude-4.5", "gpt-4o", "gpt-oss-120b"]
@@ -67,7 +72,10 @@ def _rho(true: pd.Series, mini: pd.Series) -> float:
 
 
 def ranking_metrics(
-    matrix: pd.DataFrame, col_env: pd.Series, selected: list[str], subject_groups: dict[str, list[str]]
+    matrix: pd.DataFrame,
+    col_env: pd.Series,
+    selected: list[str],
+    subject_groups: dict[str, list[str]],
 ) -> dict:
     """rho at (global, per_env) x each subject group, for one selected item set."""
     true_global = matrix.mean(axis=1)
@@ -77,7 +85,9 @@ def ranking_metrics(
 
     out = {}
     for group_name, subjects in subject_groups.items():
-        out[f"rho_{group_name}_global"] = _rho(true_global[subjects], mini_global[subjects])
+        out[f"rho_{group_name}_global"] = _rho(
+            true_global[subjects], mini_global[subjects]
+        )
 
         per_env = []
         for env in envs:
@@ -88,7 +98,9 @@ def ranking_metrics(
             true_env = matrix[env_items].mean(axis=1)
             mini_env = matrix[env_items_sel].mean(axis=1)
             per_env.append(_rho(true_env[subjects], mini_env[subjects]))
-        out[f"rho_{group_name}_per_env"] = float(np.nanmean(per_env)) if per_env else np.nan
+        out[f"rho_{group_name}_per_env"] = (
+            float(np.nanmean(per_env)) if per_env else np.nan
+        )
     return out
 
 
@@ -141,7 +153,11 @@ def main(
         logger.info(f"{method_name}: {n_draws} draws x {len(budgets)} budgets done")
 
     # ---- stratified_bayes_irt: n_draws bootstrap resamples of the MCMC posterior ----
-    trace_p = Path(trace_path) if trace_path else DATA_DIR / "irt_2pl_bayesian_trace_legacy.nc"
+    trace_p = (
+        Path(trace_path)
+        if trace_path
+        else DATA_DIR / "irt_2pl_bayesian_trace_legacy.nc"
+    )
     logger.info(f"Loading MCMC trace from {trace_p}")
     trace = az.from_netcdf(trace_p)
     _, fit_items, _, _, item_env = build_trial_counts(exclude_environments=excluded)
@@ -153,20 +169,26 @@ def main(
     env_arr = item_env.reindex(fit_items).to_numpy()
 
     for draw in range(n_draws):
-        idx = rng.choice(n_total, size=n_total, replace=True)  # classic bootstrap resample
+        idx = rng.choice(
+            n_total, size=n_total, replace=True
+        )  # classic bootstrap resample
         avg_info = vectorized_info(theta_all[:, idx], a_all[:, idx], b_all[:, idx])
 
         per_env_order = {}
         for env in np.unique(env_arr):
             mask = env_arr == env
-            per_env_order[env] = greedy_order_from_info_matrix(avg_info[mask], items_arr[mask], int(mask.sum()))
+            per_env_order[env] = greedy_order_from_info_matrix(
+                avg_info[mask], items_arr[mask], int(mask.sum())
+            )
         strata_sizes = {env: len(v) for env, v in per_env_order.items()}
 
         for budget in budgets:
             alloc = allocate_budget(strata_sizes, budget, mode="proportional")
             sel = [it for env, n in alloc.items() for it in per_env_order[env][:n]]
             m = ranking_metrics(matrix, col_env, sel, subject_groups)
-            rows.append(dict(method="stratified_bayes_irt", budget=budget, draw=draw, **m))
+            rows.append(
+                dict(method="stratified_bayes_irt", budget=budget, draw=draw, **m)
+            )
         if (draw + 1) % 50 == 0:
             logger.info(f"  stratified_bayes_irt bootstrap {draw + 1}/{n_draws} done")
 

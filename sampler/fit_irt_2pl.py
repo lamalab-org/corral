@@ -29,7 +29,7 @@ from loguru import logger
 from scipy.optimize import minimize
 
 sys.path.insert(0, str(Path(__file__).parent))
-from subsampling_core import DATA_PATH, ITEM_KEY  # noqa: E402
+from subsampling_core import DATA_PATH, ITEM_KEY
 
 OUT_DIR = Path(__file__).parent / "data"
 
@@ -60,7 +60,9 @@ def build_trial_counts(
         K[s_idx[row.subject], i_idx[row.item]] = row.k
         N[s_idx[row.subject], i_idx[row.item]] = row.n
 
-    item_env = df.drop_duplicates("item").set_index("item")["environment"].reindex(items)
+    item_env = (
+        df.drop_duplicates("item").set_index("item")["environment"].reindex(items)
+    )
     return subjects, items, K, N, item_env
 
 
@@ -74,7 +76,9 @@ def fit_2pl(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     n_subj, n_item = K.shape
     rng = np.random.default_rng(seed)
-    x0 = np.concatenate([rng.normal(0, 0.1, n_subj), rng.normal(0, 0.1, n_item), np.zeros(n_item)])
+    x0 = np.concatenate(
+        [rng.normal(0, 0.1, n_subj), rng.normal(0, 0.1, n_item), np.zeros(n_item)]
+    )
 
     def unpack(x):
         return x[:n_subj], x[n_subj : n_subj + n_item], x[n_subj + n_item :]
@@ -91,7 +95,8 @@ def fit_2pl(
         grad_theta = -(a[None, :] * resid).sum(axis=1) + theta / theta_sd**2
         grad_b = (a[None, :] * resid).sum(axis=0) + b / b_sd**2
         grad_log_a = (
-            -(a[None, :] * (theta[:, None] - b[None, :]) * resid).sum(axis=0) + log_a / log_a_sd**2
+            -(a[None, :] * (theta[:, None] - b[None, :]) * resid).sum(axis=0)
+            + log_a / log_a_sd**2
         )
 
         nll = (
@@ -121,11 +126,16 @@ def main(output: str | None = None, exclude_environments: str = "resistor") -> N
     subj_df = pd.DataFrame({"subject": subjects, "theta": theta}).sort_values(
         "theta", ascending=False
     )
-    item_df = pd.DataFrame({"item": items, "a": a, "b": b, "environment": item_env.values})
+    item_df = pd.DataFrame(
+        {"item": items, "a": a, "b": b, "environment": item_env.to_numpy()}
+    )
 
     out_dir = Path(output) if output else OUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    subj_path, item_path = out_dir / "irt_2pl_subjects.csv", out_dir / "irt_2pl_items.csv"
+    subj_path, item_path = (
+        out_dir / "irt_2pl_subjects.csv",
+        out_dir / "irt_2pl_items.csv",
+    )
     subj_df.to_csv(subj_path, index=False)
     item_df.to_csv(item_path, index=False)
     logger.success(f"Saved {subj_path}, {item_path}")
@@ -135,7 +145,9 @@ def main(output: str | None = None, exclude_environments: str = "resistor") -> N
         f"Discrimination (a): mean={a.mean():.3f} std={a.std():.3f} "
         f"range=[{a.min():.3f}, {a.max():.3f}]"
     )
-    logger.info(f"Difficulty (b): mean={b.mean():.3f} std={b.std():.3f} range=[{b.min():.3f}, {b.max():.3f}]")
+    logger.info(
+        f"Difficulty (b): mean={b.mean():.3f} std={b.std():.3f} range=[{b.min():.3f}, {b.max():.3f}]"
+    )
 
 
 if __name__ == "__main__":

@@ -37,7 +37,11 @@ BASELINE_CSV = REPO_ROOT / "analysis" / "results" / "data" / "overall_trace.csv"
 OUT_DIR = Path(__file__).parent / "data"
 
 sys.path.insert(0, str(REPO_ROOT / "analysis"))
-from plot_new_models_heatmap import ENV_DIR_TO_KEY, MODEL_NAMES, _pick_summary_json  # noqa: E402
+from plot_new_models_heatmap import (  # noqa: E402
+    ENV_DIR_TO_KEY,
+    MODEL_NAMES,
+    _pick_summary_json,
+)
 
 SCAFFOLD_NORMALIZATION = {"react": "react", "toolcalling": "tool_calling"}
 
@@ -62,7 +66,10 @@ def extract_new_model_trace() -> pd.DataFrame:
                 if not level_dir.is_dir() or not level_dir.name.startswith("level_"):
                     continue
                 for agent_dir in sorted(level_dir.iterdir()):
-                    if not agent_dir.is_dir() or agent_dir.name not in SCAFFOLD_NORMALIZATION:
+                    if (
+                        not agent_dir.is_dir()
+                        or agent_dir.name not in SCAFFOLD_NORMALIZATION
+                    ):
                         continue
                     summary = _pick_summary_json(agent_dir)
                     if summary is None:
@@ -70,7 +77,9 @@ def extract_new_model_trace() -> pd.DataFrame:
                         continue
                     scaffold = SCAFFOLD_NORMALIZATION[agent_dir.name]
                     records.extend(
-                        _trial_rows_from_summary(summary, model, env_key, level_dir.name, scaffold)
+                        _trial_rows_from_summary(
+                            summary, model, env_key, level_dir.name, scaffold
+                        )
                     )
     df = pd.DataFrame(records)
     logger.info(f"Extracted {len(df)} trial rows for new models")
@@ -91,7 +100,11 @@ def _trial_rows_from_summary(
         pass_at_k = {f"pass@{k}": task_data.get(f"Task Pass@{k}") for k in range(1, 6)}
         pass_hat_k = {f"pass^{k}": task_data.get(f"Task Pass^{k}") for k in range(1, 6)}
         for trial in task_data.get("trials", []):
-            rows.append(
+            # Not a plain list comprehension (PERF401): pass_at_k/pass_hat_k are
+            # computed once per task_id above and reused across all its trials;
+            # folding this into a comprehension would recompute them per-trial
+            # or force an awkward nested-binding trick, both worse than the loop.
+            rows.append(  # noqa: PERF401
                 {
                     "model": model,
                     "environment": environment,
@@ -133,7 +146,9 @@ def load_baseline_all_verbosity(environments: list[str]) -> pd.DataFrame:
     checks or as a shrinkage prior, not as raw pooled training data.
     """
     df = pd.read_csv(BASELINE_CSV)
-    sliced = df[df["environment"].isin(environments) & (df["category"] == "task")].copy()
+    sliced = df[
+        df["environment"].isin(environments) & (df["category"] == "task")
+    ].copy()
     logger.info(
         f"Legacy all-verbosity slice: {len(sliced)} trial rows "
         f"(verbosities={sorted(sliced['verbosity'].unique())})"
@@ -156,10 +171,25 @@ def main(output: str | None = None, legacy_output: str | None = None) -> None:
 
     combined = pd.concat([baseline_df, new_df], ignore_index=True)
     columns = [
-        "model", "environment", "scaffold", "level", "category", "verbosity", "task",
-        "success", "score",
-        "pass@1", "pass@2", "pass@3", "pass@4", "pass@5",
-        "pass^1", "pass^2", "pass^3", "pass^4", "pass^5",
+        "model",
+        "environment",
+        "scaffold",
+        "level",
+        "category",
+        "verbosity",
+        "task",
+        "success",
+        "score",
+        "pass@1",
+        "pass@2",
+        "pass@3",
+        "pass@4",
+        "pass@5",
+        "pass^1",
+        "pass^2",
+        "pass^3",
+        "pass^4",
+        "pass^5",
     ]
     combined = combined[columns]
 
@@ -176,7 +206,9 @@ def main(output: str | None = None, legacy_output: str | None = None) -> None:
     logger.success(f"Saved {len(combined)} rows -> {out}")
 
     legacy_df = load_baseline_all_verbosity(environments)[columns]
-    legacy_out = Path(legacy_output) if legacy_output else OUT_DIR / "legacy_all_verbosity.csv"
+    legacy_out = (
+        Path(legacy_output) if legacy_output else OUT_DIR / "legacy_all_verbosity.csv"
+    )
     legacy_df.to_csv(legacy_out, index=False)
     logger.success(f"Saved {len(legacy_df)} rows -> {legacy_out}")
 

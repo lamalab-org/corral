@@ -7,7 +7,10 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-from subsampling_core import allocate_budget, greedy_order_from_info_matrix  # noqa: E402
+from subsampling_core import (
+    allocate_budget,
+    greedy_order_from_info_matrix,
+)
 
 
 def posterior_averaged_info(

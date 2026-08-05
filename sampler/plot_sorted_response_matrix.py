@@ -34,7 +34,12 @@ DATA_PATH = REPO_ROOT / "analysis" / "results" / "data" / "overall_trace.csv"
 OUT_DIR = Path(__file__).parent / "figures"
 
 sys.path.insert(0, str(REPO_ROOT / "analysis"))
-from plot_config import AGENT_NAMES, ENVIRONMENT_COLOURS, MODEL_COLOURS, MODEL_NAMES  # noqa: E402
+from plot_config import (  # noqa: E402
+    AGENT_NAMES,
+    ENVIRONMENT_COLOURS,
+    MODEL_COLOURS,
+    MODEL_NAMES,
+)
 
 try:
     import lama_aesthetics
@@ -87,7 +92,9 @@ def build_matrix(
     return matrix, col_env
 
 
-def row_label(row_id: str, model_names: dict = MODEL_NAMES, agent_names: dict = AGENT_NAMES) -> str:
+def row_label(
+    row_id: str, model_names: dict = MODEL_NAMES, agent_names: dict = AGENT_NAMES
+) -> str:
     model, scaffold = row_id.split("__")
     return f"{model_names.get(model, model)} · {agent_names.get(scaffold, scaffold)}"
 
@@ -106,10 +113,12 @@ def plot_matrix(
     fig_w = max(10.0, min(0.006 * n_cols, 22.0))
     fig = plt.figure(figsize=(fig_w, 3.6))
     gs = gridspec.GridSpec(
-        2, 2,
+        2,
+        2,
         width_ratios=[1, 0.02],
         height_ratios=[1, 0.06],
-        hspace=0.08, wspace=0.02,
+        hspace=0.08,
+        wspace=0.02,
     )
     ax_heat = fig.add_subplot(gs[0, 0])
     ax_cbar = fig.add_subplot(gs[0, 1])
@@ -121,14 +130,15 @@ def plot_matrix(
         matrix.to_numpy(dtype=float),
         aspect="auto",
         cmap=cmap,
-        vmin=0, vmax=1,
+        vmin=0,
+        vmax=1,
         interpolation="none",
     )
     ax_heat.set_yticks(range(n_rows))
     ax_heat.set_yticklabels(
         [row_label(r, model_names) for r in matrix.index], fontsize=8
     )
-    for tick, row_id in zip(ax_heat.get_yticklabels(), matrix.index):
+    for tick, row_id in zip(ax_heat.get_yticklabels(), matrix.index, strict=False):
         tick.set_color(model_colours.get(row_id.split("__")[0], "black"))
     ax_heat.set_xticks([])
     title = title or (
@@ -152,10 +162,16 @@ def plot_matrix(
     }
     env_codes = {env: i for i, env in enumerate(envs_present)}
     strip = np.array([[env_codes[e] for e in col_env]])
-    strip_cmap = plt.matplotlib.colors.ListedColormap([env_colour_map[e] for e in envs_present])
+    strip_cmap = plt.matplotlib.colors.ListedColormap(
+        [env_colour_map[e] for e in envs_present]
+    )
     ax_strip.imshow(
-        strip, aspect="auto", cmap=strip_cmap,
-        vmin=-0.5, vmax=len(envs_present) - 0.5, interpolation="none",
+        strip,
+        aspect="auto",
+        cmap=strip_cmap,
+        vmin=-0.5,
+        vmax=len(envs_present) - 0.5,
+        interpolation="none",
     )
     ax_strip.set_yticks([0])
     ax_strip.set_yticklabels(["env"], fontsize=7)
@@ -164,12 +180,18 @@ def plot_matrix(
         spine.set_visible(False)
 
     handles = [
-        plt.Line2D([0], [0], marker="s", color="none", markerfacecolor=c, markersize=8, label=e)
+        plt.Line2D(
+            [0], [0], marker="s", color="none", markerfacecolor=c, markersize=8, label=e
+        )
         for e, c in env_colour_map.items()
     ]
     fig.legend(
-        handles=handles, loc="lower center", ncol=len(handles),
-        bbox_to_anchor=(0.5, -0.05), fontsize=7, frameon=False,
+        handles=handles,
+        loc="lower center",
+        ncol=len(handles),
+        bbox_to_anchor=(0.5, -0.05),
+        fontsize=7,
+        frameon=False,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -206,7 +228,9 @@ def main(
     )
 
     tag = f"_{category}" if category else ""
-    out = Path(output) if output else OUT_DIR / f"sorted_response_matrix_{value}{tag}.pdf"
+    out = (
+        Path(output) if output else OUT_DIR / f"sorted_response_matrix_{value}{tag}.pdf"
+    )
     plot_matrix(matrix, col_env, value_label=f"mean {value} rate", output_path=out)
 
 
