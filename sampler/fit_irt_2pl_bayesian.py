@@ -1,4 +1,4 @@
-"""Full Bayesian (MCMC) version of the 2PL fit, for comparison against the MAP point estimate.
+"""Full Bayesian (MCMC) version of the 2PL fit.
 
 Same model, same priors as fit_irt_2pl.py (theta ~ N(0,1), b ~ N(0,2),
 log_a ~ N(0,0.5)) — the only thing that changes is HOW we fit it: instead of
@@ -49,7 +49,9 @@ def fit_2pl_bayesian(
         p = pm.math.sigmoid(logit_p)
         pm.Binomial("obs", n=N, p=p, observed=K)
 
-        trace = pm.sample(draws=draws, tune=tune, chains=chains, random_seed=seed, target_accept=0.9)
+        trace = pm.sample(
+            draws=draws, tune=tune, chains=chains, random_seed=seed, target_accept=0.9
+        )
     return trace
 
 
@@ -65,14 +67,20 @@ def main(
     subjects, items, K, N, item_env = build_trial_counts(exclude_environments=excluded)
 
     if legacy_only:
-        keep_idx = [i for i, s in enumerate(subjects) if s.split("__")[0] in LEGACY_MODELS]
+        keep_idx = [
+            i for i, s in enumerate(subjects) if s.split("__")[0] in LEGACY_MODELS
+        ]
         subjects = [subjects[i] for i in keep_idx]
         K, N = K[keep_idx], N[keep_idx]
-        logger.info(f"Fitting on {len(subjects)} legacy subjects only (matches stratified_irt's design fit)")
+        logger.info(
+            f"Fitting on {len(subjects)} legacy subjects only (matches stratified_irt's design fit)"
+        )
     else:
         logger.info(f"Fitting on all {len(subjects)} subjects")
 
-    logger.info(f"{len(subjects)} subjects x {len(items)} items, {int(N.sum())} trials — starting NUTS sampling")
+    logger.info(
+        f"{len(subjects)} subjects x {len(items)} items, {int(N.sum())} trials — starting NUTS sampling"
+    )
     trace = fit_2pl_bayesian(K, N, draws=draws, tune=tune, chains=chains, seed=seed)
 
     summary = az.summary(trace, var_names=["theta", "a", "b"])
@@ -91,10 +99,15 @@ def main(
     ci_cols = [c for c in summary.columns if c.startswith("eti") or c.startswith("hdi")]
     theta_summary = summary.loc[[f"theta[{i}]" for i in range(len(subjects))]].copy()
     theta_summary.index = subjects
-    logger.info("\nPosterior theta (subject ability):\n" + theta_summary[["mean", "sd", *ci_cols]].to_string())
+    logger.info(
+        "\nPosterior theta (subject ability):\n"
+        + theta_summary[["mean", "sd", *ci_cols]].to_string()
+    )
 
     summary.to_csv(OUT_DIR / f"irt_2pl_bayesian_summary_{tag}.csv")
-    logger.success(f"Saved summary -> {OUT_DIR / f'irt_2pl_bayesian_summary_{tag}.csv'}")
+    logger.success(
+        f"Saved summary -> {OUT_DIR / f'irt_2pl_bayesian_summary_{tag}.csv'}"
+    )
 
 
 if __name__ == "__main__":

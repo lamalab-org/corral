@@ -1,21 +1,4 @@
-"""Uncertainty-aware item selection using the full Bayesian 2PL posterior.
-
-The MAP-based selection (subsampling_core._greedy_info_order) computes
-Fisher information at a SINGLE point estimate of (theta, a, b). We already
-found real posterior uncertainty around that point (fit_irt_2pl_bayesian.py)
-— 89% credible interval widths of 0.7-1.2 logits on subject ability alone.
-An item whose (a, b) look highly informative at the MAP point but whose
-posterior is wide (i.e. the data doesn't actually pin down how discriminating
-it is) should be trusted less than the point estimate implies.
-
-This module fixes that by averaging Fisher information across many
-posterior draws — each draw contributes its OWN theta, a, AND b jointly
-(properly propagating both subject-ability and item-parameter uncertainty
-together, not just one or the other) — before running the same greedy
-sum-of-information selection on the averaged surface. This is the posterior-
-predictive expected information, the direct Bayesian analogue of what the
-MAP version approximated with a single point.
-"""
+"""Uncertainty-aware item selection using the full Bayesian 2PL posterior."""
 
 import sys
 from pathlib import Path
@@ -27,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from subsampling_core import allocate_budget, greedy_order_from_info_matrix  # noqa: E402
 
 
-def posterior_averaged_info(trace, n_draws_used: int = 200, seed: int = 0) -> np.ndarray:
+def posterior_averaged_info(
+    trace, n_draws_used: int = 200, seed: int = 0
+) -> np.ndarray:
     """Fisher information averaged over posterior draws.
 
     Returns an (n_items, n_subj) matrix: for each item, its Fisher
@@ -35,9 +20,15 @@ def posterior_averaged_info(trace, n_draws_used: int = 200, seed: int = 0) -> np
     MAP version, both the item parameters AND the grid points themselves
     vary draw-to-draw, so this integrates over uncertainty in both at once.
     """
-    theta_samples = trace.posterior["theta"].stack(sample=("chain", "draw")).to_numpy()  # (n_subj, n_total)
-    a_samples = trace.posterior["a"].stack(sample=("chain", "draw")).to_numpy()  # (n_item, n_total)
-    b_samples = trace.posterior["b"].stack(sample=("chain", "draw")).to_numpy()  # (n_item, n_total)
+    theta_samples = (
+        trace.posterior["theta"].stack(sample=("chain", "draw")).to_numpy()
+    )  # (n_subj, n_total)
+    a_samples = (
+        trace.posterior["a"].stack(sample=("chain", "draw")).to_numpy()
+    )  # (n_item, n_total)
+    b_samples = (
+        trace.posterior["b"].stack(sample=("chain", "draw")).to_numpy()
+    )  # (n_item, n_total)
 
     n_total = theta_samples.shape[1]
     rng = np.random.default_rng(seed)
@@ -53,7 +44,9 @@ def posterior_averaged_info(trace, n_draws_used: int = 200, seed: int = 0) -> np
     return cum_info / len(draw_idx)
 
 
-def build_bayes_item_order(trace, items: list[str], budget_max: int, n_draws_used: int = 200, seed: int = 0) -> list[str]:
+def build_bayes_item_order(
+    trace, items: list[str], budget_max: int, n_draws_used: int = 200, seed: int = 0
+) -> list[str]:
     """Global (unstratified) posterior-averaged item order."""
     info = posterior_averaged_info(trace, n_draws_used=n_draws_used, seed=seed)
     return greedy_order_from_info_matrix(info, np.array(items), budget_max)
@@ -74,7 +67,9 @@ def build_bayes_item_order_per_stratum(
     return orders
 
 
-def make_stratified_bayes_sampler(per_env_order: dict[str, list[str]], allocation_mode: str = "proportional"):
+def make_stratified_bayes_sampler(
+    per_env_order: dict[str, list[str]], allocation_mode: str = "proportional"
+):
     strata_sizes = {env: len(items) for env, items in per_env_order.items()}
 
     def sampler(all_items, budget, rng, col_env):
