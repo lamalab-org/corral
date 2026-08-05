@@ -11,7 +11,6 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import quote, urlencode
 
 from loguru import logger
 
@@ -35,6 +34,14 @@ from corral.router.routes import CorralRouter
 # Name under which the corral MCP server is registered with the Codex harness
 # (the `[mcp_servers.<name>]` config table key).
 _MCP_SERVER_NAME = "corral"
+
+# MCP tools that create/place a file the model may later submit a path to. When
+# any of these is available, the model is told to use relative paths: the corral
+# filesystem tools and the scorer both resolve a relative path against the
+# server-side trial workspace, whereas an absolute path built from Codex's
+# advertised sandbox cwd points at a throwaway temp dir this agent deletes before
+# scoring (so the file — and the submission referencing it — is lost).
+_FILE_WRITING_TOOLS = frozenset({"write_file", "copy_file", "move_file", "mkdir"})
 
 # Terminal status of a single harness run. Distinguishing these lets the
 # benchmark record *why* a run ended instead of collapsing infrastructure
@@ -139,6 +146,14 @@ class CodexAgent(BaseAgent):
             the base class machinery. If None it is derived from `model`
             (prefixing `"openai/"` when `model` has no provider prefix).
         **kwargs: Additional keyword arguments forwarded to :class:`BaseAgent`.
+
+    Concurrency:
+        The Codex SDK drives a turn through a **synchronous** event stream
+        (`turn.stream()`), with no async entry point to await, so this agent does
+        not override :meth:`BaseAgent.arun`. Under concurrent benchmarking it
+        therefore uses the inherited default seam, which offloads the fully
+        synchronous :meth:`run` to a worker thread — there is no nested event
+        loop to avoid (unlike an async-SDK agent), so that is already optimal.
     """
 
     def __init__(
@@ -204,7 +219,9 @@ class CodexAgent(BaseAgent):
         """
         return False
 
-    def _developer_instructions(self, enable_surrender: bool) -> str:
+    def _developer_instructions(
+        self, enable_surrender: bool, tool_names: list[str] | None = None
+    ) -> str:
         """Compose the developer instructions handed to the Codex thread."""
         # The harness output is submitted verbatim unless answer extraction is
         # enabled, so only ask for the `Final Answer:` marker when something will
@@ -226,8 +243,23 @@ class CodexAgent(BaseAgent):
             f"You may ONLY interact with it through the provided `{_MCP_SERVER_NAME}` "
             "MCP tools; do not attempt to use the shell, filesystem, web search, or "
             "any other tool, and do not request additional permissions. Do not invent "
-            "tool outputs. " + final_answer_directive
+            "tool outputs. "
         )
+        # Only mention file paths when a file-writing tool is actually available,
+        # so a task without one sees the exact same instructions as before. The
+        # harness advertises a sandbox working directory, but that directory is a
+        # throwaway temp dir — files must be addressed relative to the task
+        # workspace (handled by the corral filesystem tools), not by an absolute
+        # path built from the advertised cwd.
+        if tool_names and _FILE_WRITING_TOOLS.intersection(tool_names):
+            instructions += (
+                "When a tool writes a file and you submit or reference its path, "
+                "use a RELATIVE path (a bare filename like `result.cif`), never an "
+                "absolute path: paths are resolved against the task workspace, and "
+                "an absolute path built from the working directory shown to you "
+                "points outside it and will not be found. "
+            )
+        instructions += final_answer_directive
         if enable_surrender and self.surrender_prompt is not None:
             instructions += "\n\n" + self.surrender_prompt.fill({})
         return instructions
@@ -241,13 +273,9 @@ class CodexAgent(BaseAgent):
         see full tool descriptions while the allowlist metadata reflects a
         briefer condition, silently breaking ablations).
         """
-        base_url = interface.base_url.rstrip("/")
-        encoded_task_id = quote(str(task_id), safe="")
-        query = urlencode({"verbosity": verbosity})
-        # Trailing slash on `/mcp/` avoids a 307 redirect: the endpoint is a
-        # Starlette Mount, so a bare `/mcp` bounces to `/mcp/` (an extra
-        # round-trip per call). Hit the canonical path directly.
-        return f"{base_url}/tasks/{encoded_task_id}/mcp/?{query}"
+        # The router owns the URL convention (task-scoped, or trial-scoped when
+        # a trial router is passed) and handles encoding / trailing slash.
+        return interface.mcp_url(task_id, verbosity)
 
     def _render_config_toml(self, mcp_url: str, tool_names: list[str]) -> str:
         """Generate the isolated Codex `config.toml` for a run.
@@ -665,7 +693,15 @@ class CodexAgent(BaseAgent):
             mcp_url, verbosity, tools, mcp_schema_sha256
         )
         self._run_meta["dropped_image_parts"] = dropped_images
-        developer_instructions = self._developer_instructions(enable_surrender)
+        developer_instructions = self._developer_instructions(
+            enable_surrender, tool_names
+        )
+
+        # Point Codex's sandbox at the trial's own (scored) workspace when it is
+        # locally accessible, so files the model writes there survive to scoring
+        # instead of a throwaway temp dir this agent deletes (see
+        # `_resolve_local_workspace`).
+        local_workspace = self._resolve_local_workspace(interface)
 
         self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
 
@@ -677,11 +713,43 @@ class CodexAgent(BaseAgent):
                 mcp_url=mcp_url,
                 tool_names=tool_names,
                 enable_surrender=enable_surrender,
+                workspace=local_workspace,
             )
         finally:
             # Lifecycle hooks run on *every* exit path (success, surrender,
             # timeout, failure).
             self._execute_hooks(HookPoint.AFTER_TASK, interface, task_id)
+
+    def _resolve_local_workspace(self, interface: CorralRouter) -> Path | None:
+        """Return the trial's server-side workspace as a local dir, if usable.
+
+        When the environment runs on the same host (the common local/in-process
+        deployment), the trial workspace the scorer reads is a real local
+        directory, carried on a trial-scoped router as `trial_workspace`.
+        Pointing Codex's sandbox `cwd` at it means files the model writes —
+        whether by a bare relative name or the absolute `cwd` path the harness
+        advertises to the model — land in the *scored* directory and survive to
+        scoring, instead of the throwaway temp dir this agent deletes when the
+        turn ends.
+
+        Returns None when no such locally-accessible directory exists (e.g. a
+        remote/Modal workspace, or non-runtime execution), so the caller falls
+        back to an isolated temp workspace and preserves the old behaviour.
+
+        The path is resolved to an absolute one: the server may report a
+        workspace relative to `base_work_dir`, and `cwd` is interpreted by the
+        `codex app-server` subprocess, whose own working directory need not match
+        this process's. Handing it a relative path would silently point the
+        sandbox at a *different* directory than the one the scorer reads.
+        """
+        ws = getattr(interface, "trial_workspace", None)
+        if not ws:
+            return None
+        try:
+            path = Path(ws).resolve()
+            return path if path.is_dir() else None
+        except OSError:
+            return None
 
     def _run_and_extract(
         self,
@@ -692,14 +760,27 @@ class CodexAgent(BaseAgent):
         mcp_url: str,
         tool_names: list[str],
         enable_surrender: bool,
+        workspace: Path | None = None,
     ) -> str:
         """Drive the harness and turn its output into a submit-ready answer."""
-        # Fresh, empty, per-episode isolated directories; cleaned up afterwards.
+        # CODEX_HOME is always a throwaway temp dir this agent owns and deletes,
+        # so the run never inherits the developer's global Codex config.
         root = Path(tempfile.mkdtemp(prefix="corral-codex-"))
         codex_home = root / "codex-home"
-        workspace = root / "workspace"
         codex_home.mkdir()
-        workspace.mkdir()
+
+        # Prefer the trial's own (scored) workspace as Codex's `cwd` so files the
+        # model writes there survive to scoring. Only fall back to an isolated
+        # temp workspace (under `root`, deleted with it) when no locally-usable
+        # trial workspace is available. A trial workspace lives *outside* `root`,
+        # so the `finally` cleanup never deletes it.
+        if workspace is not None:
+            run_workspace = workspace
+        else:
+            run_workspace = root / "workspace"
+            run_workspace.mkdir()
+        self._run_meta["codex_cwd"] = str(run_workspace)
+        self._run_meta["codex_cwd_is_trial_workspace"] = workspace is not None
 
         try:
             final_answer = self._run_codex(
@@ -708,7 +789,7 @@ class CodexAgent(BaseAgent):
                 mcp_url=mcp_url,
                 tool_names=tool_names,
                 codex_home=codex_home,
-                workspace=workspace,
+                workspace=run_workspace,
             )
         except _CodexError as e:
             status_map: dict[str, HarnessStatus] = {

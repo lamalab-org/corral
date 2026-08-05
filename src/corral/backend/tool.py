@@ -1,9 +1,11 @@
 import inspect
 from collections.abc import Callable
 from copy import deepcopy
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from agents.tool import function_tool as openai_function_tool
+from mcp.types import TASK_OPTIONAL
 
 from corral.backend.schema import ToolArgument
 
@@ -11,28 +13,43 @@ if TYPE_CHECKING:
     from corral.router.verbosity import ToolVerbosity
 
 
-def arguments_to_schema(arguments: list[ToolArgument]) -> dict[str, Any]:
-    """Convert a list of :class:`ToolArgument` into a JSON Schema dict.
+class ToolConcurrency(str, Enum):
+    """How a tool may be scheduled relative to other tool calls in one runtime.
 
-    Useful when migrating legacy class-based tools off the deprecated
-    `arguments=` constructor kwarg: build the schema with this helper and
-    pass it via `params_json_schema=`.
+    Concurrent tool calls can arrive on a single trial runtime — Claude Code and
+    Codex both issue tool calls in parallel — and the MCP transport now offloads
+    each call to a worker thread instead of running it on the event loop. This
+    mode tells the :class:`~corral.backend.env.Environment` how safe a tool is to
+    overlap with others so it can guard the shared `CorralState` accordingly
+    (Section 9 of `make_efficiency.md`):
+
+    * `SERIAL` (the default) — take the runtime's state lock for the whole
+      call, so the tool runs alone. Every existing tool defaults here, so nothing
+      overlaps until a tool explicitly opts in.
+    * `READ_ONLY` — the tool does not mutate runtime state *at all*, so it may
+      run alongside any other non-serial call with no execution lock; only the
+      recording of its result is serialised.
+    * `CONCURRENT` — the tool may mutate the single resource named by its
+      `concurrency_key` (a *writer* on that resource). Calls sharing a key are
+      serialised against each other, against `CONCURRENT_READ` calls on the
+      same key, and against background jobs on the same key; different keys run
+      in parallel.
+    * `CONCURRENT_READ` — the read side of the same `concurrency_key`
+      resource: the tool only *reads* that resource, so same-key readers overlap
+      each other (unlike `CONCURRENT`, which is exclusive) while still being
+      mutually exclusive with same-key `CONCURRENT` writers and background
+      jobs. This is the read/write split within one resource — a
+      readers-writer lock keyed by `concurrency_key` — as opposed to
+      `READ_ONLY`, which touches no shared resource and takes no lock at all.
+
+    Subclassing `str` keeps the value JSON-serialisable and comparable to the
+    plain strings accepted by the `@tool` decorator.
     """
-    properties: dict[str, Any] = {}
-    required: list[str] = []
-    for arg in arguments:
-        prop: dict[str, Any] = {
-            "type": arg.type,
-            "description": arg.description,
-        }
-        if arg.choices is not None:
-            prop["enum"] = arg.choices
-        if arg.default is not None:
-            prop["default"] = arg.default
-        properties[arg.name] = prop
-        if arg.required:
-            required.append(arg.name)
-    return {"type": "object", "properties": properties, "required": required}
+
+    SERIAL = "serial"
+    READ_ONLY = "read_only"
+    CONCURRENT = "concurrent"
+    CONCURRENT_READ = "concurrent_read"
 
 
 class Tool:
@@ -54,10 +71,27 @@ class Tool:
         description: str,
         params_json_schema: dict[str, Any] | None = None,
         hidden_args: dict[str, Any] | None = None,
+        background_capable: bool = False,
+        executor: str | None = None,
+        concurrency_key: str | None = None,
+        concurrency: "ToolConcurrency | str" = ToolConcurrency.SERIAL,
     ):
         self.name = name
         self.description = description
         self.hidden_args = hidden_args or {}
+        # Background-execution metadata (PR 4). A tool marked
+        # `background_capable` gets a generated `start_<tool>` variant that runs
+        # it as a background job so the agent is not blocked while it runs.
+        # `executor` names the preferred :class:`JobExecutor` backend (currently
+        # advisory; the default thread executor is always used). `concurrency_key`
+        # serialises background jobs that contend for the same resource.
+        self.background_capable = background_capable
+        self.executor = executor
+        self.concurrency_key = concurrency_key
+        # Concurrent-tool-call safety (Section 9). Defaults to SERIAL so an
+        # existing tool never overlaps another call unless it opts in; the
+        # environment reads this to pick the lock it holds during execution.
+        self.concurrency = ToolConcurrency(concurrency)
         self._params_json_schema = params_json_schema or {
             "type": "object",
             "properties": {},
@@ -158,11 +192,18 @@ class Tool:
             if "default" not in properties.get(r, {})
         ]
 
-        return {
+        mcp_def: dict[str, Any] = {
             "name": self.name,
             "description": filtered_description,
             "inputSchema": schema,
         }
+        # A background-capable tool advertises that it *may* be invoked as an MCP
+        # task (Section 7). A task-aware client can then task-augment the call to
+        # get a durable handle instead of blocking; every other tool omits
+        # `execution`, which the spec reads as task-forbidden.
+        if self.background_capable:
+            mcp_def["execution"] = {"taskSupport": TASK_OPTIONAL}
+        return mcp_def
 
     def get_openai_tool_format(self) -> dict[str, Any]:
         """Return the tool definition in OpenAI function-calling format.
@@ -241,7 +282,13 @@ def _extract_field_defaults(func: Callable) -> dict[str, Any]:
 
 
 def tool(
-    func: Callable | None = None, *, hidden_args: list[str] | None = None
+    func: Callable | None = None,
+    *,
+    hidden_args: list[str] | None = None,
+    background_capable: bool = False,
+    executor: str | None = None,
+    concurrency_key: str | None = None,
+    concurrency: "ToolConcurrency | str" = ToolConcurrency.SERIAL,
 ) -> Tool | Callable[[Callable], Tool]:
     """Decorator to convert a function into a Tool.
 
@@ -273,6 +320,21 @@ def tool(
         hidden_args: List of parameter names that should be excluded from
             the schema exposed to the agent. Their default values are
             recorded so the environment can inject them at call time.
+        background_capable: Mark this as a long-running tool that should also be
+            exposed as a generated `start_<tool>` variant, letting the agent run
+            it as a background job and continue working while it runs (PR 4).
+        executor: Preferred :class:`~corral.backend.jobs.JobExecutor` backend for
+            background runs (advisory for now; the thread executor is used).
+        concurrency_key: Names the shared resource this tool contends for.
+            Background jobs sharing this key are serialised so tools contending
+            for the same resource never run at once. When
+            `concurrency="concurrent"` it also serialises *foreground* (writer)
+            calls of this tool against same-key calls and jobs; when
+            `concurrency="concurrent_read"` the call takes the *read* side of
+            the same key, so same-key readers overlap while writers stay
+            exclusive (a readers-writer split within one resource).
+        concurrency: How this tool may overlap other tool calls in one runtime
+            (see :class:`ToolConcurrency`). Defaults to `SERIAL`.
 
     Returns:
         A Tool instance wrapping the function.
@@ -321,6 +383,10 @@ def tool(
                     description=ft.description,
                     params_json_schema=schema,
                     hidden_args=hidden_args_dict if hidden_args_dict else None,
+                    background_capable=background_capable,
+                    executor=executor,
+                    concurrency_key=concurrency_key,
+                    concurrency=concurrency,
                 )
 
             def execute(self, **kwargs):

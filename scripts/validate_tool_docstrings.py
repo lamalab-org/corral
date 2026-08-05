@@ -62,6 +62,14 @@ ALL_KNOWN_TAGS = (
     MAIN_TAGS + WORKFLOW_NESTED_TAGS + RAISES_NESTED_TAGS + ARGS_TAGS + RETURNS_TAGS
 )
 
+# Repo-relative paths whose @tool functions are intentionally exempt from the
+# tagged docstring format. These expose generic, shared tools (e.g. the
+# filesystem helpers) that don't participate in the verbosity system and use
+# plain docstrings instead.
+EXCLUDED_FILES = {
+    "src/corral/utils/io_tools.py",
+}
+
 # Common misspellings / variant spellings that should be flagged
 COMMON_MISSPELLINGS: dict[str, str] = {
     "ARGS_SYNTACTIC": "ARGS_SYNTACTICAL",
@@ -298,6 +306,14 @@ def find_tool_files(repo_root: Path) -> list[Path]:
     return sorted(files)
 
 
+def _is_excluded(filepath: Path, repo_root: Path) -> bool:
+    """Return True if the file is exempt from docstring validation."""
+    resolved = filepath.resolve()
+    return any(
+        resolved == (repo_root / excluded).resolve() for excluded in EXCLUDED_FILES
+    )
+
+
 def validate_file(filepath: Path) -> list[Violation]:
     """Validate all @tool functions in a single file."""
     all_violations: list[Violation] = []
@@ -320,6 +336,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         # Standalone mode: scan all task tool files
         files = find_tool_files(repo_root)
+
+    # Drop files that are intentionally exempt from the tagged format.
+    files = [f for f in files if not _is_excluded(f, repo_root)]
 
     if not files:
         return 0

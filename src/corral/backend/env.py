@@ -1,12 +1,21 @@
+import contextlib
 import inspect
+import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, Literal, get_args
 
 from loguru import logger
 
+from corral.backend.background_tools import attach_background_tools
+from corral.backend.jobs import (
+    DEFAULT_JOB_CONCURRENCY,
+    DEFAULT_POLL_AFTER_SECONDS,
+    JobExecutor,
+    JobManager,
+)
 from corral.backend.schema import ToolCall, ToolCallStatus
 from corral.backend.state import CorralState, TaskRunState
 from corral.backend.task import (
@@ -16,30 +25,126 @@ from corral.backend.task import (
     topological_order,
     validate_task_graph,
 )
-from corral.backend.tool import Tool
+from corral.backend.tool import Tool, ToolConcurrency
+
+# Per-env concurrency capability (Environment Concurrency Isolation, Phase 0).
+# Declares how safe an env's *process-global* state is to overlap across
+# concurrent trials, so the scheduler can serialise the ones that are not:
+#
+# * "thread"  — no mutable process-global state; trials are safe to overlap
+#               in-process (today's behaviour and the default, so every existing
+#               env is unchanged).
+# * "process" — keeps process-global mutable state (module globals, a stateful
+#               C-extension) that a future process-worker backend will isolate;
+#               until that backend lands the scheduler treats it like "serial".
+# * "serial"  — an explicit escape hatch: never overlap this env's trials with
+#               any other globally-stateful trial, even under a concurrent run.
+#
+# "process" and "serial" are both clamped to run one-at-a-time in Phase 0; they
+# differ only in intent (and in what the Phase 2 worker backend does with
+# "process").
+EnvConcurrency = Literal["thread", "process", "serial"]
+
+# The modes the scheduler must serialise against one another because their
+# trials may share process-global state (see `Environment.concurrency`).
+SERIALISED_CONCURRENCY: frozenset[str] = frozenset({"process", "serial"})
+
+DEFAULT_ENV_CONCURRENCY: EnvConcurrency = "thread"
+
+
+class _ReadWriteLock:
+    """A readers-writer lock: many concurrent readers **or** one exclusive writer.
+
+    Models the read/write split within a single `concurrency_key` resource
+    (Section 9). `CONCURRENT_READ` tool calls take the read side and overlap
+    each other; `CONCURRENT` calls and background jobs take the write side and
+    run exclusively against every reader and writer on that key. It is
+    writer-preferring — a waiting writer blocks *new* readers — so a steady
+    stream of readers can never starve a background job that needs the resource,
+    while already-admitted readers still finish first.
+
+    Threading (not `anyio`) primitives, because the environment's
+    `call_tool` is synchronous and shared by the REST route and the
+    thread-offloaded MCP handler. `acquire`/`release` alias the *write* side
+    so the lock is drop-in wherever an exclusive `threading.Lock` was expected
+    (the JobManager's `key_lock_factory` treats a background job as a writer).
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition(threading.Lock())
+        self._readers = 0
+        self._writer = False
+        self._writers_waiting = 0
+
+    def acquire_read(self) -> None:
+        with self._cond:
+            while self._writer or self._writers_waiting > 0:
+                self._cond.wait()
+            self._readers += 1
+
+    def release_read(self) -> None:
+        with self._cond:
+            self._readers -= 1
+            if self._readers == 0:
+                self._cond.notify_all()
+
+    def acquire_write(self) -> None:
+        with self._cond:
+            self._writers_waiting += 1
+            try:
+                while self._writer or self._readers > 0:
+                    self._cond.wait()
+            finally:
+                self._writers_waiting -= 1
+            self._writer = True
+
+    def release_write(self) -> None:
+        with self._cond:
+            self._writer = False
+            self._cond.notify_all()
+
+    # Write-side aliases so a `_ReadWriteLock` is drop-in for the JobManager's
+    # `key_lock_factory` (a background job is a writer on its resource).
+    def acquire(self) -> None:
+        self.acquire_write()
+
+    def release(self) -> None:
+        self.release_write()
+
+    @contextlib.contextmanager
+    def read_lock(self) -> Iterator[None]:
+        self.acquire_read()
+        try:
+            yield
+        finally:
+            self.release_read()
+
+    @contextlib.contextmanager
+    def write_lock(self) -> Iterator[None]:
+        self.acquire_write()
+        try:
+            yield
+        finally:
+            self.release_write()
 
 
 def default_file_tools(workspace: str) -> dict[str, Tool]:
     """Build the standard filesystem tools bound to a trial workspace."""
     # Imported lazily to avoid a circular import at module load time.
-    from corral.utils.io_tools import (
-        CatFilesTool,
-        CopyFileTool,
-        FileInfoTool,
-        FSManager,
-        ListFilesTool,
-        ReadFileTool,
-        WriteFileTool,
-    )
+    from corral.utils.io_tools import FSManager, build_file_tools
 
     fs_manager = FSManager("file", base_path=workspace)
+    tools = build_file_tools(fs_manager)
     return {
-        "list_files": ListFilesTool(fs_manager),
-        "read_file": ReadFileTool(fs_manager),
-        "write_file": WriteFileTool(fs_manager),
-        "file_info": FileInfoTool(fs_manager),
-        "cat_files": CatFilesTool(fs_manager),
-        "copy_file": CopyFileTool(fs_manager),
+        name: tools[name]
+        for name in (
+            "list_files",
+            "read_file",
+            "write_file",
+            "file_info",
+            "cat_files",
+            "copy_file",
+        )
     }
 
 
@@ -109,6 +214,12 @@ class Environment:
     through `self.state`.
     """
 
+    # Class-level concurrency default (see `EnvConcurrency`). Stateful subclasses
+    # that keep process-global state override it declaratively — e.g. wetlab sets
+    # `DEFAULT_CONCURRENCY = "process"`. A per-instance `concurrency=` kwarg
+    # (forwarded through `build_environments`) still wins when given.
+    DEFAULT_CONCURRENCY: ClassVar[EnvConcurrency] = DEFAULT_ENV_CONCURRENCY
+
     def __init__(
         self,
         task_id: str,
@@ -120,14 +231,66 @@ class Environment:
         component_id: str | None = None,
         shared_task_runs: dict[str, TaskRunState] | None = None,
         fs_manager=None,
+        runtime_id: str | None = None,
+        max_job_concurrency: int = DEFAULT_JOB_CONCURRENCY,
+        job_executors: dict[str, JobExecutor] | None = None,
+        concurrency: EnvConcurrency | None = None,
     ):
         self.task_id = task_id
         self.current_task = task
         self.base_work_dir = base_work_dir
         self.toolset = toolset or Toolset()
+        # How safe this env's process-global state is to overlap across
+        # concurrent trials (Environment Concurrency Isolation, Phase 0). `None`
+        # falls back to the class default, so a stateful subclass can declare its
+        # mode once. The concurrent scheduler reads this (via the server's
+        # `/concurrency` endpoint) to serialise "process"/"serial" envs.
+        resolved_concurrency = (
+            concurrency if concurrency is not None else type(self).DEFAULT_CONCURRENCY
+        )
+        if resolved_concurrency not in get_args(EnvConcurrency):
+            raise ValueError(
+                f"concurrency must be one of {get_args(EnvConcurrency)}, "
+                f"got {resolved_concurrency!r}"
+            )
+        self.concurrency: EnvConcurrency = resolved_concurrency
         self.group_tasks = group_tasks or {task_id: task}
         self.fs_manager = fs_manager
+        # Per-trial background-job concurrency (PR 4). Only used when a task's
+        # toolset contains a background-capable tool, in which case each trial
+        # gets its own JobManager bounded by this many simultaneous jobs.
+        self.max_job_concurrency = max_job_concurrency
+        # Preconfigured job executors, keyed by the name tools request via
+        # `@tool(executor=...)`. Lets a deployment inject a SlurmExecutor with
+        # cluster flags or a ModalExecutor bound to a deployed function; built-in
+        # thread/process/subprocess backends are created on demand when omitted.
+        self.job_executors = job_executors
+        self.job_manager: JobManager | None = None
+        # A trial *runtime* carries a unique id so its per-trial workspace is
+        # namespaced away from every other runtime of the same task (see
+        # `_create_trial_workspace`). Templates (the one-per-task environments
+        # built by `build_environments`) leave this `None` and keep the
+        # historical, unnamespaced behaviour byte-for-byte.
+        self.runtime_id = runtime_id
         self.tools: dict[str, Tool] = {}
+
+        # Per-runtime locks that protect shared state from concurrent tool calls
+        # (Section 9). Claude Code / Codex issue tool calls in parallel and the
+        # MCP transport now runs each call in a worker thread, so `call_tool`
+        # guards the single `CorralState` mutation (recording a call) and
+        # serialises execution by each tool's `ToolConcurrency` mode. `RLock`
+        # lets a SERIAL tool hold the lock across execution and still record
+        # through the same lock. `_resource_locks` are readers-writer locks keyed
+        # by `concurrency_key`, shared with this runtime's JobManager, so one key
+        # gives a read/write split — same-key `CONCURRENT_READ` readers overlap
+        # while `CONCURRENT` writers and background jobs stay exclusive — and
+        # different keys always run in parallel. They are threading (not anyio)
+        # locks because `call_tool` is synchronous and shared by the REST route
+        # and the thread-offloaded MCP handler; every entry path is therefore
+        # protected uniformly.
+        self._state_lock = threading.RLock()
+        self._resource_locks: dict[str, _ReadWriteLock] = {}
+        self._resource_locks_guard = threading.Lock()
 
         # task_prompt stays an empty placeholder; the real prompt is fetched
         # live via get_task_prompt() and recorded in the agent's messages.
@@ -163,6 +326,9 @@ class Environment:
         # Resolve all tools for the new trial: named tools from the pool, common
         # tools, and workspace-bound tools rebound to the fresh workspace.
         self.tools = self._resolve_tools(self.state.workspace)
+        # If any resolved tool is background-capable, give this trial a fresh
+        # JobManager and add the generated start_<tool> + control tools.
+        self._attach_background_tools()
         # The prompt is intentionally NOT built here: at construction time deps
         # have not run yet. It is fetched live when actually requested (agent,
         # guide, LaTeX) — always after dependencies are satisfied under the
@@ -171,9 +337,71 @@ class Environment:
         # stays an empty placeholder; nothing downstream reads it.
         return trial_id
 
+    def for_trial(
+        self,
+        trial_runtime_id: str,
+        episode_task_runs: dict[str, TaskRunState] | None = None,
+        *,
+        max_job_concurrency: int | None = None,
+    ) -> "Environment":
+        """Build a fresh, isolated runtime for one trial execution.
+
+        The returned environment shares this one's *immutable* configuration
+        (task definition, toolset, task group, base work dir, fs manager) but
+        owns a brand-new :class:`CorralState` and a workspace namespaced by
+        `trial_runtime_id`. Two runtimes of the same task therefore never share
+        mutable state or a workspace, which is exactly what makes concurrent
+        repeated trials of one task safe.
+
+        Stateful subclasses that hold non-clonable resources (hardware handles,
+        live clients, subprocess pools, or a bespoke `__init__` signature)
+        should override this to build — or lease — their own isolated runtime
+        rather than inherit this definition-only reconstruction.
+
+        `episode_task_runs` is the dependency-output store shared by every
+        runtime in the same *episode* (one trial round of a dependency chain).
+        When given, dependent tasks read their upstream siblings' outputs
+        through it while still owning isolated state and workspaces; when
+        `None` (independent trials) the runtime gets its own empty store, so
+        nothing leaks across unrelated trials.
+
+        `max_job_concurrency`, when given, sizes this runtime's background-job
+        pool (from `ConcurrencyConfig.tool_jobs_per_trial`, carried over HTTP
+        in `create_trial`); `None` falls back to this template's own default.
+        """
+        return type(self)(
+            task_id=self.task_id,
+            task=self.current_task,
+            base_work_dir=self.base_work_dir,
+            toolset=self.toolset,
+            group_tasks=self.group_tasks,
+            component_id=self.state.task_group_id,
+            shared_task_runs=episode_task_runs,
+            fs_manager=self.fs_manager,
+            runtime_id=trial_runtime_id,
+            max_job_concurrency=(
+                max_job_concurrency
+                if max_job_concurrency is not None
+                else self.max_job_concurrency
+            ),
+            job_executors=self.job_executors,
+            concurrency=self.concurrency,
+        )
+
     def _create_trial_workspace(self, trial_id: str) -> str:
-        """Create workspace directory for this trial"""
-        workspace = Path(self.base_work_dir) / f"{self.task_id}_trial_{trial_id}"
+        """Create workspace directory for this trial.
+
+        A trial runtime namespaces its workspace by its unique `runtime_id`, so
+        two concurrent trials of the *same* task (whose per-runtime trial
+        counters both start at 1) never collide on the same directory. Templates
+        keep the historical `{task_id}_trial_{n}` name unchanged.
+        """
+        leaf = (
+            f"{self.task_id}_{self.runtime_id}_trial_{trial_id}"
+            if self.runtime_id is not None
+            else f"{self.task_id}_trial_{trial_id}"
+        )
+        workspace = Path(self.base_work_dir) / leaf
         logger.info(f"Creating workspace: {workspace}")
         if self.fs_manager:
             self.fs_manager.mkdir(str(workspace), create_parents=True)
@@ -297,7 +525,11 @@ class Environment:
             return answer
         from corral.utils.tool_helpers import smart_resolve_path
 
-        return smart_resolve_path(answer)
+        # Scope the fallback file search to *this trial's* workspace so two
+        # concurrent trials submitting the same bare filename never resolve to
+        # each other's file (Phase 4 work-directory hygiene). An empty work dir
+        # (template envs) falls back to the legacy process-global search.
+        return smart_resolve_path(answer, base_dir=self.get_current_work_dir() or None)
 
     def _resolve_tools(self, workspace: str | None) -> dict[str, Tool]:
         """Resolve the trial's tools — overridable seam over the toolset.
@@ -412,12 +644,78 @@ class Environment:
 
         return {key: parse_value(key, val) for key, val in args.items()}
 
+    def _resource_lock(self, key: str) -> _ReadWriteLock:
+        """Return the shared readers-writer lock guarding one named resource.
+
+        Keyed by `concurrency_key` and shared with this runtime's JobManager
+        (which is handed this method as its `key_lock_factory`). The write side
+        serialises foreground `CONCURRENT` tool calls and background jobs that
+        share `key`, so "two tools writing the same file" never overlap
+        regardless of which path runs them; the read side lets same-key
+        `CONCURRENT_READ` calls overlap. Different keys always stay parallel.
+        Locks are created lazily and cached. A background job calls
+        `acquire`/`release` (the write-side aliases), so it is always a
+        writer on its resource.
+        """
+        with self._resource_locks_guard:
+            lock = self._resource_locks.get(key)
+            if lock is None:
+                lock = _ReadWriteLock()
+                self._resource_locks[key] = lock
+            return lock
+
+    @contextlib.contextmanager
+    def _execution_guard(self, tool: Tool) -> Iterator[None]:
+        """Hold the right lock while `tool` executes, per its concurrency mode.
+
+        * `SERIAL` — the runtime's state lock for the whole call, so the tool
+          runs alone (the safe default: with every tool SERIAL the runtime is
+          fully serialised exactly as before).
+        * `CONCURRENT` with a `concurrency_key` — the resource's **write**
+          lock, so it runs exclusively against every reader and writer on that
+          key (only same-key work is serialised; other keys overlap).
+        * `CONCURRENT_READ` with a `concurrency_key` — the resource's
+          **read** lock, so same-key readers overlap each other but still
+          exclude (and are excluded by) same-key writers and background jobs.
+        * `READ_ONLY` (or either concurrent mode without a key) — no execution
+          lock; only the result recording afterwards is serialised.
+        """
+        mode = getattr(tool, "concurrency", ToolConcurrency.SERIAL)
+        key = getattr(tool, "concurrency_key", None)
+        if mode == ToolConcurrency.SERIAL:
+            with self._state_lock:
+                yield
+        elif mode == ToolConcurrency.CONCURRENT and key is not None:
+            with self._resource_lock(key).write_lock():
+                yield
+        elif mode == ToolConcurrency.CONCURRENT_READ and key is not None:
+            with self._resource_lock(key).read_lock():
+                yield
+        else:
+            yield
+
+    def _record_tool_call(self, tool_call: ToolCall) -> None:
+        """Append a tool-call record under the runtime's state lock.
+
+        Recording is the only `CorralState` mutation on every `call_tool`
+        path, so guarding it keeps the trace consistent even when read-only or
+        concurrent tools overlap. The lock is reentrant, so a `SERIAL` tool
+        already holding it during execution records through the same lock.
+        """
+        with self._state_lock:
+            self.state.record_tool_call(tool_call)
+
     def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> ToolCall:
         """Execute a tool and record the call with enhanced error handling.
 
         The hidden arguments, if they exist, will be merged into the call arguments,
         with the hidden arguments taking precedence.
-        This is needed for cases in which the arguments are fixed and should not be modified and/or provided by the agent."""
+        This is needed for cases in which the arguments are fixed and should not be modified and/or provided by the agent.
+
+        Concurrent calls to one runtime are made safe by the tool's
+        :class:`~corral.backend.tool.ToolConcurrency` mode: execution runs inside
+        :meth:`_execution_guard` and the resulting record is written through
+        :meth:`_record_tool_call`."""
 
         # Preprocess (e.g. JSON-decode stringified args), then emit a single
         # concise debug line per call. Only spell out the before/after when
@@ -438,7 +736,8 @@ class Environment:
 
         start_time = time.perf_counter()
         # Check if tool exists
-        if tool_name not in self.tools:
+        tool = self.tools.get(tool_name)
+        if tool is None:
             duration = time.perf_counter() - start_time
             tool_call = ToolCall(
                 tool_name=tool_name,
@@ -448,12 +747,12 @@ class Environment:
                 error_message=f"Tool {tool_name} not found",
                 duration=duration,
             )
-            self.state.record_tool_call(tool_call)
+            self._record_tool_call(tool_call)
             return tool_call
 
-        tool = self.tools[tool_name]
-
-        # Merge tool-specific hidden_args if present
+        # Merge tool-specific hidden_args if present. A missing hidden arg is a
+        # misconfiguration and still raises out of the call (before any lock is
+        # taken), preserving the previous behaviour.
         call_args = arguments.copy()
         if hasattr(tool, "hidden_args") and tool.hidden_args:
             # tool.hidden_args is a list of argument names to hide
@@ -465,60 +764,171 @@ class Environment:
                         f"Hidden argument '{hidden_arg}' required by tool '{tool_name}' not found in environment's hidden_args."
                     )
 
-        # Validate arguments
-        is_valid, error_message = tool.validate_arguments(call_args)
-        if not is_valid:
-            duration = time.perf_counter() - start_time
-            tool_call = ToolCall(
-                tool_name=tool_name,
-                arguments=original_arguments,
-                result=None,
-                status=ToolCallStatus.INVALID_ARGS,
-                error_message=error_message,
-                duration=duration,
-            )
-            self.state.record_tool_call(tool_call)
+        # Serialise or parallelise the execution according to the tool's
+        # concurrency mode, then record the outcome under the state lock.
+        with self._execution_guard(tool):
+            is_valid, error_message = tool.validate_arguments(call_args)
+            if not is_valid:
+                duration = time.perf_counter() - start_time
+                tool_call = ToolCall(
+                    tool_name=tool_name,
+                    arguments=original_arguments,
+                    result=None,
+                    status=ToolCallStatus.INVALID_ARGS,
+                    error_message=error_message,
+                    duration=duration,
+                )
+                self._record_tool_call(tool_call)
+                return tool_call
+
+            try:
+                result = tool.execute(**call_args)
+                duration = time.perf_counter() - start_time
+                tool_call = ToolCall(
+                    tool_name=tool_name,
+                    arguments=original_arguments,
+                    result=result,
+                    status=ToolCallStatus.SUCCESS,
+                    error_message=None,
+                    duration=duration,
+                )
+            except Exception as e:
+                duration = time.perf_counter() - start_time
+                tool_call = ToolCall(
+                    tool_name=tool_name,
+                    arguments=original_arguments,
+                    result=None,
+                    status=ToolCallStatus.EXECUTION_ERROR,
+                    error_message=str(e),
+                    duration=duration,
+                )
+
+            self._record_tool_call(tool_call)
             return tool_call
 
-        # Execute tool
-        try:
-            result = tool.execute(**call_args)
-            duration = time.perf_counter() - start_time
-            tool_call = ToolCall(
-                tool_name=tool_name,
-                arguments=original_arguments,
-                result=result,
-                status=ToolCallStatus.SUCCESS,
-                error_message=None,
-                duration=duration,
-            )
-        except Exception as e:
-            duration = time.perf_counter() - start_time
-            tool_call = ToolCall(
-                tool_name=tool_name,
-                arguments=original_arguments,
-                result=None,
-                status=ToolCallStatus.EXECUTION_ERROR,
-                error_message=str(e),
-                duration=duration,
-            )
+    def _job_provenance(self) -> dict[str, str | None]:
+        """Live provenance for jobs submitted by this runtime.
 
-        self.state.record_tool_call(tool_call)
-        return tool_call
+        Read lazily (at submit time) rather than captured at construction,
+        because `run_id`/`episode_id` are bound onto the runtime's state *after*
+        `for_trial` builds it (see the server's `create_trial`).
+        """
+        return {
+            "benchmark_run_id": self.state.run_id,
+            "episode_id": self.state.episode_id,
+            "trial_runtime_id": self.runtime_id,
+        }
+
+    def _attach_background_tools(self) -> None:
+        """Give the current trial a JobManager + generated background tools.
+
+        Called at the end of each `reset_state`. When the freshly resolved
+        toolset has no background-capable tool the manager is torn down and
+        left `None`, so ordinary tasks are entirely unaffected. Otherwise a
+        *fresh* manager is created per trial so job ids never span trials.
+        """
+        has_background = any(
+            getattr(t, "background_capable", False) for t in self.tools.values()
+        )
+        self.shutdown_jobs()
+        if not has_background:
+            self.job_manager = None
+            return
+        self.job_manager = JobManager(
+            executors=self.job_executors,
+            max_concurrency=self.max_job_concurrency,
+            provenance_provider=self._job_provenance,
+            # Share the runtime's per-resource locks so a `concurrency_key`
+            # serialises background jobs and foreground CONCURRENT tool calls
+            # against each other, not just jobs among themselves (Section 9).
+            key_lock_factory=self._resource_lock,
+        )
+        attach_background_tools(self)
+
+    def submit_job(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Submit a background-capable tool as a job and return its handle.
+
+        Mirrors `call_tool`'s hidden-argument injection and resolves the
+        workspace **now** (at submit time), so a later environment change can
+        never redirect a running job at a different trial's workspace. Returns a
+        job handle the agent polls with the generated control tools.
+        """
+        if self.job_manager is None:
+            return {"error": "Background jobs are not enabled for this task."}
+
+        tool = self.tools.get(tool_name)
+        if tool is None:
+            return {"error": f"Tool {tool_name!r} not found."}
+
+        arguments = self._preprocess_arguments(tool_name, arguments)
+        call_args = arguments.copy()
+        hidden_names: list[str] = []
+        if getattr(tool, "hidden_args", None):
+            for hidden_arg in tool.hidden_args:
+                if hidden_arg in self.state.hidden_args:
+                    call_args[hidden_arg] = self.state.hidden_args[hidden_arg]
+                    hidden_names.append(hidden_arg)
+                else:
+                    return {
+                        "error": (
+                            f"Hidden argument {hidden_arg!r} required by tool "
+                            f"{tool_name!r} is not configured."
+                        )
+                    }
+
+        is_valid, error_message = tool.validate_arguments(call_args)
+        if not is_valid:
+            return {"error": error_message}
+
+        record = self.job_manager.submit(
+            tool,
+            visible_arguments=arguments,
+            call_arguments=call_args,
+            hidden_arg_names=tuple(hidden_names),
+            workspace=self.get_current_work_dir(),
+            concurrency_key=getattr(tool, "concurrency_key", None),
+        )
+        return {
+            "job_id": record.context.job_id,
+            "tool_name": tool_name,
+            "status": record.status.value,
+            "submitted_at": record.submitted_at.isoformat(),
+            "poll_after_seconds": DEFAULT_POLL_AFTER_SECONDS,
+        }
+
+    def refresh_jobs(self) -> None:
+        """Copy the current job snapshot onto the state for serialisation."""
+        if self.job_manager is not None:
+            self.state.jobs = self.job_manager.snapshot()
+
+    def shutdown_jobs(self) -> None:
+        """Cancel outstanding jobs and release the manager's executor threads."""
+        if self.job_manager is not None:
+            self.state.jobs = self.job_manager.snapshot()
+            self.job_manager.shutdown()
 
     def submit_answer(self, answer: str) -> float:
-        """Submit final answer and get score"""
-        self.state.submit(answer)
-        score = self.score()
-        self.state.set_score(score)
-        return score
+        """Submit final answer and get score.
+
+        Held under the state lock so a submission never interleaves with a tool
+        call still recording into the same trial's state (Section 9).
+        """
+        with self._state_lock:
+            self.state.submit(answer)
+            score = self.score()
+            self.state.set_score(score)
+            return score
 
     def surrender(self) -> float:
         """Surrender from the current task without submitting an answer"""
-        return self.state.surrender()
+        with self._state_lock:
+            return self.state.surrender()
 
     def get_completed_trial_data(self) -> dict:
         """Get all data for the completed trial"""
+        # Fold any background-job records into the state so they travel with the
+        # trial report (provenance of every long-running tool the agent ran).
+        self.refresh_jobs()
         return {
             "trial_id": self.state.trial_id,
             "state": self.state.snapshot(include_trials=False),

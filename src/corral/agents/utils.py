@@ -10,7 +10,7 @@ from litellm.types.utils import Message
 from loguru import logger
 from tenacity import (
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_chain,
     wait_fixed,
@@ -25,6 +25,25 @@ RETRY_EXCEPTIONS = (
     openai.APIStatusError,
     openai.InternalServerError,
 )
+
+# 4xx responses are client errors: a malformed request (bad output schema,
+# invalid params) fails identically on every attempt, so retrying just burns the
+# whole 30/60/90s wait chain before the same error escapes. These few 4xx codes
+# are the exception — they are genuinely transient — so they stay retryable
+# alongside all 5xx, timeouts, and connection errors.
+RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
+
+
+def _should_retry(exc: BaseException) -> bool:
+    """Retry transient failures only; fail fast on non-retryable 4xx errors."""
+    if not isinstance(exc, RETRY_EXCEPTIONS):
+        return False
+    status = getattr(exc, "status_code", None)
+    if status is not None and 400 <= status < 500:
+        return status in RETRYABLE_STATUS_CODES
+    # 5xx, client-side timeouts, and connection errors (no status) are transient.
+    return True
+
 
 # Exceptions that should stop the benchmark immediately (not retry or continue)
 STOP_BENCHMARK_EXCEPTIONS = (
@@ -43,8 +62,16 @@ QUOTA_EXHAUSTED_KEYWORDS = (
 
 
 def before_sleep_loguru(retry_state):
-    logger.info(
-        f"Retrying: {retry_state.attempt_number}, wait: {retry_state.next_action.sleep} seconds"
+    # Surface *what* is being retried, not just the attempt count: without the
+    # triggering exception a transient failure is invisible until (and unless)
+    # the final one escapes, leaving only a bare LiteLLM error in the logs.
+    outcome = retry_state.outcome
+    exc = outcome.exception() if outcome is not None else None
+    cause = f"{type(exc).__name__}: {exc}" if exc is not None else "unknown error"
+    next_action = retry_state.next_action
+    wait = f"{next_action.sleep:.0f}s" if next_action is not None else "unknown"
+    logger.warning(
+        f"LLM call retry {retry_state.attempt_number}/3 after {cause}; waiting {wait}"
     )
 
 
@@ -125,7 +152,7 @@ class LiteLLMMessage(TypedDict, total=False):
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90)),
-    retry=retry_if_exception_type(RETRY_EXCEPTIONS),
+    retry=retry_if_exception(_should_retry),
     before_sleep=before_sleep_loguru,
     reraise=True,
 )

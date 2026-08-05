@@ -1,3 +1,4 @@
+import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any
 
@@ -7,6 +8,16 @@ from .base import Metric
 
 if TYPE_CHECKING:
     from corral.report.results import BenchmarkResult
+
+# Combined estimated cost (in seconds, summed over the metrics to calculate)
+# below which the process pool never pays off. Spinning one up costs a fresh
+# interpreter per worker — a full re-import of the package under the `spawn`
+# start method — plus pickling the entire benchmark result to each worker, so
+# for the cheap in-memory reductions that make up the default metric set the
+# overhead dwarfs the work. Only once the metrics collectively claim more work
+# than this do we parallelise. Tune via the `cost_threshold` argument to
+# `MetricRegistry.calculate_all`.
+PARALLEL_COST_THRESHOLD_SECONDS = 2.0
 
 
 def _calculate_single_metric(args: tuple) -> tuple[str, Any]:
@@ -127,6 +138,7 @@ class MetricRegistry:
         enabled_only: list[str] | None = None,
         parallel: bool = False,
         max_workers: int | None = None,
+        cost_threshold: float | None = None,
     ) -> dict[str, Any]:
         """Calculate all metrics (or only enabled ones).
 
@@ -138,11 +150,17 @@ class MetricRegistry:
             benchmark_result: The benchmark result to calculate metrics from
             enabled_only: Optional list of metric names to calculate.
                          If None, all metrics are calculated.
-            parallel: If True, calculate metrics in parallel using ProcessPoolExecutor.
-                     Default is False for backward compatibility.
+            parallel: If True, calculate metrics with a process pool *only when*
+                     their combined :attr:`~corral.report.metrics.base.Metric.estimated_cost_seconds`
+                     clears `cost_threshold`; otherwise (and always when
+                     False) they run sequentially. Cheap metrics never pay the
+                     pool's spawn + pickling overhead. Default is False.
             max_workers: Maximum number of processes for parallel execution.
-                        If None, defaults to the number of CPUs on the machine.
-                        Only used when parallel=True.
+                        If None, uses one worker per metric, capped at the CPU
+                        count. Only used when a parallel run is chosen.
+            cost_threshold: Combined estimated cost (seconds) at or above which a
+                        `parallel=True` request actually uses the pool. Defaults
+                        to :data:`PARALLEL_COST_THRESHOLD_SECONDS`.
 
         Returns:
             Dictionary mapping metric names to their calculated values.
@@ -154,12 +172,47 @@ class MetricRegistry:
             else list(self._metrics.values())
         )
 
-        if parallel:
+        if parallel and self._should_parallelize(metrics_to_calc, cost_threshold):
             return self._calculate_parallel(
                 benchmark_result, metrics_to_calc, max_workers
             )
         else:
             return self._calculate_sequential(benchmark_result, metrics_to_calc)
+
+    @staticmethod
+    def _estimated_cost(metrics: list[Metric]) -> float:
+        """Combined estimated calculation cost (seconds) of `metrics`.
+
+        A missing or non-numeric hint is treated as zero, and negative hints
+        are clamped, so a stray value can never force (or block) a parallel run.
+        """
+        total = 0.0
+        for metric in metrics:
+            cost = getattr(metric, "estimated_cost_seconds", 0.0)
+            try:
+                total += max(0.0, float(cost))
+            except (TypeError, ValueError):
+                continue
+        return total
+
+    @classmethod
+    def _should_parallelize(
+        cls, metrics: list[Metric], cost_threshold: float | None
+    ) -> bool:
+        """Whether a batch is expensive enough to justify the process pool.
+
+        Parallel calculation only pays off once the metrics' combined estimated
+        cost beats the fixed overhead of spawning worker processes (a fresh
+        interpreter re-importing the package under `spawn`) and pickling the
+        whole benchmark result to each one. Cheap in-memory reductions (the
+        default) stay below the threshold and run sequentially.
+        """
+        threshold = (
+            PARALLEL_COST_THRESHOLD_SECONDS
+            if cost_threshold is None
+            else cost_threshold
+        )
+        return cls._estimated_cost(metrics) >= threshold
 
     def _calculate_sequential(
         self, benchmark_result: "BenchmarkResult", metrics: list[Metric]
@@ -200,8 +253,8 @@ class MetricRegistry:
         Args:
             benchmark_result: The benchmark result to calculate metrics from
             metrics: List of metric instances to calculate
-            max_workers: Maximum number of processes. If None, uses default
-                        (number of CPUs on the machine).
+            max_workers: Maximum number of processes. If None, uses one worker
+                        per metric, capped at the CPU count.
 
         Returns:
             Dictionary mapping metric names to their calculated values
@@ -210,6 +263,11 @@ class MetricRegistry:
 
         # Prepare arguments for the module-level helper function
         args_list = [(metric, benchmark_result) for metric in metrics]
+
+        # One worker per metric is the most that can ever run at once; spawning
+        # more just pays extra interpreter-startup cost for idle processes.
+        if max_workers is None:
+            max_workers = max(1, min(len(metrics), os.cpu_count() or 1))
 
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all metric calculations

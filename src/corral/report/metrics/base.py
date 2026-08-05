@@ -120,6 +120,17 @@ class Metric(ABC):
         ...         return (successes / total * 100) if total > 0 else 0.0
     """
 
+    #: Rough estimate, in seconds, of how long :meth:`calculate` runs on a
+    #: typical benchmark. It is used *only* to decide whether parallel
+    #: (process-pool) calculation is worth its fixed overhead — spawning worker
+    #: interpreters (a full re-import of the package under the `spawn` start
+    #: method) and pickling the whole benchmark result to each one. The default
+    #: of `0.0` marks a cheap in-memory reduction that should always run
+    #: sequentially; a metric that does real work (heavy computation, I/O, or
+    #: model calls) should raise this so a batch of such metrics can amortise
+    #: the pool overhead. See :meth:`MetricRegistry.calculate_all`.
+    estimated_cost_seconds: float = 0.0
+
     @property
     @abstractmethod
     def metadata(self) -> MetricMetadata:

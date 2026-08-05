@@ -68,14 +68,21 @@ def find_file_by_name(filename: str, base_dir: str | None = None) -> str:
     return filename
 
 
-def smart_resolve_path(input_path: str) -> str:
-    """Resolve path intelligently - use absolute path if exists, search only as fallback"""
+def smart_resolve_path(input_path: str, base_dir: str | None = None) -> str:
+    """Resolve path intelligently - use absolute path if exists, search only as fallback.
+
+    When `base_dir` is given, the fallback file search is scoped to that
+    directory (typically a trial's isolated workspace) instead of the
+    process-global `CORRAL_WORK_DIR`. This is what keeps two concurrent trials
+    that both submit the same bare filename from resolving to each other's file.
+    """
     extracted_path = extract_path_from_answer(input_path)
 
     if Path(extracted_path).exists():
         return extracted_path  # Use the extracted path directly
     else:
-        return find_file_by_name(Path(extracted_path).name)  # Search as fallback
+        # Search as fallback, scoped to base_dir when provided.
+        return find_file_by_name(Path(extracted_path).name, base_dir)
 
 
 @retry(

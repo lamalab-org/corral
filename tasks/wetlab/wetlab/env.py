@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import pickle
+from functools import partial
 from pathlib import Path
 from loguru import logger
 from dotenv import load_dotenv
@@ -199,6 +200,13 @@ class QualitativeAnalysisEnvironment(Environment):
         shared_task_runs (dict): Run store shared between linked environments
     """
 
+    # Wetlab keeps its active chemical system as reaktoro module globals
+    # (`engine.set_chemical_system` rebinds `DEFAULT_SYS`/`SOLVER`), which are
+    # shared by every in-process trial and corrupt each other when trials of
+    # different tasks overlap. Declaring "process" makes the scheduler serialise
+    # wetlab trials until the process-worker backend (Phase 2) can isolate them.
+    DEFAULT_CONCURRENCY = "process"
+
     def configure_additional_apps(self):
         """Setting the Reaktoro chemical system and the Inventory"""
         set_chemical_system(self.current_task.chemical_system)
@@ -375,8 +383,35 @@ if __name__ == "__main__":
         if env.current_task.input_map:
             logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
 
+    # Wetlab is `concurrency="process"`: it holds its reaktoro chemical system in
+    # module globals, so concurrent trials of different tasks corrupt each other
+    # in-process (Environment Concurrency Isolation). Passing `build_envs` turns
+    # on the process-worker backend, so each concurrent trial runs in its own
+    # worker process — the scheduler then lets independent wetlab trials overlap
+    # instead of serialising them (Phase 3). The builder must be picklable so the
+    # worker can rebuild the environments (reaktoro objects don't pickle), which
+    # `partial(create_qualysis_environments, ...)` — a module-level function — is.
+    #
+    # Pool size and start method are tunable via env vars:
+    #   CORRAL_TRIAL_WORKER_POOL_SIZE  — number of worker processes (caps how many
+    #       process-trials run at once; size it to your `max_concurrency`).
+    #   CORRAL_TRIAL_WORKER_START_METHOD — "spawn" (default, portable) or
+    #       "forkserver" (amortises reaktoro imports via a preloaded template).
+    build_envs = partial(
+        create_qualysis_environments, level=args.level, subtask=args.subtask
+    )
+    server_kwargs = {}
+    pool_size = os.environ.get("CORRAL_TRIAL_WORKER_POOL_SIZE")
+    if pool_size:
+        server_kwargs["trial_worker_pool_size"] = int(pool_size)
+    start_method = os.environ.get("CORRAL_TRIAL_WORKER_START_METHOD")
+    if start_method:
+        server_kwargs["trial_worker_start_method"] = start_method
+
     run_server(
         environments=environments,
         host=args.host,
         port=args.port,
+        build_envs=build_envs,
+        **server_kwargs,
     )

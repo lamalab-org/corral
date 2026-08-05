@@ -11,11 +11,16 @@ This module tests:
 
 import time
 from threading import Lock
+from unittest.mock import Mock
 
 import pytest
 
 from corral.report.metrics.base import Metric, MetricMetadata, TaskMetric
-from corral.report.metrics.registry import MetricRegistry, get_metrics_registry
+from corral.report.metrics.registry import (
+    PARALLEL_COST_THRESHOLD_SECONDS,
+    MetricRegistry,
+    get_metrics_registry,
+)
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 
 
@@ -405,9 +410,9 @@ class TestParallelBatchCalculation:
             multi_task_benchmark_result, parallel=False
         )
 
-        # Calculate in parallel
+        # Calculate in parallel (force the pool past the cost threshold)
         parallel_results = registry.calculate_all(
-            multi_task_benchmark_result, parallel=True
+            multi_task_benchmark_result, parallel=True, cost_threshold=0.0
         )
 
         # Results should be identical
@@ -437,9 +442,11 @@ class TestParallelBatchCalculation:
         registry.calculate_all(multi_task_benchmark_result, parallel=False)
         duration_seq = time.time() - start_seq
 
-        # Time parallel execution
+        # Time parallel execution (force the pool past the cost threshold)
         start_par = time.time()
-        registry.calculate_all(multi_task_benchmark_result, parallel=True)
+        registry.calculate_all(
+            multi_task_benchmark_result, parallel=True, cost_threshold=0.0
+        )
         duration_par = time.time() - start_par
 
         # Parallel should be significantly faster
@@ -460,11 +467,12 @@ class TestParallelBatchCalculation:
             metric = SlowMetric(f"metric_{i}", sleep_time=0.01)
             registry.register(metric)
 
-        # Calculate only subset in parallel
+        # Calculate only subset in parallel (force the pool past the threshold)
         results = registry.calculate_all(
             multi_task_benchmark_result,
             enabled_only=["metric_0", "metric_2", "metric_4"],
             parallel=True,
+            cost_threshold=0.0,
         )
 
         # Should only have 3 results
@@ -484,9 +492,12 @@ class TestParallelBatchCalculation:
             metric = SlowMetric(f"metric_{i}", sleep_time=0.05)
             registry.register(metric)
 
-        # Calculate with max_workers=2
+        # Calculate with max_workers=2 (force the pool past the threshold)
         results = registry.calculate_all(
-            multi_task_benchmark_result, parallel=True, max_workers=2
+            multi_task_benchmark_result,
+            parallel=True,
+            max_workers=2,
+            cost_threshold=0.0,
         )
 
         # Should still get all results
@@ -504,8 +515,10 @@ class TestParallelBatchCalculation:
         registry.register(SlowMetric("good_2", sleep_time=0.01))
         registry.register(ErrorProneMetric("bad_2"))
 
-        # Calculate in parallel
-        results = registry.calculate_all(multi_task_benchmark_result, parallel=True)
+        # Calculate in parallel (force the pool past the cost threshold)
+        results = registry.calculate_all(
+            multi_task_benchmark_result, parallel=True, cost_threshold=0.0
+        )
 
         # Good metrics should succeed
         assert results["good_1"] == 20.0
@@ -528,7 +541,9 @@ class TestParallelBatchCalculation:
         registry = MetricRegistry()
         registry.register(SlowMetric("single", sleep_time=0.01))
 
-        results = registry.calculate_all(multi_task_benchmark_result, parallel=True)
+        results = registry.calculate_all(
+            multi_task_benchmark_result, parallel=True, cost_threshold=0.0
+        )
 
         assert len(results) == 1
         assert results["single"] == 20.0
@@ -542,8 +557,10 @@ class TestParallelBatchCalculation:
         for i in range(num_metrics):
             registry.register(CountingMetric(f"counter_{i}"))
 
-        # Calculate in parallel
-        results = registry.calculate_all(multi_task_benchmark_result, parallel=True)
+        # Calculate in parallel (force the pool past the cost threshold)
+        results = registry.calculate_all(
+            multi_task_benchmark_result, parallel=True, cost_threshold=0.0
+        )
 
         # All metrics should have returned results
         # Note: With multiprocessing, class variables are not shared across processes,
@@ -585,6 +602,80 @@ class TestParallelBatchCalculation:
         assert len(results) == 3
         for i in range(3):
             assert results[f"metric_{i}"] == 20.0
+
+
+class TestParallelCostThreshold:
+    """Test that parallel=True only spawns the pool when it is worth it."""
+
+    def test_cheap_metrics_skip_the_pool(
+        self, multi_task_benchmark_result, monkeypatch
+    ):
+        """Metrics whose combined cost is below the threshold run sequentially
+        even when parallel=True (the default metric set is all cheap)."""
+        registry = MetricRegistry()
+        for i in range(3):
+            registry.register(SlowMetric(f"metric_{i}", sleep_time=0.01))
+
+        spy = Mock(wraps=registry._calculate_parallel)
+        monkeypatch.setattr(registry, "_calculate_parallel", spy)
+
+        results = registry.calculate_all(multi_task_benchmark_result, parallel=True)
+
+        spy.assert_not_called()
+        assert len(results) == 3
+        for i in range(3):
+            assert results[f"metric_{i}"] == 20.0
+
+    def test_expensive_metrics_use_the_pool(
+        self, multi_task_benchmark_result, monkeypatch
+    ):
+        """A batch whose estimated cost clears the threshold does parallelise."""
+        registry = MetricRegistry()
+        metric = SlowMetric("expensive", sleep_time=0.01)
+        # A hint at (not above) the threshold is enough to opt in.
+        metric.estimated_cost_seconds = PARALLEL_COST_THRESHOLD_SECONDS
+        registry.register(metric)
+
+        spy = Mock(wraps=registry._calculate_parallel)
+        monkeypatch.setattr(registry, "_calculate_parallel", spy)
+
+        results = registry.calculate_all(multi_task_benchmark_result, parallel=True)
+
+        spy.assert_called_once()
+        assert results["expensive"] == 20.0
+
+    def test_cost_threshold_override_forces_sequential(
+        self, multi_task_benchmark_result, monkeypatch
+    ):
+        """A caller can raise the threshold to keep expensive metrics serial."""
+        registry = MetricRegistry()
+        metric = SlowMetric("expensive", sleep_time=0.01)
+        metric.estimated_cost_seconds = 100.0
+        registry.register(metric)
+
+        spy = Mock(wraps=registry._calculate_parallel)
+        monkeypatch.setattr(registry, "_calculate_parallel", spy)
+
+        results = registry.calculate_all(
+            multi_task_benchmark_result, parallel=True, cost_threshold=1000.0
+        )
+
+        spy.assert_not_called()
+        assert results["expensive"] == 20.0
+
+    def test_estimated_cost_sums_and_clamps_hints(self):
+        """Costs add up; missing/negative/bad hints are treated as zero."""
+        registry = MetricRegistry()
+
+        cheap = SlowMetric("cheap", sleep_time=0.0)  # default hint: 0.0
+        negative = SlowMetric("negative", sleep_time=0.0)
+        negative.estimated_cost_seconds = -5.0  # clamped to 0.0
+        bad = SlowMetric("bad", sleep_time=0.0)
+        bad.estimated_cost_seconds = "nope"  # non-numeric -> ignored
+        pricey = SlowMetric("pricey", sleep_time=0.0)
+        pricey.estimated_cost_seconds = 3.5
+
+        assert registry._estimated_cost([cheap, negative, bad, pricey]) == 3.5
 
 
 class TestBatchCalculationBackwardCompatibility:

@@ -56,6 +56,11 @@ class CorralState:
     trial_id: str = "0"
     trial_counter: int = -1
     run_id: str | None = None
+    # Episode this runtime belongs to (one trial round of a dependency chain).
+    # Runtimes sharing an `episode_id` share a dependency-output store so a
+    # downstream task can read its upstream siblings' outputs; independent
+    # trials leave it `None`.
+    episode_id: str | None = None
 
     # Optional task-group identity
     task_group_id: str | None = None
@@ -84,6 +89,12 @@ class CorralState:
     workspace: str | None = None
     artifacts: dict[str, Any] = field(default_factory=dict)
     hidden_args: dict[str, Any] = field(default_factory=dict)
+
+    # Background-job provenance (PR 4): a `{job_id: record}` snapshot of any
+    # long-running tools this trial launched, refreshed from the runtime's
+    # JobManager when the trial state is captured. Safe to serialise — job
+    # records redact hidden argument values (see `JobRecord.to_dict`).
+    jobs: dict[str, Any] = field(default_factory=dict)
 
     # Archived trial snapshots
     trials: dict[str, dict[str, Any]] = field(default_factory=dict)
