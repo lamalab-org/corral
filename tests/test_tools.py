@@ -502,3 +502,23 @@ def test_tool_for_mcp_with_hidden_args():
 
     # endpoint should be required
     assert "endpoint" in mcp_def["inputSchema"]["required"]
+
+
+def test_file_tool_schemas_pass_metaschema_validation(tmp_path):
+    """Every filesystem tool (write_file, grep, ...) must be metaschema-valid.
+
+    Exercises the same validation OpenHands runs on each MCP tool schema, so a
+    Python type name (e.g. `"str"`) leaking into a file-tool schema — the
+    original OpenHands `write_file` failure — is caught here.
+    """
+    from jsonschema.validators import validator_for
+
+    from corral.utils.io_tools import FSManager, build_file_tools
+
+    tools = build_file_tools(FSManager("file", base_path=str(tmp_path)))
+    assert "write_file" in tools
+    for name, file_tool in tools.items():
+        schema = file_tool.params_json_schema
+        validator_for(schema).check_schema(schema)
+        mcp_schema = file_tool.to_mcp()["inputSchema"]
+        validator_for(mcp_schema).check_schema(mcp_schema), name

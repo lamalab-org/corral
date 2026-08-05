@@ -11,9 +11,13 @@ from pymatgen.core import Structure
 # Generate a random 4-letter unique identifier
 uid = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
 
-# Set the path. If CORRAL_WORK_DIR is missing, it uses the relative path with the UID.
+# Default base work dir when CORRAL_WORK_DIR is unset (relative path + UID).
+# NOTE: intentionally do NOT write CORRAL_WORK_DIR back into the process
+# environment here. That pins every concurrent trial to one shared directory and
+# breaks per-trial workspace isolation (Phase 4 work-directory hygiene). Scoring
+# resolves the submitted answer against the trial's own workspace via
+# Environment._resolve_answer.
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", f"../CORRAL_WORK_DIR/ml_{uid}")
-os.environ["CORRAL_WORK_DIR"] = BASE_WORK_DIR
 
 
 def resolve_path(path_or_str: str) -> str:

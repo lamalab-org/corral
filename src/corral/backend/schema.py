@@ -58,6 +58,37 @@ class TrialCompletionResponse(BaseModel):
     surrendered: bool = False
 
 
+class TrialCreateRequest(BaseModel):
+    """Request to open a fresh, isolated runtime for one trial of a task.
+
+    The identifiers are optional provenance carried from the benchmark run;
+    the server mints the authoritative `trial_runtime_id` in the response.
+
+    `tool_jobs_per_trial` lets the caller size this runtime's background-job
+    pool (`ConcurrencyConfig.tool_jobs_per_trial`); when omitted the server
+    keeps its own default (`DEFAULT_JOB_CONCURRENCY`).
+    """
+
+    benchmark_run_id: str | None = None
+    episode_id: str | None = None
+    trial_index: int | None = None
+    tool_jobs_per_trial: int | None = None
+
+
+class TrialCreatedResponse(BaseModel):
+    """Response describing a newly created trial runtime.
+
+    `mcp_url` is the per-trial MCP mount an MCP client (Claude Code, Codex, ...)
+    should connect to so its tool calls hit *this* runtime's isolated
+    environment rather than the shared task template.
+    """
+
+    trial_runtime_id: str
+    task_id: str
+    workspace: str | None = None
+    mcp_url: str
+
+
 class ToLatexRequest(BaseModel):
     """Request to generate LaTeX documentation for a task"""
 
