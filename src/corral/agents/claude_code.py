@@ -58,6 +58,8 @@ _MCP_SERVER_NAME = "corral"
 # `mcp__<server_name>__<tool_name>`.
 _SUBMIT_SERVER_NAME = "submit"
 _SUBMIT_TOOL_NAME = "submit_answer"
+_SUBMIT_TOOL_FQN = f"mcp__{_SUBMIT_SERVER_NAME}__{_SUBMIT_TOOL_NAME}"
+_SUBMIT_TOOL_RESULT_TEXT = "Answer submitted."
 
 # Terminal status of a single harness run. Distinguishing these lets the
 # benchmark record *why* a run ended instead of collapsing infrastructure
@@ -121,6 +123,22 @@ def _stringify_tool_content(content: Any) -> str:
     if isinstance(content, str):
         return content
     return json.dumps(content, ensure_ascii=False, default=str)
+
+
+def _strip_outer_code_fence(text: str) -> str:
+    """Remove one enclosing Markdown backtick fence from an answer.
+
+    The opening fence may have any language/info string. Only a fence wrapping
+    the entire answer is removed, so inline backticks and code blocks embedded
+    in a larger answer are preserved.
+    """
+    stripped = text.strip()
+    match = re.fullmatch(
+        r"(?P<fence>`{3,})[^\r\n]*\r?\n(?P<body>.*?)(?:\r?\n)?(?P=fence)[ \t]*",
+        stripped,
+        re.DOTALL,
+    )
+    return match.group("body").strip() if match else stripped
 
 
 def _parse_data_uri(url: str) -> tuple[str, str] | None:
@@ -353,10 +371,16 @@ class ClaudeCodeAgent(BaseAgent):
         self.tool_timeout_s = tool_timeout_s
         self.wall_clock_timeout_s = wall_clock_timeout_s
         self._available_tools = None
-        # Verbatim answer captured from the harness's `submit_answer` tool call
-        # (see `_make_submit_server`). `None` until the tool is called; the run
-        # then submits exactly this string instead of the trailing chat message.
+        # Answer captured from the harness's `submit_answer` tool call (see
+        # `_make_submit_server`). `None` until the tool is called; an enclosing
+        # Markdown code fence is removed before the answer is submitted.
         self._submitted_answer: str | None = None
+        # Arguments observed by the in-process submit handler. The SDK normally
+        # streams the corresponding ToolUseBlock/ToolResultBlock as well, but
+        # that is not guaranteed for an in-process terminal tool. At the end of
+        # the receive loop these records are reconciled with the streamed
+        # transcript so every actual submission is present exactly once.
+        self._submit_trace_calls: list[dict[str, Any]] = []
         # Structured outcome of the most recent run (see `HarnessRunResult`).
         self.harness_result: HarnessRunResult | None = None
         # Per-run scratch populated by `_run_harness` for the benchmark record.
@@ -364,12 +388,13 @@ class ClaudeCodeAgent(BaseAgent):
 
     @property
     def requires_answer_extraction(self) -> bool:
-        """Submit the harness answer verbatim, without a second model call.
+        """Submit the harness answer directly, without a second model call.
 
         The harness returns its answer through the in-process `submit_answer`
-        tool (see :meth:`_make_submit_server`), so :meth:`run` already has the
-        exact, format-clean string the model chose. Running the base class's
-        LiteLLM answer extractor would add an extra, separately billed model call
+        tool (see :meth:`_make_submit_server`), which removes an optional outer
+        code fence so :meth:`run` already has a format-clean string. Running the
+        base class's LiteLLM answer extractor would add an extra, separately
+        billed model call
         whose paraphrase could differ from — or fail on — that answer. Bypassing
         it keeps this condition a faithful measurement of the Claude Code harness
         alone.
@@ -410,13 +435,16 @@ class ClaudeCodeAgent(BaseAgent):
     def _make_submit_server(self) -> Any:
         """Build the in-process SDK MCP server exposing `submit_answer`.
 
-        The single tool captures its `answer` argument verbatim onto the agent
-        (`self._submitted_answer`); :meth:`_run_harness` then submits exactly
-        that string. Because the handler runs in-process on the same event loop
-        as the receive loop, no locking is needed. Registering the server only
-        here — never in a task's tool set — keeps the submit channel scoped to
-        this agent and leaves every other agent and the shared MCP surface
-        untouched.
+        The single tool captures its `answer` argument onto the agent after
+        removing an optional outer Markdown code fence, and records the raw call
+        arguments for trace reconciliation. :meth:`_run_harness` then submits
+        that normalized string and ensures the tool call/result are present in
+        ``self.messages`` even
+        if the SDK omits terminal in-process tool events from its response
+        stream. Because the handler runs in-process on the same event loop as
+        the receive loop, no locking is needed. Registering the server only here
+        — never in a task's tool set — keeps the submit channel scoped to this
+        agent and leaves every other agent and the shared MCP surface untouched.
         """
 
         @tool(
@@ -424,16 +452,24 @@ class ClaudeCodeAgent(BaseAgent):
             "Submit your final answer for scoring. Call this exactly once when "
             "the task is solved, passing ONLY the answer value (for example a "
             "file path, a number, or a short string) as `answer` — no "
-            "explanation or extra text.",
+            "explanation or extra text. An enclosing Markdown code fence is "
+            "removed automatically.",
             {"answer": str},
         )
         async def _submit(args: dict[str, Any]) -> dict[str, Any]:
             answer = args.get("answer", "")
             if not isinstance(answer, str):
                 answer = str(answer)
+            answer = _strip_outer_code_fence(answer)
             # Last call wins: a re-submission simply overwrites the previous one.
             self._submitted_answer = answer
-            return {"content": [{"type": "text", "text": "Answer submitted."}]}
+            # Keep an independent record at the point the tool actually runs.
+            # The SDK usually emits matching ToolUseBlock/ToolResultBlock events,
+            # so these are reconciled after streaming rather than appended here;
+            # doing that avoids duplicates while still covering SDK versions that
+            # suppress the terminal in-process tool exchange.
+            self._submit_trace_calls.append(dict(args))
+            return {"content": [{"type": "text", "text": _SUBMIT_TOOL_RESULT_TEXT}]}
 
         return create_sdk_mcp_server(name=_SUBMIT_SERVER_NAME, tools=[_submit])
 
@@ -551,6 +587,7 @@ class ClaudeCodeAgent(BaseAgent):
     ) -> str:
         """Drive the Claude Code harness to completion and return its answer."""
         self._submitted_answer = None
+        self._submit_trace_calls = []
         mcp_url, server, verbosity = self._mcp_server_config(interface, task_id)
         submit_server = self._make_submit_server()
         allowed_tools = [
@@ -574,20 +611,142 @@ class ClaudeCodeAgent(BaseAgent):
 
         # Use the persistent client (rather than the one-shot `query()`) so the
         # corral MCP endpoint can be inspected before the model starts solving.
-        async with ClaudeSDKClient(options=options) as client:
-            await self._preflight_mcp(client, tools)
-            await client.query(self._sdk_prompt(prompt_input))
-            async for message in client.receive_response():
-                result_text = self._consume_message(
-                    message, assistant_text, result_text
-                )
+        try:
+            async with ClaudeSDKClient(options=options) as client:
+                await self._preflight_mcp(client, tools)
+                await client.query(self._sdk_prompt(prompt_input))
+                async for message in client.receive_response():
+                    result_text = self._consume_message(
+                        message, assistant_text, result_text
+                    )
+        finally:
+            # An in-process terminal tool call is not consistently included in
+            # the SDK response stream. Materialize any calls seen by the handler
+            # but not by `_consume_message`, including when the stream fails
+            # after the tool ran.
+            self._reconcile_submit_trace_calls()
+            self._run_meta["submit_tool_used"] = self._submitted_answer is not None
 
         # Prefer the answer the harness explicitly submitted through the tool;
         # only fall back to the trailing chat message if it never called it.
-        self._run_meta["submit_tool_used"] = self._submitted_answer is not None
         if self._submitted_answer is not None:
             return self._submitted_answer
         return result_text or ("\n".join(assistant_text)).strip()
+
+    @staticmethod
+    def _is_submit_tool_name(name: Any) -> bool:
+        """Return whether ``name`` identifies the agent-only submit tool."""
+        return name in {_SUBMIT_TOOL_NAME, _SUBMIT_TOOL_FQN}
+
+    @staticmethod
+    def _tool_call_arguments(tool_call: dict[str, Any]) -> dict[str, Any] | None:
+        """Parse one LiteLLM-style tool call's arguments for comparison."""
+        function = tool_call.get("function", {})
+        arguments = function.get("arguments")
+        if isinstance(arguments, dict):
+            return arguments
+        if not isinstance(arguments, str):
+            return None
+        try:
+            parsed = json.loads(arguments)
+        except (TypeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _reconcile_submit_trace_calls(self) -> None:
+        """Ensure every executed submit call appears exactly once in the trace.
+
+        Claude Agent SDK normally streams the submit ToolUseBlock and its
+        ToolResultBlock, in which case this method leaves them untouched. If an
+        SDK version suppresses either event for the in-process terminal tool, a
+        standard LiteLLM-style assistant/tool pair is appended from the call
+        captured by :meth:`_make_submit_server`.
+        """
+        streamed_calls: list[tuple[dict[str, Any] | None, str | None]] = []
+        tool_result_ids = {
+            message.get("tool_call_id")
+            for message in self.messages
+            if message.get("role") == "tool"
+        }
+        existing_ids = set(tool_result_ids)
+
+        for message in self.messages:
+            for tool_call in message.get("tool_calls", []) or []:
+                function = tool_call.get("function", {})
+                call_id = tool_call.get("id")
+                if call_id:
+                    existing_ids.add(call_id)
+                if self._is_submit_tool_name(function.get("name")):
+                    streamed_calls.append(
+                        (self._tool_call_arguments(tool_call), call_id)
+                    )
+
+        matched = [False] * len(streamed_calls)
+        synthetic_index = 1
+        for arguments in self._submit_trace_calls:
+            match_index = next(
+                (
+                    index
+                    for index, (streamed_arguments, _) in enumerate(streamed_calls)
+                    if not matched[index] and streamed_arguments == arguments
+                ),
+                None,
+            )
+            if match_index is not None:
+                matched[match_index] = True
+                call_id = streamed_calls[match_index][1]
+                if call_id and call_id not in tool_result_ids:
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": _stringify_tool_content(
+                                [
+                                    {
+                                        "type": "text",
+                                        "text": _SUBMIT_TOOL_RESULT_TEXT,
+                                    }
+                                ]
+                            ),
+                            "name": "tool_result",
+                            "is_error": False,
+                        }
+                    )
+                    tool_result_ids.add(call_id)
+                continue
+
+            call_id = f"corral-submit-{synthetic_index}"
+            while call_id in existing_ids:
+                synthetic_index += 1
+                call_id = f"corral-submit-{synthetic_index}"
+            synthetic_index += 1
+            existing_ids.add(call_id)
+            self.messages.extend(
+                [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": call_id,
+                                "function": {
+                                    "name": _SUBMIT_TOOL_FQN,
+                                    "arguments": json.dumps(arguments, default=str),
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": _stringify_tool_content(
+                            [{"type": "text", "text": _SUBMIT_TOOL_RESULT_TEXT}]
+                        ),
+                        "name": "tool_result",
+                        "is_error": False,
+                    },
+                ]
+            )
 
     async def _preflight_mcp(
         self, client: ClaudeSDKClient, tools: list[dict[str, Any]]
@@ -1064,9 +1223,9 @@ class ClaudeCodeAgent(BaseAgent):
         """
         # Normalize the harness output into a submit-ready answer. Answer
         # extraction is disabled by default (`requires_answer_extraction` is
-        # False), so the harness output is submitted verbatim. When extraction is
-        # enabled, strip the declared "Final Answer:" marker, then reason about
-        # that normalized value.
+        # False), so the harness output is submitted without another model call.
+        # When extraction is enabled, strip the declared "Final Answer:" marker,
+        # then reason about that normalized value.
         if self.requires_answer_extraction:
             final_answer_match = re.search(
                 r"Final Answer:\s*(.*)", final_answer, re.DOTALL | re.IGNORECASE
@@ -1117,9 +1276,9 @@ class ClaudeCodeAgent(BaseAgent):
         # Ensure the submit-ready answer is in the transcript exactly once. The
         # harness `ResultMessage` is not otherwise recorded, so append it unless
         # the last streamed assistant message already equals it (ignoring
-        # surrounding whitespace). In verbatim mode this avoids the duplicate the
-        # `Final Answer:`-stripping used to produce, while still keeping the
-        # answer in the trace.
+        # surrounding whitespace). In non-extraction mode this avoids the
+        # duplicate the `Final Answer:`-stripping used to produce, while still
+        # keeping the answer in the trace.
         last_content = self.messages[-1].get("content") if self.messages else None
         already_recorded = (
             isinstance(last_content, str) and last_content.strip() == final_answer

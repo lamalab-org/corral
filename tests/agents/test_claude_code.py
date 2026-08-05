@@ -4,6 +4,7 @@ import asyncio
 import threading
 
 import anyio
+import pytest
 
 from corral.agents import ClaudeCodeAgent
 from corral.agents import claude_code as claude_code_module
@@ -112,6 +113,12 @@ def _install_fake_sdk(monkeypatch, message_factory, mcp_status_factory=None):
             for message in await message_factory(self.options, captured):
                 yield message
 
+    def fake_create_sdk_mcp_server(name, tools):
+        # Expose the decorated in-process handler to tests so they can simulate
+        # an actual submit tool execution independently of SDK stream events.
+        captured["submit_tools"] = tools
+        return {"type": "sdk", "name": name}
+
     monkeypatch.setattr(claude_code_module, "AssistantMessage", FakeAssistantMessage)
     monkeypatch.setattr(claude_code_module, "UserMessage", FakeUserMessage)
     monkeypatch.setattr(claude_code_module, "TextBlock", FakeTextBlock)
@@ -119,6 +126,9 @@ def _install_fake_sdk(monkeypatch, message_factory, mcp_status_factory=None):
     monkeypatch.setattr(claude_code_module, "ToolUseBlock", FakeToolUseBlock)
     monkeypatch.setattr(claude_code_module, "ToolResultBlock", FakeToolResultBlock)
     monkeypatch.setattr(claude_code_module, "ResultMessage", FakeResultMessage)
+    monkeypatch.setattr(
+        claude_code_module, "create_sdk_mcp_server", fake_create_sdk_mcp_server
+    )
     monkeypatch.setattr(
         claude_code_module, "ClaudeAgentOptions", FakeClaudeAgentOptions
     )
@@ -463,24 +473,102 @@ def test_submit_tool_answer_is_preferred_over_trailing_message(
     wraps around the answer in its trailing message, the run submits exactly the
     value it passed to `submit_answer`.
     """
-    holder: dict = {}
 
     async def factory(options, captured):
-        # Simulate the harness having called `submit_answer(answer="clean.cif")`
-        # while it worked; its final chat message is decoy prose to be ignored.
-        holder["agent"]._submitted_answer = "clean.cif"
+        # Run the actual in-process handler without emitting SDK tool blocks.
+        # This exercises the fallback that guarantees the call is still traced.
+        await captured["submit_tools"][0].handler({"answer": "clean.cif"})
         return [
             FakeResultMessage("Perfect! I saved everything to **clean.cif** (2.0 A)."),
         ]
 
     _install_fake_sdk(monkeypatch, factory)
     agent = ClaudeCodeAgent()
-    holder["agent"] = agent
 
     answer = agent.run(mock_interface, "task-1")
     assert answer == "clean.cif"
     assert agent.harness_result.status == "success"
     assert agent.harness_result.metadata["submit_tool_used"] is True
+    submit_calls = [
+        call
+        for message in agent.messages
+        for call in message.get("tool_calls", []) or []
+        if call["function"]["name"] == "mcp__submit__submit_answer"
+    ]
+    assert len(submit_calls) == 1
+    assert submit_calls[0]["function"]["arguments"] == '{"answer": "clean.cif"}'
+    submit_id = submit_calls[0]["id"]
+    assert any(
+        message.get("role") == "tool"
+        and message.get("tool_call_id") == submit_id
+        and '"text": "Answer submitted."' in message.get("content", "")
+        for message in agent.messages
+    )
+
+
+def test_streamed_submit_tool_call_is_not_duplicated(mock_interface, monkeypatch):
+    """Handler capture and normal SDK events reconcile to one trace step."""
+
+    async def factory(options, captured):
+        await captured["submit_tools"][0].handler({"answer": "42"})
+        return [
+            FakeAssistantMessage(
+                [
+                    FakeToolUseBlock(
+                        "submit-1",
+                        "mcp__submit__submit_answer",
+                        {"answer": "42"},
+                    )
+                ]
+            ),
+            FakeUserMessage([FakeToolResultBlock("submit-1", "Answer submitted.")]),
+            FakeResultMessage("ignored trailing text"),
+        ]
+
+    _install_fake_sdk(monkeypatch, factory)
+    agent = ClaudeCodeAgent()
+
+    assert agent.run(mock_interface, "task-1") == "42"
+    submit_calls = [
+        call
+        for message in agent.messages
+        for call in message.get("tool_calls", []) or []
+        if call["function"]["name"] == "mcp__submit__submit_answer"
+    ]
+    submit_results = [
+        message
+        for message in agent.messages
+        if message.get("role") == "tool" and message.get("tool_call_id") == "submit-1"
+    ]
+    assert len(submit_calls) == 1
+    assert len(submit_results) == 1
+
+
+@pytest.mark.parametrize(
+    ("submitted", "expected"),
+    [
+        ("```python\nprint('hello')\n```", "print('hello')"),
+        (
+            "```language-with+symbols {anything}\n/path/to/result.cif\n```",
+            "/path/to/result.cif",
+        ),
+        ("```\n42\n```", "42"),
+        ("answer with `inline code`", "answer with `inline code`"),
+    ],
+)
+def test_submit_tool_strips_outer_code_fence(
+    submitted, expected, mock_interface, monkeypatch
+):
+    """An enclosing fence is removed regardless of its language info string."""
+
+    async def factory(options, captured):
+        await captured["submit_tools"][0].handler({"answer": submitted})
+        return [FakeResultMessage("ignored trailing text")]
+
+    _install_fake_sdk(monkeypatch, factory)
+    agent = ClaudeCodeAgent()
+
+    assert agent.run(mock_interface, "task-1") == expected
 
 
 def test_falls_back_to_trailing_message_when_submit_tool_unused(
