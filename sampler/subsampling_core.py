@@ -99,7 +99,9 @@ def make_stratified_sampler(mode: str):
     def sampler(
         all_items: list[str], budget: int, rng: np.random.Generator, col_env: pd.Series
     ) -> list[str]:
-        strata_items = {env: list(col_env[col_env == env].index) for env in col_env.unique()}
+        strata_items = {
+            env: list(col_env[col_env == env].index) for env in col_env.unique()
+        }
         strata_sizes = {env: len(items) for env, items in strata_items.items()}
         alloc = allocate_budget(strata_sizes, budget, mode=mode)
         selected = []
@@ -128,7 +130,9 @@ def make_stratified_sampler_nested(mode: str):
     def sampler(
         all_items: list[str], budget: int, rng: np.random.Generator, col_env: pd.Series
     ) -> list[str]:
-        strata_items = {env: list(col_env[col_env == env].index) for env in col_env.unique()}
+        strata_items = {
+            env: list(col_env[col_env == env].index) for env in col_env.unique()
+        }
         strata_sizes = {env: len(items) for env, items in strata_items.items()}
         env_alloc = allocate_budget(strata_sizes, budget, mode=mode)
 
@@ -191,7 +195,9 @@ SAMPLERS = {
 # ---------------- evaluation ----------------
 
 
-def evaluate_subset(matrix: pd.DataFrame, col_env: pd.Series, selected: list[str]) -> dict:
+def evaluate_subset(
+    matrix: pd.DataFrame, col_env: pd.Series, selected: list[str]
+) -> dict:
     """Compare mini-set (over `selected` items) scores to full-set scores.
 
     Reports global (item-pooled) MSE/ranking, per-environment MSE/ranking
@@ -239,7 +245,9 @@ def run_sweep(
     value: str = "success",
     exclude_environments: list[str] | None = None,
 ) -> pd.DataFrame:
-    matrix, col_env = load_matrix(value=value, exclude_environments=exclude_environments)
+    matrix, col_env = load_matrix(
+        value=value, exclude_environments=exclude_environments
+    )
     all_items = list(matrix.columns)
     logger.info(f"{len(all_items)} candidate items, {matrix.shape[0]} subjects")
 
@@ -265,7 +273,9 @@ def run_sweep(
                 "global_spearman": m["global_spearman"],
                 "global_kendall": m["global_kendall"],
                 "mean_per_env_mse": np.nanmean(list(m["per_env_mse"].values())),
-                "mean_per_env_spearman": np.nanmean(list(m["per_env_spearman"].values())),
+                "mean_per_env_spearman": np.nanmean(
+                    list(m["per_env_spearman"].values())
+                ),
             }
             for env, cov in m["env_coverage"].items():
                 row[f"coverage__{env}"] = cov
