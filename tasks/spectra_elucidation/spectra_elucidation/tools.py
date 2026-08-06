@@ -155,7 +155,17 @@ def search_by_smiles(smiles: str, top_k: int = 10) -> list[dict[str, Any]]:
     [/LIMITATIONS]
     """
     collection_name = "nmrshiftdb2"
-    db_path = Path(__file__).resolve().parents[3] / "vector_databases" / "nmrshiftdb2"
+    # The prebuilt vector database was relocated to scripts/vector_databases/
+    # (see git history around "chore: remove report files (#337)"); this path
+    # was never updated to follow, which made every search_by_smiles call fail
+    # with "directory does not exist" regardless of the LFS content being
+    # present or not.
+    db_path = (
+        Path(__file__).resolve().parents[3]
+        / "scripts"
+        / "vector_databases"
+        / "nmrshiftdb2"
+    )
 
     top_k = int(top_k) if not isinstance(top_k, int) else top_k
 

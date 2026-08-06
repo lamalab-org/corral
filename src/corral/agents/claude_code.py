@@ -413,12 +413,19 @@ class ClaudeCodeAgent(BaseAgent):
         # than scraped from the last chat message, so instruct the model to call
         # it with only the answer value. This keeps a path / number / SMILES /
         # JSON answer intact regardless of any prose the model produces.
+        #
+        # Named fully-qualified (`_SUBMIT_TOOL_FQN`, i.e. `mcp__submit__submit_answer`)
+        # rather than bare `submit_answer`: the sentence just above tells the model it
+        # may ONLY use the `corral` MCP server's tools, all of which the model has seen
+        # namespaced as `mcp__corral__*`. A bare tool name left the model to guess a
+        # namespace, and it reliably guessed `mcp__corral__submit_answer` -- the wrong
+        # server -- burning a turn on a "no such tool" error before self-correcting.
         final_answer_directive = (
             "When you have solved the task, submit your final answer by calling "
-            f"the `{_SUBMIT_TOOL_NAME}` tool exactly once, passing ONLY the answer "
+            f"the `{_SUBMIT_TOOL_FQN}` tool exactly once, passing ONLY the answer "
             "value (for example a file path, a number, or a short string) as its "
             "`answer` argument, with no explanation or surrounding text. Always "
-            f"return the answer through the `{_SUBMIT_TOOL_NAME}` tool rather than "
+            f"return the answer through the `{_SUBMIT_TOOL_FQN}` tool rather than "
             "as an ordinary chat message."
         )
         append = (
