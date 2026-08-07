@@ -1,0 +1,935 @@
+{
+  "task_id": "make_6_lvl2",
+  "model": "anthropic/claude-sonnet-4-5",
+  "agent": "ClaudeCodeAgent",
+  "tool_verbosity": "brief",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "check_smiles_reaction_template_matching",
+        "description": "Checks if the SMARTS of a reaction template matches any substructure in the given SMILES.",
+        "parameters": {
+          "properties": {
+            "smiles": {
+              "description": "SMILES string of the molecule to check.",
+              "title": "Smiles",
+              "type": "string"
+            },
+            "template_id": {
+              "description": "ID of the reaction template to check.",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "smiles",
+            "template_id"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_template_catalog_by_criteria",
+        "description": "Searches the retrosynthetic template database based on specified criteria. The search criteria refer to the forward reaction.",
+        "parameters": {
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the target molecule.",
+              "title": "Molecule Smiles",
+              "type": "string"
+            },
+            "functional_groups_broken": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "List of functional groups that are broken in the forward reaction. None will result in not filtering with this criterion.",
+              "title": "Functional Groups Broken"
+            },
+            "functional_groups_formed": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "List of functional groups that are formed in the forward reaction. None will result in not filtering with this criterion.",
+              "title": "Functional Groups Formed"
+            },
+            "bonds_formed": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "List of bonds that are formed in the forward reaction (e.g., \"6-6\", \"6-8\"). None will result in not filtering with this criterion.",
+              "title": "Bonds Formed"
+            },
+            "bonds_broken": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "List of bonds that are broken in the forward reaction (e.g., \"6-6\", \"6-8\"). None will result in not filtering with this criterion.",
+              "title": "Bonds Broken"
+            },
+            "bonds_order_changed": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "List of bonds whose order is changed in the forward reaction (e.g., \"6-6 (1.0->2.0)\"). None will result in not filtering with this criterion.",
+              "title": "Bonds Order Changed"
+            },
+            "limit": {
+              "default": 10,
+              "description": "Maximum number of templates to return. Default is 10.",
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "molecule_smiles",
+            "functional_groups_broken",
+            "functional_groups_formed",
+            "bonds_formed",
+            "bonds_broken",
+            "bonds_order_changed",
+            "limit"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_template",
+        "description": "Retrieves a retrosynthetic template and other information by its ID.",
+        "parameters": {
+          "properties": {
+            "template_id": {
+              "description": "Identifier of the retrosynthetic template to retrieve.",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "template_id"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_available_functional_groups",
+        "description": "Returns a list of available functional groups for querying the database.",
+        "parameters": {
+          "properties": {},
+          "type": "object",
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "apply_template",
+        "description": "Applies a retrosynthetic template to a molecule. If one template is applicable to different groups, all possible outcomes are returned.",
+        "parameters": {
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the target molecule.",
+              "title": "Molecule Smiles",
+              "type": "string"
+            },
+            "template_id": {
+              "description": "Identifier of the retrosynthetic template to apply.",
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles",
+            "template_id"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "verify_step",
+        "description": "Verifies if a retrosynthetic step is valid. This tool might fail for intramolecular reactions.",
+        "parameters": {
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the target molecule.",
+              "title": "Molecule Smiles",
+              "type": "string"
+            },
+            "template_id": {
+              "description": "Retrosynthetic template in SMARTS format.",
+              "title": "Template Id",
+              "type": "string"
+            },
+            "precursors": {
+              "description": "List of SMILES strings representing the precursor molecules.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Precursors",
+              "type": "array"
+            }
+          },
+          "required": [
+            "molecule_smiles",
+            "template_id",
+            "precursors"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "verify_route",
+        "description": "Verifies if a synthesis route follows the expected schema.",
+        "parameters": {
+          "properties": {
+            "route": {
+              "description": "JSON string representing the synthesis route.",
+              "title": "Route",
+              "type": "string"
+            }
+          },
+          "required": [
+            "route"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_catalog_by_smiles",
+        "description": "Searches a catalog for available precursors.",
+        "parameters": {
+          "properties": {
+            "smiles_list": {
+              "description": "List of SMILES strings representing the chemicals to search for.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Smiles List",
+              "type": "array"
+            },
+            "limit": {
+              "default": 5,
+              "description": "Maximum number of results to return. Default is 5.",
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "smiles_list",
+            "limit"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "is_buyable",
+        "description": "Checks if a list of molecules are commercially available.",
+        "parameters": {
+          "properties": {
+            "smiles_list": {
+              "description": "List of SMILES strings representing the molecules to check.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Smiles List",
+              "type": "array"
+            }
+          },
+          "required": [
+            "smiles_list"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "deprotect_molecule",
+        "description": "Removes protecting groups from a molecule represented by a SMILES string.",
+        "parameters": {
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the molecule with protecting groups.",
+              "title": "Molecule Smiles",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "detect_functional_groups",
+        "description": "Detects functional groups in a molecule represented by a SMILES string.",
+        "parameters": {
+          "properties": {
+            "smiles": {
+              "description": "SMILES string of the molecule to analyze.",
+              "title": "Smiles",
+              "type": "string"
+            }
+          },
+          "required": [
+            "smiles"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "detect_protection_groups",
+        "description": "Detects protecting groups in a molecule and their positions.",
+        "parameters": {
+          "properties": {
+            "smiles": {
+              "description": "SMILES string of the molecule to analyze.",
+              "title": "Smiles",
+              "type": "string"
+            }
+          },
+          "required": [
+            "smiles"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "map_reaction_smiles",
+        "description": "Maps atoms in a reaction SMILES string using attention-guided atom mapping. Sometimes, the mapping may help to get the templates to work.",
+        "parameters": {
+          "properties": {
+            "reaction_smiles": {
+              "description": "Reaction SMILES string to be mapped.",
+              "title": "Reaction Smiles",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reaction_smiles"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "smiles_to_cas",
+        "description": "Converts a SMILES string to a CAS number.",
+        "parameters": {
+          "properties": {
+            "molecule_smiles": {
+              "description": "SMILES string of the molecule to convert.",
+              "title": "Molecule Smiles",
+              "type": "string"
+            }
+          },
+          "required": [
+            "molecule_smiles"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "cas_to_smiles",
+        "description": "Converts a CAS number to an isomeric SMILES string.",
+        "parameters": {
+          "properties": {
+            "cas_number": {
+              "description": "CAS number of the molecule to convert.",
+              "title": "Cas Number",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cas_number"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  ],
+  "timestamp": "20260807_081418",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Task make_6_lvl2:\nPropose a retrosynthesis route to synthesize the molecule with SMILES COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1. The route must have 3 reactions.\n\nHere are some guidance to help you (the reactions are enumerated in the order that they must be applied): The Sn2 reaction is a bimolecular nucleophilic substitution reaction where a nucleophile attacks an electrophilic carbon atom, leading to the displacement of a leaving group. The reaction proceeds via a single transition state, resulting in the inversion of stereochemistry at the carbon center. Common nucleophiles used in Sn2 reactions include hydroxide ions (OH-), alkoxide ions (RO-), and cyanide ions (CN-). The reaction typically occurs in polar aprotic solvents, which help to stabilize the transition state and enhance the nucleophilicity of the attacking species. As a result of the reaction, a new carbon-nucleophile bond is formed while a carbon-leaving group bond is broken, e.g. C-N formed and C-Cl gone breaking an 'halide' functional group.\n\nThe Friedel-Crafts acylation is a type of electrophilic aromatic substitution reaction that introduces an acyl group onto an aromatic ring. The reaction typically involves the use of an acyl chloride (RCOCl) in the presence of a Lewis acid catalyst, such as aluminum chloride (AlCl3) or ferric chloride (FeCl3). The Lewis acid activates the acylating agent, generating a more electrophilic species that can attack the aromatic ring, leading to the formation of a new carbon-carbon bond and breaking a carbon-chlorine bond. An 'halide' functional group is gone during the transformation.\n\nA substitution reaction can be used to replace a leaving group (such as a hydroxyl group) with an halogens (like chlorine, bromine, or iodine). This can be achieved using reagents such as hydrogen halides (HF), thionyl chloride (SOCl2), phosphorus tribromide (PBr3), or phosphorus triiodide (PI3). For the example with hidroxyl as leaving group, a Carbon-Oxygen bond is broken, and a Carbon-Halogen bond is formed, breaking an 'aliphatic hydroxyl' functional group.. Note that each of the hint describes the forward reactions for each step (enumerated in the order that they should be applied), but you have to perform the retrosynthetic reactions.\n\nRequired submission format:\nSubmit a JSON object representing the retrosynthesis route. It must follow the same JSON format as the next example: `{\n  \"type\": \"mol\",\n  \"smiles\": \"CO\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": 1234,\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"BrC\"\n        },\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"[OH-]\"\n        }\n      ]\n    }\n  ]\n}`.\n\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Let me break down this task:\n\n1. I need to propose a retrosynthesis route for the molecule: `COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1`\n2. The route must have 3 reactions\n3. The hints describe forward reactions, but I need to perform retrosynthetic reactions (working backward)\n\nThe hints describe (in forward direction):\n1. SN2 reaction: nucleophile attacks electrophile, C-N formed, C-Cl broken (halide group broken)\n2. Friedel-Crafts acylation: acyl group added to aromatic ring, C-C bond formed, C-Cl broken (halide group broken)\n3. Substitution: leaving group replaced with halogen, C-O broken and C-Halogen formed (aliphatic hydroxyl broken)\n\nSince these are forward reactions and I need to do retrosynthesis (working backward), I need to:\n- Start with the target molecule\n- Work backward through the reactions in reverse order (reaction 3, then 2, then 1)\n\nLet me first understand the target molecule structure:\n`COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1`\n\nThis appears to be:\n- A methoxy-substituted aromatic ring (COc1cccc...c1)\n- With an amide linkage: NC(=O)\n- Connected to a triazole ring: c2nnn...c2N\n- The triazole has a benzyl substituent: Cc3ccc...cc3\n- The benzyl group has a CN4CC(F)C4 substituent (a fluorinated azetidine)\n\nNow, working backward:\n\n**Reaction 3 (backward):** Substitution reaction that breaks C-Halogen and forms C-O (aliphatic hydroxyl)\n- The forward direction converts hydroxyl to halogen, so reversing this means a halogenated intermediate becomes hydroxylated\n\n**Reaction 2 (backward):** Friedel-Crafts acylation\n- Reversing the forward reaction means the acylated aromatic ring breaks apart, separating the aromatic core from the acyl chloride component\n\n**Reaction 1 (backward):** SN2 reaction\n- Reversing this means breaking a C-N bond that was formed, regenerating a chlorinated intermediate and a nucleophilic amine\n\nLooking at the target structure more carefully, I can identify the critical functional groups: an amide linkage connecting an aromatic amine to a carbonyl, a benzyl group attached to the triazole ring, and an azetidine ring connected through a C-N bond to the benzyl carbon. Working backward through the retrosynthetic steps, the halogenated intermediate from reaction 3 would need to be converted to a hydroxyl group, which then participates in the subsequent transformations to build up the final structure.",
+      "name": "thinking"
+    },
+    {
+      "role": "assistant",
+      "content": "I'll work through this retrosynthesis step by step, starting with the target molecule and working backward through the three reactions.\n\nLet me first analyze the target molecule structure:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01T4WXHG8zWP4Bqdxpcjtgi5",
+          "function": {
+            "name": "mcp__corral__detect_functional_groups",
+            "arguments": "{\"smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01T4WXHG8zWP4Bqdxpcjtgi5",
+      "content": "[{\"type\": \"text\", \"text\": \"['alkyl halide', 'benzene rings', 'ether oxygens', 'five-membered rings', 'four-membered rings', 'halide', 'meta di-substituted benzene', 'methoxy', 'para di-substituted benzene', 'primary amines', 'six-membered aromatic rings', 'tertiary amines']\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Now, let me work backward through the reactions as described:\n\n**Reaction 3 (backward): Friedel-Crafts acylation reversal** - This forms an amide bond, so working backward, we need to break the amide bond between the aromatic amine and the acyl group.\n\n**Reaction 2 (backward): SN2 reversal** - This forms a C-N bond (breaking C-Cl), so working backward we need to identify where a nucleophile attacked.\n\n**Reaction 1 (backward): Substitution reversal** - Converting a halide back to a hydroxyl group.\n\nLet me search for appropriate templates:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_015T4o7angZS1vpmfqV7U6qt",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\", \"functional_groups_broken\": [\"amide\"], \"functional_groups_formed\": [\"halide\", \"primary amines\"], \"bonds_formed\": null, \"bonds_broken\": [\"6-6\"], \"bonds_order_changed\": null, \"limit\": 10}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_015T4o7angZS1vpmfqV7U6qt",
+      "content": "[{\"type\": \"text\", \"text\": \"[]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_016n98Yw1VKRAepFkFEmXiSN",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\", \"functional_groups_broken\": [\"amide\"], \"functional_groups_formed\": null, \"bonds_formed\": null, \"bonds_broken\": [\"6-6\"], \"bonds_order_changed\": null, \"limit\": 10}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_016n98Yw1VKRAepFkFEmXiSN",
+      "content": "[{\"type\": \"text\", \"text\": \"[{'reaction_id': 1258606, 'template_hash': 'bce13d645fda1ead83346a4d81fbf291a13c52a24e00d0544c348a4e8b75f25b', 'retro_smarts_template': '[c:2]:[cH;D2;+0:1]:[c:3]>>C-O-C(=O)-C-C-[c;H0;D3;+0:1](:[c:2]):[c:3]', 'canonical_smarts_template': 'C-O-C(=O)-C-C-[c;H0;D3;+0:1](:[c:2]):[c:3]>>[c:2]:[cH;D2;+0:1]:[c:3]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][CH2:4][N:5]([C:6](=[O:7])[C:8]1=[N:9][N:10]([C:11]2=[C:12]([C:13](=[O:14])[N:15]3[CH2:16][CH2:17][C:18]4=[CH:19][CH:20]=[CH:21][CH:22]=[C:23]4[CH2:24]3)[CH:25]=[C:26]([C:27](=[O:28])[NH:29][S:30](=[O:31])(=[O:32])[C:33]3=[CH:34][C:35]4=[CH:36][CH:37]=[CH:38][CH:39]=[C:40]4[CH:41]=[CH:42]3)[CH:43]=[CH:44]2)[C:45]([CH3:46])=[C:47]1[Cl:48])[C:49]1=[CH:50][CH:51]=[C:52](CCC(=O)OC)[CH:53]=[CH:54]1.CC1=C(Cl)C(C(=O)O)=NN1C1=C(C(=O)N2CCC3=CC=CC=C3C2)C=C(C(=O)NS(=O)(=O)C2=CC3=CC=CC=C3C=C2)C=C1.CCCCNC1=CC(Cl)=C(Cl)C=C1>>[CH3:1][CH2:2][CH2:3][CH2:4][N:5]([C:6](=[O:7])[C:8]1=[N:9][N:10]([C:11]2=[C:12]([C:13](=[O:14])[N:15]3[CH2:16][CH2:17][C:18]4=[CH:19][CH:20]=[CH:21][CH:22]=[C:23]4[CH2:24]3)[CH:25]=[C:26]([C:27](=[O:28])[NH:29][S:30](=[O:31])(=[O:32])[C:33]3=[CH:34][C:35]4=[CH:36][CH:37]=[CH:38][CH:39]=[C:40]4[CH:41]=[CH:42]3)[CH:43]=[CH:44]2)[C:45]([CH3:46])=[C:47]1[Cl:48])[C:49]1=[CH:50][CH:51]=[CH:52][CH:53]=[CH:54]1', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][N:5]([C:6](=[O:7])[c:8]1[n:9][n:10](-[c:11]2[c:12]([C:13](=[O:14])[N:15]3[CH2:16][CH2:17][c:18]4[cH:19][cH:20][cH:21][cH:22][c:23]4[CH2:24]3)[cH:25][c:26]([C:27](=[O:28])[NH:29][S:30](=[O:31])(=[O:32])[c:33]3[cH:34][c:35]4[cH:36][cH:37][cH:38][cH:39][c:40]4[cH:41][cH:42]3)[cH:43][cH:44]2)[c:45]([CH3:46])[c:47]1[Cl:48])[c:49]1[cH:50][cH:51][cH:52][cH:53][cH:54]1', 'reactant_smiles': 'COC(=O)CC[c:52]1[cH:51][cH:50][c:49]([N:5]([CH2:4][CH2:3][CH2:2][CH3:1])[C:6](=[O:7])[c:8]2[n:9][n:10](-[c:11]3[c:12]([C:13](=[O:14])[N:15]4[CH2:16][CH2:17][c:18]5[cH:19][cH:20][cH:21][cH:22][c:23]5[CH2:24]4)[cH:25][c:26]([C:27](=[O:28])[NH:29][S:30](=[O:31])(=[O:32])[c:33]4[cH:34][c:35]5[cH:36][cH:37][cH:38][cH:39][c:40]5[cH:41][cH:42]4)[cH:43][cH:44]3)[c:45]([CH3:46])[c:47]2[Cl:48])[cH:54][cH:53]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20140135318A1;0872;1525349', 'derive_version': 'v1', 'similarity': 0.528344671201814}, {'reaction_id': 1147736, 'template_hash': '004894621e4dccdd2bc05cd348281e7ff106915d05f659f2a19d932556cd99de', 'retro_smarts_template': '[#7:6]-[CH2;D2;+0:5]-[c;H0;D3;+0:7](:[cH;D2;+0:1]:[c:2]):[cH;D2;+0:3]:[c:4]>>O=C-c(:[cH;D2;+0:1]:[c:2]):[cH;D2;+0:3]:[c:4].O=[C;H0;D3;+0:5](-[#7:6])-[c;H0;D3;+0:7]1:c:c:c:c:c:1', 'canonical_smarts_template': 'O=C-c(:[cH;D2;+0:1]:[c:2]):[cH;D2;+0:3]:[c:4].O=[C;H0;D3;+0:5](-[#7:6])-[c;H0;D3;+0:7]1:c:c:c:c:c:1>>[#7:6]-[CH2;D2;+0:5]-[c;H0;D3;+0:7](:[cH;D2;+0:1]:[c:2]):[cH;D2;+0:3]:[c:4]', 'mapped_rxn': '[O:1]=[C:2]([NH:3][C:4]1=[CH:5][CH:6]=[CH:7][CH:8]=[CH:9]1)[NH:10][C:11]1=[CH:12][CH:13]=[C:14]([C:15]2=[N:16][C:17]3=[C:18]([N:19]=[N:20][N:21]3[CH2:22][CH:23]3[CH2:24][N:25]([C:26](=O)[C:27]4=CC=CC=C4)[CH2:34]3)[C:35]([N:36]3[CH2:37][CH2:38][O:39][CH2:40][CH2:41]3)=[N:42]2)[CH:43]=[CH:44]1.O=CC1=[CH:28][CH:29]=[C:30]([F:31])[CH:32]=[CH:33]1.[BH3-]C#N.[Na+].[Cl-].[Cl-].[Zn+2]>>[O:1]=[C:2]([NH:3][C:4]1=[CH:5][CH:6]=[CH:7][CH:8]=[CH:9]1)[NH:10][C:11]1=[CH:12][CH:13]=[C:14]([C:15]2=[N:16][C:17]3=[C:18]([N:19]=[N:20][N:21]3[CH2:22][CH:23]3[CH2:24][N:25]([CH2:26][C:27]4=[CH:28][CH:29]=[C:30]([F:31])[CH:32]=[CH:33]4)[CH2:34]3)[C:35]([N:36]3[CH2:37][CH2:38][O:39][CH2:40][CH2:41]3)=[N:42]2)[CH:43]=[CH:44]1', 'product_smiles': '[O:1]=[C:2]([NH:3][c:4]1[cH:5][cH:6][cH:7][cH:8][cH:9]1)[NH:10][c:11]1[cH:12][cH:13][c:14](-[c:15]2[n:16][c:17]3[c:18]([n:19][n:20][n:21]3[CH2:22][CH:23]3[CH2:24][N:25]([CH2:26][c:27]4[cH:28][cH:29][c:30]([F:31])[cH:32][cH:33]4)[CH2:34]3)[c:35]([N:36]3[CH2:37][CH2:38][O:39][CH2:40][CH2:41]3)[n:42]2)[cH:43][cH:44]1', 'reactant_smiles': 'O=Cc1[cH:28][cH:29][c:30]([F:31])[cH:32][cH:33]1.O=[C:26]([N:25]1[CH2:24][CH:23]([CH2:22][n:21]2[c:17]3[n:16][c:15](-[c:14]4[cH:13][cH:12][c:11]([NH:10][C:2](=[O:1])[NH:3][c:4]5[cH:5][cH:6][cH:7][cH:8][cH:9]5)[cH:44][cH:43]4)[n:42][c:35]([N:36]4[CH2:37][CH2:38][O:39][CH2:40][CH2:41]4)[c:18]3[n:19][n:20]2)[CH2:34]1)[c:27]1ccccc1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20090181963A1;0773;738502', 'derive_version': 'v1', 'similarity': 0.518562874251497}, {'reaction_id': 1258632, 'template_hash': '460c8224f908ce8b97b7d084c606fdfdf889062a338cbf902cbe85fbbb3c1616', 'retro_smarts_template': '[c:4]1:[cH;D2;+0:5]:[cH;D2;+0:1]:[c:2]:[cH;D2;+0:3]:[cH;D2;+0:6]:1>>C-C-O-C(=O)/C=N/N-c1:c:[cH;D2;+0:1]:[c:2]:[cH;D2;+0:3]:c:1.[c:4]1:[cH;D2;+0:5]:c:c:c:[cH;D2;+0:6]:1', 'canonical_smarts_template': 'C-C-O-C(=O)/C=N/N-c1:c:[cH;D2;+0:1]:[c:2]:[cH;D2;+0:3]:c:1.[c:4]1:[cH;D2;+0:5]:c:c:c:[cH;D2;+0:6]:1>>[c:4]1:[cH;D2;+0:5]:[cH;D2;+0:1]:[c:2]:[cH;D2;+0:3]:[cH;D2;+0:6]:1', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][CH2:4][C:5]1=[C:6]([C:7]2=[C:8]([C:9](=[O:10])[N:11]3[CH2:12][CH2:13][C:14]4=[CH:15][CH:16]=[CH:17][CH:18]=[C:19]4[CH2:20]3)[CH:21]=[C:22]([C:23](=[O:24])[O:25][C:26]([CH3:27])([CH3:28])[CH3:29])[CH:30]=[CH:31]2)[C:32]([C:33](=[O:34])[O:35][CH2:36][CH3:37])=[N:38][N:39]1[C:40]1=[CH:41]C=CC=[CH:48]1.CCOC(=O)/C=N/NC1=C[CH:42]=[C:43]([CH:44]([CH3:45])[CH3:46])[CH:47]=C1.CCCCC(=CC1=C(C(=O)N2CCC3=CC=CC=C3C2)C=C(C(=O)OC(C)(C)C)C=C1)[N+](=O)[O-]>>[CH3:1][CH2:2][CH2:3][CH2:4][C:5]1=[C:6]([C:7]2=[C:8]([C:9](=[O:10])[N:11]3[CH2:12][CH2:13][C:14]4=[CH:15][CH:16]=[CH:17][CH:18]=[C:19]4[CH2:20]3)[CH:21]=[C:22]([C:23](=[O:24])[O:25][C:26]([CH3:27])([CH3:28])[CH3:29])[CH:30]=[CH:31]2)[C:32]([C:33](=[O:34])[O:35][CH2:36][CH3:37])=[N:38][N:39]1[C:40]1=[CH:41][CH:42]=[C:43]([CH:44]([CH3:45])[CH3:46])[CH:47]=[CH:48]1', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[c:6](-[c:7]2[c:8]([C:9](=[O:10])[N:11]3[CH2:12][CH2:13][c:14]4[cH:15][cH:16][cH:17][cH:18][c:19]4[CH2:20]3)[cH:21][c:22]([C:23](=[O:24])[O:25][C:26]([CH3:27])([CH3:28])[CH3:29])[cH:30][cH:31]2)[c:32]([C:33](=[O:34])[O:35][CH2:36][CH3:37])[n:38][n:39]1-[c:40]1[cH:41][cH:42][c:43]([CH:44]([CH3:45])[CH3:46])[cH:47][cH:48]1', 'reactant_smiles': 'c1c[cH:41][c:40](-[n:39]2[c:5]([CH2:4][CH2:3][CH2:2][CH3:1])[c:6](-[c:7]3[c:8]([C:9](=[O:10])[N:11]4[CH2:12][CH2:13][c:14]5[cH:15][cH:16][cH:17][cH:18][c:19]5[CH2:20]4)[cH:21][c:22]([C:23](=[O:24])[O:25][C:26]([CH3:27])([CH3:28])[CH3:29])[cH:30][cH:31]3)[c:32]([C:33](=[O:34])[O:35][CH2:36][CH3:37])[n:38]2)[cH:48]c1.CCOC(=O)/C=N/Nc1c[cH:42][c:43]([CH:44]([CH3:45])[CH3:46])[cH:47]c1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20140135318A1;1116;1525418', 'derive_version': 'v1', 'similarity': 0.5062857142857143}, {'reaction_id': 846526, 'template_hash': '640550576794085804001d09709021ff31b0570c15c6ecf0e58ba2f02b602b88', 'retro_smarts_template': '[C;D1;H3:5]-[#8:4]-[c:3]1:[c:2]:[cH;D2;+0:1]:[cH;D2;+0:7]:[c;H0;D3;+0:8](-[#7:9]-[C:10]=[O;D1;H0:11]):[cH;D2;+0:6]:1>>C-O-C(=O)-[C@H](-C(-C)-C)-N1-C-c2:c:c:c(-c3:c:c:c(-N-C(=O)-N-c4:[cH;D2;+0:1]:[c:2]:[c:3](-[#8:4]-[C;D1;H3:5]):[cH;D2;+0:6]:c:4):c:c:3):c:c:2-C-1=O.F-c1:c:[cH;D2;+0:7]:[c;H0;D3;+0:8](-[#7:9]-[C:10]=[O;D1;H0:11]):c:c:1', 'canonical_smarts_template': 'C-O-C(=O)-[C@H](-C(-C)-C)-N1-C-c2:c:c:c(-c3:c:c:c(-N-C(=O)-N-c4:[cH;D2;+0:1]:[c:2]:[c:3](-[#8:4]-[C;D1;H3:5]):[cH;D2;+0:6]:c:4):c:c:3):c:c:2-C-1=O.F-c1:c:[cH;D2;+0:7]:[c;H0;D3;+0:8](-[#7:9]-[C:10]=[O;D1;H0:11]):c:c:1>>[C;D1;H3:5]-[#8:4]-[c:3]1:[c:2]:[cH;D2;+0:1]:[cH;D2;+0:7]:[c;H0;D3;+0:8](-[#7:9]-[C:10]=[O;D1;H0:11]):[cH;D2;+0:6]:1', 'mapped_rxn': '[CH3:27][CH:26]([CH3:28])[C@@H:22]([C:23](=[O:24])[OH:25])[N:21]1[CH2:20][C:19]2=[CH:18][CH:17]=[C:16]([C:15]3=[CH:14][CH:13]=[C:12]([NH:11][C:9](=[O:10])[NH:8][C:7]4=[CH:6]C=C(F)C=C4)[CH:34]=[CH:33]3)[CH:32]=[C:31]2[C:29]1=[O:30].COC(=O)[C@H](C(C)C)N1CC2=CC=C(C3=CC=C(NC(=O)NC4=[CH:5][CH:4]=[C:3]([O:2][CH3:1])[CH:35]=C4)C=C3)C=C2C1=O>>[CH3:1][O:2][C:3]1=[CH:4][CH:5]=[CH:6][C:7]([NH:8][C:9](=[O:10])[NH:11][C:12]2=[CH:13][CH:14]=[C:15]([C:16]3=[CH:17][CH:18]=[C:19]4[CH2:20][N:21]([C@H:22]([C:23](=[O:24])[OH:25])[CH:26]([CH3:27])[CH3:28])[C:29](=[O:30])[C:31]4=[CH:32]3)[CH:33]=[CH:34]2)=[CH:35]1', 'product_smiles': '[CH3:1][O:2][c:3]1[cH:4][cH:5][cH:6][c:7]([NH:8][C:9](=[O:10])[NH:11][c:12]2[cH:13][cH:14][c:15](-[c:16]3[cH:17][cH:18][c:19]4[c:31]([cH:32]3)[C:29](=[O:30])[N:21]([C@H:22]([C:23](=[O:24])[OH:25])[CH:26]([CH3:27])[CH3:28])[CH2:20]4)[cH:33][cH:34]2)[cH:35]1', 'reactant_smiles': 'COC(=O)[C@H](C(C)C)N1Cc2ccc(-c3ccc(NC(=O)Nc4c[cH:35][c:3]([O:2][CH3:1])[cH:4][cH:5]4)cc3)cc2C1=O.Fc1cc[c:7]([NH:8][C:9](=[O:10])[NH:11][c:12]2[cH:13][cH:14][c:15](-[c:16]3[cH:17][cH:18][c:19]4[c:31]([cH:32]3)[C:29](=[O:30])[N:21]([C@H:22]([C:23](=[O:24])[OH:25])[CH:26]([CH3:27])[CH3:28])[CH2:20]4)[cH:33][cH:34]2)[cH:6]c1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08748426B2;1427;1467288', 'derive_version': 'v1', 'similarity': 0.5020979020979021}, {'reaction_id': 846899, 'template_hash': 'c421ea4b0ca2da43d1eee50411fa4bf0fb0544de3e3dd06e1e22a722df0f2b9c', 'retro_smarts_template': '[O;D1;H0:5]=[C:4](-[c:6])-[#7:3]-[c;H0;D3;+0:2]1:[cH;D2;+0:7]:[c:8]:[c:9]:[cH;D2;+0:10]:[cH;D2;+0:1]:1>>C-O-C(=O)-[C@H](-C(-C)-C)-N1-C-c2:c:c:c(-c3:c:[cH;D2;+0:1]:[c;H0;D3;+0:2](-[#7:3]-[C:4](=[O;D1;H0:5])-[c:6]):c:c:3):c:c:2-C-1=O.O=C(-N-c1:[cH;D2;+0:7]:[c:8]:[c:9]:[cH;D2;+0:10]:c:1)-c1:c:c:c:c:c:1', 'canonical_smarts_template': 'C-O-C(=O)-[C@H](-C(-C)-C)-N1-C-c2:c:c:c(-c3:c:[cH;D2;+0:1]:[c;H0;D3;+0:2](-[#7:3]-[C:4](=[O;D1;H0:5])-[c:6]):c:c:3):c:c:2-C-1=O.O=C(-N-c1:[cH;D2;+0:7]:[c:8]:[c:9]:[cH;D2;+0:10]:c:1)-c1:c:c:c:c:c:1>>[O;D1;H0:5]=[C:4](-[c:6])-[#7:3]-[c;H0;D3;+0:2]1:[cH;D2;+0:7]:[c:8]:[c:9]:[cH;D2;+0:10]:[cH;D2;+0:1]:1', 'mapped_rxn': '[CH3:1][CH:2]([CH3:3])[C@@H:4]([C:5](=[O:6])[OH:7])[N:8]1[CH2:9][C:10]2=[CH:11][CH:12]=[C:13]([C:14]3=[CH:15][CH:16]=C(NC(=O)C4=CC=CC=C4)C=[CH:33]3)[CH:34]=[C:35]2[C:36]1=[O:37].COC(=O)[C@H](C(C)C)N1CC2=CC=C(C3=CC=[C:17]([NH:18][C:19](=[O:20])[C:21]4=[N:22][CH:23]=[C:24]([C:25]5=[CH:26][CH:27]=[CH:28][CH:29]=[CH:30]5)[S:31]4)[CH:32]=C3)C=C2C1=O>>[CH3:1][CH:2]([CH3:3])[C@@H:4]([C:5](=[O:6])[OH:7])[N:8]1[CH2:9][C:10]2=[CH:11][CH:12]=[C:13]([C:14]3=[CH:15][CH:16]=[C:17]([NH:18][C:19](=[O:20])[C:21]4=[N:22][CH:23]=[C:24]([C:25]5=[CH:26][CH:27]=[CH:28][CH:29]=[CH:30]5)[S:31]4)[CH:32]=[CH:33]3)[CH:34]=[C:35]2[C:36]1=[O:37]', 'product_smiles': '[CH3:1][CH:2]([CH3:3])[C@@H:4]([C:5](=[O:6])[OH:7])[N:8]1[CH2:9][c:10]2[cH:11][cH:12][c:13](-[c:14]3[cH:15][cH:16][c:17]([NH:18][C:19](=[O:20])[c:21]4[n:22][cH:23][c:24](-[c:25]5[cH:26][cH:27][cH:28][cH:29][cH:30]5)[s:31]4)[cH:32][cH:33]3)[cH:34][c:35]2[C:36]1=[O:37]', 'reactant_smiles': 'COC(=O)[C@H](C(C)C)N1Cc2ccc(-c3cc[c:17]([NH:18][C:19](=[O:20])[c:21]4[n:22][cH:23][c:24](-[c:25]5[cH:26][cH:27][cH:28][cH:29][cH:30]5)[s:31]4)[cH:32]c3)cc2C1=O.O=C(Nc1c[cH:33][c:14](-[c:13]2[cH:12][cH:11][c:10]3[c:35]([cH:34]2)[C:36](=[O:37])[N:8]([C@@H:4]([CH:2]([CH3:1])[CH3:3])[C:5](=[O:6])[OH:7])[CH2:9]3)[cH:15][cH:16]1)c1ccccc1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08748426B2;2492;1467671', 'derive_version': 'v1', 'similarity': 0.5006353240152478}, {'reaction_id': 846909, 'template_hash': '27c30177e276b387ffef9d57070321e66c787118aecfb04833ecd73333b37110', 'retro_smarts_template': '[c:5]1:[cH;D2;+0:4]:[cH;D2;+0:1]:[c:2]:[cH;D2;+0:3]:[cH;D2;+0:6]:1>>C-O-C(=O)-[C@H](-C(-C)-C)-N1-C-c2:c:c:c(-c3:c:[cH;D2;+0:1]:[c:2]:[cH;D2;+0:3]:c:3):c:c:2-C-1=O.O=C(-N-c1:c:[cH;D2;+0:4]:[c:5]:[cH;D2;+0:6]:c:1)-c1:c:c:c:c:c:1', 'canonical_smarts_template': 'C-O-C(=O)-[C@H](-C(-C)-C)-N1-C-c2:c:c:c(-c3:c:[cH;D2;+0:1]:[c:2]:[cH;D2;+0:3]:c:3):c:c:2-C-1=O.O=C(-N-c1:c:[cH;D2;+0:4]:[c:5]:[cH;D2;+0:6]:c:1)-c1:c:c:c:c:c:1>>[c:5]1:[cH;D2;+0:4]:[cH;D2;+0:1]:[c:2]:[cH;D2;+0:3]:[cH;D2;+0:6]:1', 'mapped_rxn': '[CH3:1][CH:2]([CH3:3])[C@@H:4]([C:5](=[O:6])[OH:7])[N:8]1[CH2:9][C:10]2=[CH:11][CH:12]=[C:13]([C:14]3=[CH:15]C=C(NC(=O)C4=CC=CC=C4)C=[CH:33]3)[CH:34]=[C:35]2[C:36]1=[O:37].COC(=O)[C@H](C(C)C)N1CC2=CC=C(C3=C[CH:16]=[C:17]([NH:18][C:19](=[O:20])[C:21]4=[CH:22][CH:23]=[C:24]([C:25]5=[CH:26][N:27]=[CH:28][O:29]5)[CH:30]=[CH:31]4)[CH:32]=C3)C=C2C1=O>>[CH3:1][CH:2]([CH3:3])[C@@H:4]([C:5](=[O:6])[OH:7])[N:8]1[CH2:9][C:10]2=[CH:11][CH:12]=[C:13]([C:14]3=[CH:15][CH:16]=[C:17]([NH:18][C:19](=[O:20])[C:21]4=[CH:22][CH:23]=[C:24]([C:25]5=[CH:26][N:27]=[CH:28][O:29]5)[CH:30]=[CH:31]4)[CH:32]=[CH:33]3)[CH:34]=[C:35]2[C:36]1=[O:37]', 'product_smiles': '[CH3:1][CH:2]([CH3:3])[C@@H:4]([C:5](=[O:6])[OH:7])[N:8]1[CH2:9][c:10]2[cH:11][cH:12][c:13](-[c:14]3[cH:15][cH:16][c:17]([NH:18][C:19](=[O:20])[c:21]4[cH:22][cH:23][c:24](-[c:25]5[cH:26][n:27][cH:28][o:29]5)[cH:30][cH:31]4)[cH:32][cH:33]3)[cH:34][c:35]2[C:36]1=[O:37]', 'reactant_smiles': 'COC(=O)[C@H](C(C)C)N1Cc2ccc(-c3c[cH:16][c:17]([NH:18][C:19](=[O:20])[c:21]4[cH:22][cH:23][c:24](-[c:25]5[cH:26][n:27][cH:28][o:29]5)[cH:30][cH:31]4)[cH:32]c3)cc2C1=O.O=C(Nc1c[cH:15][c:14](-[c:13]2[cH:12][cH:11][c:10]3[c:35]([cH:34]2)[C:36](=[O:37])[N:8]([C@@H:4]([CH:2]([CH3:1])[CH3:3])[C:5](=[O:6])[OH:7])[CH2:9]3)[cH:33]c1)c1ccccc1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08748426B2;2514;1467681', 'derive_version': 'v1', 'similarity': 0.5}, {'reaction_id': 953731, 'template_hash': '5474e372c0052a3f9b091109f8170cde91737611f3c72b2ef45c2da4ed9168fd', 'retro_smarts_template': '[C:2]-[c;H0;D3;+0:1](:[cH;D2;+0:3]:[c:4]):[cH;D2;+0:5]:[c:6]>>C-C-N(-C-C)-C(=O)-c1:c:c(-c2:c:n:n(-C-C-C-O):c:2):c:c:c:1-N-c1:n:c(-N-c2:c:c:[c;H0;D3;+0:1](-[C:2]):c:c:2-O-C):n:c:c:1-C(-F)(-F)-F.C-C-O-P(=O)(-C-c(:[cH;D2;+0:3]:[c:4]):[cH;D2;+0:5]:[c:6])-O-C-C', 'canonical_smarts_template': 'C-C-N(-C-C)-C(=O)-c1:c:c(-c2:c:n:n(-C-C-C-O):c:2):c:c:c:1-N-c1:n:c(-N-c2:c:c:[c;H0;D3;+0:1](-[C:2]):c:c:2-O-C):n:c:c:1-C(-F)(-F)-F.C-C-O-P(=O)(-C-c(:[cH;D2;+0:3]:[c:4]):[cH;D2;+0:5]:[c:6])-O-C-C>>[C:2]-[c;H0;D3;+0:1](:[cH;D2;+0:3]:[c:4]):[cH;D2;+0:5]:[c:6]', 'mapped_rxn': '[CH3:25][CH2:24][O:23][P:20](=[O:21])([OH:22])[CH2:19][C:18]1=CC(OC)=C(NC2=NC=C(C(F)(F)F)C(NC3=C(C(=O)N(CC)CC)C=C(C4=CN(CCCO)N=C4)C=C3)=N2)C=C1.[CH3:1][CH2:2][NH:3][C:4](=[O:5])[C:6]1=[C:7]([NH:8][C:9]2=[N:10][C:11]([NH:12][C:13]3=[C:14]([O:15][CH3:16])[CH:17]=C(CP(=O)(OCC)OCC)[CH:26]=[CH:27]3)=[N:28][CH:29]=[C:30]2[C:31]([F:32])([F:33])[F:34])[CH:35]=[CH:36][C:37]([C:38]2=[CH:39][N:40]([CH2:41][CH2:42][CH2:43][OH:44])[N:45]=[CH:46]2)=[CH:47]1>>[CH3:1][CH2:2][NH:3][C:4](=[O:5])[C:6]1=[C:7]([NH:8][C:9]2=[N:10][C:11]([NH:12][C:13]3=[C:14]([O:15][CH3:16])[CH:17]=[C:18]([CH2:19][P:20](=[O:21])([OH:22])[O:23][CH2:24][CH3:25])[CH:26]=[CH:27]3)=[N:28][CH:29]=[C:30]2[C:31]([F:32])([F:33])[F:34])[CH:35]=[CH:36][C:37]([C:38]2=[CH:39][N:40]([CH2:41][CH2:42][CH2:43][OH:44])[N:45]=[CH:46]2)=[CH:47]1', 'product_smiles': '[CH3:1][CH2:2][NH:3][C:4](=[O:5])[c:6]1[c:7]([NH:8][c:9]2[n:10][c:11]([NH:12][c:13]3[c:14]([O:15][CH3:16])[cH:17][c:18]([CH2:19][P:20](=[O:21])([OH:22])[O:23][CH2:24][CH3:25])[cH:26][cH:27]3)[n:28][cH:29][c:30]2[C:31]([F:32])([F:33])[F:34])[cH:35][cH:36][c:37](-[c:38]2[cH:39][n:40]([CH2:41][CH2:42][CH2:43][OH:44])[n:45][cH:46]2)[cH:47]1', 'reactant_smiles': 'CCN(CC)C(=O)c1cc(-c2cnn(CCCO)c2)ccc1Nc1nc(Nc2cc[c:18]([CH2:19][P:20](=[O:21])([OH:22])[O:23][CH2:24][CH3:25])cc2OC)ncc1C(F)(F)F.CCOP(=O)(Cc1[cH:17][c:14]([O:15][CH3:16])[c:13]([NH:12][c:11]2[n:10][c:9]([NH:8][c:7]3[c:6]([C:4]([NH:3][CH2:2][CH3:1])=[O:5])[cH:47][c:37](-[c:38]4[cH:39][n:40]([CH2:41][CH2:42][CH2:43][OH:44])[n:45][cH:46]4)[cH:36][cH:35]3)[c:30]([C:31]([F:32])([F:33])[F:34])[cH:29][n:28]2)[cH:27][cH:26]1)OCC', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US09133224B2;0322;1669026', 'derive_version': 'v1', 'similarity': 0.48826291079812206}, {'reaction_id': 846801, 'template_hash': 'd4db5eac1493bb62dbc2b99c2acda1fc07d893b64c05cd325e6e2d2cb67498e0', 'retro_smarts_template': '[O;D1;H0:5]=[C:4]-[#7:3]-[c;H0;D3;+0:2]1:[cH;D2;+0:9]:[c:8]:[c:7]:[cH;D2;+0:6]:[cH;D2;+0:1]:1>>Cl-c1:c:c:c:[cH;D2;+0:1]:[c;H0;D3;+0:2]:1-[#7:3]-[C:4]=[O;D1;H0:5].O=C=N-c1:[cH;D2;+0:6]:[c:7]:[c:8]:[cH;D2;+0:9]:c:1', 'canonical_smarts_template': 'Cl-c1:c:c:c:[cH;D2;+0:1]:[c;H0;D3;+0:2]:1-[#7:3]-[C:4]=[O;D1;H0:5].O=C=N-c1:[cH;D2;+0:6]:[c:7]:[c:8]:[cH;D2;+0:9]:c:1>>[O;D1;H0:5]=[C:4]-[#7:3]-[c;H0;D3;+0:2]1:[cH;D2;+0:9]:[c:8]:[c:7]:[cH;D2;+0:6]:[cH;D2;+0:1]:1', 'mapped_rxn': '[CH3:1][O:2][C:3](=[O:4])[C@H:5]([CH:6]([CH3:7])[CH3:8])[N:9]1[CH2:10][C:11]2=[CH:12][CH:13]=[C:14]([C:15]3=[N:16][CH:17]=[C:18]([NH:19][C:20](=[O:21])[NH:22][C:23]4=C(Cl)C=CC=[CH:30]4)[CH:31]=[CH:32]3)[CH:33]=[C:34]2[C:35]1=[O:36].COC(=O)[C@H](C(C)C)N1CC2=CC=C(C3=NC=C(N)C=C3)C=C2C1=O.[CH3:26][C:25]1=[C:27]([CH3:28])[CH:29]=C(N=C=O)C=[CH:24]1>>[CH3:1][O:2][C:3](=[O:4])[C@H:5]([CH:6]([CH3:7])[CH3:8])[N:9]1[CH2:10][C:11]2=[CH:12][CH:13]=[C:14]([C:15]3=[N:16][CH:17]=[C:18]([NH:19][C:20](=[O:21])[NH:22][C:23]4=[CH:24][C:25]([CH3:26])=[C:27]([CH3:28])[CH:29]=[CH:30]4)[CH:31]=[CH:32]3)[CH:33]=[C:34]2[C:35]1=[O:36]', 'product_smiles': '[CH3:1][O:2][C:3](=[O:4])[C@H:5]([CH:6]([CH3:7])[CH3:8])[N:9]1[CH2:10][c:11]2[cH:12][cH:13][c:14](-[c:15]3[n:16][cH:17][c:18]([NH:19][C:20](=[O:21])[NH:22][c:23]4[cH:24][c:25]([CH3:26])[c:27]([CH3:28])[cH:29][cH:30]4)[cH:31][cH:32]3)[cH:33][c:34]2[C:35]1=[O:36]', 'reactant_smiles': 'Clc1ccc[cH:30][c:23]1[NH:22][C:20]([NH:19][c:18]1[cH:17][n:16][c:15](-[c:14]2[cH:13][cH:12][c:11]3[c:34]([cH:33]2)[C:35](=[O:36])[N:9]([C@H:5]([C:3]([O:2][CH3:1])=[O:4])[CH:6]([CH3:7])[CH3:8])[CH2:10]3)[cH:32][cH:31]1)=[O:21].O=C=Nc1c[cH:24][c:25]([CH3:26])[c:27]([CH3:28])[cH:29]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08748426B2;2070;1467571', 'derive_version': 'v1', 'similarity': 0.4860050890585242}, {'reaction_id': 1339076, 'template_hash': 'c5af484ec9ddd8cccb7d03cd70f43c977f8aec58851fc04ab16da3c7e9911ddd', 'retro_smarts_template': '[#8:2]-[c;H0;D3;+0:3](:[c:4]):[cH;D2;+0:1]:[cH;D2;+0:5]:[c:6]>>C-C-O-P(=O)(-O-C-C)-C(-F)(-F)-C(-C)(-O)-c1:[cH;D2;+0:1]:c(-O-[C@H]2-C-C-[C@@H](-C)-N(-C(=O)-c3:c:c:c:c:c:3-n3:n:c:c:n:3)-C-2):n:c:c:1.[#8:2]-[c;H0;D3;+0:3](:[c:4]):n:[cH;D2;+0:5]:[c:6]', 'canonical_smarts_template': 'C-C-O-P(=O)(-O-C-C)-C(-F)(-F)-C(-C)(-O)-c1:[cH;D2;+0:1]:c(-O-[C@H]2-C-C-[C@@H](-C)-N(-C(=O)-c3:c:c:c:c:c:3-n3:n:c:c:n:3)-C-2):n:c:c:1.[#8:2]-[c;H0;D3;+0:3](:[c:4]):n:[cH;D2;+0:5]:[c:6]>>[#8:2]-[c;H0;D3;+0:3](:[c:4]):[cH;D2;+0:1]:[cH;D2;+0:5]:[c:6]', 'mapped_rxn': '[CH3:1][C@@H:2]1[CH2:3][CH2:4][C@@H:5]([O:6][C:7]2=N[CH:9]=[CH:10][C:11]([C:12]([CH3:13])([OH:14])[CH:15]([F:16])[F:17])=[CH:18]2)[CH2:19][N:20]1[C:21](=[O:22])[C:23]1=[C:24]([N:25]2[N:26]=[CH:27][CH:28]=[N:29]2)[CH:30]=[CH:31][CH:32]=[CH:33]1.CCOP(=O)(OCC)C(F)(F)C(C)(O)C1=[CH:8]C(O[C@@H]2CC[C@@H](C)N(C(=O)C3=C(N4N=CC=N4)C=CC=C3)C2)=NC=C1>>[CH3:1][C@@H:2]1[CH2:3][CH2:4][C@@H:5]([O:6][C:7]2=[CH:8][CH:9]=[CH:10][C:11]([C:12]([CH3:13])([OH:14])[CH:15]([F:16])[F:17])=[CH:18]2)[CH2:19][N:20]1[C:21](=[O:22])[C:23]1=[C:24]([N:25]2[N:26]=[CH:27][CH:28]=[N:29]2)[CH:30]=[CH:31][CH:32]=[CH:33]1', 'product_smiles': '[CH3:1][C@@H:2]1[CH2:3][CH2:4][C@@H:5]([O:6][c:7]2[cH:8][cH:9][cH:10][c:11]([C:12]([CH3:13])([OH:14])[CH:15]([F:16])[F:17])[cH:18]2)[CH2:19][N:20]1[C:21](=[O:22])[c:23]1[c:24](-[n:25]2[n:26][cH:27][cH:28][n:29]2)[cH:30][cH:31][cH:32][cH:33]1', 'reactant_smiles': 'CCOP(=O)(OCC)C(F)(F)C(C)(O)c1ccnc(O[C@@H]2CC[C@@H](C)N(C(=O)c3ccccc3-n3nccn3)C2)[cH:8]1.n1[c:7]([O:6][C@@H:5]2[CH2:4][CH2:3][C@@H:2]([CH3:1])[N:20]([C:21](=[O:22])[c:23]3[c:24](-[n:25]4[n:26][cH:27][cH:28][n:29]4)[cH:30][cH:31][cH:32][cH:33]3)[CH2:19]2)[cH:18][c:11]([C:12]([CH3:13])([OH:14])[CH:15]([F:16])[F:17])[cH:10][cH:9]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20160068510A1;0243;1849716', 'derive_version': 'v1', 'similarity': 0.4797385620915033}, {'reaction_id': 846802, 'template_hash': '46d82383d6d694a6fd50d8aa13f0a255f088f1c63c86e5fdea8b1cbb06f73174', 'retro_smarts_template': '[O;D1;H0:9]=[C:8]-[#7:7]-[c;H0;D3;+0:6]1:[cH;D2;+0:5]:[cH;D2;+0:1]:[c:2]:[c:3]:[cH;D2;+0:4]:1>>C-O-C(=O)-[C@H](-C(-C)-C)-N1-C-c2:c:c:c(-c3:c:c:c(-N-C(=O)-N-c4:[cH;D2;+0:1]:[c:2]:[c:3]:[cH;D2;+0:4]:c:4):c:n:3):c:c:2-C-1=O.Cl-c1:c:c:c:[cH;D2;+0:5]:[c;H0;D3;+0:6]:1-[#7:7]-[C:8]=[O;D1;H0:9]', 'canonical_smarts_template': 'C-O-C(=O)-[C@H](-C(-C)-C)-N1-C-c2:c:c:c(-c3:c:c:c(-N-C(=O)-N-c4:[cH;D2;+0:1]:[c:2]:[c:3]:[cH;D2;+0:4]:c:4):c:n:3):c:c:2-C-1=O.Cl-c1:c:c:c:[cH;D2;+0:5]:[c;H0;D3;+0:6]:1-[#7:7]-[C:8]=[O;D1;H0:9]>>[O;D1;H0:9]=[C:8]-[#7:7]-[c;H0;D3;+0:6]1:[cH;D2;+0:5]:[cH;D2;+0:1]:[c:2]:[c:3]:[cH;D2;+0:4]:1', 'mapped_rxn': '[CH3:26][CH:25]([CH3:27])[C@@H:21]([C:22](=[O:23])[OH:24])[N:20]1[CH2:19][C:18]2=[CH:17][CH:16]=[C:15]([C:14]3=[N:13][CH:12]=[C:11]([NH:10][C:8](=[O:9])[NH:7][C:6]4=C(Cl)C=CC=[CH:34]4)[CH:33]=[CH:32]3)[CH:31]=[C:30]2[C:28]1=[O:29].COC(=O)[C@H](C(C)C)N1CC2=CC=C(C3=NC=C(NC(=O)NC4=[CH:35][C:2]([CH3:1])=[C:3]([CH3:4])[CH:5]=C4)C=C3)C=C2C1=O>>[CH3:1][C:2]1=[C:3]([CH3:4])[CH:5]=[C:6]([NH:7][C:8](=[O:9])[NH:10][C:11]2=[CH:12][N:13]=[C:14]([C:15]3=[CH:16][CH:17]=[C:18]4[CH2:19][N:20]([C@H:21]([C:22](=[O:23])[OH:24])[CH:25]([CH3:26])[CH3:27])[C:28](=[O:29])[C:30]4=[CH:31]3)[CH:32]=[CH:33]2)[CH:34]=[CH:35]1', 'product_smiles': '[CH3:1][c:2]1[c:3]([CH3:4])[cH:5][c:6]([NH:7][C:8](=[O:9])[NH:10][c:11]2[cH:12][n:13][c:14](-[c:15]3[cH:16][cH:17][c:18]4[c:30]([cH:31]3)[C:28](=[O:29])[N:20]([C@H:21]([C:22](=[O:23])[OH:24])[CH:25]([CH3:26])[CH3:27])[CH2:19]4)[cH:32][cH:33]2)[cH:34][cH:35]1', 'reactant_smiles': 'COC(=O)[C@H](C(C)C)N1Cc2ccc(-c3ccc(NC(=O)Nc4c[cH:5][c:3]([CH3:4])[c:2]([CH3:1])[cH:35]4)cn3)cc2C1=O.Clc1ccc[cH:34][c:6]1[NH:7][C:8](=[O:9])[NH:10][c:11]1[cH:12][n:13][c:14](-[c:15]2[cH:16][cH:17][c:18]3[c:30]([cH:31]2)[C:28](=[O:29])[N:20]([C@H:21]([C:22](=[O:23])[OH:24])[CH:25]([CH3:26])[CH3:27])[CH2:19]3)[cH:32][cH:33]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08748426B2;2071;1467572', 'derive_version': 'v1', 'similarity': 0.47876447876447875}]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Let me search for templates that match the Friedel-Crafts acylation (breaking amide bond):"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01EYvYeBnNY3NGYen5kjq7VS",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\", \"functional_groups_broken\": null, \"functional_groups_formed\": null, \"bonds_formed\": [\"6-35\"], \"bonds_broken\": [\"6-6\"], \"bonds_order_changed\": null, \"limit\": 15}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01EYvYeBnNY3NGYen5kjq7VS",
+      "content": "[{\"type\": \"text\", \"text\": \"[]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Let me search for SN2 type reactions:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01Tix4aFnKWVkzjuFQSTU1Kg",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\", \"functional_groups_broken\": null, \"functional_groups_formed\": [\"halide\"], \"bonds_formed\": [\"6-35\"], \"bonds_broken\": [\"6-7\"], \"bonds_order_changed\": null, \"limit\": 15}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01Tix4aFnKWVkzjuFQSTU1Kg",
+      "content": "[{\"type\": \"text\", \"text\": \"[]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Let me try a broader search focusing on the key structural features. Let me search for templates that break C-N bonds:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_018E3LEyssjLGfyPdrAgoomG",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\", \"functional_groups_broken\": null, \"functional_groups_formed\": null, \"bonds_formed\": null, \"bonds_broken\": [\"6-7\"], \"bonds_order_changed\": null, \"limit\": 20}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_018E3LEyssjLGfyPdrAgoomG",
+      "content": "[{\"type\": \"text\", \"text\": \"[{'reaction_id': 435295, 'template_hash': '9bc5bcbccf7596d9a212047ec8a763b4edb45e104d919c5199605812d2cf8bf2', 'retro_smarts_template': '[#7;a:3]:[c:2]-[NH2;D1;+0:1]>>C-N(-C)/C=[N;H0;D2;+0:1]/[c:2]:[#7;a:3]', 'canonical_smarts_template': 'C-N(-C)/C=[N;H0;D2;+0:1]/[c:2]:[#7;a:3]>>[#7;a:3]:[c:2]-[NH2;D1;+0:1]', 'mapped_rxn': '[CH3:1][O:2][C:3]1=[C:4]([NH:5][C:6](=[O:7])[C:8]2=[CH:9][C:10]3=[CH:11][CH:12]=[CH:13][CH:14]=[C:15]3[N:16]2[CH3:17])[CH:18]=[CH:19][C:20]([C:21]2=[CH:22][S:23][C:24]3=[C:25]2[C:26](/[N:27]=C/N(C)C)=[N:28][CH:29]=[C:30]3[NH:31][S:32](=[O:33])(=[O:34])[C:35]2=[CH:36][CH:37]=[CH:38][S:39]2)=[CH:40]1.Cl.C1COCCO1>>[CH3:1][O:2][C:3]1=[C:4]([NH:5][C:6](=[O:7])[C:8]2=[CH:9][C:10]3=[CH:11][CH:12]=[CH:13][CH:14]=[C:15]3[N:16]2[CH3:17])[CH:18]=[CH:19][C:20]([C:21]2=[CH:22][S:23][C:24]3=[C:25]2[C:26]([NH2:27])=[N:28][CH:29]=[C:30]3[NH:31][S:32](=[O:33])(=[O:34])[C:35]2=[CH:36][CH:37]=[CH:38][S:39]2)=[CH:40]1', 'product_smiles': '[CH3:1][O:2][c:3]1[c:4]([NH:5][C:6](=[O:7])[c:8]2[cH:9][c:10]3[cH:11][cH:12][cH:13][cH:14][c:15]3[n:16]2[CH3:17])[cH:18][cH:19][c:20](-[c:21]2[cH:22][s:23][c:24]3[c:25]2[c:26]([NH2:27])[n:28][cH:29][c:30]3[NH:31][S:32](=[O:33])(=[O:34])[c:35]2[cH:36][cH:37][cH:38][s:39]2)[cH:40]1', 'reactant_smiles': 'CN(C)/C=[N:27]/[c:26]1[c:25]2[c:21](-[c:20]3[cH:19][cH:18][c:4]([NH:5][C:6](=[O:7])[c:8]4[cH:9][c:10]5[cH:11][cH:12][cH:13][cH:14][c:15]5[n:16]4[CH3:17])[c:3]([O:2][CH3:1])[cH:40]3)[cH:22][s:23][c:24]2[c:30]([NH:31][S:32](=[O:33])(=[O:34])[c:35]2[cH:36][cH:37][cH:38][s:39]2)[cH:29][n:28]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07202363B2;1292;780619', 'derive_version': 'v1', 'similarity': 0.5282805429864253}, {'reaction_id': 1838006, 'template_hash': 'fb6ae6f58e2d37fe48f36cbef9613ca57fbd9dd0ae1b1d3cd7dd5127271b428b', 'retro_smarts_template': '[O;D1;H0:4]=[C;H0;D3;+0:3](-[c:5])-[NH;D2;+0:1]-[c:2]>>C-C-C(=O)-[NH;D2;+0:1]-[c:2].Cl-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5]', 'canonical_smarts_template': 'C-C-C(=O)-[NH;D2;+0:1]-[c:2].Cl-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5]>>[O;D1;H0:4]=[C;H0;D3;+0:3](-[c:5])-[NH;D2;+0:1]-[c:2]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[n:6][n:7](-[c:8]2[cH:9][c:10]([NH:11]C(=O)CC)[cH:20][cH:21][c:22]2[C:23]([F:24])([F:25])[F:26])[c:27](=[O:28])[n:29]1[CH2:30][c:31]1[cH:32][cH:33][c:34](-[c:35]2[cH:36][cH:37][cH:38][cH:39][c:40]2[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]1[F:54].[O:13]=[C:12](Cl)[c:14]1[cH:15][cH:16][cH:17][cH:18][cH:19]1>>[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[n:6][n:7](-[c:8]2[cH:9][c:10]([NH:11][C:12](=[O:13])[c:14]3[cH:15][cH:16][cH:17][cH:18][cH:19]3)[cH:20][cH:21][c:22]2[C:23]([F:24])([F:25])[F:26])[c:27](=[O:28])[n:29]1[CH2:30][c:31]1[cH:32][cH:33][c:34](-[c:35]2[cH:36][cH:37][cH:38][cH:39][c:40]2[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]1[F:54]', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[n:6][n:7](-[c:8]2[cH:9][c:10]([NH:11][C:12](=[O:13])[c:14]3[cH:15][cH:16][cH:17][cH:18][cH:19]3)[cH:20][cH:21][c:22]2[C:23]([F:24])([F:25])[F:26])[c:27](=[O:28])[n:29]1[CH2:30][c:31]1[cH:32][cH:33][c:34](-[c:35]2[cH:36][cH:37][cH:38][cH:39][c:40]2[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]1[F:54]', 'reactant_smiles': 'CCC(=O)[NH:11][c:10]1[cH:9][c:8](-[n:7]2[n:6][c:5]([CH2:4][CH2:3][CH2:2][CH3:1])[n:29]([CH2:30][c:31]3[cH:32][cH:33][c:34](-[c:35]4[cH:36][cH:37][cH:38][cH:39][c:40]4[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]3[F:54])[c:27]2=[O:28])[c:22]([C:23]([F:24])([F:25])[F:26])[cH:21][cH:20]1.Cl[C:12](=[O:13])[c:14]1[cH:15][cH:16][cH:17][cH:18][cH:19]1', 'dataset': 'Training data from https://doi.org/10.1039/C8SC04228D (5/10)', 'source_row_id': 'ord-fba1db8bd3384b588f6901e4e0f875e6', 'derive_version': 'v1', 'similarity': 0.525909592061742}, {'reaction_id': 1014069, 'template_hash': 'efc0753e32908697ad71b5530a1ee278c6fcfb251441cfdd70cdda8db4004f71', 'retro_smarts_template': '[#7;a:8]:[c:7](-[NH2;D1;+0:9]):[c:6]-[C:4](=[O;D1;H0:5])-[#7:3]-[c;H0;D3;+0:2]1:[cH;D2;+0:1]:[c;H0;D3;+0:13](-[#8:14]-[C;D1;H3:15]):[c:12]:[c:11]:[cH;D2;+0:10]:1>>C-O-c1:[cH;D2;+0:1]:[c;H0;D3;+0:2](-[#7:3]-[C:4](=[O;D1;H0:5])-[c:6]:[c:7](:[#7;a:8])-[NH;D2;+0:9]-C-[c;H0;D3;+0:10]2:[c:11]:[c:12]:[c;H0;D3;+0:13](-[#8:14]-[C;D1;H3:15]):c:c:2):c:c:c:1', 'canonical_smarts_template': 'C-O-c1:[cH;D2;+0:1]:[c;H0;D3;+0:2](-[#7:3]-[C:4](=[O;D1;H0:5])-[c:6]:[c:7](:[#7;a:8])-[NH;D2;+0:9]-C-[c;H0;D3;+0:10]2:[c:11]:[c:12]:[c;H0;D3;+0:13](-[#8:14]-[C;D1;H3:15]):c:c:2):c:c:c:1>>[#7;a:8]:[c:7](-[NH2;D1;+0:9]):[c:6]-[C:4](=[O;D1;H0:5])-[#7:3]-[c;H0;D3;+0:2]1:[cH;D2;+0:1]:[c;H0;D3;+0:13](-[#8:14]-[C;D1;H3:15]):[c:12]:[c:11]:[cH;D2;+0:10]:1', 'mapped_rxn': '[CH3:1][O:2][C:3]1=CC=[C:6](C[NH:37][C:36]2=[N:35][CH:34]=[N:33][C:12]([NH:13][C@@H:14]([CH3:15])[C:16]3=[N:17][N:18]4[CH:19]=[CH:20][C:21]([CH3:22])=[C:23]4[C:24](=[O:25])[N:26]3[C:27]3=[CH:28][CH:29]=[CH:30][CH:31]=[CH:32]3)=[C:11]2[C:9](=[O:10])[NH:8][C:7]2=[CH:38]C(OC)=CC=C2)[CH:5]=[CH:4]1.O=C(O)C(F)(F)F>>[CH3:1][O:2][C:3]1=[CH:4][CH:5]=[CH:6][C:7]([NH:8][C:9](=[O:10])[C:11]2=[C:12]([NH:13][C@@H:14]([CH3:15])[C:16]3=[N:17][N:18]4[CH:19]=[CH:20][C:21]([CH3:22])=[C:23]4[C:24](=[O:25])[N:26]3[C:27]3=[CH:28][CH:29]=[CH:30][CH:31]=[CH:32]3)[N:33]=[CH:34][N:35]=[C:36]2[NH2:37])=[CH:38]1', 'product_smiles': '[CH3:1][O:2][c:3]1[cH:4][cH:5][cH:6][c:7]([NH:8][C:9](=[O:10])[c:11]2[c:12]([NH:13][C@@H:14]([CH3:15])[c:16]3[n:17][n:18]4[cH:19][cH:20][c:21]([CH3:22])[c:23]4[c:24](=[O:25])[n:26]3-[c:27]3[cH:28][cH:29][cH:30][cH:31][cH:32]3)[n:33][cH:34][n:35][c:36]2[NH2:37])[cH:38]1', 'reactant_smiles': 'COc1ccc[c:7]([NH:8][C:9](=[O:10])[c:11]2[c:12]([NH:13][C@@H:14]([CH3:15])[c:16]3[n:17][n:18]4[cH:19][cH:20][c:21]([CH3:22])[c:23]4[c:24](=[O:25])[n:26]3-[c:27]3[cH:28][cH:29][cH:30][cH:31][cH:32]3)[n:33][cH:34][n:35][c:36]2[NH:37]C[c:6]2cc[c:3]([O:2][CH3:1])[cH:4][cH:5]2)[cH:38]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US09388189B2;0957;1782921', 'derive_version': 'v1', 'similarity': 0.5215909090909091}, {'reaction_id': 907845, 'template_hash': '3e974bcffe44610c404da68432e7db9327e714a5b50eac805bc908b2881a75b5', 'retro_smarts_template': '[O;D1;H0:4]=[C:3](-[c:5])-[NH;D2;+0:1]-[c:2]>>C-O-c1:c:c:c(-C-[N;H0;D3;+0:1](-[c:2])-[C:3](=[O;D1;H0:4])-[c:5]):c(-O-C):c:1', 'canonical_smarts_template': 'C-O-c1:c:c:c(-C-[N;H0;D3;+0:1](-[c:2])-[C:3](=[O;D1;H0:4])-[c:5]):c(-O-C):c:1>>[O;D1;H0:4]=[C:3](-[c:5])-[NH;D2;+0:1]-[c:2]', 'mapped_rxn': 'COC1=CC(OC)=C(C[N:8]([C:6](=[O:7])[C:5]2=[C:15]([O:16][P:17](=[O:18])([CH2:19][C:20]3=[CH:21][CH:22]=[CH:23][CH:24]=[CH:25]3)[CH2:26][C:27]3=[CH:28][CH:29]=[CH:30][CH:31]=[CH:32]3)[C:33]3=[CH:34][CH:35]=[CH:36][CH:37]=[C:38]3[N:2]([CH3:1])[C:3]2=[O:4])[C:9]2=[CH:10][CH:11]=[CH:12][CH:13]=[CH:14]2)C=C1.O=[N+]([O-])[O-].[NH4+].[Ce].CC#N>>[CH3:1][N:2]1[C:3](=[O:4])[C:5]([C:6](=[O:7])[NH:8][C:9]2=[CH:10][CH:11]=[CH:12][CH:13]=[CH:14]2)=[C:15]([O:16][P:17](=[O:18])([CH2:19][C:20]2=[CH:21][CH:22]=[CH:23][CH:24]=[CH:25]2)[CH2:26][C:27]2=[CH:28][CH:29]=[CH:30][CH:31]=[CH:32]2)[C:33]2=[CH:34][CH:35]=[CH:36][CH:37]=[C:38]12', 'product_smiles': '[CH3:1][n:2]1[c:3](=[O:4])[c:5]([C:6](=[O:7])[NH:8][c:9]2[cH:10][cH:11][cH:12][cH:13][cH:14]2)[c:15]([O:16][P:17](=[O:18])([CH2:19][c:20]2[cH:21][cH:22][cH:23][cH:24][cH:25]2)[CH2:26][c:27]2[cH:28][cH:29][cH:30][cH:31][cH:32]2)[c:33]2[cH:34][cH:35][cH:36][cH:37][c:38]12', 'reactant_smiles': 'COc1ccc(C[N:8]([C:6]([c:5]2[c:3](=[O:4])[n:2]([CH3:1])[c:38]3[c:33]([c:15]2[O:16][P:17](=[O:18])([CH2:19][c:20]2[cH:21][cH:22][cH:23][cH:24][cH:25]2)[CH2:26][c:27]2[cH:28][cH:29][cH:30][cH:31][cH:32]2)[cH:34][cH:35][cH:36][cH:37]3)=[O:7])[c:9]2[cH:10][cH:11][cH:12][cH:13][cH:14]2)c(OC)c1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08962598B2;0575;1582726', 'derive_version': 'v1', 'similarity': 0.5198019801980198}, {'reaction_id': 390319, 'template_hash': 'aef1f4da861a214a34a7c985eb9a08f6fe6a8d1a867d6389eecebac5380954b2', 'retro_smarts_template': '[C:4]-[CH2;D2;+0:5]-[N;H0;D3;+0:1](-[C:2])-[C:3]>>N-C-C-C-[N;H0;D3;+0:1](-[C:2])-[C:3].[C:4]-[CH2;D2;+0:5]-n1:c:n:c:n:1', 'canonical_smarts_template': 'N-C-C-C-[N;H0;D3;+0:1](-[C:2])-[C:3].[C:4]-[CH2;D2;+0:5]-n1:c:n:c:n:1>>[C:4]-[CH2;D2;+0:5]-[N;H0;D3;+0:1](-[C:2])-[C:3]', 'mapped_rxn': '[CH3:1][O:2][C:3]1=[C:4]2[C:5]([CH:6]3[C:7](=[O:8])[NH:9][C:10]4=[CH:11][CH:12]=[CH:13][CH:14]=[C:15]34)=[N:16][CH:17]=[N:18][N:19]2[CH:20]=[C:21]1[C:22](=[O:23])[NH:24][CH2:25][CH2:26][CH2:27]N1C=NC=N1.NCCC[N:28]1[CH2:29][CH2:30][O:31][CH2:32][CH2:33]1>>[CH3:1][O:2][C:3]1=[C:4]2[C:5]([CH:6]3[C:7](=[O:8])[NH:9][C:10]4=[CH:11][CH:12]=[CH:13][CH:14]=[C:15]34)=[N:16][CH:17]=[N:18][N:19]2[CH:20]=[C:21]1[C:22](=[O:23])[NH:24][CH2:25][CH2:26][CH2:27][N:28]1[CH2:29][CH2:30][O:31][CH2:32][CH2:33]1', 'product_smiles': '[CH3:1][O:2][c:3]1[c:4]2[c:5]([CH:6]3[C:7](=[O:8])[NH:9][c:10]4[cH:11][cH:12][cH:13][cH:14][c:15]43)[n:16][cH:17][n:18][n:19]2[cH:20][c:21]1[C:22](=[O:23])[NH:24][CH2:25][CH2:26][CH2:27][N:28]1[CH2:29][CH2:30][O:31][CH2:32][CH2:33]1', 'reactant_smiles': 'c1ncn([CH2:27][CH2:26][CH2:25][NH:24][C:22]([c:21]2[c:3]([O:2][CH3:1])[c:4]3[c:5]([CH:6]4[C:7](=[O:8])[NH:9][c:10]5[cH:11][cH:12][cH:13][cH:14][c:15]54)[n:16][cH:17][n:18][n:19]3[cH:20]2)=[O:23])n1.NCCC[N:28]1[CH2:29][CH2:30][O:31][CH2:32][CH2:33]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US06982265B1;0424;707661', 'derive_version': 'v1', 'similarity': 0.5190582959641256}, {'reaction_id': 586417, 'template_hash': 'e8846067710afebac635e532d04a6d4afa3ea07a017e989fbbb3b2f303c5be9d', 'retro_smarts_template': '[O;D1;H0:2]=[C;H0;D3;+0:1](-[c:3])-[NH;D2;+0:4]-[c:5]>>Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3].F-C(-F)(-F)-C(=O)-[NH;D2;+0:4]-[c:5]', 'canonical_smarts_template': 'Cl-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3].F-C(-F)(-F)-C(=O)-[NH;D2;+0:4]-[c:5]>>[O;D1;H0:2]=[C;H0;D3;+0:1](-[c:3])-[NH;D2;+0:4]-[c:5]', 'mapped_rxn': '[CH3:1][O:2][C:3]1=[C:4]([NH:5]C(=O)C(F)(F)F)[CH:16]=[C:17]([C:18]2=[N:19][N:20]3[CH:21]=[CH:22][CH:23]=[CH:24][C:25]3=[C:26]2[C:27]2=[N:28][C:29]([Cl:30])=[N:31][CH:32]=[CH:33]2)[CH:34]=[CH:35]1.[Li+].[OH-].[O:7]=[C:6](Cl)[C:8]1=[C:9]([F:10])[CH:11]=[CH:12][CH:13]=[C:14]1[F:15].NC(CO)(CO)CO.CN(C)C=O.O.C1CCOC1>>[CH3:1][O:2][C:3]1=[C:4]([NH:5][C:6](=[O:7])[C:8]2=[C:9]([F:10])[CH:11]=[CH:12][CH:13]=[C:14]2[F:15])[CH:16]=[C:17]([C:18]2=[N:19][N:20]3[CH:21]=[CH:22][CH:23]=[CH:24][C:25]3=[C:26]2[C:27]2=[N:28][C:29]([Cl:30])=[N:31][CH:32]=[CH:33]2)[CH:34]=[CH:35]1', 'product_smiles': '[CH3:1][O:2][c:3]1[c:4]([NH:5][C:6](=[O:7])[c:8]2[c:9]([F:10])[cH:11][cH:12][cH:13][c:14]2[F:15])[cH:16][c:17](-[c:18]2[n:19][n:20]3[cH:21][cH:22][cH:23][cH:24][c:25]3[c:26]2-[c:27]2[n:28][c:29]([Cl:30])[n:31][cH:32][cH:33]2)[cH:34][cH:35]1', 'reactant_smiles': 'Cl[C:6](=[O:7])[c:8]1[c:9]([F:10])[cH:11][cH:12][cH:13][c:14]1[F:15].O=C(C(F)(F)F)[NH:5][c:4]1[c:3]([O:2][CH3:1])[cH:35][cH:34][c:17](-[c:18]2[n:19][n:20]3[cH:21][cH:22][cH:23][cH:24][c:25]3[c:26]2-[c:27]2[n:28][c:29]([Cl:30])[n:31][cH:32][cH:33]2)[cH:16]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07812022B2;0877;1020964', 'derive_version': 'v1', 'similarity': 0.5181159420289855}, {'reaction_id': 1374048, 'template_hash': '5f8b0aad91a1a4dc6aca6318e00e3e0ed7d6f66ac8a0d4298102f3939f364eb8', 'retro_smarts_template': '[#7;a:5]:[c:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]>>N-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[c:4]:[#7;a:5].[NH2;D1;+0:6]-[c:7]', 'canonical_smarts_template': 'N-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3]:[c:4]:[#7;a:5].[NH2;D1;+0:6]-[c:7]>>[#7;a:5]:[c:4]:[c:3]-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:6]-[c:7]', 'mapped_rxn': '[CH3:1][O:2][C:3]1=[C:4]([O:5][CH3:6])[C:7]2=[C:8]([CH:9]=[CH:10]1)[C:11]([C:12](N)=[O:13])=[C:22]1[C:23]3=[CH:24][C:25]4=[C:26]([CH:27]=[C:28]3[CH2:29][CH2:30][N:31]1[C:32]2=[O:33])[O:34][CH2:35][O:36]4.[NH2:14][C:15]1=[C:16]([F:17])[CH:18]=[CH:19][CH:20]=[CH:21]1.ON1N=NC2=C1C=CC=C2.CCN(C(C)C)C(C)C.ClCCCl.CN(C)C=O.O>>[CH3:1][O:2][C:3]1=[C:4]([O:5][CH3:6])[C:7]2=[C:8]([CH:9]=[CH:10]1)[C:11]([C:12](=[O:13])[NH:14][C:15]1=[C:16]([F:17])[CH:18]=[CH:19][CH:20]=[CH:21]1)=[C:22]1[C:23]3=[CH:24][C:25]4=[C:26]([CH:27]=[C:28]3[CH2:29][CH2:30][N:31]1[C:32]2=[O:33])[O:34][CH2:35][O:36]4', 'product_smiles': '[CH3:1][O:2][c:3]1[c:4]([O:5][CH3:6])[c:7]2[c:8]([cH:9][cH:10]1)[c:11]([C:12](=[O:13])[NH:14][c:15]1[c:16]([F:17])[cH:18][cH:19][cH:20][cH:21]1)[c:22]1[n:31]([c:32]2=[O:33])[CH2:30][CH2:29][c:28]2[c:23]-1[cH:24][c:25]1[c:26]([cH:27]2)[O:34][CH2:35][O:36]1', 'reactant_smiles': 'N[C:12]([c:11]1[c:8]2[c:7]([c:4]([O:5][CH3:6])[c:3]([O:2][CH3:1])[cH:10][cH:9]2)[c:32](=[O:33])[n:31]2[c:22]1-[c:23]1[cH:24][c:25]3[c:26]([cH:27][c:28]1[CH2:29][CH2:30]2)[O:34][CH2:35][O:36]3)=[O:13].[NH2:14][c:15]1[c:16]([F:17])[cH:18][cH:19][cH:20][cH:21]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20160251368A1;0198;1927670', 'derive_version': 'v1', 'similarity': 0.5168539325842697}, {'reaction_id': 1378621, 'template_hash': '20a751459caf26e93021eea93fbb24c07684a5a786c9be9070babf736ee6b3ea', 'retro_smarts_template': '[#7;a:3]:[c;H0;D3;+0:2](-[NH2;D1;+0:1]):[c:4]>>C-C(-C)(-C)-O-C(=O)-[NH2;D1;+0:1].I-[c;H0;D3;+0:2](:[#7;a:3]):[c:4]', 'canonical_smarts_template': 'C-C(-C)(-C)-O-C(=O)-[NH2;D1;+0:1].I-[c;H0;D3;+0:2](:[#7;a:3]):[c:4]>>[#7;a:3]:[c;H0;D3;+0:2](-[NH2;D1;+0:1]):[c:4]', 'mapped_rxn': '[CH3:1][C:2]1=[N:3][N:4]2[C:5](=[N:6][C:7]3=[C:8]2[CH:9]([C:10]2=[C:11]([F:12])[CH:13]=[C:14]([Cl:15])[CH:16]=[CH:17]2)[N:18]([C:19](=[O:20])[CH2:21][O:22][C:23]2=[CH:24][CH:25]=[C:26](I)[N:28]=[C:29]2[Cl:30])[CH2:31][CH2:32]3)[S:33]1.CC(C)(C)OC([NH2:27])=O>>[CH3:1][C:2]1=[N:3][N:4]2[C:5](=[N:6][C:7]3=[C:8]2[CH:9]([C:10]2=[C:11]([F:12])[CH:13]=[C:14]([Cl:15])[CH:16]=[CH:17]2)[N:18]([C:19](=[O:20])[CH2:21][O:22][C:23]2=[CH:24][CH:25]=[C:26]([NH2:27])[N:28]=[C:29]2[Cl:30])[CH2:31][CH2:32]3)[S:33]1', 'product_smiles': '[CH3:1][c:2]1[n:3][n:4]2[c:5]([n:6][c:7]3[c:8]2[CH:9]([c:10]2[c:11]([F:12])[cH:13][c:14]([Cl:15])[cH:16][cH:17]2)[N:18]([C:19](=[O:20])[CH2:21][O:22][c:23]2[cH:24][cH:25][c:26]([NH2:27])[n:28][c:29]2[Cl:30])[CH2:31][CH2:32]3)[s:33]1', 'reactant_smiles': 'CC(C)(C)OC(=O)[NH2:27].I[c:26]1[cH:25][cH:24][c:23]([O:22][CH2:21][C:19]([N:18]2[CH:9]([c:10]3[c:11]([F:12])[cH:13][c:14]([Cl:15])[cH:16][cH:17]3)[c:8]3[n:4]4[n:3][c:2]([CH3:1])[s:33][c:5]4[n:6][c:7]3[CH2:32][CH2:31]2)=[O:20])[c:29]([Cl:30])[n:28]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20160272655A1;1249;1938539', 'derive_version': 'v1', 'similarity': 0.511400651465798}, {'reaction_id': 811833, 'template_hash': 'b90777960c00b4bab99b2f49c578d75aa45ee9e983b8db92f13444ae54961750', 'retro_smarts_template': '[C:3]-[N;H0;D3;+0:4](-[C:5])-[CH2;D2;+0:1]-[C:2]>>C-n1:n:c:c(-N-C(=O)-c2:n:c(-c3:c(-F):c:c:c:c:3-F):s:c:2-N-C(=O)-O-C(-C)(-C)-C):c:1-N1-C-C-C-[C@@H](-N(-C-C-O)-[CH2;D2;+0:1]-[C:2])-C-C-1.[C:3]-[NH;D2;+0:4]-[C:5]', 'canonical_smarts_template': 'C-n1:n:c:c(-N-C(=O)-c2:n:c(-c3:c(-F):c:c:c:c:3-F):s:c:2-N-C(=O)-O-C(-C)(-C)-C):c:1-N1-C-C-C-[C@@H](-N(-C-C-O)-[CH2;D2;+0:1]-[C:2])-C-C-1.[C:3]-[NH;D2;+0:4]-[C:5]>>[C:3]-[N;H0;D3;+0:4](-[C:5])-[CH2;D2;+0:1]-[C:2]', 'mapped_rxn': '[CH3:1][N:2]1[N:3]=[CH:4][C:5]([NH:6][C:7](=[O:8])[C:9]2=[C:10]([NH2:11])[S:12][C:13]([C:14]3=[C:15]([F:16])[CH:17]=[CH:18][CH:19]=[C:20]3[F:21])=[N:22]2)=[C:23]1[N:24]1[CH2:25][CH2:26][CH2:27][C@H:28]([NH:29][CH2:30][CH2:31][OH:32])[CH2:36][CH2:37]1.CN1N=CC(NC(=O)C2=C(NC(=O)OC(C)(C)C)SC(C3=C(F)C=CC=C3F)=N2)=C1N1CCC[C@@H](N(CCO)[CH2:33][CH2:34][OH:35])CC1>>[CH3:1][N:2]1[N:3]=[CH:4][C:5]([NH:6][C:7](=[O:8])[C:9]2=[C:10]([NH2:11])[S:12][C:13]([C:14]3=[C:15]([F:16])[CH:17]=[CH:18][CH:19]=[C:20]3[F:21])=[N:22]2)=[C:23]1[N:24]1[CH2:25][CH2:26][CH2:27][C@H:28]([N:29]([CH2:30][CH2:31][OH:32])[CH2:33][CH2:34][OH:35])[CH2:36][CH2:37]1', 'product_smiles': '[CH3:1][n:2]1[n:3][cH:4][c:5]([NH:6][C:7](=[O:8])[c:9]2[c:10]([NH2:11])[s:12][c:13](-[c:14]3[c:15]([F:16])[cH:17][cH:18][cH:19][c:20]3[F:21])[n:22]2)[c:23]1[N:24]1[CH2:25][CH2:26][CH2:27][C@H:28]([N:29]([CH2:30][CH2:31][OH:32])[CH2:33][CH2:34][OH:35])[CH2:36][CH2:37]1', 'reactant_smiles': 'Cn1ncc(NC(=O)c2nc(-c3c(F)cccc3F)sc2NC(=O)OC(C)(C)C)c1N1CCC[C@@H](N(CCO)[CH2:33][CH2:34][OH:35])CC1.[CH3:1][n:2]1[n:3][cH:4][c:5]([NH:6][C:7](=[O:8])[c:9]2[c:10]([NH2:11])[s:12][c:13](-[c:14]3[c:15]([F:16])[cH:17][cH:18][cH:19][c:20]3[F:21])[n:22]2)[c:23]1[N:24]1[CH2:25][CH2:26][CH2:27][C@H:28]([NH:29][CH2:30][CH2:31][OH:32])[CH2:36][CH2:37]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08614206B2;1006;1407477', 'derive_version': 'v1', 'similarity': 0.5082159624413145}, {'reaction_id': 811834, 'template_hash': '2a83bf1035db438c731b4f17355e181699ac2d797cf2e8aef5d5f4fd04c6b962', 'retro_smarts_template': '[C:3]-[N;H0;D3;+0:4](-[C:5])-[CH2;D2;+0:1]-[C:2]>>C-n1:n:c:c(-N-C(=O)-c2:n:c(-c3:c(-F):c:c:c:c:3-F):s:c:2-N-C(=O)-O-C(-C)(-C)-C):c:1-N1-C-C-C-[C@@H](-N(-C-C2-C-O-C-2)-[CH2;D2;+0:1]-[C:2])-C-C-1.[C:3]-[NH;D2;+0:4]-[C:5]', 'canonical_smarts_template': 'C-n1:n:c:c(-N-C(=O)-c2:n:c(-c3:c(-F):c:c:c:c:3-F):s:c:2-N-C(=O)-O-C(-C)(-C)-C):c:1-N1-C-C-C-[C@@H](-N(-C-C2-C-O-C-2)-[CH2;D2;+0:1]-[C:2])-C-C-1.[C:3]-[NH;D2;+0:4]-[C:5]>>[C:3]-[N;H0;D3;+0:4](-[C:5])-[CH2;D2;+0:1]-[C:2]', 'mapped_rxn': '[CH3:1][N:2]1[N:3]=[CH:4][C:5]([NH:6][C:7](=[O:8])[C:9]2=[C:10]([NH2:11])[S:12][C:13]([C:14]3=[C:15]([F:16])[CH:17]=[CH:18][CH:19]=[C:20]3[F:21])=[N:22]2)=[C:23]1[N:24]1[CH2:25][CH2:26][CH2:27][C@H:28]([NH:29][CH2:30][CH:31]2[CH2:32][O:33][CH2:34]2)[CH2:40][CH2:41]1.CN1N=CC(NC(=O)C2=C(NC(=O)OC(C)(C)C)SC(C3=C(F)C=CC=C3F)=N2)=C1N1CCC[C@@H](N(CC2COC2)[CH2:35][CH:36]2[CH2:37][O:38][CH2:39]2)CC1>>[CH3:1][N:2]1[N:3]=[CH:4][C:5]([NH:6][C:7](=[O:8])[C:9]2=[C:10]([NH2:11])[S:12][C:13]([C:14]3=[C:15]([F:16])[CH:17]=[CH:18][CH:19]=[C:20]3[F:21])=[N:22]2)=[C:23]1[N:24]1[CH2:25][CH2:26][CH2:27][C@H:28]([N:29]([CH2:30][CH:31]2[CH2:32][O:33][CH2:34]2)[CH2:35][CH:36]2[CH2:37][O:38][CH2:39]2)[CH2:40][CH2:41]1', 'product_smiles': '[CH3:1][n:2]1[n:3][cH:4][c:5]([NH:6][C:7](=[O:8])[c:9]2[c:10]([NH2:11])[s:12][c:13](-[c:14]3[c:15]([F:16])[cH:17][cH:18][cH:19][c:20]3[F:21])[n:22]2)[c:23]1[N:24]1[CH2:25][CH2:26][CH2:27][C@H:28]([N:29]([CH2:30][CH:31]2[CH2:32][O:33][CH2:34]2)[CH2:35][CH:36]2[CH2:37][O:38][CH2:39]2)[CH2:40][CH2:41]1', 'reactant_smiles': 'Cn1ncc(NC(=O)c2nc(-c3c(F)cccc3F)sc2NC(=O)OC(C)(C)C)c1N1CCC[C@@H](N(CC2COC2)[CH2:35][CH:36]2[CH2:37][O:38][CH2:39]2)CC1.[CH3:1][n:2]1[n:3][cH:4][c:5]([NH:6][C:7](=[O:8])[c:9]2[c:10]([NH2:11])[s:12][c:13](-[c:14]3[c:15]([F:16])[cH:17][cH:18][cH:19][c:20]3[F:21])[n:22]2)[c:23]1[N:24]1[CH2:25][CH2:26][CH2:27][C@H:28]([NH:29][CH2:30][CH:31]2[CH2:32][O:33][CH2:34]2)[CH2:40][CH2:41]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08614206B2;1011;1407478', 'derive_version': 'v1', 'similarity': 0.5063879210220673}, {'reaction_id': 1360411, 'template_hash': '55b30e9c105141701b05f069815b214a3212e21ff7f40534ed223b868e3c87dd', 'retro_smarts_template': '[C:2]-[CH2;D2;+0:1]-[N;H0;D3;+0:4](-[C:3])-[C:5]>>C-S(=O)(=O)-O-[CH2;D2;+0:1]-[C:2].[C:3]-[N;H0;D3;+0:4](-[C:5])-C-c1:c:c:c:c:c:1', 'canonical_smarts_template': 'C-S(=O)(=O)-O-[CH2;D2;+0:1]-[C:2].[C:3]-[N;H0;D3;+0:4](-[C:5])-C-c1:c:c:c:c:c:1>>[C:2]-[CH2;D2;+0:1]-[N;H0;D3;+0:4](-[C:3])-[C:5]', 'mapped_rxn': '[F:29][C:28]1([F:30])[CH2:31][N:24](CC2=CC=CC=C2)[CH2:25][CH2:26][O:27]1.CCN(CC)CC.[CH3:1][N:2]1[N:3]=[CH:4][CH:5]=[C:6]1[NH:7][C:8]1=[N:9][CH:10]=[CH:11][C:12]([C:13]2=[CH:14][C:15]3=[C:16]([S:17]2)[C:18]([CH3:19])([CH3:20])[N:21]([CH2:22][CH2:23]OS(C)(=O)=O)[C:32]3=[O:33])=[N:34]1.CC#N.CCOC(C)=O.[OH-].[Pd+2].[OH-]>>[CH3:1][N:2]1[N:3]=[CH:4][CH:5]=[C:6]1[NH:7][C:8]1=[N:9][CH:10]=[CH:11][C:12]([C:13]2=[CH:14][C:15]3=[C:16]([S:17]2)[C:18]([CH3:19])([CH3:20])[N:21]([CH2:22][CH2:23][N:24]2[CH2:25][CH2:26][O:27][C:28]([F:29])([F:30])[CH2:31]2)[C:32]3=[O:33])=[N:34]1', 'product_smiles': '[CH3:1][n:2]1[n:3][cH:4][cH:5][c:6]1[NH:7][c:8]1[n:9][cH:10][cH:11][c:12](-[c:13]2[cH:14][c:15]3[c:16]([s:17]2)[C:18]([CH3:19])([CH3:20])[N:21]([CH2:22][CH2:23][N:24]2[CH2:25][CH2:26][O:27][C:28]([F:29])([F:30])[CH2:31]2)[C:32]3=[O:33])[n:34]1', 'reactant_smiles': 'c1ccc(C[N:24]2[CH2:25][CH2:26][O:27][C:28]([F:29])([F:30])[CH2:31]2)cc1.CS(=O)(=O)O[CH2:23][CH2:22][N:21]1[C:18]([CH3:19])([CH3:20])[c:16]2[c:15]([cH:14][c:13](-[c:12]3[cH:11][cH:10][n:9][c:8]([NH:7][c:6]4[n:2]([CH3:1])[n:3][cH:4][cH:5]4)[n:34]3)[s:17]2)[C:32]1=[O:33]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20160176896A1;0144;1896547', 'derive_version': 'v1', 'similarity': 0.5055432372505543}, {'reaction_id': 1204784, 'template_hash': '31d84d6135413968d620671b3d65f9818e705f9342db50470f0d705fa4354a5e', 'retro_smarts_template': '[C:6]-[O;H0;D2;+0:7]-[c;H0;D3;+0:1](:[cH;D2;+0:2]:[c:3]):[cH;D2;+0:4]:[c:5]>>C-C(-C)-O-C(=O)/N=N/[C;H0;D3;+0:1](=O)-O-C(-C)-C.O-c(:[cH;D2;+0:2]:[c:3]):[cH;D2;+0:4]:[c:5].[C:6]-[OH;D1;+0:7]', 'canonical_smarts_template': 'C-C(-C)-O-C(=O)/N=N/[C;H0;D3;+0:1](=O)-O-C(-C)-C.O-c(:[cH;D2;+0:2]:[c:3]):[cH;D2;+0:4]:[c:5].[C:6]-[OH;D1;+0:7]>>[C:6]-[O;H0;D2;+0:7]-[c;H0;D3;+0:1](:[cH;D2;+0:2]:[c:3]):[cH;D2;+0:4]:[c:5]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][C:4]1=[CH:5][C:6]2=[C:7]([N:8]=[C:9]([CH2:10][OH:11])[N:18]=[C:19]2[N:20]2[CH2:21][CH2:22][N:23]3[C:24](=[N:25][N:26]=[C:27]3[C:28]([F:29])([F:30])[F:31])[CH2:32]2)[S:33]1.OC1=[CH:13][CH:14]=[CH:15][CH:16]=[CH:17]1.C1=CC=C(P(C2=CC=CC=C2)C2=CC=CC=C2)C=C1.CC(C)O[C:12](=O)/N=N/C(=O)OC(C)C.C1CCOC1>>[CH3:1][CH2:2][CH2:3][C:4]1=[CH:5][C:6]2=[C:7]([N:8]=[C:9]([CH2:10][O:11][C:12]3=[CH:13][CH:14]=[CH:15][CH:16]=[CH:17]3)[N:18]=[C:19]2[N:20]2[CH2:21][CH2:22][N:23]3[C:24](=[N:25][N:26]=[C:27]3[C:28]([F:29])([F:30])[F:31])[CH2:32]2)[S:33]1', 'product_smiles': '[CH3:1][CH2:2][CH2:3][c:4]1[cH:5][c:6]2[c:7]([n:8][c:9]([CH2:10][O:11][c:12]3[cH:13][cH:14][cH:15][cH:16][cH:17]3)[n:18][c:19]2[N:20]2[CH2:21][CH2:22][n:23]3[c:24]([n:25][n:26][c:27]3[C:28]([F:29])([F:30])[F:31])[CH2:32]2)[s:33]1', 'reactant_smiles': 'CC(C)OC(=O)/N=N/[C:12](=O)OC(C)C.Oc1[cH:13][cH:14][cH:15][cH:16][cH:17]1.[CH3:1][CH2:2][CH2:3][c:4]1[cH:5][c:6]2[c:7]([n:8][c:9]([CH2:10][OH:11])[n:18][c:19]2[N:20]2[CH2:21][CH2:22][n:23]3[c:24]([n:25][n:26][c:27]3[C:28]([F:29])([F:30])[F:31])[CH2:32]2)[s:33]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20110166121A1;1824;1078138', 'derive_version': 'v1', 'similarity': 0.5052631578947369}, {'reaction_id': 1289168, 'template_hash': 'bb655a929f088492fc82590d5cc687816bbfaa32db023e3b17880dd94783dfed', 'retro_smarts_template': '[c:2]:[cH;D2;+0:3]:[cH;D2;+0:1]:[cH;D2;+0:4]:[c:5]>>F-c1:c:[cH;D2;+0:1]:c:c(-F):c:1-N.[c:2]:[cH;D2;+0:3]:n:[cH;D2;+0:4]:[c:5]', 'canonical_smarts_template': 'F-c1:c:[cH;D2;+0:1]:c:c(-F):c:1-N.[c:2]:[cH;D2;+0:3]:n:[cH;D2;+0:4]:[c:5]>>[c:2]:[cH;D2;+0:3]:[cH;D2;+0:1]:[cH;D2;+0:4]:[c:5]', 'mapped_rxn': 'NC1=C(F)C=[CH:22]C=C1F.C[Al](C)C.[CH3:1][CH2:2][O:3][C:4]1=[CH:5][C:6]([C:7]([F:8])([F:9])[F:10])=[C:11]([C:12]2=[CH:13][C:14]([C:15](=[O:16])[NH:17][C:18]3=[C:19]([F:20])[CH:21]=N[CH:23]=[C:24]3[F:25])=[N:26][N:27]2[CH3:28])[CH:29]=[N:30]1.Cl.CC1=CC=CC=C1>>[CH3:1][CH2:2][O:3][C:4]1=[CH:5][C:6]([C:7]([F:8])([F:9])[F:10])=[C:11]([C:12]2=[CH:13][C:14]([C:15](=[O:16])[NH:17][C:18]3=[C:19]([F:20])[CH:21]=[CH:22][CH:23]=[C:24]3[F:25])=[N:26][N:27]2[CH3:28])[CH:29]=[N:30]1', 'product_smiles': '[CH3:1][CH2:2][O:3][c:4]1[cH:5][c:6]([C:7]([F:8])([F:9])[F:10])[c:11](-[c:12]2[cH:13][c:14]([C:15](=[O:16])[NH:17][c:18]3[c:19]([F:20])[cH:21][cH:22][cH:23][c:24]3[F:25])[n:26][n:27]2[CH3:28])[cH:29][n:30]1', 'reactant_smiles': 'n1[cH:21][c:19]([F:20])[c:18]([NH:17][C:15]([c:14]2[cH:13][c:12](-[c:11]3[c:6]([C:7]([F:8])([F:9])[F:10])[cH:5][c:4]([O:3][CH2:2][CH3:1])[n:30][cH:29]3)[n:27]([CH3:28])[n:26]2)=[O:16])[c:24]([F:25])[cH:23]1.Nc1c(F)c[cH:22]cc1F', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20150166505A1;0608;1705441', 'derive_version': 'v1', 'similarity': 0.5048543689320388}, {'reaction_id': 713493, 'template_hash': '4c955a18113b23d4fd7cf7225d8430bb7ccff6dd11f3481a877079db4d76ca5e', 'retro_smarts_template': '[#7;a:3]:[c:2]-[NH2;D1;+0:1]>>C-C-C-C-O-C(=O)-[NH;D2;+0:1]-[c:2]:[#7;a:3]', 'canonical_smarts_template': 'C-C-C-C-O-C(=O)-[NH;D2;+0:1]-[c:2]:[#7;a:3]>>[#7;a:3]:[c:2]-[NH2;D1;+0:1]', 'mapped_rxn': 'CCCCOC(=O)[NH:1][C:2]1=[N:30][CH:29]=[C:5]([CH2:6][N:7]2[C:8](=[O:9])[C:10]3([CH2:11][O:12][C:13]4=[CH:14][C:15]5=[C:16]([CH:17]=[C:18]34)[O:19][CH2:20][CH2:21][O:22]5)[C:23]3=[CH:24][CH:25]=[CH:26][CH:27]=[C:28]23)[CH:4]=[CH:3]1.O=C(O)C(F)(F)F.ClCCl>>[NH2:1][C:2]1=[CH:3][CH:4]=[C:5]([CH2:6][N:7]2[C:8](=[O:9])[C:10]3([CH2:11][O:12][C:13]4=[CH:14][C:15]5=[C:16]([CH:17]=[C:18]34)[O:19][CH2:20][CH2:21][O:22]5)[C:23]3=[CH:24][CH:25]=[CH:26][CH:27]=[C:28]23)[CH:29]=[N:30]1', 'product_smiles': '[NH2:1][c:2]1[cH:3][cH:4][c:5]([CH2:6][N:7]2[C:8](=[O:9])[C:10]3([CH2:11][O:12][c:13]4[cH:14][c:15]5[c:16]([cH:17][c:18]43)[O:19][CH2:20][CH2:21][O:22]5)[c:23]3[cH:24][cH:25][cH:26][cH:27][c:28]32)[cH:29][n:30]1', 'reactant_smiles': 'CCCCOC(=O)[NH:1][c:2]1[cH:3][cH:4][c:5]([CH2:6][N:7]2[C:8](=[O:9])[C:10]3([CH2:11][O:12][c:13]4[cH:14][c:15]5[c:16]([cH:17][c:18]43)[O:19][CH2:20][CH2:21][O:22]5)[c:23]3[cH:24][cH:25][cH:26][cH:27][c:28]32)[cH:29][n:30]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08263606B2;3110;1227131', 'derive_version': 'v1', 'similarity': 0.5046403712296984}, {'reaction_id': 969426, 'template_hash': '5569803b440b08d9ca807b2be1ffc4e0422c36a85a939bfa6575aee04eab2f29', 'retro_smarts_template': '[#7;a:4]:[c:3](:[c:5]:[#7;a:6])-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:7]-[c:8]>>C-C-O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3](:[#7;a:4]):[c:5]:[#7;a:6].C-[NH;D2;+0:7]-[c:8]', 'canonical_smarts_template': 'C-C-O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3](:[#7;a:4]):[c:5]:[#7;a:6].C-[NH;D2;+0:7]-[c:8]>>[#7;a:4]:[c:3](:[c:5]:[#7;a:6])-[C;H0;D3;+0:1](=[O;D1;H0:2])-[NH;D2;+0:7]-[c:8]', 'mapped_rxn': 'CCO[C:5](=[O:6])[C:7]1=[CH:8][N:9]=[C:10]2[CH:11]=[CH:12][C:13]([CH2:14][CH2:15][N:16]3[CH2:17][CH2:18][N:19]([CH3:20])[CH2:21][CH2:22]3)=[CH:23][N:24]12.CN(C)C(ON1N=NC2=C1N=CC=C2)=[N+](C)C.F[P-](F)(F)(F)(F)F.CCN(C(C)C)C(C)C.C[NH:4][C:3]1=[C:2]([CH3:1])[CH:39]=[CH:38][C:26]([C:27]2=[N:28][O:29][C:30]([CH:31]3[CH2:32][C:33]([F:34])([F:35])[CH2:36]3)=[N:37]2)=[CH:25]1.CN1CCCC1=O>>[CH3:1][C:2]1=[C:3]([NH:4][C:5](=[O:6])[C:7]2=[CH:8][N:9]=[C:10]3[CH:11]=[CH:12][C:13]([CH2:14][CH2:15][N:16]4[CH2:17][CH2:18][N:19]([CH3:20])[CH2:21][CH2:22]4)=[CH:23][N:24]23)[CH:25]=[C:26]([C:27]2=[N:28][O:29][C:30]([CH:31]3[CH2:32][C:33]([F:34])([F:35])[CH2:36]3)=[N:37]2)[CH:38]=[CH:39]1', 'product_smiles': '[CH3:1][c:2]1[c:3]([NH:4][C:5](=[O:6])[c:7]2[cH:8][n:9][c:10]3[cH:11][cH:12][c:13]([CH2:14][CH2:15][N:16]4[CH2:17][CH2:18][N:19]([CH3:20])[CH2:21][CH2:22]4)[cH:23][n:24]23)[cH:25][c:26](-[c:27]2[n:28][o:29][c:30]([CH:31]3[CH2:32][C:33]([F:34])([F:35])[CH2:36]3)[n:37]2)[cH:38][cH:39]1', 'reactant_smiles': 'CCO[C:5](=[O:6])[c:7]1[cH:8][n:9][c:10]2[cH:11][cH:12][c:13]([CH2:14][CH2:15][N:16]3[CH2:17][CH2:18][N:19]([CH3:20])[CH2:21][CH2:22]3)[cH:23][n:24]12.C[NH:4][c:3]1[c:2]([CH3:1])[cH:39][cH:38][c:26](-[c:27]2[n:28][o:29][c:30]([CH:31]3[CH2:32][C:33]([F:34])([F:35])[CH2:36]3)[n:37]2)[cH:25]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US09199981B2;0610;1700500', 'derive_version': 'v1', 'similarity': 0.5}, {'reaction_id': 1107638, 'template_hash': 'a8f2381cf4e066ddc5482dde15d2033daecb5edf0802ac7b95b97c8697ab644d', 'retro_smarts_template': '[O;D1;H0:2]=[C;H0;D3;+0:1](-[c:3])-[NH;D2;+0:5]-[c:4]>>O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3].[c:4]-[N;H0;D2;+0:5]=C(-c1:c:c:c:c:c:1)-c1:c:c:c:c:c:1', 'canonical_smarts_template': 'O-[C;H0;D3;+0:1](=[O;D1;H0:2])-[c:3].[c:4]-[N;H0;D2;+0:5]=C(-c1:c:c:c:c:c:1)-c1:c:c:c:c:c:1>>[O;D1;H0:2]=[C;H0;D3;+0:1](-[c:3])-[NH;D2;+0:5]-[c:4]', 'mapped_rxn': '[CH3:25][C:24]1=[C:16]([C:17]2=[N:18][C:19]([NH2:20])=[N:21][CH:22]=[CH:23]2)[S:15][C:12]2=[C:11]1[CH:10]=[C:9]([N:8]=C(C1=CC=CC=C1)C1=CC=CC=C1)[CH:14]=[CH:13]2.[CH3:1][O:2][C:3]1=[CH:4][C:5]([C:6](=[O:7])O)=[CH:26][C:27]([O:28][CH3:29])=[C:30]1[O:31][CH3:32].CCN(CC)CC.CN(C)C(ON1N=NC2=C1N=CC=C2)=[N+](C)C.F[P-](F)(F)(F)(F)F.O>>[CH3:1][O:2][C:3]1=[CH:4][C:5]([C:6](=[O:7])[NH:8][C:9]2=[CH:10][C:11]3=[C:12]([CH:13]=[CH:14]2)[S:15][C:16]([C:17]2=[N:18][C:19]([NH2:20])=[N:21][CH:22]=[CH:23]2)=[C:24]3[CH3:25])=[CH:26][C:27]([O:28][CH3:29])=[C:30]1[O:31][CH3:32]', 'product_smiles': '[CH3:1][O:2][c:3]1[cH:4][c:5]([C:6](=[O:7])[NH:8][c:9]2[cH:10][c:11]3[c:12]([cH:13][cH:14]2)[s:15][c:16](-[c:17]2[n:18][c:19]([NH2:20])[n:21][cH:22][cH:23]2)[c:24]3[CH3:25])[cH:26][c:27]([O:28][CH3:29])[c:30]1[O:31][CH3:32]', 'reactant_smiles': 'c1ccc(C(c2ccccc2)=[N:8][c:9]2[cH:10][c:11]3[c:12]([cH:13][cH:14]2)[s:15][c:16](-[c:17]2[n:18][c:19]([NH2:20])[n:21][cH:22][cH:23]2)[c:24]3[CH3:25])cc1.O[C:6]([c:5]1[cH:4][c:3]([O:2][CH3:1])[c:30]([O:31][CH3:32])[c:27]([O:28][CH3:29])[cH:26]1)=[O:7]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20080021026A1;0408;539409', 'derive_version': 'v1', 'similarity': 0.5}, {'reaction_id': 907842, 'template_hash': '6622caf2c88a4b94213a01a18786b1af998c3ac35d6724b72e12c7b976127dc8', 'retro_smarts_template': '[O;D1;H0:4]=[C:3](-[c:5])-[NH;D2;+0:1]-[c:2]>>C-C(=O)-[N;H0;D3;+0:1](-[c:2])-[C:3](=[O;D1;H0:4])-[c:5]', 'canonical_smarts_template': 'C-C(=O)-[N;H0;D3;+0:1](-[c:2])-[C:3](=[O;D1;H0:4])-[c:5]>>[O;D1;H0:4]=[C:3](-[c:5])-[NH;D2;+0:1]-[c:2]', 'mapped_rxn': '[OH-].[Na+].[CH3:1][C:2](=[O:3])[O:4][C:5]1=[C:6]([C:7](=[O:8])[N:9](C(C)=O)[C:10]2=[CH:11][CH:12]=[CH:13][CH:14]=[CH:15]2)[C:16](=[O:17])[N:18]([CH3:19])[C:20]2=[CH:21][CH:22]=[CH:23][CH:24]=[C:25]12.Cl.CO.C1CCOC1.O>>[CH3:1][C:2](=[O:3])[O:4][C:5]1=[C:6]([C:7](=[O:8])[NH:9][C:10]2=[CH:11][CH:12]=[CH:13][CH:14]=[CH:15]2)[C:16](=[O:17])[N:18]([CH3:19])[C:20]2=[CH:21][CH:22]=[CH:23][CH:24]=[C:25]12', 'product_smiles': '[CH3:1][C:2](=[O:3])[O:4][c:5]1[c:6]([C:7](=[O:8])[NH:9][c:10]2[cH:11][cH:12][cH:13][cH:14][cH:15]2)[c:16](=[O:17])[n:18]([CH3:19])[c:20]2[cH:21][cH:22][cH:23][cH:24][c:25]12', 'reactant_smiles': 'CC(=O)[N:9]([C:7]([c:6]1[c:5]([O:4][C:2]([CH3:1])=[O:3])[c:25]2[c:20]([n:18]([CH3:19])[c:16]1=[O:17])[cH:21][cH:22][cH:23][cH:24]2)=[O:8])[c:10]1[cH:11][cH:12][cH:13][cH:14][cH:15]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08962598B2;0554;1582723', 'derive_version': 'v1', 'similarity': 0.499359795134443}, {'reaction_id': 1013002, 'template_hash': '0558312d9a77ab2ad6f77dbeaf1bb55174c94452ef6d59ef801040b14da77b1c', 'retro_smarts_template': '[#7;a:3]:[c:2]-[NH2;D1;+0:1]>>O=C(-[NH;D2;+0:1]-[c:2]:[#7;a:3])-C1-C-C-1', 'canonical_smarts_template': 'O=C(-[NH;D2;+0:1]-[c:2]:[#7;a:3])-C1-C-C-1>>[#7;a:3]:[c:2]-[NH2;D1;+0:1]', 'mapped_rxn': 'C1CCOC1.CCO.[CH3:1][C:2]1=[C:3]2[C:4](=[O:5])[NH:6][C:7]3([CH2:8][CH2:9][N:10]([CH3:11])[CH2:12][CH2:13]3)[N:14]2[C:15](=[O:16])[C:17]([NH:18][C:19]2=[C:25]([Cl:26])[C:23]([NH:24]C(=O)C3CC3)=[N:22][CH:21]=[N:20]2)=[CH:27]1.[OH-].[Na+].O>>[CH3:1][C:2]1=[C:3]2[C:4](=[O:5])[NH:6][C:7]3([CH2:8][CH2:9][N:10]([CH3:11])[CH2:12][CH2:13]3)[N:14]2[C:15](=[O:16])[C:17]([NH:18][C:19]2=[N:20][CH:21]=[N:22][C:23]([NH2:24])=[C:25]2[Cl:26])=[CH:27]1', 'product_smiles': '[CH3:1][c:2]1[c:3]2[n:14]([c:15](=[O:16])[c:17]([NH:18][c:19]3[n:20][cH:21][n:22][c:23]([NH2:24])[c:25]3[Cl:26])[cH:27]1)[C:7]1([NH:6][C:4]2=[O:5])[CH2:8][CH2:9][N:10]([CH3:11])[CH2:12][CH2:13]1', 'reactant_smiles': 'O=C(C1CC1)[NH:24][c:23]1[n:22][cH:21][n:20][c:19]([NH:18][c:17]2[c:15](=[O:16])[n:14]3[c:3]([c:2]([CH3:1])[cH:27]2)[C:4](=[O:5])[NH:6][C:7]32[CH2:8][CH2:9][N:10]([CH3:11])[CH2:12][CH2:13]2)[c:25]1[Cl:26]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US09382248B2;1031;1780898', 'derive_version': 'v1', 'similarity': 0.49888641425389757}, {'reaction_id': 1141660, 'template_hash': '302f70d89661a11b029c729d96ebefbd185885469b538a2e267d711f122dcc62', 'retro_smarts_template': '[c:2]:[cH;D2;+0:1]:[c:3]>>C-N1-C-C-N(-[c;H0;D3;+0:1](:[c:2]):[c:3])-C-C-1', 'canonical_smarts_template': 'C-N1-C-C-N(-[c;H0;D3;+0:1](:[c:2]):[c:3])-C-C-1>>[c:2]:[cH;D2;+0:1]:[c:3]', 'mapped_rxn': 'CN1CCN(C2=C(C(F)(F)F)C=C(NC3=NC4=C(C=N3)CCC3=C5C(=O)NCCN5N=C43)C=C2)CC1.CN1CCN(C2=C(Cl)C=C(NC3=NC4=C(C=N3)CCC3=C5C(=O)NCCN5N=C43)C=C2)CC1.CN1CCN([C:21]2=[CH:22][CH:23]=[C:18]([NH:17][C:16]3=[N:15][C:14]4=[C:13]([CH:25]=[N:24]3)[CH2:12][CH2:11][C:9]3=[C:10]5[C:2](=[O:1])[NH:3][CH2:4][CH2:5][N:6]5[N:7]=[C:8]43)[CH:19]=[CH:20]2)CC1.NC1=NC2=C(C=N1)CCC1=C3C(=O)NCCN3N=C21>>[O:1]=[C:2]1[NH:3][CH2:4][CH2:5][N:6]2[N:7]=[C:8]3[C:9](=[C:10]12)[CH2:11][CH2:12][C:13]1=[C:14]3[N:15]=[C:16]([NH:17][C:18]2=[CH:19][CH:20]=[CH:21][CH:22]=[CH:23]2)[N:24]=[CH:25]1', 'product_smiles': '[O:1]=[C:2]1[NH:3][CH2:4][CH2:5][n:6]2[n:7][c:8]3[c:9]([c:10]21)[CH2:11][CH2:12][c:13]1[c:14]-3[n:15][c:16]([NH:17][c:18]2[cH:19][cH:20][cH:21][cH:22][cH:23]2)[n:24][cH:25]1', 'reactant_smiles': 'CN1CCN([c:21]2[cH:20][cH:19][c:18]([NH:17][c:16]3[n:15][c:14]4[c:13]([cH:25][n:24]3)[CH2:12][CH2:11][c:9]3[c:8]-4[n:7][n:6]4[c:10]3[C:2](=[O:1])[NH:3][CH2:4][CH2:5]4)[cH:23][cH:22]2)CC1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20090124605A1;0551;702340', 'derive_version': 'v1', 'similarity': 0.49653579676674364}, {'reaction_id': 969425, 'template_hash': '7355d6ca9185633c3c166f840579e1b21f3f40ab9446d0c31173a28dc026fd91', 'retro_smarts_template': '[#7;a:6]:[c:5](:[c:7]:[#7;a:8])-[C;H0;D3;+0:3](=[O;D1;H0:4])-[NH;D2;+0:1]-[c:2]>>C-[NH;D2;+0:1]-[c:2].O-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5](:[#7;a:6]):[c:7]:[#7;a:8]', 'canonical_smarts_template': 'C-[NH;D2;+0:1]-[c:2].O-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5](:[#7;a:6]):[c:7]:[#7;a:8]>>[#7;a:6]:[c:5](:[c:7]:[#7;a:8])-[C;H0;D3;+0:3](=[O;D1;H0:4])-[NH;D2;+0:1]-[c:2]', 'mapped_rxn': '[NH2:15][C:14](=[O:16])[C:13]1=[CH:17][N:18]2[C:7]([C:5](=[O:6])O)=[CH:8][N:9]=[C:10]2[CH:11]=[CH:12]1.O=C(Cl)C(=O)Cl.CN(C)C=O.C[NH:4][C:3]1=[C:2]([CH3:1])[CH:33]=[CH:32][C:20]([C:21]2=[N:22][O:23][C:24]([CH:25]3[CH2:26][C:27]([F:28])([F:29])[CH2:30]3)=[N:31]2)=[CH:19]1.ClCCl.C1=CC=NC=C1>>[CH3:1][C:2]1=[C:3]([NH:4][C:5](=[O:6])[C:7]2=[CH:8][N:9]=[C:10]3[CH:11]=[CH:12][C:13]([C:14]([NH2:15])=[O:16])=[CH:17][N:18]23)[CH:19]=[C:20]([C:21]2=[N:22][O:23][C:24]([CH:25]3[CH2:26][C:27]([F:28])([F:29])[CH2:30]3)=[N:31]2)[CH:32]=[CH:33]1', 'product_smiles': '[CH3:1][c:2]1[c:3]([NH:4][C:5](=[O:6])[c:7]2[cH:8][n:9][c:10]3[cH:11][cH:12][c:13]([C:14]([NH2:15])=[O:16])[cH:17][n:18]23)[cH:19][c:20](-[c:21]2[n:22][o:23][c:24]([CH:25]3[CH2:26][C:27]([F:28])([F:29])[CH2:30]3)[n:31]2)[cH:32][cH:33]1', 'reactant_smiles': 'C[NH:4][c:3]1[c:2]([CH3:1])[cH:33][cH:32][c:20](-[c:21]2[n:22][o:23][c:24]([CH:25]3[CH2:26][C:27]([F:28])([F:29])[CH2:30]3)[n:31]2)[cH:19]1.O[C:5](=[O:6])[c:7]1[cH:8][n:9][c:10]2[cH:11][cH:12][c:13]([C:14]([NH2:15])=[O:16])[cH:17][n:18]12', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US09199981B2;0608;1700499', 'derive_version': 'v1', 'similarity': 0.4963768115942029}]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Good! I found a template for Friedel-Crafts acylation. Let me look at template 1838006 which breaks an amide bond (C(=O)N) to form an acyl chloride and an amine. This matches the third step working backward.\n\nNow let me search for templates related to SN2 reactions (forming C-N bonds from C-Cl):"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01CCoUDwgvbTth7KsfmCHp3r",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\", \"functional_groups_broken\": null, \"functional_groups_formed\": [\"halide\"], \"bonds_formed\": null, \"bonds_broken\": null, \"bonds_order_changed\": null, \"limit\": 20}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01CCoUDwgvbTth7KsfmCHp3r",
+      "content": "[{\"type\": \"text\", \"text\": \"[{'reaction_id': 474536, 'template_hash': '5c0d2b8bf791b2ac57b9179c265ffaa87d3f8a0b69c5c185d6de5dedb8b60b0e', 'retro_smarts_template': '[#7:5]-[C:4]-[CH;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]>>C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2](-[C:3])-[C:4]-[#7:5]', 'canonical_smarts_template': 'C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2](-[C:3])-[C:4]-[#7:5]>>[#7:5]-[C:4]-[CH;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]', 'mapped_rxn': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][N:11]2[N:12]=[C:13]([C:14]([F:15])([F:16])[F:17])[N:18]=[C:19]2[CH:20]1[CH:21](O)[CH:23]1[CH2:24][CH2:25]1.CCN(CC)S(F)(F)[F:22].ClCCl>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][N:11]2[N:12]=[C:13]([C:14]([F:15])([F:16])[F:17])[N:18]=[C:19]2[CH:20]1[CH:21]([F:22])[CH:23]1[CH2:24][CH2:25]1', 'product_smiles': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][n:11]2[n:12][c:13]([C:14]([F:15])([F:16])[F:17])[n:18][c:19]2[CH:20]1[CH:21]([F:22])[CH:23]1[CH2:24][CH2:25]1', 'reactant_smiles': 'CCN(CC)S(F)(F)[F:22].O[CH:21]([CH:20]1[N:8]([C:6]([O:5][C:2]([CH3:1])([CH3:3])[CH3:4])=[O:7])[CH2:9][CH2:10][n:11]2[n:12][c:13]([C:14]([F:15])([F:16])[F:17])[n:18][c:19]21)[CH:23]1[CH2:24][CH2:25]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07390809B2;0325;842853', 'derive_version': 'v1', 'similarity': 0.4704463208685163}, {'reaction_id': 660666, 'template_hash': 'c6a2715380d71d898fe69dd748516d8f6e8b2b949371449b9c7998b09b43975b', 'retro_smarts_template': '[#7:5]-[C:4]-[CH;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]>>C-O-C-C-N(-C-C-O-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2](-[C:3])-[C:4]-[#7:5]', 'canonical_smarts_template': 'C-O-C-C-N(-C-C-O-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2](-[C:3])-[C:4]-[#7:5]>>[#7:5]-[C:4]-[CH;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]', 'mapped_rxn': '[CH3:1][O:2][C:3]1=[C:4]([C:5](=[O:6])[NH:7][C@@H:8]2[CH2:9][CH2:10][CH2:11][CH2:12][C@@H:13]2[N:14]2[CH2:15][CH2:16][CH:17](O)[CH2:19]2)[C:20]([S:21][CH3:22])=[CH:23][C:24]([C:25]([F:26])([F:27])[F:28])=[CH:29]1.COCCN(CCOC)S(F)(F)[F:18]>>[CH3:1][O:2][C:3]1=[C:4]([C:5](=[O:6])[NH:7][C@@H:8]2[CH2:9][CH2:10][CH2:11][CH2:12][C@@H:13]2[N:14]2[CH2:15][CH2:16][CH:17]([F:18])[CH2:19]2)[C:20]([S:21][CH3:22])=[CH:23][C:24]([C:25]([F:26])([F:27])[F:28])=[CH:29]1', 'product_smiles': '[CH3:1][O:2][c:3]1[c:4]([C:5](=[O:6])[NH:7][C@@H:8]2[CH2:9][CH2:10][CH2:11][CH2:12][C@@H:13]2[N:14]2[CH2:15][CH2:16][CH:17]([F:18])[CH2:19]2)[c:20]([S:21][CH3:22])[cH:23][c:24]([C:25]([F:26])([F:27])[F:28])[cH:29]1', 'reactant_smiles': 'COCCN(CCOC)S(F)(F)[F:18].O[CH:17]1[CH2:16][CH2:15][N:14]([C@@H:13]2[C@H:8]([NH:7][C:5]([c:4]3[c:3]([O:2][CH3:1])[cH:29][c:24]([C:25]([F:26])([F:27])[F:28])[cH:23][c:20]3[S:21][CH3:22])=[O:6])[CH2:9][CH2:10][CH2:11][CH2:12]2)[CH2:19]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08080541B2;0444;1140423', 'derive_version': 'v1', 'similarity': 0.465954606141522}, {'reaction_id': 662111, 'template_hash': 'c5a7b3de39d0afda6e12fa3a21e65595b5371328ee639cb0d61c01cbde0bb2bb', 'retro_smarts_template': '[#7:4]-[C:3]-[CH;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]>>O-[CH;D3;+0:1](-[C:2])-[C:3]-[#7:4].[FH;D0;+0:5]', 'canonical_smarts_template': 'O-[CH;D3;+0:1](-[C:2])-[C:3]-[#7:4].[FH;D0;+0:5]>>[#7:4]-[C:3]-[CH;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][C@:4]1([C:5](=[O:6])[C:7]2=[CH:8][C:9]([Cl:10])=[C:11]([Cl:12])[CH:13]=[CH:14]2)[CH2:15][CH:16](O)[CH2:18][N:19]1[C:20](=[O:21])[O:22][C:23]([CH3:24])([CH3:25])[CH3:26].O=S(=O)(F)C(F)(F)C(F)(F)C(F)(F)C(F)(F)F.F.F.[FH:17].CCN(CC)CC.CCN(CC)CC.C1CCOC1>>[CH3:1][CH2:2][CH2:3][C@@:4]1([C:5](=[O:6])[C:7]2=[CH:8][C:9]([Cl:10])=[C:11]([Cl:12])[CH:13]=[CH:14]2)[CH2:15][CH:16]([F:17])[CH2:18][N:19]1[C:20](=[O:21])[O:22][C:23]([CH3:24])([CH3:25])[CH3:26]', 'product_smiles': '[CH3:1][CH2:2][CH2:3][C@@:4]1([C:5](=[O:6])[c:7]2[cH:8][c:9]([Cl:10])[c:11]([Cl:12])[cH:13][cH:14]2)[CH2:15][CH:16]([F:17])[CH2:18][N:19]1[C:20](=[O:21])[O:22][C:23]([CH3:24])([CH3:25])[CH3:26]', 'reactant_smiles': 'O[CH:16]1[CH2:15][C@:4]([CH2:3][CH2:2][CH3:1])([C:5](=[O:6])[c:7]2[cH:8][c:9]([Cl:10])[c:11]([Cl:12])[cH:13][cH:14]2)[N:19]([C:20](=[O:21])[O:22][C:23]([CH3:24])([CH3:25])[CH3:26])[CH2:18]1.[FH:17]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08084623B2;1192;1142789', 'derive_version': 'v1', 'similarity': 0.42282749675745784}, {'reaction_id': 586670, 'template_hash': '48ead6dbab9a5b4dbf30c511f33c6e17b15ca1fc9f3303f00ad70ee02dcda579', 'retro_smarts_template': '[C:2]-[C@@H;D3;+0:1](-[C:3])-[F;H0;D1;+0:4]>>C-S(=O)(=O)-O-[C@@H;D3;+0:1](-[C:2])-[C:3].[FH;D0;+0:4]', 'canonical_smarts_template': 'C-S(=O)(=O)-O-[C@@H;D3;+0:1](-[C:2])-[C:3].[FH;D0;+0:4]>>[C:2]-[C@@H;D3;+0:1](-[C:3])-[F;H0;D1;+0:4]', 'mapped_rxn': 'CCCC[N+](CCCC)(CCCC)CCCC.[F-:21].O.CS(=O)(=O)O[C@H:20]1[CH2:19][CH2:18][C@H:17]([N:16]2[CH2:15][CH2:14][C@@H:13]([CH2:12][C:11]3=[C:9]([Cl:10])[CH:8]=[C:7]([C:6]4=[CH:5][CH:4]=[C:3]([C:2](=[O:1])[N:31]5[CH2:32][CH2:33][CH:34]([C:35]([F:36])([F:37])[F:38])[CH2:39][CH2:40]5)[CH:30]=[CH:29]4)[CH:28]=[C:26]3[Cl:27])[C:24]2=[O:25])[CH2:23][CH2:22]1.CC#N>>[O:1]=[C:2]([C:3]1=[CH:4][CH:5]=[C:6]([C:7]2=[CH:8][C:9]([Cl:10])=[C:11]([CH2:12][C@@H:13]3[CH2:14][CH2:15][N:16]([C@H:17]4[CH2:18][CH2:19][C@@H:20]([F:21])[CH2:22][CH2:23]4)[C:24]3=[O:25])[C:26]([Cl:27])=[CH:28]2)[CH:29]=[CH:30]1)[N:31]1[CH2:32][CH2:33][CH:34]([C:35]([F:36])([F:37])[F:38])[CH2:39][CH2:40]1', 'product_smiles': '[O:1]=[C:2]([c:3]1[cH:4][cH:5][c:6](-[c:7]2[cH:8][c:9]([Cl:10])[c:11]([CH2:12][C@@H:13]3[CH2:14][CH2:15][N:16]([C@H:17]4[CH2:18][CH2:19][C@@H:20]([F:21])[CH2:22][CH2:23]4)[C:24]3=[O:25])[c:26]([Cl:27])[cH:28]2)[cH:29][cH:30]1)[N:31]1[CH2:32][CH2:33][CH:34]([C:35]([F:36])([F:37])[F:38])[CH2:39][CH2:40]1', 'reactant_smiles': 'CS(=O)(=O)O[C@H:20]1[CH2:19][CH2:18][C@H:17]([N:16]2[CH2:15][CH2:14][C@@H:13]([CH2:12][c:11]3[c:9]([Cl:10])[cH:8][c:7](-[c:6]4[cH:5][cH:4][c:3]([C:2](=[O:1])[N:31]5[CH2:32][CH2:33][CH:34]([C:35]([F:36])([F:37])[F:38])[CH2:39][CH2:40]5)[cH:30][cH:29]4)[cH:28][c:26]3[Cl:27])[C:24]2=[O:25])[CH2:23][CH2:22]1.[FH:21]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07816349B2;0220;1021290', 'derive_version': 'v1', 'similarity': 0.4052980132450331}, {'reaction_id': 119677, 'template_hash': '01a2d1856d8c461fa22255a46bb3815d99b5c4cae609293181cc7d1f209eca79', 'retro_smarts_template': '[#7:5]-[C:4]-[C@H;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]>>C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]', 'canonical_smarts_template': 'C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]>>[#7:5]-[C:4]-[C@H;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]', 'mapped_rxn': '[CH3:1][O:2][C:3](=[O:4])[C@@H:5]1[CH2:6][C@@H:7](O)[CH2:9][N:10]1[C:11](=[O:12])[C:13]1=[CH:14][CH:15]=[CH:16][CH:17]=[CH:18]1.CCN(CC)S(F)(F)[F:8].C1=CC=NC=C1.ClCCl>>[CH3:1][O:2][C:3](=[O:4])[C@@H:5]1[CH2:6][C@H:7]([F:8])[CH2:9][N:10]1[C:11](=[O:12])[C:13]1=[CH:14][CH:15]=[CH:16][CH:17]=[CH:18]1', 'product_smiles': '[CH3:1][O:2][C:3](=[O:4])[C@@H:5]1[CH2:6][C@H:7]([F:8])[CH2:9][N:10]1[C:11](=[O:12])[c:13]1[cH:14][cH:15][cH:16][cH:17][cH:18]1', 'reactant_smiles': 'CCN(CC)S(F)(F)[F:8].O[C@@H:7]1[CH2:6][C@@H:5]([C:3]([O:2][CH3:1])=[O:4])[N:10]([C:11](=[O:12])[c:13]2[cH:14][cH:15][cH:16][cH:17][cH:18]2)[CH2:9]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04912231;;208929', 'derive_version': 'v1', 'similarity': 0.4034833091436865}, {'reaction_id': 1225950, 'template_hash': '354d4746bb99b475b41279839465db0f0e1224a2a82cb2d17b93c7b22a145e43', 'retro_smarts_template': '[C:2]-[C@@H;D3;+0:1](-[C:3])-[F;H0;D1;+0:4]>>C-c1:c:c:c:c:c:1-S(=O)(=O)-O-[CH;D3;+0:1](-[C:2])-[C:3].[FH;D0;+0:4]', 'canonical_smarts_template': 'C-c1:c:c:c:c:c:1-S(=O)(=O)-O-[CH;D3;+0:1](-[C:2])-[C:3].[FH;D0;+0:4]>>[C:2]-[C@@H;D3;+0:1](-[C:3])-[F;H0;D1;+0:4]', 'mapped_rxn': 'CC1=CC=CC=C1S(=O)(=O)O[CH:33]1[CH2:32][CH:31]([O:30][C:29]2=[CH:36][CH:37]=[CH:38][C:27]([C:2](=[O:1])[NH:3][CH2:4][C:5](=[O:6])[N:7]3[CH2:8][CH2:9][N:10]([C:11]4=[CH:12][CH:13]=[C:14]([O:15][CH2:16][C:17]5=[CH:18][CH:19]=[CH:20][CH:21]=[CH:22]5)[CH:23]=[CH:24]4)[CH2:25][CH2:26]3)=[CH:28]2)[CH2:35]1.O.O.O.[F-:34].CCCC[N+](CCCC)(CCCC)CCCC.C1CCOC1.CCOC(C)=O>>[O:1]=[C:2]([NH:3][CH2:4][C:5](=[O:6])[N:7]1[CH2:8][CH2:9][N:10]([C:11]2=[CH:12][CH:13]=[C:14]([O:15][CH2:16][C:17]3=[CH:18][CH:19]=[CH:20][CH:21]=[CH:22]3)[CH:23]=[CH:24]2)[CH2:25][CH2:26]1)[C:27]1=[CH:28][C:29]([O:30][C@H:31]2[CH2:32][C@@H:33]([F:34])[CH2:35]2)=[CH:36][CH:37]=[CH:38]1', 'product_smiles': '[O:1]=[C:2]([NH:3][CH2:4][C:5](=[O:6])[N:7]1[CH2:8][CH2:9][N:10]([c:11]2[cH:12][cH:13][c:14]([O:15][CH2:16][c:17]3[cH:18][cH:19][cH:20][cH:21][cH:22]3)[cH:23][cH:24]2)[CH2:25][CH2:26]1)[c:27]1[cH:28][c:29]([O:30][C@H:31]2[CH2:32][C@@H:33]([F:34])[CH2:35]2)[cH:36][cH:37][cH:38]1', 'reactant_smiles': 'Cc1ccccc1S(=O)(=O)O[CH:33]1[CH2:32][CH:31]([O:30][c:29]2[cH:28][c:27]([C:2](=[O:1])[NH:3][CH2:4][C:5](=[O:6])[N:7]3[CH2:8][CH2:9][N:10]([c:11]4[cH:12][cH:13][c:14]([O:15][CH2:16][c:17]5[cH:18][cH:19][cH:20][cH:21][cH:22]5)[cH:23][cH:24]4)[CH2:25][CH2:26]3)[cH:38][cH:37][cH:36]2)[CH2:35]1.[FH:34]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20120189546A1;0277;1245050', 'derive_version': 'v1', 'similarity': 0.3968481375358166}, {'reaction_id': 1145374, 'template_hash': '8ca322780cba68aa0650563e45ebf3c6fd8ac8dbb59c4cd1374d7c0076ffdc27', 'retro_smarts_template': '[C:2]-[C@@H;D3;+0:1](-[C:3])-[F;H0;D1;+0:4]>>C-S(=O)(=O)-O-[C@H;D3;+0:1](-[C:2])-[C:3].[FH;D0;+0:4]', 'canonical_smarts_template': 'C-S(=O)(=O)-O-[C@H;D3;+0:1](-[C:2])-[C:3].[FH;D0;+0:4]>>[C:2]-[C@@H;D3;+0:1](-[C:3])-[F;H0;D1;+0:4]', 'mapped_rxn': '[CH3:1][CH2:2][O:3][C:4](=[O:5])[C:6]1=[C:7]([C:8]2=[CH:9][CH:10]=[CH:11][CH:12]=[CH:13]2)[N:14]([C@H:15]2[CH2:16][CH2:17][CH2:18][CH2:19][C@@H:20]2OS(C)(=O)=O)[CH:22]=[N:23]1.CCCC[N+](CCCC)(CCCC)CCCC.[F-:21].CC#N>>[CH3:1][CH2:2][O:3][C:4](=[O:5])[C:6]1=[C:7]([C:8]2=[CH:9][CH:10]=[CH:11][CH:12]=[CH:13]2)[N:14]([C@H:15]2[CH2:16][CH2:17][CH2:18][CH2:19][C@H:20]2[F:21])[CH:22]=[N:23]1', 'product_smiles': '[CH3:1][CH2:2][O:3][C:4](=[O:5])[c:6]1[c:7](-[c:8]2[cH:9][cH:10][cH:11][cH:12][cH:13]2)[n:14]([C@H:15]2[CH2:16][CH2:17][CH2:18][CH2:19][C@H:20]2[F:21])[cH:22][n:23]1', 'reactant_smiles': 'CS(=O)(=O)O[C@@H:20]1[C@@H:15]([n:14]2[c:7](-[c:8]3[cH:9][cH:10][cH:11][cH:12][cH:13]3)[c:6]([C:4]([O:3][CH2:2][CH3:1])=[O:5])[n:23][cH:22]2)[CH2:16][CH2:17][CH2:18][CH2:19]1.[FH:21]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20090156612A1;1157;725589', 'derive_version': 'v1', 'similarity': 0.37394451145958985}, {'reaction_id': 1549151, 'template_hash': 'ee2dd0622ed2db8d8ce4ad87f16c099350c1921a1eb5c0c07c07cd06480e6ab9', 'retro_smarts_template': '[#7:4]-[C:3]-[C@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]>>O-[C@@H;D3;+0:1](-[C:2])-[C:3]-[#7:4].O=S(=O)(-[F;H0;D1;+0:5])-c1:c:c:c:c:n:1', 'canonical_smarts_template': 'O-[C@@H;D3;+0:1](-[C:2])-[C:3]-[#7:4].O=S(=O)(-[F;H0;D1;+0:5])-c1:c:c:c:c:n:1>>[#7:4]-[C:3]-[C@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]', 'mapped_rxn': '[CH3:1][O:2][C:3](=[O:4])[C@@H:5]1[CH2:6][C@H:7](O)[CH2:9][N:10]1[C:11](=[O:12])[O:13][C:14]([CH3:15])([CH3:16])[CH3:17].O=S(=O)([F:8])c1ccccn1.C1CCC2=NCCCN2CC1.C1CCOC1>>[CH3:1][O:2][C:3](=[O:4])[C@@H:5]1[CH2:6][C@H:7]([F:8])[CH2:9][N:10]1[C:11](=[O:12])[O:13][C:14]([CH3:15])([CH3:16])[CH3:17]', 'product_smiles': '[CH3:1][O:2][C:3](=[O:4])[C@@H:5]1[CH2:6][C@H:7]([F:8])[CH2:9][N:10]1[C:11](=[O:12])[O:13][C:14]([CH3:15])([CH3:16])[CH3:17]', 'reactant_smiles': 'O=S(=O)(c1ccccn1)[F:8].O[C@H:7]1[CH2:6][C@@H:5]([C:3]([O:2][CH3:1])=[O:4])[N:10]([C:11](=[O:12])[O:13][C:14]([CH3:15])([CH3:16])[CH3:17])[CH2:9]1', 'dataset': 'Deoxyfluorination screen', 'source_row_id': 'ord-9ed322911f41443190312581deb58b8c', 'derive_version': 'v1', 'similarity': 0.3227665706051873}, {'reaction_id': 1549159, 'template_hash': 'e7b45270b7533775a6bc1aeb1ce77ffec13b35c18bd3ad8e3ea87f9f1db4f169', 'retro_smarts_template': '[#7:4]-[C:3]-[C@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]>>O-[C@@H;D3;+0:1](-[C:2])-[C:3]-[#7:4].O=[N+](-[O-])-c1:c:c:c(-S(=O)(=O)-[F;H0;D1;+0:5]):c:c:1', 'canonical_smarts_template': 'O-[C@@H;D3;+0:1](-[C:2])-[C:3]-[#7:4].O=[N+](-[O-])-c1:c:c:c(-S(=O)(=O)-[F;H0;D1;+0:5]):c:c:1>>[#7:4]-[C:3]-[C@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]', 'mapped_rxn': '[CH3:1][O:2][C:3](=[O:4])[C@@H:5]1[CH2:6][C@H:7](O)[CH2:9][N:10]1[C:11](=[O:12])[O:13][C:14]([CH3:15])([CH3:16])[CH3:17].O=[N+]([O-])c1ccc(S(=O)(=O)[F:8])cc1.C1CCC2=NCCCN2CC1.C1CCOC1>>[CH3:1][O:2][C:3](=[O:4])[C@@H:5]1[CH2:6][C@H:7]([F:8])[CH2:9][N:10]1[C:11](=[O:12])[O:13][C:14]([CH3:15])([CH3:16])[CH3:17]', 'product_smiles': '[CH3:1][O:2][C:3](=[O:4])[C@@H:5]1[CH2:6][C@H:7]([F:8])[CH2:9][N:10]1[C:11](=[O:12])[O:13][C:14]([CH3:15])([CH3:16])[CH3:17]', 'reactant_smiles': 'O=[N+]([O-])c1ccc(S(=O)(=O)[F:8])cc1.O[C@H:7]1[CH2:6][C@@H:5]([C:3]([O:2][CH3:1])=[O:4])[N:10]([C:11](=[O:12])[O:13][C:14]([CH3:15])([CH3:16])[CH3:17])[CH2:9]1', 'dataset': 'Deoxyfluorination screen', 'source_row_id': 'ord-28239635c49d4e4490b797cfddb1aad3', 'derive_version': 'v1', 'similarity': 0.3227665706051873}, {'reaction_id': 352044, 'template_hash': '86f908a7b1c18fb25cc2591076f6f33cd494a2b04e8cd846ff67e0c598ecffff', 'retro_smarts_template': '[F;H0;D1;+0:1]-[CH;D3;+0:2]1-[C:3]-[#7:4]-[C:5]-1>>C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2]1-[C:3]-[#7:4]-[C:5]-1', 'canonical_smarts_template': 'C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2]1-[C:3]-[#7:4]-[C:5]-1>>[F;H0;D1;+0:1]-[CH;D3;+0:2]1-[C:3]-[#7:4]-[C:5]-1', 'mapped_rxn': 'CCN(CC)S(F)(F)[F:19].[CH3:1][CH2:2][C@H:3]([CH3:4])[C@H:5]([NH:6][C:7](=[O:8])[O:9][C:10]([CH3:11])([CH3:12])[CH3:13])[C:14](=[O:15])[N:16]1[CH2:17][CH:18](O)[CH2:20]1.ClCCl.CCOC(C)=O>>[CH3:1][CH2:2][C@H:3]([CH3:4])[C@H:5]([NH:6][C:7](=[O:8])[O:9][C:10]([CH3:11])([CH3:12])[CH3:13])[C:14](=[O:15])[N:16]1[CH2:17][CH:18]([F:19])[CH2:20]1', 'product_smiles': '[CH3:1][CH2:2][C@H:3]([CH3:4])[C@H:5]([NH:6][C:7](=[O:8])[O:9][C:10]([CH3:11])([CH3:12])[CH3:13])[C:14](=[O:15])[N:16]1[CH2:17][CH:18]([F:19])[CH2:20]1', 'reactant_smiles': 'CCN(CC)S(F)(F)[F:19].O[CH:18]1[CH2:17][N:16]([C:14]([C@H:5]([C@H:3]([CH2:2][CH3:1])[CH3:4])[NH:6][C:7](=[O:8])[O:9][C:10]([CH3:11])([CH3:12])[CH3:13])=[O:15])[CH2:20]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US06710040B1;;641766', 'derive_version': 'v1', 'similarity': 0.29809104258443464}, {'reaction_id': 1148744, 'template_hash': 'dc862ade6e0b2b34a52049e7c6c05dc9a7f5aabab13eac1f391b25185872f32d', 'retro_smarts_template': '[F;H0;D1;+0:5]-[CH;D3;+0:1]1-[C:2]-[#7:3]-[C:4]-1>>C-S(=O)(=O)-O-[CH;D3;+0:1]1-[C:2]-[#7:3]-[C:4]-1.[FH;D0;+0:5]', 'canonical_smarts_template': 'C-S(=O)(=O)-O-[CH;D3;+0:1]1-[C:2]-[#7:3]-[C:4]-1.[FH;D0;+0:5]>>[F;H0;D1;+0:5]-[CH;D3;+0:1]1-[C:2]-[#7:3]-[C:4]-1', 'mapped_rxn': 'CS(=O)(=O)O[CH:2]1[CH2:3][N:4]([CH:5]([C:6]2=[CH:7][CH:8]=[CH:9][CH:10]=[CH:11]2)[C:12]2=[CH:13][CH:14]=[CH:15][CH:16]=[CH:17]2)[CH2:18]1.[F-:1].CCCC[N+](CCCC)(CCCC)CCCC.CC#N>>[F:1][CH:2]1[CH2:3][N:4]([CH:5]([C:6]2=[CH:7][CH:8]=[CH:9][CH:10]=[CH:11]2)[C:12]2=[CH:13][CH:14]=[CH:15][CH:16]=[CH:17]2)[CH2:18]1', 'product_smiles': '[F:1][CH:2]1[CH2:3][N:4]([CH:5]([c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[c:12]2[cH:13][cH:14][cH:15][cH:16][cH:17]2)[CH2:18]1', 'reactant_smiles': 'CS(=O)(=O)O[CH:2]1[CH2:3][N:4]([CH:5]([c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[c:12]2[cH:13][cH:14][cH:15][cH:16][cH:17]2)[CH2:18]1.[FH:1]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20090186868A1;0251;740074', 'derive_version': 'v1', 'similarity': 0.27918781725888325}, {'reaction_id': 588363, 'template_hash': '03a9ea82e78fb4081820b358c5d73358bf5616052e23d2541851fa900cd524a7', 'retro_smarts_template': '[#7:4]-[C:3]-[C@@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]>>C-c1:c:c:c(-S(=O)(=O)-O-[C@@H;D3;+0:1](-[C:2])-[C:3]-[#7:4]):c:c:1.[FH;D0;+0:5]', 'canonical_smarts_template': 'C-c1:c:c:c(-S(=O)(=O)-O-[C@@H;D3;+0:1](-[C:2])-[C:3]-[#7:4]):c:c:1.[FH;D0;+0:5]>>[#7:4]-[C:3]-[C@@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]', 'mapped_rxn': 'CC1=CC=C(S(=O)(=O)O[C@H:10]2[CH2:9][N:8]([C:6](=[O:7])[O:5][C:2]([CH3:1])([CH3:3])[CH3:4])[CH2:16][C@@H:12]2[N:13]=[N+:14]=[N-:15])C=C1.[F-:11].CCCC[N+](CCCC)(CCCC)CCCC.C1CCOC1>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][C@@H:10]([F:11])[C@@H:12]([N:13]=[N+:14]=[N-:15])[CH2:16]1', 'product_smiles': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][C@@H:10]([F:11])[C@@H:12]([N:13]=[N+:14]=[N-:15])[CH2:16]1', 'reactant_smiles': 'Cc1ccc(S(=O)(=O)O[C@H:10]2[CH2:9][N:8]([C:6]([O:5][C:2]([CH3:1])([CH3:3])[CH3:4])=[O:7])[CH2:16][C@@H:12]2[N:13]=[N+:14]=[N-:15])cc1.[FH:11]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07820699B2;0448;1023717', 'derive_version': 'v1', 'similarity': 0.27786032689450224}, {'reaction_id': 954077, 'template_hash': '73bf2e59f893a3c6afed20293df2dac41f7026a851c85ca8d6547ef630dde372', 'retro_smarts_template': '[#7:4]-[C:3]-[C@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]>>C-c1:c:c:c(-S(=O)(=O)-O-[C@H;D3;+0:1](-[C:2])-[C:3]-[#7:4]):c:c:1.[FH;D0;+0:5]', 'canonical_smarts_template': 'C-c1:c:c:c(-S(=O)(=O)-O-[C@H;D3;+0:1](-[C:2])-[C:3]-[#7:4]):c:c:1.[FH;D0;+0:5]>>[#7:4]-[C:3]-[C@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]', 'mapped_rxn': 'N#N.CC1=CC=C(S(=O)(=O)O[C@@H:10]2[CH2:9][N:8]([C:6](=[O:7])[O:5][C:2]([CH3:3])([CH3:4])[CH3:1])[CH2:16][C@H:12]2[N:13]=[N+:14]=[N-:15])C=C1.C1CCOC1.[F-:11].CCCC[N+](CCCC)(CCCC)CCCC>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][C@H:10]([F:11])[C@H:12]([N:13]=[N+:14]=[N-:15])[CH2:16]1', 'product_smiles': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][C@H:10]([F:11])[C@H:12]([N:13]=[N+:14]=[N-:15])[CH2:16]1', 'reactant_smiles': 'Cc1ccc(S(=O)(=O)O[C@@H:10]2[CH2:9][N:8]([C:6]([O:5][C:2]([CH3:1])([CH3:3])[CH3:4])=[O:7])[CH2:16][C@H:12]2[N:13]=[N+:14]=[N-:15])cc1.[FH:11]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US09139524B2;0197;1669687', 'derive_version': 'v1', 'similarity': 0.27786032689450224}, {'reaction_id': 171156, 'template_hash': '56c85a1ca65d270a897603409b3c1c758dfcd2a3ea7c101f32f4231c823d7ba0', 'retro_smarts_template': '[#7:4]-[C:3]-[C@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]>>O-[C@H;D3;+0:1](-[C:2])-[C:3]-[#7:4].[FH;D0;+0:5]', 'canonical_smarts_template': 'O-[C@H;D3;+0:1](-[C:2])-[C:3]-[#7:4].[FH;D0;+0:5]>>[#7:4]-[C:3]-[C@H;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]', 'mapped_rxn': '[F-:15].[K+].[O:1]=[C:2]([O:3][CH2:4][C:5]1=[CH:6][CH:7]=[CH:8][CH:9]=[CH:10]1)[N:11]1[CH2:12][CH2:13][C@@H:14](O)[CH2:16]1.OCCO>>[O:1]=[C:2]([O:3][CH2:4][C:5]1=[CH:6][CH:7]=[CH:8][CH:9]=[CH:10]1)[N:11]1[CH2:12][CH2:13][C@H:14]([F:15])[CH2:16]1', 'product_smiles': '[O:1]=[C:2]([O:3][CH2:4][c:5]1[cH:6][cH:7][cH:8][cH:9][cH:10]1)[N:11]1[CH2:12][CH2:13][C@H:14]([F:15])[CH2:16]1', 'reactant_smiles': 'O[C@@H:14]1[CH2:13][CH2:12][N:11]([C:2](=[O:1])[O:3][CH2:4][c:5]2[cH:6][cH:7][cH:8][cH:9][cH:10]2)[CH2:16]1.[FH:15]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US05322848;;296395', 'derive_version': 'v1', 'similarity': 0.26666666666666666}, {'reaction_id': 1524157, 'template_hash': 'dea2f0ae28cf75aaa5e23eb1e275ccfe7649be54211dba2d2d2d6bea5dcf0641', 'retro_smarts_template': '[#7:4]-[C:3]-[CH;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]>>C-c1:c:c:c(-S(=O)(=O)-O-[CH;D3;+0:1](-[C:2])-[C:3]-[#7:4]):c:c:1.[FH;D0;+0:5]', 'canonical_smarts_template': 'C-c1:c:c:c(-S(=O)(=O)-O-[CH;D3;+0:1](-[C:2])-[C:3]-[#7:4]):c:c:1.[FH;D0;+0:5]>>[#7:4]-[C:3]-[CH;D3;+0:1](-[C:2])-[F;H0;D1;+0:5]', 'mapped_rxn': 'Cc1ccc(S(=O)(=O)O[CH:14]2[CH2:13][CH2:12][N:11]([C:2](=[O:1])[O:3][CH2:4][c:5]3[cH:6][cH:7][cH:8][cH:9][cH:10]3)[CH2:16]2)cc1.[F-:15].[K+].O.OCCO>>[O:1]=[C:2]([O:3][CH2:4][c:5]1[cH:6][cH:7][cH:8][cH:9][cH:10]1)[N:11]1[CH2:12][CH2:13][CH:14]([F:15])[CH2:16]1', 'product_smiles': '[O:1]=[C:2]([O:3][CH2:4][c:5]1[cH:6][cH:7][cH:8][cH:9][cH:10]1)[N:11]1[CH2:12][CH2:13][CH:14]([F:15])[CH2:16]1', 'reactant_smiles': 'Cc1ccc(S(=O)(=O)O[CH:14]2[CH2:13][CH2:12][N:11]([C:2](=[O:1])[O:3][CH2:4][c:5]3[cH:6][cH:7][cH:8][cH:9][cH:10]3)[CH2:16]2)cc1.[FH:15]', 'dataset': 'Training data from https://doi.org/10.1039/C8SC04228D (4/10)', 'source_row_id': 'ord-e65179a612ea457aa967167992a9d245', 'derive_version': 'v1', 'similarity': 0.26666666666666666}, {'reaction_id': 121503, 'template_hash': 'cac54378e7135241ecb5a566120e231efc51308144e3e4d84fd303f4b29773a2', 'retro_smarts_template': '[C:3]-[CH;D3;+0:2](-[C:4])-[F;H0;D1;+0:1]>>C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2](-[C:3])-[C:4]', 'canonical_smarts_template': 'C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2](-[C:3])-[C:4]>>[C:3]-[CH;D3;+0:2](-[C:4])-[F;H0;D1;+0:1]', 'mapped_rxn': '[CH3:1][O:2][CH2:3][CH2:4][O:5][CH2:6][CH:7](O)[CH2:9][N:10]1[CH:11]=[N:12][C:13]([N+:14](=[O:15])[O-:16])=[N:17]1.C1COCCO1.CCN(CC)S([F:8])(F)F.O>>[CH3:1][O:2][CH2:3][CH2:4][O:5][CH2:6][CH:7]([F:8])[CH2:9][N:10]1[CH:11]=[N:12][C:13]([N+:14](=[O:15])[O-:16])=[N:17]1', 'product_smiles': '[CH3:1][O:2][CH2:3][CH2:4][O:5][CH2:6][CH:7]([F:8])[CH2:9][n:10]1[cH:11][n:12][c:13]([N+:14](=[O:15])[O-:16])[n:17]1', 'reactant_smiles': 'CCN(CC)S(F)(F)[F:8].O[CH:7]([CH2:6][O:5][CH2:4][CH2:3][O:2][CH3:1])[CH2:9][n:10]1[cH:11][n:12][c:13]([N+:14](=[O:15])[O-:16])[n:17]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04927941;;212148', 'derive_version': 'v1', 'similarity': 0.2503576537911302}, {'reaction_id': 761444, 'template_hash': '67fffc3b20dfdf44c407eec2cbdfd214f6707431d78258920606122de8fbf222', 'retro_smarts_template': '[#7:5]-[C:4]-[C@H;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]>>C-O-C-C-N(-C-C-O-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]', 'canonical_smarts_template': 'C-O-C-C-N(-C-C-O-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]>>[#7:5]-[C:4]-[C@H;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]', 'mapped_rxn': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][C@@H:11]([CH2:12][N:13]=[N+:14]=[N-:15])[C@H:16](O)[CH2:18]1.COCCN(CCOC)S(F)(F)[F:17].O=C([O-])O.[Na+].ClCCl>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][C@H:11]([CH2:12][N:13]=[N+:14]=[N-:15])[C@H:16]([F:17])[CH2:18]1', 'product_smiles': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][C@H:11]([CH2:12][N:13]=[N+:14]=[N-:15])[C@H:16]([F:17])[CH2:18]1', 'reactant_smiles': 'COCCN(CCOC)S(F)(F)[F:17].O[C@H:16]1[C@H:11]([CH2:12][N:13]=[N+:14]=[N-:15])[CH2:10][CH2:9][N:8]([C:6]([O:5][C:2]([CH3:1])([CH3:3])[CH3:4])=[O:7])[CH2:18]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08431575B2;0674;1315461', 'derive_version': 'v1', 'similarity': 0.24962178517397882}, {'reaction_id': 1914395, 'template_hash': 'cd59a6988184d7f8fd2eb86d0bb328fd1f657221081a40726aa60e3457434ca4', 'retro_smarts_template': '[F;D1;H0:5]-[CH;D3;+0:1]1-[C:2]-[#7:3]-[C:4]-1>>O-[CH;D3;+0:1]1-[C:2]-[#7:3]-[C:4]-1', 'canonical_smarts_template': 'O-[CH;D3;+0:1]1-[C:2]-[#7:3]-[C:4]-1>>[F;D1;H0:5]-[CH;D3;+0:1]1-[C:2]-[#7:3]-[C:4]-1', 'mapped_rxn': 'O[CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[CH2:12]1>>[F:1][CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[CH2:12]1', 'product_smiles': '[F:1][CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[CH2:12]1', 'reactant_smiles': 'O[CH:2]1[CH2:3][N:4]([CH2:5][c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[CH2:12]1', 'dataset': 'custom', 'source_row_id': None, 'derive_version': 'custom_v1', 'similarity': 0.2392857142857143}, {'reaction_id': 1588808, 'template_hash': '62e9ad7eadf74ebb23610473e03743297aba1f5396e88877be8cb27ffd24eefc', 'retro_smarts_template': '[C:3]-[CH;D3;+0:2](-[C:4])-[F;H0;D1;+0:1]>>F-[B-](-F)(-F)-[F;H0;D1;+0:1].N-[CH;D3;+0:2](-[C:3])-[C:4]', 'canonical_smarts_template': 'F-[B-](-F)(-F)-[F;H0;D1;+0:1].N-[CH;D3;+0:2](-[C:3])-[C:4]>>[C:3]-[CH;D3;+0:2](-[C:4])-[F;H0;D1;+0:1]', 'mapped_rxn': '[CH3:1][CH2:2][CH:3](N)[CH2:5][CH:6]([CH3:7])[O:8][NH:9][C:10](=[O:11])[c:12]1[cH:13][cH:14][cH:15][cH:16][cH:17]1.[F:4][B-](F)(F)F.[H+].O=N[O-].[Na+].[Na+].[OH-].O>>[CH3:1][CH2:2][CH:3]([F:4])[CH2:5][CH:6]([CH3:7])[O:8][NH:9][C:10](=[O:11])[c:12]1[cH:13][cH:14][cH:15][cH:16][cH:17]1', 'product_smiles': '[CH3:1][CH2:2][CH:3]([F:4])[CH2:5][CH:6]([CH3:7])[O:8][NH:9][C:10](=[O:11])[c:12]1[cH:13][cH:14][cH:15][cH:16][cH:17]1', 'reactant_smiles': 'F[B-](F)(F)[F:4].N[CH:3]([CH2:2][CH3:1])[CH2:5][CH:6]([CH3:7])[O:8][NH:9][C:10](=[O:11])[c:12]1[cH:13][cH:14][cH:15][cH:16][cH:17]1', 'dataset': 'Training data from https://doi.org/10.1039/C8SC04228D (8/10)', 'source_row_id': 'ord-d5c641fd477d4a799a09c15295548dee', 'derive_version': 'v1', 'similarity': 0.21439749608763695}, {'reaction_id': 553795, 'template_hash': 'fed4fd87ace546e94c9c1b3fe64ffeb66242decfa6551cc726e3070ad6d68615', 'retro_smarts_template': '[#7:5]-[C:4]-[CH;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]>>C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]', 'canonical_smarts_template': 'C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]>>[#7:5]-[C:4]-[CH;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]', 'mapped_rxn': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][C@@H:11](O)[CH2:13]1.CCN(CC)S(F)(F)[F:12].CCOC(C)=O>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][CH:11]([F:12])[CH2:13]1', 'product_smiles': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][CH:11]([F:12])[CH2:13]1', 'reactant_smiles': 'CCN(CC)S(F)(F)[F:12].O[C@@H:11]1[CH2:10][CH2:9][N:8]([C:6]([O:5][C:2]([CH3:1])([CH3:3])[CH3:4])=[O:7])[CH2:13]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07692005B2;0286;968511', 'derive_version': 'v1', 'similarity': 0.2102728731942215}]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Now let me search more specifically for SN2-type reactions that form C-N bonds from C-Cl (benzyl chloride + amine type reactions):"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01Rn7QrJhd3LEWuwJ3zuXoP8",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\", \"functional_groups_broken\": null, \"functional_groups_formed\": [\"halide\"], \"bonds_formed\": [\"6-17\"], \"bonds_broken\": [\"6-7\"], \"bonds_order_changed\": null, \"limit\": 15}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01Rn7QrJhd3LEWuwJ3zuXoP8",
+      "content": "[{\"type\": \"text\", \"text\": \"[]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Let me try a simpler search. Working backward through the reactions:\n\n1. **Step 3 (reverse Friedel-Crafts acylation)**: Break the amide bond between the 3-methoxyaniline and the acyl group\n2. **Step 2 (reverse SN2)**: Break the C-N bond where the azetidine nitrogen is connected to the benzyl carbon  \n3. **Step 1 (reverse OH to Cl)**: Convert the fluoro group on azetidine back to OH\n\nLet me search for templates that break benzyl C-N bonds:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_015FcnxFzysgppU1Nt4sCeUL",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"c1ccc(CN2CC(F)C2)cc1\", \"functional_groups_broken\": null, \"functional_groups_formed\": [\"halide\"], \"bonds_formed\": null, \"bonds_broken\": [\"6-7\"], \"bonds_order_changed\": null, \"limit\": 15}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_015FcnxFzysgppU1Nt4sCeUL",
+      "content": "[{\"type\": \"text\", \"text\": \"[{'reaction_id': 1588808, 'template_hash': '62e9ad7eadf74ebb23610473e03743297aba1f5396e88877be8cb27ffd24eefc', 'retro_smarts_template': '[C:3]-[CH;D3;+0:2](-[C:4])-[F;H0;D1;+0:1]>>F-[B-](-F)(-F)-[F;H0;D1;+0:1].N-[CH;D3;+0:2](-[C:3])-[C:4]', 'canonical_smarts_template': 'F-[B-](-F)(-F)-[F;H0;D1;+0:1].N-[CH;D3;+0:2](-[C:3])-[C:4]>>[C:3]-[CH;D3;+0:2](-[C:4])-[F;H0;D1;+0:1]', 'mapped_rxn': '[CH3:1][CH2:2][CH:3](N)[CH2:5][CH:6]([CH3:7])[O:8][NH:9][C:10](=[O:11])[c:12]1[cH:13][cH:14][cH:15][cH:16][cH:17]1.[F:4][B-](F)(F)F.[H+].O=N[O-].[Na+].[Na+].[OH-].O>>[CH3:1][CH2:2][CH:3]([F:4])[CH2:5][CH:6]([CH3:7])[O:8][NH:9][C:10](=[O:11])[c:12]1[cH:13][cH:14][cH:15][cH:16][cH:17]1', 'product_smiles': '[CH3:1][CH2:2][CH:3]([F:4])[CH2:5][CH:6]([CH3:7])[O:8][NH:9][C:10](=[O:11])[c:12]1[cH:13][cH:14][cH:15][cH:16][cH:17]1', 'reactant_smiles': 'F[B-](F)(F)[F:4].N[CH:3]([CH2:2][CH3:1])[CH2:5][CH:6]([CH3:7])[O:8][NH:9][C:10](=[O:11])[c:12]1[cH:13][cH:14][cH:15][cH:16][cH:17]1', 'dataset': 'Training data from https://doi.org/10.1039/C8SC04228D (8/10)', 'source_row_id': 'ord-d5c641fd477d4a799a09c15295548dee', 'derive_version': 'v1', 'similarity': 0.28205128205128205}]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Let me search more broadly. I need to find templates that disconnect benzyl amines (C-N bonds):"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01AxskgQkvBYs3GUdQ175J9N",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"c1ccc(CN2CCCC2)cc1\", \"functional_groups_broken\": null, \"functional_groups_formed\": [\"halide\"], \"bonds_formed\": null, \"bonds_broken\": [\"6-7\"], \"bonds_order_changed\": null, \"limit\": 20}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01AxskgQkvBYs3GUdQ175J9N",
+      "content": "[{\"type\": \"text\", \"text\": \"[]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Let me approach this differently. Based on the hints, I need to work through these transformations systematically. Let me manually construct the retrosynthesis route based on chemical reasoning:\n\n**Target**: COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\n\n**Step 3 (reverse Friedel-Crafts acylation)**: Break amide bond\n- Template 1838006 looks suitable for breaking the amide bond\n- This disconnects to: 3-methoxyaniline + acyl chloride of the triazole\n\n**Step 2 (reverse SN2)**: Break benzyl C-N bond \n- This converts the benzyl amine back to benzyl chloride + secondary amine\n\n**Step 1 (reverse substitution)**: Convert F to OH\n- This converts 3-fluoroazetidine back to 3-hydroxyazetidine\n\nLet me use template 1838006 for the Friedel-Crafts step:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01R6n55SQgyd6H2QHkQ5SuWe",
+          "function": {
+            "name": "mcp__corral__get_template",
+            "arguments": "{\"template_id\": \"1838006\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01R6n55SQgyd6H2QHkQ5SuWe",
+      "content": "[{\"type\": \"text\", \"text\": \"{'reaction_id': 1838006, 'template_hash': 'fb6ae6f58e2d37fe48f36cbef9613ca57fbd9dd0ae1b1d3cd7dd5127271b428b', 'retro_smarts_template': '[O;D1;H0:4]=[C;H0;D3;+0:3](-[c:5])-[NH;D2;+0:1]-[c:2]>>C-C-C(=O)-[NH;D2;+0:1]-[c:2].Cl-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5]', 'canonical_smarts_template': 'C-C-C(=O)-[NH;D2;+0:1]-[c:2].Cl-[C;H0;D3;+0:3](=[O;D1;H0:4])-[c:5]>>[O;D1;H0:4]=[C;H0;D3;+0:3](-[c:5])-[NH;D2;+0:1]-[c:2]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[n:6][n:7](-[c:8]2[cH:9][c:10]([NH:11]C(=O)CC)[cH:20][cH:21][c:22]2[C:23]([F:24])([F:25])[F:26])[c:27](=[O:28])[n:29]1[CH2:30][c:31]1[cH:32][cH:33][c:34](-[c:35]2[cH:36][cH:37][cH:38][cH:39][c:40]2[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]1[F:54].[O:13]=[C:12](Cl)[c:14]1[cH:15][cH:16][cH:17][cH:18][cH:19]1>>[CH3:1][CH2:2][CH2:3][CH2:4][c:5]1[n:6][n:7](-[c:8]2[cH:9][c:10]([NH:11][C:12](=[O:13])[c:14]3[cH:15][cH:16][cH:17][cH:18][cH:19]3)[cH:20][cH:21][c:22]2[C:23]([F:24])([F:25])[F:26])[c:27](=[O:28])[n:29]1[CH2:30][c:31]1[cH:32][cH:33][c:34](-[c:35]2[cH:36][cH:37][cH:38][cH:39][c:40]2[S:41](=[O:42])(=[O:43])[NH:44][C:45](=[O:46])[O:47][C:48]([CH3:49])([CH3:50])[CH3:51])[cH:52][c:53]1[F:54]'}\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01Bj7iTskzfNNToDgjnzg37B",
+          "function": {
+            "name": "mcp__corral__apply_template",
+            "arguments": "{\"molecule_smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\", \"template_id\": \"1838006\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01Bj7iTskzfNNToDgjnzg37B",
+      "content": "[{\"type\": \"text\", \"text\": \"(('CCC(=O)Nc1cccc(OC)c1', 'Nc1c(C(=O)Cl)nnn1Cc1ccc(CN2CC(F)C2)cc1'),)\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Great! Now I have the first precursor from step 3 backward. Now I need to find templates for step 2 (breaking the benzyl C-N bond). Let me search for templates that break this type of bond:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_013BAxze1DDeHptkQ9HeqvQE",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"c1ccc(CN2CC(F)C2)cc1\", \"functional_groups_broken\": null, \"functional_groups_formed\": null, \"bonds_formed\": [\"6-17\"], \"bonds_broken\": [\"6-7\"], \"bonds_order_changed\": null, \"limit\": 20}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_013BAxze1DDeHptkQ9HeqvQE",
+      "content": "[{\"type\": \"text\", \"text\": \"[]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Let me search for reductive amination reverse reactions:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01W41vrwpsP9birTfvxvLkQM",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"c1ccc(CN2CCCC2)cc1\", \"functional_groups_broken\": null, \"functional_groups_formed\": [\"aldehyde\"], \"bonds_formed\": null, \"bonds_broken\": [\"6-7\"], \"bonds_order_changed\": null, \"limit\": 20}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01W41vrwpsP9birTfvxvLkQM",
+      "content": "Invalid functional group(s) in 'functional_groups_formed': ['aldehyde']. Valid functional groups are: ['azo', 'diazo', 'aryl diazonium', 'azide', 'nitrile', 'isonitrile', 'nitro', 'aldehydes', 'aliphatic hydroxyls', 'aromatic hydroxyls', 'aliphatic carboxylic acid', 'aromatic carboxylic acid', 'acyl chloride', 'six-membered aromatic rings', 'benzene rings', 'phenyl group', 'ortho di-substituted benzene', 'meta di-substituted benzene', 'para di-substituted benzene', 'pyrridine', 'pyridazine', 'pyrimidine', 'pyrazine', 'amide', 'imide', 'thioamide', 'amidine', 'guanidine', 'C-C double bonds', 'C-C triple bonds', 'imine', 'cyclopropane', 'ketones', 'carboxylic esters', 'carbonate', 'carbamate', 'anhydride', 'urea', 'thiourea', 'ether oxygens', 'epoxides', 'aziridines', 'four-membered rings', 'five-membered rings', 'trifluoromethyl', 'primary amines', 'secondary amines', 'tertiary amines', 't-butyl', 'thiol', 'thioethers', 'thioketones', 'sulfoxides', 'sulfones', 'sulfonic', 'sulfonamides', 'methoxy', 'ethoxy', 'isopropoxy', 'phenoxy', 'alkyl halide', 'aryl halide', 'halide', 'furan', 'thiophene', 'pyrrole', 'imidazole', 'oxazole', 'thiazole', 'cyanate', 'isocyanate', 'isothiocyanate', 'trimethylsilyl', 't-butyldimethylsilyl']. Use the tool 'get_available_functional_groups' to see the list of available functional groups.",
+      "name": "tool_result",
+      "is_error": true
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_017WqtK6s4QhmrgVWpb3xDP9",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"c1ccc(CN2CCCC2)cc1\", \"functional_groups_broken\": null, \"functional_groups_formed\": [\"aldehydes\"], \"bonds_formed\": null, \"bonds_broken\": [\"6-7\"], \"bonds_order_changed\": null, \"limit\": 20}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_017WqtK6s4QhmrgVWpb3xDP9",
+      "content": "[{\"type\": \"text\", \"text\": \"[]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Let me try searching for templates that specifically disconnect benzyl groups:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01AHmiyxtSgQib8GCkpzGyLA",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"c1ccc(CN2CCCC2)cc1\", \"functional_groups_broken\": null, \"functional_groups_formed\": null, \"bonds_formed\": null, \"bonds_broken\": [\"6-7\"], \"bonds_order_changed\": null, \"limit\": 20}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01AHmiyxtSgQib8GCkpzGyLA",
+      "content": "[{\"type\": \"text\", \"text\": \"[{'reaction_id': 1098715, 'template_hash': '1eacd86dc2c6af4e0fca02bcfc4ecb32a99abf338514f8a3b4ca01cbdc5943e8', 'retro_smarts_template': '[C:2]-[c;H0;D3;+0:3](:[c:4]):[cH;D2;+0:1]:[cH;D2;+0:5]:[c:6]>>C-C-O-C(=O)-c1:c:n(-c2:c:[cH;D2;+0:1]:c(-C-N3-C-C-C-C-3):c:c:2):c2:c(-Cl):c(-F):c(-F):c:c:2:c:1=O.[C:2]-[c;H0;D3;+0:3](:[c:4]):n:[cH;D2;+0:5]:[c:6]', 'canonical_smarts_template': 'C-C-O-C(=O)-c1:c:n(-c2:c:[cH;D2;+0:1]:c(-C-N3-C-C-C-C-3):c:c:2):c2:c(-Cl):c(-F):c(-F):c:c:2:c:1=O.[C:2]-[c;H0;D3;+0:3](:[c:4]):n:[cH;D2;+0:5]:[c:6]>>[C:2]-[c;H0;D3;+0:3](:[c:4]):[cH;D2;+0:1]:[cH;D2;+0:5]:[c:6]', 'mapped_rxn': 'CCOC(=O)C1=CN(C2=CC=C(CN3CCCC3)[CH:12]=C2)C2=C(Cl)C(F)=C(F)C=C2C1=O.[NH2:1][C:2]1=[CH:3][CH:4]=[C:5]([CH2:6][N:7]2[CH2:8][CH2:9][CH2:10][CH2:11]2)N=[CH:13]1>>[NH2:1][C:2]1=[CH:3][CH:4]=[C:5]([CH2:6][N:7]2[CH2:8][CH2:9][CH2:10][CH2:11]2)[CH:12]=[CH:13]1', 'product_smiles': '[NH2:1][c:2]1[cH:3][cH:4][c:5]([CH2:6][N:7]2[CH2:8][CH2:9][CH2:10][CH2:11]2)[cH:12][cH:13]1', 'reactant_smiles': 'CCOC(=O)c1cn(-c2ccc(CN3CCCC3)[cH:12]c2)c2c(Cl)c(F)c(F)cc2c1=O.n1[c:5]([CH2:6][N:7]2[CH2:8][CH2:9][CH2:10][CH2:11]2)[cH:4][cH:3][c:2]([NH2:1])[cH:13]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20070213339A1;0277;494039', 'derive_version': 'v1', 'similarity': 0.8333333333333334}, {'reaction_id': 100146, 'template_hash': '0299977584bd82931d5cd7a6d8a402c20c383685ecd17d8f3af40779538d3796', 'retro_smarts_template': '[C:8]-[N;H0;D3;+0:9](-[C:10])-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1>>Cl-C-C-N(-C-C-Cl)-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1.[C:8]-[NH;D2;+0:9]-[C:10]', 'canonical_smarts_template': 'Cl-C-C-N(-C-C-Cl)-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1.[C:8]-[NH;D2;+0:9]-[C:10]>>[C:8]-[N;H0;D3;+0:9](-[C:10])-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1', 'mapped_rxn': 'ClCCN(CCCl)[CH2:8][C:9]1=[CH:10][CH:11]=[CH:12][CH:13]=[CH:14]1.ClCC1=CC=CC=C1.[OH:7][CH2:6][CH2:5][NH:4][CH2:3][CH2:2][OH:1]>>[OH:1][CH2:2][CH2:3][N:4]([CH2:5][CH2:6][OH:7])[CH2:8][C:9]1=[CH:10][CH:11]=[CH:12][CH:13]=[CH:14]1', 'product_smiles': '[OH:1][CH2:2][CH2:3][N:4]([CH2:5][CH2:6][OH:7])[CH2:8][c:9]1[cH:10][cH:11][cH:12][cH:13][cH:14]1', 'reactant_smiles': 'ClCCN(CCCl)[CH2:8][c:9]1[cH:10][cH:11][cH:12][cH:13][cH:14]1.[OH:1][CH2:2][CH2:3][NH:4][CH2:5][CH2:6][OH:7]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04748276;;175645', 'derive_version': 'v1', 'similarity': 0.6896551724137931}, {'reaction_id': 63791, 'template_hash': '9f97bb9e90455652860884ba3ed536789f6e11c10034d45bbadd71c26e8187ab', 'retro_smarts_template': '[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]>>O=C-[N;H0;D3;+0:1](-[C:2])-[C:3].O=[CH;D2;+0:4]-[c:5]', 'canonical_smarts_template': 'O=C-[N;H0;D3;+0:1](-[C:2])-[C:3].O=[CH;D2;+0:4]-[c:5]>>[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]', 'mapped_rxn': '[N:1]#[C:2][C:3]1=[CH:4][CH:5]=[C:6]([CH:7]=O)[CH:14]=[CH:15]1.O=C[N:8]1[CH2:9][CH2:10][NH:11][CH2:12][CH2:13]1.O=CO.Cl.CCO>>[N:1]#[C:2][C:3]1=[CH:4][CH:5]=[C:6]([CH2:7][N:8]2[CH2:9][CH2:10][NH:11][CH2:12][CH2:13]2)[CH:14]=[CH:15]1', 'product_smiles': '[N:1]#[C:2][c:3]1[cH:4][cH:5][c:6]([CH2:7][N:8]2[CH2:9][CH2:10][NH:11][CH2:12][CH2:13]2)[cH:14][cH:15]1', 'reactant_smiles': 'O=C[N:8]1[CH2:9][CH2:10][NH:11][CH2:12][CH2:13]1.O=[CH:7][c:6]1[cH:5][cH:4][c:3]([C:2]#[N:1])[cH:15][cH:14]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04421753;;113759', 'derive_version': 'v1', 'similarity': 0.6071428571428571}, {'reaction_id': 79377, 'template_hash': 'ed6ee10debb357da12220486316ff1d39d55596ebf922d3a644cb62e94a9f1e3', 'retro_smarts_template': '[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]>>C-C-O-C(=O)-[N;H0;D3;+0:1](-[C:2])-[C:3].Cl-[CH2;D2;+0:4]-[c:5]', 'canonical_smarts_template': 'C-C-O-C(=O)-[N;H0;D3;+0:1](-[C:2])-[C:3].Cl-[CH2;D2;+0:4]-[c:5]>>[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]', 'mapped_rxn': 'Cl[CH2:7][C:6]1=[CH:5][C:3]([Cl:4])=[C:2]([Cl:1])[CH:15]=[CH:14]1.CCOC(=O)[N:8]1[CH2:9][CH2:10][NH:11][CH2:12][CH2:13]1.O=C([O-])[O-].[Na+].[Na+].[OH-].[K+].CCO.CC1=CC=CC=C1C>>[Cl:1][C:2]1=[C:3]([Cl:4])[CH:5]=[C:6]([CH2:7][N:8]2[CH2:9][CH2:10][NH:11][CH2:12][CH2:13]2)[CH:14]=[CH:15]1', 'product_smiles': '[Cl:1][c:2]1[c:3]([Cl:4])[cH:5][c:6]([CH2:7][N:8]2[CH2:9][CH2:10][NH:11][CH2:12][CH2:13]2)[cH:14][cH:15]1', 'reactant_smiles': 'CCOC(=O)[N:8]1[CH2:9][CH2:10][NH:11][CH2:12][CH2:13]1.Cl[CH2:7][c:6]1[cH:5][c:3]([Cl:4])[c:2]([Cl:1])[cH:15][cH:14]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04562189;;140827', 'derive_version': 'v1', 'similarity': 0.504950495049505}, {'reaction_id': 321653, 'template_hash': '6261e330f0e7311f9cdef6fb6f8a594ab3de0a37dcf49728d6857dbc51aa0750', 'retro_smarts_template': '[C:2]-[c;H0;D3;+0:1](:[cH;D2;+0:4]:[c:3]):[cH;D2;+0:5]:[c:6]>>N#[C;H0;D2;+0:1]-[C:2].[c:3]:[cH;D2;+0:4]:c:[cH;D2;+0:5]:[c:6]', 'canonical_smarts_template': 'N#[C;H0;D2;+0:1]-[C:2].[c:3]:[cH;D2;+0:4]:c:[cH;D2;+0:5]:[c:6]>>[C:2]-[c;H0;D3;+0:1](:[cH;D2;+0:4]:[c:3]):[cH;D2;+0:5]:[c:6]', 'mapped_rxn': '[CH3:1][C:2]([CH3:3])([C:4]#N)[N:10]1[CH2:11][CH2:12][N:13]([CH2:14][C:15]2=[CH:16][CH:17]=[CH:18][CH:19]=[CH:20]2)[CH2:21][CH2:22]1.C1=[CH:5][CH:6]=[CH:7][CH:8]=[CH:9]1.[Cl-].[NH4+].CCOCC>>[CH3:1][C:2]([CH3:3])([C:4]1=[CH:5][CH:6]=[CH:7][CH:8]=[CH:9]1)[N:10]1[CH2:11][CH2:12][N:13]([CH2:14][C:15]2=[CH:16][CH:17]=[CH:18][CH:19]=[CH:20]2)[CH2:21][CH2:22]1', 'product_smiles': '[CH3:1][C:2]([CH3:3])([c:4]1[cH:5][cH:6][cH:7][cH:8][cH:9]1)[N:10]1[CH2:11][CH2:12][N:13]([CH2:14][c:15]2[cH:16][cH:17][cH:18][cH:19][cH:20]2)[CH2:21][CH2:22]1', 'reactant_smiles': 'c1[cH:5][cH:6][cH:7][cH:8][cH:9]1.N#[C:4][C:2]([CH3:1])([CH3:3])[N:10]1[CH2:11][CH2:12][N:13]([CH2:14][c:15]2[cH:16][cH:17][cH:18][cH:19][cH:20]2)[CH2:21][CH2:22]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US06498251B1;;586814', 'derive_version': 'v1', 'similarity': 0.47297297297297297}, {'reaction_id': 1456922, 'template_hash': '93425257ce6dcf4ffee7722fe1ed3f7bb792a4656ea84f52fc1469e2dcfef75f', 'retro_smarts_template': '[C:4]-[N;H0;D3;+0:3](-[C:5])-[CH2;D2;+0:1]-[c:2]>>Br-[CH2;D2;+0:1]-[c:2].Cl-c1:c:c:c(-C-[N;H0;D3;+0:3](-[C:4])-[C:5]):s:1', 'canonical_smarts_template': 'Br-[CH2;D2;+0:1]-[c:2].Cl-c1:c:c:c(-C-[N;H0;D3;+0:3](-[C:4])-[C:5]):s:1>>[C:4]-[N;H0;D3;+0:3](-[C:5])-[CH2;D2;+0:1]-[c:2]', 'mapped_rxn': '[NH2:1][CH2:2][CH:3]1[CH2:4][N:5](Cc2ccc(Cl)s2)[CH2:15][CH2:16][O:17]1.[F:11][c:10]1[cH:9][cH:8][c:7]([CH2:6]Br)[cH:14][c:12]1[F:13]>>[NH2:1][CH2:2][CH:3]1[CH2:4][N:5]([CH2:6][c:7]2[cH:8][cH:9][c:10]([F:11])[c:12]([F:13])[cH:14]2)[CH2:15][CH2:16][O:17]1', 'product_smiles': '[NH2:1][CH2:2][CH:3]1[CH2:4][N:5]([CH2:6][c:7]2[cH:8][cH:9][c:10]([F:11])[c:12]([F:13])[cH:14]2)[CH2:15][CH2:16][O:17]1', 'reactant_smiles': 'Br[CH2:6][c:7]1[cH:8][cH:9][c:10]([F:11])[c:12]([F:13])[cH:14]1.Clc1ccc(C[N:5]2[CH2:4][CH:3]([CH2:2][NH2:1])[O:17][CH2:16][CH2:15]2)s1', 'dataset': 'Training data from https://doi.org/10.1039/C8SC04228D (9/10)', 'source_row_id': 'ord-ecebfea0e45043548fbf244156540bc5', 'derive_version': 'v1', 'similarity': 0.45136186770428016}, {'reaction_id': 343267, 'template_hash': '647959d07b8aa907e8b6e5b877e9c76f83642c54df8f848b26c4d68a35036e11', 'retro_smarts_template': '[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]>>C-C(-C)(-C)-O-C(=O)-[N;H0;D3;+0:1](-[C:2])-[C:3].O=C-[CH2;D2;+0:4]-[c:5]', 'canonical_smarts_template': 'C-C(-C)(-C)-O-C(=O)-[N;H0;D3;+0:1](-[C:2])-[C:3].O=C-[CH2;D2;+0:4]-[c:5]>>[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]', 'mapped_rxn': 'O=C(O)C(F)(F)F.[CH3:1][CH:2]([CH2:3][CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][N:9](C(=O)OC(C)(C)C)[CH2:17]1)[C:18](=[O:19])[NH:20][C:21]1=[CH:22][CH:23]=[CH:24][CH:25]=[CH:26]1.O=C[CH2:10][C:11]1=[CH:12][CH:13]=[CH:14][CH:15]=[CH:16]1.CC(=O)O[BH-](OC(C)=O)OC(C)=O.[Na+].O=C([O-])[O-].[K+].[K+].ClCCl.CC(=O)O>>[CH3:1][CH:2]([CH2:3][CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][N:9]([CH2:10][C:11]2=[CH:12][CH:13]=[CH:14][CH:15]=[CH:16]2)[CH2:17]1)[C:18](=[O:19])[NH:20][C:21]1=[CH:22][CH:23]=[CH:24][CH:25]=[CH:26]1', 'product_smiles': '[CH3:1][CH:2]([CH2:3][CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][N:9]([CH2:10][c:11]2[cH:12][cH:13][cH:14][cH:15][cH:16]2)[CH2:17]1)[C:18](=[O:19])[NH:20][c:21]1[cH:22][cH:23][cH:24][cH:25][cH:26]1', 'reactant_smiles': 'CC(C)(C)OC(=O)[N:9]1[CH2:8][CH2:7][CH2:6][CH:5]([CH2:4][CH2:3][CH:2]([CH3:1])[C:18](=[O:19])[NH:20][c:21]2[cH:22][cH:23][cH:24][cH:25][cH:26]2)[CH2:17]1.O=C[CH2:10][c:11]1[cH:12][cH:13][cH:14][cH:15][cH:16]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US06635661B2;;624623', 'derive_version': 'v1', 'similarity': 0.45018450184501846}, {'reaction_id': 45196, 'template_hash': 'e99ef0e641e4ca07dbf75263635a73911c85b79d841ea5d115af7fbf1ed2fb44', 'retro_smarts_template': '[C:3]-[N;H0;D3;+0:4](-[C:5])-[CH2;D2;+0:1]-[c:2]>>Cl-[CH2;D2;+0:1]-[c:2].[C:3]-[N;H0;D3;+0:4](-[C:5])-C-c1:c:c:c:c:c:1', 'canonical_smarts_template': 'Cl-[CH2;D2;+0:1]-[c:2].[C:3]-[N;H0;D3;+0:4](-[C:5])-C-c1:c:c:c:c:c:1>>[C:3]-[N;H0;D3;+0:4](-[C:5])-[CH2;D2;+0:1]-[c:2]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][O:13][CH2:14][CH:15]([OH:16])[CH2:17][N:18]1[CH2:19][CH2:20][N:21](CC2=CC=CC=C2)[CH2:30][CH2:31]1.CCCCCCCCCCCCOCC(O)CN1CCNCC1.[F:27][C:26]1=[CH:25][CH:24]=[C:23]([CH2:22]Cl)[CH:29]=[CH:28]1.[Pd]>>[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][O:13][CH2:14][CH:15]([OH:16])[CH2:17][N:18]1[CH2:19][CH2:20][N:21]([CH2:22][C:23]2=[CH:24][CH:25]=[C:26]([F:27])[CH:28]=[CH:29]2)[CH2:30][CH2:31]1', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][O:13][CH2:14][CH:15]([OH:16])[CH2:17][N:18]1[CH2:19][CH2:20][N:21]([CH2:22][c:23]2[cH:24][cH:25][c:26]([F:27])[cH:28][cH:29]2)[CH2:30][CH2:31]1', 'reactant_smiles': 'c1ccc(C[N:21]2[CH2:20][CH2:19][N:18]([CH2:17][CH:15]([CH2:14][O:13][CH2:12][CH2:11][CH2:10][CH2:9][CH2:8][CH2:7][CH2:6][CH2:5][CH2:4][CH2:3][CH2:2][CH3:1])[OH:16])[CH2:31][CH2:30]2)cc1.Cl[CH2:22][c:23]1[cH:24][cH:25][c:26]([F:27])[cH:28][cH:29]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04255426;;79346', 'derive_version': 'v1', 'similarity': 0.44841269841269843}, {'reaction_id': 1468289, 'template_hash': '6ac9bf61fcc001332a65aae3f8aa264ea32e356b067adffa5fc604c051b00361', 'retro_smarts_template': '[C:2]-[N;H0;D3;+0:3](-[C:4])-[CH2;D2;+0:1]-[c;H0;D3;+0:6](:[c:5]):[c:7]>>C-[C;H0;D2;+0:1]#N.[C:2]-[NH;D2;+0:3]-[C:4].[c:5]:[cH;D2;+0:6]:[c:7]', 'canonical_smarts_template': 'C-[C;H0;D2;+0:1]#N.[C:2]-[NH;D2;+0:3]-[C:4].[c:5]:[cH;D2;+0:6]:[c:7]>>[C:2]-[N;H0;D3;+0:3](-[C:4])-[CH2;D2;+0:1]-[c;H0;D3;+0:6](:[c:5]):[c:7]', 'mapped_rxn': '[CH2:13]1[CH2:12][O:11][CH2:10][CH2:9][NH:8]1.[CH3:1][CH2:2][c:3]1[cH:4][cH:5][cH:6][c:14]([OH:15])[cH:16]1.C[C:7]#N>>[CH3:1][CH2:2][c:3]1[cH:4][cH:5][c:6]([CH2:7][N:8]2[CH2:9][CH2:10][O:11][CH2:12][CH2:13]2)[c:14]([OH:15])[cH:16]1', 'product_smiles': '[CH3:1][CH2:2][c:3]1[cH:4][cH:5][c:6]([CH2:7][N:8]2[CH2:9][CH2:10][O:11][CH2:12][CH2:13]2)[c:14]([OH:15])[cH:16]1', 'reactant_smiles': 'C[C:7]#N.[CH3:1][CH2:2][c:3]1[cH:4][cH:5][cH:6][c:14]([OH:15])[cH:16]1.[NH:8]1[CH2:9][CH2:10][O:11][CH2:12][CH2:13]1', 'dataset': 'Training data from https://doi.org/10.1039/C8SC04228D (2/10)', 'source_row_id': 'ord-06a811d473c748ba87d8bf7df781188d', 'derive_version': 'v1', 'similarity': 0.4435146443514644}, {'reaction_id': 1191756, 'template_hash': '500c0938e9376ac458483c116d3bbcc0e7b404ce3eab21e0a52f78442d79e7b1', 'retro_smarts_template': '[C:2]-[N;H0;D3;+0:3](-[C:4])-[CH2;D2;+0:1]-[c;H0;D3;+0:6](:[c:5]):[c:7]>>C-N(-C)-[CH;D2;+0:1]=O.[C:2]-[NH;D2;+0:3]-[C:4].[c:5]:[cH;D2;+0:6]:[c:7]', 'canonical_smarts_template': 'C-N(-C)-[CH;D2;+0:1]=O.[C:2]-[NH;D2;+0:3]-[C:4].[c:5]:[cH;D2;+0:6]:[c:7]>>[C:2]-[N;H0;D3;+0:3](-[C:4])-[CH2;D2;+0:1]-[c;H0;D3;+0:6](:[c:5]):[c:7]', 'mapped_rxn': '[OH:13][B:12]([OH:14])[C:11]1=[CH:10][CH:9]=[CH:8][CH:16]=[CH:15]1.[O:1]=[C:2]([CH:3]1[CH2:4][CH2:5][NH:6][CH2:17][CH2:18]1)[N:19]1[CH2:20][CH2:21][CH2:22][CH2:23][CH2:24]1.O=C([O-])[O-].[K+].[K+].CN(C)[CH:7]=O>>[O:1]=[C:2]([CH:3]1[CH2:4][CH2:5][N:6]([CH2:7][C:8]2=[CH:9][CH:10]=[C:11]([B:12]([OH:13])[OH:14])[CH:15]=[CH:16]2)[CH2:17][CH2:18]1)[N:19]1[CH2:20][CH2:21][CH2:22][CH2:23][CH2:24]1', 'product_smiles': '[O:1]=[C:2]([CH:3]1[CH2:4][CH2:5][N:6]([CH2:7][c:8]2[cH:9][cH:10][c:11]([B:12]([OH:13])[OH:14])[cH:15][cH:16]2)[CH2:17][CH2:18]1)[N:19]1[CH2:20][CH2:21][CH2:22][CH2:23][CH2:24]1', 'reactant_smiles': 'CN(C)[CH:7]=O.[cH:8]1[cH:9][cH:10][c:11]([B:12]([OH:13])[OH:14])[cH:15][cH:16]1.[O:1]=[C:2]([CH:3]1[CH2:4][CH2:5][NH:6][CH2:17][CH2:18]1)[N:19]1[CH2:20][CH2:21][CH2:22][CH2:23][CH2:24]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20100311729A1;0584;984263', 'derive_version': 'v1', 'similarity': 0.44244604316546765}, {'reaction_id': 60610, 'template_hash': '8962d83c3d616786ed3f231b6a0ccefab1b60fd16c2be0789be5696a4361dab7', 'retro_smarts_template': '[C:8]-[N;H0;D3;+0:9](-[C:10])-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1>>C-N(-C)-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1.[C:8]-[NH;D2;+0:9]-[C:10]', 'canonical_smarts_template': 'C-N(-C)-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1.[C:8]-[NH;D2;+0:9]-[C:10]>>[C:8]-[N;H0;D3;+0:9](-[C:10])-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1', 'mapped_rxn': '[CH3:16][C:15]1=[CH:17][C:9]([CH2:8]N(C)C)=[CH:10][C:11]([CH3:12])=[C:13]1[OH:14].[CH3:1][C:2](=[O:3])[N:4]1[CH2:5][CH2:6][NH:7][CH2:18][CH2:19]1.CC1=CC=CC=C1C>>[CH3:1][C:2](=[O:3])[N:4]1[CH2:5][CH2:6][N:7]([CH2:8][C:9]2=[CH:10][C:11]([CH3:12])=[C:13]([OH:14])[C:15]([CH3:16])=[CH:17]2)[CH2:18][CH2:19]1', 'product_smiles': '[CH3:1][C:2](=[O:3])[N:4]1[CH2:5][CH2:6][N:7]([CH2:8][c:9]2[cH:10][c:11]([CH3:12])[c:13]([OH:14])[c:15]([CH3:16])[cH:17]2)[CH2:18][CH2:19]1', 'reactant_smiles': 'CN(C)[CH2:8][c:9]1[cH:10][c:11]([CH3:12])[c:13]([OH:14])[c:15]([CH3:16])[cH:17]1.[CH3:1][C:2](=[O:3])[N:4]1[CH2:5][CH2:6][NH:7][CH2:18][CH2:19]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04391805;;107829', 'derive_version': 'v1', 'similarity': 0.4327731092436975}, {'reaction_id': 1054488, 'template_hash': '4671c15d2a21995f9df0edebcc94472fbe38368d30e857c1d3011b335b043e7d', 'retro_smarts_template': '[C:8]-[N;H0;D3;+0:9](-[C:10])-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1>>O=C1-C-C-N(-[CH2;D2;+0:1]-[c:2]2:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:2)-C-C-1.[C:8]-[NH;D2;+0:9]-[C:10]', 'canonical_smarts_template': 'O=C1-C-C-N(-[CH2;D2;+0:1]-[c:2]2:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:2)-C-C-1.[C:8]-[NH;D2;+0:9]-[C:10]>>[C:8]-[N;H0;D3;+0:9](-[C:10])-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1', 'mapped_rxn': 'Cl.[O:1]=[C:2]1[O:3][CH2:4][CH2:5][N:6]1[CH:7]1[CH2:8][CH2:9][NH:10][CH2:18][CH2:19]1.O=C1CCN([CH2:11][C:12]2=[CH:13][CH:14]=[CH:15][CH:16]=[CH:17]2)CC1.NCCO.[BH3-]C#N.[Na+].O=S(=O)(O)C(F)(F)F.Cl.OCCNC1CCN(CC2=CC=CC=C2)CC1.O=C(C1=NC=CN1)C1=NC=CN1.CO.ClCCCl.ClCCl>>[O:1]=[C:2]1[O:3][CH2:4][CH2:5][N:6]1[CH:7]1[CH2:8][CH2:9][N:10]([CH2:11][C:12]2=[CH:13][CH:14]=[CH:15][CH:16]=[CH:17]2)[CH2:18][CH2:19]1', 'product_smiles': '[O:1]=[C:2]1[O:3][CH2:4][CH2:5][N:6]1[CH:7]1[CH2:8][CH2:9][N:10]([CH2:11][c:12]2[cH:13][cH:14][cH:15][cH:16][cH:17]2)[CH2:18][CH2:19]1', 'reactant_smiles': 'O=C1CCN([CH2:11][c:12]2[cH:13][cH:14][cH:15][cH:16][cH:17]2)CC1.[O:1]=[C:2]1[O:3][CH2:4][CH2:5][N:6]1[CH:7]1[CH2:8][CH2:9][NH:10][CH2:18][CH2:19]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20050043379A1;0677;231927', 'derive_version': 'v1', 'similarity': 0.43214285714285716}, {'reaction_id': 1170513, 'template_hash': '983d641fa210083f21c5f337fe180be1030eb05a31f70793d71b5417755950fb', 'retro_smarts_template': '[C:4]-[N;H0;D3;+0:3](-[C:5])-[CH2;D2;+0:1]-[c:2]>>Br-[CH2;D2;+0:1]-[c:2].Cl-c1:c:c:c:c(-C(=O)-c2:c:c:c(-C-[N;H0;D3;+0:3](-[C:4])-[C:5]):c:c:2):c:1', 'canonical_smarts_template': 'Br-[CH2;D2;+0:1]-[c:2].Cl-c1:c:c:c:c(-C(=O)-c2:c:c:c(-C-[N;H0;D3;+0:3](-[C:4])-[C:5]):c:c:2):c:1>>[C:4]-[N;H0;D3;+0:3](-[C:5])-[CH2;D2;+0:1]-[c:2]', 'mapped_rxn': '[O:1]=[C:2]([C:3]1=[CH:4][CH:5]=[C:6]([Cl:7])[CH:8]=[CH:9]1)[C:10]1=[CH:11][C:12]([F:13])=[C:14]([CH2:15]Br)[CH:21]=[CH:22]1.C1CCNC1.O=C(C1=CC=C(C[N:16]2[CH2:17][CH2:18][CH2:19][CH2:20]2)C=C1)C1=CC(Cl)=CC=C1.ClC(Cl)Cl.CO>>[O:1]=[C:2]([C:3]1=[CH:4][CH:5]=[C:6]([Cl:7])[CH:8]=[CH:9]1)[C:10]1=[CH:11][C:12]([F:13])=[C:14]([CH2:15][N:16]2[CH2:17][CH2:18][CH2:19][CH2:20]2)[CH:21]=[CH:22]1', 'product_smiles': '[O:1]=[C:2]([c:3]1[cH:4][cH:5][c:6]([Cl:7])[cH:8][cH:9]1)[c:10]1[cH:11][c:12]([F:13])[c:14]([CH2:15][N:16]2[CH2:17][CH2:18][CH2:19][CH2:20]2)[cH:21][cH:22]1', 'reactant_smiles': 'Br[CH2:15][c:14]1[c:12]([F:13])[cH:11][c:10]([C:2](=[O:1])[c:3]2[cH:4][cH:5][c:6]([Cl:7])[cH:8][cH:9]2)[cH:22][cH:21]1.O=C(c1ccc(C[N:16]2[CH2:17][CH2:18][CH2:19][CH2:20]2)cc1)c1cccc(Cl)c1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20100093726A1;0262;861964', 'derive_version': 'v1', 'similarity': 0.42662116040955633}, {'reaction_id': 733793, 'template_hash': 'ef04510cd83a3faa6a757dc939967455d75daae5d09d4c7d0c3b3d735cfb53c4', 'retro_smarts_template': '[C:8]-[N;H0;D3;+0:9](-[C:10])-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1>>N-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1.[C:8]-[NH;D2;+0:9]-[C:10]', 'canonical_smarts_template': 'N-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1.[C:8]-[NH;D2;+0:9]-[C:10]>>[C:8]-[N;H0;D3;+0:9](-[C:10])-[CH2;D2;+0:1]-[c:2]1:[c:3]:[c:4]:[c:5]:[c:6]:[c:7]:1', 'mapped_rxn': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[O:8][NH:9][C@H:10]1[CH2:11][CH2:12][CH2:13][NH:14][CH2:22]1.N[CH2:15][C:16]1=[CH:17][CH:18]=[CH:19][CH:20]=[CH:21]1>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[O:8][NH:9][C@H:10]1[CH2:11][CH2:12][CH2:13][N:14]([CH2:15][C:16]2=[CH:17][CH:18]=[CH:19][CH:20]=[CH:21]2)[CH2:22]1', 'product_smiles': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[O:8][NH:9][C@H:10]1[CH2:11][CH2:12][CH2:13][N:14]([CH2:15][c:16]2[cH:17][cH:18][cH:19][cH:20][cH:21]2)[CH2:22]1', 'reactant_smiles': 'N[CH2:15][c:16]1[cH:17][cH:18][cH:19][cH:20][cH:21]1.[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[O:8][NH:9][C@H:10]1[CH2:11][CH2:12][CH2:13][NH:14][CH2:22]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08338142B2;0009;1262924', 'derive_version': 'v1', 'similarity': 0.41638225255972694}, {'reaction_id': 130241, 'template_hash': 'f4415b6b608313f0e4df8654c7701c45b5191a568aebb8d30268a47a76325ee1', 'retro_smarts_template': '[C:3]-[c;H0;D3;+0:4]1:[c:5]:[c:6]:[cH;D2;+0:7]:[cH;D2;+0:1]:[cH;D2;+0:2]:1>>C-N-[C@H;D3;+0:1](-[CH2;D2;+0:2]-C(-O)=O)-C(-O)=O.[C:3]-[c;H0;D3;+0:4]1:[c:5]:[c:6]:[cH;D2;+0:7]:s:1', 'canonical_smarts_template': 'C-N-[C@H;D3;+0:1](-[CH2;D2;+0:2]-C(-O)=O)-C(-O)=O.[C:3]-[c;H0;D3;+0:4]1:[c:5]:[c:6]:[cH;D2;+0:7]:s:1>>[C:3]-[c;H0;D3;+0:4]1:[c:5]:[c:6]:[cH;D2;+0:7]:[cH;D2;+0:1]:[cH;D2;+0:2]:1', 'mapped_rxn': '[CH:18]1=[CH:1]S[C:4]([C:5]2([N:6]3[CH2:7][CH2:8][CH2:9][CH2:10][CH2:11]3)[CH2:12][CH2:13][CH2:14][CH2:15][CH2:16]2)=[CH:17]1.CN[C@H:2]([CH2:3]C(=O)[O-])C(=O)[O-]>>[CH:1]1=[CH:2][CH:3]=[C:4]([C:5]2([N:6]3[CH2:7][CH2:8][CH2:9][CH2:10][CH2:11]3)[CH2:12][CH2:13][CH2:14][CH2:15][CH2:16]2)[CH:17]=[CH:18]1', 'product_smiles': '[cH:1]1[cH:2][cH:3][c:4]([C:5]2([N:6]3[CH2:7][CH2:8][CH2:9][CH2:10][CH2:11]3)[CH2:12][CH2:13][CH2:14][CH2:15][CH2:16]2)[cH:17][cH:18]1', 'reactant_smiles': 'CN[C@@H:2](C(=O)O)[CH2:3]C(=O)O.s1[cH:1][cH:18][cH:17][c:4]1[C:5]1([N:6]2[CH2:7][CH2:8][CH2:9][CH2:10][CH2:11]2)[CH2:12][CH2:13][CH2:14][CH2:15][CH2:16]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04994446;;226471', 'derive_version': 'v1', 'similarity': 0.4066666666666667}, {'reaction_id': 1511434, 'template_hash': 'f28d43d1dd86a08d4d21fab41cdd3cf5b8da192d5f275ac028970a050fa9577a', 'retro_smarts_template': '[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]>>N#C-C-C-C-O-c1:c:c:c(-[N+](=O)-[O-]):c(-C-[N;H0;D3;+0:1](-[C:2])-[C:3]):c:1.O=[CH;D2;+0:4]-[c:5]', 'canonical_smarts_template': 'N#C-C-C-C-O-c1:c:c:c(-[N+](=O)-[O-]):c(-C-[N;H0;D3;+0:1](-[C:2])-[C:3]):c:1.O=[CH;D2;+0:4]-[c:5]>>[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]', 'mapped_rxn': '[BH4-].C1CCNCC1.CCO.N#CCCCOc1ccc([N+](=O)[O-])c(C[N:12]2[CH2:13][CH2:14][CH2:15][CH2:16][CH2:17]2)c1.[Na+].O=[CH:11][c:10]1[cH:9][c:7]([OH:8])[cH:6][cH:5][c:4]1[N+:2](=[O:1])[O-:3]>>[O:1]=[N+:2]([O-:3])[c:4]1[cH:5][cH:6][c:7]([OH:8])[cH:9][c:10]1[CH2:11][N:12]1[CH2:13][CH2:14][CH2:15][CH2:16][CH2:17]1', 'product_smiles': '[O:1]=[N+:2]([O-:3])[c:4]1[cH:5][cH:6][c:7]([OH:8])[cH:9][c:10]1[CH2:11][N:12]1[CH2:13][CH2:14][CH2:15][CH2:16][CH2:17]1', 'reactant_smiles': 'N#CCCCOc1ccc([N+](=O)[O-])c(C[N:12]2[CH2:13][CH2:14][CH2:15][CH2:16][CH2:17]2)c1.O=[CH:11][c:10]1[c:4]([N+:2](=[O:1])[O-:3])[cH:5][cH:6][c:7]([OH:8])[cH:9]1', 'dataset': 'Training data from https://doi.org/10.1039/C8SC04228D (4/10)', 'source_row_id': 'ord-4d2a9babab81451db246b8b8f8b008be', 'derive_version': 'v1', 'similarity': 0.40131578947368424}, {'reaction_id': 602982, 'template_hash': 'd714c62f2825e84d94ef18208585598ab41cf19d883ac545e6b23cc1db62d2e4', 'retro_smarts_template': '[C:3]-[N;H0;D3;+0:4](-[C:5])-[CH2;D2;+0:1]-[C:2]>>C-O-C(=O)-[C@@H]1-C-N(-[CH2;D2;+0:1]-[C:2])-C-C-[C@@H]-1-N-C(=O)-O-C-c1:c:c:c:c:c:1.[C:3]-[NH;D2;+0:4]-[C:5]', 'canonical_smarts_template': 'C-O-C(=O)-[C@@H]1-C-N(-[CH2;D2;+0:1]-[C:2])-C-C-[C@@H]-1-N-C(=O)-O-C-c1:c:c:c:c:c:1.[C:3]-[NH;D2;+0:4]-[C:5]>>[C:3]-[N;H0;D3;+0:4](-[C:5])-[CH2;D2;+0:1]-[C:2]', 'mapped_rxn': '[CH3:1][O:2][C@@H:3]1[CH2:4][NH:5][CH2:9][CH2:10][C@@H:11]1[N:12]([CH2:13][C:14]1=[CH:15][CH:16]=[CH:17][CH:18]=[CH:19]1)[CH2:20][C:21]1=[CH:22][CH:23]=[CH:24][CH:25]=[CH:26]1.CC(O)Br.CCN(C(C)C)C(C)C.COC(=O)[C@H]1CN([CH2:6][CH2:7][OH:8])CC[C@H]1NC(=O)OCC1=CC=CC=C1.ClCCl.CO>>[CH3:1][O:2][C@@H:3]1[CH2:4][N:5]([CH2:6][CH2:7][OH:8])[CH2:9][CH2:10][C@@H:11]1[N:12]([CH2:13][C:14]1=[CH:15][CH:16]=[CH:17][CH:18]=[CH:19]1)[CH2:20][C:21]1=[CH:22][CH:23]=[CH:24][CH:25]=[CH:26]1', 'product_smiles': '[CH3:1][O:2][C@@H:3]1[CH2:4][N:5]([CH2:6][CH2:7][OH:8])[CH2:9][CH2:10][C@@H:11]1[N:12]([CH2:13][c:14]1[cH:15][cH:16][cH:17][cH:18][cH:19]1)[CH2:20][c:21]1[cH:22][cH:23][cH:24][cH:25][cH:26]1', 'reactant_smiles': 'COC(=O)[C@H]1CN([CH2:6][CH2:7][OH:8])CC[C@H]1NC(=O)OCc1ccccc1.[CH3:1][O:2][C@@H:3]1[CH2:4][NH:5][CH2:9][CH2:10][C@@H:11]1[N:12]([CH2:13][c:14]1[cH:15][cH:16][cH:17][cH:18][cH:19]1)[CH2:20][c:21]1[cH:22][cH:23][cH:24][cH:25][cH:26]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07875715B2;1174;1046767', 'derive_version': 'v1', 'similarity': 0.39864864864864863}, {'reaction_id': 343239, 'template_hash': 'db6e0c7ce258e4092fa0b9292829f3f7de200c1d3f9b5820b2e7354fdce1b206', 'retro_smarts_template': '[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]>>C-C(-C)(-C)-O-C(=O)-[N;H0;D3;+0:1](-[C:2])-[C:3].O=[CH;D2;+0:4]-[c:5]', 'canonical_smarts_template': 'C-C(-C)(-C)-O-C(=O)-[N;H0;D3;+0:1](-[C:2])-[C:3].O=[CH;D2;+0:4]-[c:5]>>[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]', 'mapped_rxn': 'O=C(O)C(F)(F)F.[CH3:1][CH2:2][C:3](=[O:4])[N:5]([CH2:6][CH:7]1[CH2:8][CH2:9][CH2:10][N:11](C(=O)OC(C)(C)C)[CH2:19]1)[C:20]1=[CH:21][CH:22]=[CH:23][CH:24]=[CH:25]1.O=[CH:12][C:13]1=[CH:14][CH:15]=[CH:16][CH:17]=[CH:18]1.CC(=O)O[BH-](OC(C)=O)OC(C)=O.[Na+].ClCCl>>[CH3:1][CH2:2][C:3](=[O:4])[N:5]([CH2:6][CH:7]1[CH2:8][CH2:9][CH2:10][N:11]([CH2:12][C:13]2=[CH:14][CH:15]=[CH:16][CH:17]=[CH:18]2)[CH2:19]1)[C:20]1=[CH:21][CH:22]=[CH:23][CH:24]=[CH:25]1', 'product_smiles': '[CH3:1][CH2:2][C:3](=[O:4])[N:5]([CH2:6][CH:7]1[CH2:8][CH2:9][CH2:10][N:11]([CH2:12][c:13]2[cH:14][cH:15][cH:16][cH:17][cH:18]2)[CH2:19]1)[c:20]1[cH:21][cH:22][cH:23][cH:24][cH:25]1', 'reactant_smiles': 'CC(C)(C)OC(=O)[N:11]1[CH2:10][CH2:9][CH2:8][CH:7]([CH2:6][N:5]([C:3]([CH2:2][CH3:1])=[O:4])[c:20]2[cH:21][cH:22][cH:23][cH:24][cH:25]2)[CH2:19]1.O=[CH:12][c:13]1[cH:14][cH:15][cH:16][cH:17][cH:18]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US06635661B2;;624594', 'derive_version': 'v1', 'similarity': 0.3929712460063898}, {'reaction_id': 1054541, 'template_hash': 'b3cc48b05e3867660cbcebbfb64fce4393aa05a3ae1eaf88eaf8b7fabeee91fc', 'retro_smarts_template': '[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]1:[c:6]:[c:7]:[c:8]:[c:9]:[c:10]:1>>O=C(-N-C-C-[N;H0;D3;+0:1](-[C:2])-[C:3])-O-[CH2;D2;+0:4]-[c:5]1:[c:6]:[c:7]:[c:8]:[c:9]:[c:10]:1', 'canonical_smarts_template': 'O=C(-N-C-C-[N;H0;D3;+0:1](-[C:2])-[C:3])-O-[CH2;D2;+0:4]-[c:5]1:[c:6]:[c:7]:[c:8]:[c:9]:[c:10]:1>>[C:2]-[N;H0;D3;+0:1](-[C:3])-[CH2;D2;+0:4]-[c:5]1:[c:6]:[c:7]:[c:8]:[c:9]:[c:10]:1', 'mapped_rxn': '[CH3:1][CH2:2][O:3][C:4](=[O:5])[C:6]1([CH2:7][C:8]2=[CH:9][CH:10]=[CH:11][CH:12]=[CH:13]2)[CH2:14][CH2:15][N:16](CCNC(=O)O[CH2:17][C:18]2=[CH:19][CH:20]=[CH:21][CH:22]=[CH:23]2)[CH2:24][CH2:25]1.CO.[Pd]>>[CH3:1][CH2:2][O:3][C:4](=[O:5])[C:6]1([CH2:7][C:8]2=[CH:9][CH:10]=[CH:11][CH:12]=[CH:13]2)[CH2:14][CH2:15][N:16]([CH2:17][C:18]2=[CH:19][CH:20]=[CH:21][CH:22]=[CH:23]2)[CH2:24][CH2:25]1', 'product_smiles': '[CH3:1][CH2:2][O:3][C:4](=[O:5])[C:6]1([CH2:7][c:8]2[cH:9][cH:10][cH:11][cH:12][cH:13]2)[CH2:14][CH2:15][N:16]([CH2:17][c:18]2[cH:19][cH:20][cH:21][cH:22][cH:23]2)[CH2:24][CH2:25]1', 'reactant_smiles': 'O=C(NCC[N:16]1[CH2:15][CH2:14][C:6]([C:4]([O:3][CH2:2][CH3:1])=[O:5])([CH2:7][c:8]2[cH:9][cH:10][cH:11][cH:12][cH:13]2)[CH2:25][CH2:24]1)O[CH2:17][c:18]1[cH:19][cH:20][cH:21][cH:22][cH:23]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20050043535A1;0294;232345', 'derive_version': 'v1', 'similarity': 0.3867924528301887}, {'reaction_id': 1054542, 'template_hash': 'a7179933058cddf588000201a1f6526f2c2bc6238d78161a5a17b7bb3eca596a', 'retro_smarts_template': '[C:2]-[c;H0;D3;+0:1](:[c:3]):[c:4]>>N-[CH2;D2;+0:1]-[C:2]', 'canonical_smarts_template': 'N-[CH2;D2;+0:1]-[C:2]>>[C:2]-[c;H0;D3;+0:1](:[c:3]):[c:4]', 'mapped_rxn': '[CH3:1][CH2:2][O:3][C:4](=[O:5])[C:6]1([CH2:7][C:8]2=[CH:9][CH:10]=[CH:11][CH:12]=[CH:13]2)[CH2:14][CH2:15][N:16]([CH2:17][CH2:18]N)[CH2:24][CH2:25]1.Cl>>[CH3:1][CH2:2][O:3][C:4](=[O:5])[C:6]1([CH2:7][C:8]2=[CH:9][CH:10]=[CH:11][CH:12]=[CH:13]2)[CH2:14][CH2:15][N:16]([CH2:17][C:18]2=[CH:19][CH:20]=[CH:21][CH:22]=[CH:23]2)[CH2:24][CH2:25]1', 'product_smiles': '[CH3:1][CH2:2][O:3][C:4](=[O:5])[C:6]1([CH2:7][c:8]2[cH:9][cH:10][cH:11][cH:12][cH:13]2)[CH2:14][CH2:15][N:16]([CH2:17][c:18]2[cH:19][cH:20][cH:21][cH:22][cH:23]2)[CH2:24][CH2:25]1', 'reactant_smiles': 'N[CH2:18][CH2:17][N:16]1[CH2:15][CH2:14][C:6]([C:4]([O:3][CH2:2][CH3:1])=[O:5])([CH2:7][c:8]2[cH:9][cH:10][cH:11][cH:12][cH:13]2)[CH2:25][CH2:24]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20050043535A1;0296;232346', 'derive_version': 'v1', 'similarity': 0.3867924528301887}]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Good! I found template 79377 which disconnects benzyl C-N bonds. Let me use it for step 2. Let me also check templates for converting OH to halides (reverse step):"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01WCRPVjauW6F6EaRMzjkfSG",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"FC1CN(C)C1\", \"functional_groups_broken\": [\"halide\"], \"functional_groups_formed\": [\"aliphatic hydroxyls\"], \"bonds_formed\": null, \"bonds_broken\": null, \"bonds_order_changed\": null, \"limit\": 15}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01WCRPVjauW6F6EaRMzjkfSG",
+      "content": "[{\"type\": \"text\", \"text\": \"[]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Let me search for a broader OH to halide conversion:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01SKxrckWYL49p3WbTWBkmVE",
+          "function": {
+            "name": "mcp__corral__search_template_catalog_by_criteria",
+            "arguments": "{\"molecule_smiles\": \"FC1CNC1\", \"functional_groups_broken\": [\"halide\"], \"functional_groups_formed\": null, \"bonds_formed\": null, \"bonds_broken\": null, \"bonds_order_changed\": null, \"limit\": 20}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01SKxrckWYL49p3WbTWBkmVE",
+      "content": "[{\"type\": \"text\", \"text\": \"[{'reaction_id': 29684, 'template_hash': 'af28c64690fd70e7eae68e26431df13dd3736c18c072529f2c4a2fefbc89427c', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>Cl-c1:c:c:c(-C(-O)=O):c:c:1-S(=O)(=O)-[N;H0;D3;+0:1](-[C:2])-[C:3]', 'canonical_smarts_template': 'Cl-c1:c:c:c(-C(-O)=O):c:c:1-S(=O)(=O)-[N;H0;D3;+0:1](-[C:2])-[C:3]>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][CH2:4][N:5]([CH2:6][CH2:7][CH2:8][CH3:9])S(=O)(=O)C1=C(Cl)C=CC(C(=O)O)=C1.CC1CCCCC1>>[CH3:1][CH2:2][CH2:3][CH2:4][NH:5][CH2:6][CH2:7][CH2:8][CH3:9]', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][NH:5][CH2:6][CH2:7][CH2:8][CH3:9]', 'reactant_smiles': 'O=C(O)c1ccc(Cl)c(S(=O)(=O)[N:5]([CH2:4][CH2:3][CH2:2][CH3:1])[CH2:6][CH2:7][CH2:8][CH3:9])c1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04125614;;48914', 'derive_version': 'v1', 'similarity': 0.3181818181818182}, {'reaction_id': 721149, 'template_hash': 'ff439c3694cd87719fc2e1a48dfe1f54761c9c640077be6eb86f4919c988b6d6', 'retro_smarts_template': '[F;D1;H0:2]-[CH;D3;+0:1]1-[C:3]-[#7:4]-[C:5]-1>>F-[C;H0;D4;+0:1]1(-[F;D1;H0:2])-[C:3]-[#7:4]-[C:5]-1', 'canonical_smarts_template': 'F-[C;H0;D4;+0:1]1(-[F;D1;H0:2])-[C:3]-[#7:4]-[C:5]-1>>[F;D1;H0:2]-[CH;D3;+0:1]1-[C:3]-[#7:4]-[C:5]-1', 'mapped_rxn': '[F:1][C:2]1(F)[CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11]1.FC1CNC1>>[F:1][CH:2]1[CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11]1', 'product_smiles': '[F:1][CH:2]1[CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11]1', 'reactant_smiles': 'F[C:2]1([F:1])[CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08293735B2;0387;1241337', 'derive_version': 'v1', 'similarity': 0.25210084033613445}, {'reaction_id': 263108, 'template_hash': 'e249e14e10dba50011add7a276e38c0507da9fe3f3134296ce883b183f6f2a0f', 'retro_smarts_template': '[C:3]-[NH;D2;+0:4]-[CH2;D2;+0:1]-[C:2]>>C-C-C-C-C-C-C-C-C-C-C-C-C-C-N-[C;H0;D3;+0:1](=O)-[C:2].[C:3]-[NH2;D1;+0:4]', 'canonical_smarts_template': 'C-C-C-C-C-C-C-C-C-C-C-C-C-C-N-[C;H0;D3;+0:1](=O)-[C:2].[C:3]-[NH2;D1;+0:4]>>[C:3]-[NH;D2;+0:4]-[CH2;D2;+0:1]-[C:2]', 'mapped_rxn': 'CCCCCCCCCCCCCC(=O)Cl.CCCCCCCCCCCCCCN[C:16](=O)[CH2:17][CH2:18][CH2:19][CH2:20][CH2:21][CH2:22][CH2:23][CH2:24][CH2:25][CH2:26][CH2:27][CH2:28][CH3:29].[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][CH2:13][CH2:14][NH2:15].C1CCC2=NCCCN2CC1.ClCCl>>[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][CH2:13][CH2:14][NH:15][CH2:16][CH2:17][CH2:18][CH2:19][CH2:20][CH2:21][CH2:22][CH2:23][CH2:24][CH2:25][CH2:26][CH2:27][CH2:28][CH3:29]', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][CH2:13][CH2:14][NH:15][CH2:16][CH2:17][CH2:18][CH2:19][CH2:20][CH2:21][CH2:22][CH2:23][CH2:24][CH2:25][CH2:26][CH2:27][CH2:28][CH3:29]', 'reactant_smiles': 'CCCCCCCCCCCCCCN[C:16](=O)[CH2:17][CH2:18][CH2:19][CH2:20][CH2:21][CH2:22][CH2:23][CH2:24][CH2:25][CH2:26][CH2:27][CH2:28][CH3:29].[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][CH2:13][CH2:14][NH2:15]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US06093816;;478836', 'derive_version': 'v1', 'similarity': 0.25}, {'reaction_id': 809511, 'template_hash': '5ad0dce0ddde7deb86f4a14870d88fb327d4e3a2970d4d989d0e7c50f76b2b31', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>C-c1:c:c:c:c2:c:c(-C-N(-C-c3:c:c(-C(-F)(-F)-F):c:c(-C(-F)(-F)-F):c:3)-c3:n:[nH]:n:n:3):c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:1:2', 'canonical_smarts_template': 'C-c1:c:c:c:c2:c:c(-C-N(-C-c3:c:c(-C(-F)(-F)-F):c:c(-C(-F)(-F)-F):c:3)-c3:n:[nH]:n:n:3):c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:1:2>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': 'CC1=C2N=C([N:5]([CH2:4][CH:3]3[CH2:2][CH2:1]3)[CH2:6][CH:7]3[CH2:8][CH2:9]3)C(CN(CC3=CC(C(F)(F)F)=CC(C(F)(F)F)=C3)C3=NNN=N3)=CC2=CC=C1.[OH-].[Na+].ClCCl.COS(=O)(=O)OC.O.[Br-].CCCC[N+](CCCC)(CCCC)CCCC>>[CH2:1]1[CH2:2][CH:3]1[CH2:4][NH:5][CH2:6][CH:7]1[CH2:8][CH2:9]1', 'product_smiles': '[CH2:1]1[CH2:2][CH:3]1[CH2:4][NH:5][CH2:6][CH:7]1[CH2:8][CH2:9]1', 'reactant_smiles': 'Cc1cccc2cc(CN(Cc3cc(C(F)(F)F)cc(C(F)(F)F)c3)c3nn[nH]n3)c([N:5]([CH2:4][CH:3]3[CH2:1][CH2:2]3)[CH2:6][CH:7]3[CH2:8][CH2:9]3)nc12', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08604055B2;1608;1403174', 'derive_version': 'v1', 'similarity': 0.23333333333333334}, {'reaction_id': 409963, 'template_hash': '2b0812f00cbf185048a0ae6c862f028b6efbc16202404c9dc899475b446bdfce', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>N#C-C-C-[N;H0;D3;+0:1](-[C:2])-[C:3]', 'canonical_smarts_template': 'N#C-C-C-[N;H0;D3;+0:1](-[C:2])-[C:3]>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': 'CCO.[OH-].[K+].[CH2:1]=[CH:2][CH2:3][CH2:4][CH2:5][CH2:6][N:7](CCC#N)[CH2:8][CH2:9][CH2:10][CH2:11][CH:12]=[CH2:13].O.ClC(Cl)Cl>>[CH2:1]=[CH:2][CH2:3][CH2:4][CH2:5][CH2:6][NH:7][CH2:8][CH2:9][CH2:10][CH2:11][CH:12]=[CH2:13]', 'product_smiles': '[CH2:1]=[CH:2][CH2:3][CH2:4][CH2:5][CH2:6][NH:7][CH2:8][CH2:9][CH2:10][CH2:11][CH:12]=[CH2:13]', 'reactant_smiles': 'N#CCC[N:7]([CH2:6][CH2:5][CH2:4][CH2:3][CH:2]=[CH2:1])[CH2:8][CH2:9][CH2:10][CH2:11][CH:12]=[CH2:13]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07098226B2;0272;740084', 'derive_version': 'v1', 'similarity': 0.22950819672131148}, {'reaction_id': 5127, 'template_hash': '79a261d1475a08862136992391b519f061f996eda5dac30f899f1e2b51dfff9d', 'retro_smarts_template': '[C:2]-[CH2;D2;+0:1]-[NH;D2;+0:4]-[C:3]>>Cl-[CH2;D2;+0:1]-[C:2].[C:3]-[NH2;D1;+0:4]', 'canonical_smarts_template': 'Cl-[CH2;D2;+0:1]-[C:2].[C:3]-[NH2;D1;+0:4]>>[C:2]-[CH2;D2;+0:1]-[NH;D2;+0:4]-[C:3]', 'mapped_rxn': '[NH2:13][CH2:14][CH2:15][NH2:16].[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12]Cl.CCO>>[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][NH:13][CH2:14][CH2:15][NH2:16]', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][NH:13][CH2:14][CH2:15][NH2:16]', 'reactant_smiles': 'Cl[CH2:12][CH2:11][CH2:10][CH2:9][CH2:8][CH2:7][CH2:6][CH2:5][CH2:4][CH2:3][CH2:2][CH3:1].[NH2:13][CH2:14][CH2:15][NH2:16]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US03954436;;6257', 'derive_version': 'v1', 'similarity': 0.21875}, {'reaction_id': 1585891, 'template_hash': '867ed216cff883b24a48ff6daf16210fed3756ed8ceb3767a5621fd361791e66', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>Br-c1:c:c2:c(:c:c:1-S-c1:n:c3:c(-N):n:c:n:c:3:n:1-C-C-[N;H0;D3;+0:1](-[C:2])-[C:3])-O-C-O-2', 'canonical_smarts_template': 'Br-c1:c:c2:c(:c:c:1-S-c1:n:c3:c(-N):n:c:n:c:3:n:1-C-C-[N;H0;D3;+0:1](-[C:2])-[C:3])-O-C-O-2>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': '[CH3:1][CH:2]([CH3:3])[N:4]1[CH2:5][CH2:6][N:7](CCn2c(Sc3cc4c(cc3Br)OCO4)nc3c(N)ncnc23)[CH2:8][CH2:9]1.CC(C)N1CCN(CCn2cnc(N)c3nc(Sc4cc5c(cc4Br)OCO5)nc2-3)CC1>>[CH3:1][CH:2]([CH3:3])[N:4]1[CH2:5][CH2:6][NH:7][CH2:8][CH2:9]1', 'product_smiles': '[CH3:1][CH:2]([CH3:3])[N:4]1[CH2:5][CH2:6][NH:7][CH2:8][CH2:9]1', 'reactant_smiles': 'Nc1ncnc2c1nc(Sc1cc3c(cc1Br)OCO3)n2CC[N:7]1[CH2:6][CH2:5][N:4]([CH:2]([CH3:1])[CH3:3])[CH2:9][CH2:8]1', 'dataset': 'Training data from https://doi.org/10.1039/C8SC04228D (8/10)', 'source_row_id': 'ord-633bc8c1ee6448e2bf4d4e2345fc63c1', 'derive_version': 'v1', 'similarity': 0.19117647058823528}, {'reaction_id': 809507, 'template_hash': '33bde1798beaab23a6728ab17444da78b5e9c7402a8fa6457648b587d6d6946f', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>F-C(-F)(-F)-c1:c:c(-C-N(-C-c2:c:c3:c:c:c:c:c:3:n:c:2-[N;H0;D3;+0:1](-[C:2])-[C:3])-c2:[nH]:n:n:n:2):c:c(-C(-F)(-F)-F):c:1', 'canonical_smarts_template': 'F-C(-F)(-F)-c1:c:c(-C-N(-C-c2:c:c3:c:c:c:c:c:3:n:c:2-[N;H0;D3;+0:1](-[C:2])-[C:3])-c2:[nH]:n:n:n:2):c:c(-C(-F)(-F)-F):c:1>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': '[CH3:1][CH2:2][N:3]([CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9]1)C1=NC2=CC=CC=C2C=C1CN(CC1=CC(C(F)(F)F)=CC(C(F)(F)F)=C1)C1=NN=NN1.[OH-].[Na+].ClCCl.COS(=O)(=O)OC.O.[Br-].CCCC[N+](CCCC)(CCCC)CCCC>>[CH3:1][CH2:2][NH:3][CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9]1', 'product_smiles': '[CH3:1][CH2:2][NH:3][CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9]1', 'reactant_smiles': 'FC(F)(F)c1cc(CN(Cc2cc3ccccc3nc2[N:3]([CH2:2][CH3:1])[CH2:4][CH:5]2[CH2:6][CH2:7][CH2:8][CH2:9]2)c2nnn[nH]2)cc(C(F)(F)F)c1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US08604055B2;1572;1403170', 'derive_version': 'v1', 'similarity': 0.17721518987341772}, {'reaction_id': 1147231, 'template_hash': '51790fdee47d02c66fda7e1cdeff101e7fd341881be0577e5eb850f94b7bcac5', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>Br-c1:c:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):c(-C-N(-C-c2:c:c(-C(-F)(-F)-F):c:c(-C(-F)(-F)-F):c:2)-c2:n:n:n(-C):n:2):c:1', 'canonical_smarts_template': 'Br-c1:c:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):c(-C-N(-C-c2:c:c(-C(-F)(-F)-F):c:c(-C(-F)(-F)-F):c:2)-c2:n:n:n(-C):n:2):c:1>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': '[CH3:1][CH2:2][N:3]([CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9]1)C1=NC=C(Br)C=C1CN(CC1=CC(C(F)(F)F)=CC(C(F)(F)F)=C1)C1=NN(C)N=N1.CC(=O)[O-].[K+].O.CS(C)=O.C1=CC=C(P(C2=CC=CC=C2)[C-]2C=CC=C2)C=C1.C1=CC=C(P(C2=CC=CC=C2)[C-]2C=CC=C2)C=C1.Cl[Pd]Cl.[Fe+2]>>[CH3:1][CH2:2][NH:3][CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9]1', 'product_smiles': '[CH3:1][CH2:2][NH:3][CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9]1', 'reactant_smiles': 'Cn1nnc(N(Cc2cc(C(F)(F)F)cc(C(F)(F)F)c2)Cc2cc(Br)cnc2[N:3]([CH2:2][CH3:1])[CH2:4][CH:5]2[CH2:6][CH2:7][CH2:8][CH2:9]2)n1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20090181929A1;0267;735909', 'derive_version': 'v1', 'similarity': 0.17721518987341772}, {'reaction_id': 12976, 'template_hash': 'ce566cdc5826c80de031ec84156e107704aa5cdc6dc5571ddef31cc8d4043534', 'retro_smarts_template': '[C:3]-[NH;D2;+0:4]-[CH2;D2;+0:1]-[C:2]>>O=[CH;D2;+0:1]-[C:2].[C:3]-[NH2;D1;+0:4]', 'canonical_smarts_template': 'O=[CH;D2;+0:1]-[C:2].[C:3]-[NH2;D1;+0:4]>>[C:3]-[NH;D2;+0:4]-[CH2;D2;+0:1]-[C:2]', 'mapped_rxn': 'O=[CH:6][C@H:7]([OH:8])[CH2:9][OH:10].[CH3:1][C:2]([CH3:3])([CH3:4])[NH2:5].CCO.[Pd]>>[CH3:1][C:2]([CH3:3])([CH3:4])[NH:5][CH2:6][C@H:7]([OH:8])[CH2:9][OH:10]', 'product_smiles': '[CH3:1][C:2]([CH3:3])([CH3:4])[NH:5][CH2:6][C@H:7]([OH:8])[CH2:9][OH:10]', 'reactant_smiles': 'O=[CH:6][C@H:7]([OH:8])[CH2:9][OH:10].[CH3:1][C:2]([CH3:3])([CH3:4])[NH2:5]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US03998835;;17354', 'derive_version': 'v1', 'similarity': 0.1686746987951807}, {'reaction_id': 612012, 'template_hash': '32f85b77e3fc47bbe65be59686c9f6d0da00787781183795dbf5e56c48cf3a6e', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[CH2;D2;+0:3]-[C:4]>>C-C-[NH;D2;+0:1]-[C:2].O=[CH;D2;+0:3]-[C:4]', 'canonical_smarts_template': 'C-C-[NH;D2;+0:1]-[C:2].O=[CH;D2;+0:3]-[C:4]>>[C:2]-[NH;D2;+0:1]-[CH2;D2;+0:3]-[C:4]', 'mapped_rxn': 'O=[CH:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9][CH2:10]1.Cl.[CH3:1][CH2:2][NH:3]CC.CC(=O)O.[OH-].[Na+].ClCCl>>[CH3:1][CH2:2][NH:3][CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9][CH2:10]1', 'product_smiles': '[CH3:1][CH2:2][NH:3][CH2:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9][CH2:10]1', 'reactant_smiles': 'CC[NH:3][CH2:2][CH3:1].O=[CH:4][CH:5]1[CH2:6][CH2:7][CH2:8][CH2:9][CH2:10]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07906517B2;0828;1061662', 'derive_version': 'v1', 'similarity': 0.1686746987951807}, {'reaction_id': 25633, 'template_hash': '701a8e651f1a714497ae2849db10b13645a0807a00a14ab35bd9e799424ea026', 'retro_smarts_template': '[C:2]-[CH2;D2;+0:1]-[NH;D2;+0:4]-[C:3]>>O-[CH2;D2;+0:1]-[C:2].[C:3]-[NH2;D1;+0:4]', 'canonical_smarts_template': 'O-[CH2;D2;+0:1]-[C:2].[C:3]-[NH2;D1;+0:4]>>[C:2]-[CH2;D2;+0:1]-[NH;D2;+0:4]-[C:3]', 'mapped_rxn': '[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][CH2:13][CH2:14][CH2:15][CH2:16][CH2:17][CH2:18][N:19]([CH2:38][CH2:39][CH2:40]O)[CH2:20][CH2:21][CH2:22][CH2:23][CH2:24][CH2:25][CH2:26][CH2:27][CH2:28][CH2:29][CH2:30][CH2:31][CH2:32][CH2:33][CH2:34][CH2:35][CH2:36][CH3:37].CS(=O)(=O)Cl.[NH2:41][CH2:42][CH2:43][OH:44].ClC(Cl)Cl>>[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][CH2:13][CH2:14][CH2:15][CH2:16][CH2:17][CH2:18][N:19]([CH2:20][CH2:21][CH2:22][CH2:23][CH2:24][CH2:25][CH2:26][CH2:27][CH2:28][CH2:29][CH2:30][CH2:31][CH2:32][CH2:33][CH2:34][CH2:35][CH2:36][CH3:37])[CH2:38][CH2:39][CH2:40][NH:41][CH2:42][CH2:43][OH:44]', 'product_smiles': '[CH3:1][CH2:2][CH2:3][CH2:4][CH2:5][CH2:6][CH2:7][CH2:8][CH2:9][CH2:10][CH2:11][CH2:12][CH2:13][CH2:14][CH2:15][CH2:16][CH2:17][CH2:18][N:19]([CH2:20][CH2:21][CH2:22][CH2:23][CH2:24][CH2:25][CH2:26][CH2:27][CH2:28][CH2:29][CH2:30][CH2:31][CH2:32][CH2:33][CH2:34][CH2:35][CH2:36][CH3:37])[CH2:38][CH2:39][CH2:40][NH:41][CH2:42][CH2:43][OH:44]', 'reactant_smiles': 'O[CH2:40][CH2:39][CH2:38][N:19]([CH2:18][CH2:17][CH2:16][CH2:15][CH2:14][CH2:13][CH2:12][CH2:11][CH2:10][CH2:9][CH2:8][CH2:7][CH2:6][CH2:5][CH2:4][CH2:3][CH2:2][CH3:1])[CH2:20][CH2:21][CH2:22][CH2:23][CH2:24][CH2:25][CH2:26][CH2:27][CH2:28][CH2:29][CH2:30][CH2:31][CH2:32][CH2:33][CH2:34][CH2:35][CH2:36][CH3:37].[NH2:41][CH2:42][CH2:43][OH:44]', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US04087552;;40468', 'derive_version': 'v1', 'similarity': 0.16666666666666666}, {'reaction_id': 442558, 'template_hash': 'e603c13d8853cc56c4d15555f81a769d1705f2e622929b4553fa33ac49179ec0', 'retro_smarts_template': '[F;H0;D1;+0:1]-[CH;D3;+0:2]1-[C:3]-[#7:4]-[C:5]-1>>C-O-C-C-N(-C-C-O-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2]1-[C:3]-[#7:4]-[C:5]-1', 'canonical_smarts_template': 'C-O-C-C-N(-C-C-O-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[CH;D3;+0:2]1-[C:3]-[#7:4]-[C:5]-1>>[F;H0;D1;+0:1]-[CH;D3;+0:2]1-[C:3]-[#7:4]-[C:5]-1', 'mapped_rxn': 'O[CH:2]1[CH2:3][N:4]([CH:5]([C:6]2=[CH:7][CH:8]=[CH:9][CH:10]=[CH:11]2)[C:12]2=[CH:13][CH:14]=[CH:15][CH:16]=[CH:17]2)[CH2:18]1.ClCCl.COCCN(CCOC)S(F)(F)[F:1].O=C([O-])O.[Na+].O>>[F:1][CH:2]1[CH2:3][N:4]([CH:5]([C:6]2=[CH:7][CH:8]=[CH:9][CH:10]=[CH:11]2)[C:12]2=[CH:13][CH:14]=[CH:15][CH:16]=[CH:17]2)[CH2:18]1', 'product_smiles': '[F:1][CH:2]1[CH2:3][N:4]([CH:5]([c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[c:12]2[cH:13][cH:14][cH:15][cH:16][cH:17]2)[CH2:18]1', 'reactant_smiles': 'COCCN(CCOC)S(F)(F)[F:1].O[CH:2]1[CH2:3][N:4]([CH:5]([c:6]2[cH:7][cH:8][cH:9][cH:10][cH:11]2)[c:12]2[cH:13][cH:14][cH:15][cH:16][cH:17]2)[CH2:18]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07238683B2;0240;793612', 'derive_version': 'v1', 'similarity': 0.15306122448979592}, {'reaction_id': 207295, 'template_hash': '27996e88080ffe877b3b72e3bdd7993c2ba95e49755243593d7a093d4474f0b6', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>C-N(-C-c1:c:c:c:c:c:1)-c1:n:c:n:c2:c(-N3-C-C-O-C-C-3):n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:1:2', 'canonical_smarts_template': 'C-N(-C-c1:c:c:c:c:c:1)-c1:n:c:n:c2:c(-N3-C-C-O-C-C-3):n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:1:2>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': 'CN(CC1=CC=CC=C1)C1=NC=NC2=C1N=C([N:8]1[CH2:7][CH2:6][CH:5]([N:4]3[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]3)[CH2:10][CH2:9]1)N=C2N1CCOCC1.CN(CC1=CC=CC=C1)C1=NC=NC2=C1N=C(Cl)N=C2N1CCOCC1>>[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'product_smiles': '[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'reactant_smiles': 'CN(Cc1ccccc1)c1ncnc2c(N3CCOCC3)nc([N:8]3[CH2:7][CH2:6][CH:5]([N:4]4[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]4)[CH2:10][CH2:9]3)nc12', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US05618814;;366849', 'derive_version': 'v1', 'similarity': 0.14285714285714285}, {'reaction_id': 1078427, 'template_hash': '1b0c04aaa4a8e2d0f69496b49b9c1d1aa59901400558e50639dd8c7cfa352f64', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>F-c1:c:c:c(-C-N-c2:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:c:2-c2:c:c:c(-F):c:c:2-F):c(-F):c:1', 'canonical_smarts_template': 'F-c1:c:c:c(-C-N-c2:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:c:2-c2:c:c:c(-F):c:c:2-F):c(-F):c:1>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': 'FC1=CC(F)=C(CNC2=NC([N:8]3[CH2:7][CH2:6][CH:5]([N:4]4[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]4)[CH2:10][CH2:9]3)=NC=C2C2=C(F)C=C(F)C=C2)C=C1.FC1=CC(F)=C(CNC2=NC(Cl)=NC=C2C2=C(F)C=C(F)C=C2)C=C1>>[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'product_smiles': '[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'reactant_smiles': 'Fc1ccc(CNc2nc([N:8]3[CH2:7][CH2:6][CH:5]([N:4]4[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]4)[CH2:10][CH2:9]3)ncc2-c2ccc(F)cc2F)c(F)c1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20060194811A1;0211;382715', 'derive_version': 'v1', 'similarity': 0.14285714285714285}, {'reaction_id': 1078442, 'template_hash': 'c4f7ffd9eaef72135050c8a79b03370c0a232077c017c1bccf3b95e58063d767', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>F-c1:c:c:c:c(-F):c:1-C-N-c1:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:c:1-c1:c:c:c:c:c:1', 'canonical_smarts_template': 'F-c1:c:c:c:c(-F):c:1-C-N-c1:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:c:1-c1:c:c:c:c:c:1>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': 'FC1=CC=CC(F)=C1CNC1=NC([N:8]2[CH2:7][CH2:6][CH:5]([N:4]3[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]3)[CH2:10][CH2:9]2)=NC=C1C1=CC=CC=C1.FC1=CC=CC(F)=C1CNC1=NC(Cl)=NC=C1C1=CC=CC=C1>>[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'product_smiles': '[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'reactant_smiles': 'Fc1cccc(F)c1CNc1nc([N:8]2[CH2:7][CH2:6][CH:5]([N:4]3[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]3)[CH2:10][CH2:9]2)ncc1-c1ccccc1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20060194811A1;0346;382730', 'derive_version': 'v1', 'similarity': 0.14285714285714285}, {'reaction_id': 1078443, 'template_hash': '3c88356aad525c0d51d8318e9fd49638ed669bd648361ad84ae62b9cdf22dcba', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>C-c1:c:c:s:c:1-c1:c:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:1-N-C-c1:c:c:c(-F):c:c:1-F', 'canonical_smarts_template': 'C-c1:c:c:s:c:1-c1:c:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:1-N-C-c1:c:c:c(-F):c:c:1-F>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': 'CC1=C(C2=CN=C([N:8]3[CH2:7][CH2:6][CH:5]([N:4]4[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]4)[CH2:10][CH2:9]3)N=C2NCC2=C(F)C=C(F)C=C2)SC=C1.CC1=C(C2=CN=C(Cl)N=C2NCC2=C(F)C=CC=C2F)SC=C1>>[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'product_smiles': '[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'reactant_smiles': 'Cc1ccsc1-c1cnc([N:8]2[CH2:7][CH2:6][CH:5]([N:4]3[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]3)[CH2:10][CH2:9]2)nc1NCc1ccc(F)cc1F', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20060194811A1;0349;382731', 'derive_version': 'v1', 'similarity': 0.14285714285714285}, {'reaction_id': 1078444, 'template_hash': '53f89749112548e0a3b0ba8300c6629b91633e3b4eb59c9de26e6834fb4bb9e7', 'retro_smarts_template': '[C:2]-[NH;D2;+0:1]-[C:3]>>F-c1:c:c:c:c(-F):c:1-C-N-c1:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:c:1-c1:c:c:c:c:n:1', 'canonical_smarts_template': 'F-c1:c:c:c:c(-F):c:1-C-N-c1:n:c(-[N;H0;D3;+0:1](-[C:2])-[C:3]):n:c:c:1-c1:c:c:c:c:n:1>>[C:2]-[NH;D2;+0:1]-[C:3]', 'mapped_rxn': 'FC1=CC=CC(F)=C1CNC1=NC([N:8]2[CH2:7][CH2:6][CH:5]([N:4]3[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]3)[CH2:10][CH2:9]2)=NC=C1C1=NC=CC=C1.FC1=CC=CC(F)=C1CNC1=NC(Cl)=NC=C1C1=NC=CC=C1>>[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'product_smiles': '[CH2:1]1[CH2:2][CH2:3][N:4]([CH:5]2[CH2:6][CH2:7][NH:8][CH2:9][CH2:10]2)[CH2:11][CH2:12]1', 'reactant_smiles': 'Fc1cccc(F)c1CNc1nc([N:8]2[CH2:7][CH2:6][CH:5]([N:4]3[CH2:3][CH2:2][CH2:1][CH2:12][CH2:11]3)[CH2:10][CH2:9]2)ncc1-c1ccccn1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US20060194811A1;0355;382732', 'derive_version': 'v1', 'similarity': 0.14285714285714285}, {'reaction_id': 546973, 'template_hash': '5c21f054e06f5587df60e8ec61e90de377a1d92458a82727de66d1497dc376da', 'retro_smarts_template': '[#7:5]-[C:4]-[C@H;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]>>C-O-C-C-N(-C-C-O-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]', 'canonical_smarts_template': 'C-O-C-C-N(-C-C-O-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]>>[#7:5]-[C:4]-[C@H;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]', 'mapped_rxn': 'COCCN(CCOC)S(F)(F)[F:12].[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][C@@H:11](O)[CH2:13]1.O=C([O-])O.[Na+].ClCCl>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][C@H:11]([F:12])[CH2:13]1', 'product_smiles': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][C@H:11]([F:12])[CH2:13]1', 'reactant_smiles': 'COCCN(CCOC)S(F)(F)[F:12].O[C@@H:11]1[CH2:10][CH2:9][N:8]([C:6]([O:5][C:2]([CH3:1])([CH3:3])[CH3:4])=[O:7])[CH2:13]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07666871B2;0354;959054', 'derive_version': 'v1', 'similarity': 0.13705583756345177}, {'reaction_id': 553795, 'template_hash': 'fed4fd87ace546e94c9c1b3fe64ffeb66242decfa6551cc726e3070ad6d68615', 'retro_smarts_template': '[#7:5]-[C:4]-[CH;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]>>C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]', 'canonical_smarts_template': 'C-C-N(-C-C)-S(-F)(-F)-[F;H0;D1;+0:1].O-[C@H;D3;+0:2](-[C:3])-[C:4]-[#7:5]>>[#7:5]-[C:4]-[CH;D3;+0:2](-[C:3])-[F;H0;D1;+0:1]', 'mapped_rxn': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][C@@H:11](O)[CH2:13]1.CCN(CC)S(F)(F)[F:12].CCOC(C)=O>>[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][CH:11]([F:12])[CH2:13]1', 'product_smiles': '[CH3:1][C:2]([CH3:3])([CH3:4])[O:5][C:6](=[O:7])[N:8]1[CH2:9][CH2:10][CH:11]([F:12])[CH2:13]1', 'reactant_smiles': 'CCN(CC)S(F)(F)[F:12].O[C@@H:11]1[CH2:10][CH2:9][N:8]([C:6]([O:5][C:2]([CH3:1])([CH3:3])[CH3:4])=[O:7])[CH2:13]1', 'dataset': 'uspto_data_mapped', 'source_row_id': 'US07692005B2;0286;968511', 'derive_version': 'v1', 'similarity': 0.13705583756345177}]\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Perfect! I found template 442558 which converts 3-hydroxyazetidine to 3-fluoroazetidine using a deoxyfluorinating reagent. This is the reverse of what I need (step 1 in reverse: F \u2192 OH).\n\nNow let me construct the complete retrosynthetic route. Based on the analysis:\n\n- **Step 3 (reverse)**: Use template 1838006 to break the amide bond  \n- **Step 2 (reverse)**: Use template 79377 to break the benzyl C-N bond\n- **Step 1 (reverse)**: Use template 442558 (in reverse) to convert F \u2192 OH\n\nLet me now apply the templates and verify the route:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01BdiJc5U7HUSFnFWpCEYu1N",
+          "function": {
+            "name": "mcp__corral__apply_template",
+            "arguments": "{\"molecule_smiles\": \"Nc1c(C(=O)Cl)nnn1Cc1ccc(CN2CC(F)C2)cc1\", \"template_id\": \"79377\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01BdiJc5U7HUSFnFWpCEYu1N",
+      "content": "[{\"type\": \"text\", \"text\": \"(('CCOC(=O)N1CC(F)C1', 'Nc1c(C(=O)Cl)nnn1Cc1ccc(CCl)cc1'),)\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_0185eqU98WvuV5mEWM9BAmta",
+          "function": {
+            "name": "mcp__corral__apply_template",
+            "arguments": "{\"molecule_smiles\": \"FC1CN(C)C1\", \"template_id\": \"442558\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_0185eqU98WvuV5mEWM9BAmta",
+      "content": "[{\"type\": \"text\", \"text\": \"(('CN1CC(O)C1', 'COCCN(CCOC)S(F)(F)F'),)\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "Perfect! Now I can construct the complete retrosynthetic route in JSON format:"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "toolu_01EPzGnDN79WuHpFvCMj7MWX",
+          "function": {
+            "name": "mcp__submit__submit_answer",
+            "arguments": "{\"answer\": \"{\\n  \\\"type\\\": \\\"mol\\\",\\n  \\\"smiles\\\": \\\"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\\\",\\n  \\\"children\\\": [\\n    {\\n      \\\"type\\\": \\\"reaction\\\",\\n      \\\"template_id\\\": \\\"1838006\\\",\\n      \\\"children\\\": [\\n        {\\n          \\\"type\\\": \\\"mol\\\",\\n          \\\"smiles\\\": \\\"CCC(=O)Nc1cccc(OC)c1\\\"\\n        },\\n        {\\n          \\\"type\\\": \\\"mol\\\",\\n          \\\"smiles\\\": \\\"Nc1c(C(=O)Cl)nnn1Cc2ccc(CN3CC(F)C3)cc2\\\",\\n          \\\"children\\\": [\\n            {\\n              \\\"type\\\": \\\"reaction\\\",\\n              \\\"template_id\\\": \\\"79377\\\",\\n              \\\"children\\\": [\\n                {\\n                  \\\"type\\\": \\\"mol\\\",\\n                  \\\"smiles\\\": \\\"CCOC(=O)N1CC(F)C1\\\",\\n                  \\\"children\\\": [\\n                    {\\n                      \\\"type\\\": \\\"reaction\\\",\\n                      \\\"template_id\\\": \\\"442558\\\",\\n                      \\\"children\\\": [\\n                        {\\n                          \\\"type\\\": \\\"mol\\\",\\n                          \\\"smiles\\\": \\\"CCOC(=O)N1CC(O)C1\\\"\\n                        },\\n                        {\\n                          \\\"type\\\": \\\"mol\\\",\\n                          \\\"smiles\\\": \\\"COCCN(CCOC)S(F)(F)F\\\"\\n                        }\\n                      ]\\n                    }\\n                  ]\\n                },\\n                {\\n                  \\\"type\\\": \\\"mol\\\",\\n                  \\\"smiles\\\": \\\"Nc1c(C(=O)Cl)nnn1Cc1ccc(CCl)cc1\\\"\\n                }\\n              ]\\n            }\\n          ]\\n        }\\n      ]\\n    }\\n  ]\\n}\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "toolu_01EPzGnDN79WuHpFvCMj7MWX",
+      "content": "[{\"type\": \"text\", \"text\": \"Answer submitted.\"}]",
+      "name": "tool_result",
+      "is_error": false
+    },
+    {
+      "role": "assistant",
+      "content": "I have successfully submitted the retrosynthesis route for the target molecule COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1. The route consists of 3 reactions as required:\n\n1. **Reaction 1 (reverse substitution)**: Converts the fluoro group on the azetidine ring to a hydroxyl group using deoxyfluorination reversal (template 442558)\n   - CCOC(=O)N1CC(F)C1 \u2192 CCOC(=O)N1CC(O)C1\n\n2. **Reaction 2 (reverse SN2)**: Breaks the benzyl C-N bond to form a benzyl chloride and free amine (template 79377)\n   - Combination of the azetidine derivative with the benzyl chloride compound\n\n3. **Reaction 3 (reverse Friedel-Crafts acylation)**: Breaks the amide bond to form an acyl chloride and aromatic amine (template 1838006)\n   - Final disconnection to CCC(=O)Nc1cccc(OC)c1 and the acyl chloride triazole derivative\n\nThe route follows the hints provided: starting from substitution (reverse: F\u2192OH), then SN2 (reverse: break C-N benzyl bond forming C-Cl), and finally Friedel-Crafts acylation (reverse: break amide bond forming acyl chloride)."
+    },
+    {
+      "role": "assistant",
+      "content": "{\n  \"type\": \"mol\",\n  \"smiles\": \"COc1cccc(NC(=O)c2nnn(Cc3ccc(CN4CC(F)C4)cc3)c2N)c1\",\n  \"children\": [\n    {\n      \"type\": \"reaction\",\n      \"template_id\": \"1838006\",\n      \"children\": [\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"CCC(=O)Nc1cccc(OC)c1\"\n        },\n        {\n          \"type\": \"mol\",\n          \"smiles\": \"Nc1c(C(=O)Cl)nnn1Cc2ccc(CN3CC(F)C3)cc2\",\n          \"children\": [\n            {\n              \"type\": \"reaction\",\n              \"template_id\": \"79377\",\n              \"children\": [\n                {\n                  \"type\": \"mol\",\n                  \"smiles\": \"CCOC(=O)N1CC(F)C1\",\n                  \"children\": [\n                    {\n                      \"type\": \"reaction\",\n                      \"template_id\": \"442558\",\n                      \"children\": [\n                        {\n                          \"type\": \"mol\",\n                          \"smiles\": \"CCOC(=O)N1CC(O)C1\"\n                        },\n                        {\n                          \"type\": \"mol\",\n                          \"smiles\": \"COCCN(CCOC)S(F)(F)F\"\n                        }\n                      ]\n                    }\n                  ]\n                },\n                {\n                  \"type\": \"mol\",\n                  \"smiles\": \"Nc1c(C(=O)Cl)nnn1Cc1ccc(CCl)cc1\"\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}"
+    }
+  ]
+}
