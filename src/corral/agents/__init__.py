@@ -1,5 +1,6 @@
 from importlib import import_module
 
+from corral.agents.ai_scientist import AIScientistAgent, AIScientistConfig
 from corral.agents.base_agent import BaseAgent
 from corral.agents.llm_planner import LLMPlanner
 from corral.agents.react import ReActAgent
@@ -38,6 +39,8 @@ def __dir__():
 
 __all__ = [
     "SURRENDER_SENTINEL",
+    "AIScientistAgent",
+    "AIScientistConfig",
     "Action",
     "AgentRunResult",
     "BaseAgent",

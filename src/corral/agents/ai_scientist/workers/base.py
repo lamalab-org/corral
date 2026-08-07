@@ -1,0 +1,163 @@
+"""Model-provider boundary for schema-constrained worker calls."""
+
+import json
+import re
+import threading
+from typing import Any, Protocol, TypeVar
+
+from loguru import logger
+from pydantic import BaseModel, ValidationError
+
+from corral.agents.utils import LiteLLMMessage, llm_call
+from corral.types import BudgetExhaustedError
+
+ResponseT = TypeVar("ResponseT", bound=BaseModel)
+
+
+class LLMBudgetExceeded(RuntimeError):
+    """Raised before a logical worker call exceeds the local LLM-call budget."""
+
+
+class StructuredModel(Protocol):
+    call_count: int
+
+    def generate(
+        self,
+        prompt: str,
+        response_model: type[ResponseT],
+        *,
+        model: str | None = None,
+        purpose: str = "scientific_worker",
+    ) -> ResponseT: ...
+
+
+def _extract_object(content: str) -> dict[str, Any]:
+    content = content.strip()
+    if content.startswith("```"):
+        content = re.sub(r"^`+[^\n]*\n?", "", content)
+        content = re.sub(r"\n?`+\s*$", "", content).strip()
+    try:
+        value = json.loads(content)
+    except json.JSONDecodeError:
+        start = content.find("{")
+        if start < 0:
+            raise ValueError("The model response contained no JSON object.") from None
+        value, _ = json.JSONDecoder().raw_decode(content[start:])
+    if not isinstance(value, dict):
+        raise ValueError("The model response must be one JSON object.")
+    return value
+
+
+class LiteLLMStructuredModel:
+    """Isolated structured calls with transcript and token accounting."""
+
+    def __init__(
+        self,
+        *,
+        owner: Any,
+        default_model: str,
+        evaluator_model: str,
+        system_prompt: str,
+        temperature: float,
+        api_endpoint: str | None,
+        max_calls: int,
+        use_structured_output: bool,
+        llm_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        self.owner = owner
+        self.default_model = default_model
+        self.evaluator_model = evaluator_model
+        self.system_prompt = system_prompt
+        self.temperature = temperature
+        self.api_endpoint = api_endpoint
+        self.max_calls = max_calls
+        self.use_structured_output = use_structured_output
+        self.llm_kwargs = llm_kwargs or {}
+        self.call_count = 0
+        self.token_count = 0
+        self._state_lock = threading.Lock()
+
+    @property
+    def remaining_calls(self) -> int:
+        with self._state_lock:
+            return max(0, self.max_calls - self.call_count)
+
+    def generate(
+        self,
+        prompt: str,
+        response_model: type[ResponseT],
+        *,
+        model: str | None = None,
+        purpose: str = "scientific_worker",
+    ) -> ResponseT:
+        with self._state_lock:
+            if self.call_count >= self.max_calls:
+                raise LLMBudgetExceeded(
+                    f"LLM-call budget exhausted ({self.max_calls}) before {purpose}."
+                )
+            self.call_count += 1
+            use_structured_output = self.use_structured_output
+        selected_model = model or self.default_model
+        messages: list[LiteLLMMessage] = [
+            LiteLLMMessage(role="system", content=self.system_prompt),
+            LiteLLMMessage(role="user", content=prompt),
+        ]
+
+        response = None
+        if use_structured_output:
+            try:
+                response = llm_call(
+                    model=selected_model,
+                    messages=messages,
+                    temperature=self.temperature,
+                    api_endpoint=self.api_endpoint,
+                    response_format=response_model,
+                    **self.llm_kwargs,
+                )
+            except BudgetExhaustedError:
+                # Authentication/quota failures are benchmark stop conditions,
+                # not evidence that a provider lacks structured output.
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Structured output failed for {} ({}); retrying as JSON text.",
+                    purpose,
+                    exc,
+                )
+                with self._state_lock:
+                    self.use_structured_output = False
+
+        if response is None:
+            response = llm_call(
+                model=selected_model,
+                messages=messages,
+                temperature=self.temperature,
+                api_endpoint=self.api_endpoint,
+                **self.llm_kwargs,
+            )
+
+        content = response.content or ""
+        try:
+            parsed = response_model.model_validate_json(content.strip())
+        except ValidationError:
+            parsed = response_model.model_validate(_extract_object(content))
+
+        # The worker contexts are intentionally isolated, but the full sequence
+        # remains visible to Corral's normal verbose transcript machinery.
+        with self._state_lock:
+            self.owner.messages.extend(
+                [
+                    *messages,
+                    LiteLLMMessage(
+                        role="assistant",
+                        content=content,
+                        id=getattr(response, "id", None),
+                        name=purpose,
+                    ),
+                ]
+            )
+            if response.usage:
+                self.token_count += int(response.usage.get("total_tokens", 0))
+                self.owner.token_usage = response.usage
+                self.owner._accumulate_token_usage(response.usage)
+        return parsed
