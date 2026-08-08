@@ -63,7 +63,9 @@ class NodePlanner:
         tools: list[dict],
         journal_context: str,
         parent: ExperimentNode | None,
+        siblings: list[ExperimentNode],
         branch_workspaces: list[str],
+        proposal_offset: int = 0,
     ) -> list[NodeProposal]:
         prompt_name = {
             ResearchStage.PRELIMINARY: "preliminary",
@@ -76,6 +78,28 @@ class NodePlanner:
             if parent is not None
             else "No parent; create independent root approaches."
         )
+        sibling_text = (
+            json.dumps(
+                [
+                    sibling.model_dump(
+                        mode="json",
+                        include={
+                            "id",
+                            "node_type",
+                            "hypothesis",
+                            "experiment_goal",
+                            "success_criteria",
+                            "conclusions",
+                        },
+                    )
+                    for sibling in siblings
+                ],
+                indent=2,
+                ensure_ascii=False,
+            )
+            if siblings
+            else "No existing children from this checkpoint."
+        )
         tool_text = json.dumps(tools, indent=2, ensure_ascii=False)
         if len(tool_text) > self.max_tool_schema_chars:
             tool_text = tool_text[: self.max_tool_schema_chars] + "\n... truncated ..."
@@ -86,7 +110,11 @@ class NodePlanner:
             tools=tool_text,
             journal=journal_context[: self.max_journal_chars],
             parent=parent_text,
+            siblings=sibling_text,
             branch_workspaces=json.dumps(branch_workspaces, ensure_ascii=False),
+            proposal_slots=json.dumps(
+                list(range(proposal_offset + 1, proposal_offset + count + 1))
+            ),
             node_type=node_type.value,
             count=count,
             max_actions=self.max_actions_per_node,
@@ -95,14 +123,10 @@ class NodePlanner:
             prompt, PlanningBatch, purpose=f"plan_{stage.value}_{node_type.value}"
         )
         proposals = batch.proposals[:count]
-        # The manager, not the model, owns the tree semantics. Coerce the type
-        # requested for this expansion and bound actions deterministically.
+        # The manager, not the model, owns the tree semantics. The proposal is
+        # deliberately high-level; the experiment worker chooses actions only
+        # after seeing the preceding observations.
         return [
-            proposal.model_copy(
-                update={
-                    "node_type": node_type,
-                    "plan": proposal.plan[: self.max_actions_per_node],
-                }
-            )
+            proposal.model_copy(update={"node_type": node_type})
             for proposal in proposals
         ]

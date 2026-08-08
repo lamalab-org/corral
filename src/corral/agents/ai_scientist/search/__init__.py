@@ -2,7 +2,10 @@
 
 from corral.agents.ai_scientist.search.evaluator import EvaluationWeights
 from corral.agents.ai_scientist.search.nodes import (
+    ExperimentDecision,
     ExperimentNode,
+    ExperimentStep,
+    ExperimentTermination,
     NodeEvaluation,
     NodeStatus,
     NodeType,
@@ -15,7 +18,10 @@ from corral.agents.ai_scientist.search.tree import ExperimentTree
 
 __all__ = [
     "EvaluationWeights",
+    "ExperimentDecision",
     "ExperimentNode",
+    "ExperimentStep",
+    "ExperimentTermination",
     "ExperimentTree",
     "NodeEvaluation",
     "NodeStatus",

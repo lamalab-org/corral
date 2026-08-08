@@ -1,14 +1,57 @@
-"""Schema-validating, sequential execution through a CorralRouter."""
+"""Schema-validating execution through a trial-scoped Corral router."""
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from corral.agents.ai_scientist.search.nodes import Observation, PlannedAction
+from corral.agents.ai_scientist.search.nodes import (
+    ExecutedAction,
+    Observation,
+    PlannedAction,
+)
 
 
 class ToolCallBudgetExceeded(RuntimeError):
-    """Raised before a tool call would exceed the configured local budget."""
+    """Raised before a tool call would exceed the configured global budget."""
+
+
+@dataclass
+class ResearchBudget:
+    """One thread-safe physical tool-call budget shared by every branch."""
+
+    max_physical_tool_calls: int
+    scientific_calls: int = 0
+    replay_calls: int = 0
+    _lock: Any = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self._lock = Lock()
+
+    @property
+    def used(self) -> int:
+        with self._lock:
+            return self.scientific_calls + self.replay_calls
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.max_physical_tool_calls - self.used)
+
+    def consume(self, *, replay: bool) -> bool:
+        """Atomically reserve one call, returning false at the global limit."""
+        with self._lock:
+            if (
+                self.scientific_calls + self.replay_calls
+                >= self.max_physical_tool_calls
+            ):
+                return False
+            if replay:
+                self.replay_calls += 1
+            else:
+                self.scientific_calls += 1
+            return True
 
 
 def _tool_definitions(payload: dict[str, Any] | list[dict[str, Any]]) -> list[dict]:
@@ -43,13 +86,16 @@ class CorralExecutor:
         max_tool_calls: int,
         max_observation_chars: int | None = 12_000,
         stop_on_error: bool = True,
+        budget: ResearchBudget | None = None,
+        on_executed: Callable[[ExecutedAction], None] | None = None,
     ) -> None:
         self.interface = interface
         self.task_id = task_id
         self.max_tool_calls = max_tool_calls
         self.max_observation_chars = max_observation_chars
         self.stop_on_error = stop_on_error
-        self.call_count = 0
+        self.budget = budget or ResearchBudget(max_tool_calls)
+        self._on_executed = on_executed
         self._schemas: dict[str, dict[str, Any]] = {}
         for tool in _tool_definitions(tools):
             normalised = _normalise_tool(tool)
@@ -62,11 +108,21 @@ class CorralExecutor:
 
     @property
     def remaining_calls(self) -> int:
-        return max(0, self.max_tool_calls - self.call_count)
+        return self.budget.remaining
 
-    def execute_plan(self, plan: list[PlannedAction]) -> list[Observation]:
+    @property
+    def call_count(self) -> int:
+        return self.budget.used
+
+    def execute_plan(
+        self,
+        plan: list[PlannedAction],
+        *,
+        replay: bool = False,
+        start_index: int = 0,
+    ) -> list[Observation]:
         observations: list[Observation] = []
-        for index, action in enumerate(plan):
+        for index, action in enumerate(plan, start=start_index):
             error = self._validate_action(action)
             if error is not None:
                 observations.append(self._failure(index, action, error))
@@ -74,7 +130,7 @@ class CorralExecutor:
                     break
                 continue
 
-            if self.call_count >= self.max_tool_calls:
+            if not self.budget.consume(replay=replay):
                 observations.append(
                     self._failure(
                         index,
@@ -87,7 +143,6 @@ class CorralExecutor:
             # This is intentionally the only environment action in the package.
             # It never calls submit_answer/get_last_score and it executes plans
             # sequentially because a Corral task workspace may be stateful.
-            self.call_count += 1
             try:
                 response = self.interface.execute_tool(
                     self.task_id, action.tool_name, action.arguments
@@ -96,16 +151,15 @@ class CorralExecutor:
                 result = getattr(response, "result", None)
                 response_error = getattr(response, "error", None)
                 if success:
-                    observations.append(
-                        Observation(
-                            action_index=index,
-                            purpose=action.purpose,
-                            tool_name=action.tool_name,
-                            arguments=action.arguments,
-                            success=True,
-                            result=self._bounded(result),
-                        )
+                    observation = Observation(
+                        action_index=index,
+                        purpose=action.purpose,
+                        tool_name=action.tool_name,
+                        arguments=action.arguments,
+                        success=True,
+                        result=self._bounded(result),
                     )
+                    observations.append(observation)
                 else:
                     observations.append(
                         self._failure(
@@ -117,6 +171,11 @@ class CorralExecutor:
             except Exception as exc:
                 observations.append(
                     self._failure(index, action, f"Tool execution raised: {exc}")
+                )
+
+            if self._on_executed is not None:
+                self._on_executed(
+                    ExecutedAction(action=action, observation=observations[-1])
                 )
 
             if not observations[-1].success and self.stop_on_error:

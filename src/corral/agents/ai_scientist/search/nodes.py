@@ -2,7 +2,7 @@
 
 import json
 from enum import Enum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -10,6 +10,7 @@ from pydantic import (
     Field,
     WithJsonSchema,
     field_validator,
+    model_validator,
 )
 
 
@@ -38,8 +39,19 @@ class NodeStatus(str, Enum):
     PROPOSED = "proposed"
     RUNNING = "running"
     SUCCESSFUL = "successful"
+    PARTIAL = "partial"
     FAILED = "failed"
     INVALID = "invalid"
+
+
+class ExperimentTermination(str, Enum):
+    """Why an experiment worker stopped producing actions."""
+
+    AGGREGATED = "aggregated"
+    WORKER_FINISHED = "worker_finished"
+    ACTION_BUDGET_EXHAUSTED = "action_budget_exhausted"
+    TOOL_BUDGET_EXHAUSTED = "tool_budget_exhausted"
+    ACTION_FAILED = "action_failed"
 
 
 class Recommendation(str, Enum):
@@ -84,6 +96,46 @@ class PlannedAction(BaseModel):
         return value
 
 
+class ExperimentDecision(BaseModel):
+    """One observe-reason-act decision made inside an experiment node."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["act", "finish"]
+    rationale: str
+    purpose: str | None = None
+    tool_name: str | None = None
+    arguments: JsonArguments = Field(default_factory=dict)
+    expected_information: str | None = None
+    conclusion: str | None = None
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def _parse_arguments(cls, value: Any) -> Any:
+        return PlannedAction._parse_arguments(value)
+
+    @model_validator(mode="after")
+    def _consistent_decision(self) -> "ExperimentDecision":
+        action_fields = (self.purpose, self.tool_name, self.expected_information)
+        if self.decision == "act" and not all(action_fields):
+            raise ValueError(
+                "An act decision requires purpose, tool_name, and expected_information"
+            )
+        if self.decision == "finish" and any(action_fields):
+            raise ValueError("A finish decision cannot contain an action")
+        return self
+
+    def as_action(self) -> PlannedAction | None:
+        if self.decision == "finish":
+            return None
+        return PlannedAction(
+            purpose=self.purpose or "",
+            tool_name=self.tool_name or "",
+            arguments=self.arguments,
+            expected_information=self.expected_information or "",
+        )
+
+
 class Observation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -94,6 +146,25 @@ class Observation(BaseModel):
     success: bool
     result: str | None = None
     error: str | None = None
+
+
+class ExecutedAction(BaseModel):
+    """A physical tool call and the observation it originally produced."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: PlannedAction
+    observation: Observation
+
+
+class ExperimentStep(BaseModel):
+    """A durable worker decision and, for actions, its resulting observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_index: int = Field(ge=0)
+    decision: ExperimentDecision
+    observation: Observation | None = None
 
 
 class NodeEvaluation(BaseModel):
@@ -113,14 +184,15 @@ class NodeEvaluation(BaseModel):
 
 
 class NodeProposal(BaseModel):
-    """One model-proposed scientific experiment."""
+    """One high-level scientific experiment, without a precomputed action list."""
 
     model_config = ConfigDict(extra="forbid")
 
     node_type: NodeType
     hypothesis: str
     rationale: str
-    plan: list[PlannedAction] = Field(default_factory=list)
+    experiment_goal: str
+    success_criteria: list[str] = Field(default_factory=list)
 
 
 class PlanningBatch(BaseModel):
@@ -136,13 +208,24 @@ class ExperimentNode(BaseModel):
 
     id: str
     parent_id: str | None = None
+    branch_id: str | None = None
+    trial_runtime_id: str | None = None
     branch_workspace: str | None = None
     stage: ResearchStage
     node_type: NodeType
     hypothesis: str
     rationale: str
+    experiment_goal: str = ""
+    success_criteria: list[str] = Field(default_factory=list)
+    # ``plan`` is the realized action sequence. Actions are appended only after
+    # the worker has observed every preceding result; it is never precomputed.
     plan: list[PlannedAction] = Field(default_factory=list)
     observations: list[Observation] = Field(default_factory=list)
+    trajectory: list[ExperimentStep] = Field(default_factory=list)
+    worker_conclusion: str | None = None
+    allocated_action_budget: int = Field(default=0, ge=0)
+    termination_reason: ExperimentTermination | None = None
+    executed_actions: list[ExecutedAction] = Field(default_factory=list)
     conclusions: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     status: NodeStatus = NodeStatus.PROPOSED

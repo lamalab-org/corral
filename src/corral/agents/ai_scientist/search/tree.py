@@ -2,6 +2,7 @@
 
 from corral.agents.ai_scientist.search.evaluator import evaluation_priority
 from corral.agents.ai_scientist.search.nodes import (
+    ExecutedAction,
     ExperimentNode,
     NodeStatus,
     Recommendation,
@@ -36,6 +37,10 @@ class ExperimentTree:
     def children(self, node_id: str | None) -> list[ExperimentNode]:
         return [self._nodes[item] for item in self._children.get(node_id, [])]
 
+    def child_count(self, node_id: str) -> int:
+        """Return the number of alternative continuations from a checkpoint."""
+        return len(self._children.get(node_id, []))
+
     @property
     def nodes(self) -> list[ExperimentNode]:
         return list(self._nodes.values())
@@ -45,6 +50,25 @@ class ExperimentTree:
 
     def leaves(self) -> list[ExperimentNode]:
         return [node for node in self._nodes.values() if not self.children(node.id)]
+
+    def trajectory(self, node_id: str) -> list[ExperimentNode]:
+        """Return the root-to-node logical trajectory, inclusive."""
+        path: list[ExperimentNode] = []
+        node = self.get(node_id)
+        while True:
+            path.append(node)
+            if node.parent_id is None:
+                break
+            node = self.get(node.parent_id)
+        return list(reversed(path))
+
+    def executed_trajectory(self, node_id: str) -> list[ExecutedAction]:
+        """Return the physical actions needed to reconstruct ``node_id``."""
+        return [
+            executed
+            for node in self.trajectory(node_id)
+            for executed in node.executed_actions
+        ]
 
     def best(self, limit: int = 3) -> list[ExperimentNode]:
         evaluated = [

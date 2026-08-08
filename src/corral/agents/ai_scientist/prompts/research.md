@@ -10,7 +10,13 @@ Formulation:
 Parent checkpoint:
 {{parent}}
 
-Branch workspaces, one per proposal in proposal order:
+Existing child experiments from this checkpoint:
+{{siblings}}
+
+Proposal slots in this expansion:
+{{proposal_slots}}
+
+Trial-relative workspaces, one per proposal in proposal order:
 {{branch_workspaces}}
 
 Global research journal (including sibling evidence):
@@ -21,7 +27,11 @@ Allowed tools:
 
 Prefer discriminating or falsifying experiments: when hypotheses remain
 compatible with current observations, choose an observation expected to differ
-between them. A DEBUG node must address the concrete failed action. Use at most
-{{max_actions}} sequential actions, listed tools only, and JSON object strings
-for arguments. Put any tool output path under the proposal's assigned branch
-workspace. Return exactly {{count}} proposal(s) when possible.
+between them. Define one experiment goal and observable success criteria per
+proposal. Do not repeat an existing child, and make requested slots test
+materially different uncertainties. Do not precompute tool actions. A bounded
+worker will choose up to
+{{max_actions}} actions adaptively from actual observations. A DEBUG node must
+address the concrete failed action. The experiment must use listed tools only
+and keep output paths relative to the assigned trial workspace. Return exactly
+{{count}} proposal(s) when possible.

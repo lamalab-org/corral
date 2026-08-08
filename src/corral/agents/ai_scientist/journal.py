@@ -54,7 +54,7 @@ class ResearchJournal:
             self.hypotheses.append(JournalHypothesis(text=text))
 
     def integrate(self, node: ExperimentNode, minimum_validity: float = 0.45) -> None:
-        """Merge reliable node evidence while retaining useful partial results."""
+        """Retain observations, but promote claims only from successful nodes."""
         for observation in node.observations:
             if observation.success:
                 self.observations.append((node.id, observation))
@@ -74,7 +74,11 @@ class ResearchJournal:
             )
 
         evaluation = node.evaluation
-        if evaluation is None or evaluation.validity < minimum_validity:
+        if (
+            node.status != NodeStatus.SUCCESSFUL
+            or evaluation is None
+            or evaluation.validity < minimum_validity
+        ):
             return
 
         confidence = evaluation.evidence_strength

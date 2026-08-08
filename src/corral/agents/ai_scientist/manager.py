@@ -18,7 +18,12 @@ from corral.agents.ai_scientist.search.nodes import (
 )
 from corral.agents.ai_scientist.search.selector import TreeSelector
 from corral.agents.ai_scientist.state import ScientistState
-from corral.agents.ai_scientist.tools.corral_executor import CorralExecutor
+from corral.agents.ai_scientist.tools.corral_executor import ToolCallBudgetExceeded
+from corral.agents.ai_scientist.tools.trial_pool import (
+    BranchRuntime,
+    ReplayDiverged,
+    TrialPool,
+)
 from corral.agents.ai_scientist.workers.base import StructuredModel
 from corral.agents.ai_scientist.workers.critic import ScientificCritic
 from corral.agents.ai_scientist.workers.experimenter import Experimenter
@@ -26,7 +31,7 @@ from corral.agents.ai_scientist.workers.planner import NodePlanner
 
 
 class ExperimentManager:
-    """Own the stage, tree, journal, selection policy, and local budgets."""
+    """Own the stage, tree, journal, selection policy, and global budgets."""
 
     def __init__(
         self,
@@ -51,19 +56,19 @@ class ExperimentManager:
         self.initial_llm_calls = initial_llm_calls
         self.initial_llm_tokens = initial_llm_tokens
 
-    def run(self, state: ScientistState, executor: CorralExecutor) -> ScientistState:
+    def run(self, state: ScientistState, pool: TrialPool) -> ScientistState:
         self._transition(state, ResearchStage.PRELIMINARY)
-        self._preliminary(state, executor)
+        self._preliminary(state, pool)
 
         if (
             state.formulation.has_tunable_parameters
             and self.config.tuning_node_budget > 0
-            and self._can_create(state, executor, llm_calls=2)
+            and self._can_create(state, pool, llm_calls=self._calls_per_node)
         ):
             self._transition(state, ResearchStage.TUNING)
             self._iterative_stage(
                 state,
-                executor,
+                pool,
                 stage=ResearchStage.TUNING,
                 budget=self.config.tuning_node_budget,
                 default_type=NodeType.PARAMETER_SEARCH,
@@ -72,28 +77,28 @@ class ExperimentManager:
         self._transition(state, ResearchStage.RESEARCH)
         self._iterative_stage(
             state,
-            executor,
+            pool,
             stage=ResearchStage.RESEARCH,
             budget=self.config.research_node_budget,
             default_type=NodeType.RESEARCH,
         )
 
         self._transition(state, ResearchStage.VERIFICATION)
-        self._verification(state, executor)
+        self._verification(state, pool)
         self._transition(state, ResearchStage.COMPLETE)
-        state.tool_calls = executor.call_count
+        self._update_usage(state, pool)
         state.llm_calls = self._llm_calls_used
         state.llm_tokens = self._llm_tokens_used
         return state
 
-    def _preliminary(self, state: ScientistState, executor: CorralExecutor) -> None:
+    def _preliminary(self, state: ScientistState, pool: TrialPool) -> None:
         # Independent roots may be planned/evaluated concurrently. Fit all those
         # logical calls while reserving final synthesis for the top-level agent.
         root_limit = min(
             self.config.initial_drafts,
             self.config.preliminary_node_budget,
             self.config.max_nodes - len(state.tree),
-            executor.remaining_calls,
+            pool.remaining_calls,
         )
         root_count = self._affordable_candidate_count(root_limit)
         if root_count <= 0:
@@ -105,13 +110,13 @@ class ExperimentManager:
             count=root_count,
             parent=None,
         )
-        self._execute_candidates(state, executor, proposals, parent=None)
+        self._execute_candidates(state, pool, proposals, parent=None)
 
         while (
             len(state.tree.by_stage(ResearchStage.PRELIMINARY))
             < self.config.preliminary_node_budget
             and not self._stage_complete(state, ResearchStage.PRELIMINARY)
-            and self._can_create(state, executor, llm_calls=2)
+            and self._can_create(state, pool, llm_calls=self._calls_per_node)
         ):
             parent = self.selector.select(state.tree)
             if parent is None:
@@ -120,10 +125,11 @@ class ExperimentManager:
             count = self._affordable_candidate_count(
                 min(
                     self.config.candidates_per_expansion,
+                    self.selector.remaining_child_slots(state.tree, parent),
                     self.config.preliminary_node_budget
                     - len(state.tree.by_stage(ResearchStage.PRELIMINARY)),
                     self.config.max_nodes - len(state.tree),
-                    executor.remaining_calls,
+                    pool.remaining_calls,
                 )
             )
             if count <= 0:
@@ -137,12 +143,12 @@ class ExperimentManager:
             )
             if not proposals:
                 break
-            self._execute_candidates(state, executor, proposals, parent=parent)
+            self._execute_candidates(state, pool, proposals, parent=parent)
 
     def _iterative_stage(
         self,
         state: ScientistState,
-        executor: CorralExecutor,
+        pool: TrialPool,
         *,
         stage: ResearchStage,
         budget: int,
@@ -151,7 +157,7 @@ class ExperimentManager:
         while (
             len(state.tree.by_stage(stage)) < budget
             and not self._stage_complete(state, stage)
-            and self._can_create(state, executor, llm_calls=2)
+            and self._can_create(state, pool, llm_calls=self._calls_per_node)
         ):
             parent = self.selector.select(state.tree)
             if parent is None:
@@ -160,9 +166,10 @@ class ExperimentManager:
             count = self._affordable_candidate_count(
                 min(
                     self.config.candidates_per_expansion,
+                    self.selector.remaining_child_slots(state.tree, parent),
                     budget - len(state.tree.by_stage(stage)),
                     self.config.max_nodes - len(state.tree),
-                    executor.remaining_calls,
+                    pool.remaining_calls,
                 )
             )
             if count <= 0:
@@ -176,9 +183,9 @@ class ExperimentManager:
             )
             if not proposals:
                 break
-            self._execute_candidates(state, executor, proposals, parent=parent)
+            self._execute_candidates(state, pool, proposals, parent=parent)
 
-    def _verification(self, state: ScientistState, executor: CorralExecutor) -> None:
+    def _verification(self, state: ScientistState, pool: TrialPool) -> None:
         verification_types = cycle(
             [
                 NodeType.ABLATION,
@@ -190,15 +197,14 @@ class ExperimentManager:
         while len(
             state.tree.by_stage(ResearchStage.VERIFICATION)
         ) < self.config.verification_node_budget and self._can_create(
-            state, executor, llm_calls=2
+            state, pool, llm_calls=self._calls_per_node
         ):
             count = len(state.tree.by_stage(ResearchStage.VERIFICATION))
             if count >= self.config.verification_min_nodes and self._stage_complete(
                 state, ResearchStage.VERIFICATION
             ):
                 break
-            best = state.tree.best(limit=1)
-            parent = best[0] if best else self.selector.select(state.tree)
+            parent = self.selector.select(state.tree, allow_failures=False)
             if parent is None:
                 break
             node_type = next(verification_types)
@@ -212,11 +218,7 @@ class ExperimentManager:
             if not proposals:
                 break
             node_id, proposal = proposals[0]
-            if node_type == NodeType.AGGREGATION:
-                proposal = proposal.model_copy(update={"plan": []})
-            self._execute_candidates(
-                state, executor, [(node_id, proposal)], parent=parent
-            )
+            self._execute_candidates(state, pool, [(node_id, proposal)], parent=parent)
 
     def _propose(
         self,
@@ -228,10 +230,18 @@ class ExperimentManager:
         parent: ExperimentNode | None,
     ) -> list[tuple[str, NodeProposal]]:
         candidate_ids = [state.tree.next_id() for _ in range(count)]
-        branch_workspaces = [f"ai_scientist/{node_id}/" for node_id in candidate_ids]
+        # Every proposal will execute in a separate trial workspace. Relative
+        # paths therefore isolate artifacts without synthetic node directories.
+        branch_workspaces = ["." for _ in candidate_ids]
         journal_context = state.journal.context(self.config.max_journal_chars)
+        siblings = state.tree.children(parent.id if parent is not None else None)
 
-        def plan(candidate_count: int, workspaces: list[str]) -> list[NodeProposal]:
+        def plan(
+            candidate_count: int,
+            workspaces: list[str],
+            *,
+            proposal_offset: int | None = None,
+        ) -> list[NodeProposal]:
             return self.planner.propose(
                 stage=stage,
                 node_type=node_type,
@@ -241,68 +251,223 @@ class ExperimentManager:
                 tools=state.tools,
                 journal_context=journal_context,
                 parent=parent,
+                siblings=siblings,
                 branch_workspaces=workspaces,
+                proposal_offset=(
+                    len(siblings) if proposal_offset is None else proposal_offset
+                ),
             )
 
         if count > 1 and self.config.parallel_llm_workers > 1:
 
             def propose_one(index: int) -> tuple[str, NodeProposal | None]:
-                proposals = plan(1, [branch_workspaces[index]])
+                proposals = plan(
+                    1,
+                    [branch_workspaces[index]],
+                    proposal_offset=len(siblings) + index,
+                )
                 return candidate_ids[index], proposals[0] if proposals else None
 
             with ThreadPoolExecutor(
                 max_workers=min(count, self.config.parallel_llm_workers)
             ) as pool:
                 planned = list(pool.map(propose_one, range(count)))
-            return [(node_id, proposal) for node_id, proposal in planned if proposal]
+            candidates = [
+                (node_id, proposal) for node_id, proposal in planned if proposal
+            ]
+            return self._deduplicate_proposals(candidates, siblings)
 
         proposals = plan(count, branch_workspaces)
-        return list(zip(candidate_ids, proposals, strict=False))
+        return self._deduplicate_proposals(
+            list(zip(candidate_ids, proposals, strict=False)), siblings
+        )
+
+    def _deduplicate_proposals(
+        self,
+        candidates: list[tuple[str, NodeProposal]],
+        siblings: list[ExperimentNode],
+    ) -> list[tuple[str, NodeProposal]]:
+        """Reject exact semantic repeats of existing or simultaneous siblings."""
+        fingerprints = {self._experiment_fingerprint(node) for node in siblings}
+        unique: list[tuple[str, NodeProposal]] = []
+        for node_id, proposal in candidates:
+            fingerprint = self._experiment_fingerprint(proposal)
+            if fingerprint in fingerprints:
+                self.trace.write(
+                    "proposal_duplicate_rejected",
+                    {"node_id": node_id, "fingerprint": fingerprint},
+                )
+                continue
+            fingerprints.add(fingerprint)
+            unique.append((node_id, proposal))
+        return unique
+
+    @staticmethod
+    def _experiment_fingerprint(
+        experiment: ExperimentNode | NodeProposal,
+    ) -> str:
+        fields = [
+            experiment.node_type.value,
+            experiment.hypothesis,
+            experiment.experiment_goal,
+            *experiment.success_criteria,
+        ]
+        return "|".join(" ".join(item.casefold().split()) for item in fields)
 
     def _execute_candidates(
         self,
         state: ScientistState,
-        executor: CorralExecutor,
+        pool: TrialPool,
         candidates: list[tuple[str, NodeProposal]],
         *,
         parent: ExperimentNode | None,
     ) -> list[ExperimentNode]:
-        """Run environment actions serially, then evaluate siblings in parallel."""
-        evaluation_capacity = max(
-            0,
-            self.config.max_llm_calls - 1 - self._llm_calls_used,
-        )
+        """Run isolated sibling experiments and evaluations concurrently."""
         node_capacity = self.config.max_nodes - len(state.tree)
-        pending: list[ExperimentNode] = []
+        prepared: list[tuple[ExperimentNode, BranchRuntime, int, int]] = []
+        reserved_scientific_calls = 0
+        reserved_llm_calls = 0
+        remaining_llm_calls = max(
+            0, self.config.max_llm_calls - 1 - self._llm_calls_used
+        )
+        candidate_batch = candidates[:node_capacity]
+        replay_costs = [
+            pool.replay_cost(parent, state.tree, prefer_existing=index == 0)
+            for index in range(len(candidate_batch))
+        ]
 
-        for node_id, proposal in candidates[: min(evaluation_capacity, node_capacity)]:
-            if (
-                executor.remaining_calls <= 0
-                and proposal.node_type != NodeType.AGGREGATION
-            ):
+        for index, (node_id, proposal) in enumerate(candidate_batch):
+            is_aggregation = proposal.node_type == NodeType.AGGREGATION
+            available = pool.remaining_calls - reserved_scientific_calls
+            replay_cost = replay_costs[index]
+            future_tool_minimum = sum(
+                future_replay
+                + (0 if future_proposal.node_type == NodeType.AGGREGATION else 1)
+                for future_replay, (_, future_proposal) in zip(
+                    replay_costs[index + 1 :],
+                    candidate_batch[index + 1 :],
+                    strict=True,
+                )
+            )
+            if replay_cost + (0 if is_aggregation else 1) > available:
+                break
+            own_tool_minimum = 0 if is_aggregation else 1
+            reserve_for_future_tools = (
+                future_tool_minimum
+                if replay_cost + own_tool_minimum + future_tool_minimum <= available
+                else 0
+            )
+            available_after_replay = max(
+                0,
+                available - replay_cost - reserve_for_future_tools,
+            )
+            future_llm_minimum = sum(
+                1 if future.node_type == NodeType.AGGREGATION else 3
+                for _, future in candidate_batch[index + 1 :]
+            )
+            available_llm = (
+                remaining_llm_calls - reserved_llm_calls - future_llm_minimum
+            )
+            action_limit = (
+                0
+                if is_aggregation
+                else min(
+                    self.config.max_actions_per_node,
+                    available_after_replay,
+                    max(0, available_llm - 2),
+                )
+            )
+            if not is_aggregation and action_limit <= 0:
+                break
+            # Reserve an evaluator, one decision per possible physical action,
+            # and a final zero-action completion decision. That last decision
+            # prevents a successful action prefix from masquerading as a
+            # complete experiment when its allocated budget is exhausted.
+            candidate_llm_calls = 1 if is_aggregation else action_limit + 2
+            if reserved_llm_calls + candidate_llm_calls > remaining_llm_calls:
+                break
+            try:
+                branch = pool.acquire(
+                    parent,
+                    state.tree,
+                    prefer_existing=index == 0,
+                )
+            except (ReplayDiverged, ToolCallBudgetExceeded) as exc:
+                logger.warning("Could not prepare {}: {}", node_id, exc)
+                self.trace.write(
+                    "branch_replay_failed", {"node_id": node_id, "error": str(exc)}
+                )
                 break
             is_debug = proposal.node_type == NodeType.DEBUG
-            # Never turn a useful partial plan into a failed node merely because
-            # the planner proposed more actions than the remaining local budget.
-            plan = proposal.plan[: executor.remaining_calls]
+            reserved_llm_calls += candidate_llm_calls
+            reserved_scientific_calls += action_limit
             node = ExperimentNode(
                 id=node_id,
                 parent_id=parent.id if parent is not None else None,
-                branch_workspace=f"ai_scientist/{node_id}/",
+                branch_id=branch.branch_id,
+                trial_runtime_id=branch.trial_runtime_id,
+                branch_workspace=branch.workspace,
                 stage=state.current_stage,
                 node_type=proposal.node_type,
                 hypothesis=proposal.hypothesis,
                 rationale=proposal.rationale,
-                plan=plan,
+                experiment_goal=proposal.experiment_goal,
+                success_criteria=proposal.success_criteria,
                 debug_depth=(parent.debug_depth + 1 if parent and is_debug else 0),
                 depth=(parent.depth + 1 if parent else 0),
             )
             self.trace.write("node_planned", node.model_dump(mode="json"))
-            # Deliberately serial: different branches share Corral task state.
-            pending.append(self.experimenter.execute(node, executor))
+            self.trace.write(
+                "branch_assigned",
+                {
+                    "node_id": node.id,
+                    "branch_id": branch.branch_id,
+                    "trial_runtime_id": branch.trial_runtime_id,
+                    "replayed_actions": len(branch.replay_results),
+                },
+            )
+            for replay in branch.replay_results:
+                self.trace.write(
+                    "action_replayed",
+                    {
+                        "node_id": node.id,
+                        "branch_id": branch.branch_id,
+                        "exact": replay.exact,
+                        "original": replay.original.model_dump(mode="json"),
+                        "replayed": replay.replayed.model_dump(mode="json"),
+                    },
+                )
+            prepared.append((node, branch, len(branch.action_history), action_limit))
 
-        if not pending:
+        if not prepared:
             return []
+
+        def execute(
+            item: tuple[ExperimentNode, BranchRuntime, int, int],
+        ) -> ExperimentNode:
+            node, branch, history_start, action_limit = item
+            executed = self.experimenter.execute(
+                node,
+                branch.executor,
+                task_prompt=state.task_prompt,
+                formulation=state.formulation,
+                tools=state.tools,
+                journal_context=state.journal.context(self.config.max_journal_chars),
+                action_limit=action_limit,
+            )
+            pool.commit(branch, executed, history_start)
+            return executed
+
+        experiment_workers = (
+            min(len(prepared), self.config.parallel_experiment_workers)
+            if pool.isolated
+            else 1
+        )
+        if experiment_workers > 1:
+            with ThreadPoolExecutor(max_workers=experiment_workers) as executor:
+                pending = list(executor.map(execute, prepared))
+        else:
+            pending = [execute(item) for item in prepared]
 
         journal_context = state.journal.context(self.config.max_journal_chars)
 
@@ -317,8 +482,8 @@ class ExperimentManager:
         if len(pending) > 1 and self.config.parallel_llm_workers > 1:
             with ThreadPoolExecutor(
                 max_workers=min(len(pending), self.config.parallel_llm_workers)
-            ) as pool:
-                evaluations = list(pool.map(evaluate, pending))
+            ) as llm_pool:
+                evaluations = list(llm_pool.map(evaluate, pending))
         else:
             evaluations = [evaluate(node) for node in pending]
 
@@ -336,13 +501,13 @@ class ExperimentManager:
             self.trace.write("node_completed", node.model_dump(mode="json"))
             self.trace.write("journal", state.journal.as_dict())
 
-        state.tool_calls = executor.call_count
+        self._update_usage(state, pool)
         state.llm_calls = self._llm_calls_used
         state.llm_tokens = self._llm_tokens_used
         return pending
 
     def _affordable_candidate_count(self, maximum: int) -> int:
-        """Fit planning, evaluation, and the reserved final call in the budget."""
+        """Fit planning, adaptive execution, completion, and evaluation."""
         if maximum <= 0 or not self._within_token_budget:
             return 0
         remaining = self.config.max_llm_calls - 1 - self._llm_calls_used
@@ -350,24 +515,37 @@ class ExperimentManager:
             planning_calls = (
                 count if count > 1 and self.config.parallel_llm_workers > 1 else 1
             )
-            if planning_calls + count <= remaining:
+            if planning_calls + count * 3 <= remaining:
                 return count
         return 0
 
     def _can_create(
         self,
         state: ScientistState,
-        executor: CorralExecutor,
+        pool: TrialPool,
         *,
         llm_calls: int,
     ) -> bool:
         # Keep one LLM call in reserve for final synthesis.
         return (
             len(state.tree) < self.config.max_nodes
-            and executor.remaining_calls > 0
+            and pool.remaining_calls > 0
             and self._llm_calls_used + llm_calls <= self.config.max_llm_calls - 1
             and self._within_token_budget
         )
+
+    def _update_usage(self, state: ScientistState, pool: TrialPool) -> None:
+        state.tool_calls = pool.call_count
+        state.scientific_tool_calls = pool.budget.scientific_calls
+        state.replay_tool_calls = pool.budget.replay_calls
+        state.trial_runtimes_created = pool.trials_created
+        state.peak_simultaneous_trials = pool.peak_simultaneous_trials
+        state.replay_results = list(pool.replay_results)
+
+    @property
+    def _calls_per_node(self) -> int:
+        """Minimum: planner, action, explicit finish, and evaluator."""
+        return 4
 
     @property
     def _llm_calls_used(self) -> int:

@@ -25,7 +25,9 @@ class AIScientistConfig(BaseModel):
     verification_min_nodes: int = Field(default=4, ge=1)
 
     candidates_per_expansion: int = Field(default=1, ge=1, le=4)
-    max_nodes: int = Field(default=24, ge=1)
+    max_children_per_node: int = Field(default=3, ge=1, le=16)
+    tree_exploration_weight: float = Field(default=0.1, ge=0.0, le=1.0)
+    max_nodes: int = Field(default=3, ge=1)
     max_tool_calls: int = Field(default=32, ge=0)
     max_llm_calls: int = Field(default=64, ge=2)
     max_llm_tokens: int | None = Field(default=None, ge=1)
@@ -33,6 +35,7 @@ class AIScientistConfig(BaseModel):
     max_debug_depth: int = Field(default=2, ge=0)
     debug_probability: float = Field(default=0.2, ge=0.0, le=1.0)
     parallel_llm_workers: int = Field(default=4, ge=1, le=16)
+    parallel_experiment_workers: int = Field(default=3, ge=1, le=16)
 
     preliminary_evidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     stage_completion_threshold: float = Field(default=0.78, ge=0.0, le=1.0)

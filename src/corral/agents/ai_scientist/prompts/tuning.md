@@ -10,7 +10,13 @@ Formulation:
 Parent checkpoint:
 {{parent}}
 
-Branch workspaces, one per proposal in proposal order:
+Existing child experiments from this checkpoint:
+{{siblings}}
+
+Proposal slots in this expansion:
+{{proposal_slots}}
+
+Trial-relative workspaces, one per proposal in proposal order:
 {{branch_workspaces}}
 
 All reliable evidence:
@@ -20,8 +26,10 @@ Allowed tools:
 {{tools}}
 
 Vary only meaningful parameters identified in the formulation or justified by
-observations. State what comparison the change enables. Use at most
-{{max_actions}} sequential actions per proposal, listed tools only, and JSON
-object strings for arguments. Put any tool output path under the proposal's
-assigned branch workspace. Return exactly {{count}} proposal(s) when
-possible.
+observations. Define one experiment goal and observable success criteria, and
+state what comparison the change enables. Do not repeat an existing child, and
+make requested slots materially different parameter comparisons. Do not
+precompute tool actions. A
+bounded worker will choose up to {{max_actions}} listed-tool actions one at a
+time from actual observations. Keep output paths relative to the assigned trial
+workspace. Return exactly {{count}} proposal(s) when possible.

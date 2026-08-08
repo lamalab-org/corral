@@ -9,7 +9,13 @@ Formulation:
 Best parent checkpoint:
 {{parent}}
 
-Branch workspace:
+Existing child experiments from this checkpoint:
+{{siblings}}
+
+Proposal slot in this expansion:
+{{proposal_slots}}
+
+Trial-relative workspace:
 {{branch_workspaces}}
 
 Global research journal:
@@ -21,7 +27,10 @@ Allowed tools:
 For ABLATION, remove or change an assumption carrying the conclusion. For
 REPLICATION, independently repeat the decisive measurement. For COUNTERFACTUAL,
 seek an observation that would falsify the current conclusion. For AGGREGATION,
-use no tool actions and reconcile repeated or conflicting evidence already in
-the journal. Non-aggregation proposals may use at most {{max_actions}}
-sequential actions. Use listed tools only and JSON object strings for arguments.
-Put any tool output path under the assigned branch workspace.
+define an experiment goal that reconciles repeated or conflicting evidence
+already in the journal and requires no environment action. For every other
+type, define one experiment goal and observable success criteria. Do not repeat
+an existing child experiment from this checkpoint. Do not
+precompute tool actions. A bounded worker will choose up to {{max_actions}}
+listed-tool actions adaptively. Keep output paths relative to the assigned trial
+workspace.

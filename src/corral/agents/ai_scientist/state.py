@@ -51,6 +51,11 @@ class ScientistState:
         self.journal = ResearchJournal()
         self.current_stage = ResearchStage.FORMULATION
         self.tool_calls = 0
+        self.scientific_tool_calls = 0
+        self.replay_tool_calls = 0
+        self.trial_runtimes_created = 0
+        self.peak_simultaneous_trials = 0
+        self.replay_results = []
         self.llm_calls = 0
         self.llm_tokens = 0
 

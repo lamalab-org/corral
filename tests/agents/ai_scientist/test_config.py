@@ -4,6 +4,16 @@ from pydantic import ValidationError
 from corral.agents.ai_scientist import AIScientistConfig
 
 
+def test_default_search_uses_three_nodes():
+    config = AIScientistConfig()
+
+    assert config.max_nodes == 3
+    assert config.max_actions_per_node == 3
+    assert config.max_children_per_node == 3
+    assert config.tree_exploration_weight == 0.1
+    assert config.parallel_experiment_workers == 3
+
+
 def test_config_rejects_inconsistent_stage_budgets():
     with pytest.raises(ValidationError, match="initial_drafts"):
         AIScientistConfig(initial_drafts=3, preliminary_node_budget=2)

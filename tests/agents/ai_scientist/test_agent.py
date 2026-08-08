@@ -5,10 +5,10 @@ from dataclasses import dataclass
 
 from corral.agents import AIScientistAgent, AIScientistConfig
 from corral.agents.ai_scientist.search.nodes import (
+    ExperimentDecision,
     NodeEvaluation,
     NodeProposal,
     NodeType,
-    PlannedAction,
     PlanningBatch,
     Recommendation,
     ResearchStage,
@@ -27,6 +27,9 @@ class ToolResponse:
 class FakeRouter:
     def __init__(self):
         self.tool_calls = []
+        self.trial_tool_calls = []
+        self.created_trials = []
+        self.closed_trials = []
 
     def get_task_prompt(self, task_id):
         return "Determine the measured value and return one integer."
@@ -50,6 +53,58 @@ class FakeRouter:
     def execute_tool(self, task_id, tool_name, arguments):
         self.tool_calls.append((task_id, tool_name, arguments))
         return ToolResponse(success=True, result="42")
+
+    def create_trial(self, task_id):
+        trial_runtime_id = f"trial-{len(self.created_trials) + 1}"
+        self.created_trials.append(trial_runtime_id)
+        return {
+            "trial_runtime_id": trial_runtime_id,
+            "workspace": f"/fake/{trial_runtime_id}",
+        }
+
+    def for_trial(self, trial_runtime_id, task_id, *, verbosity=None, workspace=None):
+        return FakeTrialRouter(self, trial_runtime_id)
+
+    def close_trial(self, trial_runtime_id):
+        self.closed_trials.append(trial_runtime_id)
+
+    def execute_trial_tool(self, trial_runtime_id, task_id, tool_name, arguments):
+        call = (task_id, tool_name, arguments)
+        self.tool_calls.append(call)
+        self.trial_tool_calls.append((trial_runtime_id, *call))
+        return ToolResponse(success=True, result="42")
+
+
+class FakeTrialRouter:
+    def __init__(self, parent, trial_runtime_id):
+        self.parent = parent
+        self.trial_runtime_id = trial_runtime_id
+
+    def execute_tool(self, task_id, tool_name, arguments):
+        return self.parent.execute_trial_tool(
+            self.trial_runtime_id, task_id, tool_name, arguments
+        )
+
+
+class ConcurrentToolRouter(FakeRouter):
+    def __init__(self):
+        super().__init__()
+        self._lock = threading.Lock()
+        self._active = 0
+        self.max_active = 0
+
+    def execute_trial_tool(self, trial_runtime_id, task_id, tool_name, arguments):
+        with self._lock:
+            self._active += 1
+            self.max_active = max(self.max_active, self._active)
+        time.sleep(0.03)
+        try:
+            return super().execute_trial_tool(
+                trial_runtime_id, task_id, tool_name, arguments
+            )
+        finally:
+            with self._lock:
+                self._active -= 1
 
 
 class ScriptedModel:
@@ -100,27 +155,37 @@ class ScriptedModel:
             )
             match = re.search(r"Design (\d+)", prompt)
             count = int(match.group(1)) if match else 1
-            plan = []
-            if node_type != NodeType.AGGREGATION:
-                plan = [
-                    PlannedAction(
-                        purpose="measure",
-                        tool_name="measure",
-                        arguments={"value": index},
-                        expected_information="the value",
-                    )
-                    for index in range(self.actions_per_plan)
-                ]
+            slot_match = re.search(
+                r"Proposal slots?.*?\[\s*(\d+)", prompt, flags=re.DOTALL
+            )
+            proposal_offset = int(slot_match.group(1)) - 1 if slot_match else 0
             return PlanningBatch(
                 proposals=[
                     NodeProposal(
                         node_type=node_type,
-                        hypothesis=f"proposal {index}",
+                        hypothesis=f"proposal {proposal_offset + index}",
                         rationale="discriminating experiment",
-                        plan=plan,
+                        experiment_goal="measure the value",
+                        success_criteria=["obtain a measurement"],
                     )
                     for index in range(count)
                 ]
+            )
+        if response_model is ExperimentDecision:
+            step = int(purpose.rsplit("_", 1)[-1])
+            if step > self.actions_per_plan:
+                return ExperimentDecision(
+                    decision="finish",
+                    rationale="the requested measurements are complete",
+                    conclusion="The measured value is 42",
+                )
+            return ExperimentDecision(
+                decision="act",
+                rationale="take the next measurement",
+                purpose="measure",
+                tool_name="measure",
+                arguments={"value": step - 1},
+                expected_information="the value",
             )
         if response_model is NodeEvaluation:
             return NodeEvaluation(
@@ -148,7 +213,11 @@ class ConcurrentProbeModel(ScriptedModel):
     def generate(
         self, prompt, response_model, *, model=None, purpose="scientific_worker"
     ):
-        is_parallel_worker = response_model in {PlanningBatch, NodeEvaluation}
+        is_parallel_worker = response_model in {
+            PlanningBatch,
+            ExperimentDecision,
+            NodeEvaluation,
+        }
         if is_parallel_worker:
             with self._lock:
                 self._active += 1
@@ -175,7 +244,8 @@ def test_agent_runs_all_scientific_stages_without_using_scorer(tmp_path):
         verification_min_nodes=4,
         max_nodes=10,
         max_tool_calls=10,
-        max_llm_calls=20,
+        max_llm_calls=30,
+        max_actions_per_node=1,
         trace_path=tmp_path,
     )
     agent = AIScientistAgent(config=config, model_gateway=model)
@@ -195,23 +265,37 @@ def test_agent_runs_all_scientific_stages_without_using_scorer(tmp_path):
         NodeType.COUNTERFACTUAL,
         NodeType.AGGREGATION,
     ]
-    assert len(router.tool_calls) == 6
-    assert model.call_count == 16
+    assert len(router.tool_calls) == 9
+    assert agent.last_state.scientific_tool_calls == 6
+    assert agent.last_state.replay_tool_calls == 3
+    assert agent.last_state.trial_runtimes_created == 5
+    assert router.closed_trials == router.created_trials
+    assert model.call_count == 28
     assert (tmp_path / "scientific-task.jsonl").is_file()
 
     preliminary = agent.last_state.tree.by_stage(ResearchStage.PRELIMINARY)
     assert [node.branch_workspace for node in preliminary] == [
-        "ai_scientist/node_0001/",
-        "ai_scientist/node_0002/",
+        "/fake/trial-1",
+        "/fake/trial-2",
+    ]
+    assert len({node.branch_id for node in preliminary}) == 2
+    assert len({node.trial_runtime_id for node in preliminary}) == 2
+    assert [node.parent_id for node in agent.last_state.tree.nodes[2:]] == [
+        "node_0001",
+        "node_0002",
+        "node_0001",
+        "node_0002",
+        "node_0001",
     ]
     planning_prompts = [
         prompt for purpose, prompt in model.records if purpose.startswith("plan_")
     ]
-    assert any("ai_scientist/node_0001/" in prompt for prompt in planning_prompts)
-    assert any("ai_scientist/node_0002/" in prompt for prompt in planning_prompts)
+    assert all("Trial-relative workspace" in prompt for prompt in planning_prompts)
+    assert all("Existing child experiments" in prompt for prompt in planning_prompts)
+    assert all("Proposal slot" in prompt for prompt in planning_prompts)
 
 
-def test_agent_stops_new_nodes_at_tool_budget_and_keeps_partial_plan_valid():
+def test_agent_marks_budget_truncated_node_partial_and_does_not_rank_it():
     model = ScriptedModel(actions_per_plan=2)
     config = AIScientistConfig(
         initial_drafts=1,
@@ -222,7 +306,8 @@ def test_agent_stops_new_nodes_at_tool_budget_and_keeps_partial_plan_valid():
         verification_min_nodes=1,
         max_nodes=3,
         max_tool_calls=1,
-        max_llm_calls=10,
+        max_llm_calls=8,
+        max_actions_per_node=3,
     )
     agent = AIScientistAgent(config=config, model_gateway=model)
     router = FakeRouter()
@@ -232,9 +317,42 @@ def test_agent_stops_new_nodes_at_tool_budget_and_keeps_partial_plan_valid():
     assert result.answer == "42"
     assert len(router.tool_calls) == 1
     assert len(agent.last_state.tree.nodes) == 1
-    assert agent.last_state.tree.nodes[0].status.value == "successful"
-    assert len(agent.last_state.tree.nodes[0].plan) == 1
-    assert model.call_count == 4
+    node = agent.last_state.tree.nodes[0]
+    assert node.status.value == "partial"
+    assert node.allocated_action_budget == 1
+    assert node.termination_reason.value == "action_budget_exhausted"
+    assert len(node.plan) == 1
+    assert agent.last_state.best_nodes == []
+    assert agent.last_state.journal.claims == []
+    assert model.call_count == 6
+
+
+def test_parallel_nodes_reserve_shared_tool_budget_before_execution():
+    model = ScriptedModel(actions_per_plan=2)
+    config = AIScientistConfig(
+        initial_drafts=2,
+        preliminary_node_budget=2,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        max_nodes=2,
+        max_tool_calls=3,
+        max_llm_calls=14,
+        max_actions_per_node=2,
+        parallel_experiment_workers=2,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+
+    agent.run_agent(FakeRouter(), "parallel-budget-reservation-task")
+
+    assert [len(node.plan) for node in agent.last_state.tree.nodes] == [2, 1]
+    assert [node.status.value for node in agent.last_state.tree.nodes] == [
+        "successful",
+        "partial",
+    ]
+    assert agent.last_state.scientific_tool_calls == 3
+    assert agent.last_state.replay_tool_calls == 0
 
 
 def test_reusable_injected_model_gets_a_fresh_per_run_llm_budget():
@@ -247,8 +365,9 @@ def test_reusable_injected_model_gets_a_fresh_per_run_llm_budget():
         verification_node_budget=1,
         verification_min_nodes=1,
         max_nodes=3,
-        max_tool_calls=3,
-        max_llm_calls=8,
+        max_tool_calls=4,
+        max_llm_calls=16,
+        max_actions_per_node=1,
     )
     agent = AIScientistAgent(config=config, model_gateway=model)
 
@@ -275,6 +394,7 @@ def test_agent_stops_expansion_after_total_llm_token_budget():
         max_tool_calls=3,
         max_llm_calls=10,
         max_llm_tokens=25,
+        max_actions_per_node=1,
     )
     agent = AIScientistAgent(config=config, model_gateway=model)
     router = FakeRouter()
@@ -284,10 +404,10 @@ def test_agent_stops_expansion_after_total_llm_token_budget():
     assert result.answer == "42"
     assert len(router.tool_calls) == 1
     assert len(agent.last_state.tree.nodes) == 1
-    # Formulation + planning + evaluation crossed the ceiling; only the
-    # separately reserved final-synthesis call was allowed afterward.
-    assert agent.last_state.llm_calls == 4
-    assert agent.last_state.llm_tokens == 40
+    # Formulation + planning + adaptive action + explicit completion +
+    # evaluation crossed the token ceiling; final synthesis remained reserved.
+    assert agent.last_state.llm_calls == 6
+    assert agent.last_state.llm_tokens == 60
 
 
 def test_low_validity_tool_success_is_marked_invalid_and_not_ranked_best():
@@ -302,6 +422,7 @@ def test_low_validity_tool_success_is_marked_invalid_and_not_ranked_best():
         max_nodes=3,
         max_tool_calls=1,
         max_llm_calls=8,
+        max_actions_per_node=1,
     )
     agent = AIScientistAgent(config=config, model_gateway=model)
 
@@ -331,7 +452,8 @@ def test_critic_debug_recommendation_drives_the_next_node_type():
         verification_min_nodes=1,
         max_nodes=2,
         max_tool_calls=2,
-        max_llm_calls=8,
+        max_llm_calls=10,
+        max_actions_per_node=1,
     )
     agent = AIScientistAgent(config=config, model_gateway=model)
 
@@ -355,6 +477,7 @@ def test_llm_planning_and_evaluation_overlap_for_independent_roots():
         max_nodes=2,
         max_tool_calls=2,
         max_llm_calls=10,
+        max_actions_per_node=1,
         parallel_llm_workers=2,
     )
     agent = AIScientistAgent(config=config, model_gateway=model)
@@ -362,6 +485,31 @@ def test_llm_planning_and_evaluation_overlap_for_independent_roots():
     agent.run_agent(FakeRouter(), "parallel-llm-task")
 
     assert model.max_active >= 2
+
+
+def test_tool_execution_overlaps_for_isolated_root_trials():
+    model = ScriptedModel()
+    config = AIScientistConfig(
+        initial_drafts=2,
+        preliminary_node_budget=2,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        max_nodes=2,
+        max_tool_calls=2,
+        max_llm_calls=9,
+        max_actions_per_node=1,
+        parallel_llm_workers=1,
+        parallel_experiment_workers=2,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+    router = ConcurrentToolRouter()
+
+    agent.run_agent(router, "parallel-tool-task")
+
+    assert router.max_active == 2
+    assert agent.last_state.peak_simultaneous_trials == 2
 
 
 def test_parallel_root_planning_preserves_the_reserved_final_llm_call():
@@ -375,7 +523,8 @@ def test_parallel_root_planning_preserves_the_reserved_final_llm_call():
         verification_min_nodes=1,
         max_nodes=3,
         max_tool_calls=3,
-        max_llm_calls=4,
+        max_llm_calls=6,
+        max_actions_per_node=3,
         parallel_llm_workers=3,
     )
     agent = AIScientistAgent(config=config, model_gateway=model)
@@ -384,4 +533,5 @@ def test_parallel_root_planning_preserves_the_reserved_final_llm_call():
 
     assert result.answer == "42"
     assert len(agent.last_state.tree.nodes) == 1
-    assert model.call_count == 4
+    assert len(agent.last_state.tree.nodes[0].plan) == 1
+    assert model.call_count == 6

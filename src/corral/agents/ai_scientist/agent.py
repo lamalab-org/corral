@@ -8,7 +8,7 @@ from corral.agents.ai_scientist.journal import JSONLTraceWriter
 from corral.agents.ai_scientist.manager import ExperimentManager
 from corral.agents.ai_scientist.search.selector import TreeSelector
 from corral.agents.ai_scientist.state import ScientistState
-from corral.agents.ai_scientist.tools.corral_executor import CorralExecutor
+from corral.agents.ai_scientist.tools.trial_pool import TrialPool
 from corral.agents.ai_scientist.workers.base import (
     LiteLLMStructuredModel,
     StructuredModel,
@@ -122,7 +122,7 @@ class AIScientistAgent(BaseAgent):
         self.last_state = state
         trace.write("formulation", formulation.model_dump(mode="json"))
 
-        executor = CorralExecutor(
+        pool = TrialPool(
             interface=interface,
             task_id=task_id,
             tools=tool_payload,
@@ -145,34 +145,45 @@ class AIScientistAgent(BaseAgent):
             config=self.config,
             model=gateway,
             planner=planner,
-            experimenter=Experimenter(),
+            experimenter=Experimenter(
+                gateway,
+                max_actions_per_node=self.config.max_actions_per_node,
+                max_journal_chars=self.config.max_journal_chars,
+                max_tool_schema_chars=self.config.max_tool_schema_chars,
+            ),
             critic=critic,
             selector=TreeSelector(
                 debug_probability=self.config.debug_probability,
                 max_debug_depth=self.config.max_debug_depth,
+                max_children_per_node=self.config.max_children_per_node,
+                exploration_weight=self.config.tree_exploration_weight,
                 random_seed=self.config.random_seed,
             ),
             trace=trace,
             initial_llm_calls=initial_llm_calls,
             initial_llm_tokens=initial_llm_tokens,
         )
-        state = manager.run(state, executor)
-        self.last_state = state
+        try:
+            state = manager.run(state, pool)
+            self.last_state = state
 
-        answer = FinalSynthesizer(
-            gateway, max_journal_chars=self.config.max_journal_chars
-        ).generate(
-            task_prompt=prompt,
-            journal_context=state.journal.context(self.config.max_journal_chars),
-            best_nodes=state.best_nodes,
-        )
+            answer = FinalSynthesizer(
+                gateway, max_journal_chars=self.config.max_journal_chars
+            ).generate(
+                task_prompt=prompt,
+                journal_context=state.journal.context(self.config.max_journal_chars),
+                best_nodes=state.best_nodes,
+            )
+        finally:
+            pool.close_all()
+
         state.llm_calls = gateway.call_count - initial_llm_calls
         state.llm_tokens = getattr(gateway, "token_count", 0) - initial_llm_tokens
         trace.write(
             "final_answer",
             {
                 "answer": answer,
-                "tool_calls": executor.call_count,
+                **pool.stats(),
                 "llm_calls": state.llm_calls,
                 "llm_tokens": state.llm_tokens,
             },
