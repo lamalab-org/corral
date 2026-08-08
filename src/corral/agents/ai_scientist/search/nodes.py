@@ -182,6 +182,7 @@ class NodeEvaluation(BaseModel):
     supported_claims: list[str] = Field(default_factory=list)
     contradicted_claims: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
+    visual_feedback: list[str] = Field(default_factory=list)
 
 
 class NodeProposal(BaseModel):
@@ -194,12 +195,35 @@ class NodeProposal(BaseModel):
     rationale: str
     experiment_goal: str
     success_criteria: list[str] = Field(default_factory=list)
+    related_node_ids: list[str] = Field(default_factory=list)
+    visual_artifacts: list[str] = Field(default_factory=list)
 
 
 class PlanningBatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     proposals: list[NodeProposal]
+
+
+class SubstagePlan(BaseModel):
+    """An evidence-dependent research agenda within one main stage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str
+    rationale: str
+    objectives: list[str] = Field(default_factory=list)
+    completion_criteria: list[str] = Field(default_factory=list)
+
+
+class StageWinnerSelection(BaseModel):
+    """Listwise comparison used when handing one stage into the next."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_node_id: str
+    reason: str
+    candidate_comparison: list[str] = Field(default_factory=list)
 
 
 class ExperimentNode(BaseModel):
@@ -213,11 +237,17 @@ class ExperimentNode(BaseModel):
     trial_runtime_id: str | None = None
     branch_workspace: str | None = None
     stage: ResearchStage
+    stage_seed_id: str | None = None
+    substage_id: str | None = None
+    boundary_validation: bool = False
+    physical_state_inherited: bool = False
     node_type: NodeType
     hypothesis: str
     rationale: str
     experiment_goal: str = ""
     success_criteria: list[str] = Field(default_factory=list)
+    related_node_ids: list[str] = Field(default_factory=list)
+    visual_artifacts: list[str] = Field(default_factory=list)
     # ``plan`` is the realized action sequence. Actions are appended only after
     # the worker has observed every preceding result; it is never precomputed.
     plan: list[PlannedAction] = Field(default_factory=list)

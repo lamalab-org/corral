@@ -45,8 +45,15 @@ class ExperimentTree:
     def nodes(self) -> list[ExperimentNode]:
         return list(self._nodes.values())
 
-    def by_stage(self, stage: ResearchStage) -> list[ExperimentNode]:
-        return [node for node in self._nodes.values() if node.stage == stage]
+    def by_stage(
+        self, stage: ResearchStage, *, include_boundary: bool = True
+    ) -> list[ExperimentNode]:
+        return [
+            node
+            for node in self._nodes.values()
+            if node.stage == stage
+            and (include_boundary or not node.boundary_validation)
+        ]
 
     def leaves(self) -> list[ExperimentNode]:
         return [node for node in self._nodes.values() if not self.children(node.id)]

@@ -12,8 +12,15 @@ from corral.agents.ai_scientist.search.nodes import (
     NodeStatus,
     NodeType,
     ResearchStage,
+    StageWinnerSelection,
+    SubstagePlan,
 )
-from corral.agents.ai_scientist.state import ScientistState, TaskFormulation
+from corral.agents.ai_scientist.state import (
+    ScientistState,
+    StageProgress,
+    SubstageState,
+    TaskFormulation,
+)
 
 __all__ = [
     "AIScientistAgent",
@@ -28,5 +35,9 @@ __all__ = [
     "ResearchJournal",
     "ResearchStage",
     "ScientistState",
+    "StageProgress",
+    "StageWinnerSelection",
+    "SubstagePlan",
+    "SubstageState",
     "TaskFormulation",
 ]

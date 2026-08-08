@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from corral.agents.ai_scientist.journal import ResearchJournal
-from corral.agents.ai_scientist.search.nodes import ResearchStage
+from corral.agents.ai_scientist.search.nodes import ResearchStage, SubstagePlan
 from corral.agents.ai_scientist.search.tree import ExperimentTree
 
 
@@ -34,6 +34,36 @@ class TaskFormulation(BaseModel):
         return bool(self.tunable_parameters)
 
 
+class SubstageState(BaseModel):
+    """One manager-created agenda inside a main research stage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    plan: SubstagePlan
+    node_ids: list[str] = Field(default_factory=list)
+
+
+class StageProgress(BaseModel):
+    """Explicit handoff and validation state for a main research stage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage: ResearchStage
+    seed_node_id: str | None = None
+    best_node_id: str | None = None
+    improved_over_seed: bool = False
+    completion_criteria_met: bool = False
+    comparison_reason: str | None = None
+    substages: list[SubstageState] = Field(default_factory=list)
+    replication_node_ids: list[str] = Field(default_factory=list)
+    aggregation_node_id: str | None = None
+
+    @property
+    def current_substage(self) -> SubstageState | None:
+        return self.substages[-1] if self.substages else None
+
+
 class ScientistState:
     """Mutable orchestration state; the tree and journal stay explicit."""
 
@@ -50,6 +80,7 @@ class ScientistState:
         self.tree = ExperimentTree()
         self.journal = ResearchJournal()
         self.current_stage = ResearchStage.FORMULATION
+        self.stages: dict[ResearchStage, StageProgress] = {}
         self.tool_calls = 0
         self.scientific_tool_calls = 0
         self.replay_tool_calls = 0
@@ -68,3 +99,6 @@ class ScientistState:
     @property
     def best_nodes(self):
         return self.tree.best()
+
+    def stage_progress(self, stage: ResearchStage) -> StageProgress:
+        return self.stages[stage]

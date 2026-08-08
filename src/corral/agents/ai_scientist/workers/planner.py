@@ -9,6 +9,7 @@ from corral.agents.ai_scientist.search.nodes import (
     NodeType,
     PlanningBatch,
     ResearchStage,
+    SubstagePlan,
 )
 from corral.agents.ai_scientist.state import TaskFormulation
 from corral.agents.ai_scientist.workers.base import StructuredModel
@@ -65,6 +66,7 @@ class NodePlanner:
         parent: ExperimentNode | None,
         siblings: list[ExperimentNode],
         branch_workspaces: list[str],
+        substage: SubstagePlan | None = None,
         proposal_offset: int = 0,
     ) -> list[NodeProposal]:
         if node_type == NodeType.CONTINUE:
@@ -134,6 +136,11 @@ class NodePlanner:
             node_type=node_type.value,
             count=count,
             max_actions=self.max_actions_per_node,
+            substage=(
+                substage.model_dump_json(indent=2)
+                if substage is not None
+                else "No narrower substage agenda."
+            ),
         )
         batch = self.model.generate(
             prompt, PlanningBatch, purpose=f"plan_{stage.value}_{node_type.value}"
@@ -146,3 +153,58 @@ class NodePlanner:
             proposal.model_copy(update={"node_type": node_type})
             for proposal in proposals
         ]
+
+    def propose_substage(
+        self,
+        *,
+        stage: ResearchStage,
+        task_prompt: str,
+        formulation: TaskFormulation,
+        journal_context: str,
+        seed: ExperimentNode | None,
+        previous: SubstagePlan,
+        stage_nodes: list[ExperimentNode],
+        substage_number: int,
+    ) -> SubstagePlan:
+        """Replan a main-stage agenda from evidence gathered so far."""
+        prompt = render_prompt(
+            "substage",
+            task_prompt=task_prompt,
+            formulation=formulation.model_dump_json(indent=2),
+            stage=stage.value,
+            seed=(
+                json.dumps(seed.model_dump(mode="json"), indent=2)
+                if seed is not None
+                else "No inherited seed in the preliminary stage."
+            ),
+            previous_substage=previous.model_dump_json(indent=2),
+            stage_results=json.dumps(
+                [
+                    node.model_dump(
+                        mode="json",
+                        include={
+                            "id",
+                            "substage_id",
+                            "node_type",
+                            "hypothesis",
+                            "experiment_goal",
+                            "status",
+                            "conclusions",
+                            "open_questions",
+                            "evaluation",
+                            "visual_artifacts",
+                        },
+                    )
+                    for node in stage_nodes
+                ],
+                indent=2,
+                ensure_ascii=False,
+            ),
+            journal=journal_context[: self.max_journal_chars],
+            substage_number=substage_number,
+        )
+        return self.model.generate(
+            prompt,
+            SubstagePlan,
+            purpose=f"manage_{stage.value}_substage_{substage_number}",
+        )

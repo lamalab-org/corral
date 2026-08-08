@@ -107,3 +107,29 @@ def test_text_mode_counts_one_physical_request(monkeypatch):
     assert model.call_count == 1
     assert len(calls) == 1
     assert "response_format" not in calls[0]
+
+
+def test_multimodal_generation_attaches_local_images(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_llm_call(**kwargs):
+        calls.append(kwargs)
+        return FakeResponse()
+
+    image = tmp_path / "curve.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\nplot")
+    monkeypatch.setattr(base, "llm_call", fake_llm_call)
+    model = gateway()
+
+    result = model.generate_multimodal(
+        "inspect the convergence curve",
+        FinalAnswer,
+        image_paths=[str(image)],
+        purpose="visual_evaluation",
+    )
+
+    assert result.final_answer == "42"
+    content = calls[0]["messages"][1]["content"]
+    assert content[0] == {"type": "text", "text": "inspect the convergence curve"}
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")

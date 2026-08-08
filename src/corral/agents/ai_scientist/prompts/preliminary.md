@@ -6,6 +6,9 @@ Task:
 Formulation:
 {{formulation}}
 
+Current experimental substage and its specific objectives:
+{{substage}}
+
 Parent checkpoint:
 {{parent}}
 

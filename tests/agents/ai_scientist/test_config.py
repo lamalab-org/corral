@@ -9,6 +9,7 @@ def test_default_search_uses_three_nodes():
 
     assert config.max_nodes == 3
     assert config.max_actions_per_node == 3
+    assert config.candidates_per_expansion == 3
     assert config.max_children_per_node == 3
     assert config.tree_exploration_weight == 0.1
     assert config.parallel_experiment_workers == 3

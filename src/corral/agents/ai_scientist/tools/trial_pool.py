@@ -233,6 +233,53 @@ class TrialPool:
             ),
         }
 
+    def visual_artifacts(
+        self,
+        branch: BranchRuntime,
+        *,
+        limit: int,
+        max_bytes: int,
+    ) -> list[str]:
+        """Return safe local plot/image artifacts produced in a branch.
+
+        Remote trial workspaces are intentionally tolerated: if the advertised
+        path is not mounted in this process there is simply no local artifact
+        to attach to the evaluator.
+        """
+        if limit <= 0 or not branch.workspace:
+            return []
+        workspace = Path(branch.workspace).resolve()
+        if not workspace.is_dir():
+            return []
+        suffixes = {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+            ".gif",
+            ".tif",
+            ".tiff",
+            ".bmp",
+        }
+        artifacts: list[str] = []
+        for item in sorted(workspace.rglob("*")):
+            if len(artifacts) >= limit:
+                break
+            if item.is_symlink() or not item.is_file():
+                continue
+            if item.suffix.casefold() not in suffixes:
+                continue
+            resolved = item.resolve()
+            if workspace not in resolved.parents:
+                continue
+            try:
+                if resolved.stat().st_size > max_bytes:
+                    continue
+            except OSError:
+                continue
+            artifacts.append(str(resolved))
+        return artifacts
+
     def promote_artifacts(
         self,
         nodes: list[ExperimentNode],

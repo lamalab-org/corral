@@ -9,7 +9,8 @@ Task formulation:
 Experiment node:
 {{node}}
 
-Prior partial checkpoint being continued:
+Prior partial checkpoint being continued, or scientific seed inherited by a
+clean independent experiment:
 {{prior_checkpoint}}
 
 Reliable evidence from the global journal:
@@ -31,3 +32,7 @@ advance this experiment. Return `decision="finish"`, no action fields, and a
 brief evidence-grounded conclusion when the experiment is complete or no
 useful action remains. Keep output paths relative to the node's branch
 workspace. Do not call scoring or answer-submission tools.
+Unless the experiment node says `physical_state_inherited=true`, parent results
+are scientific context only: reproduce every state/configuration needed for
+this experiment in the clean trial instead of assuming the parent's live tool
+state exists.

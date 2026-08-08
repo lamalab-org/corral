@@ -1,8 +1,11 @@
 """Model-provider boundary for schema-constrained worker calls."""
 
+import base64
 import json
+import mimetypes
 import re
 import threading
+from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
 from loguru import logger
@@ -129,14 +132,64 @@ class LiteLLMStructuredModel:
         model: str | None = None,
         purpose: str = "scientific_worker",
     ) -> ResponseT:
-        self._reserve_request(purpose)
-        with self._state_lock:
-            use_structured_output = self.use_structured_output
-        selected_model = model or self.default_model
         messages: list[LiteLLMMessage] = [
             LiteLLMMessage(role="system", content=self.system_prompt),
             LiteLLMMessage(role="user", content=prompt),
         ]
+        return self._generate_messages(
+            messages,
+            response_model,
+            model=model,
+            purpose=purpose,
+        )
+
+    def generate_multimodal(
+        self,
+        prompt: str,
+        response_model: type[ResponseT],
+        *,
+        image_paths: list[str],
+        model: str | None = None,
+        purpose: str = "multimodal_scientific_worker",
+    ) -> ResponseT:
+        """Generate a structured evaluation with local images attached."""
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for raw_path in image_paths:
+            path = Path(raw_path)
+            media_type = mimetypes.guess_type(path.name)[0] or "image/png"
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{media_type};base64,{encoded}",
+                        "detail": "high",
+                    },
+                }
+            )
+        messages: list[LiteLLMMessage] = [
+            LiteLLMMessage(role="system", content=self.system_prompt),
+            LiteLLMMessage(role="user", content=content),
+        ]
+        return self._generate_messages(
+            messages,
+            response_model,
+            model=model,
+            purpose=purpose,
+        )
+
+    def _generate_messages(
+        self,
+        messages: list[LiteLLMMessage],
+        response_model: type[ResponseT],
+        *,
+        model: str | None,
+        purpose: str,
+    ) -> ResponseT:
+        self._reserve_request(purpose)
+        with self._state_lock:
+            use_structured_output = self.use_structured_output
+        selected_model = model or self.default_model
 
         response = None
         if use_structured_output:

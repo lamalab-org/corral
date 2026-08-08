@@ -12,6 +12,8 @@ from corral.agents.ai_scientist.search.nodes import (
     Observation,
     PlannedAction,
     ResearchStage,
+    StageWinnerSelection,
+    SubstagePlan,
 )
 from corral.agents.ai_scientist.search.selector import TreeSelector
 from corral.agents.ai_scientist.search.tree import ExperimentTree
@@ -29,5 +31,7 @@ __all__ = [
     "Observation",
     "PlannedAction",
     "ResearchStage",
+    "StageWinnerSelection",
+    "SubstagePlan",
     "TreeSelector",
 ]

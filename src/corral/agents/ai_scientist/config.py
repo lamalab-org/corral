@@ -24,7 +24,9 @@ class AIScientistConfig(BaseModel):
     verification_node_budget: int = Field(default=4, ge=1)
     verification_min_nodes: int = Field(default=4, ge=1)
 
-    candidates_per_expansion: int = Field(default=1, ge=1, le=4)
+    # Ordinary expansions should expose the configured worker parallelism. A
+    # value of one made the search serial after the independent root drafts.
+    candidates_per_expansion: int = Field(default=3, ge=1, le=4)
     max_children_per_node: int = Field(default=3, ge=1, le=16)
     tree_exploration_weight: float = Field(default=0.1, ge=0.0, le=1.0)
     max_nodes: int = Field(default=3, ge=1)
@@ -37,10 +39,40 @@ class AIScientistConfig(BaseModel):
     parallel_llm_workers: int = Field(default=4, ge=1, le=16)
     parallel_experiment_workers: int = Field(default=3, ge=1, le=16)
 
+    # The manager can revise the experimental agenda within a main stage. The
+    # first substage is deterministic; later substages are generated from the
+    # accumulated evidence after this many search nodes.
+    adaptive_substages: bool = True
+    max_substages_per_stage: int = Field(default=3, ge=1, le=16)
+    nodes_per_substage: int = Field(default=3, ge=1)
+
+    # Repeat the winning experiment at each main-stage boundary and reconcile
+    # those repetitions before seeding the next stage. Set to zero for tasks
+    # that are known to be deterministic or too expensive to repeat.
+    stage_boundary_replications: int = Field(default=3, ge=0, le=16)
+    aggregate_stage_replications: bool = True
+
+    # Stage 4 is systematic ablation/assumption testing. Counterfactuals are a
+    # useful Corral generalisation, but replication and aggregation belong at
+    # stage boundaries rather than in the Stage-4 node cycle.
+    verification_include_counterfactual: bool = True
+
+    # Non-continuation experiments start in clean trials and inherit the
+    # parent's scientific design through prompts. Opting into physical-state
+    # inheritance restores replay-on-fork for environments that truly need it.
+    inherit_parent_trial_state: bool = False
+
+    # Local image artifacts are sent to a multimodal evaluator when the model
+    # gateway supports that call shape.
+    enable_visual_feedback: bool = True
+    max_visual_artifacts_per_node: int = Field(default=4, ge=0, le=32)
+    max_visual_artifact_bytes: int = Field(default=5_000_000, ge=1_024)
+
     preliminary_evidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     stage_completion_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
     confidence_threshold: float = Field(default=0.82, ge=0.0, le=1.0)
     minimum_validity: float = Field(default=0.45, ge=0.0, le=1.0)
+    minimum_stage_improvement: float = Field(default=0.0, ge=0.0, le=1.0)
 
     random_seed: int = 0
     use_structured_output: bool = True

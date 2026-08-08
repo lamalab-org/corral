@@ -197,3 +197,29 @@ def test_selector_and_best_nodes_exclude_abandoned_branches():
 
     assert selector.select(tree).id == "continue"
     assert [node.id for node in tree.best()] == ["continue"]
+
+
+def test_later_stage_selector_is_scoped_to_its_explicit_seed_and_nodes():
+    tree = ExperimentTree()
+    unrelated = evaluated_node("unrelated")
+    unrelated.stage = ResearchStage.PRELIMINARY
+    unrelated.evaluation.task_progress = 1.0
+    unrelated.evaluation.evidence_strength = 1.0
+    seed = evaluated_node("seed")
+    seed.stage = ResearchStage.PRELIMINARY
+    child = evaluated_node("research-child", parent_id=seed.id)
+    child.stage = ResearchStage.RESEARCH
+    child.depth = 1
+    tree.add(unrelated)
+    tree.add(seed)
+    tree.add(child)
+
+    selected = TreeSelector().select(
+        tree,
+        stage=ResearchStage.RESEARCH,
+        seed_node_id=seed.id,
+    )
+
+    assert selected is not None
+    assert selected.id in {seed.id, child.id}
+    assert selected.id != unrelated.id

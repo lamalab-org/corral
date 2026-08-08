@@ -48,6 +48,7 @@ class ResearchJournal:
         self.hypotheses: list[JournalHypothesis] = []
         self.unresolved_questions: list[str] = []
         self.failed_experiments: list[ExperimentFailure] = []
+        self.visual_feedback: list[dict[str, Any]] = []
 
     def register_hypothesis(self, text: str) -> None:
         if text and all(item.text != text for item in self.hypotheses):
@@ -80,6 +81,15 @@ class ResearchJournal:
             or evaluation.validity < minimum_validity
         ):
             return
+
+        if node.visual_artifacts or evaluation.visual_feedback:
+            self.visual_feedback.append(
+                {
+                    "node_id": node.id,
+                    "artifacts": list(node.visual_artifacts),
+                    "feedback": list(evaluation.visual_feedback),
+                }
+            )
 
         confidence = evaluation.evidence_strength
         supported = [*evaluation.conclusions, *evaluation.supported_claims]
@@ -134,6 +144,7 @@ class ResearchJournal:
             "failed_experiments": [
                 failure.model_dump(mode="json") for failure in self.failed_experiments
             ],
+            "visual_feedback": self.visual_feedback,
         }
 
     def context(self, max_chars: int = 30_000) -> str:
