@@ -10,6 +10,7 @@ from corral.agents.ai_scientist.search.evaluator import (
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentNode,
     NodeStatus,
+    NodeType,
     Recommendation,
 )
 from corral.agents.ai_scientist.search.tree import ExperimentTree
@@ -38,6 +39,7 @@ class TreeSelector:
         tree: ExperimentTree,
         *,
         allow_failures: bool = True,
+        allow_partial: bool = True,
     ) -> ExperimentNode | None:
         """Select the best expandable checkpoint, including internal nodes."""
         candidates = [
@@ -45,7 +47,12 @@ class TreeSelector:
             for node in tree.nodes
             if tree.child_count(node.id) < self.max_children_per_node
         ]
-        return self._select_from(tree, candidates, allow_failures=allow_failures)
+        return self._select_from(
+            tree,
+            candidates,
+            allow_failures=allow_failures,
+            allow_partial=allow_partial,
+        )
 
     def _select_from(
         self,
@@ -53,6 +60,7 @@ class TreeSelector:
         candidates: list[ExperimentNode],
         *,
         allow_failures: bool = True,
+        allow_partial: bool = True,
     ) -> ExperimentNode | None:
         failed = [
             node
@@ -67,6 +75,22 @@ class TreeSelector:
             for node in candidates
             if node.status == NodeStatus.SUCCESSFUL and not self._abandoned(node)
         ]
+        partial = [
+            node
+            for node in candidates
+            if allow_partial
+            and node.status == NodeStatus.PARTIAL
+            and not self._abandoned(node)
+            and not any(
+                child.node_type == NodeType.CONTINUE for child in tree.children(node.id)
+            )
+        ]
+
+        # A partial node is a valid physical checkpoint, but not yet scientific
+        # evidence. Resume the strongest unfinished workflow before opening a
+        # different hypothesis or debugging an unrelated failure.
+        if partial:
+            return max(partial, key=lambda node: self._priority(tree, node))
 
         choose_failure = bool(failed) and (
             not successful or self._random.random() < self.debug_probability

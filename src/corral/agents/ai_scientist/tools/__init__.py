@@ -6,16 +6,20 @@ from corral.agents.ai_scientist.tools.corral_executor import (
     ToolCallBudgetExceeded,
 )
 from corral.agents.ai_scientist.tools.trial_pool import (
+    ArtifactPromotion,
     BranchRuntime,
     ReplayDiverged,
+    ReplayEquivalence,
     ReplayResult,
     TrialPool,
 )
 
 __all__ = [
+    "ArtifactPromotion",
     "BranchRuntime",
     "CorralExecutor",
     "ReplayDiverged",
+    "ReplayEquivalence",
     "ReplayResult",
     "ResearchBudget",
     "ToolCallBudgetExceeded",

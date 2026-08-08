@@ -1,7 +1,9 @@
 import re
+import shutil
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from corral.agents import AIScientistAgent, AIScientistConfig
 from corral.agents.ai_scientist.search.nodes import (
@@ -105,6 +107,46 @@ class ConcurrentToolRouter(FakeRouter):
         finally:
             with self._lock:
                 self._active -= 1
+
+
+class ArtifactRouter(FakeRouter):
+    def __init__(self, root: Path):
+        super().__init__()
+        self.root = root
+        self.trial_runtime_id = "outer-trial"
+        self.trial_workspace = str(root / "canonical")
+        Path(self.trial_workspace).mkdir()
+        self.workspaces = {self.trial_runtime_id: self.trial_workspace}
+
+    def create_trial(self, task_id):
+        descriptor = super().create_trial(task_id)
+        workspace = self.root / descriptor["trial_runtime_id"]
+        workspace.mkdir()
+        descriptor["workspace"] = str(workspace)
+        self.workspaces[descriptor["trial_runtime_id"]] = str(workspace)
+        return descriptor
+
+    def execute_trial_tool(self, trial_runtime_id, task_id, tool_name, arguments):
+        artifact = Path(self.workspaces[trial_runtime_id]) / "results" / "model.json"
+        artifact.parent.mkdir()
+        artifact.write_text('{"value": 42}', encoding="utf-8")
+        return super().execute_trial_tool(
+            trial_runtime_id, task_id, tool_name, arguments
+        )
+
+    def promote_trial_artifacts(
+        self, source_trial_runtime_id, destination_trial_runtime_id
+    ):
+        source = Path(self.workspaces[source_trial_runtime_id])
+        destination = Path(self.workspaces[destination_trial_runtime_id])
+        shutil.copytree(source, destination, dirs_exist_ok=True)
+        return {
+            "files": [
+                str(item.relative_to(source))
+                for item in source.rglob("*")
+                if item.is_file()
+            ]
+        }
 
 
 class ScriptedModel:
@@ -265,10 +307,12 @@ def test_agent_runs_all_scientific_stages_without_using_scorer(tmp_path):
         NodeType.COUNTERFACTUAL,
         NodeType.AGGREGATION,
     ]
-    assert len(router.tool_calls) == 9
+    # Aggregation has no physical branch and therefore no longer replays its
+    # parent trajectory merely to reconcile already-collected evidence.
+    assert len(router.tool_calls) == 8
     assert agent.last_state.scientific_tool_calls == 6
-    assert agent.last_state.replay_tool_calls == 3
-    assert agent.last_state.trial_runtimes_created == 5
+    assert agent.last_state.replay_tool_calls == 2
+    assert agent.last_state.trial_runtimes_created == 4
     assert router.closed_trials == router.created_trials
     assert model.call_count == 28
     assert (tmp_path / "scientific-task.jsonl").is_file()
@@ -353,6 +397,129 @@ def test_parallel_nodes_reserve_shared_tool_budget_before_execution():
     ]
     assert agent.last_state.scientific_tool_calls == 3
     assert agent.last_state.replay_tool_calls == 0
+
+
+class FourStepModel(ScriptedModel):
+    def __init__(self):
+        super().__init__()
+        self.actions_taken = 0
+
+    def generate(
+        self, prompt, response_model, *, model=None, purpose="scientific_worker"
+    ):
+        if response_model is ExperimentDecision:
+            self.call_count += 1
+            self.token_count += 10
+            self.purposes.append(purpose)
+            self.records.append((purpose, prompt))
+            if self.actions_taken < 4:
+                next_action = self.actions_taken + 1
+                if "You have 0 tool action(s) left" not in prompt:
+                    self.actions_taken = next_action
+                return ExperimentDecision(
+                    decision="act",
+                    rationale="complete the next workflow step",
+                    purpose=f"workflow step {next_action}",
+                    tool_name="measure",
+                    arguments={"value": next_action},
+                    expected_information="the next intermediate result",
+                )
+            return ExperimentDecision(
+                decision="finish",
+                rationale="all four workflow steps are complete",
+                conclusion="The four-step workflow completed.",
+            )
+        return super().generate(prompt, response_model, model=model, purpose=purpose)
+
+
+def test_partial_node_is_continued_in_the_same_physical_branch():
+    model = FourStepModel()
+    config = AIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=2,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        max_nodes=2,
+        max_tool_calls=4,
+        max_llm_calls=14,
+        max_actions_per_node=3,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+
+    agent.run_agent(FakeRouter(), "four-step-task")
+
+    first, continuation = agent.last_state.tree.nodes
+    assert first.status.value == "partial"
+    assert continuation.node_type == NodeType.CONTINUE
+    assert continuation.status.value == "successful"
+    assert continuation.parent_id == first.id
+    assert continuation.branch_id == first.branch_id
+    assert continuation.hypothesis == first.hypothesis
+    assert len(first.executed_actions) == 3
+    assert len(continuation.executed_actions) == 1
+    continuation_prompt = next(
+        prompt
+        for purpose, prompt in model.records
+        if purpose == f"experiment_{continuation.id}_step_1"
+    )
+    assert "Prior partial checkpoint being continued" in continuation_prompt
+    assert '"result": "42"' in continuation_prompt
+
+
+def test_aggregation_remains_available_after_tool_budget_is_exhausted():
+    model = ScriptedModel()
+    config = AIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        max_nodes=2,
+        max_tool_calls=1,
+        max_llm_calls=8,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+
+    agent.run_agent(FakeRouter(), "zero-tool-aggregation-task")
+
+    assert [node.node_type for node in agent.last_state.tree.nodes] == [
+        NodeType.DRAFT,
+        NodeType.AGGREGATION,
+    ]
+    aggregation = agent.last_state.tree.nodes[-1]
+    assert aggregation.branch_id is None
+    assert aggregation.allocated_action_budget == 0
+    assert agent.last_state.scientific_tool_calls == 1
+    assert agent.last_state.replay_tool_calls == 0
+
+
+def test_agent_promotes_winning_artifacts_into_the_scored_trial(tmp_path):
+    config = AIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        max_nodes=1,
+        max_tool_calls=1,
+        max_llm_calls=6,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
+    router = ArtifactRouter(tmp_path)
+
+    agent.run_agent(router, "artifact-task")
+
+    promoted = Path(router.trial_workspace) / "results" / "model.json"
+    assert promoted.read_text(encoding="utf-8") == '{"value": 42}'
+    assert agent.last_state.promoted_artifacts == ["results/model.json"]
+    assert agent.last_state.artifact_destination_workspace == router.trial_workspace
+    assert router.closed_trials == router.created_trials
 
 
 def test_reusable_injected_model_gets_a_fresh_per_run_llm_budget():

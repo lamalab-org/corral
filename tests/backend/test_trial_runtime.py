@@ -11,6 +11,7 @@ of the *same* task no longer share a single mutable server-side environment.
 * `DELETE` frees the runtime.
 """
 
+from pathlib import Path
 from typing import Literal
 
 import pytest
@@ -97,6 +98,30 @@ def test_create_trial_returns_runtime_descriptor():
     assert data["task_id"] == "task_a"
     assert data["trial_runtime_id"].startswith("tr_")
     assert data["mcp_url"] == f"/trials/{data['trial_runtime_id']}/mcp"
+
+
+def test_promote_trial_artifacts_overlays_the_scored_workspace(tmp_path):
+    envs = _build_environments("task_a", base_work_dir=str(tmp_path))
+    with TestClient(create_benchmark_server(envs)) as client:
+        canonical = _create_trial(client, "task_a")
+        branch = _create_trial(client, "task_a")
+        canonical_workspace = Path(canonical["workspace"])
+        branch_workspace = Path(branch["workspace"])
+        (canonical_workspace / "keep.txt").write_text("keep", encoding="utf-8")
+        artifact = branch_workspace / "results" / "final_results.json"
+        artifact.parent.mkdir()
+        artifact.write_text('{"value": 42}', encoding="utf-8")
+
+        response = client.post(
+            f"/trials/{branch['trial_runtime_id']}/artifacts/promote",
+            json={"destination_trial_runtime_id": canonical["trial_runtime_id"]},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["files"] == ["results/final_results.json"]
+        promoted = canonical_workspace / "results" / "final_results.json"
+        assert promoted.read_text(encoding="utf-8") == '{"value": 42}'
+        assert (canonical_workspace / "keep.txt").read_text() == "keep"
 
 
 def test_create_trial_unknown_task_404():

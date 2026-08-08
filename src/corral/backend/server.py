@@ -1,7 +1,9 @@
 import contextlib
+import shutil
 import threading
 import uuid
 from collections.abc import AsyncIterator, Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import uvicorn
@@ -18,6 +20,8 @@ from corral.backend.mcp_server import (
 from corral.backend.schema import (
     ToLatexRequest,
     ToolRequest,
+    TrialArtifactPromotionRequest,
+    TrialArtifactPromotionResponse,
     TrialCompletionResponse,
     TrialCreatedResponse,
     TrialCreateRequest,
@@ -311,6 +315,40 @@ def create_benchmark_server(
             raise HTTPException(status_code=404, detail="Trial runtime not found")
         return runtime
 
+    def _copy_trial_artifacts(source: str, destination: str) -> list[str]:
+        """Overlay regular files from one registered workspace onto another."""
+        source_path = Path(source).resolve()
+        destination_path = Path(destination).resolve()
+        if not source_path.is_dir():
+            raise HTTPException(status_code=409, detail="Source workspace is missing")
+        if source_path == destination_path:
+            return []
+        if (
+            source_path in destination_path.parents
+            or destination_path in source_path.parents
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Artifact workspaces must not contain one another",
+            )
+
+        destination_path.mkdir(parents=True, exist_ok=True)
+        copied: list[str] = []
+        for item in source_path.rglob("*"):
+            # Branches are model-controlled. Do not promote symlinks that could
+            # point outside either registered trial workspace.
+            if item.is_symlink():
+                continue
+            relative = item.relative_to(source_path)
+            target = destination_path / relative
+            if item.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif item.is_file():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, target)
+                copied.append(relative.as_posix())
+        return copied
+
     def _acquire_worker(episode_id: str | None) -> tuple[WorkerHandle, bool]:
         """Lease a worker for a process-trial, reusing an episode's pinned one.
 
@@ -418,6 +456,31 @@ def create_benchmark_server(
                 f"Failed to shut down jobs for trial {trial_runtime_id}: {exc}"
             )
         return {"status": "closed", "trial_runtime_id": trial_runtime_id}
+
+    @app.post("/trials/{trial_runtime_id}/artifacts/promote")
+    def promote_trial_artifacts(
+        trial_runtime_id: str,
+        request: TrialArtifactPromotionRequest,
+    ) -> TrialArtifactPromotionResponse:
+        """Overlay a branch workspace onto its canonical scored workspace."""
+        source = _require_trial(trial_runtime_id)
+        destination = _require_trial(request.destination_trial_runtime_id)
+        if source.task_id != destination.task_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Artifacts can only be promoted between trials of one task",
+            )
+        if source.workspace is None or destination.workspace is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Both trials must expose filesystem workspaces",
+            )
+        files = _copy_trial_artifacts(source.workspace, destination.workspace)
+        return TrialArtifactPromotionResponse(
+            source_trial_runtime_id=trial_runtime_id,
+            destination_trial_runtime_id=request.destination_trial_runtime_id,
+            files=files,
+        )
 
     @app.delete("/episodes/{episode_id}")
     def close_episode(episode_id: str):

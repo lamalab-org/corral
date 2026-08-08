@@ -26,6 +26,7 @@ class FinalSynthesizer:
         task_prompt: str,
         journal_context: str,
         best_nodes: list[ExperimentNode],
+        canonical_workspace: str | None = None,
     ) -> str:
         prompt = render_prompt(
             "final_answer",
@@ -35,6 +36,10 @@ class FinalSynthesizer:
                 [node.model_dump(mode="json") for node in best_nodes],
                 indent=2,
                 ensure_ascii=False,
+            ),
+            canonical_workspace=(
+                canonical_workspace
+                or "No filesystem workspace is associated with this task."
             ),
         )
         result = self.model.generate(prompt, FinalAnswer, purpose="final_synthesis")

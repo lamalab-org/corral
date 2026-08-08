@@ -89,6 +89,20 @@ class TrialCreatedResponse(BaseModel):
     mcp_url: str
 
 
+class TrialArtifactPromotionRequest(BaseModel):
+    """Copy branch artifacts into the canonical scored trial workspace."""
+
+    destination_trial_runtime_id: str
+
+
+class TrialArtifactPromotionResponse(BaseModel):
+    """Result of promoting one trial workspace over another."""
+
+    source_trial_runtime_id: str
+    destination_trial_runtime_id: str
+    files: list[str]
+
+
 class ToLatexRequest(BaseModel):
     """Request to generate LaTeX documentation for a task"""
 

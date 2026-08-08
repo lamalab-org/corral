@@ -67,6 +67,22 @@ class NodePlanner:
         branch_workspaces: list[str],
         proposal_offset: int = 0,
     ) -> list[NodeProposal]:
+        if node_type == NodeType.CONTINUE:
+            if parent is None:
+                raise ValueError("A continuation proposal requires a parent node")
+            # Continuation is an execution detail, not a new hypothesis. Keep
+            # the parent's scientific identity instead of inviting the planner
+            # to silently redefine an unfinished experiment.
+            return [
+                NodeProposal(
+                    node_type=NodeType.CONTINUE,
+                    hypothesis=parent.hypothesis,
+                    rationale=parent.rationale,
+                    experiment_goal=parent.experiment_goal,
+                    success_criteria=list(parent.success_criteria),
+                )
+            ]
+
         prompt_name = {
             ResearchStage.PRELIMINARY: "preliminary",
             ResearchStage.TUNING: "tuning",

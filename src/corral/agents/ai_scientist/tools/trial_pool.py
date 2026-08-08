@@ -1,11 +1,18 @@
 """Isolated branch runtimes and replay-on-fork orchestration."""
 
+import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from corral.agents.ai_scientist.search.nodes import ExecutedAction, ExperimentNode
+from corral.agents.ai_scientist.search.nodes import (
+    ExecutedAction,
+    ExperimentNode,
+    Observation,
+)
 from corral.agents.ai_scientist.search.tree import ExperimentTree
 from corral.agents.ai_scientist.tools.corral_executor import (
     CorralExecutor,
@@ -15,7 +22,10 @@ from corral.agents.ai_scientist.tools.corral_executor import (
 
 
 class ReplayDiverged(RuntimeError):
-    """Raised when replay changes whether a physical action succeeds."""
+    """Raised when replay cannot reconstruct the parent's physical state."""
+
+
+ReplayEquivalence = Callable[[Observation, Observation], bool]
 
 
 @dataclass
@@ -24,8 +34,19 @@ class ReplayResult:
 
     branch_id: str
     exact: bool
+    equivalent: bool
     original: ExecutedAction
     replayed: ExecutedAction
+
+
+@dataclass(frozen=True)
+class ArtifactPromotion:
+    """Files copied from a winning branch into the scored workspace."""
+
+    branch_id: str
+    source_workspace: str
+    destination_workspace: str
+    files: tuple[str, ...]
 
 
 @dataclass
@@ -55,12 +76,14 @@ class TrialPool:
         max_tool_calls: int,
         max_observation_chars: int | None = 12_000,
         stop_on_error: bool = True,
+        replay_equivalence: ReplayEquivalence | None = None,
     ) -> None:
         self.interface = interface
         self.task_id = task_id
         self.tools = tools
         self.max_observation_chars = max_observation_chars
         self.stop_on_error = stop_on_error
+        self.replay_equivalence = replay_equivalence
         self.budget = ResearchBudget(max_tool_calls)
         self.active: dict[str, BranchRuntime] = {}
         self.replay_results: list[ReplayResult] = []
@@ -204,8 +227,98 @@ class TrialPool:
             "physical_tool_calls": self.budget.used,
             "trial_runtimes_created": self.trials_created,
             "peak_simultaneous_trials": self.peak_simultaneous_trials,
-            "replay_divergences": sum(not item.exact for item in self.replay_results),
+            "nonexact_replays": sum(not item.exact for item in self.replay_results),
+            "replay_divergences": sum(
+                not item.equivalent for item in self.replay_results
+            ),
         }
+
+    def promote_artifacts(
+        self,
+        nodes: list[ExperimentNode],
+        tree: ExperimentTree,
+        *,
+        destination_workspace: str | None,
+        destination_trial_runtime_id: str | None = None,
+    ) -> ArtifactPromotion | None:
+        """Promote the highest-ranked physical branch into the scored trial.
+
+        Corral's server-side promotion API is preferred because client and
+        server filesystems need not be the same. A local copy is retained as a
+        compatibility path for in-process/custom routers.
+        """
+        if not destination_workspace:
+            return None
+        branch = self._first_physical_branch(nodes, tree)
+        if branch is None or not branch.workspace or not branch.trial_runtime_id:
+            return None
+
+        promote = getattr(self.interface, "promote_trial_artifacts", None)
+        if callable(promote) and destination_trial_runtime_id:
+            response = promote(
+                branch.trial_runtime_id,
+                destination_trial_runtime_id,
+            )
+            files = tuple(str(item) for item in response.get("files", []))
+        else:
+            files = tuple(self._copy_workspace(branch.workspace, destination_workspace))
+        return ArtifactPromotion(
+            branch_id=branch.branch_id,
+            source_workspace=branch.workspace,
+            destination_workspace=destination_workspace,
+            files=files,
+        )
+
+    def _first_physical_branch(
+        self,
+        nodes: list[ExperimentNode],
+        tree: ExperimentTree,
+    ) -> BranchRuntime | None:
+        for candidate in nodes:
+            node = candidate
+            while True:
+                if node.branch_id is not None:
+                    branch = self.active.get(node.branch_id)
+                    if (
+                        branch is not None
+                        and branch.workspace
+                        and branch.trial_runtime_id
+                    ):
+                        return branch
+                if node.parent_id is None:
+                    break
+                node = tree.get(node.parent_id)
+        return None
+
+    @staticmethod
+    def _copy_workspace(source: str, destination: str) -> list[str]:
+        source_path = Path(source).resolve()
+        destination_path = Path(destination).resolve()
+        if not source_path.is_dir():
+            return []
+        if source_path == destination_path:
+            return []
+        if (
+            source_path in destination_path.parents
+            or destination_path in source_path.parents
+        ):
+            raise ValueError("Artifact workspaces must not contain one another")
+
+        destination_path.mkdir(parents=True, exist_ok=True)
+        copied: list[str] = []
+        for item in source_path.rglob("*"):
+            # Never let a branch-created symlink escape either workspace.
+            if item.is_symlink():
+                continue
+            relative = item.relative_to(source_path)
+            target = destination_path / relative
+            if item.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif item.is_file():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, target)
+                copied.append(relative.as_posix())
+        return copied
 
     def _fork(self, parent: ExperimentNode, tree: ExperimentTree) -> BranchRuntime:
         trajectory = tree.executed_trajectory(parent.id)
@@ -227,9 +340,27 @@ class TrialPool:
                 exact = original.observation.model_dump(
                     exclude={"action_index"}
                 ) == replayed.observation.model_dump(exclude={"action_index"})
+                equivalent = exact
+                if (
+                    not exact
+                    and original.observation.success == replayed.observation.success
+                    and self.replay_equivalence is not None
+                ):
+                    try:
+                        equivalent = bool(
+                            self.replay_equivalence(
+                                original.observation,
+                                replayed.observation,
+                            )
+                        )
+                    except Exception as exc:
+                        raise ReplayDiverged(
+                            "Replay equivalence comparison failed."
+                        ) from exc
                 result = ReplayResult(
                     branch_id=branch.branch_id,
                     exact=exact,
+                    equivalent=equivalent,
                     original=original,
                     replayed=replayed,
                 )
@@ -238,6 +369,11 @@ class TrialPool:
                 if original.observation.success != replayed.observation.success:
                     raise ReplayDiverged(
                         "Replay changed the success status of a parent action."
+                    )
+                if not equivalent:
+                    raise ReplayDiverged(
+                        "Replay observation differed from the parent trajectory; "
+                        "the forked physical state is unsafe to use."
                     )
             branch.head_node_id = parent.id
             return branch

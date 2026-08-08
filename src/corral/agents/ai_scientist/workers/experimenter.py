@@ -35,13 +35,14 @@ class Experimenter:
     def execute(
         self,
         node: ExperimentNode,
-        executor: CorralExecutor,
+        executor: CorralExecutor | None,
         *,
         task_prompt: str,
         formulation: TaskFormulation,
         tools: list[dict],
         journal_context: str,
         action_limit: int | None = None,
+        previous_node: ExperimentNode | None = None,
     ) -> ExperimentNode:
         node.status = NodeStatus.RUNNING
         # Aggregation is the one node type that reconciles existing evidence
@@ -51,6 +52,8 @@ class Experimenter:
             node.termination_reason = ExperimentTermination.AGGREGATED
             node.status = NodeStatus.SUCCESSFUL
             return node
+        if executor is None:
+            raise ValueError("A physical experiment requires a Corral executor")
 
         limit = min(
             self.max_actions_per_node,
@@ -80,6 +83,7 @@ class Experimenter:
                 formulation=formulation,
                 tools=tool_text,
                 journal_context=journal_context,
+                previous_node=previous_node,
             )
             action = decision.as_action()
             if action is None:
@@ -147,6 +151,7 @@ class Experimenter:
         formulation: TaskFormulation,
         tools: str,
         journal_context: str,
+        previous_node: ExperimentNode | None,
     ) -> ExperimentDecision:
         prompt = render_prompt(
             "experiment_step",
@@ -168,6 +173,27 @@ class Experimenter:
                 ),
                 indent=2,
                 ensure_ascii=False,
+            ),
+            prior_checkpoint=(
+                json.dumps(
+                    previous_node.model_dump(
+                        mode="json",
+                        include={
+                            "id",
+                            "hypothesis",
+                            "experiment_goal",
+                            "success_criteria",
+                            "trajectory",
+                            "observations",
+                            "worker_conclusion",
+                            "termination_reason",
+                        },
+                    ),
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                if previous_node is not None
+                else "No prior partial checkpoint; this is a new experiment."
             ),
             trajectory=json.dumps(
                 [step.model_dump(mode="json") for step in node.trajectory],

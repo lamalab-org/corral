@@ -8,7 +8,7 @@ from corral.agents.ai_scientist.journal import JSONLTraceWriter
 from corral.agents.ai_scientist.manager import ExperimentManager
 from corral.agents.ai_scientist.search.selector import TreeSelector
 from corral.agents.ai_scientist.state import ScientistState
-from corral.agents.ai_scientist.tools.trial_pool import TrialPool
+from corral.agents.ai_scientist.tools.trial_pool import ReplayEquivalence, TrialPool
 from corral.agents.ai_scientist.workers.base import (
     LiteLLMStructuredModel,
     StructuredModel,
@@ -45,6 +45,7 @@ class AIScientistAgent(BaseAgent):
         evaluator_model: str | None = None,
         config: AIScientistConfig | None = None,
         model_gateway: StructuredModel | None = None,
+        replay_equivalence: ReplayEquivalence | None = None,
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
@@ -56,6 +57,7 @@ class AIScientistAgent(BaseAgent):
         self.config = config or AIScientistConfig()
         self.evaluator_model = evaluator_model or model
         self._injected_gateway = model_gateway
+        self.replay_equivalence = replay_equivalence
         if user_prompt is None:
             # BaseAgent resolves this prompt even though this scaffold constructs
             # its worker prompts directly.
@@ -129,6 +131,7 @@ class AIScientistAgent(BaseAgent):
             max_tool_calls=self.config.max_tool_calls,
             max_observation_chars=self.config.max_observation_chars,
             stop_on_error=self.config.stop_plan_on_tool_error,
+            replay_equivalence=self.replay_equivalence,
         )
         planner = NodePlanner(
             gateway,
@@ -167,13 +170,41 @@ class AIScientistAgent(BaseAgent):
             state = manager.run(state, pool)
             self.last_state = state
 
+            promotion = pool.promote_artifacts(
+                state.best_nodes,
+                state.tree,
+                destination_workspace=getattr(interface, "trial_workspace", None),
+                destination_trial_runtime_id=getattr(
+                    interface, "trial_runtime_id", None
+                ),
+            )
+            if promotion is not None:
+                state.artifact_source_workspace = promotion.source_workspace
+                state.artifact_destination_workspace = promotion.destination_workspace
+                state.promoted_artifacts = list(promotion.files)
+                trace.write(
+                    "artifacts_promoted",
+                    {
+                        "branch_id": promotion.branch_id,
+                        "source_workspace": promotion.source_workspace,
+                        "destination_workspace": promotion.destination_workspace,
+                        "files": list(promotion.files),
+                    },
+                )
+
             answer = FinalSynthesizer(
                 gateway, max_journal_chars=self.config.max_journal_chars
             ).generate(
                 task_prompt=prompt,
                 journal_context=state.journal.context(self.config.max_journal_chars),
                 best_nodes=state.best_nodes,
+                canonical_workspace=state.artifact_destination_workspace,
             )
+            if promotion is not None:
+                answer = answer.replace(
+                    promotion.source_workspace,
+                    promotion.destination_workspace,
+                )
         finally:
             pool.close_all()
 

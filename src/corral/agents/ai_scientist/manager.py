@@ -124,6 +124,9 @@ class ExperimentManager:
             node_type = self._continuation_type(parent, NodeType.REFINE)
             count = self._affordable_candidate_count(
                 min(
+                    1
+                    if node_type == NodeType.CONTINUE
+                    else self.config.candidates_per_expansion,
                     self.config.candidates_per_expansion,
                     self.selector.remaining_child_slots(state.tree, parent),
                     self.config.preliminary_node_budget
@@ -165,6 +168,9 @@ class ExperimentManager:
             node_type = self._continuation_type(parent, default_type)
             count = self._affordable_candidate_count(
                 min(
+                    1
+                    if node_type == NodeType.CONTINUE
+                    else self.config.candidates_per_expansion,
                     self.config.candidates_per_expansion,
                     self.selector.remaining_child_slots(state.tree, parent),
                     budget - len(state.tree.by_stage(stage)),
@@ -194,20 +200,41 @@ class ExperimentManager:
                 NodeType.AGGREGATION,
             ]
         )
-        while len(
-            state.tree.by_stage(ResearchStage.VERIFICATION)
-        ) < self.config.verification_node_budget and self._can_create(
-            state, pool, llm_calls=self._calls_per_node
+        while (
+            len(state.tree.by_stage(ResearchStage.VERIFICATION))
+            < self.config.verification_node_budget
         ):
             count = len(state.tree.by_stage(ResearchStage.VERIFICATION))
             if count >= self.config.verification_min_nodes and self._stage_complete(
                 state, ResearchStage.VERIFICATION
             ):
                 break
-            parent = self.selector.select(state.tree, allow_failures=False)
+            node_type = (
+                NodeType.AGGREGATION
+                if pool.remaining_calls <= 0
+                else next(verification_types)
+            )
+            if node_type == NodeType.AGGREGATION and any(
+                node.node_type == NodeType.AGGREGATION
+                for node in state.tree.by_stage(ResearchStage.VERIFICATION)
+            ):
+                break
+            if not self._can_create(
+                state,
+                pool,
+                llm_calls=2
+                if node_type == NodeType.AGGREGATION
+                else self._calls_per_node,
+                requires_tool_budget=node_type != NodeType.AGGREGATION,
+            ):
+                break
+            parent = self.selector.select(
+                state.tree,
+                allow_failures=False,
+                allow_partial=False,
+            )
             if parent is None:
                 break
-            node_type = next(verification_types)
             proposals = self._propose(
                 state,
                 stage=ResearchStage.VERIFICATION,
@@ -324,7 +351,7 @@ class ExperimentManager:
     ) -> list[ExperimentNode]:
         """Run isolated sibling experiments and evaluations concurrently."""
         node_capacity = self.config.max_nodes - len(state.tree)
-        prepared: list[tuple[ExperimentNode, BranchRuntime, int, int]] = []
+        prepared: list[tuple[ExperimentNode, BranchRuntime | None, int, int]] = []
         reserved_scientific_calls = 0
         reserved_llm_calls = 0
         remaining_llm_calls = max(
@@ -332,8 +359,12 @@ class ExperimentManager:
         )
         candidate_batch = candidates[:node_capacity]
         replay_costs = [
-            pool.replay_cost(parent, state.tree, prefer_existing=index == 0)
-            for index in range(len(candidate_batch))
+            (
+                0
+                if proposal.node_type == NodeType.AGGREGATION
+                else pool.replay_cost(parent, state.tree, prefer_existing=index == 0)
+            )
+            for index, (_, proposal) in enumerate(candidate_batch)
         ]
 
         for index, (node_id, proposal) in enumerate(candidate_batch):
@@ -386,27 +417,32 @@ class ExperimentManager:
             candidate_llm_calls = 1 if is_aggregation else action_limit + 2
             if reserved_llm_calls + candidate_llm_calls > remaining_llm_calls:
                 break
-            try:
-                branch = pool.acquire(
-                    parent,
-                    state.tree,
-                    prefer_existing=index == 0,
-                )
-            except (ReplayDiverged, ToolCallBudgetExceeded) as exc:
-                logger.warning("Could not prepare {}: {}", node_id, exc)
-                self.trace.write(
-                    "branch_replay_failed", {"node_id": node_id, "error": str(exc)}
-                )
-                break
+            branch: BranchRuntime | None = None
+            if not is_aggregation:
+                try:
+                    branch = pool.acquire(
+                        parent,
+                        state.tree,
+                        prefer_existing=index == 0,
+                    )
+                except (ReplayDiverged, ToolCallBudgetExceeded) as exc:
+                    logger.warning("Could not prepare {}: {}", node_id, exc)
+                    self.trace.write(
+                        "branch_replay_failed",
+                        {"node_id": node_id, "error": str(exc)},
+                    )
+                    break
             is_debug = proposal.node_type == NodeType.DEBUG
             reserved_llm_calls += candidate_llm_calls
             reserved_scientific_calls += action_limit
             node = ExperimentNode(
                 id=node_id,
                 parent_id=parent.id if parent is not None else None,
-                branch_id=branch.branch_id,
-                trial_runtime_id=branch.trial_runtime_id,
-                branch_workspace=branch.workspace,
+                branch_id=branch.branch_id if branch is not None else None,
+                trial_runtime_id=(
+                    branch.trial_runtime_id if branch is not None else None
+                ),
+                branch_workspace=branch.workspace if branch is not None else None,
                 stage=state.current_stage,
                 node_type=proposal.node_type,
                 hypothesis=proposal.hypothesis,
@@ -417,45 +453,61 @@ class ExperimentManager:
                 depth=(parent.depth + 1 if parent else 0),
             )
             self.trace.write("node_planned", node.model_dump(mode="json"))
-            self.trace.write(
-                "branch_assigned",
-                {
-                    "node_id": node.id,
-                    "branch_id": branch.branch_id,
-                    "trial_runtime_id": branch.trial_runtime_id,
-                    "replayed_actions": len(branch.replay_results),
-                },
-            )
-            for replay in branch.replay_results:
+            if branch is not None:
                 self.trace.write(
-                    "action_replayed",
+                    "branch_assigned",
                     {
                         "node_id": node.id,
                         "branch_id": branch.branch_id,
-                        "exact": replay.exact,
-                        "original": replay.original.model_dump(mode="json"),
-                        "replayed": replay.replayed.model_dump(mode="json"),
+                        "trial_runtime_id": branch.trial_runtime_id,
+                        "replayed_actions": len(branch.replay_results),
                     },
                 )
-            prepared.append((node, branch, len(branch.action_history), action_limit))
+                for replay in branch.replay_results:
+                    self.trace.write(
+                        "action_replayed",
+                        {
+                            "node_id": node.id,
+                            "branch_id": branch.branch_id,
+                            "exact": replay.exact,
+                            "equivalent": replay.equivalent,
+                            "original": replay.original.model_dump(mode="json"),
+                            "replayed": replay.replayed.model_dump(mode="json"),
+                        },
+                    )
+            else:
+                self.trace.write(
+                    "aggregation_without_branch",
+                    {"node_id": node.id, "parent_id": node.parent_id},
+                )
+            prepared.append(
+                (
+                    node,
+                    branch,
+                    len(branch.action_history) if branch is not None else 0,
+                    action_limit,
+                )
+            )
 
         if not prepared:
             return []
 
         def execute(
-            item: tuple[ExperimentNode, BranchRuntime, int, int],
+            item: tuple[ExperimentNode, BranchRuntime | None, int, int],
         ) -> ExperimentNode:
             node, branch, history_start, action_limit = item
             executed = self.experimenter.execute(
                 node,
-                branch.executor,
+                branch.executor if branch is not None else None,
                 task_prompt=state.task_prompt,
                 formulation=state.formulation,
                 tools=state.tools,
                 journal_context=state.journal.context(self.config.max_journal_chars),
                 action_limit=action_limit,
+                previous_node=(parent if node.node_type == NodeType.CONTINUE else None),
             )
-            pool.commit(branch, executed, history_start)
+            if branch is not None:
+                pool.commit(branch, executed, history_start)
             return executed
 
         experiment_workers = (
@@ -525,11 +577,12 @@ class ExperimentManager:
         pool: TrialPool,
         *,
         llm_calls: int,
+        requires_tool_budget: bool = True,
     ) -> bool:
         # Keep one LLM call in reserve for final synthesis.
         return (
             len(state.tree) < self.config.max_nodes
-            and pool.remaining_calls > 0
+            and (not requires_tool_budget or pool.remaining_calls > 0)
             and self._llm_calls_used + llm_calls <= self.config.max_llm_calls - 1
             and self._within_token_budget
         )
@@ -565,6 +618,8 @@ class ExperimentManager:
     def _continuation_type(
         self, parent: ExperimentNode, successful_type: NodeType
     ) -> NodeType:
+        if parent.status == NodeStatus.PARTIAL:
+            return NodeType.CONTINUE
         if parent.status in {NodeStatus.FAILED, NodeStatus.INVALID}:
             if parent.debug_depth < self.config.max_debug_depth:
                 return NodeType.DEBUG

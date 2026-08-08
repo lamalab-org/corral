@@ -129,6 +129,18 @@ def test_selector_can_reexpand_a_strong_internal_checkpoint():
     assert selector.remaining_child_slots(tree, root) == 2
 
 
+def test_selector_advances_past_a_partial_checkpoint_after_continuation():
+    tree = ExperimentTree()
+    partial = evaluated_node("partial", status=NodeStatus.PARTIAL)
+    continuation = evaluated_node("continuation", parent_id=partial.id)
+    continuation.node_type = NodeType.CONTINUE
+    continuation.depth = 1
+    tree.add(partial)
+    tree.add(continuation)
+
+    assert TreeSelector().select(tree).id == continuation.id
+
+
 def test_selector_prefers_breadth_over_an_equivalent_new_leaf():
     tree = ExperimentTree()
     root = evaluated_node("root")

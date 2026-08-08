@@ -15,7 +15,7 @@ ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 
 class LLMBudgetExceeded(RuntimeError):
-    """Raised before a logical worker call exceeds the local LLM-call budget."""
+    """Raised before a physical request exceeds the local LLM-call budget."""
 
 
 class StructuredModel(Protocol):
@@ -29,6 +29,45 @@ class StructuredModel(Protocol):
         model: str | None = None,
         purpose: str = "scientific_worker",
     ) -> ResponseT: ...
+
+
+def _is_unsupported_structured_output_error(exc: Exception) -> bool:
+    """Return whether a provider explicitly rejected structured output.
+
+    Provider SDKs do not expose one stable exception hierarchy across all
+    supported LiteLLM versions, so use the dedicated exception name when
+    available and tightly classify known 4xx/value errors by parameter text.
+    Timeouts, connection failures, 5xx responses, and malformed completions are
+    deliberately not treated as capability failures.
+    """
+    exception_names = {item.__name__ for item in type(exc).__mro__}
+    if "UnsupportedParamsError" in exception_names:
+        return True
+    if not exception_names.intersection(
+        {"BadRequestError", "InvalidRequestError", "ValueError"}
+    ):
+        return False
+    status = getattr(exc, "status_code", None)
+    if status is not None and not 400 <= status < 500:
+        return False
+    message = str(exc).casefold()
+    parameter_markers = (
+        "response_format",
+        "response format",
+        "structured output",
+        "json schema",
+    )
+    rejection_markers = (
+        "not supported",
+        "unsupported",
+        "does not support",
+        "unknown parameter",
+        "unrecognized",
+        "invalid parameter",
+    )
+    return any(item in message for item in parameter_markers) and any(
+        item in message for item in rejection_markers
+    )
 
 
 def _extract_object(content: str) -> dict[str, Any]:
@@ -90,12 +129,8 @@ class LiteLLMStructuredModel:
         model: str | None = None,
         purpose: str = "scientific_worker",
     ) -> ResponseT:
+        self._reserve_request(purpose)
         with self._state_lock:
-            if self.call_count >= self.max_calls:
-                raise LLMBudgetExceeded(
-                    f"LLM-call budget exhausted ({self.max_calls}) before {purpose}."
-                )
-            self.call_count += 1
             use_structured_output = self.use_structured_output
         selected_model = model or self.default_model
         messages: list[LiteLLMMessage] = [
@@ -119,8 +154,10 @@ class LiteLLMStructuredModel:
                 # not evidence that a provider lacks structured output.
                 raise
             except Exception as exc:
+                if not _is_unsupported_structured_output_error(exc):
+                    raise
                 logger.warning(
-                    "Structured output failed for {} ({}); retrying as JSON text.",
+                    "Structured output is unsupported for {} ({}); retrying as JSON text.",
                     purpose,
                     exc,
                 )
@@ -128,6 +165,10 @@ class LiteLLMStructuredModel:
                     self.use_structured_output = False
 
         if response is None:
+            if use_structured_output:
+                # The fallback is a second physical provider request, so
+                # reserve it independently from the rejected structured call.
+                self._reserve_request(f"{purpose}_json_fallback")
             response = llm_call(
                 model=selected_model,
                 messages=messages,
@@ -161,3 +202,12 @@ class LiteLLMStructuredModel:
                 self.owner.token_usage = response.usage
                 self.owner._accumulate_token_usage(response.usage)
         return parsed
+
+    def _reserve_request(self, purpose: str) -> None:
+        """Atomically reserve one physical provider request."""
+        with self._state_lock:
+            if self.call_count >= self.max_calls:
+                raise LLMBudgetExceeded(
+                    f"LLM-call budget exhausted ({self.max_calls}) before {purpose}."
+                )
+            self.call_count += 1

@@ -25,6 +25,7 @@ class ResearchStage(str, Enum):
 
 class NodeType(str, Enum):
     DRAFT = "draft"
+    CONTINUE = "continue"
     REFINE = "refine"
     DEBUG = "debug"
     PARAMETER_SEARCH = "parameter_search"

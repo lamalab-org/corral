@@ -9,6 +9,9 @@ Task formulation:
 Experiment node:
 {{node}}
 
+Prior partial checkpoint being continued:
+{{prior_checkpoint}}
+
 Reliable evidence from the global journal:
 {{journal}}
 

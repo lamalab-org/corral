@@ -56,6 +56,9 @@ class ScientistState:
         self.trial_runtimes_created = 0
         self.peak_simultaneous_trials = 0
         self.replay_results = []
+        self.artifact_source_workspace: str | None = None
+        self.artifact_destination_workspace: str | None = None
+        self.promoted_artifacts: list[str] = []
         self.llm_calls = 0
         self.llm_tokens = 0
 

@@ -1,4 +1,7 @@
 from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
 
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentNode,
@@ -7,7 +10,7 @@ from corral.agents.ai_scientist.search.nodes import (
     ResearchStage,
 )
 from corral.agents.ai_scientist.search.tree import ExperimentTree
-from corral.agents.ai_scientist.tools import TrialPool
+from corral.agents.ai_scientist.tools import ReplayDiverged, TrialPool
 
 
 @dataclass
@@ -135,3 +138,108 @@ def test_trial_pool_reuses_first_child_and_replays_parent_for_sibling():
 
     pool.close_all()
     assert interface.closed == ["trial-1", "trial-2"]
+
+
+class DriftingTrial(StatefulTrial):
+    def execute_tool(self, task_id, tool_name, arguments):
+        response = super().execute_tool(task_id, tool_name, arguments)
+        if self.trial_runtime_id != "trial-1":
+            response.result = str(float(response.result) + 0.1)
+        return response
+
+
+class DriftingRouter(StatefulRouter):
+    def for_trial(self, trial_runtime_id, task_id, *, verbosity=None, workspace=None):
+        return DriftingTrial(self, trial_runtime_id)
+
+
+def _one_action_parent(pool, tree):
+    branch = pool.acquire(None, tree, prefer_existing=True)
+    parent = node("root", branch, [action("set", 1)])
+    execute_and_commit(pool, branch, parent)
+    tree.add(parent)
+    return branch, parent
+
+
+def test_successful_but_different_replay_is_fatal_by_default():
+    interface = DriftingRouter()
+    pool = TrialPool(
+        interface=interface,
+        task_id="task",
+        tools=TOOLS,
+        max_tool_calls=2,
+    )
+    tree = ExperimentTree()
+    original_branch, parent = _one_action_parent(pool, tree)
+
+    with pytest.raises(ReplayDiverged, match="physical state is unsafe"):
+        pool.acquire(parent, tree, prefer_existing=False)
+
+    replay = pool.replay_results[0]
+    assert replay.exact is False
+    assert replay.equivalent is False
+    assert interface.closed == ["trial-2"]
+    assert list(pool.active) == [original_branch.branch_id]
+
+
+def test_environment_comparator_can_accept_semantically_equivalent_replay():
+    interface = DriftingRouter()
+    pool = TrialPool(
+        interface=interface,
+        task_id="task",
+        tools=TOOLS,
+        max_tool_calls=2,
+        replay_equivalence=lambda original, replayed: abs(
+            float(original.result) - float(replayed.result)
+        )
+        < 0.2,
+    )
+    tree = ExperimentTree()
+    _, parent = _one_action_parent(pool, tree)
+
+    fork = pool.acquire(parent, tree, prefer_existing=False)
+
+    assert fork.head_node_id == parent.id
+    assert pool.replay_results[0].exact is False
+    assert pool.replay_results[0].equivalent is True
+
+
+class LocalWorkspaceRouter(StatefulRouter):
+    def __init__(self, root: Path):
+        super().__init__()
+        self.root = root
+
+    def create_trial(self, task_id):
+        descriptor = super().create_trial(task_id)
+        workspace = self.root / descriptor["trial_runtime_id"]
+        workspace.mkdir()
+        descriptor["workspace"] = str(workspace)
+        return descriptor
+
+
+def test_winning_branch_artifacts_are_promoted_before_cleanup(tmp_path):
+    interface = LocalWorkspaceRouter(tmp_path)
+    pool = TrialPool(
+        interface=interface,
+        task_id="task",
+        tools=TOOLS,
+        max_tool_calls=1,
+    )
+    tree = ExperimentTree()
+    branch = pool.acquire(None, tree, prefer_existing=True)
+    root = node("root", branch, [])
+    tree.add(root)
+    artifact = Path(branch.workspace) / "results" / "model.json"
+    artifact.parent.mkdir()
+    artifact.write_text('{"answer": 42}', encoding="utf-8")
+    destination = tmp_path / "canonical"
+
+    promotion = pool.promote_artifacts(
+        [root],
+        tree,
+        destination_workspace=str(destination),
+    )
+
+    assert promotion is not None
+    assert promotion.files == ("results/model.json",)
+    assert (destination / "results" / "model.json").read_text() == '{"answer": 42}'
