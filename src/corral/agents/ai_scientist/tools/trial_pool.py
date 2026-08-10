@@ -62,6 +62,7 @@ class BranchRuntime:
     action_history: list[ExecutedAction] = field(default_factory=list)
     head_node_id: str | None = None
     replay_results: list[ReplayResult] = field(default_factory=list)
+    inheritance_method: str = "fresh"
 
 
 class TrialPool:
@@ -89,6 +90,7 @@ class TrialPool:
         self.replay_results: list[ReplayResult] = []
         self.trials_created = 0
         self.peak_simultaneous_trials = 0
+        self.trials_cloned = 0
         self._next_branch_number = 1
         required_methods = ("create_trial", "for_trial", "close_trial")
         missing = [
@@ -111,11 +113,33 @@ class TrialPool:
     def call_count(self) -> int:
         return self.budget.used
 
+    @property
+    def supports_cloning(self) -> bool:
+        """Whether the environment can checkpoint/clone a live trial."""
+        return callable(getattr(self.interface, "clone_trial", None))
+
+    def can_clone(self, parent: ExperimentNode) -> bool:
+        """Whether an active runtime is still parked at this checkpoint."""
+        return self.supports_cloning and any(
+            branch.head_node_id == parent.id and branch.trial_runtime_id is not None
+            for branch in self.active.values()
+        )
+
     def create(self) -> BranchRuntime:
+        descriptor: dict[str, Any] = self.interface.create_trial(self.task_id)
+        return self._runtime_from_descriptor(descriptor)
+
+    def _runtime_from_descriptor(
+        self,
+        descriptor: dict[str, Any],
+        *,
+        action_history: list[ExecutedAction] | None = None,
+        head_node_id: str | None = None,
+        inheritance_method: str = "fresh",
+    ) -> BranchRuntime:
         branch_id = f"branch_{self._next_branch_number:04d}"
         self._next_branch_number += 1
 
-        descriptor: dict[str, Any] = self.interface.create_trial(self.task_id)
         trial_runtime_id = str(descriptor["trial_runtime_id"])
         workspace = descriptor.get("workspace")
         self.trials_created += 1
@@ -137,7 +161,7 @@ class TrialPool:
                 )
             raise
 
-        history: list[ExecutedAction] = []
+        history = list(action_history or [])
         executor = CorralExecutor(
             interface=router,
             task_id=self.task_id,
@@ -156,6 +180,8 @@ class TrialPool:
             executor=executor,
             owns_trial=True,
             action_history=history,
+            head_node_id=head_node_id,
+            inheritance_method=inheritance_method,
         )
         self.active[branch_id] = branch
         self.peak_simultaneous_trials = max(
@@ -170,14 +196,17 @@ class TrialPool:
         tree: ExperimentTree,
         *,
         prefer_existing: bool,
+        prefer_clone: bool = False,
     ) -> BranchRuntime:
-        """Get a runtime at ``parent``, replaying its trajectory when needed."""
+        """Get a runtime at ``parent``, cloning or replaying when needed."""
         if parent is None:
             return self.create()
         if prefer_existing and parent.branch_id is not None:
             existing = self.active.get(parent.branch_id)
             if existing is not None and existing.head_node_id == parent.id:
                 return existing
+        if prefer_clone and self.can_clone(parent):
+            return self._clone(parent, tree)
         return self._fork(parent, tree)
 
     def replay_cost(
@@ -186,6 +215,7 @@ class TrialPool:
         tree: ExperimentTree,
         *,
         prefer_existing: bool,
+        prefer_clone: bool = False,
     ) -> int:
         """Return physical calls needed to place a runtime at ``parent``."""
         if parent is None:
@@ -194,6 +224,8 @@ class TrialPool:
             existing = self.active.get(parent.branch_id)
             if existing is not None and existing.head_node_id == parent.id:
                 return 0
+        if prefer_clone and self.can_clone(parent):
+            return 0
         return len(tree.executed_trajectory(parent.id))
 
     def commit(self, branch: BranchRuntime, node: ExperimentNode, start: int) -> None:
@@ -226,6 +258,7 @@ class TrialPool:
             "replay_tool_calls": self.budget.replay_calls,
             "physical_tool_calls": self.budget.used,
             "trial_runtimes_created": self.trials_created,
+            "trial_runtimes_cloned": self.trials_cloned,
             "peak_simultaneous_trials": self.peak_simultaneous_trials,
             "nonexact_replays": sum(not item.exact for item in self.replay_results),
             "replay_divergences": sum(
@@ -375,6 +408,7 @@ class TrialPool:
             )
 
         branch = self.create()
+        branch.inheritance_method = "replay"
         try:
             for original in trajectory:
                 before = len(branch.action_history)
@@ -434,3 +468,39 @@ class TrialPool:
                     close_error,
                 )
             raise
+
+    def _clone(
+        self,
+        parent: ExperimentNode,
+        tree: ExperimentTree,
+    ) -> BranchRuntime:
+        """Clone a parent runtime without replaying its physical trajectory.
+
+        Optional routers expose ``clone_trial(source_trial_runtime_id, task_id)``
+        and return the same descriptor shape as ``create_trial``. The logical
+        action history is retained for later provenance and fallback replay,
+        but cloned actions do not consume the physical tool-call budget.
+        """
+        source = next(
+            (
+                branch
+                for branch in self.active.values()
+                if branch.head_node_id == parent.id
+                and branch.trial_runtime_id is not None
+            ),
+            None,
+        )
+        source_id = source.trial_runtime_id if source is not None else None
+        if source_id is None:
+            return self._fork(parent, tree)
+        descriptor: dict[str, Any] = self.interface.clone_trial(
+            source_id,
+            self.task_id,
+        )
+        self.trials_cloned += 1
+        return self._runtime_from_descriptor(
+            descriptor,
+            action_history=tree.executed_trajectory(parent.id),
+            head_node_id=parent.id,
+            inheritance_method="clone",
+        )

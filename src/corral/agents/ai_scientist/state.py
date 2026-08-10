@@ -5,7 +5,11 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from corral.agents.ai_scientist.journal import ResearchJournal
-from corral.agents.ai_scientist.search.nodes import ResearchStage, SubstagePlan
+from corral.agents.ai_scientist.search.nodes import (
+    MeasuredMetric,
+    ResearchStage,
+    SubstagePlan,
+)
 from corral.agents.ai_scientist.search.tree import ExperimentTree
 
 
@@ -28,6 +32,7 @@ class TaskFormulation(BaseModel):
     possible_experiments: list[str] = Field(default_factory=list)
     success_criteria: list[str] = Field(default_factory=list)
     tunable_parameters: list[str] = Field(default_factory=list)
+    measured_metric: MeasuredMetric | None = None
 
     @property
     def has_tunable_parameters(self) -> bool:
@@ -42,6 +47,9 @@ class SubstageState(BaseModel):
     id: str
     plan: SubstagePlan
     node_ids: list[str] = Field(default_factory=list)
+    completion_criteria_met: bool = False
+    completion_reason: str | None = None
+    last_completion_check_node_count: int = Field(default=0, ge=0)
 
 
 class StageProgress(BaseModel):
@@ -85,6 +93,7 @@ class ScientistState:
         self.scientific_tool_calls = 0
         self.replay_tool_calls = 0
         self.trial_runtimes_created = 0
+        self.trial_runtimes_cloned = 0
         self.peak_simultaneous_trials = 0
         self.replay_results = []
         self.artifact_source_workspace: str | None = None
@@ -92,6 +101,7 @@ class ScientistState:
         self.promoted_artifacts: list[str] = []
         self.llm_calls = 0
         self.llm_tokens = 0
+        self.experimental_search_terminated_reason: str | None = None
 
         for hypothesis in formulation.candidate_hypotheses:
             self.journal.register_hypothesis(hypothesis.statement)

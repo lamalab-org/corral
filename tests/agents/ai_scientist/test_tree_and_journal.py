@@ -1,6 +1,9 @@
 from corral.agents.ai_scientist.journal import ResearchJournal
+from corral.agents.ai_scientist.search.evaluator import extract_measured_outcome
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentNode,
+    MeasuredMetric,
+    MeasuredOutcome,
     NodeEvaluation,
     NodeStatus,
     NodeType,
@@ -10,6 +13,7 @@ from corral.agents.ai_scientist.search.nodes import (
 )
 from corral.agents.ai_scientist.search.selector import TreeSelector
 from corral.agents.ai_scientist.search.tree import ExperimentTree
+from corral.agents.ai_scientist.state import TaskFormulation
 
 
 def evaluated_node(
@@ -223,3 +227,91 @@ def test_later_stage_selector_is_scoped_to_its_explicit_seed_and_nodes():
     assert selected is not None
     assert selected.id in {seed.id, child.id}
     assert selected.id != unrelated.id
+
+
+def test_declared_metric_is_parsed_from_tool_evidence_with_provenance():
+    experiment = evaluated_node("measured")
+    experiment.observations[0].result = '{"metrics": {"validation_loss": 0.125}}'
+    formulation = TaskFormulation(
+        objective="minimize validation loss",
+        required_answer="best setup",
+        measured_metric=MeasuredMetric(
+            name="validation_loss",
+            maximize=False,
+        ),
+    )
+
+    outcome = extract_measured_outcome(experiment, formulation)
+
+    assert outcome is not None
+    assert outcome.name == "validation_loss"
+    assert outcome.value == 0.125
+    assert outcome.maximize is False
+    assert outcome.provenance == (
+        "tool=measure;observation=0;path=result.metrics.validation_loss"
+    )
+
+
+def test_arbitrary_numbers_are_not_promoted_without_a_declared_metric():
+    experiment = evaluated_node("unanchored")
+    experiment.observations[0].result = (
+        '{"measured_outcome": {"name": "score", "value": 42, ' '"maximize": true}}'
+    )
+
+    outcome = extract_measured_outcome(
+        experiment,
+        TaskFormulation(objective="answer", required_answer="value"),
+    )
+
+    assert outcome is None
+
+
+def test_explicit_outcome_must_match_the_declared_metric_and_direction():
+    experiment = evaluated_node("mismatched")
+    experiment.observations[0].result = (
+        '{"measured_outcome": {"name": "accuracy", "value": 0.99, '
+        '"maximize": true}, "validation_loss": 0.125}'
+    )
+    formulation = TaskFormulation(
+        objective="minimize validation loss",
+        required_answer="best setup",
+        measured_metric=MeasuredMetric(
+            name="validation_loss",
+            maximize=False,
+        ),
+    )
+
+    outcome = extract_measured_outcome(experiment, formulation)
+
+    assert outcome is not None
+    assert outcome.name == "validation_loss"
+    assert outcome.value == 0.125
+    assert outcome.maximize is False
+    assert outcome.provenance.endswith("path=result.validation_loss")
+
+
+def test_measured_outcome_anchors_tree_ranking_ahead_of_critic_scores():
+    tree = ExperimentTree()
+    objective_winner = evaluated_node("objective-winner")
+    objective_winner.evaluation.task_progress = 0.1
+    objective_winner.evaluation.evidence_strength = 0.1
+    objective_winner.measured_outcome = MeasuredOutcome(
+        name="loss",
+        value=0.1,
+        maximize=False,
+        provenance="tool=measure;observation=0;path=result.loss",
+    )
+    critic_winner = evaluated_node("critic-winner")
+    critic_winner.evaluation.task_progress = 1.0
+    critic_winner.evaluation.evidence_strength = 1.0
+    critic_winner.measured_outcome = MeasuredOutcome(
+        name="loss",
+        value=0.9,
+        maximize=False,
+        provenance="tool=measure;observation=0;path=result.loss",
+    )
+    tree.add(objective_winner)
+    tree.add(critic_winner)
+
+    assert tree.best(limit=1) == [objective_winner]
+    assert TreeSelector(exploration_weight=0).select(tree) == objective_winner

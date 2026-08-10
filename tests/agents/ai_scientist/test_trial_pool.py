@@ -51,6 +51,15 @@ class StatefulTrial:
         )
 
 
+class CloneableRouter(StatefulRouter):
+    def clone_trial(self, source_trial_runtime_id, task_id):
+        descriptor = self.create_trial(task_id)
+        self.states[descriptor["trial_runtime_id"]] = self.states[
+            source_trial_runtime_id
+        ]
+        return descriptor
+
+
 TOOLS = {
     "tools": [
         {
@@ -138,6 +147,36 @@ def test_trial_pool_reuses_first_child_and_replays_parent_for_sibling():
 
     pool.close_all()
     assert interface.closed == ["trial-1", "trial-2"]
+
+
+def test_trial_pool_prefers_environment_clone_without_replay_cost():
+    interface = CloneableRouter()
+    pool = TrialPool(
+        interface=interface,
+        task_id="task",
+        tools=TOOLS,
+        max_tool_calls=2,
+    )
+    tree = ExperimentTree()
+    root_branch = pool.acquire(None, tree, prefer_existing=True)
+    root = node("root", root_branch, [action("set", 2)])
+    execute_and_commit(pool, root_branch, root)
+    tree.add(root)
+
+    clone = pool.acquire(
+        root,
+        tree,
+        prefer_existing=False,
+        prefer_clone=True,
+    )
+    child = node("child", clone, [action("add", 3)], parent_id=root.id)
+    execute_and_commit(pool, clone, child)
+
+    assert clone.inheritance_method == "clone"
+    assert interface.states[clone.trial_runtime_id] == 5
+    assert pool.trials_cloned == 1
+    assert pool.budget.scientific_calls == 2
+    assert pool.budget.replay_calls == 0
 
 
 class DriftingTrial(StatefulTrial):

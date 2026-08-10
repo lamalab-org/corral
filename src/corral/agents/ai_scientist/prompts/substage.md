@@ -1,5 +1,6 @@
-Create the next experimental substage for main stage {{stage}}. Replan from
-actual accumulated results; do not restate the previous agenda.
+Create the next experimental substage for main stage {{stage}} after the critic
+has confirmed that the previous substage met its criteria. Replan from actual
+accumulated results; do not restate the previous agenda.
 
 Task:
 {{task_prompt}}

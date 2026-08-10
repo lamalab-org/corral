@@ -5,7 +5,7 @@ import random
 
 from corral.agents.ai_scientist.search.evaluator import (
     EvaluationWeights,
-    evaluation_priority,
+    node_ranking_key,
 )
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentNode,
@@ -134,7 +134,7 @@ class TreeSelector:
         tree: ExperimentTree,
         node: ExperimentNode,
         stage: ResearchStage | None = None,
-    ) -> float:
+    ) -> tuple[int, float, float]:
         """Combine scientific quality with an under-expansion bonus."""
         scope = [
             item
@@ -156,7 +156,11 @@ class TreeSelector:
             )
             / (node.depth + 1)
         )
-        return evaluation_priority(node, self.weights) + exploration
+        return node_ranking_key(
+            node,
+            critic_bonus=exploration,
+            weights=self.weights,
+        )
 
     @staticmethod
     def _in_scope(

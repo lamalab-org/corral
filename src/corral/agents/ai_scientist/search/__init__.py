@@ -1,11 +1,18 @@
 """Experiment-tree data structures and search policy."""
 
-from corral.agents.ai_scientist.search.evaluator import EvaluationWeights
+from corral.agents.ai_scientist.search.evaluator import (
+    EvaluationWeights,
+    extract_measured_outcome,
+    measured_improvement,
+    node_ranking_key,
+)
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentDecision,
     ExperimentNode,
     ExperimentStep,
     ExperimentTermination,
+    MeasuredMetric,
+    MeasuredOutcome,
     NodeEvaluation,
     NodeStatus,
     NodeType,
@@ -13,6 +20,7 @@ from corral.agents.ai_scientist.search.nodes import (
     PlannedAction,
     ResearchStage,
     StageWinnerSelection,
+    SubstageCompletion,
     SubstagePlan,
 )
 from corral.agents.ai_scientist.search.selector import TreeSelector
@@ -25,6 +33,8 @@ __all__ = [
     "ExperimentStep",
     "ExperimentTermination",
     "ExperimentTree",
+    "MeasuredMetric",
+    "MeasuredOutcome",
     "NodeEvaluation",
     "NodeStatus",
     "NodeType",
@@ -32,6 +42,10 @@ __all__ = [
     "PlannedAction",
     "ResearchStage",
     "StageWinnerSelection",
+    "SubstageCompletion",
     "SubstagePlan",
     "TreeSelector",
+    "extract_measured_outcome",
+    "measured_improvement",
+    "node_ranking_key",
 ]

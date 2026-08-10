@@ -1,6 +1,10 @@
 from importlib import import_module
 
-from corral.agents.ai_scientist import AIScientistAgent, AIScientistConfig
+from corral.agents.ai_scientist import (
+    AIScientistAgent,
+    AIScientistConfig,
+    SakanaAIScientistConfig,
+)
 from corral.agents.base_agent import BaseAgent
 from corral.agents.llm_planner import LLMPlanner
 from corral.agents.react import ReActAgent
@@ -50,6 +54,7 @@ __all__ = [
     "OpenHandsAgent",
     "ReActAgent",
     "ReflexionAgent",
+    "SakanaAIScientistConfig",
     "TerminusAgent",
     "Thought",
     "ToolCallingAgent",

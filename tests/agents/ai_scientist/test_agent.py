@@ -5,7 +5,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from corral.agents import AIScientistAgent, AIScientistConfig
+from corral.agents import (
+    AIScientistAgent,
+    AIScientistConfig,
+    SakanaAIScientistConfig,
+)
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentDecision,
     NodeEvaluation,
@@ -15,6 +19,7 @@ from corral.agents.ai_scientist.search.nodes import (
     Recommendation,
     ResearchStage,
     StageWinnerSelection,
+    SubstageCompletion,
     SubstagePlan,
 )
 from corral.agents.ai_scientist.state import Hypothesis, TaskFormulation
@@ -159,6 +164,7 @@ class ScriptedModel:
         validity=0.95,
         evidence_strength=0.9,
         recommendation=Recommendation.FINALIZE,
+        substage_complete=True,
     ):
         self.call_count = 0
         self.token_count = 0
@@ -168,6 +174,7 @@ class ScriptedModel:
         self.validity = validity
         self.evidence_strength = evidence_strength
         self.recommendation = recommendation
+        self.substage_complete = substage_complete
 
     def generate(
         self, prompt, response_model, *, model=None, purpose="scientific_worker"
@@ -256,6 +263,25 @@ class ScriptedModel:
                 objectives=["Run a materially different measurement."],
                 completion_criteria=["Obtain valid discriminating evidence."],
             )
+        if response_model is SubstageCompletion:
+            return SubstageCompletion(
+                complete=self.substage_complete,
+                reason=(
+                    "Valid observations satisfy the current agenda."
+                    if self.substage_complete
+                    else "The observations do not satisfy the agenda yet."
+                ),
+                satisfied_criteria=(
+                    ["Obtain valid discriminating evidence."]
+                    if self.substage_complete
+                    else []
+                ),
+                unmet_criteria=(
+                    []
+                    if self.substage_complete
+                    else ["Obtain valid discriminating evidence."]
+                ),
+            )
         if response_model is FinalAnswer:
             return FinalAnswer(final_answer="42")
         raise AssertionError(response_model)
@@ -308,6 +334,21 @@ class SeedPreferringModel(ScriptedModel):
                 candidate_comparison=["The seed remains strongest."],
             )
         return super().generate(prompt, response_model, model=model, purpose=purpose)
+
+
+class TunableScriptedModel(ScriptedModel):
+    def generate(
+        self, prompt, response_model, *, model=None, purpose="scientific_worker"
+    ):
+        result = super().generate(
+            prompt,
+            response_model,
+            model=model,
+            purpose=purpose,
+        )
+        if response_model is TaskFormulation:
+            return result.model_copy(update={"tunable_parameters": ["temperature"]})
+        return result
 
 
 class VisualScriptedModel(ScriptedModel):
@@ -445,6 +486,106 @@ def test_agent_runs_all_scientific_stages_without_using_scorer(tmp_path):
     assert all("Proposal slot" in prompt for prompt in planning_prompts)
 
 
+def test_boundary_validation_does_not_consume_the_search_node_cap():
+    config = AIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        stage_boundary_replications=1,
+        max_validation_nodes=2,
+        max_nodes=1,
+        max_tool_calls=2,
+        max_llm_calls=12,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
+
+    agent.run_agent(FakeRouter(), "separate-node-budgets-task")
+
+    search_nodes = [
+        node for node in agent.last_state.tree.nodes if not node.boundary_validation
+    ]
+    validation_nodes = [
+        node for node in agent.last_state.tree.nodes if node.boundary_validation
+    ]
+    assert len(search_nodes) == 1
+    assert [node.node_type for node in validation_nodes] == [
+        NodeType.REPLICATION,
+        NodeType.AGGREGATION,
+    ]
+
+
+def test_tuning_and_verification_use_fixed_stage_baselines():
+    config = AIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=4,
+        research_node_budget=1,
+        verification_node_budget=4,
+        verification_min_nodes=4,
+        adaptive_substages=False,
+        stage_boundary_replications=0,
+        max_search_nodes=10,
+        max_tool_calls=10,
+        max_llm_calls=64,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=TunableScriptedModel())
+
+    agent.run_agent(FakeRouter(), "fixed-stage-baselines-task")
+
+    tuning_progress = agent.last_state.stage_progress(ResearchStage.TUNING)
+    tuning_nodes = agent.last_state.tree.by_stage(
+        ResearchStage.TUNING,
+        include_boundary=False,
+    )
+    assert len(tuning_nodes) == 4
+    assert {node.parent_id for node in tuning_nodes} == {tuning_progress.seed_node_id}
+    assert {node.node_type for node in tuning_nodes} == {NodeType.PARAMETER_SEARCH}
+
+    verification_progress = agent.last_state.stage_progress(ResearchStage.VERIFICATION)
+    verification_nodes = agent.last_state.tree.by_stage(
+        ResearchStage.VERIFICATION,
+        include_boundary=False,
+    )
+    assert len(verification_nodes) == 4
+    assert {node.parent_id for node in verification_nodes} == {
+        verification_progress.seed_node_id
+    }
+
+
+def test_sakana_profile_runs_full_stage_four_budget_with_only_ablations():
+    config = SakanaAIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=4,
+        verification_min_nodes=1,
+        adaptive_substages=False,
+        stage_boundary_replications=0,
+        max_search_nodes=6,
+        max_tool_calls=6,
+        max_llm_calls=40,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
+
+    agent.run_agent(FakeRouter(), "sakana-verification-task")
+
+    verification = agent.last_state.tree.by_stage(
+        ResearchStage.VERIFICATION,
+        include_boundary=False,
+    )
+    seed_id = agent.last_state.stage_progress(ResearchStage.VERIFICATION).seed_node_id
+    assert len(verification) == 4
+    assert {node.node_type for node in verification} == {NodeType.ABLATION}
+    assert {node.parent_id for node in verification} == {seed_id}
+
+
 def test_agent_marks_budget_truncated_node_partial_and_does_not_rank_it():
     model = ScriptedModel(actions_per_plan=2)
     config = AIScientistConfig(
@@ -454,6 +595,7 @@ def test_agent_marks_budget_truncated_node_partial_and_does_not_rank_it():
         research_node_budget=1,
         verification_node_budget=1,
         verification_min_nodes=1,
+        stage_boundary_replications=0,
         max_nodes=3,
         max_tool_calls=1,
         max_llm_calls=8,
@@ -635,6 +777,7 @@ def test_reusable_injected_model_gets_a_fresh_per_run_llm_budget():
         research_node_budget=1,
         verification_node_budget=1,
         verification_min_nodes=1,
+        stage_boundary_replications=0,
         max_nodes=3,
         max_tool_calls=4,
         max_llm_calls=16,
@@ -703,6 +846,8 @@ def test_low_validity_tool_success_is_marked_invalid_and_not_ranked_best():
     node = agent.last_state.tree.nodes[0]
     assert node.status.value == "invalid"
     assert agent.last_state.best_nodes == []
+    assert set(agent.last_state.stages) == {ResearchStage.PRELIMINARY}
+    assert agent.last_state.experimental_search_terminated_reason is not None
     assert agent.last_state.journal.failed_experiments[0].errors == [
         "the tool repeatedly returned 42"
     ]
@@ -876,6 +1021,39 @@ def test_manager_creates_evidence_dependent_substages():
         for purpose in model.purposes
         if purpose.startswith("manage_preliminary_substage_")
     ] == ["manage_preliminary_substage_2", "manage_preliminary_substage_3"]
+
+
+def test_node_count_alone_does_not_advance_an_incomplete_substage():
+    model = ScriptedModel(
+        evidence_strength=0.1,
+        recommendation=Recommendation.CONTINUE,
+        substage_complete=False,
+    )
+    config = AIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=3,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        candidates_per_expansion=1,
+        nodes_per_substage=1,
+        max_substages_per_stage=3,
+        stage_boundary_replications=0,
+        max_nodes=3,
+        max_tool_calls=3,
+        max_llm_calls=24,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+
+    agent.run_agent(FakeRouter(), "incomplete-substage-task")
+
+    progress = agent.last_state.stage_progress(ResearchStage.PRELIMINARY)
+    assert [substage.id for substage in progress.substages] == ["preliminary.1"]
+    assert progress.current_substage.completion_criteria_met is False
+    assert progress.current_substage.last_completion_check_node_count == 2
+    assert model.purposes.count("evaluate_preliminary_substage") == 2
 
 
 def test_plot_artifacts_are_sent_to_multimodal_critic_and_journal(tmp_path):

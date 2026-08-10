@@ -1,6 +1,7 @@
-"""Configuration for the AI Scientist scaffold."""
+"""Configuration profiles for the AI Scientist scaffold."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -8,11 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class AIScientistConfig(BaseModel):
     """Search, budget, and persistence controls.
 
-    Node budgets are upper bounds for each stage, not unconditional iteration
-    counts. The manager may transition earlier when the stage's evidence-based
-    completion criterion is met. ``max_llm_tokens`` stops further search after
-    the provider-reported total reaches the ceiling; final synthesis is still
-    reserved so the run can return an answer.
+    Search-node budgets are upper bounds for each stage, not unconditional
+    iteration counts. Boundary replications and aggregations have a separate
+    validation-node budget, so validating one stage can never consume the
+    capacity reserved for later scientific search. ``max_llm_tokens`` stops
+    further search after the provider-reported total reaches the ceiling; final
+    synthesis is still reserved so the run can return an answer.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -29,7 +31,12 @@ class AIScientistConfig(BaseModel):
     candidates_per_expansion: int = Field(default=3, ge=1, le=4)
     max_children_per_node: int = Field(default=3, ge=1, le=16)
     tree_exploration_weight: float = Field(default=0.1, ge=0.0, le=1.0)
-    max_nodes: int = Field(default=3, ge=1)
+    # ``max_nodes`` is retained as a backwards-compatible alias for the search
+    # cap. It no longer includes boundary validation nodes. Leaving both caps
+    # unset relies on the explicit per-stage budgets.
+    max_search_nodes: int | None = Field(default=None, ge=1)
+    max_validation_nodes: int | None = Field(default=None, ge=0)
+    max_nodes: int | None = Field(default=None, ge=1, deprecated=True)
     max_tool_calls: int = Field(default=32, ge=0)
     max_llm_calls: int = Field(default=64, ge=2)
     max_llm_tokens: int | None = Field(default=None, ge=1)
@@ -40,8 +47,9 @@ class AIScientistConfig(BaseModel):
     parallel_experiment_workers: int = Field(default=3, ge=1, le=16)
 
     # The manager can revise the experimental agenda within a main stage. The
-    # first substage is deterministic; later substages are generated from the
-    # accumulated evidence after this many search nodes.
+    # first substage is deterministic; after this many additional search nodes
+    # the critic checks its evidence-based completion criteria. A new agenda is
+    # created only when that check succeeds.
     adaptive_substages: bool = True
     max_substages_per_stage: int = Field(default=3, ge=1, le=16)
     nodes_per_substage: int = Field(default=3, ge=1)
@@ -56,11 +64,14 @@ class AIScientistConfig(BaseModel):
     # useful Corral generalisation, but replication and aggregation belong at
     # stage boundaries rather than in the Stage-4 node cycle.
     verification_include_counterfactual: bool = True
+    verification_early_stopping: bool = True
 
-    # Non-continuation experiments start in clean trials and inherit the
-    # parent's scientific design through prompts. Opting into physical-state
-    # inheritance restores replay-on-fork for environments that truly need it.
-    inherit_parent_trial_state: bool = False
+    # ``auto`` uses a router's optional trial-cloning capability and otherwise
+    # starts non-continuation children clean. ``replay`` reconstructs parent
+    # state when cloning is unavailable. ``inherit_parent_trial_state`` is the
+    # legacy boolean spelling and maps to clean/replay when provided.
+    trial_state_inheritance: Literal["auto", "clean", "replay"] = "auto"
+    inherit_parent_trial_state: bool | None = Field(default=None, deprecated=True)
 
     # Local image artifacts are sent to a multimodal evaluator when the model
     # gateway supports that call shape.
@@ -73,6 +84,7 @@ class AIScientistConfig(BaseModel):
     confidence_threshold: float = Field(default=0.82, ge=0.0, le=1.0)
     minimum_validity: float = Field(default=0.45, ge=0.0, le=1.0)
     minimum_stage_improvement: float = Field(default=0.0, ge=0.0, le=1.0)
+    minimum_measured_improvement: float = Field(default=0.0, ge=0.0)
 
     random_seed: int = 0
     use_structured_output: bool = True
@@ -90,15 +102,68 @@ class AIScientistConfig(BaseModel):
             raise ValueError(
                 "verification_min_nodes cannot exceed verification_node_budget"
             )
+        if self.max_search_nodes is not None and self.max_nodes is not None:
+            raise ValueError("Set only one of max_search_nodes and legacy max_nodes")
         return self
 
     @property
-    def planned_node_budget(self) -> int:
-        """Maximum nodes reachable through all enabled stages."""
-        return min(
-            self.max_nodes,
+    def search_node_budget(self) -> int:
+        """Effective global cap for ordinary scientific search nodes."""
+        stage_total = (
             self.preliminary_node_budget
             + self.tuning_node_budget
             + self.research_node_budget
-            + self.verification_node_budget,
+            + self.verification_node_budget
         )
+        configured = (
+            self.max_search_nodes
+            if self.max_search_nodes is not None
+            else self.max_nodes
+        )
+        return min(stage_total, configured) if configured is not None else stage_total
+
+    @property
+    def validation_node_budget(self) -> int:
+        """Effective cap for replications and aggregations at stage boundaries."""
+        if self.max_validation_nodes is not None:
+            return self.max_validation_nodes
+        per_stage = self.stage_boundary_replications + int(
+            self.aggregate_stage_replications and self.stage_boundary_replications > 0
+        )
+        return 4 * per_stage
+
+    @property
+    def effective_trial_state_inheritance(self) -> Literal["auto", "clean", "replay"]:
+        """Resolve the legacy state-inheritance flag without mutating the model."""
+        if self.inherit_parent_trial_state is None:
+            return self.trial_state_inheritance
+        return "replay" if self.inherit_parent_trial_state else "clean"
+
+    @property
+    def planned_node_budget(self) -> int:
+        """Maximum ordinary search nodes reachable through enabled stages."""
+        return self.search_node_budget
+
+    @property
+    def planned_total_node_budget(self) -> int:
+        """Maximum search plus stage-boundary validation nodes."""
+        return self.search_node_budget + self.validation_node_budget
+
+
+class SakanaAIScientistConfig(AIScientistConfig):
+    """AI Scientist v2 fidelity profile rather than the cheaper Corral profile."""
+
+    initial_drafts: int = Field(default=3, ge=1)
+    preliminary_node_budget: int = Field(default=20, ge=1)
+    tuning_node_budget: int = Field(default=12, ge=0)
+    research_node_budget: int = Field(default=12, ge=1)
+    verification_node_budget: int = Field(default=18, ge=1)
+    verification_min_nodes: int = Field(default=18, ge=1)
+    debug_probability: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_debug_depth: int = Field(default=3, ge=0)
+    parallel_experiment_workers: int = Field(default=4, ge=1, le=16)
+    tree_exploration_weight: float = Field(default=0.0, ge=0.0, le=1.0)
+    verification_include_counterfactual: bool = False
+    verification_early_stopping: bool = False
+    max_tool_calls: int = Field(default=256, ge=0)
+    max_llm_calls: int = Field(default=512, ge=2)

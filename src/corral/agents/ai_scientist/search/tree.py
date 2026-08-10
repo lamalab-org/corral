@@ -1,6 +1,6 @@
 """External experiment-tree state owned by the manager."""
 
-from corral.agents.ai_scientist.search.evaluator import evaluation_priority
+from corral.agents.ai_scientist.search.evaluator import node_ranking_key
 from corral.agents.ai_scientist.search.nodes import (
     ExecutedAction,
     ExperimentNode,
@@ -85,7 +85,7 @@ class ExperimentTree:
             and node.status == NodeStatus.SUCCESSFUL
             and node.evaluation.recommendation != Recommendation.ABANDON
         ]
-        return sorted(evaluated, key=evaluation_priority, reverse=True)[:limit]
+        return sorted(evaluated, key=node_ranking_key, reverse=True)[:limit]
 
     def model_dump(self) -> dict[str, object]:
         return {"nodes": [node.model_dump(mode="json") for node in self.nodes]}

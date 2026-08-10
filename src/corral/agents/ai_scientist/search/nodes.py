@@ -2,6 +2,7 @@
 
 import json
 from enum import Enum
+from math import isfinite
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -185,6 +186,35 @@ class NodeEvaluation(BaseModel):
     visual_feedback: list[str] = Field(default_factory=list)
 
 
+class MeasuredMetric(BaseModel):
+    """A task-internal scalar that can objectively rank experiments."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    maximize: bool
+    unit: str | None = None
+
+
+class MeasuredOutcome(MeasuredMetric):
+    """A scalar parsed from an actual tool observation, never benchmark score."""
+
+    value: float
+    provenance: str = Field(min_length=1)
+
+    @field_validator("value")
+    @classmethod
+    def _finite_value(cls, value: float) -> float:
+        if not isfinite(value):
+            raise ValueError("measured outcome must be finite")
+        return value
+
+    @property
+    def directional_value(self) -> float:
+        """Return a value where larger is always scientifically preferable."""
+        return self.value if self.maximize else -self.value
+
+
 class NodeProposal(BaseModel):
     """One high-level scientific experiment, without a precomputed action list."""
 
@@ -214,6 +244,17 @@ class SubstagePlan(BaseModel):
     rationale: str
     objectives: list[str] = Field(default_factory=list)
     completion_criteria: list[str] = Field(default_factory=list)
+
+
+class SubstageCompletion(BaseModel):
+    """Evidence-based decision about whether a substage may advance."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    complete: bool
+    reason: str
+    satisfied_criteria: list[str] = Field(default_factory=list)
+    unmet_criteria: list[str] = Field(default_factory=list)
 
 
 class StageWinnerSelection(BaseModel):
@@ -262,4 +303,5 @@ class ExperimentNode(BaseModel):
     status: NodeStatus = NodeStatus.PROPOSED
     debug_depth: int = Field(default=0, ge=0)
     depth: int = Field(default=0, ge=0)
+    measured_outcome: MeasuredOutcome | None = None
     evaluation: NodeEvaluation | None = None

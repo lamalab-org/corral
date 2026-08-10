@@ -7,7 +7,12 @@ from loguru import logger
 
 from corral.agents.ai_scientist.config import AIScientistConfig
 from corral.agents.ai_scientist.journal import JSONLTraceWriter
-from corral.agents.ai_scientist.search.evaluator import evaluation_priority
+from corral.agents.ai_scientist.search.evaluator import (
+    evaluation_priority,
+    extract_measured_outcome,
+    measured_improvement,
+    node_ranking_key,
+)
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentNode,
     NodeEvaluation,
@@ -68,6 +73,25 @@ class ExperimentManager:
         self._preliminary(state, pool)
         stage_winner = self._finish_stage(state, pool, ResearchStage.PRELIMINARY)
 
+        preliminary = state.stage_progress(ResearchStage.PRELIMINARY)
+        if stage_winner is None or not preliminary.completion_criteria_met:
+            state.experimental_search_terminated_reason = (
+                "Preliminary investigation did not produce an executable "
+                "approach with sufficient valid primary evidence."
+            )
+            self.trace.write(
+                "experimental_search_terminated",
+                {
+                    "stage": ResearchStage.PRELIMINARY.value,
+                    "reason": state.experimental_search_terminated_reason,
+                },
+            )
+            self._transition(state, ResearchStage.COMPLETE)
+            self._update_usage(state, pool)
+            state.llm_calls = self._llm_calls_used
+            state.llm_tokens = self._llm_tokens_used
+            return state
+
         if (
             stage_winner is not None
             and state.formulation.has_tunable_parameters
@@ -118,7 +142,7 @@ class ExperimentManager:
         root_limit = min(
             self.config.initial_drafts,
             self.config.preliminary_node_budget,
-            self.config.max_nodes - len(state.tree),
+            self._remaining_node_capacity(state),
             pool.remaining_calls,
         )
         root_count = self._affordable_candidate_count(root_limit)
@@ -163,7 +187,7 @@ class ExperimentManager:
                     ),
                     self.config.preliminary_node_budget
                     - self._search_node_count(state, ResearchStage.PRELIMINARY),
-                    self.config.max_nodes - len(state.tree),
+                    self._remaining_node_capacity(state),
                     pool.remaining_calls,
                 )
             )
@@ -201,21 +225,29 @@ class ExperimentManager:
             and self._can_create(state, pool, llm_calls=self._calls_per_node)
         ):
             self._maybe_advance_substage(state, stage)
-            parent = self._select_parent(state, stage)
+            parent, node_type = self._parent_and_node_type(
+                state,
+                stage,
+                default_type,
+            )
             if parent is None:
                 break
-            node_type = self._continuation_type(parent, default_type)
+            fixed_baseline = self._uses_fixed_baseline(stage, parent, node_type, state)
             count = self._affordable_candidate_count(
                 min(
                     1
                     if node_type == NodeType.CONTINUE
                     else self.config.candidates_per_expansion,
                     self.config.candidates_per_expansion,
-                    self.selector.remaining_child_slots(
-                        state.tree, parent, stage=stage
+                    (
+                        budget - self._search_node_count(state, stage)
+                        if fixed_baseline
+                        else self.selector.remaining_child_slots(
+                            state.tree, parent, stage=stage
+                        )
                     ),
                     budget - self._search_node_count(state, stage),
-                    self.config.max_nodes - len(state.tree),
+                    self._remaining_node_capacity(state),
                     pool.remaining_calls,
                 )
             )
@@ -249,8 +281,10 @@ class ExperimentManager:
             < self.config.verification_node_budget
         ):
             count = self._search_node_count(state, ResearchStage.VERIFICATION)
-            if count >= self.config.verification_min_nodes and self._stage_complete(
-                state, ResearchStage.VERIFICATION
+            if (
+                self.config.verification_early_stopping
+                and count >= self.config.verification_min_nodes
+                and self._stage_complete(state, ResearchStage.VERIFICATION)
             ):
                 break
             self._maybe_advance_substage(state, ResearchStage.VERIFICATION)
@@ -261,24 +295,34 @@ class ExperimentManager:
                 llm_calls=self._calls_per_node,
             ):
                 break
-            parent = self._select_parent(
+            parent, selected_type = self._parent_and_node_type(
                 state,
                 ResearchStage.VERIFICATION,
-                allow_failures=False,
-                allow_partial=False,
+                node_type,
             )
             if parent is None:
                 break
+            node_type = selected_type
+            fixed_baseline = self._uses_fixed_baseline(
+                ResearchStage.VERIFICATION,
+                parent,
+                node_type,
+                state,
+            )
             candidate_count = self._affordable_candidate_count(
                 min(
                     self.config.candidates_per_expansion,
-                    self.selector.remaining_child_slots(
-                        state.tree,
-                        parent,
-                        stage=ResearchStage.VERIFICATION,
+                    (
+                        self.config.verification_node_budget - count
+                        if fixed_baseline
+                        else self.selector.remaining_child_slots(
+                            state.tree,
+                            parent,
+                            stage=ResearchStage.VERIFICATION,
+                        )
                     ),
                     self.config.verification_node_budget - count,
-                    self.config.max_nodes - len(state.tree),
+                    self._remaining_node_capacity(state),
                     pool.remaining_calls,
                 )
             )
@@ -376,6 +420,52 @@ class ExperimentManager:
             seed_node_id=progress.seed_node_id,
         )
 
+    def _parent_and_node_type(
+        self,
+        state: ScientistState,
+        stage: ResearchStage,
+        default_type: NodeType,
+    ) -> tuple[ExperimentNode | None, NodeType]:
+        """Apply stage-specific fixed-baseline semantics.
+
+        Normal tuning experiments always compare against the Stage-1 seed and
+        normal verification experiments against the Stage-3 seed. A current-
+        stage node may become the parent only for a continuation or debug that
+        repairs that exact experiment.
+        """
+        selected = self._select_parent(state, stage)
+        if stage not in {ResearchStage.TUNING, ResearchStage.VERIFICATION}:
+            if selected is None:
+                return None, default_type
+            return selected, self._continuation_type(selected, default_type)
+
+        progress = state.stage_progress(stage)
+        seed = (
+            state.tree.get(progress.seed_node_id)
+            if progress.seed_node_id is not None
+            else None
+        )
+        if selected is not None and selected.id != progress.seed_node_id:
+            repair_type = self._continuation_type(selected, default_type)
+            if repair_type in {NodeType.CONTINUE, NodeType.DEBUG}:
+                return selected, repair_type
+        return seed, default_type
+
+    @staticmethod
+    def _uses_fixed_baseline(
+        stage: ResearchStage,
+        parent: ExperimentNode,
+        node_type: NodeType,
+        state: ScientistState,
+    ) -> bool:
+        if stage not in {ResearchStage.TUNING, ResearchStage.VERIFICATION}:
+            return False
+        progress = state.stage_progress(stage)
+        return parent.id == progress.seed_node_id and node_type not in {
+            NodeType.CONTINUE,
+            NodeType.DEBUG,
+        }
+
     def _maybe_advance_substage(
         self, state: ScientistState, stage: ResearchStage
     ) -> None:
@@ -383,17 +473,45 @@ class ExperimentManager:
             return
         progress = state.stage_progress(stage)
         current = progress.current_substage
-        if current is None or len(current.node_ids) < self.config.nodes_per_substage:
+        if current is None or current.completion_criteria_met:
             return
         if len(progress.substages) >= self.config.max_substages_per_stage:
             return
-        # The new agenda is useful only if at least one experiment can still be
-        # run afterwards. Keep final synthesis reserved as usual.
         if (
-            self._llm_calls_used + 1 + self._calls_per_node
+            len(current.node_ids) - current.last_completion_check_node_count
+            < self.config.nodes_per_substage
+        ):
+            return
+        # The new agenda is useful only if at least one experiment can still be
+        # run afterwards. Reserve one critic check, one replanning call, and
+        # final synthesis as usual.
+        if (
+            self._llm_calls_used + 2 + self._calls_per_node
             > self.config.max_llm_calls - 1
             or not self._within_token_budget
         ):
+            return
+        current_nodes = [state.tree.get(node_id) for node_id in current.node_ids]
+        current.last_completion_check_node_count = len(current.node_ids)
+        completion = self.critic.is_substage_complete(
+            task_prompt=state.task_prompt,
+            formulation=state.formulation,
+            stage=stage,
+            substage=current.plan,
+            stage_nodes=current_nodes,
+            journal_context=state.journal.context(self.config.max_journal_chars),
+        )
+        current.completion_criteria_met = completion.complete
+        current.completion_reason = completion.reason
+        self.trace.write(
+            "substage_completion_checked",
+            {
+                "stage": stage.value,
+                "substage_id": current.id,
+                **completion.model_dump(mode="json"),
+            },
+        )
+        if not completion.complete:
             return
         stage_nodes = state.tree.by_stage(stage, include_boundary=False)
         seed = (
@@ -496,7 +614,7 @@ class ExperimentManager:
     ) -> tuple[ExperimentNode | None, str]:
         if not candidates:
             return None, "No valid candidates."
-        fallback = max(candidates, key=evaluation_priority)
+        fallback = max(candidates, key=node_ranking_key)
         if len(candidates) < 2:
             return fallback, "Only one valid candidate was available."
         if (
@@ -555,16 +673,7 @@ class ExperimentManager:
                 < self.config.preliminary_evidence_threshold
             ):
                 return False
-            if (
-                self.config.minimum_stage_improvement > 0
-                and progress.seed_node_id is not None
-            ):
-                seed = state.tree.get(progress.seed_node_id)
-                return (
-                    evaluation_priority(winner) - evaluation_priority(seed)
-                    >= self.config.minimum_stage_improvement
-                )
-            return True
+            return self._beats_seed(state, stage, winner, inclusive=True)
         if stage == ResearchStage.VERIFICATION:
             return any(
                 node.node_type == NodeType.ABLATION
@@ -593,7 +702,8 @@ class ExperimentManager:
         )
         replication_capacity = max(
             0,
-            self.config.max_nodes - len(state.tree) - reserve_aggregation,
+            self._remaining_node_capacity(state, boundary_validation=True)
+            - reserve_aggregation,
         )
         maximum = min(
             self.config.stage_boundary_replications,
@@ -637,6 +747,7 @@ class ExperimentManager:
                 pool,
                 llm_calls=1,
                 requires_tool_budget=False,
+                boundary_validation=True,
             )
         ):
             return
@@ -794,7 +905,10 @@ class ExperimentManager:
         inherit_parent_state: bool | None = None,
     ) -> list[ExperimentNode]:
         """Run isolated sibling experiments and evaluations concurrently."""
-        node_capacity = self.config.max_nodes - len(state.tree)
+        node_capacity = self._remaining_node_capacity(
+            state,
+            boundary_validation=boundary_validation,
+        )
         prepared: list[tuple[ExperimentNode, BranchRuntime | None, int, int]] = []
         reserved_scientific_calls = 0
         reserved_llm_calls = 0
@@ -802,18 +916,34 @@ class ExperimentManager:
             0, self.config.max_llm_calls - 1 - self._llm_calls_used
         )
         candidate_batch = candidates[:node_capacity]
-        inherit_noncontinuations = (
-            self.config.inherit_parent_trial_state
-            if inherit_parent_state is None
-            else inherit_parent_state
-        )
+        inheritance_strategy = self.config.effective_trial_state_inheritance
+        if inherit_parent_state is not None:
+            inheritance_strategy = "replay" if inherit_parent_state else "clean"
 
         def runtime_parent(proposal: NodeProposal) -> ExperimentNode | None:
             if parent is None or proposal.node_type == NodeType.AGGREGATION:
                 return None
-            if proposal.node_type == NodeType.CONTINUE or inherit_noncontinuations:
+            if proposal.node_type == NodeType.CONTINUE:
+                return parent
+            if inheritance_strategy == "replay" or (
+                inheritance_strategy == "auto" and pool.can_clone(parent)
+            ):
                 return parent
             return None
+
+        def prefer_clone(proposal: NodeProposal) -> bool:
+            return (
+                parent is not None
+                and runtime_parent(proposal) is not None
+                and pool.can_clone(parent)
+            )
+
+        def prefer_existing(index: int, proposal: NodeProposal) -> bool:
+            # Keep an inherited baseline runtime parked at its checkpoint so
+            # later controlled alternatives can clone the same physical state.
+            return index == 0 and (
+                proposal.node_type == NodeType.CONTINUE or not prefer_clone(proposal)
+            )
 
         replay_costs = [
             (
@@ -822,7 +952,8 @@ class ExperimentManager:
                 else pool.replay_cost(
                     runtime_parent(proposal),
                     state.tree,
-                    prefer_existing=index == 0,
+                    prefer_existing=prefer_existing(index, proposal),
+                    prefer_clone=prefer_clone(proposal),
                 )
             )
             for index, (_, proposal) in enumerate(candidate_batch)
@@ -884,7 +1015,8 @@ class ExperimentManager:
                     branch = pool.acquire(
                         runtime_parent(proposal),
                         state.tree,
-                        prefer_existing=index == 0,
+                        prefer_existing=prefer_existing(index, proposal),
+                        prefer_clone=prefer_clone(proposal),
                     )
                 except (ReplayDiverged, ToolCallBudgetExceeded) as exc:
                     logger.warning("Could not prepare {}: {}", node_id, exc)
@@ -928,6 +1060,7 @@ class ExperimentManager:
                         "branch_id": branch.branch_id,
                         "trial_runtime_id": branch.trial_runtime_id,
                         "replayed_actions": len(branch.replay_results),
+                        "inheritance_method": branch.inheritance_method,
                     },
                 )
                 for replay in branch.replay_results:
@@ -996,6 +1129,12 @@ class ExperimentManager:
                         limit=self.config.max_visual_artifacts_per_node,
                         max_bytes=self.config.max_visual_artifact_bytes,
                     )
+
+        for node in pending:
+            node.measured_outcome = extract_measured_outcome(
+                node,
+                state.formulation,
+            )
 
         journal_context = state.journal.context(self.config.max_journal_chars)
 
@@ -1066,20 +1205,42 @@ class ExperimentManager:
         *,
         llm_calls: int,
         requires_tool_budget: bool = True,
+        boundary_validation: bool = False,
     ) -> bool:
         # Keep one LLM call in reserve for final synthesis.
         return (
-            len(state.tree) < self.config.max_nodes
+            self._remaining_node_capacity(
+                state,
+                boundary_validation=boundary_validation,
+            )
+            > 0
             and (not requires_tool_budget or pool.remaining_calls > 0)
             and self._llm_calls_used + llm_calls <= self.config.max_llm_calls - 1
             and self._within_token_budget
         )
+
+    def _remaining_node_capacity(
+        self,
+        state: ScientistState,
+        *,
+        boundary_validation: bool = False,
+    ) -> int:
+        used = sum(
+            node.boundary_validation == boundary_validation for node in state.tree.nodes
+        )
+        budget = (
+            self.config.validation_node_budget
+            if boundary_validation
+            else self.config.search_node_budget
+        )
+        return max(0, budget - used)
 
     def _update_usage(self, state: ScientistState, pool: TrialPool) -> None:
         state.tool_calls = pool.call_count
         state.scientific_tool_calls = pool.budget.scientific_calls
         state.replay_tool_calls = pool.budget.replay_calls
         state.trial_runtimes_created = pool.trials_created
+        state.trial_runtimes_cloned = pool.trials_cloned
         state.peak_simultaneous_trials = pool.peak_simultaneous_trials
         state.replay_results = list(pool.replay_results)
 
@@ -1168,13 +1329,38 @@ class ExperimentManager:
         seed_node_id = state.stage_progress(stage).seed_node_id
         if seed_node_id is None:
             return True
+        return self._beats_seed(state, stage, node, inclusive=False)
+
+    def _beats_seed(
+        self,
+        state: ScientistState,
+        stage: ResearchStage,
+        node: ExperimentNode,
+        *,
+        inclusive: bool,
+    ) -> bool:
+        seed_node_id = state.stage_progress(stage).seed_node_id
+        if seed_node_id is None:
+            return True
+        if node.id == seed_node_id:
+            return False
         seed = state.tree.get(seed_node_id)
+        objective_delta = measured_improvement(node, seed)
+        if objective_delta is not None:
+            threshold = self.config.minimum_measured_improvement
+            if inclusive and threshold > 0:
+                return objective_delta >= threshold
+            return objective_delta > threshold
         if seed.evaluation is None:
             return True
-        return (
-            evaluation_priority(node) - evaluation_priority(seed)
-            > self.config.minimum_stage_improvement
-        )
+        threshold = self.config.minimum_stage_improvement
+        # At stage handoff, a valid listwise-selected non-seed winner is enough
+        # unless the caller requested a quantitative critic-score margin. The
+        # provisional early-stop check remains strict.
+        if inclusive and threshold == 0:
+            return True
+        critic_delta = evaluation_priority(node) - evaluation_priority(seed)
+        return critic_delta >= threshold if inclusive else critic_delta > threshold
 
     @staticmethod
     def _confidence(evaluation: NodeEvaluation) -> float:
