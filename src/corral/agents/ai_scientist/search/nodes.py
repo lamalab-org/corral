@@ -50,6 +50,7 @@ class ExperimentTermination(str, Enum):
     """Why an experiment worker stopped producing actions."""
 
     AGGREGATED = "aggregated"
+    REPLICATION_REPLAYED = "replication_replayed"
     WORKER_FINISHED = "worker_finished"
     ACTION_BUDGET_EXHAUSTED = "action_budget_exhausted"
     TOOL_BUDGET_EXHAUSTED = "tool_budget_exhausted"
@@ -215,6 +216,34 @@ class MeasuredOutcome(MeasuredMetric):
         return self.value if self.maximize else -self.value
 
 
+class ReplicationSummary(BaseModel):
+    """Deterministic statistics over stage-boundary replication outcomes.
+
+    ``std`` is the sample standard deviation and ``stderr`` is computed from
+    the number of comparable scalar values. Non-scalar Corral experiments keep
+    the run/success/seed accounting while leaving metric statistics unset.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    n_runs: int = Field(ge=0)
+    n_successful: int = Field(ge=0)
+    metric_name: str | None = None
+    values: list[float] = Field(default_factory=list)
+    mean: float | None = None
+    std: float | None = None
+    stderr: float | None = None
+    seeds: list[int | None] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _consistent_counts(self) -> "ReplicationSummary":
+        if self.n_successful > self.n_runs:
+            raise ValueError("n_successful cannot exceed n_runs")
+        if len(self.seeds) != self.n_runs:
+            raise ValueError("seeds must contain one entry per replication run")
+        return self
+
+
 class NodeProposal(BaseModel):
     """One high-level scientific experiment, without a precomputed action list."""
 
@@ -298,6 +327,9 @@ class ExperimentNode(BaseModel):
     allocated_action_budget: int = Field(default=0, ge=0)
     termination_reason: ExperimentTermination | None = None
     executed_actions: list[ExecutedAction] = Field(default_factory=list)
+    replication_seed: int | None = None
+    replication_seed_overrides: list[str] = Field(default_factory=list)
+    replication_summary: ReplicationSummary | None = None
     conclusions: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     status: NodeStatus = NodeStatus.PROPOSED

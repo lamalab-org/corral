@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 
-from corral.agents.ai_scientist.search.nodes import PlannedAction
+from corral.agents.ai_scientist.search.nodes import (
+    ExecutedAction,
+    Observation,
+    PlannedAction,
+)
 from corral.agents.ai_scientist.tools import CorralExecutor
 
 
@@ -100,3 +104,47 @@ def test_executor_reports_local_budget_exhaustion_as_an_observation():
     assert [item.success for item in observations] == [True, False]
     assert "budget exhausted" in observations[1].error
     assert len(interface.calls) == 1
+
+
+def test_replication_plan_overrides_only_schema_declared_random_state():
+    executor = CorralExecutor(
+        interface=FakeInterface(),
+        task_id="task",
+        tools={
+            "tools": [
+                {
+                    "name": "measure",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "value": {"type": "integer"},
+                            "random_state": {"type": "integer"},
+                        },
+                        "required": ["value"],
+                        "additionalProperties": False,
+                    },
+                }
+            ]
+        },
+        max_tool_calls=1,
+    )
+    original_action = action(arguments={"value": 2, "random_state": 99})
+    original = ExecutedAction(
+        action=original_action,
+        observation=Observation(
+            action_index=0,
+            purpose="test",
+            tool_name="measure",
+            arguments=original_action.arguments,
+            success=True,
+            result="measured:2",
+        ),
+    )
+
+    plan, overrides = executor.prepare_replication_plan([original], seed=7)
+
+    assert original_action.arguments == {"value": 2, "random_state": 99}
+    assert plan[0].arguments == {"value": 2, "random_state": 7}
+    assert plan[0].purpose == original_action.purpose
+    assert plan[0].expected_information == original_action.expected_information
+    assert overrides == ["action_0.measure.random_state"]

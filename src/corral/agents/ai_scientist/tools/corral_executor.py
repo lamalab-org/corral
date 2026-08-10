@@ -114,6 +114,36 @@ class CorralExecutor:
     def call_count(self) -> int:
         return self.budget.used
 
+    def prepare_replication_plan(
+        self,
+        executed_actions: list[ExecutedAction],
+        *,
+        seed: int,
+    ) -> tuple[list[PlannedAction], list[str]]:
+        """Copy an exact realized plan, changing only exposed seed arguments.
+
+        Tool schemas, rather than argument-name guesses, determine whether an
+        action supports a seed. This means tools without an explicit ``seed``
+        or ``random_state`` property are replayed byte-for-byte at the logical
+        action level and are reported as independent unseeded repetitions.
+        """
+        plan: list[PlannedAction] = []
+        overrides: list[str] = []
+        for index, executed in enumerate(executed_actions):
+            action = executed.action
+            schema = self._schemas.get(action.tool_name, {})
+            properties = schema.get("properties", {})
+            if not isinstance(properties, dict):
+                properties = {}
+            arguments = dict(action.arguments)
+            for field_name in ("seed", "random_state"):
+                if field_name not in properties:
+                    continue
+                arguments[field_name] = seed
+                overrides.append(f"action_{index}.{action.tool_name}.{field_name}")
+            plan.append(action.model_copy(deep=True, update={"arguments": arguments}))
+        return plan, overrides
+
     def execute_plan(
         self,
         plan: list[PlannedAction],

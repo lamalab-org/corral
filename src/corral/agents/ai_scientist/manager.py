@@ -2,6 +2,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from itertools import cycle
+from math import sqrt
+from statistics import fmean, stdev
 
 from loguru import logger
 
@@ -14,12 +16,17 @@ from corral.agents.ai_scientist.search.evaluator import (
     node_ranking_key,
 )
 from corral.agents.ai_scientist.search.nodes import (
+    ExperimentDecision,
     ExperimentNode,
+    ExperimentStep,
+    ExperimentTermination,
     NodeEvaluation,
     NodeProposal,
     NodeStatus,
     NodeType,
+    PlannedAction,
     Recommendation,
+    ReplicationSummary,
     ResearchStage,
     SubstagePlan,
 )
@@ -94,7 +101,10 @@ class ExperimentManager:
 
         if (
             stage_winner is not None
-            and state.formulation.has_tunable_parameters
+            and (
+                state.formulation.has_tunable_parameters
+                or self.config.force_tuning_stage
+            )
             and self.config.tuning_node_budget > 0
             and self._can_create(state, pool, llm_calls=self._calls_per_node)
         ):
@@ -695,19 +705,11 @@ class ExperimentManager:
         progress = state.stage_progress(stage)
         stage_nodes = state.tree.by_stage(stage, include_boundary=False)
         candidates = [
-            node
-            for node in stage_nodes
-            if node.status == NodeStatus.SUCCESSFUL
-            and node.evaluation is not None
-            and node.evaluation.recommendation != Recommendation.ABANDON
+            node for node in stage_nodes if self._eligible_stage_candidate(node)
         ]
         if progress.seed_node_id is not None:
             seed = state.tree.get(progress.seed_node_id)
-            if (
-                seed.status == NodeStatus.SUCCESSFUL
-                and seed.evaluation is not None
-                and seed.evaluation.recommendation != Recommendation.ABANDON
-            ):
+            if self._eligible_stage_candidate(seed):
                 candidates.insert(0, seed)
         winner, reason = self._comparative_winner(state, stage, candidates)
         if winner is None:
@@ -824,7 +826,10 @@ class ExperimentManager:
             return False
         if stage == ResearchStage.PRELIMINARY:
             return (
-                evaluation.validity >= self.config.minimum_validity
+                (
+                    not self.config.preliminary_require_critic_validity
+                    or evaluation.validity >= self.config.minimum_validity
+                )
                 and evaluation.evidence_strength
                 >= self.config.preliminary_evidence_threshold
             )
@@ -866,43 +871,52 @@ class ExperimentManager:
             self.config.aggregate_stage_replications
             and self.config.stage_boundary_replications > 0
         )
-        replication_capacity = max(
-            0,
-            self._remaining_node_capacity(state, boundary_validation=True)
-            - reserve_aggregation,
-        )
-        maximum = min(
-            self.config.stage_boundary_replications,
-            replication_capacity,
-            pool.remaining_calls,
-        )
-        remaining_llm = self.config.max_llm_calls - 1 - self._llm_calls_used
-        maximum = min(maximum, max(0, remaining_llm // 3))
-        candidates = [
-            (
-                state.tree.next_id(),
-                NodeProposal(
-                    node_type=NodeType.REPLICATION,
-                    hypothesis=winner.hypothesis,
-                    rationale=(
-                        "Independent stage-boundary repetition of the selected "
-                        f"{stage.value} checkpoint."
-                    ),
-                    experiment_goal=winner.experiment_goal,
-                    success_criteria=list(winner.success_criteria),
-                    related_node_ids=[winner.id],
-                ),
+        if self.config.deterministic_replication:
+            replications = self._run_deterministic_replications(
+                state,
+                pool,
+                stage,
+                winner,
+                reserve_aggregation=reserve_aggregation,
             )
-            for _ in range(maximum)
-        ]
-        replications = self._execute_candidates(
-            state,
-            pool,
-            candidates,
-            parent=winner,
-            boundary_validation=True,
-            inherit_parent_state=False,
-        )
+        else:
+            replication_capacity = max(
+                0,
+                self._remaining_node_capacity(state, boundary_validation=True)
+                - reserve_aggregation,
+            )
+            maximum = min(
+                self.config.stage_boundary_replications,
+                replication_capacity,
+                pool.remaining_calls,
+            )
+            remaining_llm = self.config.max_llm_calls - 1 - self._llm_calls_used
+            maximum = min(maximum, max(0, remaining_llm // 3))
+            candidates = [
+                (
+                    state.tree.next_id(),
+                    NodeProposal(
+                        node_type=NodeType.REPLICATION,
+                        hypothesis=winner.hypothesis,
+                        rationale=(
+                            "Independent stage-boundary repetition of the selected "
+                            f"{stage.value} checkpoint."
+                        ),
+                        experiment_goal=winner.experiment_goal,
+                        success_criteria=list(winner.success_criteria),
+                        related_node_ids=[winner.id],
+                    ),
+                )
+                for _ in range(maximum)
+            ]
+            replications = self._execute_candidates(
+                state,
+                pool,
+                candidates,
+                parent=winner,
+                boundary_validation=True,
+                inherit_parent_state=False,
+            )
         progress.replication_node_ids = [node.id for node in replications]
 
         if (
@@ -918,6 +932,7 @@ class ExperimentManager:
         ):
             return
         aggregation_id = state.tree.next_id()
+        summary = self._summarize_replications(replications)
         aggregation = NodeProposal(
             node_type=NodeType.AGGREGATION,
             hypothesis=winner.hypothesis,
@@ -945,9 +960,291 @@ class ExperimentManager:
             parent=winner,
             boundary_validation=True,
             inherit_parent_state=False,
+            replication_summary=summary,
         )
         if aggregated:
             progress.aggregation_node_id = aggregated[0].id
+
+    def _run_deterministic_replications(
+        self,
+        state: ScientistState,
+        pool: TrialPool,
+        stage: ResearchStage,
+        winner: ExperimentNode,
+        *,
+        reserve_aggregation: int,
+    ) -> list[ExperimentNode]:
+        """Replay exactly the winning node's realized actions in clean trials."""
+        if not winner.executed_actions:
+            self.trace.write(
+                "deterministic_replication_skipped",
+                {
+                    "stage": stage.value,
+                    "winner_node_id": winner.id,
+                    "reason": "winner_has_no_executed_actions",
+                },
+            )
+            return []
+
+        action_count = len(winner.executed_actions)
+        node_capacity = max(
+            0,
+            self._remaining_node_capacity(state, boundary_validation=True)
+            - reserve_aggregation,
+        )
+        remaining_llm = max(
+            0,
+            self.config.max_llm_calls - 1 - self._llm_calls_used - reserve_aggregation,
+        )
+        maximum = min(
+            self.config.stage_boundary_replications,
+            node_capacity,
+            pool.remaining_calls // action_count,
+            remaining_llm,
+        )
+        prepared: list[tuple[ExperimentNode, BranchRuntime, list[PlannedAction]]] = []
+        progress = state.stage_progress(stage)
+        for seed in range(maximum):
+            branch = pool.acquire(
+                None,
+                state.tree,
+                prefer_existing=False,
+                prefer_clone=False,
+            )
+            plan, seed_overrides = branch.executor.prepare_replication_plan(
+                winner.executed_actions,
+                seed=seed,
+            )
+            seeded = bool(seed_overrides)
+            node = ExperimentNode(
+                id=state.tree.next_id(),
+                parent_id=winner.id,
+                branch_id=branch.branch_id,
+                trial_runtime_id=branch.trial_runtime_id,
+                branch_workspace=branch.workspace,
+                stage=stage,
+                stage_seed_id=progress.seed_node_id,
+                boundary_validation=True,
+                physical_state_inherited=False,
+                node_type=NodeType.REPLICATION,
+                hypothesis=winner.hypothesis,
+                rationale=(
+                    f"Exact clean-trial replay of {winner.id} with seed {seed}."
+                    if seeded
+                    else f"Exact independent clean-trial replay of {winner.id}."
+                ),
+                experiment_goal=winner.experiment_goal,
+                success_criteria=list(winner.success_criteria),
+                related_node_ids=[winner.id],
+                allocated_action_budget=len(plan),
+                replication_seed=seed if seeded else None,
+                replication_seed_overrides=seed_overrides,
+                depth=winner.depth + 1,
+            )
+            self.trace.write("node_planned", node.model_dump(mode="json"))
+            self.trace.write(
+                "branch_assigned",
+                {
+                    "node_id": node.id,
+                    "branch_id": branch.branch_id,
+                    "trial_runtime_id": branch.trial_runtime_id,
+                    "replayed_actions": 0,
+                    "inheritance_method": "fresh_exact_replication",
+                },
+            )
+            self.trace.write(
+                "replication_plan_fixed",
+                {
+                    "node_id": node.id,
+                    "source_node_id": winner.id,
+                    "seed": node.replication_seed,
+                    "seed_overrides": seed_overrides,
+                    "actions": [action.model_dump(mode="json") for action in plan],
+                },
+            )
+            prepared.append((node, branch, plan))
+
+        def execute(
+            item: tuple[ExperimentNode, BranchRuntime, list[PlannedAction]],
+        ) -> ExperimentNode:
+            node, branch, plan = item
+            node.status = NodeStatus.RUNNING
+            observations = branch.executor.execute_plan(plan)
+            node.plan = list(plan)
+            node.observations = observations
+            node.trajectory = [
+                ExperimentStep(
+                    step_index=index,
+                    decision=ExperimentDecision(
+                        decision="act",
+                        rationale=(
+                            "Deterministic stage-boundary replay of the winning "
+                            "experiment action."
+                        ),
+                        purpose=action.purpose,
+                        tool_name=action.tool_name,
+                        arguments=action.arguments,
+                        expected_information=action.expected_information,
+                    ),
+                    observation=observation,
+                )
+                for index, (action, observation) in enumerate(
+                    zip(plan, observations, strict=False)
+                )
+            ]
+            pool.commit(branch, node, 0)
+            if any(not observation.success for observation in observations):
+                node.status = NodeStatus.FAILED
+                node.termination_reason = ExperimentTermination.ACTION_FAILED
+                node.worker_conclusion = "The exact replication encountered a failure."
+            elif len(observations) < len(plan):
+                node.status = NodeStatus.PARTIAL
+                node.termination_reason = ExperimentTermination.TOOL_BUDGET_EXHAUSTED
+                node.worker_conclusion = "The exact replication did not finish."
+            elif observations:
+                node.status = NodeStatus.SUCCESSFUL
+                node.termination_reason = ExperimentTermination.REPLICATION_REPLAYED
+                node.worker_conclusion = "The exact replication completed."
+            else:
+                node.status = NodeStatus.INVALID
+                node.worker_conclusion = (
+                    "The exact replication produced no observation."
+                )
+            return node
+
+        workers = min(len(prepared), self.config.parallel_experiment_workers)
+        if workers > 1:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                pending = list(executor.map(execute, prepared))
+        else:
+            pending = [execute(item) for item in prepared]
+        return self._evaluate_and_record_nodes(
+            state,
+            pool,
+            pending,
+            branches=[(node, branch) for node, branch, _ in prepared],
+        )
+
+    @staticmethod
+    def _summarize_replications(
+        replications: list[ExperimentNode],
+    ) -> ReplicationSummary:
+        """Build objective replication statistics without LLM interpretation."""
+        successful = [
+            node
+            for node in replications
+            if node.status in {NodeStatus.SUCCESSFUL, NodeStatus.INVALID}
+            and node.observations
+            and node.observations[-1].success
+            and node.termination_reason
+            in {
+                ExperimentTermination.WORKER_FINISHED,
+                ExperimentTermination.REPLICATION_REPLAYED,
+            }
+        ]
+        outcomes = [
+            node.measured_outcome
+            for node in successful
+            if node.measured_outcome is not None
+        ]
+        common_metric = bool(outcomes) and all(
+            outcome.name.casefold() == outcomes[0].name.casefold()
+            and outcome.maximize == outcomes[0].maximize
+            for outcome in outcomes[1:]
+        )
+        values = [outcome.value for outcome in outcomes] if common_metric else []
+        mean = fmean(values) if values else None
+        standard_deviation = (
+            stdev(values) if len(values) > 1 else (0.0 if values else None)
+        )
+        standard_error = (
+            standard_deviation / sqrt(len(values))
+            if standard_deviation is not None
+            else None
+        )
+        return ReplicationSummary(
+            n_runs=len(replications),
+            n_successful=len(successful),
+            metric_name=outcomes[0].name if common_metric else None,
+            values=values,
+            mean=mean,
+            std=standard_deviation,
+            stderr=standard_error,
+            seeds=[node.replication_seed for node in replications],
+        )
+
+    def _evaluate_and_record_nodes(
+        self,
+        state: ScientistState,
+        pool: TrialPool,
+        pending: list[ExperimentNode],
+        *,
+        branches: list[tuple[ExperimentNode, BranchRuntime | None]],
+    ) -> list[ExperimentNode]:
+        """Extract evidence, evaluate nodes, and persist them consistently."""
+        if self.config.enable_visual_feedback:
+            for node, branch in branches:
+                if branch is not None:
+                    node.visual_artifacts = pool.visual_artifacts(
+                        branch,
+                        limit=self.config.max_visual_artifacts_per_node,
+                        max_bytes=self.config.max_visual_artifact_bytes,
+                    )
+        for node in pending:
+            node.measured_outcome = extract_measured_outcome(node, state.formulation)
+
+        journal_context = state.journal.context(self.config.max_journal_chars)
+
+        def evaluate(node: ExperimentNode) -> NodeEvaluation:
+            return self.critic.evaluate(
+                task_prompt=state.task_prompt,
+                formulation=state.formulation,
+                node=node,
+                journal_context=journal_context,
+            )
+
+        if len(pending) > 1 and self.config.parallel_llm_workers > 1:
+            with ThreadPoolExecutor(
+                max_workers=min(len(pending), self.config.parallel_llm_workers)
+            ) as llm_pool:
+                evaluations = list(llm_pool.map(evaluate, pending))
+        else:
+            evaluations = [evaluate(node) for node in pending]
+
+        for node, evaluation in zip(pending, evaluations, strict=True):
+            node.evaluation = evaluation
+            node.conclusions = evaluation.conclusions
+            node.open_questions = evaluation.open_questions
+            if (
+                node.status == NodeStatus.SUCCESSFUL
+                and evaluation.validity < self.config.minimum_validity
+                and (
+                    node.stage != ResearchStage.PRELIMINARY
+                    or self.config.preliminary_require_critic_validity
+                )
+            ):
+                node.status = NodeStatus.INVALID
+            state.tree.add(node)
+            if not node.boundary_validation and node.substage_id is not None:
+                progress = state.stage_progress(node.stage)
+                substage = next(
+                    (
+                        item
+                        for item in progress.substages
+                        if item.id == node.substage_id
+                    ),
+                    None,
+                )
+                if substage is not None:
+                    substage.node_ids.append(node.id)
+            state.journal.integrate(node, self.config.minimum_validity)
+            self.trace.write("node_completed", node.model_dump(mode="json"))
+            self.trace.write("journal", state.journal.as_dict())
+
+        self._update_usage(state, pool)
+        state.llm_calls = self._llm_calls_used
+        state.llm_tokens = self._llm_tokens_used
+        return pending
 
     @staticmethod
     def _current_substage_id(state: ScientistState, stage: ResearchStage) -> str | None:
@@ -1155,6 +1452,7 @@ class ExperimentManager:
         substage_id: str | None = None,
         boundary_validation: bool = False,
         inherit_parent_state: bool | None = None,
+        replication_summary: ReplicationSummary | None = None,
     ) -> list[ExperimentNode]:
         """Run isolated sibling experiments and evaluations concurrently."""
         return self._execute_parent_candidates(
@@ -1164,6 +1462,7 @@ class ExperimentManager:
             substage_id=substage_id,
             boundary_validation=boundary_validation,
             inherit_parent_state=inherit_parent_state,
+            replication_summary=replication_summary,
         )
 
     def _execute_parent_candidates(
@@ -1175,6 +1474,7 @@ class ExperimentManager:
         substage_id: str | None = None,
         boundary_validation: bool = False,
         inherit_parent_state: bool | None = None,
+        replication_summary: ReplicationSummary | None = None,
     ) -> list[ExperimentNode]:
         """Run a mixed-parent worker batch in isolated trials concurrently."""
         node_capacity = self._remaining_node_capacity(
@@ -1337,6 +1637,7 @@ class ExperimentManager:
                 success_criteria=proposal.success_criteria,
                 related_node_ids=proposal.related_node_ids,
                 visual_artifacts=proposal.visual_artifacts,
+                replication_summary=(replication_summary if is_aggregation else None),
                 debug_depth=(parent.debug_depth + 1 if parent and is_debug else 0),
                 depth=(parent.depth + 1 if parent else 0),
             )
@@ -1413,70 +1714,12 @@ class ExperimentManager:
                 pending = list(executor.map(execute, prepared))
         else:
             pending = [execute(item) for item in prepared]
-
-        if self.config.enable_visual_feedback:
-            for node, branch, _, _ in prepared:
-                if branch is not None:
-                    node.visual_artifacts = pool.visual_artifacts(
-                        branch,
-                        limit=self.config.max_visual_artifacts_per_node,
-                        max_bytes=self.config.max_visual_artifact_bytes,
-                    )
-
-        for node in pending:
-            node.measured_outcome = extract_measured_outcome(
-                node,
-                state.formulation,
-            )
-
-        journal_context = state.journal.context(self.config.max_journal_chars)
-
-        def evaluate(node: ExperimentNode) -> NodeEvaluation:
-            return self.critic.evaluate(
-                task_prompt=state.task_prompt,
-                formulation=state.formulation,
-                node=node,
-                journal_context=journal_context,
-            )
-
-        if len(pending) > 1 and self.config.parallel_llm_workers > 1:
-            with ThreadPoolExecutor(
-                max_workers=min(len(pending), self.config.parallel_llm_workers)
-            ) as llm_pool:
-                evaluations = list(llm_pool.map(evaluate, pending))
-        else:
-            evaluations = [evaluate(node) for node in pending]
-
-        for node, evaluation in zip(pending, evaluations, strict=True):
-            node.evaluation = evaluation
-            node.conclusions = evaluation.conclusions
-            node.open_questions = evaluation.open_questions
-            if (
-                node.status == NodeStatus.SUCCESSFUL
-                and evaluation.validity < self.config.minimum_validity
-            ):
-                node.status = NodeStatus.INVALID
-            state.tree.add(node)
-            if not node.boundary_validation and node.substage_id is not None:
-                progress = state.stage_progress(node.stage)
-                substage = next(
-                    (
-                        item
-                        for item in progress.substages
-                        if item.id == node.substage_id
-                    ),
-                    None,
-                )
-                if substage is not None:
-                    substage.node_ids.append(node.id)
-            state.journal.integrate(node, self.config.minimum_validity)
-            self.trace.write("node_completed", node.model_dump(mode="json"))
-            self.trace.write("journal", state.journal.as_dict())
-
-        self._update_usage(state, pool)
-        state.llm_calls = self._llm_calls_used
-        state.llm_tokens = self._llm_tokens_used
-        return pending
+        return self._evaluate_and_record_nodes(
+            state,
+            pool,
+            pending,
+            branches=[(node, branch) for node, branch, _, _ in prepared],
+        )
 
     def _affordable_candidate_count(
         self,
@@ -1578,6 +1821,7 @@ class ExperimentManager:
             if (
                 parent.evaluation.recommendation == Recommendation.DEBUG
                 and parent.debug_depth < self.config.max_debug_depth
+                and not self.config.debug_leaf_only
             ):
                 return NodeType.DEBUG
             if parent.evaluation.recommendation == Recommendation.REFINE:
@@ -1588,15 +1832,16 @@ class ExperimentManager:
         nodes = [
             node
             for node in state.tree.by_stage(stage, include_boundary=False)
-            if node.evaluation is not None
-            and node.status == NodeStatus.SUCCESSFUL
-            and node.evaluation.recommendation != Recommendation.ABANDON
+            if self._eligible_stage_candidate(node)
         ]
         if not nodes:
             return False
         if stage == ResearchStage.PRELIMINARY:
             return any(
-                node.evaluation.validity >= self.config.minimum_validity
+                (
+                    not self.config.preliminary_require_critic_validity
+                    or node.evaluation.validity >= self.config.minimum_validity
+                )
                 and node.evaluation.evidence_strength
                 >= self.config.preliminary_evidence_threshold
                 for node in nodes
@@ -1668,6 +1913,17 @@ class ExperimentManager:
         return (
             evaluation.validity + evaluation.evidence_strength + evaluation.consistency
         ) / 3
+
+    def _eligible_stage_candidate(self, node: ExperimentNode) -> bool:
+        """Apply the configured working-node gate before stage comparison."""
+        if node.status != NodeStatus.SUCCESSFUL or node.evaluation is None:
+            return False
+        if (
+            node.stage == ResearchStage.PRELIMINARY
+            and not self.config.preliminary_require_critic_validity
+        ):
+            return True
+        return node.evaluation.recommendation != Recommendation.ABANDON
 
     def _transition(self, state: ScientistState, stage: ResearchStage) -> None:
         state.current_stage = stage

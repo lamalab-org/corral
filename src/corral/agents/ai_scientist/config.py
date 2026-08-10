@@ -50,6 +50,10 @@ class AIScientistConfig(BaseModel):
     max_actions_per_node: int = Field(default=3, ge=1)
     max_debug_depth: int = Field(default=2, ge=0)
     debug_probability: float = Field(default=0.2, ge=0.0, le=1.0)
+    # AI Scientist v2 only revisits failed leaves: after a DEBUG child exists,
+    # the child becomes the next debuggable checkpoint instead of opening
+    # several independent repairs from the same failed ancestor.
+    debug_leaf_only: bool = False
     parallel_llm_workers: int = Field(default=4, ge=1, le=16)
     parallel_experiment_workers: int = Field(default=3, ge=1, le=16)
 
@@ -66,6 +70,10 @@ class AIScientistConfig(BaseModel):
     # that are known to be deterministic or too expensive to repeat.
     stage_boundary_replications: int = Field(default=3, ge=0, le=16)
     aggregate_stage_replications: bool = True
+    # Exact replication bypasses the adaptive experiment worker and replays the
+    # selected node's realized actions in clean trials. When a tool schema
+    # exposes ``seed`` or ``random_state``, only those arguments are changed.
+    deterministic_replication: bool = False
 
     # Stage 4 is systematic ablation/assumption testing. Counterfactuals are a
     # useful Corral generalisation, but replication and aggregation belong at
@@ -77,6 +85,10 @@ class AIScientistConfig(BaseModel):
     # stage termination for Stages 2--4 and still evaluates the best node over
     # multiple seeds. Stage 1 remains a hard working-implementation gate.
     validate_on_stage_budget_exhaustion: bool = False
+    # Corral normally omits Stage 2 when formulation finds no explicit tunable
+    # parameter. The fidelity profile treats procedural/experimental choices
+    # as tunable and therefore always attempts the stage when it has a budget.
+    force_tuning_stage: bool = False
 
     # ``auto`` uses a router's optional trial-cloning capability and otherwise
     # starts non-continuation children clean. ``replay`` reconstructs parent
@@ -92,6 +104,10 @@ class AIScientistConfig(BaseModel):
     max_visual_artifact_bytes: int = Field(default=5_000_000, ge=1_024)
 
     preliminary_evidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    # The general Corral profile protects its Stage-1 gate with the critic's
+    # validity threshold. Sakana's good-node gate asks only whether the
+    # implementation executed successfully.
+    preliminary_require_critic_validity: bool = True
     stage_completion_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
     confidence_threshold: float = Field(default=0.82, ge=0.0, le=1.0)
     minimum_validity: float = Field(default=0.45, ge=0.0, le=1.0)
@@ -173,6 +189,7 @@ class SakanaAIScientistConfig(AIScientistConfig):
     verification_min_nodes: int = Field(default=18, ge=1)
     debug_probability: float = Field(default=0.5, ge=0.0, le=1.0)
     max_debug_depth: int = Field(default=3, ge=0)
+    debug_leaf_only: bool = True
     candidates_per_expansion: int = Field(default=4, ge=1, le=4)
     max_children_per_node: int = Field(default=16, ge=1, le=16)
     max_actions_per_node: int = Field(default=16, ge=1)
@@ -185,6 +202,9 @@ class SakanaAIScientistConfig(AIScientistConfig):
     research_early_stopping: bool = False
     verification_early_stopping: bool = False
     validate_on_stage_budget_exhaustion: bool = True
+    force_tuning_stage: bool = True
+    deterministic_replication: bool = True
     preliminary_evidence_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    preliminary_require_critic_validity: bool = False
     max_tool_calls: int = Field(default=256, ge=0)
     max_llm_calls: int = Field(default=512, ge=2)

@@ -26,6 +26,7 @@ class TreeSelector:
         *,
         debug_probability: float = 0.2,
         max_debug_depth: int = 2,
+        debug_leaf_only: bool = False,
         max_children_per_node: int = 3,
         exploration_weight: float = 0.1,
         random_seed: int = 0,
@@ -33,6 +34,7 @@ class TreeSelector:
     ) -> None:
         self.debug_probability = debug_probability
         self.max_debug_depth = max_debug_depth
+        self.debug_leaf_only = debug_leaf_only
         self.max_children_per_node = max_children_per_node
         self.exploration_weight = exploration_weight
         self._random = random.Random(random_seed)
@@ -174,6 +176,7 @@ class TreeSelector:
             if allow_failures
             and node.status in {NodeStatus.FAILED, NodeStatus.INVALID}
             and node.debug_depth < self.max_debug_depth
+            and (not self.debug_leaf_only or not tree.children(node.id))
             and not self._abandoned(node)
         ]
         successful = [

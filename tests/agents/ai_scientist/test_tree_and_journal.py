@@ -114,6 +114,29 @@ def test_selector_falls_back_to_successful_ancestor_after_capped_debug_leaf():
     assert selector.select(tree).id == "root"
 
 
+def test_leaf_only_debugging_advances_through_failed_debug_children():
+    tree = ExperimentTree()
+    failed_root = evaluated_node("failed-root", status=NodeStatus.FAILED)
+    failed_debug = evaluated_node(
+        "failed-debug",
+        status=NodeStatus.FAILED,
+        parent_id=failed_root.id,
+        debug_depth=1,
+    )
+    failed_debug.node_type = NodeType.DEBUG
+    failed_debug.depth = 1
+    tree.add(failed_root)
+    tree.add(failed_debug)
+
+    selector = TreeSelector(
+        debug_probability=1.0,
+        max_debug_depth=3,
+        debug_leaf_only=True,
+    )
+
+    assert selector.select(tree) == failed_debug
+
+
 def test_selector_can_reexpand_a_strong_internal_checkpoint():
     tree = ExperimentTree()
     root = evaluated_node("root")

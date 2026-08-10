@@ -158,6 +158,7 @@ class AIScientistAgent(BaseAgent):
             selector=TreeSelector(
                 debug_probability=self.config.debug_probability,
                 max_debug_depth=self.config.max_debug_depth,
+                debug_leaf_only=self.config.debug_leaf_only,
                 max_children_per_node=self.config.max_children_per_node,
                 exploration_weight=self.config.tree_exploration_weight,
                 random_seed=self.config.random_seed,

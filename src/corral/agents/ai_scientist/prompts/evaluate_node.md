@@ -10,6 +10,12 @@ Formulation:
 Experiment node and actual observations:
 {{node}}
 
+For an aggregation node, interpret its deterministic `replication_summary`
+(run count, success count, scalar values, mean, standard deviation, standard
+error, and seeds) directly. Do not recompute or replace those statistics with
+subjective estimates. When scalar statistics are absent, reconcile the
+non-scalar observations qualitatively.
+
 Reliable evidence known before this node:
 {{journal}}
 

@@ -5,6 +5,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from corral.agents import (
     AIScientistAgent,
     AIScientistConfig,
@@ -12,6 +14,7 @@ from corral.agents import (
 )
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentDecision,
+    MeasuredMetric,
     NodeEvaluation,
     NodeProposal,
     NodeType,
@@ -351,6 +354,56 @@ class TunableScriptedModel(ScriptedModel):
         return result
 
 
+class MeasuredScriptedModel(ScriptedModel):
+    def generate(
+        self, prompt, response_model, *, model=None, purpose="scientific_worker"
+    ):
+        result = super().generate(
+            prompt,
+            response_model,
+            model=model,
+            purpose=purpose,
+        )
+        if response_model is TaskFormulation:
+            return result.model_copy(
+                update={
+                    "measured_metric": MeasuredMetric(
+                        name="score",
+                        maximize=True,
+                    )
+                }
+            )
+        return result
+
+
+class SeededMetricRouter(FakeRouter):
+    def get_mcp_tool_schema(self, task_id):
+        return {
+            "tools": [
+                {
+                    "name": "measure",
+                    "description": "Return a seeded measurement",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "value": {"type": "integer"},
+                            "seed": {"type": "integer"},
+                        },
+                        "required": ["value"],
+                    },
+                }
+            ],
+            "mcp_schema_sha256": "seeded-digest",
+        }
+
+    def execute_trial_tool(self, trial_runtime_id, task_id, tool_name, arguments):
+        call = (task_id, tool_name, arguments)
+        self.tool_calls.append(call)
+        self.trial_tool_calls.append((trial_runtime_id, *call))
+        score = float(arguments["seed"] + 1) if "seed" in arguments else 10.0
+        return ToolResponse(success=True, result=f'{{"score": {score}}}')
+
+
 class VisualScriptedModel(ScriptedModel):
     def __init__(self):
         super().__init__()
@@ -516,6 +569,13 @@ def test_boundary_validation_does_not_consume_the_search_node_cap():
         NodeType.REPLICATION,
         NodeType.AGGREGATION,
     ]
+    summary = validation_nodes[-1].replication_summary
+    assert summary is not None
+    assert summary.n_runs == summary.n_successful == 1
+    assert summary.metric_name is None
+    assert summary.model_dump()["values"] == []
+    assert summary.mean is summary.std is summary.stderr is None
+    assert summary.seeds == [None]
 
 
 def test_tuning_and_verification_use_fixed_stage_baselines():
@@ -685,6 +745,211 @@ def test_sakana_validates_a_best_node_after_research_budget_exhaustion():
     replication = agent.last_state.tree.get(progress.replication_node_ids[0])
     assert replication.node_type == NodeType.REPLICATION
     assert replication.boundary_validation is True
+
+
+def test_sakana_replication_exactly_replays_actions_with_seed_only_overrides():
+    model = MeasuredScriptedModel()
+    config = SakanaAIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        adaptive_substages=False,
+        stage_boundary_replications=3,
+        aggregate_stage_replications=True,
+        max_search_nodes=1,
+        max_validation_nodes=4,
+        max_tool_calls=4,
+        max_llm_calls=20,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+    router = SeededMetricRouter()
+
+    agent.run_agent(router, "sakana-exact-replication-task")
+
+    progress = agent.last_state.stage_progress(ResearchStage.PRELIMINARY)
+    winner = agent.last_state.tree.get(progress.best_node_id)
+    replications = [
+        agent.last_state.tree.get(node_id) for node_id in progress.replication_node_ids
+    ]
+    assert len(replications) == 3
+    assert winner.plan[0].arguments == {"value": 0}
+    assert [node.replication_seed for node in replications] == [0, 1, 2]
+    assert [node.plan[0].arguments for node in replications] == [
+        {"value": 0, "seed": 0},
+        {"value": 0, "seed": 1},
+        {"value": 0, "seed": 2},
+    ]
+    assert all(
+        node.replication_seed_overrides == ["action_0.measure.seed"]
+        for node in replications
+    )
+    assert all(node.plan[0].purpose == winner.plan[0].purpose for node in replications)
+    assert all(
+        node.plan[0].expected_information == winner.plan[0].expected_information
+        for node in replications
+    )
+    assert len({node.trial_runtime_id for node in replications}) == 3
+    assert winner.trial_runtime_id not in {
+        node.trial_runtime_id for node in replications
+    }
+    assert all(
+        not any(
+            purpose.startswith(f"experiment_{node.id}_step_")
+            for purpose in model.purposes
+        )
+        for node in replications
+    )
+    assert agent.last_state.scientific_tool_calls == 4
+    assert agent.last_state.replay_tool_calls == 0
+
+    aggregation = agent.last_state.tree.get(progress.aggregation_node_id)
+    summary = aggregation.replication_summary
+    assert summary is not None
+    assert summary.n_runs == summary.n_successful == 3
+    assert summary.metric_name == "score"
+    assert summary.model_dump()["values"] == [1.0, 2.0, 3.0]
+    assert summary.mean == 2.0
+    assert summary.std == 1.0
+    assert summary.stderr == pytest.approx(1 / (3**0.5))
+    assert summary.seeds == [0, 1, 2]
+    aggregation_prompt = next(
+        prompt
+        for purpose, prompt in model.records
+        if purpose == f"evaluate_{aggregation.id}"
+    )
+    assert '"replication_summary"' in aggregation_prompt
+    assert '"mean": 2.0' in aggregation_prompt
+
+
+def test_sakana_exact_replication_is_unseeded_when_tool_exposes_no_seed():
+    config = SakanaAIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        adaptive_substages=False,
+        stage_boundary_replications=1,
+        aggregate_stage_replications=False,
+        max_search_nodes=1,
+        max_validation_nodes=1,
+        max_tool_calls=2,
+        max_llm_calls=12,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
+
+    agent.run_agent(FakeRouter(), "sakana-unseeded-replication-task")
+
+    progress = agent.last_state.stage_progress(ResearchStage.PRELIMINARY)
+    winner = agent.last_state.tree.get(progress.best_node_id)
+    replication = agent.last_state.tree.get(progress.replication_node_ids[0])
+    assert replication.replication_seed is None
+    assert replication.replication_seed_overrides == []
+    assert replication.plan == winner.plan
+    assert "independent clean-trial replay" in replication.rationale
+
+
+def test_sakana_forces_tuning_for_procedural_parameters():
+    config = SakanaAIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=1,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        adaptive_substages=False,
+        stage_boundary_replications=0,
+        max_search_nodes=4,
+        max_tool_calls=4,
+        max_llm_calls=32,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
+
+    agent.run_agent(FakeRouter(), "sakana-forced-tuning-task")
+
+    assert agent.last_state.formulation.tunable_parameters == []
+    tuning = agent.last_state.tree.by_stage(
+        ResearchStage.TUNING,
+        include_boundary=False,
+    )
+    assert len(tuning) == 1
+    assert tuning[0].node_type == NodeType.PARAMETER_SEARCH
+
+
+def test_sakana_preliminary_gate_accepts_a_working_low_validity_node():
+    model = ScriptedModel(validity=0.1, recommendation=Recommendation.ABANDON)
+    config = SakanaAIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        adaptive_substages=False,
+        stage_boundary_replications=0,
+        max_search_nodes=3,
+        max_tool_calls=3,
+        max_llm_calls=24,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+
+    agent.run_agent(FakeRouter(), "sakana-working-stage-one-task")
+
+    preliminary = agent.last_state.tree.by_stage(
+        ResearchStage.PRELIMINARY,
+        include_boundary=False,
+    )
+    assert preliminary[0].status.value == "successful"
+    assert (
+        agent.last_state.stage_progress(
+            ResearchStage.PRELIMINARY
+        ).completion_criteria_met
+        is True
+    )
+    assert ResearchStage.RESEARCH in agent.last_state.stages
+    assert agent.last_state.experimental_search_terminated_reason is None
+
+
+def test_sakana_does_not_debug_a_nonfailed_critic_flagged_node():
+    model = ScriptedModel(
+        evidence_strength=0.1,
+        recommendation=Recommendation.DEBUG,
+    )
+    config = SakanaAIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=2,
+        preliminary_evidence_threshold=0.95,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        adaptive_substages=False,
+        stage_boundary_replications=0,
+        max_search_nodes=2,
+        max_tool_calls=2,
+        max_llm_calls=16,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+
+    agent.run_agent(FakeRouter(), "sakana-failed-leaf-debug-only-task")
+
+    preliminary = agent.last_state.tree.by_stage(
+        ResearchStage.PRELIMINARY,
+        include_boundary=False,
+    )
+    assert [node.node_type for node in preliminary] == [
+        NodeType.DRAFT,
+        NodeType.REFINE,
+    ]
 
 
 def test_agent_marks_budget_truncated_node_partial_and_does_not_rank_it():

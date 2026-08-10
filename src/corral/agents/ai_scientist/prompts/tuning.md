@@ -29,7 +29,10 @@ Allowed tools:
 {{tools}}
 
 Vary only meaningful parameters identified in the formulation or justified by
-observations. Define one experiment goal and observable success criteria, and
+observations. If the formulation lists no explicit tunable parameter, optimize
+a meaningful experimental or procedural choice such as sampling, controls,
+measurement settings, or analysis thresholds. Define one experiment goal and
+observable success criteria, and
 state what comparison the change enables. Do not repeat an existing child, and
 make requested slots materially different parameter comparisons. Do not
 precompute tool actions. A

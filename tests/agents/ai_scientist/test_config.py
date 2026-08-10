@@ -71,7 +71,11 @@ def test_sakana_fidelity_profile_uses_original_search_behavior():
     assert config.research_early_stopping is False
     assert config.verification_early_stopping is False
     assert config.validate_on_stage_budget_exhaustion is True
+    assert config.debug_leaf_only is True
+    assert config.force_tuning_stage is True
+    assert config.deterministic_replication is True
     assert config.preliminary_evidence_threshold == 0.0
+    assert config.preliminary_require_critic_validity is False
 
 
 def test_legacy_trial_inheritance_flag_maps_to_explicit_strategy():
