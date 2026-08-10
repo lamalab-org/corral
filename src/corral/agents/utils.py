@@ -341,6 +341,7 @@ def save_agent_messages(
     output_dir: str | None = None,
     tools: list[dict] | None = None,
     tool_verbosity: str = "brief",
+    trace_metadata: dict[str, Any] | None = None,
 ) -> str:
     """Save agent conversation to a JSON file for logging and analysis purposes.
 
@@ -354,6 +355,9 @@ def save_agent_messages(
         output_dir (str, optional): Directory to save the logs (will be created if it doesn't exist). Default is "agent_logs".
         tools (list[dict], optional): List of available tools used by the agent. Defaults to None.
         tool_verbosity (str, optional): Verbosity level for tool descriptions. Defaults to "brief".
+        trace_metadata (dict, optional): Agent-specific trace information saved
+            beside ``messages``. It is deliberately not merged into individual
+            messages, which keeps replayed/API-bound messages schema-compatible.
 
     Returns:
         str: Path to the saved file
@@ -379,6 +383,8 @@ def save_agent_messages(
         "timestamp": timestamp,
         "messages": serializable_messages,
     }
+    if trace_metadata is not None:
+        log_data["trace_metadata"] = trace_metadata
 
     # Write to file with metadata and pretty formatting
     with Path(file_path).open("w") as f:

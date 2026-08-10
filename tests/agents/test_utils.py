@@ -453,6 +453,43 @@ def test_save_agent_messages_with_tools(tmp_path):
     assert data["tools"] == tools
 
 
+def test_save_agent_messages_keeps_trace_metadata_outside_messages(tmp_path):
+    """Graph annotations must never become provider message keys."""
+    messages = cast(
+        "list[LiteLLMMessage]",
+        [
+            {"role": "user", "content": "Hello"},
+            {
+                "role": "assistant",
+                "content": "Result",
+                "name": "evaluate_node_0001",
+            },
+        ],
+    )
+    original_messages = [message.copy() for message in messages]
+    trace_metadata = {
+        "schema": "corral.ai_scientist.graph",
+        "nodes": [{"id": "node_0001", "label": "recognizable node"}],
+        "edges": [],
+    }
+
+    result_path = save_agent_messages(
+        messages=messages,
+        task_id="test_task",
+        agent_name="test_agent",
+        model="test_model",
+        output_dir=str(tmp_path),
+        trace_metadata=trace_metadata,
+    )
+
+    with open(result_path) as f:
+        data = json.load(f)
+
+    assert data["messages"] == original_messages
+    assert data["trace_metadata"] == trace_metadata
+    assert messages == original_messages
+
+
 def test_save_agent_messages_creates_directory():
     """Test that save_agent_messages creates output directory."""
     with tempfile.TemporaryDirectory() as temp_dir:

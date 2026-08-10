@@ -149,6 +149,85 @@ The framework includes several pre-built environments:
 
 The framework includes several built-in agent types:
 
+### AIScientistAgent
+
+Uses progressive tree search over Corral tool experiments. It formulates
+hypotheses, runs preliminary and discriminating investigations, optionally tunes
+experimental parameters, verifies conclusions, and synthesizes a submit-ready
+answer from a global evidence journal. Each tree node is one bounded scientific
+experiment: an experiment worker chooses one tool action, observes its result,
+and then chooses the next action without branching the tree between tool calls.
+
+```python
+from corral.agents import AIScientistAgent, AIScientistConfig
+
+agent = AIScientistAgent(
+    model="gpt-4o",
+    evaluator_model="gpt-4o",
+    config=AIScientistConfig(
+        max_tool_calls=24,
+        max_actions_per_node=3,
+        max_children_per_node=3,
+        tree_exploration_weight=0.1,
+        max_llm_tokens=200_000,
+    ),
+)
+```
+
+The default configuration now relies on its per-stage search budgets (18
+ordinary nodes in total) instead of a three-node global cap. Search nodes and
+stage-boundary validation nodes have independent optional caps via
+`max_search_nodes` and `max_validation_nodes`; legacy `max_nodes` limits search
+nodes only. A failed preliminary stage is a hard gate, so later research never
+builds on a non-working baseline.
+
+Successful internal checkpoints remain expandable until their child cap is
+reached, allowing several alternative refinements instead of only one chain.
+Each main stage has its own search scope and is seeded explicitly by the
+previous stage's listwise-selected winner. Tuning and research continue until a
+new checkpoint beats that seed or their budget is exhausted; the manager can
+create a new evidence-dependent substage only after the critic confirms that
+the current agenda's observable criteria have been met. Tuning experiments all
+derive from the Stage-1 winner and verification experiments all derive from the
+Stage-3 winner, except continuations/debugs that repair one experiment. Winning
+checkpoints are independently replicated and aggregated at stage boundaries,
+while Stage 4 remains focused on ablations and optional counterfactual tests.
+
+When tools expose a declared task-internal scalar, the manager parses its value
+and provenance from actual observations and uses it as the objective ranking
+anchor; it never reads the benchmark score. Non-continuation children use the
+`auto` trial-state strategy by default: clone-capable environments inherit a
+checkpoint, while other environments start clean. Set
+`trial_state_inheritance="replay"` only when a stateful environment requires
+inheritance but cannot clone trials. If a local trial produces plot/image artifacts,
+the evaluator sends them to a multimodal-capable model gateway and records its
+visual feedback in the research journal. Boundary repetitions can be disabled
+for deterministic or especially costly tasks with
+`stage_boundary_replications=0`.
+
+For comparison with AI Scientist v2 rather than the cheaper Corral defaults,
+use `SakanaAIScientistConfig`. It supplies the 20/12/12/18 stage budgets,
+0.5 debug probability, debug depth 3, and four experiment workers. Stage 1/3
+fill each worker batch by selecting parents independently, prefer distinct root
+trees before reuse, and use listwise LLM selection with deterministic metric
+fallback. The profile also uses fixed-baseline tuning/ablation, runs Stage 3/4
+to their full budgets, validates the best result when a non-initial stage
+exhausts its budget, allows up to 16 children and 16 adaptive actions per node,
+debugs failed leaves as a chain instead of repeatedly branching from an
+already-expanded failure, always attempts Stage 2 (including procedural or
+experimental tuning), and treats any tool-successful working Stage-1 node as
+sufficient to advance without an extra critic-validity gate.
+
+Sakana-profile boundary replication replays the winner's exact realized action
+sequence in clean trials rather than asking an LLM to reconstruct it. A
+schema-declared `seed` or `random_state` argument is changed to seeds 0, 1, and
+2; tools without either field receive independent byte-for-byte logical
+replays. Aggregation records deterministic run/success counts and, when all
+replications expose the declared scalar objective, its values, mean, sample
+standard deviation, standard error, and seeds before the critic interprets the
+evidence. The profile does not include AI Scientist's manuscript, citation, or
+review pipeline.
+
 ### ReActAgent
 
 Uses the ReAct (Reasoning and Acting) framework for step-by-step problem solving.

@@ -209,6 +209,19 @@ class CorralRouter(_RouterURLs):
         response = requests.delete(f"{self.base_url}/trials/{trial_runtime_id}")
         response.raise_for_status()
 
+    def promote_trial_artifacts(
+        self,
+        source_trial_runtime_id: str,
+        destination_trial_runtime_id: str,
+    ) -> dict[str, Any]:
+        """Copy a branch trial's files into the canonical scored trial."""
+        response = requests.post(
+            f"{self.base_url}/trials/{source_trial_runtime_id}/artifacts/promote",
+            json={"destination_trial_runtime_id": destination_trial_runtime_id},
+        )
+        response.raise_for_status()
+        return response.json()
+
     def close_episode(self, episode_id: str) -> None:
         """Free an episode's shared dependency-output store on the server.
 
@@ -601,6 +614,19 @@ class AsyncCorralRouter(_RouterURLs):
             f"{self.base_url}/trials/{trial_runtime_id}"
         )
         response.raise_for_status()
+
+    async def promote_trial_artifacts(
+        self,
+        source_trial_runtime_id: str,
+        destination_trial_runtime_id: str,
+    ) -> dict[str, Any]:
+        """Copy a branch trial's files into the canonical scored trial."""
+        response = await self.client.post(
+            f"{self.base_url}/trials/{source_trial_runtime_id}/artifacts/promote",
+            json={"destination_trial_runtime_id": destination_trial_runtime_id},
+        )
+        response.raise_for_status()
+        return response.json()
 
     async def close_episode(self, episode_id: str) -> None:
         """Free an episode's shared dependency-output store on the server."""

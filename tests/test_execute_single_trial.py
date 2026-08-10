@@ -71,6 +71,42 @@ def test_success_status_is_submitted():
     assert trial.score == 1.0
 
 
+def test_agent_owned_tool_statistics_override_canonical_runtime_statistics():
+    statistics = {
+        "total_calls": 1,
+        "successful_calls": 0,
+        "failed_calls": 1,
+        "tools_used": ["measure"],
+        "error_types": {
+            "invalid_tool": 0,
+            "invalid_args": 0,
+            "execution_error": 1,
+        },
+        "tool_calls": [
+            {
+                "tool_name": "measure",
+                "arguments": {},
+                "result": None,
+                "status": "execution_error",
+                "error_message": "failed",
+                "duration": 0.1,
+                "timestamp": "2026-08-10T12:00:00+00:00",
+            }
+        ],
+    }
+
+    _, trial = _run(
+        AgentRunResult(
+            answer="42",
+            status="success",
+            metadata={"tool_statistics": statistics},
+        )
+    )
+
+    assert trial.tool_statistics == statistics
+    assert trial.state["tool_statistics"] == statistics
+
+
 def test_timeout_status_is_not_submitted():
     interface, trial = _run(
         AgentRunResult(
