@@ -46,7 +46,7 @@ def main():
                 "keywords": ["chemistry", "synthesis", "retrosynthesis"],
                 "metrics": ["binary"],
                 "input": {
-                    "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The leaves on the retrosynthesis tree should be commercially available chemicals. The price of all the chemical cannot exceed ${PRIZES[i]}. The final route should not surpass {len(TEMPLATES[i])} steps.",
+                    "prompt": f"Propose a retrosynthesis route to synthesize the molecule with SMILES {molecule}. The leaves on the retrosynthesis tree should be commercially available chemicals. A molecule's price is its frozen estimated cost in USD for 1 g, and the route cost is the sum across all leaf molecules. The route cost cannot exceed ${PRIZES[i]}. The final route should not surpass {len(TEMPLATES[i])} steps.",
                     "input_from_task": False,
                     "input_for_task": False,
                 },

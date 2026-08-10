@@ -1,6 +1,5 @@
 import json
 import re
-from time import sleep
 from typing import Any
 
 from rdkit import Chem
@@ -609,12 +608,12 @@ def verify_route(route: str) -> tuple[bool, str]:
 @tool
 def search_catalog_by_smiles(
     smiles_list: list[str], limit: int = 5
-) -> list[dict[str, Any]]:
+) -> dict[str, list[dict[str, Any]]] | str:
     """
     [BRIEF] Searches a catalog for available precursors. [/BRIEF]
 
     [DETAILED] This function searches a chemical catalog using for a list of SMILES strings to find available precursor chemicals.
-    It returns a list of chemical information dictionaries if matches are found, or a message indicating no results were found. [/DETAILED]
+    It returns a mapping from each input SMILES to its chemical information dictionaries. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you have a list of SMILES strings and want to find corresponding chemicals in the catalog.
@@ -627,7 +626,7 @@ def search_catalog_by_smiles(
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - The function takes a list of SMILES strings as input and queries some chemical catalogs for matching entries using the `chemprice` package.
+    - The function canonicalizes each SMILES and queries the frozen local buyables database.
     - It retrieves a list of chemicals that match the provided SMILES strings, each represented as a dictionary containing relevant chemical information.
     - If no matches are found, it returns a message indicating that no results were found. [/CONTEXTUAL]
 
@@ -655,27 +654,25 @@ def search_catalog_by_smiles(
             [ARGS_EXAMPLES] 5, 10, 3 [/ARGS_EXAMPLES]
 
     Returns:
-        list[dict[str, Any]] | str:
-            [RETURNS_BRIEF] List of chemical info dicts or a not-found message. [/RETURNS_BRIEF]
-            [RETURNS_DETAILED] If matches are found, a list of dictionaries containing chemical information is returned. Each dictionary represents a chemical and includes details such as SMILES, amount, distributor or price. If no matches are found, a message indicating no results were found is returned. [/RETURNS_DETAILED]
-            [RETURNS_SYNTACTICAL] List of dictionaries or a string message [/RETURNS_SYNTACTICAL]
-            [RETURNS_EXAMPLES] [{"name": "Formaldehyde", "cas": "50-00-0", ...}], "No results found" [/RETURNS_EXAMPLES]
+        dict[str, list[dict[str, Any]]] | str:
+            [RETURNS_BRIEF] Mapping of input SMILES to chemical info dicts. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] Each input SMILES maps to zero or one frozen price entries. If the input mapping is empty, a not-found message is returned. [/RETURNS_DETAILED]
+            [RETURNS_SYNTACTICAL] Dictionary of lists or a string message [/RETURNS_SYNTACTICAL]
+            [RETURNS_EXAMPLES] {"CCO": [{"SMILES": "CCO", "Price": 1.23, ...}]} [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
             [ERROR_WHEN] Raised for any unexpected errors during the catalog search. [/ERROR_WHEN]
-            [ERROR_DETAILS] This could be due to connectivity issues, invalid SMILES format, or server errors in the catalog service. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] Verify the SMILES format if the error has to do with the SMILES representation. If the error comes from the catalog service, inform the user to try again later. [/ERROR_RECOVERY]
+            [ERROR_DETAILS] This could be due to an invalid SMILES or a missing/malformed local database. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the SMILES and the local buyables database configuration. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
     - The function limits the number of returned matches to prevent overwhelming the user with too many results.
-    - The accuracy and completeness of the search results depend on the underlying chemical catalog being queried.
-    - The function does not handle partial matches or synonyms; it strictly searches by the exact CAS number provided.
-    - If the catalog service is down or unreachable, the function will not be able to return results.
+    - Results reflect the frozen database snapshot rather than current market availability.
+    - Matching is an exact canonical-SMILES lookup; partial matches and synonyms are not supported.
     [/LIMITATIONS]
     """
-    sleep(60)
     chemicals = check_price(smiles_list, limit)
     return chemicals if chemicals else "No results found"
 
@@ -699,7 +696,7 @@ def is_buyable(smiles_list: list[str]) -> list[bool]:
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - The function takes a list of SMILES as input and queries some chemical database using the `chemprice` package to check the commercial availability of each molecule.
+    - The function canonicalizes each SMILES and checks the frozen local buyables database.
     - It checks if the molecule associated with the provided SMILES is listed as available for purchase.
     - If the molecule is found to be commercially available, the function returns True for such molecule. If it is not available, it returns False. [/CONTEXTUAL]
 
@@ -730,18 +727,17 @@ def is_buyable(smiles_list: list[str]) -> list[bool]:
     [RAISES] Exceptions:
         Exception:
             [ERROR_WHEN] Raised for any unexpected errors during the availability check. [/ERROR_WHEN]
-            [ERROR_DETAILS] This could be due to connectivity issues, invalid SMILES format, or server errors in the availability service. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] Verify the SMILES format if the error has to do with the SMILES. If the error comes from the availability service, inform the user to try again later, and you should workaround by checking alternative routes. [/ERROR_RECOVERY]
+            [ERROR_DETAILS] This could be due to an invalid SMILES or a missing/malformed local database. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Verify the SMILES and the local buyables database configuration. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known limitations:
     - The function relies on the accuracy and completeness of the underlying database or service used to check commercial availability.
-    - The availability status may change over time, so the function's results may not always reflect the most current market conditions.
+    - Availability reflects the frozen database snapshot, not current market conditions.
     - The function does not provide information on pricing, suppliers, or quantities available for purchase.
-    - If the availability service is down or unreachable, the function will not be able to return results.
+    - Matching is an exact canonical-SMILES lookup.
     [/LIMITATIONS]
     """
-    sleep(60)
     return _is_buyable(smiles_list)
 
 
