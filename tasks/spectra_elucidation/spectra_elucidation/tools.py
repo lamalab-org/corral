@@ -12,8 +12,8 @@ from spectra_elucidation.spectra_utils import (
     convert_ms_spectrum_to_string,
     enumerate_fragments_from_smiles,
     format_hsqc_spectrum,
-    make_api_call,
     predict_isotopic_distribution,
+    predict_nmr_spectra,
 )
 
 from corral.backend.tool import Tool, tool
@@ -594,7 +594,7 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
 
     [CONTEXTUAL] How this tool works:
     - This function measures the HSQC NMR spectra for the sample at hand.
-    - It makes a POST request to an external API that measures the HSQC NMR experiment for the sample at hand.
+    - It runs the local nmr-processing predictor and selects its HSQC result.
     - The function then parses the data from the measurement to extract the HSQC spectrum data and formats it in standard NMR notation, similar to the ACS convention.
     - If an error occurs during the measurement, it returns an appropriate message. [/CONTEXTUAL]
 
@@ -626,13 +626,11 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
         - The experiment can only measure for the compound of the sample at hand.
     [/LIMITATIONS]
     """
-    URL = "https://lamalab-org--nmr-prediction-api-predict-nmr.modal.run"
     mol = Chem.MolFromSmiles(h_smiles)
     if mol is None:
         return "Invalid SMILES string provided."
-    payload = {"smiles": h_smiles}
 
-    spectra = make_api_call(URL, payload)
+    spectra = predict_nmr_spectra(h_smiles)
     for spectrum in spectra["spectra"]:
         info = spectrum.get("info", {})
         pulse_sequence = info.get("pulseSequence", "")

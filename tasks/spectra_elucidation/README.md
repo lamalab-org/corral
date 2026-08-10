@@ -15,11 +15,11 @@ uv sync
 
 If you prefer not to activate the environment, use `uv run` to prefix the commands below.
 
-## Node.js Dependency
+## Node.js Dependencies
 
-The `mass_spectrometry_spectra` tool calls a local Node.js isotopic-distribution predictor. Python dependencies are installed by `uv sync`, but this JavaScript dependency must be installed separately.
+The `mass_spectrometry_spectra` and `hsqc_nmr_spectra` tools call local Node.js predictors. Python dependencies are installed by `uv sync`, but their JavaScript dependencies must be installed separately.
 
-> **Why isn't this in `pyproject.toml`?** `pyproject.toml`/`uv` only manage Python packages — they cannot install the Node.js runtime or npm packages. Node must therefore be installed through your OS package manager (e.g. `brew install node`, `apt-get install nodejs`, or [nodejs.org](https://nodejs.org)), and the `isotopic-distribution` package installed with `npm` as shown below. The predictor resolves the `node` executable from `PATH` (via `shutil.which("node")`), so any Node ≥ 20 on the `PATH` works.
+> **Why aren't these in `pyproject.toml`?** `pyproject.toml`/`uv` only manage Python packages — they cannot install the Node.js runtime or npm packages. Node must therefore be installed through your OS package manager (e.g. `brew install node`, `apt-get install nodejs`, or [nodejs.org](https://nodejs.org)), and the JavaScript packages installed with `npm` as shown below. The predictors resolve the `node` executable from `PATH` (via `shutil.which("node")`), so any Node ≥ 20 on the `PATH` works.
 
 Install Node.js 20 or newer, then create a small npm project for the predictor:
 
@@ -29,7 +29,7 @@ mkdir -p CORRAL_WORK_DIR/js
 cd CORRAL_WORK_DIR/js
 npm init -y
 npm pkg set type=module
-npm i --omit=dev isotopic-distribution
+npm i --omit=dev isotopic-distribution nmr-processing openchemlib
 ```
 
 Point the spectra environment at that npm project before running the server:
@@ -39,7 +39,7 @@ cd tasks/spectra_elucidation
 export CORRAL_SPECTRA_JS_DIR="$PWD/CORRAL_WORK_DIR/js"
 ```
 
-If `CORRAL_SPECTRA_JS_DIR` is not set, the code falls back to `/srv/js`. The unit tests mock this predictor, so passing tests do not prove the runtime Node.js setup is available.
+If `CORRAL_SPECTRA_JS_DIR` is not set, the code falls back to `/srv/js`. The unit tests mock these predictors, so passing tests do not prove the runtime Node.js setup is available.
 
 ## Run The Server
 
@@ -75,7 +75,7 @@ The server accepts these options:
 The environment also reads these variables:
 
 - `CORRAL_WORK_DIR`: Base directory for task workspaces and generated files. Setting it explicitly to `tasks/spectra_elucidation/CORRAL_WORK_DIR` keeps task output inside this task directory.
-- `CORRAL_SPECTRA_JS_DIR`: Directory containing the npm project with `isotopic-distribution`.
+- `CORRAL_SPECTRA_JS_DIR`: Directory containing the npm project with `isotopic-distribution`, `nmr-processing`, and `openchemlib`.
 
 ## See The Tasks
 

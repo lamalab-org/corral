@@ -14,7 +14,6 @@ from typing import ClassVar
 
 import aiohttp
 import backoff
-import requests
 from loguru import logger
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
@@ -296,20 +295,42 @@ def predict_isotopic_distribution(smiles: str, ionization: str | None = None) ->
     return json.loads(out)
 
 
-def make_api_call(url: str, payload: dict) -> dict:
+def predict_nmr_spectra(smiles: str) -> dict:
     """
-    Make a POST request to the specified URL with the given payload.
+    Predict 1D and 2D NMR spectra locally with nmr-processing.
 
     Args:
-        url (str): The URL to which the request is sent.
-        payload (dict): The data to be sent in the request body.
+        smiles: SMILES string of the molecule.
 
     Returns:
-        dict: The JSON response from the server.
+        The complete prediction returned by the nmr-processing JavaScript package.
     """
-    resp = requests.post(url, json=payload)
-    resp.raise_for_status()
-    return resp.json()
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        msg = "Invalid SMILES"
+        raise ValueError(msg)
+
+    js = textwrap.dedent(
+        """
+        import { predictSpectra } from "nmr-processing";
+        import { Molecule } from "openchemlib";
+
+        const mol = Molecule.fromSmiles(process.argv[1]);
+        const result = await predictSpectra(mol);
+        console.log(JSON.stringify(result));
+        """
+    )
+    node_project_dir = os.environ.get("CORRAL_SPECTRA_JS_DIR", "/srv/js")
+    cwd = node_project_dir if Path(node_project_dir).is_dir() else None
+    node_executable = shutil.which("node") or "node"
+    out = subprocess.check_output(
+        [node_executable, "--input-type=module", "-e", js, smiles],
+        cwd=cwd,
+        text=True,
+        stderr=subprocess.STDOUT,
+    )
+    return json.loads(out)
+
 
 class SpectraAPI:
     """Class for handling spectral predictions from the NMR and IR APIs

@@ -324,11 +324,11 @@ class TestIRSpectra:
 class TestHSQCNMRSpectra:
     """Tests for the hsqc_nmr_spectra tool."""
 
-    @patch("spectra_elucidation.tools.make_api_call")
-    def test_hsqc_nmr_spectra_success(self, mock_api_call):
+    @patch("spectra_elucidation.tools.predict_nmr_spectra")
+    def test_hsqc_nmr_spectra_success(self, mock_predict):
         """Test successful HSQC NMR spectra prediction."""
-        # Mock the API response with correct format
-        mock_api_call.return_value = {
+        # Mock the local predictor response with correct format
+        mock_predict.return_value = {
             "spectra": [
                 {
                     "info": {"pulseSequence": "hsqc"},
@@ -354,24 +354,18 @@ class TestHSQCNMRSpectra:
 
         result = hsqc_nmr_spectra.execute(h_smiles="CCO")
 
-        # Check that the API was called
-        mock_api_call.assert_called_once()
-        call_args = mock_api_call.call_args[0]
-        assert (
-            call_args[0]
-            == "https://lamalab-org--nmr-prediction-api-predict-nmr.modal.run"
-        )
-        assert call_args[1]["smiles"] == "CCO"
+        # Check that the local predictor was called
+        mock_predict.assert_called_once_with("CCO")
 
         # Check the result
         assert isinstance(result, str)
         assert "HSQC" in result or "delta" in result or "3.6" in result
 
-    @patch("spectra_elucidation.tools.make_api_call")
-    def test_hsqc_nmr_spectra_no_hsqc(self, mock_api_call):
+    @patch("spectra_elucidation.tools.predict_nmr_spectra")
+    def test_hsqc_nmr_spectra_no_hsqc(self, mock_predict):
         """Test when no HSQC spectrum is found."""
-        # Mock the API response without HSQC
-        mock_api_call.return_value = {
+        # Mock the local predictor response without HSQC
+        mock_predict.return_value = {
             "spectra": [
                 {
                     "info": {"pulseSequence": "other"},
@@ -383,6 +377,14 @@ class TestHSQCNMRSpectra:
         result = hsqc_nmr_spectra.execute(h_smiles="CCO")
 
         assert "No HSQC spectrum found" in result
+
+    @patch("spectra_elucidation.tools.predict_nmr_spectra")
+    def test_hsqc_nmr_spectra_invalid_smiles(self, mock_predict):
+        """Test that invalid SMILES are rejected before prediction."""
+        result = hsqc_nmr_spectra.execute(h_smiles="INVALID")
+
+        mock_predict.assert_not_called()
+        assert "Invalid SMILES string" in result
 
 
 class TestMassSpectrometrySpectra:
