@@ -58,11 +58,14 @@ source .venv/bin/activate
 uv sync
 ```
 
-The bundled buyables snapshot combines CoPriNet and ChemCost records. SMILES are
-canonicalized with RDKit while retaining stereochemistry and multicomponent
-structures. Duplicate records are merged by taking the minimum USD/g price;
-the median, observation count, and source names remain in the database for
-auditing. Snapshot details and SHA256 hashes are recorded in
+The bundled buyables snapshot combines CoPriNet and ChemCost records with 11
+repository-authored SMILES/price rows embedded directly by the database builder
+for reference-route leaves those sources do not cover. The manual values are
+frozen benchmark estimates, not live vendor quotes. SMILES are canonicalized
+with RDKit while retaining stereochemistry and multicomponent structures.
+Duplicate records are merged by taking the minimum USD/g price; the median,
+observation count, and source names remain in the database for auditing.
+Snapshot details and SHA256 hashes are recorded in
 `retrosynthesis/data/buyables.metadata.json`.
 
 To rebuild the snapshot from local source files:
@@ -74,9 +77,16 @@ uv run python scripts/build_buyables.py \
   --output retrosynthesis/data/buyables.sqlite
 ```
 
+The 11 built-in manual rows are added automatically on every rebuild; no
+separate task-price file or option is required.
+
 An ASKCOS `buyables.json` or `buyables.json.gz` snapshot can optionally be
 included with `--askcos`. To use a database outside the package, set
 `RETRO_PRICE_DB_PATH=/absolute/path/to/buyables.sqlite`.
+
+The first four level-3 price budgets are the reference-route total plus 10%,
+rounded up to the nearest cent. Tests enforce both complete reference-leaf
+coverage and this margin.
 
 If you prefer not to activate the environment, use `uv run` to prefix the commands below.
 

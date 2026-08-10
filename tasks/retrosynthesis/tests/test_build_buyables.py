@@ -13,6 +13,7 @@ build_database = builder["build_database"]
 load_askcos = builder["load_askcos"]
 load_chemcost = builder["load_chemcost"]
 load_coprinet = builder["load_coprinet"]
+load_manual_prices = builder["load_manual_prices"]
 normalize_entry = builder["normalize_entry"]
 
 
@@ -76,3 +77,10 @@ def test_source_loaders_accept_documented_formats(tmp_path):
         ("CC", 2.2, "chemcost"),
     ]
     assert list(load_askcos(askcos)) == [("CCC", 4.4, "askcos:MC")]
+
+
+def test_manual_prices_are_valid_built_in_rows():
+    rows = list(load_manual_prices())
+
+    assert len(rows) == 11
+    assert all(source == "corral_manual" for _smiles, _price, source in rows)

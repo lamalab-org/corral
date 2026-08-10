@@ -25,10 +25,11 @@ TEMPLATES = [
     ["20810", "2895", "1914397", "1914398", "1914399", "74054"],
 ]
 PRIZES = [
-    250.0,
-    405.0,
-    125.0,
-    150.0,
+    # 110% of each curated reference-route total, rounded up to the nearest cent.
+    165.0,
+    45.69,
+    67.61,
+    126.5,
     9999.0,
     9999.0,
     9999.0,

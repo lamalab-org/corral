@@ -13,6 +13,7 @@ import statistics
 import tempfile
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
+from itertools import chain
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -32,6 +33,27 @@ SOURCE_METADATA = {
         "url": "https://askcos-docs.mit.edu/guide/3-Advanced-Usage/3.5-Utilities.html",
         "license": "Verify the provenance of the supplied snapshot before redistribution",
     },
+}
+MANUAL_SOURCE = "corral_manual"
+MANUAL_SOURCE_METADATA = {
+    "license": "Repository-authored benchmark data",
+    "provenance": (
+        "Manually assigned frozen USD/g estimates for reference-route leaves; "
+        "these are benchmark values, not live vendor quotes"
+    ),
+}
+MANUAL_PRICES = {
+    "C/C(=C/CCCC(=O)C(F)(F)F)c1ccccc1": 150.0,
+    "COC(=O)C1=CC(=O)C1": 40.0,
+    "COC(=O)C(=O)CCc1ccccc1": 60.0,
+    "COc1ccc(C(=O)c2ccc(OC)cc2)cc1": 15.0,
+    "[Li]C[Si](C)(C)C": 100.0,
+    "COC#CC(C)P(=O)(OCC(F)(F)F)OCC(F)(F)F": 450.0,
+    "CCOC(=O)C[C@H]1C[C@H](O)[C@@H](C)[C@@H](C=O)O1": 500.0,
+    "OC1CN(Cc2ccccc2)C1": 200.0,
+    "O=Cc1ccc(S(=O)(=O)Cl)cc1": 60.0,
+    "O=C1CCC1": 30.0,
+    "CC(=O)c1cc([N+](=O)[O-])ccc1O": 25.0,
 }
 
 
@@ -80,6 +102,15 @@ def load_coprinet(path: Path) -> Iterator[PriceRow]:
             entry = normalize_entry(row["SMILES"], row["price"], "coprinet_mcule")
             if entry is not None:
                 yield entry
+
+
+def load_manual_prices() -> Iterator[PriceRow]:
+    """Yield the benchmark's built-in manual SMILES/price rows."""
+    for smiles, price in MANUAL_PRICES.items():
+        entry = normalize_entry(smiles, price, MANUAL_SOURCE)
+        if entry is None:
+            raise ValueError(f"Invalid built-in manual price row: {smiles}")
+        yield entry
 
 
 def walk_chemcost(obj: Any) -> Iterator[tuple[Any, Any]]:
@@ -209,6 +240,11 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def manual_prices_sha256() -> str:
+    payload = json.dumps(MANUAL_PRICES, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def write_metadata(
     metadata_path: Path,
     output: Path,
@@ -223,6 +259,13 @@ def write_metadata(
         "raw_records": raw_records,
         "final_molecules": final_molecules,
         "database": {"file": output.name, "sha256": sha256(output)},
+        "embedded_sources": {
+            MANUAL_SOURCE: {
+                **MANUAL_SOURCE_METADATA,
+                "records": len(MANUAL_PRICES),
+                "sha256": manual_prices_sha256(),
+            }
+        },
         "inputs": {
             source: {
                 "file": path.name,
@@ -258,12 +301,13 @@ def main() -> None:
     if not inputs:
         parser.error("at least one input dataset is required")
 
-    rows = (
+    dataset_rows = (
         row
         for path, loader in loaders.values()
         if path is not None
         for row in loader(path)
     )
+    rows = chain(dataset_rows, load_manual_prices())
     raw_records, final_molecules = build_database(rows, args.output)
     metadata_path = args.metadata or args.output.with_suffix(".metadata.json")
     write_metadata(metadata_path, args.output, inputs, raw_records, final_molecules)
