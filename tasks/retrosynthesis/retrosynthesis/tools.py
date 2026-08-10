@@ -673,8 +673,10 @@ def search_catalog_by_smiles(
     - Matching is an exact canonical-SMILES lookup; partial matches and synonyms are not supported.
     [/LIMITATIONS]
     """
-    chemicals = check_price(smiles_list, limit)
-    return chemicals if chemicals else "No results found"
+chemicals = check_price(smiles_list, limit)
+if not chemicals or all(not entries for entries in chemicals.values()):
+    return "No results found"
+return chemicals
 
 
 @tool
