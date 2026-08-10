@@ -237,11 +237,20 @@ class LiteLLMStructuredModel:
             parsed = response_model.model_validate(_extract_object(content))
 
         # The worker contexts are intentionally isolated, but the full sequence
-        # remains visible to Corral's normal verbose transcript machinery.
+        # remains visible to Corral's normal verbose transcript machinery. Add
+        # the same legal ``name`` to every role in the recorded call so node
+        # turns can be grouped without inference from adjacency. These are
+        # copies made *after* the provider request: the API-bound ``messages``
+        # above remain untouched and contain no trace-only fields.
+        recorded_messages: list[LiteLLMMessage] = []
+        for message in messages:
+            recorded_message = message.copy()
+            recorded_message["name"] = purpose
+            recorded_messages.append(recorded_message)
         with self._state_lock:
             self.owner.messages.extend(
                 [
-                    *messages,
+                    *recorded_messages,
                     LiteLLMMessage(
                         role="assistant",
                         content=content,

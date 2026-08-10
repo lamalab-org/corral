@@ -5,6 +5,8 @@ import re
 import shutil
 import subprocess
 import textwrap
+import threading
+import time
 from collections import Counter
 from itertools import combinations
 from pathlib import Path
@@ -321,7 +323,7 @@ class SpectraAPI:
     NMR_BASE_URL: str = "https://nmr-prediction.service.zakodium.com/v1/predict"
     VALID_SPECTRUM_TYPES: ClassVar = {"carbon", "proton"}
 
-    _request_lock = asyncio.Lock()
+    _request_lock = threading.Lock()
     _last_request_time: float = 0
     _min_request_interval = 1
     _timeout = 60
@@ -441,14 +443,20 @@ class SpectraAPI:
             ValueError: If invalid prediction_type or spectrum_type provided
             aiohttp.ClientError: If the request fails after all retries
         """
-        async with SpectraAPI._request_lock:
-            current_time = asyncio.get_event_loop().time()
-            time_since_last_request = current_time - SpectraAPI._last_request_time
-            if time_since_last_request < SpectraAPI._min_request_interval:
-                await asyncio.sleep(
-                    SpectraAPI._min_request_interval - time_since_last_request
-                )
-            SpectraAPI._last_request_time = asyncio.get_event_loop().time()
+        # Tool calls run in worker threads, each with its own event loop. Reserve
+        # request slots under a thread lock so rate limiting remains safe across
+        # those loops without binding an asyncio.Lock to one of them.
+        with SpectraAPI._request_lock:
+            current_time = time.monotonic()
+            request_time = max(
+                current_time,
+                SpectraAPI._last_request_time + SpectraAPI._min_request_interval,
+            )
+            SpectraAPI._last_request_time = request_time
+
+        delay = request_time - current_time
+        if delay > 0:
+            await asyncio.sleep(delay)
 
         if prediction_type == "nmr":
             if spectrum_type not in SpectraAPI.VALID_SPECTRUM_TYPES:

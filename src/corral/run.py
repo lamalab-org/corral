@@ -431,6 +431,26 @@ def _elapsed_seconds(trial_start_time: datetime) -> float:
     return (datetime.now(tz=timezone.utc) - trial_start_time).total_seconds()
 
 
+def _apply_agent_tool_statistics(
+    result: TaskTrialResult, run_result: AgentRunResult
+) -> TaskTrialResult:
+    """Use agent-owned tool records when calls ran outside the scored runtime.
+
+    Most agents execute tools directly in the canonical trial, whose submitted
+    state already supplies ``tool_statistics``. AI Scientist instead uses
+    isolated branch runtimes, so it returns their aggregate in run metadata.
+    Applying that explicit aggregate here keeps reporting agent-agnostic while
+    leaving the normal canonical-runtime path unchanged.
+    """
+    statistics = run_result.metadata.get("tool_statistics")
+    if not isinstance(statistics, Mapping):
+        return result
+    result.tool_statistics = dict(statistics)
+    if isinstance(result.state, dict):
+        result.state["tool_statistics"] = dict(statistics)
+    return result
+
+
 def _finish_trial(
     task_id: str,
     trial_index: int,
@@ -456,7 +476,7 @@ def _finish_trial(
             result.token_usage = token_usage
             result.messages = messages
             result.duration = _elapsed_seconds(trial_start_time)
-            return result
+            return _apply_agent_tool_statistics(result, run_result)
         except Exception as surrender_error:
             result = exception_trial_result(
                 task_id=task_id,
@@ -469,7 +489,7 @@ def _finish_trial(
                 messages=messages,
             )
             result.duration = _elapsed_seconds(trial_start_time)
-            return result
+            return _apply_agent_tool_statistics(result, run_result)
 
     # An infrastructure failure (harness timeout, SDK crash, MCP transport
     # failure, iteration/budget exhaustion, ...) surfaces as a non-submit
@@ -488,14 +508,14 @@ def _finish_trial(
             messages=messages,
         )
         result.duration = _elapsed_seconds(trial_start_time)
-        return result
+        return _apply_agent_tool_statistics(result, run_result)
 
     try:
         result = interface.submit_answer(task_id, answer)
         result.token_usage = token_usage
         result.messages = messages
         result.duration = _elapsed_seconds(trial_start_time)
-        return result
+        return _apply_agent_tool_statistics(result, run_result)
     except Exception as submit_error:
         result = exception_trial_result(
             task_id=task_id,
@@ -507,7 +527,7 @@ def _finish_trial(
             messages=messages,
         )
         result.duration = _elapsed_seconds(trial_start_time)
-        return result
+        return _apply_agent_tool_statistics(result, run_result)
 
 
 async def _afinish_trial(
@@ -536,7 +556,7 @@ async def _afinish_trial(
             result.token_usage = token_usage
             result.messages = messages
             result.duration = _elapsed_seconds(trial_start_time)
-            return result
+            return _apply_agent_tool_statistics(result, run_result)
         except Exception as surrender_error:
             result = await aexception_trial_result(
                 task_id=task_id,
@@ -549,7 +569,7 @@ async def _afinish_trial(
                 messages=messages,
             )
             result.duration = _elapsed_seconds(trial_start_time)
-            return result
+            return _apply_agent_tool_statistics(result, run_result)
 
     # A non-submit status is an infrastructure failure, recorded as a trial error
     # rather than submitted to the scorer (mirrors :func:`_finish_trial`).
@@ -564,14 +584,14 @@ async def _afinish_trial(
             messages=messages,
         )
         result.duration = _elapsed_seconds(trial_start_time)
-        return result
+        return _apply_agent_tool_statistics(result, run_result)
 
     try:
         result = await acall(interface.submit_answer, task_id, answer)
         result.token_usage = token_usage
         result.messages = messages
         result.duration = _elapsed_seconds(trial_start_time)
-        return result
+        return _apply_agent_tool_statistics(result, run_result)
     except Exception as submit_error:
         result = await aexception_trial_result(
             task_id=task_id,
@@ -583,7 +603,7 @@ async def _afinish_trial(
             messages=messages,
         )
         result.duration = _elapsed_seconds(trial_start_time)
-        return result
+        return _apply_agent_tool_statistics(result, run_result)
 
 
 def execute_single_trial(

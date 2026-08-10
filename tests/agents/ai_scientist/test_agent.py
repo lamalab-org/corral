@@ -1098,7 +1098,7 @@ def test_stage_four_does_not_substitute_aggregation_when_tools_are_exhausted():
     )
     agent = AIScientistAgent(config=config, model_gateway=model)
 
-    agent.run_agent(FakeRouter(), "zero-tool-aggregation-task")
+    result = agent.run_agent(FakeRouter(), "zero-tool-aggregation-task")
 
     assert [node.node_type for node in agent.last_state.tree.nodes] == [NodeType.DRAFT]
     assert (
@@ -1107,6 +1107,8 @@ def test_stage_four_does_not_substitute_aggregation_when_tools_are_exhausted():
     )
     assert agent.last_state.scientific_tool_calls == 1
     assert agent.last_state.replay_tool_calls == 0
+    assert result.metadata["tool_statistics"]["total_calls"] == 1
+    assert result.metadata["tool_statistics"]["successful_calls"] == 1
 
 
 def test_agent_promotes_winning_artifacts_into_the_scored_trial(tmp_path):

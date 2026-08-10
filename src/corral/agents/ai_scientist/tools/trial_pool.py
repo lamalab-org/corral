@@ -4,6 +4,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from loguru import logger
@@ -92,6 +93,8 @@ class TrialPool:
         self.peak_simultaneous_trials = 0
         self.trials_cloned = 0
         self._next_branch_number = 1
+        self._tool_calls: list[dict[str, Any]] = []
+        self._tool_calls_lock = Lock()
         required_methods = ("create_trial", "for_trial", "close_trial")
         missing = [
             name
@@ -150,6 +153,14 @@ class TrialPool:
                 verbosity=getattr(self.interface, "current_verbosity", None),
                 workspace=workspace,
             )
+            # The top-level benchmark runner configures its own trial before
+            # starting the agent, but AI Scientist creates additional isolated
+            # runtimes for experiment branches. Those runtimes need the same
+            # per-trial setup (for example, spectra tasks bind the sample as a
+            # hidden ``h_smiles`` argument) before any branch tool executes.
+            configure = getattr(router, "configure_additional_apps", None)
+            if callable(configure):
+                configure(self.task_id)
         except Exception:
             try:
                 self.interface.close_trial(trial_runtime_id)
@@ -171,6 +182,7 @@ class TrialPool:
             stop_on_error=self.stop_on_error,
             budget=self.budget,
             on_executed=history.append,
+            on_tool_call=self._record_tool_call,
         )
         branch = BranchRuntime(
             branch_id=branch_id,
@@ -264,6 +276,31 @@ class TrialPool:
             "replay_divergences": sum(
                 not item.equivalent for item in self.replay_results
             ),
+        }
+
+    def _record_tool_call(self, call: dict[str, Any]) -> None:
+        """Record one physical branch call exactly once across all runtimes."""
+        with self._tool_calls_lock:
+            self._tool_calls.append(call)
+
+    def tool_statistics(self) -> dict[str, Any]:
+        """Return report-compatible statistics for all physical branch calls."""
+        with self._tool_calls_lock:
+            calls = [dict(call) for call in self._tool_calls]
+        successful = sum(call.get("status") == "success" for call in calls)
+        error_statuses = ("invalid_tool", "invalid_args", "execution_error")
+        return {
+            "total_calls": len(calls),
+            "successful_calls": successful,
+            "failed_calls": len(calls) - successful,
+            "tools_used": sorted(
+                {str(call["tool_name"]) for call in calls if call.get("tool_name")}
+            ),
+            "error_types": {
+                status: sum(call.get("status") == status for call in calls)
+                for status in error_statuses
+            },
+            "tool_calls": calls,
         }
 
     def visual_artifacts(

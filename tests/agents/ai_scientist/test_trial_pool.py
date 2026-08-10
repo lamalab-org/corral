@@ -60,6 +60,24 @@ class CloneableRouter(StatefulRouter):
         return descriptor
 
 
+class SetupRouter(StatefulRouter):
+    def __init__(self):
+        super().__init__()
+        self.configured = []
+
+    def for_trial(self, trial_runtime_id, task_id, *, verbosity=None, workspace=None):
+        return SetupTrial(self, trial_runtime_id)
+
+
+class SetupTrial(StatefulTrial):
+    def configure_additional_apps(self, task_id):
+        self.parent.configured.append((self.trial_runtime_id, task_id))
+
+    def execute_tool(self, task_id, tool_name, arguments):
+        assert (self.trial_runtime_id, task_id) in self.parent.configured
+        return super().execute_tool(task_id, tool_name, arguments)
+
+
 TOOLS = {
     "tools": [
         {
@@ -108,6 +126,25 @@ def execute_and_commit(pool, branch, experiment_node):
     pool.commit(branch, experiment_node, start)
 
 
+def test_trial_pool_configures_fresh_runtime_before_tool_execution():
+    interface = SetupRouter()
+    pool = TrialPool(
+        interface=interface,
+        task_id="task",
+        tools=TOOLS,
+        max_tool_calls=1,
+    )
+
+    branch = pool.create()
+    experiment_node = node("root", branch, [action("set", 1)])
+    execute_and_commit(pool, branch, experiment_node)
+
+    assert interface.configured == [(branch.trial_runtime_id, "task")]
+    assert experiment_node.observations[0].success is True
+    assert pool.tool_statistics()["total_calls"] == 1
+    assert pool.tool_statistics()["successful_calls"] == 1
+
+
 def test_trial_pool_reuses_first_child_and_replays_parent_for_sibling():
     interface = StatefulRouter()
     pool = TrialPool(
@@ -139,6 +176,7 @@ def test_trial_pool_reuses_first_child_and_replays_parent_for_sibling():
     assert interface.states[sibling_branch.trial_runtime_id] == 6
     assert pool.budget.scientific_calls == 3
     assert pool.budget.replay_calls == 1
+    assert pool.tool_statistics()["total_calls"] == 4
     assert pool.replay_results[0].exact is True
     assert [item.action for item in tree.executed_trajectory("sibling")] == [
         action("set", 1),

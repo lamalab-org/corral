@@ -109,6 +109,29 @@ def test_text_mode_counts_one_physical_request(monkeypatch):
     assert "response_format" not in calls[0]
 
 
+def test_transcript_names_every_role_without_mutating_api_messages(monkeypatch):
+    calls = []
+
+    def fake_llm_call(**kwargs):
+        calls.append(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(base, "llm_call", fake_llm_call)
+    model = gateway()
+
+    model.generate("prompt", FinalAnswer, purpose="evaluate_node_0007")
+
+    assert [message["role"] for message in model.owner.messages] == [
+        "system",
+        "user",
+        "assistant",
+    ]
+    assert all(
+        message["name"] == "evaluate_node_0007" for message in model.owner.messages
+    )
+    assert all("name" not in message for message in calls[0]["messages"])
+
+
 def test_multimodal_generation_attaches_local_images(monkeypatch, tmp_path):
     calls = []
 

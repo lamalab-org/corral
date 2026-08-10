@@ -1,6 +1,7 @@
 """Public Corral BaseAgent implementation."""
 
 import json
+import re
 from typing import Any
 
 from corral.agents.ai_scientist.config import AIScientistConfig
@@ -18,6 +19,7 @@ from corral.agents.ai_scientist.workers.experimenter import Experimenter
 from corral.agents.ai_scientist.workers.planner import NodePlanner, TaskFormulator
 from corral.agents.ai_scientist.workers.synthesizer import FinalSynthesizer
 from corral.agents.base_agent import BaseAgent
+from corral.agents.schema import AgentRunResult
 from corral.router.routes import CorralRouter
 
 _SCIENTIST_SYSTEM_PROMPT = """
@@ -27,6 +29,9 @@ the supplied Corral tool schemas. Never invent observations, never use a
 benchmark score as evidence, and distinguish measured facts from hypotheses.
 Return the requested structured object without Markdown or surrounding prose.
 """.strip()
+
+_TRACE_NODE_ID = re.compile(r"node_\d+")
+_TRACE_LABEL_HYPOTHESIS_CHARS = 96
 
 
 class AIScientistAgent(BaseAgent):
@@ -75,6 +80,7 @@ class AIScientistAgent(BaseAgent):
         )
         self._available_tools: list[dict[str, Any]] = []
         self.last_state: ScientistState | None = None
+        self._branch_tool_statistics: dict[str, Any] | None = None
 
     @property
     def requires_answer_extraction(self) -> bool:
@@ -89,6 +95,13 @@ class AIScientistAgent(BaseAgent):
         examples: list[str] | None = None,
         **_kwargs: Any,
     ) -> str:
+        # Clear prior-run state before any router/model operation can fail. A
+        # serial caller may reuse an agent, and a partial second run must never
+        # save the first run's experiment graph beside its messages.
+        self.last_state = None
+        self._available_tools = []
+        self._branch_tool_statistics = None
+        self.messages = list(self._initial_messages or [])
         prompt_value = task_prompt or interface.get_task_prompt(task_id)
         prompt = (
             prompt_value
@@ -98,7 +111,6 @@ class AIScientistAgent(BaseAgent):
         tool_payload = self._get_tool_payload(interface, task_id)
         tools = tool_payload.get("tools", [])
         self._available_tools = tools
-        self.messages = list(self._initial_messages or [])
 
         gateway = self._injected_gateway or LiteLLMStructuredModel(
             owner=self,
@@ -207,7 +219,12 @@ class AIScientistAgent(BaseAgent):
                     promotion.destination_workspace,
                 )
         finally:
+            # JSONL traces get the same directly-renderable graph that verbose
+            # agent logs store at top level. This is written even for a partial
+            # run; the last_state tree contains every node recorded so far.
+            trace.write("graph_snapshot", self._trace_metadata())
             pool.close_all()
+            self._branch_tool_statistics = pool.tool_statistics()
 
         state.llm_calls = gateway.call_count - initial_llm_calls
         state.llm_tokens = getattr(gateway, "token_count", 0) - initial_llm_tokens
@@ -221,6 +238,116 @@ class AIScientistAgent(BaseAgent):
             },
         )
         return answer
+
+    def _agent_run_result(self, answer: str) -> AgentRunResult:
+        """Attach isolated branch calls to the benchmark-facing run result."""
+        result = super()._agent_run_result(answer)
+        if self._branch_tool_statistics is not None:
+            result.metadata["tool_statistics"] = self._branch_tool_statistics
+        return result
+
+    def _trace_metadata(self) -> dict[str, Any]:
+        """Describe the experiment tree without modifying ``self.messages``.
+
+        The returned object is stored as a sibling of ``messages`` in verbose
+        agent logs. Consumers can render the tree directly from ``nodes`` and
+        ``edges``; readable labels avoid having to inspect a full node payload.
+        ``message_links`` correlates worker responses whose existing, legal
+        ``name`` field contains a node id. No custom key is ever placed on an
+        API-bound message.
+        """
+        state = self.last_state
+        if state is None:
+            return {
+                "schema": "corral.ai_scientist.graph",
+                "schema_version": 1,
+                "current_stage": None,
+                "nodes": [],
+                "edges": [],
+                "root_node_ids": [],
+                "best_node_ids": [],
+                "stage_winner_node_ids": {},
+                "message_links": [],
+            }
+
+        nodes = []
+        node_ids = {node.id for node in state.tree.nodes}
+        for node in state.tree.nodes:
+            hypothesis = " ".join(node.hypothesis.split())
+            if len(hypothesis) > _TRACE_LABEL_HYPOTHESIS_CHARS:
+                hypothesis = (
+                    hypothesis[: _TRACE_LABEL_HYPOTHESIS_CHARS - 3].rstrip() + "..."
+                )
+            nodes.append(
+                {
+                    "id": node.id,
+                    "label": (
+                        f"{node.id} [{node.stage.value}/{node.node_type.value}; "
+                        f"{node.status.value}] {hypothesis}"
+                    ),
+                    "parent_id": node.parent_id,
+                    "stage": node.stage.value,
+                    "node_type": node.node_type.value,
+                    "status": node.status.value,
+                    "depth": node.depth,
+                    "boundary_validation": node.boundary_validation,
+                    "substage_id": node.substage_id,
+                    "stage_seed_id": node.stage_seed_id,
+                    "branch_id": node.branch_id,
+                    "hypothesis": node.hypothesis,
+                    "experiment_goal": node.experiment_goal,
+                    "related_node_ids": list(node.related_node_ids),
+                }
+            )
+
+        message_links = []
+        for index, message in enumerate(self.messages):
+            if not isinstance(message, dict):
+                continue
+            name = message.get("name")
+            if not isinstance(name, str):
+                continue
+            linked_ids = list(
+                dict.fromkeys(
+                    node_id
+                    for node_id in _TRACE_NODE_ID.findall(name)
+                    if node_id in node_ids
+                )
+            )
+            if linked_ids:
+                message_links.append(
+                    {
+                        "message_index": index,
+                        "message_name": name,
+                        "node_ids": linked_ids,
+                    }
+                )
+
+        return {
+            "schema": "corral.ai_scientist.graph",
+            "schema_version": 1,
+            "current_stage": state.current_stage.value,
+            "nodes": nodes,
+            "edges": [
+                {
+                    "source": node.parent_id,
+                    "target": node.id,
+                    "kind": "parent",
+                }
+                for node in state.tree.nodes
+                if node.parent_id is not None
+            ],
+            "root_node_ids": [
+                node.id for node in state.tree.nodes if node.parent_id is None
+            ],
+            "best_node_ids": [node.id for node in state.best_nodes],
+            "stage_winner_node_ids": {
+                stage.value: progress.best_node_id
+                for stage, progress in state.stages.items()
+                if progress.best_node_id is not None
+            },
+            "message_links": message_links,
+        }
 
     @staticmethod
     def _get_tool_payload(interface: Any, task_id: str) -> dict[str, Any]:

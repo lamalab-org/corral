@@ -392,7 +392,18 @@ class BaseAgent(ABC):
             model=self.model,
             tools=tools,
             tool_verbosity=tool_verbosity,
+            trace_metadata=self._trace_metadata(),
         )
+
+    def _trace_metadata(self) -> dict[str, Any] | None:
+        """Return agent-specific metadata stored beside API-compatible messages.
+
+        Subclasses may override this hook to make a saved transcript easier to
+        analyse. Metadata belongs at the top level of the log file rather than
+        inside ``self.messages``: those message dictionaries can later be sent
+        back to a model API and therefore must retain the provider schema.
+        """
+        return None
 
     def _extract_final_answer(self, final_answer: str) -> AgentRunResult:
         """Run the LiteLLM answer extractor to distil a clean final answer.
