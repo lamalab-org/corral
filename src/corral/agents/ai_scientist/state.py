@@ -62,6 +62,8 @@ class StageProgress(BaseModel):
     best_node_id: str | None = None
     improved_over_seed: bool = False
     completion_criteria_met: bool = False
+    search_budget_exhausted: bool = False
+    boundary_validation_reason: str | None = None
     comparison_reason: str | None = None
     substages: list[SubstageState] = Field(default_factory=list)
     replication_node_ids: list[str] = Field(default_factory=list)

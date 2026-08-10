@@ -187,6 +187,26 @@ def test_exploration_bonus_prefers_an_equivalent_underexpanded_root():
     assert selector.select(tree).id == "unexplored"
 
 
+def test_parallel_selector_represents_distinct_roots_before_reusing_one():
+    tree = ExperimentTree()
+    roots = [evaluated_node(f"root-{index}") for index in range(3)]
+    for root in roots:
+        tree.add(root)
+
+    selected = TreeSelector(max_children_per_node=4).select_batch(
+        tree,
+        limit=4,
+        prefer_distinct_roots=True,
+        successful_ranker=lambda candidates: candidates[-1],
+    )
+
+    selected_root_ids = [tree.trajectory(node.id)[0].id for node in selected]
+    assert selected[0].id == "root-2"  # The injected listwise ranker is honored.
+    assert set(selected_root_ids[:3]) == {root.id for root in roots}
+    assert len(selected) == 4
+    assert selected_root_ids[3] in selected_root_ids[:3]
+
+
 def test_selector_and_best_nodes_exclude_abandoned_branches():
     tree = ExperimentTree()
     tree.add(
@@ -254,9 +274,9 @@ def test_declared_metric_is_parsed_from_tool_evidence_with_provenance():
 
 def test_arbitrary_numbers_are_not_promoted_without_a_declared_metric():
     experiment = evaluated_node("unanchored")
-    experiment.observations[0].result = (
-        '{"measured_outcome": {"name": "score", "value": 42, ' '"maximize": true}}'
-    )
+    experiment.observations[
+        0
+    ].result = '{"measured_outcome": {"name": "score", "value": 42, "maximize": true}}'
 
     outcome = extract_measured_outcome(
         experiment,

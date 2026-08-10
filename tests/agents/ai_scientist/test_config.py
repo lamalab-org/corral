@@ -59,10 +59,19 @@ def test_sakana_fidelity_profile_uses_original_search_behavior():
     ) == (20, 12, 12, 18)
     assert config.debug_probability == 0.5
     assert config.max_debug_depth == 3
+    assert config.candidates_per_expansion == 4
+    assert config.max_children_per_node == 16
+    assert config.max_actions_per_node == 16
     assert config.parallel_experiment_workers == 4
+    assert config.parallel_parent_selection is True
+    assert config.prefer_distinct_root_trees is True
+    assert config.parent_selection_mode == "llm"
     assert config.tree_exploration_weight == 0.0
     assert config.verification_include_counterfactual is False
+    assert config.research_early_stopping is False
     assert config.verification_early_stopping is False
+    assert config.validate_on_stage_budget_exhaustion is True
+    assert config.preliminary_evidence_threshold == 0.0
 
 
 def test_legacy_trial_inheritance_flag_maps_to_explicit_strategy():

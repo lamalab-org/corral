@@ -31,6 +31,13 @@ class AIScientistConfig(BaseModel):
     candidates_per_expansion: int = Field(default=3, ge=1, le=4)
     max_children_per_node: int = Field(default=3, ge=1, le=16)
     tree_exploration_weight: float = Field(default=0.1, ge=0.0, le=1.0)
+    # Corral's economical default creates several sibling proposals from one
+    # best parent. The fidelity profile instead fills an experiment-worker
+    # batch with independently selected parents and represents distinct root
+    # trees before reusing one, as AI Scientist v2's parallel BFTS does.
+    parallel_parent_selection: bool = False
+    prefer_distinct_root_trees: bool = False
+    parent_selection_mode: Literal["deterministic", "llm"] = "deterministic"
     # ``max_nodes`` is retained as a backwards-compatible alias for the search
     # cap. It no longer includes boundary validation nodes. Leaving both caps
     # unset relies on the explicit per-stage budgets.
@@ -64,7 +71,12 @@ class AIScientistConfig(BaseModel):
     # useful Corral generalisation, but replication and aggregation belong at
     # stage boundaries rather than in the Stage-4 node cycle.
     verification_include_counterfactual: bool = True
+    research_early_stopping: bool = True
     verification_early_stopping: bool = True
+    # Sakana treats reaching the configured iteration count as successful
+    # stage termination for Stages 2--4 and still evaluates the best node over
+    # multiple seeds. Stage 1 remains a hard working-implementation gate.
+    validate_on_stage_budget_exhaustion: bool = False
 
     # ``auto`` uses a router's optional trial-cloning capability and otherwise
     # starts non-continuation children clean. ``replay`` reconstructs parent
@@ -161,9 +173,18 @@ class SakanaAIScientistConfig(AIScientistConfig):
     verification_min_nodes: int = Field(default=18, ge=1)
     debug_probability: float = Field(default=0.5, ge=0.0, le=1.0)
     max_debug_depth: int = Field(default=3, ge=0)
+    candidates_per_expansion: int = Field(default=4, ge=1, le=4)
+    max_children_per_node: int = Field(default=16, ge=1, le=16)
+    max_actions_per_node: int = Field(default=16, ge=1)
     parallel_experiment_workers: int = Field(default=4, ge=1, le=16)
+    parallel_parent_selection: bool = True
+    prefer_distinct_root_trees: bool = True
+    parent_selection_mode: Literal["deterministic", "llm"] = "llm"
     tree_exploration_weight: float = Field(default=0.0, ge=0.0, le=1.0)
     verification_include_counterfactual: bool = False
+    research_early_stopping: bool = False
     verification_early_stopping: bool = False
+    validate_on_stage_budget_exhaustion: bool = True
+    preliminary_evidence_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
     max_tool_calls: int = Field(default=256, ge=0)
     max_llm_calls: int = Field(default=512, ge=2)

@@ -23,7 +23,7 @@ from corral.agents.ai_scientist.search.nodes import (
     ResearchStage,
     SubstagePlan,
 )
-from corral.agents.ai_scientist.search.selector import TreeSelector
+from corral.agents.ai_scientist.search.selector import SuccessfulRanker, TreeSelector
 from corral.agents.ai_scientist.state import (
     ScientistState,
     StageProgress,
@@ -170,6 +170,17 @@ class ExperimentManager:
             and self._can_create(state, pool, llm_calls=self._calls_per_node)
         ):
             self._maybe_advance_substage(state, ResearchStage.PRELIMINARY)
+            if self.config.parallel_parent_selection:
+                expanded = self._expand_parallel_parent_batch(
+                    state,
+                    pool,
+                    stage=ResearchStage.PRELIMINARY,
+                    budget=self.config.preliminary_node_budget,
+                    default_type=NodeType.REFINE,
+                )
+                if not expanded:
+                    break
+                continue
             parent = self._select_parent(state, ResearchStage.PRELIMINARY)
             if parent is None:
                 break
@@ -221,10 +232,30 @@ class ExperimentManager:
     ) -> None:
         while (
             self._search_node_count(state, stage) < budget
-            and not self._stage_complete(state, stage)
+            and (
+                (
+                    stage == ResearchStage.RESEARCH
+                    and not self.config.research_early_stopping
+                )
+                or not self._stage_complete(state, stage)
+            )
             and self._can_create(state, pool, llm_calls=self._calls_per_node)
         ):
             self._maybe_advance_substage(state, stage)
+            if (
+                self.config.parallel_parent_selection
+                and stage == ResearchStage.RESEARCH
+            ):
+                expanded = self._expand_parallel_parent_batch(
+                    state,
+                    pool,
+                    stage=stage,
+                    budget=budget,
+                    default_type=default_type,
+                )
+                if not expanded:
+                    break
+                continue
             parent, node_type = self._parent_and_node_type(
                 state,
                 stage,
@@ -418,7 +449,121 @@ class ExperimentManager:
             allow_partial=allow_partial,
             stage=stage,
             seed_node_id=progress.seed_node_id,
+            successful_ranker=self._parent_ranker(state, stage),
         )
+
+    def _select_parent_batch(
+        self,
+        state: ScientistState,
+        stage: ResearchStage,
+        *,
+        limit: int,
+    ) -> list[ExperimentNode]:
+        progress = state.stage_progress(stage)
+        return self.selector.select_batch(
+            state.tree,
+            limit=limit,
+            stage=stage,
+            seed_node_id=progress.seed_node_id,
+            prefer_distinct_roots=self.config.prefer_distinct_root_trees,
+            successful_ranker=self._parent_ranker(state, stage),
+        )
+
+    def _parent_ranker(
+        self,
+        state: ScientistState,
+        stage: ResearchStage,
+    ) -> SuccessfulRanker | None:
+        if self.config.parent_selection_mode != "llm" or stage not in {
+            ResearchStage.PRELIMINARY,
+            ResearchStage.RESEARCH,
+        }:
+            return None
+
+        def rank(candidates: list[ExperimentNode]) -> ExperimentNode | None:
+            if len(candidates) == 1:
+                return candidates[0]
+            if (
+                self._llm_calls_used + 1 > self.config.max_llm_calls - 1
+                or not self._within_token_budget
+            ):
+                return None
+            selection = self.critic.select_best(
+                task_prompt=state.task_prompt,
+                formulation=state.formulation,
+                stage=stage,
+                seed_node_id=state.stage_progress(stage).seed_node_id,
+                candidates=candidates,
+                journal_context=state.journal.context(self.config.max_journal_chars),
+            )
+            by_id = {node.id: node for node in candidates}
+            selected = by_id.get(selection.selected_node_id)
+            self.trace.write(
+                "search_parent_selected",
+                {
+                    "stage": stage.value,
+                    "selected_node_id": selection.selected_node_id,
+                    "allowed_node_ids": list(by_id),
+                    "selection_valid": selected is not None,
+                    "reason": selection.reason,
+                },
+            )
+            return selected
+
+        return rank
+
+    def _expand_parallel_parent_batch(
+        self,
+        state: ScientistState,
+        pool: TrialPool,
+        *,
+        stage: ResearchStage,
+        budget: int,
+        default_type: NodeType,
+    ) -> bool:
+        """Select one parent per worker slot, then run the children together."""
+        maximum = min(
+            self.config.parallel_experiment_workers,
+            budget - self._search_node_count(state, stage),
+            self._remaining_node_capacity(state),
+            pool.remaining_calls,
+        )
+        maximum = self._affordable_candidate_count(
+            maximum,
+            independent_planning=True,
+        )
+        if maximum <= 0:
+            return False
+        parents = self._select_parent_batch(state, stage, limit=maximum)
+        if not parents:
+            return False
+        # LLM parent selection itself consumes calls, so fit the resulting
+        # worker batch again before starting independent planning calls.
+        affordable = self._affordable_candidate_count(
+            len(parents),
+            independent_planning=True,
+        )
+        parents = parents[:affordable]
+        if not parents:
+            return False
+        parent_requests = [
+            (parent, self._continuation_type(parent, default_type))
+            for parent in parents
+        ]
+        candidates = self._propose_for_parent_batch(
+            state,
+            stage=stage,
+            parent_requests=parent_requests,
+        )
+        if not candidates:
+            return False
+        completed = self._execute_parent_candidates(
+            state,
+            pool,
+            candidates,
+            substage_id=self._current_substage_id(state, stage),
+        )
+        return bool(completed)
 
     def _parent_and_node_type(
         self,
@@ -578,6 +723,9 @@ class ExperimentManager:
             progress.seed_node_id is None or winner.id != progress.seed_node_id
         )
         progress.comparison_reason = reason
+        progress.search_budget_exhausted = self._search_node_count(
+            state, stage
+        ) >= self._stage_node_budget(stage)
         progress.completion_criteria_met = self._stage_completion_for_winner(
             state, stage, winner
         )
@@ -585,7 +733,17 @@ class ExperimentManager:
             "stage_winner_selected",
             progress.model_dump(mode="json"),
         )
-        if progress.completion_criteria_met:
+        validate_budget_exhaustion = (
+            self.config.validate_on_stage_budget_exhaustion
+            and stage != ResearchStage.PRELIMINARY
+            and progress.search_budget_exhausted
+        )
+        if progress.completion_criteria_met or validate_budget_exhaustion:
+            progress.boundary_validation_reason = (
+                "completion_criteria_met"
+                if progress.completion_criteria_met
+                else "search_budget_exhausted"
+            )
             self._run_stage_boundary_validation(state, pool, stage, winner)
         else:
             self.trace.write(
@@ -605,6 +763,14 @@ class ExperimentManager:
             progress.model_dump(mode="json"),
         )
         return winner
+
+    def _stage_node_budget(self, stage: ResearchStage) -> int:
+        return {
+            ResearchStage.PRELIMINARY: self.config.preliminary_node_budget,
+            ResearchStage.TUNING: self.config.tuning_node_budget,
+            ResearchStage.RESEARCH: self.config.research_node_budget,
+            ResearchStage.VERIFICATION: self.config.verification_node_budget,
+        }[stage]
 
     def _comparative_winner(
         self,
@@ -861,6 +1027,92 @@ class ExperimentManager:
             list(zip(candidate_ids, proposals, strict=False)), siblings
         )
 
+    def _propose_for_parent_batch(
+        self,
+        state: ScientistState,
+        *,
+        stage: ResearchStage,
+        parent_requests: list[tuple[ExperimentNode, NodeType]],
+    ) -> list[tuple[str, NodeProposal, ExperimentNode]]:
+        """Plan one child for every independently selected BFTS parent."""
+        candidate_ids = [state.tree.next_id() for _ in parent_requests]
+        journal_context = state.journal.context(self.config.max_journal_chars)
+        progress = state.stage_progress(stage)
+        current_substage = progress.current_substage
+        existing_siblings = {
+            parent.id: [
+                node
+                for node in state.tree.children(parent.id)
+                if node.stage == stage and not node.boundary_validation
+            ]
+            for parent, _ in parent_requests
+        }
+        batch_offsets: list[int] = []
+        seen_parent_counts: dict[str, int] = {}
+        for parent, _ in parent_requests:
+            batch_offsets.append(
+                len(existing_siblings[parent.id]) + seen_parent_counts.get(parent.id, 0)
+            )
+            seen_parent_counts[parent.id] = seen_parent_counts.get(parent.id, 0) + 1
+
+        def propose_one(index: int) -> tuple[str, NodeProposal | None, ExperimentNode]:
+            parent, node_type = parent_requests[index]
+            proposals = self.planner.propose(
+                stage=stage,
+                node_type=node_type,
+                count=1,
+                task_prompt=state.task_prompt,
+                formulation=state.formulation,
+                tools=state.tools,
+                journal_context=journal_context,
+                parent=parent,
+                siblings=existing_siblings[parent.id],
+                branch_workspaces=["."],
+                substage=(current_substage.plan if current_substage else None),
+                proposal_offset=batch_offsets[index],
+            )
+            return (
+                candidate_ids[index],
+                proposals[0] if proposals else None,
+                parent,
+            )
+
+        if len(parent_requests) > 1 and self.config.parallel_llm_workers > 1:
+            with ThreadPoolExecutor(
+                max_workers=min(len(parent_requests), self.config.parallel_llm_workers)
+            ) as planning_pool:
+                planned = list(
+                    planning_pool.map(propose_one, range(len(parent_requests)))
+                )
+        else:
+            planned = [propose_one(index) for index in range(len(parent_requests))]
+
+        fingerprints = {
+            parent.id: {
+                self._experiment_fingerprint(sibling)
+                for sibling in existing_siblings[parent.id]
+            }
+            for parent, _ in parent_requests
+        }
+        unique: list[tuple[str, NodeProposal, ExperimentNode]] = []
+        for node_id, proposal, parent in planned:
+            if proposal is None:
+                continue
+            fingerprint = self._experiment_fingerprint(proposal)
+            if fingerprint in fingerprints[parent.id]:
+                self.trace.write(
+                    "proposal_duplicate_rejected",
+                    {
+                        "node_id": node_id,
+                        "parent_id": parent.id,
+                        "fingerprint": fingerprint,
+                    },
+                )
+                continue
+            fingerprints[parent.id].add(fingerprint)
+            unique.append((node_id, proposal, parent))
+        return unique
+
     def _deduplicate_proposals(
         self,
         candidates: list[tuple[str, NodeProposal]],
@@ -905,6 +1157,26 @@ class ExperimentManager:
         inherit_parent_state: bool | None = None,
     ) -> list[ExperimentNode]:
         """Run isolated sibling experiments and evaluations concurrently."""
+        return self._execute_parent_candidates(
+            state,
+            pool,
+            [(node_id, proposal, parent) for node_id, proposal in candidates],
+            substage_id=substage_id,
+            boundary_validation=boundary_validation,
+            inherit_parent_state=inherit_parent_state,
+        )
+
+    def _execute_parent_candidates(
+        self,
+        state: ScientistState,
+        pool: TrialPool,
+        candidates: list[tuple[str, NodeProposal, ExperimentNode | None]],
+        *,
+        substage_id: str | None = None,
+        boundary_validation: bool = False,
+        inherit_parent_state: bool | None = None,
+    ) -> list[ExperimentNode]:
+        """Run a mixed-parent worker batch in isolated trials concurrently."""
         node_capacity = self._remaining_node_capacity(
             state,
             boundary_validation=boundary_validation,
@@ -920,7 +1192,10 @@ class ExperimentManager:
         if inherit_parent_state is not None:
             inheritance_strategy = "replay" if inherit_parent_state else "clean"
 
-        def runtime_parent(proposal: NodeProposal) -> ExperimentNode | None:
+        def runtime_parent(
+            proposal: NodeProposal,
+            parent: ExperimentNode | None,
+        ) -> ExperimentNode | None:
             if parent is None or proposal.node_type == NodeType.AGGREGATION:
                 return None
             if proposal.node_type == NodeType.CONTINUE:
@@ -931,18 +1206,32 @@ class ExperimentManager:
                 return parent
             return None
 
-        def prefer_clone(proposal: NodeProposal) -> bool:
+        def prefer_clone(
+            proposal: NodeProposal,
+            parent: ExperimentNode | None,
+        ) -> bool:
             return (
                 parent is not None
-                and runtime_parent(proposal) is not None
+                and runtime_parent(proposal, parent) is not None
                 and pool.can_clone(parent)
             )
 
-        def prefer_existing(index: int, proposal: NodeProposal) -> bool:
+        def prefer_existing(
+            index: int,
+            proposal: NodeProposal,
+            parent: ExperimentNode | None,
+        ) -> bool:
             # Keep an inherited baseline runtime parked at its checkpoint so
             # later controlled alternatives can clone the same physical state.
-            return index == 0 and (
-                proposal.node_type == NodeType.CONTINUE or not prefer_clone(proposal)
+            first_for_parent = not any(
+                prior_parent is not None
+                and parent is not None
+                and prior_parent.id == parent.id
+                for _, _, prior_parent in candidate_batch[:index]
+            )
+            return first_for_parent and (
+                proposal.node_type == NodeType.CONTINUE
+                or not prefer_clone(proposal, parent)
             )
 
         replay_costs = [
@@ -950,23 +1239,23 @@ class ExperimentManager:
                 0
                 if proposal.node_type == NodeType.AGGREGATION
                 else pool.replay_cost(
-                    runtime_parent(proposal),
+                    runtime_parent(proposal, parent),
                     state.tree,
-                    prefer_existing=prefer_existing(index, proposal),
-                    prefer_clone=prefer_clone(proposal),
+                    prefer_existing=prefer_existing(index, proposal, parent),
+                    prefer_clone=prefer_clone(proposal, parent),
                 )
             )
-            for index, (_, proposal) in enumerate(candidate_batch)
+            for index, (_, proposal, parent) in enumerate(candidate_batch)
         ]
 
-        for index, (node_id, proposal) in enumerate(candidate_batch):
+        for index, (node_id, proposal, parent) in enumerate(candidate_batch):
             is_aggregation = proposal.node_type == NodeType.AGGREGATION
             available = pool.remaining_calls - reserved_scientific_calls
             replay_cost = replay_costs[index]
             future_tool_minimum = sum(
                 future_replay
                 + (0 if future_proposal.node_type == NodeType.AGGREGATION else 1)
-                for future_replay, (_, future_proposal) in zip(
+                for future_replay, (_, future_proposal, _) in zip(
                     replay_costs[index + 1 :],
                     candidate_batch[index + 1 :],
                     strict=True,
@@ -986,7 +1275,7 @@ class ExperimentManager:
             )
             future_llm_minimum = sum(
                 1 if future.node_type == NodeType.AGGREGATION else 3
-                for _, future in candidate_batch[index + 1 :]
+                for _, future, _ in candidate_batch[index + 1 :]
             )
             available_llm = (
                 remaining_llm_calls - reserved_llm_calls - future_llm_minimum
@@ -1013,10 +1302,10 @@ class ExperimentManager:
             if not is_aggregation:
                 try:
                     branch = pool.acquire(
-                        runtime_parent(proposal),
+                        runtime_parent(proposal, parent),
                         state.tree,
-                        prefer_existing=prefer_existing(index, proposal),
-                        prefer_clone=prefer_clone(proposal),
+                        prefer_existing=prefer_existing(index, proposal, parent),
+                        prefer_clone=prefer_clone(proposal, parent),
                     )
                 except (ReplayDiverged, ToolCallBudgetExceeded) as exc:
                     logger.warning("Could not prepare {}: {}", node_id, exc)
@@ -1040,7 +1329,7 @@ class ExperimentManager:
                 stage_seed_id=state.stage_progress(state.current_stage).seed_node_id,
                 substage_id=substage_id,
                 boundary_validation=boundary_validation,
-                physical_state_inherited=runtime_parent(proposal) is not None,
+                physical_state_inherited=runtime_parent(proposal, parent) is not None,
                 node_type=proposal.node_type,
                 hypothesis=proposal.hypothesis,
                 rationale=proposal.rationale,
@@ -1104,7 +1393,11 @@ class ExperimentManager:
                 tools=state.tools,
                 journal_context=state.journal.context(self.config.max_journal_chars),
                 action_limit=action_limit,
-                previous_node=parent,
+                previous_node=(
+                    state.tree.get(node.parent_id)
+                    if node.parent_id is not None
+                    else None
+                ),
             )
             if branch is not None:
                 pool.commit(branch, executed, history_start)
@@ -1185,14 +1478,22 @@ class ExperimentManager:
         state.llm_tokens = self._llm_tokens_used
         return pending
 
-    def _affordable_candidate_count(self, maximum: int) -> int:
+    def _affordable_candidate_count(
+        self,
+        maximum: int,
+        *,
+        independent_planning: bool = False,
+    ) -> int:
         """Fit planning, adaptive execution, completion, and evaluation."""
         if maximum <= 0 or not self._within_token_budget:
             return 0
         remaining = self.config.max_llm_calls - 1 - self._llm_calls_used
         for count in range(maximum, 0, -1):
             planning_calls = (
-                count if count > 1 and self.config.parallel_llm_workers > 1 else 1
+                count
+                if independent_planning
+                or (count > 1 and self.config.parallel_llm_workers > 1)
+                else 1
             )
             if planning_calls + count * 3 <= remaining:
                 return count

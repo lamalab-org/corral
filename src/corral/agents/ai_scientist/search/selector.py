@@ -2,6 +2,7 @@
 
 import math
 import random
+from collections.abc import Callable
 
 from corral.agents.ai_scientist.search.evaluator import (
     EvaluationWeights,
@@ -15,6 +16,8 @@ from corral.agents.ai_scientist.search.nodes import (
     ResearchStage,
 )
 from corral.agents.ai_scientist.search.tree import ExperimentTree
+
+SuccessfulRanker = Callable[[list[ExperimentNode]], ExperimentNode | None]
 
 
 class TreeSelector:
@@ -43,6 +46,7 @@ class TreeSelector:
         allow_partial: bool = True,
         stage: ResearchStage | None = None,
         seed_node_id: str | None = None,
+        successful_ranker: SuccessfulRanker | None = None,
     ) -> ExperimentNode | None:
         """Select an expandable checkpoint within one stage search scope.
 
@@ -62,7 +66,97 @@ class TreeSelector:
             allow_failures=allow_failures,
             allow_partial=allow_partial,
             stage=stage,
+            successful_ranker=successful_ranker,
         )
+
+    def select_batch(
+        self,
+        tree: ExperimentTree,
+        *,
+        limit: int,
+        allow_failures: bool = True,
+        allow_partial: bool = True,
+        stage: ResearchStage | None = None,
+        seed_node_id: str | None = None,
+        prefer_distinct_roots: bool = True,
+        successful_ranker: SuccessfulRanker | None = None,
+    ) -> list[ExperimentNode]:
+        """Fill a parallel BFTS batch with independently selected parents.
+
+        Distinct viable root trees are represented before any tree is reused.
+        Within a represented tree, distinct parent checkpoints are preferred
+        before the same successful parent is selected for another worker. A
+        repeated parent still consumes one of its remaining child slots, so a
+        batch can expose all workers when there are fewer roots than workers.
+        Partial and failed checkpoints are selected at most once per batch.
+        """
+        if limit <= 0:
+            return []
+        candidates = [
+            node
+            for node in tree.nodes
+            if self._in_scope(node, stage=stage, seed_node_id=seed_node_id)
+            and self._child_count(tree, node, stage) < self.max_children_per_node
+        ]
+        selected: list[ExperimentNode] = []
+        selected_counts: dict[str, int] = {}
+        represented_roots: set[str] = set()
+
+        while len(selected) < limit:
+            available = [
+                node
+                for node in candidates
+                if selected_counts.get(node.id, 0)
+                < self._batch_selection_capacity(tree, node, stage)
+            ]
+            if not available:
+                break
+
+            pool = available
+            if prefer_distinct_roots:
+                unrepresented = [
+                    node
+                    for node in available
+                    if self._root_id(tree, node) not in represented_roots
+                ]
+                if unrepresented:
+                    pool = unrepresented
+                else:
+                    unselected = [
+                        node
+                        for node in available
+                        if selected_counts.get(node.id, 0) == 0
+                    ]
+                    if unselected:
+                        pool = unselected
+
+            parent = self._select_from(
+                tree,
+                pool,
+                allow_failures=allow_failures,
+                allow_partial=allow_partial,
+                stage=stage,
+                successful_ranker=successful_ranker,
+            )
+            if parent is None:
+                # The root-diversity subset can contain only ineligible status
+                # classes. Fall back to all remaining candidates before giving
+                # up on the batch.
+                if pool is not available:
+                    parent = self._select_from(
+                        tree,
+                        available,
+                        allow_failures=allow_failures,
+                        allow_partial=allow_partial,
+                        stage=stage,
+                        successful_ranker=successful_ranker,
+                    )
+                if parent is None:
+                    break
+            selected.append(parent)
+            selected_counts[parent.id] = selected_counts.get(parent.id, 0) + 1
+            represented_roots.add(self._root_id(tree, parent))
+        return selected
 
     def _select_from(
         self,
@@ -72,6 +166,7 @@ class TreeSelector:
         allow_failures: bool = True,
         allow_partial: bool = True,
         stage: ResearchStage | None = None,
+        successful_ranker: SuccessfulRanker | None = None,
     ) -> ExperimentNode | None:
         failed = [
             node
@@ -114,7 +209,25 @@ class TreeSelector:
             pool = failed
         if not pool:
             return None
+        if pool is successful and successful_ranker is not None:
+            ranked = successful_ranker(successful)
+            if ranked is not None and ranked in successful:
+                return ranked
         return max(pool, key=lambda node: self._priority(tree, node, stage))
+
+    def _batch_selection_capacity(
+        self,
+        tree: ExperimentTree,
+        node: ExperimentNode,
+        stage: ResearchStage | None,
+    ) -> int:
+        if node.status != NodeStatus.SUCCESSFUL:
+            return 1
+        return self.remaining_child_slots(tree, node, stage=stage)
+
+    @staticmethod
+    def _root_id(tree: ExperimentTree, node: ExperimentNode) -> str:
+        return tree.trajectory(node.id)[0].id
 
     def remaining_child_slots(
         self,

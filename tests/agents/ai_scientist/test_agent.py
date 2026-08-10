@@ -586,6 +586,107 @@ def test_sakana_profile_runs_full_stage_four_budget_with_only_ablations():
     assert {node.parent_id for node in verification} == {seed_id}
 
 
+def test_sakana_parallel_bfts_fills_four_workers_from_diverse_root_trees():
+    model = ScriptedModel(
+        evidence_strength=0.9,
+        recommendation=Recommendation.CONTINUE,
+    )
+    config = SakanaAIScientistConfig(
+        initial_drafts=3,
+        preliminary_node_budget=7,
+        preliminary_evidence_threshold=0.95,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        adaptive_substages=False,
+        stage_boundary_replications=0,
+        max_search_nodes=7,
+        max_tool_calls=7,
+        max_llm_calls=80,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+    router = ConcurrentToolRouter()
+
+    agent.run_agent(router, "sakana-parallel-parent-task")
+
+    preliminary = agent.last_state.tree.by_stage(
+        ResearchStage.PRELIMINARY,
+        include_boundary=False,
+    )
+    roots = preliminary[:3]
+    expanded = preliminary[3:]
+    assert len(expanded) == 4
+    assert {node.parent_id for node in expanded} == {node.id for node in roots}
+    assert router.max_active == 4
+    assert agent.last_state.experimental_search_terminated_reason is not None
+
+
+def test_sakana_research_uses_full_budget_and_llm_parent_selection():
+    model = ScriptedModel()
+    config = SakanaAIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=5,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        adaptive_substages=False,
+        stage_boundary_replications=0,
+        max_search_nodes=7,
+        max_tool_calls=7,
+        max_llm_calls=100,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+
+    agent.run_agent(FakeRouter(), "sakana-full-research-task")
+
+    research = agent.last_state.tree.by_stage(
+        ResearchStage.RESEARCH,
+        include_boundary=False,
+    )
+    assert len(research) == 5
+    # The listwise test model selects the last candidate. On the second BFTS
+    # batch this is the last child from the first batch, while deterministic
+    # equal-score selection would fall back to the inherited seed.
+    assert research[-1].parent_id == research[-2].id
+    assert model.purposes.count("select_best_research") >= 2
+
+
+def test_sakana_validates_a_best_node_after_research_budget_exhaustion():
+    model = ScriptedModel(recommendation=Recommendation.CONTINUE)
+    config = SakanaAIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=2,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        adaptive_substages=False,
+        stage_boundary_replications=1,
+        aggregate_stage_replications=False,
+        max_search_nodes=4,
+        max_validation_nodes=3,
+        max_tool_calls=7,
+        max_llm_calls=80,
+        max_actions_per_node=1,
+    )
+    agent = AIScientistAgent(config=config, model_gateway=model)
+
+    agent.run_agent(FakeRouter(), "sakana-budget-validation-task")
+
+    progress = agent.last_state.stage_progress(ResearchStage.RESEARCH)
+    assert progress.completion_criteria_met is False
+    assert progress.search_budget_exhausted is True
+    assert progress.boundary_validation_reason == "search_budget_exhausted"
+    assert len(progress.replication_node_ids) == 1
+    replication = agent.last_state.tree.get(progress.replication_node_ids[0])
+    assert replication.node_type == NodeType.REPLICATION
+    assert replication.boundary_validation is True
+
+
 def test_agent_marks_budget_truncated_node_partial_and_does_not_rank_it():
     model = ScriptedModel(actions_per_plan=2)
     config = AIScientistConfig(
