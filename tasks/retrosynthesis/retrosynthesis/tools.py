@@ -613,7 +613,7 @@ def search_catalog_by_smiles(
     [BRIEF] Searches a catalog for available precursors. [/BRIEF]
 
     [DETAILED] This function searches a chemical catalog using for a list of SMILES strings to find available precursor chemicals.
-    It returns a mapping from each input SMILES to its chemical information dictionaries. [/DETAILED]
+    It returns a mapping from each input SMILES to its chemical information dictionaries, or a clear message when none are available. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - When you have a list of SMILES strings and want to find corresponding chemicals in the catalog.
@@ -656,7 +656,7 @@ def search_catalog_by_smiles(
     Returns:
         dict[str, list[dict[str, Any]]] | str:
             [RETURNS_BRIEF] Mapping of input SMILES to chemical info dicts. [/RETURNS_BRIEF]
-            [RETURNS_DETAILED] Each input SMILES maps to zero or one frozen price entries. If the input mapping is empty, a not-found message is returned. [/RETURNS_DETAILED]
+            [RETURNS_DETAILED] Each input SMILES maps to zero or one frozen price entries. If none of the requested molecules are available, a message listing the queried SMILES is returned. [/RETURNS_DETAILED]
             [RETURNS_SYNTACTICAL] Dictionary of lists or a string message [/RETURNS_SYNTACTICAL]
             [RETURNS_EXAMPLES] {"CCO": [{"SMILES": "CCO", "Price": 1.23, ...}]} [/RETURNS_EXAMPLES]
 
@@ -674,7 +674,11 @@ def search_catalog_by_smiles(
     [/LIMITATIONS]
     """
     chemicals = check_price(smiles_list, limit)
-    return chemicals if chemicals else "No results found"
+    if any(chemicals.values()):
+        return chemicals
+
+    quoted_smiles = ", ".join(json.dumps(smiles) for smiles in smiles_list)
+    return f"No chemicals available in the catalogue with SMILES {quoted_smiles}."
 
 
 @tool
