@@ -4,7 +4,14 @@ This directory contains the retrosynthesis task environment for Corral. It provi
 
 ## Database Setup
 
-The retrosynthesis environment requires a PostgreSQL database with RDKit extensions containing two databases: `reactions_raw_db` and `reactions_production_db`.
+The retrosynthesis environment uses two local, frozen databases:
+
+- PostgreSQL with RDKit extensions for reaction templates.
+- `retrosynthesis/data/buyables.sqlite` for commercial availability and prices.
+
+Pricing lookups do not call supplier APIs or require API keys. The price of a
+molecule is the frozen estimated cost in USD for 1 g, and a route's cost is the
+sum of those prices for its leaf molecules.
 
 ### Quick Start
 
@@ -51,6 +58,36 @@ source .venv/bin/activate
 uv sync
 ```
 
+The bundled buyables snapshot combines CoPriNet and ChemCost records with 11
+repository-authored SMILES/price rows embedded directly by the database builder
+for reference-route leaves those sources do not cover. The manual values are
+frozen benchmark estimates, not live vendor quotes. SMILES are canonicalized
+with RDKit while retaining stereochemistry and multicomponent structures.
+Duplicate records are merged by taking the minimum USD/g price; the median,
+observation count, and source names remain in the database for auditing.
+Snapshot details and SHA256 hashes are recorded in
+`retrosynthesis/data/buyables.metadata.json`.
+
+To rebuild the snapshot from local source files:
+
+```bash
+uv run python scripts/build_buyables.py \
+  --coprinet data/raw/test_set_PC.csv \
+  --chemcost data/raw/chemcost.jsonl \
+  --output retrosynthesis/data/buyables.sqlite
+```
+
+The 11 built-in manual rows are added automatically on every rebuild; no
+separate task-price file or option is required.
+
+An ASKCOS `buyables.json` or `buyables.json.gz` snapshot can optionally be
+included with `--askcos`. To use a database outside the package, set
+`RETRO_PRICE_DB_PATH=/absolute/path/to/buyables.sqlite`.
+
+The first four level-3 price budgets are the reference-route total plus 10%,
+rounded up to the nearest cent. Tests enforce both complete reference-leaf
+coverage and this margin.
+
 If you prefer not to activate the environment, use `uv run` to prefix the commands below.
 
 ## Run The Server
@@ -88,4 +125,4 @@ curl http://localhost:8000/tasks/
 
 - Before starting, the server validates database connectivity and schema. Startup fails early if the production database is unavailable or incomplete.
 - Database credentials default to local PostgreSQL values, but can be overridden with `RETRO_DB_HOST`, `RETRO_DB_PORT`, `RETRO_DB_NAME`, `RETRO_DB_USER`, and `RETRO_DB_PASSWORD`.
-- Optional pricing and availability utilities can also use `MOLPORT_API_KEY`, `CHEMSPACE_API_KEY`, and `MCULE_API_KEY`. See `.env.example` for the full configuration template.
+- Pricing and availability use the bundled SQLite snapshot and never contact supplier services at runtime.

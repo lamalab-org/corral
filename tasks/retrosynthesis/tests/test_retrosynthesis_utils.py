@@ -2,17 +2,13 @@
 
 from unittest.mock import patch
 
-import pandas as pd
-import pytest
 from rdkit import Chem
 from retrosynthesis.retrosynthesis_utils import (
     _fragment_mapped_smiles,
     _get_full_mapped_smiles,
     _is_buyable,
     check_price,
-    check_smiles_presence,
     detect_functional_groups_in_molecule,
-    filter_price_data,
     get_functional_groups,
     return_matching,
     species_match,
@@ -106,204 +102,63 @@ class TestSpeciesMatch:
         assert species_match(ground_truth, predicted) is False
 
 
-class TestFilterPriceData:
-    """Tests for filter_price_data function."""
-
-    @pytest.fixture()
-    def sample_price_df(self):
-        """Create a sample price dataframe."""
-        return pd.DataFrame(
-            {
-                "SMILES": ["CCO", "CCO", "c1ccccc1", "CC(=O)C"],
-                "Input SMILES": ["CCO", "CCO", "c1ccccc1", "CC(=O)C"],
-                "Supplier Name": [
-                    "Supplier A",
-                    "Supplier B",
-                    "Supplier C",
-                    "Supplier D",
-                ],
-                "Purity": ["95%", "99%", "98%", "99%"],
-                "Amount": [100, 500, 250, 100],
-                "Measure": ["g", "g", "ml", "g"],
-                "Price_USD": [10.0, 45.0, 120.0, 30.0],
-            }
-        )
-
-    def test_filter_single_smiles(self, sample_price_df):
-        """Test filtering for a single SMILES."""
-        result = filter_price_data(sample_price_df, ["CCO"], limit=10)
-        assert "CCO" in result
-        assert len(result["CCO"]) == 2
-        assert result["CCO"][0]["Supplier"] == "Supplier A"
-        assert result["CCO"][1]["Supplier"] == "Supplier B"
-
-    def test_filter_multiple_smiles(self, sample_price_df):
-        """Test filtering for multiple SMILES."""
-        result = filter_price_data(sample_price_df, ["CCO", "c1ccccc1"], limit=10)
-        assert "CCO" in result
-        assert "c1ccccc1" in result
-        assert len(result["CCO"]) == 2
-        assert len(result["c1ccccc1"]) == 1
-
-    def test_filter_with_limit(self, sample_price_df):
-        """Test filtering with a limit."""
-        result = filter_price_data(sample_price_df, ["CCO"], limit=1)
-        assert len(result["CCO"]) == 1
-
-    def test_filter_not_found_smiles(self, sample_price_df):
-        """Test filtering for SMILES not in dataframe."""
-        result = filter_price_data(sample_price_df, ["CCCCCCCC"], limit=10)
-        assert "CCCCCCCC" in result
-        assert len(result["CCCCCCCC"]) == 0
-
-    def test_filter_invalid_smiles(self, sample_price_df):
-        """Test filtering with invalid SMILES."""
-        result = filter_price_data(sample_price_df, ["invalid_smiles"], limit=10)
-        assert "invalid_smiles" in result
-        assert len(result["invalid_smiles"]) == 0
-
-    def test_canonical_smiles_matching(self, sample_price_df):
-        """Test that canonical forms are matched correctly."""
-        # Both "c1ccccc1" and "C1=CC=CC=C1" are benzene
-        result = filter_price_data(sample_price_df, ["C1=CC=CC=C1"], limit=10)
-        assert "C1=CC=CC=C1" in result
-        assert len(result["C1=CC=CC=C1"]) == 1
-
-
-class TestCheckSmilesPresence:
-    """Tests for check_smiles_presence function."""
-
-    @pytest.fixture()
-    def sample_price_df(self):
-        """Create a sample price dataframe."""
-        return pd.DataFrame(
-            {
-                "SMILES": ["CCO", "c1ccccc1", "CC(=O)C"],
-                "Input SMILES": ["CCO", "c1ccccc1", "CC(=O)C"],
-            }
-        )
-
-    def test_check_present_smiles(self, sample_price_df):
-        """Test checking for SMILES that are present."""
-        result = check_smiles_presence(sample_price_df, ["CCO", "c1ccccc1"])
-        assert result["CCO"] is True
-        assert result["c1ccccc1"] is True
-
-    def test_check_absent_smiles(self, sample_price_df):
-        """Test checking for SMILES that are absent."""
-        result = check_smiles_presence(sample_price_df, ["CCCCCC"])
-        assert result["CCCCCC"] is False
-
-    def test_check_mixed_presence(self, sample_price_df):
-        """Test checking for a mix of present and absent SMILES."""
-        result = check_smiles_presence(sample_price_df, ["CCO", "CCCCCC"])
-        assert result["CCO"] is True
-        assert result["CCCCCC"] is False
-
-    def test_check_invalid_smiles(self, sample_price_df):
-        """Test checking for invalid SMILES."""
-        result = check_smiles_presence(sample_price_df, ["invalid_smiles"])
-        assert result["invalid_smiles"] is False
-
-    def test_canonical_smiles_presence(self, sample_price_df):
-        """Test that canonical forms are detected correctly."""
-        # Both "c1ccccc1" and "C1=CC=CC=C1" are benzene
-        result = check_smiles_presence(sample_price_df, ["C1=CC=CC=C1"])
-        assert result["C1=CC=CC=C1"] is True
-
-
 class TestIsBuyable:
-    """Tests for _is_buyable function (with mocked API)."""
+    """Tests for availability backed by the local lookup."""
 
-    @patch("retrosynthesis.retrosynthesis_utils.check_chemicals_price")
-    def test_is_buyable_all_available(self, mock_check_price):
-        """Test with all molecules available."""
-        # Mock the API response
-        mock_df = pd.DataFrame(
-            {
-                "SMILES": ["CCO", "c1ccccc1"],
-                "Input SMILES": ["CCO", "c1ccccc1"],
-            }
-        )
-        mock_check_price.return_value = mock_df
+    @patch("retrosynthesis.retrosynthesis_utils.lookup_prices")
+    def test_is_buyable_preserves_input_order(self, mock_lookup):
+        mock_lookup.return_value = {
+            "CCO": {
+                "canonical_smiles": "CCO",
+                "price_usd_per_g": 3.2,
+                "sources": ["test"],
+            },
+            "CCCCCCCCCC": None,
+        }
 
-        result = _is_buyable(["CCO", "c1ccccc1"])
-        assert result == {"CCO": True, "c1ccccc1": True}
-
-    @patch("retrosynthesis.retrosynthesis_utils.check_chemicals_price")
-    def test_is_buyable_none_available(self, mock_check_price):
-        """Test with no molecules available."""
-        # Mock the API response with empty dataframe
-        mock_df = pd.DataFrame(
-            {
-                "SMILES": [],
-                "Input SMILES": [],
-            }
-        )
-        mock_check_price.return_value = mock_df
-
-        result = _is_buyable(["CCCCCCCCCC"])
-        assert result == {"CCCCCCCCCC": False}
-
-    @patch("retrosynthesis.retrosynthesis_utils.check_chemicals_price")
-    def test_is_buyable_mixed_availability(self, mock_check_price):
-        """Test with mixed availability."""
-        # Mock the API response
-        mock_df = pd.DataFrame(
-            {
-                "SMILES": ["CCO"],
-                "Input SMILES": ["CCO"],
-            }
-        )
-        mock_check_price.return_value = mock_df
-
-        result = _is_buyable(["CCO", "CCCCCCCCCC"])
-        assert result == {"CCO": True, "CCCCCCCCCC": False}
+        assert _is_buyable(["CCO", "CCCCCCCCCC"]) == [True, False]
+        mock_lookup.assert_called_once_with(["CCO", "CCCCCCCCCC"])
 
 
 class TestCheckPrice:
-    """Tests for check_price function (with mocked API)."""
+    """Tests for the compatibility shape returned by check_price."""
 
-    @patch("retrosynthesis.retrosynthesis_utils.check_chemicals_price")
-    def test_check_price_basic(self, mock_check_price):
-        """Test basic price checking."""
-        # Mock the API response
-        mock_df = pd.DataFrame(
+    @patch("retrosynthesis.retrosynthesis_utils.lookup_prices")
+    def test_check_price_returns_one_gram_usd_entry(self, mock_lookup):
+        mock_lookup.return_value = {
+            "C1=CC=CC=C1": {
+                "canonical_smiles": "c1ccccc1",
+                "price_usd_per_g": 4.25,
+                "sources": ["chemcost", "coprinet_mcule"],
+            },
+            "not-smiles": None,
+        }
+
+        result = check_price(["C1=CC=CC=C1", "not-smiles"], limit=5)
+
+        assert result["C1=CC=CC=C1"] == [
             {
-                "SMILES": ["CCO", "CCO"],
-                "Input SMILES": ["CCO", "CCO"],
-                "Supplier Name": ["Supplier A", "Supplier B"],
-                "Purity": ["95%", "99%"],
-                "Amount": [100, 500],
-                "Measure": ["g", "g"],
-                "Price_USD": [10.0, 45.0],
+                "SMILES": "c1ccccc1",
+                "Supplier": "chemcost, coprinet_mcule",
+                "Purity": None,
+                "Amount": 1.0,
+                "Measure": "g",
+                "Price": 4.25,
             }
-        )
-        mock_check_price.return_value = mock_df
+        ]
+        assert result["not-smiles"] == []
 
-        result = check_price(["CCO"], limit=10)
-        assert "CCO" in result
-        assert len(result["CCO"]) == 2
-
-    @patch("retrosynthesis.retrosynthesis_utils.check_chemicals_price")
-    def test_check_price_with_limit(self, mock_check_price):
-        """Test price checking with limit."""
-        # Mock the API response with multiple entries
-        mock_df = pd.DataFrame(
-            {
-                "SMILES": ["CCO"] * 5,
-                "Input SMILES": ["CCO"] * 5,
-                "Supplier Name": [f"Supplier {i}" for i in range(5)],
-                "Purity": ["95%"] * 5,
-                "Amount": [100] * 5,
-                "Measure": ["g"] * 5,
-                "Price_USD": [10.0 + i for i in range(5)],
+    @patch("retrosynthesis.retrosynthesis_utils.lookup_prices")
+    def test_check_price_zero_limit_still_returns_frozen_offer(self, mock_lookup):
+        mock_lookup.return_value = {
+            "CCO": {
+                "canonical_smiles": "CCO",
+                "price_usd_per_g": 3.2,
+                "sources": ["test"],
             }
-        )
-        mock_check_price.return_value = mock_df
+        }
 
-        result = check_price(["CCO"], limit=2)
-        assert len(result["CCO"]) == 2
+        assert len(check_price(["CCO"], limit=0)["CCO"]) == 1
 
 
 class TestDetectFunctionalGroups:

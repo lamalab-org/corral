@@ -4,7 +4,6 @@ import json
 from loguru import logger
 from rdkit import Chem
 from retrosynthesis.retrosynthesis_utils import (
-    _is_buyable,
     apply_template_retro,
     check_price,
     check_templates_equal,
@@ -133,7 +132,7 @@ def score_final(prediction: dict, target: dict) -> float:
             raise NotImplementedError(
                 "Step count validation is not implemented in this scoring function."
             )
-        target = float(target.get("prize"))
+        price_budget = float(target.get("prize"))
     except Exception as e:
         raise ValueError(f"Invalid target format: {e}") from e
     prediction = prediction.replace("```json", "").replace("```", "").strip()
@@ -156,31 +155,21 @@ def score_final(prediction: dict, target: dict) -> float:
         if not leaf_molecules:
             return 0.0
 
-        # Step 3: Check if all starting materials are buyable
+        # Steps 3 and 4: validate each leaf, then fetch availability and price once.
         for smiles in leaf_molecules:
             if not valid_smiles(smiles):
                 return 0.0
-            if not _is_buyable([smiles]):
-                return 0.0
 
-        # Step 4: Calculate total price
+        price_data = check_price(leaf_molecules, limit=1)
         total_price = 0.0
         for smiles in leaf_molecules:
-            try:
-                price_data = check_price([smiles], limit=0)
-                # check_price returns a dict: {smiles: [list of price entries]}
-                # Since limit=0, results are sorted by price, so first entry is cheapest
-                if price_data.get(smiles):
-                    total_price += float(price_data[smiles][0]["Price"])
-                else:
-                    # No price data available for this molecule
-                    return 0.0
-            except Exception:
-                # If price cannot be determined, consider it as failure
+            entries = price_data.get(smiles, [])
+            if not entries:
                 return 0.0
+            total_price += float(entries[0]["Price"])
 
         # Step 5: Check if total price is within budget
-        if total_price <= target:
+        if total_price <= price_budget:
             return 1.0
         else:
             return 0.0
