@@ -1,3 +1,4 @@
+import asyncio
 import random
 import traceback
 from pathlib import Path
@@ -5,16 +6,17 @@ from typing import Any
 
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
+from spectra_elucidation.pubchem_helpers import PubChem
 from spectra_elucidation.spectra_utils import (
+    SpectraAPI,
     convert_ms_spectrum_to_string,
     enumerate_fragments_from_smiles,
     format_hsqc_spectrum,
-    make_api_call,
     predict_isotopic_distribution,
+    predict_nmr_spectra,
 )
 
 from corral.backend.tool import Tool, tool
-from corral.utils.modal import remote_call
 from corral.utils.rag import vector_database_search
 
 
@@ -467,9 +469,7 @@ def carbon_nmr_spectra(h_smiles: str) -> str:
         - The experiment can only measure for the compound at hand.
     [/LIMITATIONS]
     """
-    return remote_call(function_name="get_c13_nmr_prediction", env_name="chemenv")(
-        smiles=h_smiles
-    )
+    return asyncio.run(SpectraAPI.get_c13_nmr_prediction(h_smiles))
 
 
 @tool(hidden_args=["h_smiles"])
@@ -521,9 +521,7 @@ def proton_nmr_spectra(h_smiles: str) -> str:
         - The experiment can only measure the compound of the sample at hand.
     [/LIMITATIONS]
     """
-    return remote_call(function_name="get_h_nmr_prediction", env_name="chemenv")(
-        smiles=h_smiles
-    )
+    return asyncio.run(SpectraAPI.get_h_nmr_prediction(h_smiles))
 
 
 @tool(hidden_args=["h_smiles"])
@@ -575,9 +573,7 @@ def ir_spectra(h_smiles: str) -> str:
         - The experiment can only measure the IR spectra for the compound of the sample at hand.
     [/LIMITATIONS]
     """
-    return remote_call(function_name="get_ir_prediction", env_name="chemenv")(
-        smiles=h_smiles
-    )
+    return asyncio.run(SpectraAPI.get_ir_prediction(h_smiles))
 
 
 @tool(hidden_args=["h_smiles"])
@@ -598,7 +594,7 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
 
     [CONTEXTUAL] How this tool works:
     - This function measures the HSQC NMR spectra for the sample at hand.
-    - It makes a POST request to an external API that measures the HSQC NMR experiment for the sample at hand.
+    - It runs the local nmr-processing predictor and selects its HSQC result.
     - The function then parses the data from the measurement to extract the HSQC spectrum data and formats it in standard NMR notation, similar to the ACS convention.
     - If an error occurs during the measurement, it returns an appropriate message. [/CONTEXTUAL]
 
@@ -630,13 +626,11 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
         - The experiment can only measure for the compound of the sample at hand.
     [/LIMITATIONS]
     """
-    URL = "https://lamalab-org--nmr-prediction-api-predict-nmr.modal.run"
     mol = Chem.MolFromSmiles(h_smiles)
     if mol is None:
         return "Invalid SMILES string provided."
-    payload = {"smiles": h_smiles}
 
-    spectra = make_api_call(URL, payload)
+    spectra = predict_nmr_spectra(h_smiles)
     for spectrum in spectra["spectra"]:
         info = spectrum.get("info", {})
         pulse_sequence = info.get("pulseSequence", "")
@@ -917,7 +911,7 @@ def obtain_isomers_from_molecular_formula(
 ) -> list[str]:
     """[BRIEF] Obtain isomers for a given molecular formula. [/BRIEF]
 
-    [DETAILED] This function retrieves isomers for a given molecular formula using the `get_isomers_from_molecular_formula` remote function. It returns a list of isomer SMILES strings. The list of isomers might not be accurate since it is based on the PubChem database. [/DETAILED]
+    [DETAILED] This function retrieves isomers for a given molecular formula using the local PubChem helper. It returns a list of isomer SMILES strings. The list of isomers might not be accurate since it is based on the PubChem database. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use it when you want to find isomers for a given molecular formula.
@@ -931,7 +925,7 @@ def obtain_isomers_from_molecular_formula(
     [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-        - It uses the `get_isomers_from_molecular_formula` remote function to retrieve isomers for the given molecular formula.
+        - It uses the in-repository PubChem helper to query PubChem's PUG REST API for the given molecular formula.
         - The function returns a list of SMILES strings representing the isomers of the input compound that match the molecular formula.
         - The accuracy of the isomers is dependent on the underlying database (e.g., PubChem).
     [/CONTEXTUAL]
@@ -967,7 +961,7 @@ def obtain_isomers_from_molecular_formula(
 
     [RAISES] Exceptions:
         Exception:
-            [ERROR_WHEN] If the remote call to PubChem fails or returns an error. [/ERROR_WHEN]
+            [ERROR_WHEN] If the PubChem API call fails or returns an error. [/ERROR_WHEN]
             [ERROR_DETAILS] This can occur due to network connectivity issues, PubChem API unavailability, an invalid molecular formula, or timeouts when querying formulas with many isomers. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Verify the molecular formula is valid (e.g., "C6H6" not "XYZ"). If the error is a timeout, try reducing the `limit` parameter. If it is a network issue, retry after some time. [/ERROR_RECOVERY]
     [/RAISES]
@@ -978,9 +972,9 @@ def obtain_isomers_from_molecular_formula(
         - The function may not find all possible isomers, especially for complex or unusual structures.
     [/LIMITATIONS]
     """
-    return remote_call(
-        function_name="get_compound_isomers_pubchem_by_formula", env_name="chemenv"
-    )(formula=molecular_formula, limit=limit)
+    return asyncio.run(
+        PubChem.get_compound_isomers_by_formula(molecular_formula, limit=limit)
+    )
 
 
 @tool
@@ -1121,7 +1115,7 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
     """[BRIEF] Simulate 1H NMR, 13C NMR, and IR spectra for a given molecule using its SMILES string, that allows validation of a proposed candidate. [/BRIEF]
 
     [DETAILED] This function simulates the 1H NMR, 13C NMR, and IR spectra for a molecule represented by its SMILES string.
-    It uses a remote function to perform the simulation, which involves structure analysis, neural network prediction of chemical shifts, prediction of J-coupling constants, and quantum-mechanical simulation to generate realistic multiplet patterns and effects. [/DETAILED]
+    It uses the in-repository `SpectraAPI` helper to request and format the predictions from the configured public NMR and IR services. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Use it to validate the chemical structure of a proposed molecule by simulating its spectra.
@@ -1134,14 +1128,10 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
     3. [FOLLOW_UP] Submit the answer if the simulated spectra is similar to the experimental, or go back to step 1 and propose new candidate molecules. [/FOLLOW_UP] [/WORKFLOW_INTEGRATION]
 
     [CONTEXTUAL] How this tool works:
-    - It uses a remote function `simulate_spectra` to perform the simulation.
-    - The simulation process involves:
-        1. Structure analysis using HOSE code descriptors to identify the chemical environment of atoms in the molecule.
-        2. Neural network prediction of chemical shifts based on experimental data.
-        3. Prediction of J-coupling constants for proton-proton interactions to simulate the splitting patterns in NMR spectra.
-        4. Quantum-mechanical simulation to generate realistic multiplet patterns and effects in the spectra.
-    - The function returns a dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
-    If some of the spectra are not available, it will return None for those spectra.
+    - It uses `SpectraAPI.get_all_predictions` to request 1H NMR, 13C NMR, and IR predictions concurrently.
+    - The helper formats each successful response into a concise literature-style string.
+    - The function returns a dictionary containing `h_nmr`, `c13_nmr`, and `ir` entries.
+    - If a prediction is unavailable, its entry contains a failure message while successful predictions are preserved.
     [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
@@ -1158,7 +1148,7 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
         smiles (str):
             [ARGS_BRIEF] The SMILES representation of the compound to simulate spectra for [/ARGS_BRIEF]
             [ARGS_DETAILED] The SMILES string representing the chemical structure of the molecule for which the spectra will be simulated.
-            It should be a valid SMILES notation that can be processed by the remote function. [/ARGS_DETAILED]
+            It should be a valid SMILES notation accepted by the configured prediction services. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: "valid SMILES string" [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] Examples: "CCO", "C1=CC=CC=C1", "C(C(=O)O)N", "C1=CC=C(C=C1)C(=O)O" [/ARGS_EXAMPLES]
 
@@ -1168,24 +1158,22 @@ def simulate_spectra(smiles: str) -> dict[str, str]:
             [RETURNS_DETAILED] A dictionary containing the simulated spectra for 1H NMR, 13C NMR, and IR.
             Each key corresponds to a type of spectrum, and the value is a string representation of the simulated spectrum.
             If some spectra are not available, the value will be None for those keys. [/RETURNS_DETAILED]
-            [RETURNS_EXAMPLES] Examples: {"1H NMR": "simulated_1H_NMR_spectrum", "13C NMR": "simulated_13C_NMR_spectrum", "IR": "simulated_IR_spectrum"} [/RETURNS_EXAMPLES]
+            [RETURNS_EXAMPLES] Examples: {"h_nmr": "simulated_1H_NMR_spectrum", "c13_nmr": "simulated_13C_NMR_spectrum", "ir": "simulated_IR_spectrum"} [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
         Exception:
-            [ERROR_WHEN] If a network error occurs during the remote function call. [/ERROR_WHEN]
-            [ERROR_DETAILS] This exception is raised when there is an error in calling the remote function `simulate_spectra`, such as network issues. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] This tool is unavailable if the remote function cannot be called. [/ERROR_RECOVERY]
+            [ERROR_WHEN] If a network error occurs while contacting a prediction service. [/ERROR_WHEN]
+            [ERROR_DETAILS] Individual service failures are returned in the corresponding result entry. [/ERROR_DETAILS]
+            [ERROR_RECOVERY] Retry later or use the available individual spectrum tools. [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
-        - The SMILES string must be valid and represent a chemical structure that can be interpreted by the remote function.
-        - The remote function may not be able to simulate spectra for all compounds, especially if they are complex or not well-defined.
-        - The function relies on the availability of the remote service and its simulation capabilities, which may change over time.
+        - The SMILES string must be valid and represent a structure accepted by the prediction services.
+        - The services may not be able to simulate spectra for all compounds, especially if they are complex or not well-defined.
+        - The function relies on public prediction services whose availability and behavior may change over time.
     [/LIMITATIONS]
     """
-    return remote_call(function_name="simulate_spectra", env_name="chemenv")(
-        smiles=smiles
-    )
+    return asyncio.run(SpectraAPI.get_all_predictions(smiles))
 
 
 def create_tools() -> dict[str, Tool]:

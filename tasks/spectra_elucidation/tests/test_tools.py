@@ -2,7 +2,7 @@
 Tests for the tools in the spectra_elucidation package.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from spectra_elucidation.tools import (
@@ -262,22 +262,17 @@ class TestSearchBySmiles:
 class TestCarbonNMRSpectra:
     """Tests for the carbon_nmr_spectra tool."""
 
-    @patch("spectra_elucidation.tools.remote_call")
-    def test_carbon_nmr_spectra_success(self, mock_remote_call):
+    @patch(
+        "spectra_elucidation.tools.SpectraAPI.get_c13_nmr_prediction",
+        new_callable=AsyncMock,
+    )
+    def test_carbon_nmr_spectra_success(self, mock_prediction):
         """Test successful carbon NMR spectra prediction."""
-        # Mock the remote call
-        mock_function = MagicMock()
-        mock_function.return_value = "13C NMR: δC 10.0, 60.0 ppm"
-        mock_remote_call.return_value = mock_function
+        mock_prediction.return_value = "13C NMR: δC 10.0, 60.0 ppm"
 
         result = carbon_nmr_spectra.execute(h_smiles="CCO")
 
-        # Check that remote_call was called with correct parameters
-        mock_remote_call.assert_called_once_with(
-            function_name="get_c13_nmr_prediction", env_name="chemenv"
-        )
-        # Check that the returned function was called with the SMILES
-        mock_function.assert_called_once_with(smiles="CCO")
+        mock_prediction.assert_awaited_once_with("CCO")
 
         # Check the result
         assert "13C NMR" in result
@@ -287,24 +282,19 @@ class TestCarbonNMRSpectra:
 class TestProtonNMRSpectra:
     """Tests for the proton_nmr_spectra tool."""
 
-    @patch("spectra_elucidation.tools.remote_call")
-    def test_proton_nmr_spectra_success(self, mock_remote_call):
+    @patch(
+        "spectra_elucidation.tools.SpectraAPI.get_h_nmr_prediction",
+        new_callable=AsyncMock,
+    )
+    def test_proton_nmr_spectra_success(self, mock_prediction):
         """Test successful proton NMR spectra prediction."""
-        # Mock the remote call
-        mock_function = MagicMock()
-        mock_function.return_value = (
+        mock_prediction.return_value = (
             "1H NMR: δH 1.2 (t, 3H), 3.6 (q, 2H), 2.5 (s, 1H) ppm"
         )
-        mock_remote_call.return_value = mock_function
 
         result = proton_nmr_spectra.execute(h_smiles="CCO")
 
-        # Check that remote_call was called with correct parameters
-        mock_remote_call.assert_called_once_with(
-            function_name="get_h_nmr_prediction", env_name="chemenv"
-        )
-        # Check that the returned function was called with the SMILES
-        mock_function.assert_called_once_with(smiles="CCO")
+        mock_prediction.assert_awaited_once_with("CCO")
 
         # Check the result
         assert "1H NMR" in result or "δH" in result
@@ -313,24 +303,19 @@ class TestProtonNMRSpectra:
 class TestIRSpectra:
     """Tests for the ir_spectra tool."""
 
-    @patch("spectra_elucidation.tools.remote_call")
-    def test_ir_spectra_success(self, mock_remote_call):
+    @patch(
+        "spectra_elucidation.tools.SpectraAPI.get_ir_prediction",
+        new_callable=AsyncMock,
+    )
+    def test_ir_spectra_success(self, mock_prediction):
         """Test successful IR spectra prediction."""
-        # Mock the remote call
-        mock_function = MagicMock()
-        mock_function.return_value = (
+        mock_prediction.return_value = (
             "IR: 3400 cm-1 (O-H stretch), 2900 cm-1 (C-H stretch)"
         )
-        mock_remote_call.return_value = mock_function
 
         result = ir_spectra.execute(h_smiles="CCO")
 
-        # Check that remote_call was called with correct parameters
-        mock_remote_call.assert_called_once_with(
-            function_name="get_ir_prediction", env_name="chemenv"
-        )
-        # Check that the returned function was called with the SMILES
-        mock_function.assert_called_once_with(smiles="CCO")
+        mock_prediction.assert_awaited_once_with("CCO")
 
         # Check the result
         assert "IR" in result or "cm-1" in result or "3400" in result
@@ -339,11 +324,11 @@ class TestIRSpectra:
 class TestHSQCNMRSpectra:
     """Tests for the hsqc_nmr_spectra tool."""
 
-    @patch("spectra_elucidation.tools.make_api_call")
-    def test_hsqc_nmr_spectra_success(self, mock_api_call):
+    @patch("spectra_elucidation.tools.predict_nmr_spectra")
+    def test_hsqc_nmr_spectra_success(self, mock_predict):
         """Test successful HSQC NMR spectra prediction."""
-        # Mock the API response with correct format
-        mock_api_call.return_value = {
+        # Mock the local predictor response with correct format
+        mock_predict.return_value = {
             "spectra": [
                 {
                     "info": {"pulseSequence": "hsqc"},
@@ -369,24 +354,18 @@ class TestHSQCNMRSpectra:
 
         result = hsqc_nmr_spectra.execute(h_smiles="CCO")
 
-        # Check that the API was called
-        mock_api_call.assert_called_once()
-        call_args = mock_api_call.call_args[0]
-        assert (
-            call_args[0]
-            == "https://lamalab-org--nmr-prediction-api-predict-nmr.modal.run"
-        )
-        assert call_args[1]["smiles"] == "CCO"
+        # Check that the local predictor was called
+        mock_predict.assert_called_once_with("CCO")
 
         # Check the result
         assert isinstance(result, str)
         assert "HSQC" in result or "delta" in result or "3.6" in result
 
-    @patch("spectra_elucidation.tools.make_api_call")
-    def test_hsqc_nmr_spectra_no_hsqc(self, mock_api_call):
+    @patch("spectra_elucidation.tools.predict_nmr_spectra")
+    def test_hsqc_nmr_spectra_no_hsqc(self, mock_predict):
         """Test when no HSQC spectrum is found."""
-        # Mock the API response without HSQC
-        mock_api_call.return_value = {
+        # Mock the local predictor response without HSQC
+        mock_predict.return_value = {
             "spectra": [
                 {
                     "info": {"pulseSequence": "other"},
@@ -398,6 +377,14 @@ class TestHSQCNMRSpectra:
         result = hsqc_nmr_spectra.execute(h_smiles="CCO")
 
         assert "No HSQC spectrum found" in result
+
+    @patch("spectra_elucidation.tools.predict_nmr_spectra")
+    def test_hsqc_nmr_spectra_invalid_smiles(self, mock_predict):
+        """Test that invalid SMILES are rejected before prediction."""
+        result = hsqc_nmr_spectra.execute(h_smiles="INVALID")
+
+        mock_predict.assert_not_called()
+        assert "Invalid SMILES string" in result
 
 
 class TestMassSpectrometrySpectra:
@@ -431,24 +418,19 @@ class TestMassSpectrometrySpectra:
 class TestObtainIsomersFromMolecularFormula:
     """Tests for the obtain_isomers_from_molecular_formula tool."""
 
-    @patch("spectra_elucidation.tools.remote_call")
-    def test_obtain_isomers_success(self, mock_remote_call):
+    @patch(
+        "spectra_elucidation.tools.PubChem.get_compound_isomers_by_formula",
+        new_callable=AsyncMock,
+    )
+    def test_obtain_isomers_success(self, mock_get_isomers):
         """Test successful isomer retrieval."""
-        # Mock the remote call
-        mock_function = MagicMock()
-        mock_function.return_value = ["CCO", "COC"]
-        mock_remote_call.return_value = mock_function
+        mock_get_isomers.return_value = ["CCO", "COC"]
 
         result = obtain_isomers_from_molecular_formula.execute(
             molecular_formula="C2H6O", limit=10
         )
 
-        # Check that remote_call was called with correct parameters
-        mock_remote_call.assert_called_once_with(
-            function_name="get_compound_isomers_pubchem_by_formula", env_name="chemenv"
-        )
-        # Check that the returned function was called with the formula
-        mock_function.assert_called_once_with(formula="C2H6O", limit=10)
+        mock_get_isomers.assert_awaited_once_with("C2H6O", limit=10)
 
         # Check the result - tool decorator converts to string
         assert isinstance(result, str)
@@ -485,29 +467,24 @@ class TestReturnPossibleFragments:
 class TestSimulateSpectra:
     """Tests for the simulate_spectra tool."""
 
-    @patch("spectra_elucidation.tools.remote_call")
-    def test_simulate_spectra_success(self, mock_remote_call):
+    @patch(
+        "spectra_elucidation.tools.SpectraAPI.get_all_predictions",
+        new_callable=AsyncMock,
+    )
+    def test_simulate_spectra_success(self, mock_prediction):
         """Test successful spectra simulation."""
-        # Mock the remote call
-        mock_function = MagicMock()
-        mock_function.return_value = {
-            "1H NMR": "δH 1.2 (t, 3H), 3.6 (q, 2H) ppm",
-            "13C NMR": "δC 10.0, 60.0 ppm",
-            "IR": "3400 cm-1 (O-H), 2900 cm-1 (C-H)",
+        mock_prediction.return_value = {
+            "h_nmr": "δH 1.2 (t, 3H), 3.6 (q, 2H) ppm",
+            "c13_nmr": "δC 10.0, 60.0 ppm",
+            "ir": "3400 cm-1 (O-H), 2900 cm-1 (C-H)",
         }
-        mock_remote_call.return_value = mock_function
 
         result = simulate_spectra.execute(smiles="CCO")
 
-        # Check that remote_call was called with correct parameters
-        mock_remote_call.assert_called_once_with(
-            function_name="simulate_spectra", env_name="chemenv"
-        )
-        # Check that the returned function was called with the SMILES
-        mock_function.assert_called_once_with(smiles="CCO")
+        mock_prediction.assert_awaited_once_with("CCO")
 
         # Check the result - tool decorator converts to string
         assert isinstance(result, str)
-        assert "1H NMR" in result
-        assert "13C NMR" in result
-        assert "IR" in result
+        assert "h_nmr" in result
+        assert "c13_nmr" in result
+        assert "ir" in result

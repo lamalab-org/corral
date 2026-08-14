@@ -1,8 +1,10 @@
 import importlib.resources
 import traceback
 from abc import ABC, abstractmethod
+from functools import partial
 from typing import Any, Self
 
+import anyio
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import Message
 from loguru import logger
@@ -18,7 +20,7 @@ from corral.agents.utils import (
     llm_call,
     save_agent_messages,
 )
-from corral.router.routes import CorralRouter
+from corral.router.routes import CorralRouter, as_sync_interface
 from corral.types import BudgetExhaustedError
 
 
@@ -300,6 +302,8 @@ class BaseAgent(ABC):
         """
         self.reset_token_usage()
 
+        final_answer: str | None = None
+        cancelled = False
         try:
             final_answer = self.run(
                 interface,
@@ -308,53 +312,24 @@ class BaseAgent(ABC):
                 examples,
                 enable_surrender=enable_surrender,
             )
-
-            # Check if agent decided to surrender. The sentinel is returned
-            # verbatim (without running the answer extractor) so surrender never
-            # depends on an extra model call. All agents emit `SURRENDER_SENTINEL`,
-            # which is what CorralRunner checks for before calling `surrender_task()`.
-            if final_answer == SURRENDER_SENTINEL:
-                logger.info(f"Agent surrender from task {task_id}")
-                return self._agent_run_result(final_answer)
-
-            if "Error" in final_answer:
-                logger.error(f"Error in agent response: {final_answer}")
-                return self._agent_run_result(final_answer)
-
+            early = self._early_answer_result(task_id, final_answer)
+            if early is not None:
+                return early
         except BudgetExhaustedError:
             # Re-raise to stop the benchmark immediately
             raise
         except Exception:
-            full_error = traceback.format_exc()
-            logger.error(f"Error running agent: {full_error}")
-            self.messages.append(
-                LiteLLMMessage(
-                    role="user", content=f"Error running agent: {full_error}"
-                )
-            )
-            # An exception escaping `run()` is never a real model answer, so mark
-            # it as an infrastructure failure. `execute_single_trial` routes any
-            # non-submit-worthy status to the trial exception path instead of
-            # submitting the traceback string to the task scorer.
-            return AgentRunResult(
-                answer=f"Error running agent: {full_error}",
-                messages=self.messages,
-                token_usage=self.get_total_token_usage(),
-                status="agent_error",
-                error_message=full_error,
-            )
+            return self._run_exception_result()
+        except BaseException:
+            # Cancellation (Ctrl+C / anyio CancelledError, SystemExit, ...): the
+            # trial is being abandoned and its result discarded, so its partial
+            # transcript must not be persisted. Flag it so the `finally` skips the
+            # verbose save, then let the cancellation propagate untouched.
+            cancelled = True
+            raise
         finally:
-            if verbose:
-                # Check if agent has stored tools information
-                tools = getattr(self, "_available_tools", None)
-                save_agent_messages(
-                    messages=self.messages,
-                    task_id=task_id,
-                    agent_name=self.__class__.__name__,
-                    model=self.model,
-                    tools=tools,
-                    tool_verbosity=tool_verbosity,
-                )
+            if verbose and not cancelled:
+                self._save_run_messages(task_id, tool_verbosity)
 
         # Agents that already return a submit-ready answer bypass the extra
         # answer-extraction model call so the benchmark measures (and submits)
@@ -362,6 +337,80 @@ class BaseAgent(ABC):
         if not self.requires_answer_extraction:
             return self._agent_run_result(final_answer)
 
+        return self._extract_final_answer(final_answer)
+
+    def _early_answer_result(
+        self, task_id: str, final_answer: str
+    ) -> AgentRunResult | None:
+        """Turn a surrender/error answer into a terminal result, else `None`.
+
+        Shared by the sync :meth:`run_agent` and async :meth:`arun_agent`. The
+        surrender sentinel is returned verbatim (never through the answer
+        extractor) so giving up never depends on an extra model call; every agent
+        emits `SURRENDER_SENTINEL`, which is what CorralRunner checks before
+        calling `surrender_task()`. An answer containing `"Error"` is likewise a
+        harness-signalled failure surfaced as-is. Returning `None` means the run
+        succeeded and the caller should proceed to (optional) answer extraction.
+        """
+        if final_answer == SURRENDER_SENTINEL:
+            logger.info(f"Agent surrender from task {task_id}")
+            return self._agent_run_result(final_answer)
+        if "Error" in final_answer:
+            logger.error(f"Error in agent response: {final_answer}")
+            return self._agent_run_result(final_answer)
+        return None
+
+    def _run_exception_result(self) -> AgentRunResult:
+        """Build the `agent_error` result for an exception escaping :meth:`run`.
+
+        An exception escaping `run()` is never a real model answer, so it is
+        marked as an infrastructure failure. `execute_single_trial` routes any
+        non-submit-worthy status to the trial exception path instead of
+        submitting the traceback string to the task scorer.
+        """
+        full_error = traceback.format_exc()
+        logger.error(f"Error running agent: {full_error}")
+        self.messages.append(
+            LiteLLMMessage(role="user", content=f"Error running agent: {full_error}")
+        )
+        return AgentRunResult(
+            answer=f"Error running agent: {full_error}",
+            messages=self.messages,
+            token_usage=self.get_total_token_usage(),
+            status="agent_error",
+            error_message=full_error,
+        )
+
+    def _save_run_messages(self, task_id: str, tool_verbosity: str) -> None:
+        """Persist the run transcript when `verbose` was requested."""
+        # Check if agent has stored tools information
+        tools = getattr(self, "_available_tools", None)
+        save_agent_messages(
+            messages=self.messages,
+            task_id=task_id,
+            agent_name=self.__class__.__name__,
+            model=self.model,
+            tools=tools,
+            tool_verbosity=tool_verbosity,
+            trace_metadata=self._trace_metadata(),
+        )
+
+    def _trace_metadata(self) -> dict[str, Any] | None:
+        """Return agent-specific metadata stored beside API-compatible messages.
+
+        Subclasses may override this hook to make a saved transcript easier to
+        analyse. Metadata belongs at the top level of the log file rather than
+        inside ``self.messages``: those message dictionaries can later be sent
+        back to a model API and therefore must retain the provider schema.
+        """
+        return None
+
+    def _extract_final_answer(self, final_answer: str) -> AgentRunResult:
+        """Run the LiteLLM answer extractor to distil a clean final answer.
+
+        Only reached for agents whose :attr:`requires_answer_extraction` is
+        `True`; the async path offloads this blocking call to a worker thread.
+        """
         message = "The task is to:\n" + self.messages[0]["content"]
         if self.messages[0]["role"] == "system":
             message += "\n\n" + self.messages[1]["content"]
@@ -389,6 +438,112 @@ class BaseAgent(ABC):
         except Exception as e:
             logger.error(f"Error extracting final answer: {e}")
             return self._agent_run_result(final_answer)
+
+    async def arun(
+        self,
+        interface: CorralRouter,
+        task_id: str,
+        task_prompt: str | None = None,
+        examples: list[str] | None = None,
+        enable_surrender: bool = False,
+        **kwargs: Any,  # noqa: ARG002
+    ) -> str:
+        """Async counterpart of :meth:`run` — the seam native agents override.
+
+        The default implementation offloads the synchronous :meth:`run` (and the
+        blocking harness/HTTP work it drives) to a worker thread so an `anyio`
+        scheduler can run many trials concurrently without blocking the event
+        loop. Because that thread has **no** running event loop, an agent whose
+        `run()` bridges an async SDK (e.g. via `asyncio.run`) takes its simple
+        single-loop path rather than nesting an extra loop in yet another thread.
+
+        Agents whose SDK is natively async (e.g. Claude Code) override this to
+        `await` their coroutine directly on the scheduler loop, avoiding the
+        thread/loop nesting entirely and enabling structured cancellation of the
+        in-flight SDK call. Their synchronous :meth:`run` then becomes the
+        wrapper. Returns the raw final answer string, exactly like :meth:`run`.
+
+        The worker thread has no event loop, so a blocking :meth:`run` cannot
+        drive an :class:`~corral.router.AsyncCorralRouter` (its methods would
+        return un-awaited coroutines). :func:`as_sync_interface` hands `run` an
+        equivalent **synchronous** router in that case; a synchronous interface
+        is passed straight through, so the historical path is unchanged.
+        """
+        run_interface = as_sync_interface(interface)
+        return await anyio.to_thread.run_sync(
+            partial(
+                self.run,
+                run_interface,
+                task_id,
+                task_prompt,
+                examples,
+                enable_surrender=enable_surrender,
+            )
+        )
+
+    async def arun_agent(
+        self,
+        interface: CorralRouter,
+        task_id: str,
+        task_prompt: str | None = None,
+        examples: list[str] | None = None,
+        verbose: bool = False,
+        tool_verbosity: str = "brief",
+        enable_surrender: bool = False,
+    ) -> AgentRunResult:
+        """Async counterpart of :meth:`run_agent`.
+
+        Mirrors :meth:`run_agent` step for step but drives the agent through the
+        async :meth:`arun` seam rather than the synchronous :meth:`run`. For a
+        natively-async agent (e.g. Claude Code) the harness coroutine runs
+        directly on the scheduler loop; for every other agent :meth:`arun`
+        offloads the blocking `run()` to a worker thread. Either way the
+        surrender/error handling, transcript saving, and result assembly are the
+        *same* code paths the sync runner uses, so the two stay in lockstep.
+
+        The (blocking) LiteLLM answer extractor — only invoked for agents whose
+        :attr:`requires_answer_extraction` is `True` — is offloaded to a thread
+        so it never stalls the event loop.
+
+        Args and return value mirror :meth:`run_agent`.
+        """
+        self.reset_token_usage()
+
+        final_answer: str | None = None
+        cancelled = False
+        try:
+            final_answer = await self.arun(
+                interface,
+                task_id,
+                task_prompt,
+                examples,
+                enable_surrender=enable_surrender,
+            )
+            early = self._early_answer_result(task_id, final_answer)
+            if early is not None:
+                return early
+        except BudgetExhaustedError:
+            # Re-raise to stop the benchmark immediately
+            raise
+        except Exception:
+            return self._run_exception_result()
+        except BaseException:
+            # Cancellation (Ctrl+C / anyio CancelledError, SystemExit, ...): the
+            # trial is being abandoned and its result discarded, so its partial
+            # transcript must not be persisted. Flag it so the `finally` skips the
+            # verbose save, then let the cancellation propagate untouched.
+            cancelled = True
+            raise
+        finally:
+            if verbose and not cancelled:
+                self._save_run_messages(task_id, tool_verbosity)
+
+        if not self.requires_answer_extraction:
+            return self._agent_run_result(final_answer)
+
+        return await anyio.to_thread.run_sync(
+            partial(self._extract_final_answer, final_answer)
+        )
 
     def _agent_run_result(self, answer: str) -> AgentRunResult:
         """Build an :class:`AgentRunResult`, propagating a harness status.

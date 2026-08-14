@@ -212,7 +212,11 @@ if __name__ == "__main__":
 
     host = args.host
     port = args.port
-    work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
+    # Absolute so the workspace path the server reports to a sandbox-running
+    # agent (e.g. Codex) resolves the same in that agent's process (a different
+    # cwd) instead of silently missing and losing files. BASE_WORK_DIR is already
+    # absolute; resolve() also normalizes a relative CORRAL_WORK_DIR override.
+    work_dir = str(Path(os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)).resolve())
     Path(work_dir).mkdir(parents=True, exist_ok=True)
 
     environments = create_environments(
@@ -227,6 +231,5 @@ if __name__ == "__main__":
         if env.current_task.input_map:
             logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
 
-    # --- Run Server ---
     logger.info(f"Running server on {host}:{port}")
     run_server(environments, host, port)

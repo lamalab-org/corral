@@ -519,6 +519,85 @@ Single source of truth for one environment's runtime state (`corral.backend.stat
 
 ---
 
+## CorralRunner Class
+
+Executes agents against an environment and aggregates results.
+
+**Constructor**:
+
+```python
+runner = CorralRunner(
+    interface,  # CorralRouter or AsyncCorralRouter
+    agent=None,  # a single shared BaseAgent (serial runs)
+    agent_factory=None,  # (TrialContext) -> BaseAgent (required for concurrency)
+    concurrency=None,  # default ConcurrencyConfig for this runner
+    checkpoint_dir="./benchmark_checkpoints",
+    enable_surrender=False,
+    metrics=None,
+)
+```
+
+Exactly one agent source is required. A shared `agent` accumulates per-run state, so it is fine for serial `bench()` but **cannot** back concurrent trials; pass an `agent_factory` for those. Both may be supplied — the factory then mints each trial's agent and the shared agent is used only for run metadata / report labeling.
+
+### `bench(...) -> BenchmarkResult`
+
+Run the benchmark synchronously. Key parameters:
+
+- `task_ids` (list[str] | None): Tasks to run; `None` runs every available task.
+- `trials_per_task` (int): Trials per task (for `pass@k`).
+- `k_values` (int | list[int] | None): k values for pass@k metrics.
+- `run_name` (str | None): Name used in the report filename.
+- `max_concurrency` (int, default `1`): Max trials in flight across the whole run. `1` is the byte-for-byte serial path; `> 1` runs concurrently via `abench` and **requires** an `agent_factory`.
+- `max_concurrency_per_task` (int, default `1`): Max simultaneous trials of the *same* task. Above `1` requires the server to support trial runtimes.
+- `agent_factory` (AgentFactory | None): Per-call override of the runner's factory.
+- `concurrency` (ConcurrencyConfig | None): Full config; when given it supersedes the two scalars above.
+
+When the effective concurrency exceeds `1`, `bench` drives an event loop via `anyio.run`, so it must **not** be called from inside a running event loop.
+
+### `abench(...) -> BenchmarkResult`
+
+Async counterpart of `bench` with the same arguments. Use it directly when you are already inside an event loop (pair it with an `AsyncCorralRouter`).
+
+---
+
+## ConcurrencyConfig Dataclass
+
+Frozen value object bounding how many trials — and how much per-trial work — run at once. Pass it to `CorralRunner(concurrency=...)` or to `bench`/`abench(concurrency=...)`.
+
+**Fields**:
+
+- `global_trials` (int, default `1`): Max trials executing simultaneously across the whole benchmark (the `max_concurrency` scalar).
+
+- `per_task` (int, default `1`): Max simultaneous trials of the same task (the `max_concurrency_per_task` scalar). Values above `1` require server-side trial-runtime support.
+
+- `per_model` (Mapping[str, int] | None): Per-model cap on simultaneous trials, keyed by agent model name (e.g. `{"claude-opus": 8}`). A model absent from the map is bounded only by `global_trials`. Each cap must be `>= 1`.
+
+- `tool_jobs_per_trial` (int, default `4`): Max background jobs running at once within a single trial runtime; forwarded to each runtime's `JobManager`.
+
+- `configure_apps` (int | None): Max trials configuring their additional apps/services simultaneously. Must be `>= 1` when set.
+
+`per_model` and `configure_apps` are enforced only on the concurrent path (`abench`, and `bench` when effective concurrency exceeds `1`). All numeric fields are validated (`>= 1`) at construction.
+
+---
+
+## TrialContext Dataclass
+
+Immutable description of the trial an `AgentFactory` is building for. Passed to the factory so it can bind an agent to one specific trial.
+
+**Fields**:
+
+- `task_id` (str): Task this trial belongs to.
+
+- `trial_index` (int): Zero-based index of this trial within the task.
+
+- `session_id` (str): Benchmark session id (checkpoint namespace).
+
+- `benchmark_run_id` (str): Identifier for the whole benchmark invocation.
+
+`AgentFactory` is the callable protocol `(TrialContext) -> BaseAgent`.
+
+---
+
 ## BenchmarkResult Dataclass
 
 Results from benchmark execution.

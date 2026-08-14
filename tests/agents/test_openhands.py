@@ -6,20 +6,17 @@ Conversation / event shapes. The real `ConversationExecutionStatus` enum is
 reused because it is a stable, dependency-free enum.
 """
 
+import asyncio
 import hashlib
 import json
 import threading
-import time
 
+import anyio
 from openhands.sdk.conversation.state import ConversationExecutionStatus
 
 from corral.agents import OpenHandsAgent
 from corral.agents import openhands as openhands_module
 from corral.agents.schema import SURRENDER_SENTINEL
-
-# ---------------------------------------------------------------------------
-# Fakes mirroring the openhands-sdk surface the agent depends on.
-# ---------------------------------------------------------------------------
 
 
 class FakeMessage:
@@ -196,28 +193,37 @@ class FakeConversation:
     def send_message(self, prompt):
         self._captured["sent_message"] = prompt
 
-    def _emit(self):
-        if self._run_error is not None:
-            raise self._run_error
-        if self._block_seconds:
-            # Cooperative block so an interrupt can unwind the run promptly.
-            waited = 0.0
-            while waited < self._block_seconds and not self._interrupted.is_set():
-                time.sleep(0.02)
-                waited += 0.02
-            if self._interrupted.is_set():
-                return
+    def _emit_events(self):
         for event in self._events:
             for cb in self.callbacks:
                 cb(event)
 
     def run(self):
+        # The agent now always drives the async entrypoint (`arun`); this sync
+        # path is kept only so the fake stays a faithful stand-in for the SDK.
         self._captured["ran"] = True
-        self._emit()
+        if self._run_error is not None:
+            raise self._run_error
+        self._emit_events()
 
     async def arun(self):
         self._captured["aran"] = True
-        self._emit()
+        # Record the thread the SDK ran on so a test can prove the native `arun`
+        # drives the harness on the event-loop thread (no worker-thread nesting).
+        self._captured["arun_thread"] = threading.current_thread().name
+        if self._run_error is not None:
+            raise self._run_error
+        if self._block_seconds:
+            # Genuinely async block (mirrors the real SDK's awaiting `arun`) so a
+            # loop-level deadline/interrupt can unwind the run promptly instead of
+            # freezing the event loop.
+            waited = 0.0
+            while waited < self._block_seconds and not self._interrupted.is_set():
+                await asyncio.sleep(0.02)
+                waited += 0.02
+            if self._interrupted.is_set():
+                return
+        self._emit_events()
 
     def interrupt(self):
         self._captured["interrupted"] = True
@@ -285,11 +291,6 @@ def _install_fake_sdk(
 
 def _finish(message):
     return FakeActionEvent(FakeFinishAction(message))
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 def test_model_split_between_harness_and_extractor():
@@ -487,6 +488,26 @@ def test_system_prompt_is_hashed_for_reproducibility(mock_interface, monkeypatch
     assert meta["system_prompt_has_dynamic_context"] is False
 
 
+def test_system_prompt_recorded_first_in_transcript(mock_interface, monkeypatch):
+    """The system prompt is recorded ahead of the seeded task prompt.
+
+    The task prompt is pre-seeded as `messages[0]` before the harness runs, but
+    the system message precedes it in the real conversation, so the saved
+    transcript must record `system` first and `user` (task prompt) second.
+    """
+    events = [FakeSystemPromptEvent("SYSTEM PROMPT TEXT"), _finish("42")]
+    _install_fake_sdk(monkeypatch, events)
+
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
+    agent.run(mock_interface, "task-1")
+
+    assert agent.messages[0]["role"] == "system"
+    assert agent.messages[0]["content"] == "SYSTEM PROMPT TEXT"
+    assert agent.messages[1]["role"] == "user"
+    # Exactly one system message (inserted, not duplicated).
+    assert [m.get("role") for m in agent.messages].count("system") == 1
+
+
 def test_agent_context_datetime_is_pinned_off(mock_interface, monkeypatch):
     """The system-prompt datetime is pinned off so the prompt is reproducible."""
     captured = _install_fake_sdk(monkeypatch, [_finish("ok")])
@@ -672,3 +693,127 @@ def test_wall_clock_timeout_interrupts_and_closes(mock_interface, monkeypatch):
     assert captured.get("aran") is True
     assert captured.get("interrupted") is True
     assert captured["closed"] == 1
+
+
+class AsyncMockInterface:
+    """A minimal async benchmark interface (mirrors the AsyncCorralRouter shape).
+
+    Its prompt/tools/schema methods are `async def` and record the thread they
+    ran on, so a test can prove the native `arun` awaited them on the
+    event-loop thread rather than offloading each to a worker thread.
+    """
+
+    def __init__(self):
+        self.base_url = "http://test-server:8000"
+        self.current_verbosity = "brief"
+        self.calls: list[tuple[str, str]] = []
+
+    async def get_available_tools_for_task(self, task_id, verbosity=None):
+        self.calls.append(("tools", threading.current_thread().name))
+        return {
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "test_tool",
+                        "description": "A test tool",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                        },
+                    },
+                }
+            ]
+        }
+
+    async def get_task_prompt(self, task_id):
+        self.calls.append(("prompt", threading.current_thread().name))
+        return "Test task prompt"
+
+    async def get_mcp_tool_schema(self, task_id, verbosity=None):
+        self.calls.append(("schema", threading.current_thread().name))
+        return {"tools": [], "mcp_schema_sha256": "deadbeef"}
+
+    def mcp_url(self, task_id, verbosity=None):
+        verbosity = verbosity or self.current_verbosity or "brief"
+        return f"{self.base_url}/tasks/{task_id}/mcp/?verbosity={verbosity}"
+
+
+def test_arun_drives_the_sdk_on_the_loop_thread(mock_interface, monkeypatch):
+    """`arun` drives conversation.arun() natively on the caller's loop."""
+    captured = _install_fake_sdk(monkeypatch, [_finish("42")])
+
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
+    answer = anyio.run(agent.arun, mock_interface, "task-1")
+
+    assert answer == "42"
+    assert agent.harness_result.status == "success"
+    # The SDK conversation ran on the event-loop thread — no nested worker thread.
+    assert captured["arun_thread"] == threading.current_thread().name
+    # The async entrypoint (not the sync `run`) drove the harness.
+    assert captured.get("aran") is True
+    assert "ran" not in captured
+
+
+def test_run_and_arun_produce_the_same_answer(mock_interface, monkeypatch):
+    """The sync wrapper and the native async path return the same answer."""
+    _install_fake_sdk(monkeypatch, [_finish("same-answer")])
+
+    sync_answer = OpenHandsAgent(model="openai/gpt-5.6", api_key="k").run(
+        mock_interface, "task-1"
+    )
+    async_answer = anyio.run(
+        OpenHandsAgent(model="openai/gpt-5.6", api_key="k").arun,
+        mock_interface,
+        "task-1",
+    )
+
+    assert sync_answer == async_answer == "same-answer"
+
+
+def test_arun_surrender_returns_give_up(mock_interface, monkeypatch):
+    _install_fake_sdk(monkeypatch, [_finish(SURRENDER_SENTINEL)])
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="k")
+
+    async def _go():
+        return await agent.arun(mock_interface, "task-1", enable_surrender=True)
+
+    assert anyio.run(_go) == SURRENDER_SENTINEL
+    assert agent.harness_result.status == "surrender"
+
+
+def test_arun_wall_clock_timeout_is_reported(mock_interface, monkeypatch):
+    """The native async path enforces the deadline + interrupt on the loop."""
+    captured = _install_fake_sdk(monkeypatch, [_finish("42")], block_seconds=2.0)
+    agent = OpenHandsAgent(
+        model="openai/gpt-5.6", api_key="k", wall_clock_timeout_s=0.1
+    )
+
+    answer = anyio.run(agent.arun, mock_interface, "task-1")
+
+    assert "Error solving the task" in answer
+    assert agent.harness_result.status == "timeout"
+    # The overrunning run was interrupted and the conversation closed, on the loop.
+    assert captured.get("interrupted") is True
+    assert captured["closed"] == 1
+
+
+def test_arun_fetches_prompt_and_tools_through_async_router(monkeypatch):
+    """The native `arun` awaits prompts/tools/schema on the async interface."""
+    _install_fake_sdk(monkeypatch, [_finish("42")])
+    interface = AsyncMockInterface()
+    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="k")
+    main_thread = threading.current_thread().name
+
+    answer = anyio.run(agent.arun, interface, "task-1")
+
+    assert answer == "42"
+    assert agent.harness_result.status == "success"
+    # Every HTTP fetch was awaited on the loop thread — no worker-thread offload —
+    # proving the native path fetches through the async router.
+    assert ("tools", main_thread) in interface.calls
+    assert ("prompt", main_thread) in interface.calls
+    assert ("schema", main_thread) in interface.calls
+    # The digest fetched through the async router lands in the run metadata.
+    assert agent.harness_result.metadata["mcp_tool_schema_sha256"] == "deadbeef"

@@ -34,12 +34,27 @@ def skip_if_no_api_key():
 
 
 def rehydrate_docs(docs_as_dicts):
-    """Converts a list of dicts back into a list of mock objects."""
+    """Converts a list of stored doc dicts into a list of mock MP documents.
+
+    Copies each source dict so the cached pickle payload is never mutated
+    (fixtures are reused across tests). Fields are normalised to what the tools
+    expect: ``structure`` is a pymatgen ``Structure`` (already hydrated in the
+    fixtures, so only converted when still a dict), ``symmetry`` is exposed as
+    an object with a ``.symbol`` attribute, and ``decomposes_to`` entries as
+    objects with ``.material_id`` / ``.formula`` / ``.amount``.
+    """
     rehydrated = []
-    for doc_dict in docs_as_dicts:
+    for source in docs_as_dicts:
+        doc_dict = dict(source)
         mock_obj = MagicMock()
-        if doc_dict.get("structure"):
-            doc_dict["structure"] = Structure.from_dict(doc_dict["structure"])
+        structure = doc_dict.get("structure")
+        if isinstance(structure, dict):
+            doc_dict["structure"] = Structure.from_dict(structure)
+        symmetry = doc_dict.get("symmetry")
+        if isinstance(symmetry, dict):
+            symmetry_obj = MagicMock()
+            symmetry_obj.configure_mock(**symmetry)
+            doc_dict["symmetry"] = symmetry_obj
         if doc_dict.get("decomposes_to"):
             decomp_list = []
             for item_dict in doc_dict["decomposes_to"]:
@@ -54,7 +69,13 @@ def rehydrate_docs(docs_as_dicts):
 
 @pytest.fixture()
 def mock_mp_rester(mocker):
-    """Mocks the MPRester class to return rehydrated mock data."""
+    """Mocks the MPRester class to return rehydrated mock data.
+
+    Also guarantees an ``MP_API_KEY`` is present so the tools' key check passes;
+    the Rester itself is mocked, so no live request is made and the value is
+    irrelevant.
+    """
+    mocker.patch.dict(os.environ, {"MP_API_KEY": "test-key"})
     with (MOCK_DATA_DIR / "si_summary_docs.pkl").open("rb") as f:
         si_summary_dicts = pickle.load(f)
     with (MOCK_DATA_DIR / "tio2_polymorph_docs.pkl").open("rb") as f:
@@ -174,8 +195,7 @@ def test_adsorption_workflow(silicon_cif, co_cif):
     assert len(combined_struct) == len(slab_struct) + len(adsorbate_struct)
 
 
-@skip_if_no_api_key()
-def test_get_bulk_polymorphs_data():
+def test_get_bulk_polymorphs_data(mock_mp_rester):
     polymorphs_json = get_bulk_polymorphs_data.execute(composition="TiO2")
     data = json.loads(polymorphs_json)
     assert isinstance(data, list)
@@ -183,8 +203,7 @@ def test_get_bulk_polymorphs_data():
     assert data[0]["energy_above_hull"] <= data[1]["energy_above_hull"]
 
 
-@skip_if_no_api_key()
-def test_sort_and_get_first_from_json():
+def test_sort_and_get_first_from_json(mock_mp_rester):
     polymorphs_json = get_bulk_polymorphs_data.execute(composition="TiO2")
     stable_id = sort_and_get_first_from_json.execute(
         json_data=polymorphs_json,
@@ -203,8 +222,7 @@ def test_execute_python_code():
     assert output["execution_result"]["result"] == 50
 
 
-@skip_if_no_api_key()
-def test_get_mp_thermo_data():
+def test_get_mp_thermo_data(mock_mp_rester):
     thermo_json = get_mp_thermo_data.execute(material_id="mp-149")
     data = json.loads(thermo_json)
     assert isinstance(data, list)

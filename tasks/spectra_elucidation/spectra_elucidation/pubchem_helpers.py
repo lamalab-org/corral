@@ -5,13 +5,12 @@ from urllib.parse import quote
 
 import aiohttp
 import backoff
-import pubchempy as pcp
 from loguru import logger
 
 
 class PubChem:
     """
-    PubChem handler to retrieve compound data from PubChem using PubChemPy and RDKit.
+    PubChem handler to retrieve compound data from the PubChem PUG REST API.
     Automatically converts the input to a CID and retrieves the data for that compound from PubChem.
 
     Example:
@@ -58,29 +57,78 @@ class PubChem:
             compound (str): Any type of compound identifier (CID, SMILES, InChI, etc.)
 
         Returns:
-            int: PubChem CID if found, None if not found
+            str: PubChem CID if found, None if not found
         """
-        try:
-            if compound.isdigit():
-                results = pcp.get_compounds(compound, "cid")
-                if results:
-                    return compound
-        except Exception as e:
-            logger.error(f"Invalid compound CID: {compound}, {e}")
-            raise ValueError("Invalid compound CID") from e
-
-        for namespace in ["name", "smiles", "inchi"]:
+        namespaces = ["cid"] if compound.isdigit() else ["name", "smiles", "inchi"]
+        for namespace in namespaces:
+            encoded_compound = quote(compound, safe="")
+            url = f"{self.base_url}/compound/{namespace}/{encoded_compound}/cids/JSON"
             try:
-                results = pcp.get_compounds(compound, namespace)
-                if results:
-                    return results[0].cid
+                data = await self.get_data_from_url(url)
+                cids = data.get("IdentifierList", {}).get("CID", [])
+                if cids:
+                    return str(cids[0])
             except Exception:
                 continue
 
         logger.error(f"Invalid compound identifier: {compound}")
         raise ValueError(
-            "Invalid compound identifier. Only name, smiles or InChI are supported."
+            "Invalid compound identifier. Only CID, name, SMILES or InChI are supported."
         )
+
+    @classmethod
+    async def get_compound_isomers_by_formula(
+        cls, formula: str, limit: int = 5
+    ) -> list[str]:
+        """Retrieve isomeric SMILES for compounds matching a molecular formula.
+
+        Args:
+            formula: Molecular formula accepted by PubChem's fast-formula search.
+            limit: Maximum number of isomers to return. ``0`` returns all matches.
+
+        Returns:
+            A shuffled list of isomeric SMILES strings.
+        """
+        if not formula.strip():
+            raise ValueError("Molecular formula cannot be empty")
+        if limit < 0:
+            raise ValueError("limit must be greater than or equal to 0")
+
+        self = cls()
+        encoded_formula = quote(formula.strip(), safe="")
+        url = f"{self.base_url}/compound/fastformula/{encoded_formula}/cids/JSON"
+        try:
+            data = await self.get_data_from_url(url)
+            isomer_cids = data.get("IdentifierList", {}).get("CID", [])
+        except Exception as e:
+            raise ValueError(f"No compound isomers found for {formula}: {e}") from e
+
+        random.shuffle(isomer_cids)
+        if limit:
+            isomer_cids = isomer_cids[:limit]
+
+        isomers = []
+        for batch_start in range(0, len(isomer_cids), 100):
+            cid_batch = isomer_cids[batch_start : batch_start + 100]
+            cid_path = ",".join(map(str, cid_batch))
+            property_url = (
+                f"{self.base_url}/compound/cid/{cid_path}/property/IsomericSMILES/JSON"
+            )
+            try:
+                property_data = await self.get_data_from_url(property_url)
+                properties = property_data.get("PropertyTable", {}).get(
+                    "Properties", []
+                )
+                isomers.extend(
+                    property_["SMILES"]
+                    for property_ in properties
+                    if property_.get("SMILES")
+                )
+            except Exception as e:
+                logger.warning(f"Could not get SMILES for CIDs {cid_path}: {e}")
+
+        logger.info(f"Found {len(isomers)} compound isomers for formula {formula}")
+        return isomers
 
     @backoff.on_exception(
         backoff.expo,

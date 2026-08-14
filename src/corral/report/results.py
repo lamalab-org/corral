@@ -163,6 +163,10 @@ class BenchmarkResult:
         Returns:
             Dictionary mapping metric names to their calculated values.
         """
+        # `parallel=True` only *allows* a process pool; the registry falls back
+        # to sequential unless the metrics' combined estimated cost clears the
+        # threshold. The default metric set is all cheap in-memory reductions,
+        # so this stays sequential and avoids the pool's spawn + pickling tax.
         return self.metric_registry.calculate_all(
             benchmark_result=self, enabled_only=metrics_to_calculate, parallel=True
         )

@@ -1,38 +1,18 @@
-"""Corral-native Terminus agent.
-
-This is a Corral-native reimplementation of the Terminal-Bench "Terminus"
-scaffold. Terminus itself is tightly coupled to Terminal-Bench (its action is a
-batch of terminal keystrokes executed against a `TmuxSession` and its
-observations are captured terminal panes), which does not map onto Corral where
-tools are retrieved per task and dispatched exclusively through
-`CorralRouter`.
-
-Rather than importing the Terminal-Bench class, this agent ports its
-control-flow idea: on each turn the model returns a single structured JSON
-object with `analysis` and `plan` fields plus exactly one terminal action
-(`tool_calls`, `final_answer`, or `surrender`). Tool calls are executed
-through the router and the structured observations are fed back for the next
-turn. Plain JSON is used instead of provider-native function calling so the
-scaffold behaves comparably across models; when the provider supports it the
-schema is additionally enforced through LiteLLM's `response_format`.
-
-It also ports the two behaviors that characterize the Terminus-2 revision of
-the scaffold — context summarization once the transcript grows large, and
-completion confirmation (a proposed `final_answer` must be re-affirmed before
-it is accepted). Both are opt-out via `__init__` arguments.
-
-The Terminal-Bench / Harbor projects that inspired this control loop are
-Apache-2.0 licensed; this file is an independent reimplementation and copies no
-code from them.
-"""
-
 import json
 import re
-from typing import Any
+from typing import Annotated, Any
 
 from jsonschema import Draft202012Validator
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    WithJsonSchema,
+    field_validator,
+    model_validator,
+)
 
 from corral.agents.base_agent import BaseAgent
 from corral.agents.hooks import HookPoint
@@ -52,7 +32,34 @@ class TerminusToolCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
+    # A free-form dict in Python, but exposed to the provider schema (and hence
+    # to the model) as a JSON *string*. Anthropic structured outputs reject any
+    # object with `additionalProperties: true`, which a `dict[str, Any]` schema
+    # necessarily produces; encoding the arguments as a string keeps the schema
+    # provider-valid while leaving `call.arguments` a dict for downstream
+    # consumers (`_validate_arguments`, `execute_tool`). The `before` validator
+    # parses the JSON string, and also tolerates a real object so the lenient
+    # text-parse fallback keeps working for models that ignore the string type.
+    arguments: Annotated[
+        dict[str, Any],
+        WithJsonSchema(
+            {
+                "type": "string",
+                "description": (
+                    "Tool arguments as a JSON object encoded in a string, "
+                    'e.g. "{\\"path\\": \\"/tmp\\"}". Use "{}" for no arguments.'
+                ),
+            }
+        ),
+    ] = Field(default_factory=dict)
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def _coerce_arguments(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = value.strip()
+            return json.loads(value) if value else {}
+        return value
 
 
 class TerminusResponse(BaseModel):
@@ -93,9 +100,9 @@ def _strip_code_fence(text: str) -> str:
     """Remove a single outer Markdown code fence, if present.
 
     Correctly strips a triple-backtick fence (with an optional language tag)
-    from both ends; text without a fence is returned unchanged. The backtick
-    runs are matched with ``` `+ ``` so a standard three-backtick fence is
-    consumed whole rather than leaving a stray backtick behind.
+    from both ends; text without a fence is returned unchanged. Backtick runs
+    of any length are matched, so a standard three-backtick fence is consumed
+    whole rather than leaving a stray backtick behind.
     """
     text = text.strip()
     if text.startswith("```"):

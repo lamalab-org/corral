@@ -236,6 +236,70 @@ class TestValidateReactionsWithProducts:
 class TestScoreFinal:
     """Tests for score_final function."""
 
+    @staticmethod
+    def leaf_route(*smiles):
+        return json.dumps(
+            {
+                "type": "mol",
+                "smiles": "CCO",
+                "children": [
+                    {
+                        "type": "reaction",
+                        "template_id": "1",
+                        "children": [
+                            {"type": "mol", "smiles": item, "children": []}
+                            for item in smiles
+                        ],
+                    }
+                ],
+            }
+        )
+
+    @patch("retrosynthesis.score.validate_reactions_with_products", return_value=True)
+    @patch("retrosynthesis.score.check_price")
+    def test_score_final_batches_price_lookup(self, mock_check_price, mock_validate):
+        mock_check_price.return_value = {
+            "C": [{"Price": 2.5}],
+            "CO": [{"Price": 4.0}],
+        }
+
+        result = score_final(self.leaf_route("C", "CO"), {"prize": 6.5, "max_steps": 1})
+
+        assert result == 1.0
+        mock_validate.assert_called_once()
+        mock_check_price.assert_called_once_with(["C", "CO"], limit=1)
+
+    @patch("retrosynthesis.score.validate_reactions_with_products", return_value=True)
+    @patch("retrosynthesis.score.check_price")
+    def test_score_final_rejects_missing_buyable(
+        self, mock_check_price, mock_validate
+    ):
+        mock_check_price.return_value = {"C": [{"Price": 2.5}], "CO": []}
+
+        result = score_final(
+            self.leaf_route("C", "CO"), {"prize": 100.0, "max_steps": 1}
+        )
+
+        assert result == 0.0
+        mock_validate.assert_called_once()
+
+    @patch("retrosynthesis.score.validate_reactions_with_products", return_value=True)
+    @patch("retrosynthesis.score.check_price")
+    def test_score_final_rejects_route_over_budget(
+        self, mock_check_price, mock_validate
+    ):
+        mock_check_price.return_value = {
+            "C": [{"Price": 2.5}],
+            "CO": [{"Price": 4.0}],
+        }
+
+        result = score_final(
+            self.leaf_route("C", "CO"), {"prize": 6.49, "max_steps": 1}
+        )
+
+        assert result == 0.0
+        mock_validate.assert_called_once()
+
     def test_score_final_valid_route(self):
         """Test scoring a valid retrosynthesis route."""
         prediction = json.dumps(

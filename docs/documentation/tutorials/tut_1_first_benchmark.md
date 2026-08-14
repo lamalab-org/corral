@@ -183,4 +183,6 @@ Congratulations! You've run your first `Corral` benchmark.
 
 Try modifying the environment to use different numbers or add more tasks.
 
+Once you have several tasks (or run `trials_per_task > 1` for `pass@k`), running them one at a time gets slow. See [How to run benchmarks concurrently (`abench`)](../how_tos/concurrent_benchmarking.md) to overlap trials under limits you control.
+
 ---

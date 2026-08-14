@@ -1,33 +1,13 @@
-import os
 from typing import Any
 
-import pandas as pd
 import psycopg2
-from chemprice import PriceCollector
 from loguru import logger
 from psycopg2.extras import RealDictCursor
 from rdkit import Chem
 from retrosynthesis.config import get_db_config
 from retrosynthesis.constants import FG_PATTERNS
+from retrosynthesis.price_db import lookup_prices
 from rxnutils.chem.reaction import ChemicalReaction
-
-HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br, zstd",
-    "Accept-Language": "en,es-ES;q=0.9,es;q=0.8",
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-}
-
-if (
-    os.environ.get("MOLPORT_API_KEY", "") == ""
-    or os.environ.get("CHEMSPACE_API_KEY", "") == ""
-):
-    raise ValueError(
-        "Please set MOLPORT_API_KEY, CHEMSPACE_API_KEY and MCULE_API_KEY environment variables."
-    )
-pc = PriceCollector()
-pc.setMolportApiKey(os.environ.get("MOLPORT_API_KEY", ""))
-pc.setChemSpaceApiKey(os.environ.get("CHEMSPACE_API_KEY", ""))
 
 
 def get_production_connection():
@@ -514,133 +494,14 @@ def _check_template_applicable(
         return False
 
 
-def filter_price_data(df, smiles_list, limit=10):
-    """
-    Filter the price dataframe and return results for each SMILES in the input list.
-
-    Args:
-        df (pandas.DataFrame): The dataframe containing price information.
-        smiles_list (list[str]): List of SMILES strings to filter the dataframe.
-        limit (int): Maximum number of entries to return per SMILES. If 0, return all results sorted by price.
-
-    Returns:
-        dict: Dictionary where keys are SMILES from smiles_list and values are lists of
-              dictionaries containing price information.
-    """
-
-    def canonicalize_smiles(smiles):
-        """Convert SMILES to canonical form using RDKit, return None if invalid."""
-        try:
-            mol = Chem.MolFromSmiles(smiles)
-            if mol is None:
-                return None
-            return Chem.MolToSmiles(mol)
-        except Exception:
-            return None
-
-    result = {}
-
-    # Process each SMILES in the input list
-    for target_smiles in smiles_list:
-        target_canonical = canonicalize_smiles(target_smiles)
-
-        if target_canonical is None:
-            logger.warning(f"Could not parse SMILES: {target_smiles}")
-            result[target_smiles] = []
-            continue
-
-        # Find matching rows in the dataframe
-        matching_rows = []
-
-        for _idx, row in df.iterrows():
-            df_smiles = row.get("Input SMILES", row.get("SMILES", ""))
-            df_canonical = canonicalize_smiles(df_smiles)
-
-            # Compare canonical SMILES
-            if df_canonical == target_canonical:
-                matching_rows.append(
-                    {
-                        "SMILES": row["SMILES"],
-                        "Supplier": row["Supplier Name"],
-                        "Purity": row["Purity"],
-                        "Amount": row["Amount"],
-                        "Measure": row["Measure"],
-                        "Price": row["Price_USD"],
-                    }
-                )
-
-                # Stop if we've reached the limit (unless limit is 0)
-                if limit > 0 and len(matching_rows) >= limit:
-                    break
-
-        # If limit is 0, return all results sorted by price
-        if limit == 0:
-            matching_rows.sort(key=lambda x: x["Price"])
-
-        result[target_smiles] = matching_rows
-
-    return result
-
-
-def check_chemicals_price(smiles_list: list[str]) -> pd.DataFrame:
-    """Check the price of chemicals given a list of SMILES strings."""
-    pc.check()
-    pc.status()
-    return pc.collect(smiles_list)
-
-
-def check_smiles_presence(df, smiles_list):
-    """
-    Check which SMILES from the input list are present in the dataframe's 'Input SMILES' column.
-
-    Args:
-        df (pandas.DataFrame): The dataframe containing price information with 'Input SMILES' column
-        smiles_list (list of str): List of SMILES strings to check for presence in the dataframe
-
-    Returns:
-        dict: A dictionary where keys are SMILES from smiles_list and values are boolean
-               indicating presence in the dataframe.
-    """
-
-    def canonicalize_smiles(smiles):
-        """Convert SMILES to canonical form using RDKit, return None if invalid."""
-        try:
-            mol = Chem.MolFromSmiles(smiles)
-            if mol is None:
-                return None
-            return Chem.MolToSmiles(mol)
-        except Exception:
-            return None
-
-    # Canonicalize all SMILES in the dataframe once
-    df_canonical_smiles = set()
-    for _idx, row in df.iterrows():
-        df_smiles = row.get("Input SMILES", row.get("SMILES", ""))
-        df_canonical = canonicalize_smiles(df_smiles)
-        if df_canonical is not None:
-            df_canonical_smiles.add(df_canonical)
-
-    # Check each SMILES in the input list
-    result = {}
-    for target_smiles in smiles_list:
-        target_canonical = canonicalize_smiles(target_smiles)
-
-        if target_canonical is None:
-            logger.warning(f"Warning: Could not parse SMILES: {target_smiles}")
-            result[target_smiles] = False
-        else:
-            result[target_smiles] = target_canonical in df_canonical_smiles
-
-    return result
-
-
 def _is_buyable(smiles: list[str]) -> list[bool]:
-    chemicals = check_chemicals_price(smiles)
+    hits = lookup_prices(smiles)
+    return [hits[item] is not None for item in smiles]
 
-    return check_smiles_presence(chemicals, smiles)
 
-
-def check_price(smiles_list: list[str], limit: int) -> list[dict[str, Any]]:
+def check_price(
+    smiles_list: list[str], limit: int = 5
+) -> dict[str, list[dict[str, Any]]]:
     """
     Check the price of chemicals given a list of SMILES strings.
 
@@ -649,11 +510,30 @@ def check_price(smiles_list: list[str], limit: int) -> list[dict[str, Any]]:
         limit (int): Maximum number of entries to return per SMILES.
 
     Returns:
-        list of dict: List of dictionaries containing price information for each SMILES.
+        A dictionary mapping each input SMILES to zero or one frozen price entries.
     """
-    return filter_price_data(
-        check_chemicals_price(smiles_list), smiles_list, limit=limit
-    )
+    hits = lookup_prices(smiles_list)
+    results: dict[str, list[dict[str, Any]]] = {}
+
+    for smiles in smiles_list:
+        hit = hits[smiles]
+        if hit is None:
+            results[smiles] = []
+            continue
+
+        entries = [
+            {
+                "SMILES": hit["canonical_smiles"],
+                "Supplier": ", ".join(hit["sources"]),
+                "Purity": None,
+                "Amount": 1.0,
+                "Measure": "g",
+                "Price": hit["price_usd_per_g"],
+            }
+        ]
+        results[smiles] = entries[:limit] if limit > 0 else entries
+
+    return results
 
 
 def valid_smiles(smiles: str) -> bool:

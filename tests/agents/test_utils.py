@@ -86,9 +86,10 @@ def setup_mock_logger(monkeypatch):
 class MockRetryState:
     """Mock retry state for testing retry functionality."""
 
-    def __init__(self, attempt_number=2, sleep_time=30.0):
+    def __init__(self, attempt_number=2, sleep_time=30.0, exception=None):
         self.attempt_number = attempt_number
         self.next_action = type("NextAction", (), {"sleep": sleep_time})()
+        self.outcome = type("Outcome", (), {"exception": lambda self: exception})()
 
 
 class MockSerializableMessage:
@@ -125,14 +126,16 @@ def test_retry_exceptions_are_openai_exceptions():
 def test_before_sleep_loguru_logs_retry_info(monkeypatch):
     """Test that before_sleep_loguru logs retry information."""
     mock_logger = MockFunction()
-    mock_logger.info = MockFunction()
+    mock_logger.warning = MockFunction()
     monkeypatch.setattr("corral.agents.utils.logger", mock_logger)
 
-    mock_retry_state = MockRetryState()
+    mock_retry_state = MockRetryState(exception=ValueError("boom"))
 
     before_sleep_loguru(mock_retry_state)
 
-    mock_logger.info.assert_called_once_with("Retrying: 2, wait: 30.0 seconds")
+    mock_logger.warning.assert_called_once_with(
+        "LLM call retry 2/3 after ValueError: boom; waiting 30s"
+    )
 
 
 def test_litellm_message_structure():
@@ -448,6 +451,43 @@ def test_save_agent_messages_with_tools(tmp_path):
         data = json.load(f)
 
     assert data["tools"] == tools
+
+
+def test_save_agent_messages_keeps_trace_metadata_outside_messages(tmp_path):
+    """Graph annotations must never become provider message keys."""
+    messages = cast(
+        "list[LiteLLMMessage]",
+        [
+            {"role": "user", "content": "Hello"},
+            {
+                "role": "assistant",
+                "content": "Result",
+                "name": "evaluate_node_0001",
+            },
+        ],
+    )
+    original_messages = [message.copy() for message in messages]
+    trace_metadata = {
+        "schema": "corral.ai_scientist.graph",
+        "nodes": [{"id": "node_0001", "label": "recognizable node"}],
+        "edges": [],
+    }
+
+    result_path = save_agent_messages(
+        messages=messages,
+        task_id="test_task",
+        agent_name="test_agent",
+        model="test_model",
+        output_dir=str(tmp_path),
+        trace_metadata=trace_metadata,
+    )
+
+    with open(result_path) as f:
+        data = json.load(f)
+
+    assert data["messages"] == original_messages
+    assert data["trace_metadata"] == trace_metadata
+    assert messages == original_messages
 
 
 def test_save_agent_messages_creates_directory():

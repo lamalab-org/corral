@@ -1,13 +1,5 @@
 """Shared fixtures and test data for retrosynthesis tests."""
 
-import os
-
-# Set dummy API keys before any imports that might load retrosynthesis_utils
-# These must be set at module level (not in fixtures) so they're available during test collection
-os.environ.setdefault("MOLPORT_API_KEY", "dummy_molport_key_for_testing")
-os.environ.setdefault("CHEMSPACE_API_KEY", "dummy_chemspace_key_for_testing")
-os.environ.setdefault("MCULE_API_KEY", "dummy_mcule_key_for_testing")
-
 import pytest
 
 
