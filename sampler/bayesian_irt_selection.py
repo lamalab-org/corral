@@ -84,3 +84,70 @@ def make_stratified_bayes_sampler(
         return selected
 
     return sampler
+
+
+def build_bayes_item_order_per_env_level(
+    trace, items: list[str], item_env: pd.Series, n_draws_used: int = 200, seed: int = 0
+) -> dict[tuple[str, str], list[str]]:
+    """Per-(environment, level) posterior-averaged item order -- the nested
+    analogue of build_bayes_item_order_per_stratum, so the Bayes-IRT-greedy
+    sampler can be compared head-to-head against
+    subsampling_core.make_stratified_sampler_nested under the exact same
+    (environment, level) allocation, isolating "how items are picked within
+    a stratum" as the only thing that differs between the two methods.
+    """
+    info = posterior_averaged_info(trace, n_draws_used=n_draws_used, seed=seed)
+    items_arr = np.array(items)
+    env_arr = item_env.reindex(items).to_numpy()
+    level_arr = np.array([it.split("|")[1] for it in items])
+
+    orders: dict[tuple[str, str], list[str]] = {}
+    for env in np.unique(env_arr):
+        for level in np.unique(level_arr[env_arr == env]):
+            mask = (env_arr == env) & (level_arr == level)
+            orders[(env, level)] = greedy_order_from_info_matrix(
+                info[mask], items_arr[mask], int(mask.sum())
+            )
+    return orders
+
+
+def make_stratified_bayes_sampler_nested(
+    orders: dict[tuple[str, str], list[str]],
+    allocation_mode: str = "proportional",
+    min_per_stratum: int = 1,
+):
+    """Nested (environment, level) allocation identical in structure to
+    subsampling_core.make_stratified_sampler_nested -- same two-stage
+    allocate_budget calls, same min_per_stratum floor -- but within each
+    stratum, takes the top-k items by Fisher-information greedy order
+    (from build_bayes_item_order_per_env_level) instead of a random draw.
+    Deterministic: no rng use, despite the signature matching SAMPLERS'
+    (all_items, budget, rng, col_env) shape for drop-in compatibility.
+    """
+    env_level_sizes = {k: len(v) for k, v in orders.items()}
+    envs = sorted({env for env, _level in orders})
+    env_sizes = {
+        env: sum(n for (e, _lv), n in env_level_sizes.items() if e == env)
+        for env in envs
+    }
+
+    def sampler(all_items, budget, rng, col_env):
+        env_alloc = allocate_budget(
+            env_sizes, budget, mode=allocation_mode, min_per_stratum=min_per_stratum
+        )
+        selected = []
+        for env, n in env_alloc.items():
+            if n == 0:
+                continue
+            level_sizes = {
+                lv: sz for (e, lv), sz in env_level_sizes.items() if e == env
+            }
+            level_alloc = allocate_budget(
+                level_sizes, n, mode=allocation_mode, min_per_stratum=min_per_stratum
+            )
+            for lv, k in level_alloc.items():
+                if k > 0:
+                    selected.extend(orders[(env, lv)][:k])
+        return selected
+
+    return sampler

@@ -57,15 +57,46 @@ def fit_2pl_bayesian(
 def main(
     exclude_environments: str = "resistor",
     legacy_only: bool = True,
+    exclude_models: str = "",
+    data_path: str | None = None,
+    tag: str | None = None,
     draws: int = 1000,
     tune: int = 1000,
     chains: int = 4,
     seed: int = 0,
 ) -> None:
-    excluded = [e.strip() for e in exclude_environments.split(",") if e.strip()]
-    subjects, items, K, N, item_env = build_trial_counts(exclude_environments=excluded)
+    """
+    Args:
+        legacy_only: shortcut for the original 3-model (claude-4.5, gpt-4o,
+            gpt-oss-120b) fit. Ignored (treated as False) whenever
+            exclude_models is also set, since the two select different
+            subject sets and legacy_only would silently win otherwise.
+        exclude_models: comma-separated models to drop from the subject pool
+            (e.g. "gpt-4o,gpt-oss-120b" for a "top-4-model" fit). Takes
+            precedence over legacy_only.
+        data_path: override source CSV (default corral_mini_source.csv). Use
+            e.g. data/corral_mini_source_cleaned.csv for the cleaned pool.
+        tag: output filename suffix (irt_2pl_bayesian_{trace,summary}_{tag}).
+            Defaults to "legacy" or "all" based on legacy_only when
+            exclude_models isn't set; required to be meaningful when it is
+            (defaults to "custom" otherwise).
+    """
+    excluded_envs = [e.strip() for e in exclude_environments.split(",") if e.strip()]
+    excluded_models = [m.strip() for m in exclude_models.split(",") if m.strip()]
+    subjects, items, K, N, item_env = build_trial_counts(
+        exclude_environments=excluded_envs,
+        data_path=Path(data_path) if data_path else None,
+    )
 
-    if legacy_only:
+    if excluded_models:
+        keep_idx = [
+            i for i, s in enumerate(subjects) if s.split("__")[0] not in excluded_models
+        ]
+        subjects = [subjects[i] for i in keep_idx]
+        K, N = K[keep_idx], N[keep_idx]
+        logger.info(f"Fitting on {len(subjects)} subjects, excluding {excluded_models}")
+        tag = tag or "custom"
+    elif legacy_only:
         keep_idx = [
             i for i, s in enumerate(subjects) if s.split("__")[0] in LEGACY_MODELS
         ]
@@ -74,8 +105,10 @@ def main(
         logger.info(
             f"Fitting on {len(subjects)} legacy subjects only (matches stratified_irt's design fit)"
         )
+        tag = tag or "legacy"
     else:
         logger.info(f"Fitting on all {len(subjects)} subjects")
+        tag = tag or "all"
 
     logger.info(
         f"{len(subjects)} subjects x {len(items)} items, {int(N.sum())} trials — starting NUTS sampling"
@@ -90,7 +123,6 @@ def main(
     logger.info(f"Max r_hat: {max_rhat:.4f} (want close to 1.00)")
     logger.info(f"Min ESS (bulk): {min_ess:.0f} (want > ~400 per chain-equivalent)")
 
-    tag = "legacy" if legacy_only else "all"
     trace_path = OUT_DIR / f"irt_2pl_bayesian_trace_{tag}.nc"
     trace.to_netcdf(trace_path)
     logger.success(f"Saved trace -> {trace_path}")

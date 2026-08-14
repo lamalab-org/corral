@@ -22,6 +22,8 @@ def main(
     budget_step: int = 5,
     seed: int = 0,
     exclude_environments: str = "resistor",
+    data_path: str | None = None,
+    tag: str | None = None,
     output: str | None = None,
 ) -> None:
     """
@@ -35,6 +37,11 @@ def main(
             the candidate item pool before sampling (e.g. "resistor" — too
             few items/levels to be worth subsampling; keep it whole instead).
             Pass "" for no exclusions.
+        data_path: override source CSV (default corral_mini_source.csv). Use
+            e.g. data/corral_mini_source_cleaned.csv for the cleaned pool.
+        tag: output filename suffix override, used literally as
+            f"subsampling_sweep_{sampler}{tag}.csv" (include your own
+            leading "_"; default derived from exclude_environments).
     """
     if sampler not in SAMPLERS:
         raise ValueError(f"sampler must be one of {list(SAMPLERS)}")
@@ -42,15 +49,23 @@ def main(
 
     budgets = sorted(set(range(budget_min, budget_max, budget_step)) | {budget_max})
     logger.info(
-        f"sampler={sampler} budgets={budgets} n_repeats={n_repeats} excluded={excluded}"
+        f"sampler={sampler} budgets={budgets} n_repeats={n_repeats} excluded={excluded} "
+        f"data_path={data_path or 'default'}"
     )
 
     results = run_sweep(
-        sampler, budgets, n_repeats, seed=seed, exclude_environments=excluded
+        sampler,
+        budgets,
+        n_repeats,
+        seed=seed,
+        exclude_environments=excluded,
+        data_path=Path(data_path) if data_path else None,
     )
     logger.info(f"{len(results)} (budget, repeat) rows")
 
-    tag = f"_excl-{'-'.join(excluded)}" if excluded else ""
+    tag = (
+        tag if tag is not None else (f"_excl-{'-'.join(excluded)}" if excluded else "")
+    )
     out = Path(output) if output else OUT_DIR / f"subsampling_sweep_{sampler}{tag}.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(out, index=False)

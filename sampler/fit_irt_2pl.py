@@ -36,10 +36,14 @@ OUT_DIR = Path(__file__).parent / "data"
 
 def build_trial_counts(
     exclude_environments: list[str] | None = None,
+    exclude_models: list[str] | None = None,
+    data_path: Path | None = None,
 ) -> tuple[list[str], list[str], np.ndarray, np.ndarray, pd.Series]:
-    df = pd.read_csv(DATA_PATH)
+    df = pd.read_csv(data_path or DATA_PATH)
     if exclude_environments:
         df = df[~df["environment"].isin(exclude_environments)]
+    if exclude_models:
+        df = df[~df["model"].isin(exclude_models)]
     df = df.copy()
     df["subject"] = df["model"] + "__" + df["scaffold"]
     df["item"] = df[ITEM_KEY].astype(str).agg("|".join, axis=1)
@@ -116,9 +120,19 @@ def fit_2pl(
     return theta, np.exp(log_a), b
 
 
-def main(output: str | None = None, exclude_environments: str = "resistor") -> None:
-    excluded = [e.strip() for e in exclude_environments.split(",") if e.strip()]
-    subjects, items, K, N, item_env = build_trial_counts(exclude_environments=excluded)
+def main(
+    output: str | None = None,
+    exclude_environments: str = "resistor",
+    exclude_models: str = "",
+    data_path: str | None = None,
+) -> None:
+    excluded_envs = [e.strip() for e in exclude_environments.split(",") if e.strip()]
+    excluded_models = [m.strip() for m in exclude_models.split(",") if m.strip()]
+    subjects, items, K, N, item_env = build_trial_counts(
+        exclude_environments=excluded_envs,
+        exclude_models=excluded_models,
+        data_path=Path(data_path) if data_path else None,
+    )
     logger.info(f"{len(subjects)} subjects x {len(items)} items, {int(N.sum())} trials")
 
     theta, a, b = fit_2pl(K, N)

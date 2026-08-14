@@ -32,12 +32,18 @@ ITEM_KEY = ["environment", "level", "task"]
 
 
 def load_matrix(
-    value: str = "success", exclude_environments: list[str] | None = None
+    value: str = "success",
+    exclude_environments: list[str] | None = None,
+    exclude_models: list[str] | None = None,
+    data_path: Path | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
-    df = pd.read_csv(DATA_PATH)
+    df = pd.read_csv(data_path or DATA_PATH)
     if exclude_environments:
         df = df[~df["environment"].isin(exclude_environments)]
         logger.info(f"Excluded environments from item pool: {exclude_environments}")
+    if exclude_models:
+        df = df[~df["model"].isin(exclude_models)]
+        logger.info(f"Excluded models from subject pool: {exclude_models}")
     matrix, col_env = build_matrix(df, value=value, item_key=ITEM_KEY)
     return matrix, col_env
 
@@ -95,7 +101,7 @@ def allocate_budget(
     return alloc
 
 
-def make_stratified_sampler(mode: str):
+def make_stratified_sampler(mode: str, min_per_stratum: int = 1):
     def sampler(
         all_items: list[str], budget: int, rng: np.random.Generator, col_env: pd.Series
     ) -> list[str]:
@@ -103,7 +109,9 @@ def make_stratified_sampler(mode: str):
             env: list(col_env[col_env == env].index) for env in col_env.unique()
         }
         strata_sizes = {env: len(items) for env, items in strata_items.items()}
-        alloc = allocate_budget(strata_sizes, budget, mode=mode)
+        alloc = allocate_budget(
+            strata_sizes, budget, mode=mode, min_per_stratum=min_per_stratum
+        )
         selected = []
         for env, n in alloc.items():
             if n > 0:
@@ -113,7 +121,7 @@ def make_stratified_sampler(mode: str):
     return sampler
 
 
-def make_stratified_sampler_nested(mode: str):
+def make_stratified_sampler_nested(mode: str, min_per_stratum: int = 1):
     """Proportional allocation nested two levels deep: environment, then level
     within environment. Item strings are "environment|level|task" (ITEM_KEY
     order), so the level is parsed straight out of the item id — no separate
@@ -122,9 +130,13 @@ def make_stratified_sampler_nested(mode: str):
     Two-stage `allocate_budget` call: first split the total budget across
     environments exactly like `make_stratified_sampler`, then split each
     environment's share across its levels using the same proportional (or
-    equal) rule. `allocate_budget`'s min_per_stratum=1 guarantee applies at
-    both stages, so every non-empty (environment, level) combo present in the
-    pool gets at least one item as long as the budget stretches that far.
+    equal) rule. `min_per_stratum` is applied at BOTH stages (same value),
+    so every non-empty (environment, level) combo gets at least that many
+    items as long as the budget stretches that far -- note the environment
+    stage needs enough headroom to cover `min_per_stratum * n_levels` for
+    each environment, or the level stage's own minimum guarantee will run
+    short on whatever's left; check the actual per-stratum output rather
+    than assuming the nested minimum always holds exactly at small budgets.
     """
 
     def sampler(
@@ -134,7 +146,9 @@ def make_stratified_sampler_nested(mode: str):
             env: list(col_env[col_env == env].index) for env in col_env.unique()
         }
         strata_sizes = {env: len(items) for env, items in strata_items.items()}
-        env_alloc = allocate_budget(strata_sizes, budget, mode=mode)
+        env_alloc = allocate_budget(
+            strata_sizes, budget, mode=mode, min_per_stratum=min_per_stratum
+        )
 
         selected = []
         for env, n in env_alloc.items():
@@ -145,7 +159,9 @@ def make_stratified_sampler_nested(mode: str):
                 level = item.split("|")[1]
                 level_items.setdefault(level, []).append(item)
             level_sizes = {lv: len(items) for lv, items in level_items.items()}
-            level_alloc = allocate_budget(level_sizes, n, mode=mode)
+            level_alloc = allocate_budget(
+                level_sizes, n, mode=mode, min_per_stratum=min_per_stratum
+            )
             for lv, k in level_alloc.items():
                 if k > 0:
                     selected.extend(rng.choice(level_items[lv], size=k, replace=False))
@@ -189,6 +205,9 @@ SAMPLERS = {
     "stratified_proportional": make_stratified_sampler("proportional"),
     "stratified_equal": make_stratified_sampler("equal"),
     "stratified_proportional_nested": make_stratified_sampler_nested("proportional"),
+    "stratified_proportional_nested_min2": make_stratified_sampler_nested(
+        "proportional", min_per_stratum=2
+    ),
 }
 
 
@@ -244,9 +263,10 @@ def run_sweep(
     seed: int = 0,
     value: str = "success",
     exclude_environments: list[str] | None = None,
+    data_path: Path | None = None,
 ) -> pd.DataFrame:
     matrix, col_env = load_matrix(
-        value=value, exclude_environments=exclude_environments
+        value=value, exclude_environments=exclude_environments, data_path=data_path
     )
     all_items = list(matrix.columns)
     logger.info(f"{len(all_items)} candidate items, {matrix.shape[0]} subjects")
