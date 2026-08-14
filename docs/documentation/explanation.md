@@ -106,112 +106,23 @@ The system follows several principles:
 
 ---
 
-## The Philosophy Behind Hooks
+## Why agents return actions
 
-Hooks in `Corral` allow injecting custom code at specific points in agent execution.
+An agent does not own an episode. It receives an immutable view of the current
+State and proposes one action. Corral records the action, executes it, records
+the result, and supplies the new State revision to the next step.
 
-### The Core Problem
+This boundary keeps mutable execution concerns out of agent classes:
 
-When building agents, you often need to:
+- messages and usage are durable State data;
+- the runtime owns iteration limits and tool dispatch;
+- agent-specific prompt and response protocols stay in their concrete agents;
+- concurrent trials can share one agent configuration safely.
 
-- Log what's happening for debugging
-- Modify behavior in specific situations
-- Inject test conditions or failures
-- Track custom metrics
-- Implement intervention studies
-
-You could hard-code these features into each agent, but this creates several problems:
-
-**Tight Coupling**: Agent logic becomes mixed with logging, metrics, and special-case handling.
-
-**Limited Reusability**: You can't easily apply the same logging to different agents.
-
-**Fork Proliferation**: Every research variation requires copying and modifying agent code.
-
-### The Hook Solution
-
-Hooks provide *extension points* where you can inject behavior without modifying agent code:
-
-```python
-def my_hook(context: HookContext) -> None:
-    # Your custom logic
-    print(f"Iteration {context.iteration}")
-
-
-hooks = AgentHooks()
-hooks.register(HookPoint.BEFORE_ITERATION, my_hook)
-
-agent = ReActAgent(model="gpt-4", hooks=hooks)
-```
-
-The agent doesn't know about your hook. It just exposes hook points and executes registered callbacks.
-
-### Why This Design
-
-**Separation of Concerns**: Agent logic stays focused on reasoning. Logging, metrics, and interventions live in hooks.
-
-**Composability**: Multiple hooks can be registered at the same point. You can combine logging hooks, metric hooks, and intervention hooks.
-
-**Reusability**: Write a hook once, use it with any agent that supports the hook point.
-
-**Research Flexibility**: Run the same agent with different hooks to test interventions without modifying agent code.
-
-### Hook Point Selection
-
-`Corral` provides four hook points, chosen to cover common needs without overwhelming users:
-
-**BEFORE_TASK**: For setup, intervention injection, initialization
-**AFTER_TASK**: For cleanup, final metrics, result processing
-**BEFORE_ITERATION**: For logging, iteration-specific setup
-**AFTER_ITERATION**: For analyzing tool calls, checking progress
-
-This is deliberately minimal. More hook points would provide more flexibility but increase complexity. These four cover most research needs while keeping the system understandable.
-
-### The HookContext Design
-
-Hooks receive a `HookContext` object that's *mutable*. This is important:
-
-```python
-def early_stopping_hook(context: HookContext) -> None:
-    if too_many_errors(context):
-        context.should_continue = False  # Stops agent
-```
-
-The hook can *modify* the context, affecting agent behavior. This is more powerful than read-only observation.
-
-The context includes:
-- State (messages, iteration number, task_id)
-- Control flags (should_continue, skip_current_step)
-- Storage (metadata dict for custom data)
-
-This gives hooks both observability and control.
-
-### Interventions as Hooks
-
-Intervention studies (where you inject thoughts or actions into agents) are implemented as hooks:
-
-```python
-intervention_hook = create_intervention_hook(
-    intervention_map={"task_1": "helpful hint"}, execute_tools=True
-)
-hooks.register(HookPoint.BEFORE_TASK, intervention_hook)
-```
-
-This demonstrates hook composability - interventions are just another type of hook, compatible with logging hooks and metric hooks.
-
-
-### Design Trade-offs
-
-Hooks add complexity - there's more API surface, more concepts to learn. For simple use cases, they're overkill.
-
-`Corral` accepts this because the target use case is *research*, where you'll run many variations and need flexibility. The hook system pays for itself when you need to:
-
-- Run the same agent with and without interventions
-- Compare different logging strategies
-- Test custom stopping conditions
-- Inject test failures
-
-If you're just running one agent on one task once, hooks are unnecessary. But research involves many variations, and hooks enable that efficiently.
+Completion follows the same rule as every other decision. The agent calls
+`submit_answer`; free text is never scanned or sent through a second extraction
+model. Consequently, the interaction trace is the authoritative record of the
+submitted answer.
 
 ---
 

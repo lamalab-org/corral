@@ -1,24 +1,38 @@
-"""Tests for `execute_single_trial` routing of harness infrastructure failures.
+"""Tests for executing a trial through the State/Action runtime."""
 
-A black-box harness agent surfaces a timeout / SDK crash / MCP transport failure
-as an :class:`AgentRunResult` with a non-submit-worthy ``status`` and an error
-string for ``answer``. `execute_single_trial` must record that as a trial error
-(via ``get_task_status`` score) instead of submitting the error string to the
-task scorer.
-"""
-
-from corral.agents.schema import SURRENDER_SENTINEL, AgentRunResult
+from corral.agents.schema import SURRENDER_SENTINEL
+from corral.core.action import Action, submit_answer_action
 from corral.report import TaskTrialResult
 from corral.run import execute_single_trial
+from corral.types import ToolResponse
 
 
 class FakeInterface:
     def __init__(self):
         self.submit_calls = []
         self.surrender_calls = []
+        self.tool_calls = []
 
     def configure_additional_apps(self, task_id, timeout=None):
         return "configured"
+
+    def get_task_prompt(self, task_id):
+        return f"solve {task_id}"
+
+    def get_available_tools_for_task(self, task_id, verbosity="brief"):
+        return {
+            "tools": [
+                {
+                    "name": "measure",
+                    "description": "Measure",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ]
+        }
+
+    def execute_tool(self, task_id, name, arguments):
+        self.tool_calls.append((task_id, name, arguments))
+        return ToolResponse(result="measured", success=True, error=None)
 
     def get_task_status(self, task_id):
         return {"score": 0.0}
@@ -45,97 +59,54 @@ class FakeInterface:
         )
 
 
-class FakeAgent:
-    def __init__(self, result: AgentRunResult):
-        self._result = result
+class SubmitAgent:
+    model = "test-model"
+    max_iterations = 2
 
-    def run_agent(self, interface, task_id, **kwargs):
-        return self._result
+    def __init__(self, answer="42"):
+        self.answer = answer
 
-    def get_total_token_usage(self):
-        return {}
+    async def step(self, state):
+        return submit_answer_action(self.answer)
 
 
-def _run(result: AgentRunResult):
+class ToolThenSubmitAgent:
+    model = "test-model"
+    max_iterations = 2
+
+    async def step(self, state):
+        if state.usage.agent_steps == 0:
+            return Action(name="measure", arguments={})
+        return submit_answer_action("42")
+
+
+def _run(agent):
     interface = FakeInterface()
-    agent = FakeAgent(result)
     trial = execute_single_trial(
         task_id="task-1", trial_index=0, interface=interface, agent=agent
     )
     return interface, trial
 
 
-def test_success_status_is_submitted():
-    interface, trial = _run(AgentRunResult(answer="42", status="success"))
+def test_submit_action_is_submitted_to_environment():
+    interface, trial = _run(SubmitAgent())
+
+    assert interface.submit_calls == [("task-1", "42")]
+    assert trial.score == 1.0
+    assert any(message.get("name") == "submit_answer" for message in trial.messages)
+
+
+def test_tool_action_is_executed_before_submission():
+    interface, trial = _run(ToolThenSubmitAgent())
+
+    assert interface.tool_calls == [("task-1", "measure", {})]
     assert interface.submit_calls == [("task-1", "42")]
     assert trial.score == 1.0
 
 
-def test_agent_owned_tool_statistics_override_canonical_runtime_statistics():
-    statistics = {
-        "total_calls": 1,
-        "successful_calls": 0,
-        "failed_calls": 1,
-        "tools_used": ["measure"],
-        "error_types": {
-            "invalid_tool": 0,
-            "invalid_args": 0,
-            "execution_error": 1,
-        },
-        "tool_calls": [
-            {
-                "tool_name": "measure",
-                "arguments": {},
-                "result": None,
-                "status": "execution_error",
-                "error_message": "failed",
-                "duration": 0.1,
-                "timestamp": "2026-08-10T12:00:00+00:00",
-            }
-        ],
-    }
+def test_surrender_is_a_submit_action_with_the_sentinel():
+    interface, trial = _run(SubmitAgent(SURRENDER_SENTINEL))
 
-    _, trial = _run(
-        AgentRunResult(
-            answer="42",
-            status="success",
-            metadata={"tool_statistics": statistics},
-        )
-    )
-
-    assert trial.tool_statistics == statistics
-    assert trial.state["tool_statistics"] == statistics
-
-
-def test_timeout_status_is_not_submitted():
-    interface, trial = _run(
-        AgentRunResult(
-            answer="Error solving the task: timed out",
-            status="timeout",
-            error_message="harness timed out",
-        )
-    )
-    # The error string is never submitted as if it were a model answer.
-    assert interface.submit_calls == []
-    assert "Agent timeout" in (trial.error_message or "")
-
-
-def test_sdk_failure_status_is_not_submitted():
-    interface, trial = _run(
-        AgentRunResult(
-            answer="Error solving the task: crash",
-            status="sdk_failure",
-            error_message="boom",
-        )
-    )
-    assert interface.submit_calls == []
-    assert "Agent sdk_failure" in (trial.error_message or "")
-
-
-def test_surrender_is_routed_to_surrender_task():
-    interface, trial = _run(
-        AgentRunResult(answer=SURRENDER_SENTINEL, status="surrender")
-    )
     assert interface.surrender_calls == ["task-1"]
     assert interface.submit_calls == []
     assert trial.surrendered is True

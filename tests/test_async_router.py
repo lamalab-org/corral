@@ -23,11 +23,11 @@ import httpx
 import pytest
 from pydantic import Field
 
-from corral.agents.schema import AgentRunResult
 from corral.backend.env import Toolset, build_environments
 from corral.backend.server import create_benchmark_server
 from corral.backend.task import TaskDefinition
 from corral.backend.tool import tool
+from corral.core.action import submit_answer_action
 from corral.router.routes import (
     AsyncCorralRouter,
     AsyncTrialScopedRouter,
@@ -344,28 +344,18 @@ def test_as_sync_interface_passes_sync_through_and_converts_async():
 
 
 class _NativeFetchAgent:
-    """A minimal natively-async agent that fetches through the async router.
+    """A minimal action agent recording the event-loop thread."""
 
-    It has no synchronous `run()`: `arun_agent` awaits the interface's
-    prompt/tools coroutines directly (like `ClaudeCodeAgent`'s native path),
-    then returns a fixed answer that the demo task always scores `1.0`. It
-    records the thread it ran on so a test can prove the HTTP was awaited on the
-    event loop and never offloaded to a worker thread.
-    """
+    model = "test-model"
+    max_iterations = 1
 
     def __init__(self) -> None:
-        self.messages: list = []
         self.thread_name: str | None = None
 
-    async def arun_agent(self, interface, task_id, **kwargs) -> AgentRunResult:
+    async def step(self, state):
         self.thread_name = threading.current_thread().name
-        await acall(interface.get_available_tools_for_task, task_id)
-        prompt = await acall(interface.get_task_prompt, task_id)
-        assert prompt  # fetched through the (async) router
-        return AgentRunResult(answer="7", status="success")
-
-    def get_total_token_usage(self) -> dict:
-        return {}
+        assert state.metadata.task["prompt"]
+        return submit_answer_action("7")
 
 
 def _run_abench_over_async_router(app, tmp_path, factory, **abench_kwargs):

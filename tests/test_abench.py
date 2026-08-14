@@ -4,10 +4,10 @@ These cover the first parallelism stage from `make_efficiency.md`:
 
 * independent task/trial pairs run concurrently, bounded by a global limit;
 * repeated trials of the *same* task stay serialised;
-* every concurrent trial gets its **own** agent (via an `agent_factory`);
+* immutable agent configuration can be shared safely between trials;
 * a single collector still records every trial and checkpoints deterministically;
 * resume-awareness skips already-recorded trials;
-* concurrency without a factory fails fast with a clear error.
+* a factory can still provide per-trial configuration when requested.
 
 The whole flow is driven through the synchronous `bench(max_concurrency=...)`
 entry point (which internally runs `abench` via `anyio.run`), so the tests
@@ -20,16 +20,17 @@ import threading
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from functools import partial
 
 import anyio
 import pytest
 
-from corral.agents.base_agent import BaseAgent
-from corral.agents.schema import AgentRunResult
-from corral.concurrency import ConcurrencyConfig, TrialContext
+from corral.concurrency import (
+    DEFAULT_TOOL_JOBS_PER_TRIAL,
+    ConcurrencyConfig,
+    TrialContext,
+)
+from corral.core.action import submit_answer_action
 from corral.report import TaskTrialResult, TaskTrialResults
-from corral.router import AsyncCorralRouter, CorralRouter
 from corral.run import CorralRunner
 
 
@@ -66,30 +67,25 @@ class ConcurrencyTracker:
 
 
 class TrackingAgent:
-    """Minimal agent: sleeps (to expose overlap) then returns a fixed answer.
+    """Minimal stateless agent that sleeps to expose scheduler overlap."""
 
-    The blocking `time.sleep` runs in a worker thread on every path — the sync
-    scheduler calls `run_agent` in a thread, and the async scheduler awaits
-    `arun_agent`, whose default here offloads `run_agent` to a thread (exactly as
-    a non-native `BaseAgent` does). So real overlap is observable either way.
-    """
+    model = "test-model"
+    max_iterations = 1
 
     def __init__(self, tracker: ConcurrencyTracker, sleep: float = 0.02):
         self._tracker = tracker
         self._sleep = sleep
 
-    def run_agent(self, interface, task_id, **kwargs) -> AgentRunResult:
-        with self._tracker.track(task_id):
+    def _tracking_key(self, state) -> str:
+        return str(state.metadata.task["id"])
+
+    def _sleep_once(self, key: str) -> None:
+        with self._tracker.track(key):
             time.sleep(self._sleep)
-        return AgentRunResult(answer="42", status="success")
 
-    async def arun_agent(self, interface, task_id, **kwargs) -> AgentRunResult:
-        return await anyio.to_thread.run_sync(
-            partial(self.run_agent, interface, task_id, **kwargs)
-        )
-
-    def get_total_token_usage(self) -> dict:
-        return {}
+    async def step(self, state):
+        await anyio.to_thread.run_sync(self._sleep_once, self._tracking_key(state))
+        return submit_answer_action("42")
 
 
 class FakeRouter:
@@ -136,6 +132,12 @@ class FakeRouter:
         with self._lock:
             self.configure_calls.append(task_id)
         return "configured"
+
+    def get_task_prompt(self, task_id):
+        return f"solve {task_id}"
+
+    def get_available_tools_for_task(self, task_id, verbosity="brief"):
+        return {"tools": []}
 
     def get_task_status(self, task_id) -> dict:
         return {"score": 0.0}
@@ -211,6 +213,12 @@ class _FakeTrialRouter:
         with self._parent._lock:
             self._parent.configure_calls.append(self.task_id)
         return "configured"
+
+    def get_task_prompt(self, task_id=None):
+        return f"solve {self.task_id}"
+
+    def get_available_tools_for_task(self, task_id=None, verbosity="brief"):
+        return {"tools": []}
 
     def get_task_status(self, task_id=None) -> dict:
         return {"score": 0.0}
@@ -297,8 +305,6 @@ def test_concurrency_config_models_richer_limits():
 
 
 def test_concurrency_config_tool_jobs_defaults_to_server_default():
-    from corral.concurrency import DEFAULT_TOOL_JOBS_PER_TRIAL
-
     # Left un-tuned, the field carries the server's own historical default, so an
     # existing run forwards exactly what the server would have used anyway.
     assert ConcurrencyConfig().tool_jobs_per_trial == DEFAULT_TOOL_JOBS_PER_TRIAL
@@ -589,10 +595,8 @@ class ModeledAgent(TrackingAgent):
         super().__init__(tracker, sleep=sleep)
         self.model = model
 
-    def run_agent(self, interface, task_id, **kwargs) -> AgentRunResult:
-        with self._tracker.track(self.model):
-            time.sleep(self._sleep)
-        return AgentRunResult(answer="42", status="success")
+    def _tracking_key(self, state) -> str:
+        return self.model
 
 
 def test_per_model_caps_simultaneous_trials_by_model(tmp_path, monkeypatch):
@@ -818,156 +822,22 @@ def test_resume_skips_already_recorded_trials(tmp_path, monkeypatch):
     assert len(interface.submit_calls) == 1
 
 
-def test_concurrent_without_factory_fails_fast(tmp_path):
+def test_concurrent_trials_share_stateless_agent_configuration(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     shared_agent = TrackingAgent(ConcurrencyTracker())
-    runner = CorralRunner(
-        FakeRouter(), agent=shared_agent, checkpoint_dir=str(tmp_path)
+    interface = FakeRouter()
+    runner = CorralRunner(interface, agent=shared_agent, checkpoint_dir=str(tmp_path))
+
+    runner.bench(
+        task_ids=["a", "b"],
+        trials_per_task=1,
+        max_concurrency=2,
+        run_name="report",
     )
 
-    with pytest.raises(ValueError, match="fresh agent per trial"):
-        runner.bench(task_ids=["a"], trials_per_task=1, max_concurrency=2)
+    assert len(interface.submit_calls) == 2
 
 
 def test_runner_requires_an_agent_source(tmp_path):
     with pytest.raises(ValueError, match="agent.*agent_factory"):
         CorralRunner(FakeRouter(), checkpoint_dir=str(tmp_path))
-
-
-class _ThreadRecordingAgent(BaseAgent):
-    """Minimal non-native agent: records the thread its blocking `run` ran on."""
-
-    def __init__(self):
-        super().__init__(user_prompt="tool_calling/user_prompt")
-        self.run_thread_name = None
-
-    @property
-    def requires_answer_extraction(self) -> bool:
-        # Skip the extractor so the run needs no LLM call.
-        return False
-
-    def run(
-        self,
-        interface,
-        task_id,
-        task_prompt=None,
-        examples=None,
-        enable_surrender=False,
-        **kwargs,
-    ) -> str:
-        self.run_thread_name = threading.current_thread().name
-        return "ok"
-
-
-def test_arun_agent_offloads_sync_run_to_worker_thread():
-    agent = _ThreadRecordingAgent()
-    main_thread = threading.current_thread().name
-
-    # The default async seam offloads the blocking `run()` to a worker thread so
-    # the event loop is never blocked by a non-native (synchronous) agent.
-    result = anyio.run(agent.arun_agent, "iface", "task-1")
-
-    assert result.answer == "ok"
-    assert agent.run_thread_name is not None
-    assert agent.run_thread_name != main_thread
-
-
-class _NativeAsyncAgent(BaseAgent):
-    """Native async agent: overrides `arun`, records the loop thread it ran on."""
-
-    def __init__(self):
-        super().__init__(user_prompt="tool_calling/user_prompt")
-        self.arun_thread_name = None
-
-    @property
-    def requires_answer_extraction(self) -> bool:
-        return False
-
-    def run(
-        self,
-        interface,
-        task_id,
-        task_prompt=None,
-        examples=None,
-        enable_surrender=False,
-        **kwargs,
-    ) -> str:  # pragma: no cover - the native path must not fall back to this
-        raise AssertionError("native agent must not use the sync run() path")
-
-    async def arun(
-        self,
-        interface,
-        task_id,
-        task_prompt=None,
-        examples=None,
-        enable_surrender=False,
-        **kwargs,
-    ) -> str:
-        self.arun_thread_name = threading.current_thread().name
-        return "native-ok"
-
-
-def test_native_arun_runs_on_the_event_loop_thread():
-    agent = _NativeAsyncAgent()
-    main_thread = threading.current_thread().name
-
-    # A native agent's coroutine runs directly on the loop (no worker thread),
-    # and `run()` is never touched.
-    result = anyio.run(agent.arun_agent, "iface", "task-1")
-
-    assert result.answer == "native-ok"
-    assert agent.arun_thread_name == main_thread
-
-
-class _InterfaceRecordingAgent(BaseAgent):
-    """Non-native agent that records the interface its blocking `run` received."""
-
-    def __init__(self):
-        super().__init__(user_prompt="tool_calling/user_prompt")
-        self.seen_interface = None
-
-    @property
-    def requires_answer_extraction(self) -> bool:
-        return False
-
-    def run(
-        self,
-        interface,
-        task_id,
-        task_prompt=None,
-        examples=None,
-        enable_surrender=False,
-        **kwargs,
-    ) -> str:
-        self.seen_interface = interface
-        return "ok"
-
-
-def test_default_arun_hands_run_a_synchronous_view_of_an_async_router():
-    """A non-native agent's offloaded `run()` never sees the async router.
-
-    The worker thread has no event loop, so the async router's coroutine-
-    returning methods would be unusable there. The default `arun` converts it to
-    an equivalent synchronous `CorralRouter` for `run()`; a synchronous interface
-    passes straight through.
-    """
-    async_router = AsyncCorralRouter("http://x", default_verbosity="detailed")
-    agent = _InterfaceRecordingAgent()
-
-    result = anyio.run(agent.arun_agent, async_router, "task-1")
-
-    assert result.answer == "ok"
-    assert isinstance(agent.seen_interface, CorralRouter)
-    assert not isinstance(agent.seen_interface, AsyncCorralRouter)
-    # The synchronous view targets the same server and carries the verbosity.
-    assert agent.seen_interface.base_url == "http://x"
-    assert agent.seen_interface.current_verbosity == "detailed"
-
-
-def test_default_arun_passes_a_synchronous_interface_through_unchanged():
-    sync_router = CorralRouter("http://y")
-    agent = _InterfaceRecordingAgent()
-
-    anyio.run(agent.arun_agent, sync_router, "task-1")
-
-    # An already-synchronous interface is handed to `run()` unchanged (identity).
-    assert agent.seen_interface is sync_router

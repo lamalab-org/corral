@@ -279,10 +279,8 @@ BaseAgent(
     api_endpoint=None,
     system_prompt=None,
     user_prompt=None,
-    extractor_prompt=None,
     surrender_prompt=None,
     temperature=0.7,
-    hooks=None,
     **kwargs,
 )
 ```
@@ -298,57 +296,35 @@ BaseAgent(
 
 - `user_prompt` (str | None): User prompt template
 
-- `extractor_prompt` (str | None): Answer extraction prompt
-
 - `surrender_prompt` (str | None): Surrender instructions
 
 - `temperature` (float): LLM sampling temperature
-
-- `hooks` (AgentHooks | None): Lifecycle hooks
 
 - `**kwargs`: Additional LLM parameters
 
 **Attributes**:
 - `model` (str): Model name
 
-- `messages` (list): Conversation history
+- `max_iterations` (int): Runtime action-step budget
 
-- `token_usage` (dict): Token usage statistics
+- `system_prompt`, `user_prompt`, `surrender_prompt`: Prompt configuration
 
-- `hooks` (AgentHooks): Registered hooks
+- `kwargs` (dict): Provider-specific model options
 
 **Abstract Methods**:
 
-#### `run(interface, task_id, history=None, task_prompt=None, examples=None, **kwargs) -> str`
-Main agent reasoning loop. Must be implemented by subclasses.
+#### `async step(state: AgentStateView) -> Action`
+Proposes exactly one action from the complete read-only execution state.
 
 **Parameters**:
-- `interface` (CorralRouter): Router interface
-- `task_id` (str): Task to solve
-- `history` (list | None): Conversation history
-- `task_prompt` (str | None): Override task prompt
-- `examples` (list | None): Few-shot examples
-- `**kwargs`: Additional parameters
+- `state` (AgentStateView): Immutable task metadata, messages, environment,
+  workspace, usage, and runtime data
 
-**Returns**: Final answer string
+**Returns**: One `Action`. Completion is
+`Action(name="submit_answer", arguments={"answer": "..."})`.
 
-**Concrete Methods**:
-
-#### `get_llm_response(tools: list[dict] | None = None) -> Any`
-Calls LLM with current messages.
-
-**Parameters**:
-- `tools` (list[dict] | None): Optional function definitions
-
-**Returns**: LLM response object
-
-#### `get_total_token_usage() -> dict[str, int]`
-Returns cumulative token usage.
-
-**Returns**: Dictionary with prompt_tokens, completion_tokens, total_tokens
-
-#### `reset_token_usage() -> None`
-Resets token counters.
+`BaseAgent` stores configuration only. Messages, usage, iteration progress, tool
+execution, and terminal-answer handling belong to State and the runtime.
 
 ---
 
@@ -368,6 +344,9 @@ Implements Reasoning and Acting framework.
 <action_input>{"arg": "value"}</action_input>
 ```
 
+The final response uses the same format with `submit_answer` as the action.
+Free text is never interpreted as a submission.
+
 ### `ToolCallingAgent`
 
 Uses native LLM function calling.
@@ -375,7 +354,8 @@ Uses native LLM function calling.
 **Additional Parameters**:
 - All BaseAgent parameters
 
-**Note**: Automatically converts Corral tools to OpenAI function format.
+**Note**: Automatically exposes `submit_answer` alongside Corral tools and
+requires exactly one native tool call per step.
 
 ### `LLMPlanner`
 
@@ -388,10 +368,8 @@ Hierarchical planning agent.
 
 ### `ReflectionAgent`
 
-Self-reflective agent.
-
-**Additional Parameters**:
-- `max_reflections` (int): Maximum reflection cycles
+Stateless wrapper that delegates actions to an actor. Reflection history must
+be supplied through State rather than retained on the agent instance.
 
 ---
 
@@ -410,20 +388,6 @@ class ToolVerbosity(Enum):
     SYNTACTICAL = "syntactical"  # + [SYNTACTICAL] sections
     COMPREHENSIVE = "comprehensive"  # + [RAISES], [LIMITATIONS], [EXAMPLES]
     FULL = "full"  # Complete docstring
-```
-
----
-
-## HookPoint Enum
-
-Agent lifecycle hook points.
-
-```python
-class HookPoint(Enum):
-    BEFORE_TASK = "before_task"  # Before task starts
-    AFTER_TASK = "after_task"  # After task completes
-    BEFORE_ITERATION = "before_iteration"  # Before each LLM call
-    AFTER_ITERATION = "after_iteration"  # After tools execute
 ```
 
 ---
@@ -528,8 +492,8 @@ Executes agents against an environment and aggregates results.
 ```python
 runner = CorralRunner(
     interface,  # CorralRouter or AsyncCorralRouter
-    agent=None,  # a single shared BaseAgent (serial runs)
-    agent_factory=None,  # (TrialContext) -> BaseAgent (required for concurrency)
+    agent=None,  # immutable configuration, safe to share between trials
+    agent_factory=None,  # optional (TrialContext) -> BaseAgent customization
     concurrency=None,  # default ConcurrencyConfig for this runner
     checkpoint_dir="./benchmark_checkpoints",
     enable_surrender=False,
@@ -537,7 +501,11 @@ runner = CorralRunner(
 )
 ```
 
-Exactly one agent source is required. A shared `agent` accumulates per-run state, so it is fine for serial `bench()` but **cannot** back concurrent trials; pass an `agent_factory` for those. Both may be supplied — the factory then mints each trial's agent and the shared agent is used only for run metadata / report labeling.
+Exactly one agent source is required. A shared action-based `agent` is safe for
+concurrent trials because execution data belongs to State. Use an
+`agent_factory` only when a trial needs different immutable configuration. Both
+may be supplied; the factory then takes precedence and the shared agent is used
+for run metadata and report labeling.
 
 ### `bench(...) -> BenchmarkResult`
 
@@ -547,7 +515,7 @@ Run the benchmark synchronously. Key parameters:
 - `trials_per_task` (int): Trials per task (for `pass@k`).
 - `k_values` (int | list[int] | None): k values for pass@k metrics.
 - `run_name` (str | None): Name used in the report filename.
-- `max_concurrency` (int, default `1`): Max trials in flight across the whole run. `1` is the byte-for-byte serial path; `> 1` runs concurrently via `abench` and **requires** an `agent_factory`.
+- `max_concurrency` (int, default `1`): Max trials in flight across the whole run. `1` uses the serial path; `> 1` runs concurrently via `abench`.
 - `max_concurrency_per_task` (int, default `1`): Max simultaneous trials of the *same* task. Above `1` requires the server to support trial runtimes.
 - `agent_factory` (AgentFactory | None): Per-call override of the runner's factory.
 - `concurrency` (ConcurrencyConfig | None): Full config; when given it supersedes the two scalars above.

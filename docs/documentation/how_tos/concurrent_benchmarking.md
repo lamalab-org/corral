@@ -13,9 +13,19 @@
 
 At `max_concurrency=1` both keep the byte-for-byte serial behaviour, so the serial `bench()` from [Tutorial 1](../tutorials/tut_1_first_benchmark.md) is just the degenerate case of this same API.
 
-## 1. Provide an `agent_factory` (required for concurrency)
+## 1. Provide an agent
 
-A single `BaseAgent` accumulates per-run state (messages, token usage, hooks, harness/SDK sessions), so it **cannot** be shared by two trials running at once. Concurrent benchmarking therefore takes a *factory* — a callable `(TrialContext) -> BaseAgent` — and calls it once per trial, giving every trial its own isolated agent.
+Action-based agents retain immutable configuration only, so one instance can be
+shared safely by concurrent trials:
+
+```python
+from corral.agents import ReActAgent
+
+runner = CorralRunner(interface, agent=ReActAgent(model="openai/gpt-4o"))
+```
+
+Use an `agent_factory` when the configuration itself should vary by trial. The
+factory is a callable `(TrialContext) -> BaseAgent`:
 
 ```python
 from corral import CorralRunner, TrialContext
@@ -23,19 +33,15 @@ from corral.agents import BaseAgent, ReActAgent
 
 
 def make_agent(context: TrialContext) -> BaseAgent:
-    # A fresh agent per trial. `context` carries task_id, trial_index,
-    # session_id and benchmark_run_id if you want per-trial wiring.
+    # `context` carries task_id, trial_index, session_id, and benchmark_run_id.
     return ReActAgent(model="openai/gpt-4o")
 
 
 runner = CorralRunner(interface, agent_factory=make_agent)
 ```
 
-You may also pass a shared `agent=` alongside the factory — it's used only for run metadata / report labeling, while the factory mints the agent each trial actually runs.
-
-/// info
-Forgetting the factory fails fast: running any concurrent path with only a shared `agent` raises `Concurrent benchmarking needs a fresh agent per trial`. There's no silent sharing or deep-copying.
-///
+You may also pass a shared `agent=` alongside the factory. It is used for run
+metadata and report labeling while the factory supplies each trial's policy.
 
 ## 2. Run it — synchronous
 

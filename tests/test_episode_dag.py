@@ -16,13 +16,12 @@ import threading
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from functools import partial
 
 import anyio
 import pytest
 
-from corral.agents.schema import AgentRunResult
 from corral.concurrency import ConcurrencyConfig, EpisodeTaskCompleted
+from corral.core.action import submit_answer_action
 from corral.episode import run_episode_dag
 from corral.report import TaskTrialResult
 from corral.run import CorralRunner, unreachable_trial_result
@@ -145,25 +144,24 @@ class _ConcurrencyTracker:
 class _ChainAgent:
     """Agent that sleeps (to expose overlap) then answers with its task id."""
 
+    model = "test-model"
+    max_iterations = 1
+
     def __init__(self, tracker: _ConcurrencyTracker, sleep: float):
         self._tracker = tracker
         self._sleep = sleep
 
-    def run_agent(self, interface, task_id, **kwargs) -> AgentRunResult:
-        with self._tracker.track():
+    def _tracking_key(self, state) -> str:
+        return "_all"
+
+    def _sleep_once(self, key: str) -> None:
+        with self._tracker.track(key):
             time.sleep(self._sleep)
-        return AgentRunResult(answer=f"answer_{task_id}", status="success")
 
-    async def arun_agent(self, interface, task_id, **kwargs) -> AgentRunResult:
-        # Non-native agent: the async scheduler offloads the blocking run to a
-        # worker thread (exactly as BaseAgent's default seam does), so the
-        # `time.sleep` overlap stays observable off the event loop.
-        return await anyio.to_thread.run_sync(
-            partial(self.run_agent, interface, task_id, **kwargs)
-        )
-
-    def get_total_token_usage(self) -> dict:
-        return {}
+    async def step(self, state):
+        await anyio.to_thread.run_sync(self._sleep_once, self._tracking_key(state))
+        task_id = str(state.metadata.task["id"])
+        return submit_answer_action(f"answer_{task_id}")
 
 
 class _ChainedRouter:
@@ -202,6 +200,12 @@ class _ChainedRouter:
 
     def configure_additional_apps(self, task_id, timeout=None) -> str:
         return "configured"
+
+    def get_task_prompt(self, task_id):
+        return f"solve {task_id}"
+
+    def get_available_tools_for_task(self, task_id, verbosity="brief"):
+        return {"tools": []}
 
     def get_task_status(self, task_id) -> dict:
         return {"score": 0.0}
@@ -281,6 +285,12 @@ class _ChainedTrialRouter:
 
     def configure_additional_apps(self, task_id=None, timeout=None) -> str:
         return "configured"
+
+    def get_task_prompt(self, task_id=None):
+        return f"solve {self.task_id}"
+
+    def get_available_tools_for_task(self, task_id=None, verbosity="brief"):
+        return {"tools": []}
 
     def get_task_status(self, task_id=None) -> dict:
         return {"score": 0.0}
@@ -389,15 +399,23 @@ def test_chained_dependency_failure_propagates(tmp_path, monkeypatch):
         assert trial.state["missing_dependency"] == "a"
 
 
-def test_chained_concurrent_without_factory_fails_fast(tmp_path):
+def test_chained_concurrent_can_share_stateless_agent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     interface = _ChainedRouter({"a": [], "b": ["a"]})
     runner = CorralRunner(
         interface,
         agent=_ChainAgent(_ConcurrencyTracker(), 0.0),  # shared agent, not a factory
         checkpoint_dir=str(tmp_path),
     )
-    with pytest.raises(ValueError, match="fresh agent per trial"):
-        runner.bench(task_ids=["a", "b"], trials_per_task=1, max_concurrency=2)
+    result = runner.bench(
+        task_ids=["a", "b"], trials_per_task=1, max_concurrency=2, run_name="report"
+    )
+
+    assert all(
+        trial.success
+        for task_result in result.task_results.values()
+        for trial in task_result.trials
+    )
 
 
 def test_chained_concurrent_requires_runtime_support(tmp_path):
@@ -421,7 +439,7 @@ def test_chained_serial_still_works_without_factory(tmp_path, monkeypatch):
     interface = _ChainedRouter(graph)
     runner = CorralRunner(
         interface,
-        agent=_ChainAgent(tracker, 0.0),  # shared agent, allowed when serial
+        agent=_ChainAgent(tracker, 0.0),  # immutable configuration is shareable
         checkpoint_dir=str(tmp_path),
     )
 
@@ -440,10 +458,8 @@ class _ModeledChainAgent(_ChainAgent):
         super().__init__(tracker, sleep)
         self.model = model
 
-    def run_agent(self, interface, task_id, **kwargs) -> AgentRunResult:
-        with self._tracker.track(self.model):
-            time.sleep(self._sleep)
-        return AgentRunResult(answer=f"answer_{task_id}", status="success")
+    def _tracking_key(self, state) -> str:
+        return self.model
 
 
 def test_chained_per_model_caps_sibling_overlap(tmp_path, monkeypatch):
