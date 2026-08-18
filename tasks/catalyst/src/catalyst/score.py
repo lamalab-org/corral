@@ -15,20 +15,16 @@ uid = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
 
 # Default base work dir when CORRAL_WORK_DIR is unset (relative path + UID).
 # NOTE: intentionally do NOT write CORRAL_WORK_DIR back into the process
-# environment here. That pins every concurrent trial to one shared directory and
-# breaks per-trial workspace isolation (Phase 4 work-directory hygiene). Scoring
-# resolves the submitted answer against the trial's own workspace via
+# environment here. That pins every concurrent task execution to one shared
+# directory and breaks execution workspace isolation. Scoring resolves the
+# submitted answer against the task execution's workspace via
 # Environment._resolve_answer.
 #
-# Resolve to an ABSOLUTE path at import time. The server reports each trial's
-# workspace to the agent (see `TrialCreatedResponse.workspace`), and a
-# sandbox-running agent such as Codex points its own working directory at it. A
-# relative work dir resolves against whatever process reads it, so the agent
-# process (different cwd than the server) would resolve it to a non-existent
-# directory, silently fall back to a throwaway temp dir, and lose every file the
-# model writes there before scoring. An absolute path is portable across that
-# process boundary. `resolve()` is evaluated against the server's cwd, which is
-# exactly where the workspace directories are created.
+# Resolve to an ABSOLUTE path at import time for server-side materialization and
+# evaluation. Native agent harnesses are deliberately not given this path;
+# their task file access goes through the execution-scoped MCP tools instead.
+# `resolve()` is evaluated against the server's cwd, which is exactly where the
+# workspace directories are created.
 BASE_WORK_DIR = str(
     Path(
         os.environ.get("CORRAL_WORK_DIR", f"../CORRAL_WORK_DIR/catalyst_{uid}")

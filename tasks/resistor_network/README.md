@@ -15,9 +15,9 @@ uv sync
 
 If you prefer not to activate the environment, use `uv run` to prefix the commands below.
 
-## Run The Server
+## Inspect The Environment Definitions
 
-Start the resistor network environment server from this directory:
+Build and list the resistor-network environment definitions from this directory:
 
 ```bash
 cd tasks/resistor_network
@@ -33,18 +33,10 @@ source .venv/bin/activate
 python src/resistor_network/env.py --mode chained
 ```
 
-The server also accepts these options:
+The inspection command accepts these options:
 
-- `tasks_json_path`: Optional path to a task JSON file or directory. If omitted, the server auto-discovers the level 1 benchmark.
-- `--host`: Bind host. Defaults to `CORRAL_HOST` or `0.0.0.0`.
-- `--port`: Bind port. Defaults to `CORRAL_PORT` or `8000`.
+- `tasks_json_path`: Optional path to a task JSON file or directory. If omitted, the command auto-discovers the level 1 benchmark.
 - `--mode`: Use `single` to load `environments/level_1/tasks_json` or `chained` to load `environments/level_1/subtasks_json`.
-
-## See The Tasks
-
-```bash
-curl http://localhost:8000/tasks/
-```
 
 ## Notes
 

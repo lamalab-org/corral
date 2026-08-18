@@ -34,7 +34,7 @@ from corral.backend.executors import (
     render_result,
 )
 from corral.backend.jobs import JobManager, JobStatus
-from corral.backend.tool import tool
+from corral.core.tool import tool
 
 
 @tool

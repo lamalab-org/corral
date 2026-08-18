@@ -8,8 +8,59 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from corral.backend.tool import Tool, tool
+from corral.core.tool import Tool, tool
 from corral.core.workspace import normalize_workspace_path
+
+
+def confine_workspace_path(
+    root: str | Path,
+    path: str | Path,
+    *,
+    allow_root: bool = False,
+) -> Path:
+    """Resolve a local path while proving it remains below ``root``.
+
+    This helper is for trusted server code that needs a physical path (for
+    example, evaluation of a file submission). Agent-facing filesystem tools
+    remain stricter and accept logical relative paths only. Symbolic links are
+    rejected even when they currently point back inside the workspace so a
+    task cannot turn one workspace path into ambient host-filesystem access.
+    """
+    root_path = Path(root)
+    if root_path.is_symlink() or not root_path.is_dir():
+        raise ValueError(f"workspace root must be a regular directory: {root}")
+    root_path = root_path.resolve()
+
+    raw_path = str(path)
+    if not raw_path or "\x00" in raw_path:
+        raise ValueError("workspace paths cannot be empty or contain NUL bytes")
+    if "\\" in raw_path:
+        raise ValueError("workspace paths must use portable POSIX separators")
+
+    supplied = Path(path)
+    if ".." in supplied.parts:
+        raise ValueError(f"workspace path cannot traverse its parent: {path!r}")
+    candidate = supplied if supplied.is_absolute() else root_path / supplied
+    resolved = candidate.resolve(strict=False)
+    if resolved != root_path and root_path not in resolved.parents:
+        raise ValueError(f"workspace path escapes its materialization: {path!r}")
+    if resolved == root_path and not allow_root:
+        raise ValueError("workspace path cannot name the workspace root")
+
+    try:
+        relative = candidate.relative_to(root_path)
+    except ValueError as exc:
+        raise ValueError(
+            f"workspace path escapes its materialization: {path!r}"
+        ) from exc
+    current = root_path
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(
+                f"workspace paths cannot traverse symbolic links: {path!r}"
+            )
+    return resolved
 
 
 class WorkspaceFilesystem:
@@ -31,18 +82,7 @@ class WorkspaceFilesystem:
         if allow_root and path in {"", "."}:
             return self.root
         normalized = normalize_workspace_path(path)
-        candidate = self.root.joinpath(*normalized.split("/"))
-        resolved = candidate.resolve(strict=False)
-        if resolved != self.root and self.root not in resolved.parents:
-            raise ValueError(f"workspace path escapes its materialization: {path!r}")
-        current = candidate
-        while current != self.root:
-            if current.is_symlink():
-                raise ValueError(
-                    f"workspace paths cannot traverse symbolic links: {path!r}"
-                )
-            current = current.parent
-        return candidate
+        return confine_workspace_path(self.root, normalized, allow_root=allow_root)
 
     def _logical_path(self, path: Path) -> str:
         resolved = path.resolve(strict=False)

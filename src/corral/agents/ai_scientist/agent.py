@@ -1,26 +1,41 @@
-"""Public Corral BaseAgent implementation."""
+"""AI Scientist search harness implemented as a first-class session agent."""
 
 import json
 import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from functools import partial
+from threading import RLock
 from typing import Any
+from uuid import uuid4
+
+import anyio
+from anyio.from_thread import BlockingPortal
 
 from corral.agents.ai_scientist.config import AIScientistConfig
 from corral.agents.ai_scientist.journal import JSONLTraceWriter
 from corral.agents.ai_scientist.manager import ExperimentManager
 from corral.agents.ai_scientist.search.selector import TreeSelector
 from corral.agents.ai_scientist.state import ScientistState
-from corral.agents.ai_scientist.tools.trial_pool import ReplayEquivalence, TrialPool
+from corral.agents.ai_scientist.tools.execution_pool import (
+    BranchSessionHandle,
+    ExecutionPool,
+    ReplayEquivalence,
+)
 from corral.agents.ai_scientist.workers.base import (
     LiteLLMStructuredModel,
+    LLMBudgetExceeded,
     StructuredModel,
 )
 from corral.agents.ai_scientist.workers.critic import ScientificCritic
 from corral.agents.ai_scientist.workers.experimenter import Experimenter
 from corral.agents.ai_scientist.workers.planner import NodePlanner, TaskFormulator
 from corral.agents.ai_scientist.workers.synthesizer import FinalSynthesizer
-from corral.agents.base_agent import BaseAgent
-from corral.agents.schema import AgentRunResult
-from corral.router.routes import CorralRouter
+from corral.agents.base_agent import BaseAgent, prompt_with_state_history
+from corral.agents.schema import AgentOutcome, AgentUsage, BudgetExhaustedError
+from corral.agents.session import AgentSession
+from corral.agents.utils import llm_call
+from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 
 _SCIENTIST_SYSTEM_PROMPT = """
 You are the reasoning component of a scientific experiment manager. Interact
@@ -32,6 +47,72 @@ Return the requested structured object without Markdown or surrounding prose.
 
 _TRACE_NODE_ID = re.compile(r"node_\d+")
 _TRACE_LABEL_HYPOTHESIS_CHARS = 96
+_SCIENTIST_STATE_NAMESPACE = "ai_scientist"
+
+
+@dataclass(slots=True)
+class _GatewayOwner:
+    """Per-run transcript/usage sink expected by LiteLLMStructuredModel."""
+
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    token_usage: dict[str, int] = field(default_factory=dict)
+    cumulative_token_usage: dict[str, int] = field(default_factory=dict)
+
+    def _accumulate_token_usage(self, usage: dict[str, int]) -> None:
+        for key, value in usage.items():
+            self.cumulative_token_usage[key] = self.cumulative_token_usage.get(
+                key, 0
+            ) + int(value or 0)
+
+
+def _call_llm_from_harness(portal: BlockingPortal, **call_kwargs: Any) -> Any:
+    """Run one native-async LiteLLM call from the blocking search harness."""
+    return portal.call(partial(llm_call, **call_kwargs))
+
+
+class _BranchSessionRegistry:
+    """Create logical/physical AI Scientist branches from canonical State."""
+
+    def __init__(self, parent: AgentSession, portal: BlockingPortal) -> None:
+        self.parent = parent
+        self.portal = portal
+        self.execution_id = parent.execution_id
+        self.execution_workspace = parent.workspace
+        self._sessions: dict[str, AgentSession] = {}
+        self._lock = RLock()
+
+    def _create(
+        self,
+        source: AgentSession,
+    ) -> BranchSessionHandle:
+        execution_id = f"{self.parent.execution_id}-scientist-{uuid4()}"
+        session = source.fork_branch(execution_id=execution_id)
+        with self._lock:
+            self._sessions[execution_id] = session
+        return BranchSessionHandle(
+            execution_id=execution_id,
+            workspace=session.workspace,
+            execute=partial(self.portal.call, session.execute),
+        )
+
+    def create_branch(self) -> BranchSessionHandle:
+        return self._create(self.parent)
+
+    def clone_branch(self, source_execution_id: str) -> BranchSessionHandle:
+        with self._lock:
+            source = self._sessions[source_execution_id]
+        return self._create(source)
+
+    def close_branch(self, execution_id: str) -> None:
+        with self._lock:
+            session = self._sessions.pop(execution_id, None)
+        if session is not None:
+            session.close()
+            session.environment.shutdown_jobs()
+
+    def session(self, execution_id: str) -> AgentSession:
+        with self._lock:
+            return self._sessions[execution_id]
 
 
 class AIScientistAgent(BaseAgent):
@@ -54,7 +135,6 @@ class AIScientistAgent(BaseAgent):
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
-        extractor_prompt: str | None = None,
         surrender_prompt: str | None = None,
         temperature: float = 0.2,
         **kwargs: Any,
@@ -63,69 +143,117 @@ class AIScientistAgent(BaseAgent):
         self.evaluator_model = evaluator_model or model
         self._injected_gateway = model_gateway
         self.replay_equivalence = replay_equivalence
-        if user_prompt is None:
-            # BaseAgent resolves this prompt even though this scaffold constructs
-            # its worker prompts directly.
-            user_prompt = "tool_calling/user_prompt"
         super().__init__(
             model=model,
-            max_iterations=self.config.max_llm_calls,
             api_endpoint=api_endpoint,
             system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            extractor_prompt=extractor_prompt,
+            user_prompt=user_prompt or "tool_calling/user_prompt",
             surrender_prompt=surrender_prompt,
             temperature=temperature,
             **kwargs,
         )
-        self._available_tools: list[dict[str, Any]] = []
-        self.last_state: ScientistState | None = None
-        self._branch_tool_statistics: dict[str, Any] | None = None
 
-    @property
-    def requires_answer_extraction(self) -> bool:
-        """Return the synthesizer's submission-ready answer verbatim."""
-        return False
+    @staticmethod
+    def _search_snapshot(state: ScientistState) -> dict[str, Any]:
+        """Serialize search progress and provenance into Corral State."""
+        return {
+            "formulation": state.formulation.model_dump(mode="json"),
+            "current_stage": state.current_stage.value,
+            "tree": state.tree.model_dump(),
+            "journal": state.journal.as_dict(),
+            "stages": {
+                stage.value: progress.model_dump(mode="json")
+                for stage, progress in state.stages.items()
+            },
+            "usage": {
+                "tool_calls": state.tool_calls,
+                "scientific_tool_calls": state.scientific_tool_calls,
+                "replay_tool_calls": state.replay_tool_calls,
+                "executions_created": state.executions_created,
+                "executions_cloned": state.executions_cloned,
+                "peak_simultaneous_executions": state.peak_simultaneous_executions,
+                "llm_calls": state.llm_calls,
+                "llm_tokens": state.llm_tokens,
+            },
+            "replay_results": [
+                {
+                    "branch_id": replay.branch_id,
+                    "exact": replay.exact,
+                    "equivalent": replay.equivalent,
+                    "original": replay.original.model_dump(mode="json"),
+                    "replayed": replay.replayed.model_dump(mode="json"),
+                }
+                for replay in state.replay_results
+            ],
+            "artifacts": {
+                "source_workspace": state.artifact_source_workspace,
+                "destination_workspace": state.artifact_destination_workspace,
+                "promoted": list(state.promoted_artifacts),
+            },
+            "experimental_search_terminated_reason": (
+                state.experimental_search_terminated_reason
+            ),
+        }
 
-    def run(
+    @classmethod
+    def _state_payload(
+        cls,
+        state: ScientistState | None,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        status: str,
+        tool_statistics: Mapping[str, Any] | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "status": status,
+            "search": cls._search_snapshot(state) if state is not None else None,
+            "graph": cls._trace_metadata(state, messages),
+            "tool_statistics": dict(tool_statistics or {}),
+            "error": error,
+        }
+
+    def _execute_session(
         self,
-        interface: CorralRouter,
-        task_id: str,
-        task_prompt: str | None = None,
-        examples: list[str] | None = None,
-        **_kwargs: Any,
-    ) -> str:
-        # Clear prior-run state before any router/model operation can fail. A
-        # serial caller may reuse an agent, and a partial second run must never
-        # save the first run's experiment graph beside its messages.
-        self.last_state = None
-        self._available_tools = []
-        self._branch_tool_statistics = None
-        self.messages = list(self._initial_messages or [])
-        prompt_value = task_prompt or interface.get_task_prompt(task_id)
+        session: AgentSession,
+        owner: _GatewayOwner,
+        portal: BlockingPortal,
+    ) -> tuple[str, AgentUsage, dict[str, Any]]:
+        # Search shape remains agent configuration, but the task-bound session
+        # is the sole authority for how many model/SDK turns this run may use.
+        config = self.config
+        max_llm_calls = session.iteration_limit
+        prompt_value = session.prompt
         prompt = (
             prompt_value
             if isinstance(prompt_value, str)
             else json.dumps(prompt_value, ensure_ascii=False)
         )
-        tool_payload = self._get_tool_payload(interface, task_id)
+        prompt = prompt_with_state_history(prompt, session.messages)
+        tools = [dict(tool) for tool in session.tools]
+        tool_payload = {"tools": tools}
         tools = tool_payload.get("tools", [])
-        self._available_tools = tools
 
         gateway = self._injected_gateway or LiteLLMStructuredModel(
-            owner=self,
+            owner=owner,
             default_model=self.model,
             evaluator_model=self.evaluator_model,
             system_prompt=f"{self.system_prompt}\n\n{_SCIENTIST_SYSTEM_PROMPT}",
             temperature=self.temperature,
             api_endpoint=self.api_endpoint,
-            max_calls=self.config.max_llm_calls,
-            use_structured_output=self.config.use_structured_output,
+            max_calls=max_llm_calls,
+            use_structured_output=config.use_structured_output,
+            completion_runner=partial(_call_llm_from_harness, portal),
             llm_kwargs=self.kwargs,
         )
-        trace = JSONLTraceWriter(self.config.trace_path, task_id)
+        task_id = str(
+            session.initial_state.metadata.task.get("id") or session.execution_id
+        )
+        examples = session.initial_state.metadata.scaffold.get("examples") or []
+        trace = JSONLTraceWriter(config.trace_path, task_id)
         formulator = TaskFormulator(
-            gateway, max_tool_schema_chars=self.config.max_tool_schema_chars
+            gateway, max_tool_schema_chars=config.max_tool_schema_chars
         )
         initial_llm_calls = gateway.call_count
         initial_llm_tokens = getattr(gateway, "token_count", 0)
@@ -133,63 +261,77 @@ class AIScientistAgent(BaseAgent):
             task_prompt=prompt, tools=tools, examples=examples
         )
         state = ScientistState(task_prompt=prompt, tools=tools, formulation=formulation)
-        self.last_state = state
         trace.write("formulation", formulation.model_dump(mode="json"))
 
-        pool = TrialPool(
-            interface=interface,
-            task_id=task_id,
+        branch_sessions = _BranchSessionRegistry(session, portal)
+        pool = ExecutionPool(
+            sessions=branch_sessions,
             tools=tool_payload,
-            max_tool_calls=self.config.max_tool_calls,
-            max_observation_chars=self.config.max_observation_chars,
-            stop_on_error=self.config.stop_plan_on_tool_error,
+            max_tool_calls=config.max_tool_calls,
+            max_observation_chars=config.max_observation_chars,
+            stop_on_error=config.stop_plan_on_tool_error,
             replay_equivalence=self.replay_equivalence,
         )
         planner = NodePlanner(
             gateway,
-            max_actions_per_node=self.config.max_actions_per_node,
-            max_journal_chars=self.config.max_journal_chars,
-            max_tool_schema_chars=self.config.max_tool_schema_chars,
+            max_actions_per_node=config.max_actions_per_node,
+            max_journal_chars=config.max_journal_chars,
+            max_tool_schema_chars=config.max_tool_schema_chars,
         )
         critic = ScientificCritic(
             gateway,
             evaluator_model=self.evaluator_model,
-            max_journal_chars=self.config.max_journal_chars,
+            max_journal_chars=config.max_journal_chars,
         )
         manager = ExperimentManager(
-            config=self.config,
+            config=config,
+            max_llm_calls=max_llm_calls,
             model=gateway,
             planner=planner,
             experimenter=Experimenter(
                 gateway,
-                max_actions_per_node=self.config.max_actions_per_node,
-                max_journal_chars=self.config.max_journal_chars,
-                max_tool_schema_chars=self.config.max_tool_schema_chars,
+                max_actions_per_node=config.max_actions_per_node,
+                max_journal_chars=config.max_journal_chars,
+                max_tool_schema_chars=config.max_tool_schema_chars,
             ),
             critic=critic,
             selector=TreeSelector(
-                debug_probability=self.config.debug_probability,
-                max_debug_depth=self.config.max_debug_depth,
-                debug_leaf_only=self.config.debug_leaf_only,
-                max_children_per_node=self.config.max_children_per_node,
-                exploration_weight=self.config.tree_exploration_weight,
-                random_seed=self.config.random_seed,
+                debug_probability=config.debug_probability,
+                max_debug_depth=config.max_debug_depth,
+                debug_leaf_only=config.debug_leaf_only,
+                max_children_per_node=config.max_children_per_node,
+                exploration_weight=config.tree_exploration_weight,
+                random_seed=config.random_seed,
             ),
             trace=trace,
             initial_llm_calls=initial_llm_calls,
             initial_llm_tokens=initial_llm_tokens,
         )
         try:
-            state = manager.run(state, pool)
-            self.last_state = state
+            state = manager.execute_search(state, pool)
+
+            selected_branch = None
+            for candidate in state.best_nodes:
+                node = candidate
+                while True:
+                    if node.branch_id in pool.active:
+                        selected_branch = pool.active[node.branch_id]
+                        break
+                    if node.parent_id is None:
+                        break
+                    node = state.tree.get(node.parent_id)
+                if selected_branch is not None:
+                    break
+            if selected_branch is not None and selected_branch.execution_id is not None:
+                session.adopt_branch(
+                    branch_sessions.session(selected_branch.execution_id)
+                )
 
             promotion = pool.promote_artifacts(
                 state.best_nodes,
                 state.tree,
-                destination_workspace=getattr(interface, "trial_workspace", None),
-                destination_trial_runtime_id=getattr(
-                    interface, "trial_runtime_id", None
-                ),
+                destination_workspace=session.workspace,
+                destination_execution_id=session.execution_id,
             )
             if promotion is not None:
                 state.artifact_source_workspace = promotion.source_workspace
@@ -206,10 +348,10 @@ class AIScientistAgent(BaseAgent):
                 )
 
             answer = FinalSynthesizer(
-                gateway, max_journal_chars=self.config.max_journal_chars
+                gateway, max_journal_chars=config.max_journal_chars
             ).generate(
                 task_prompt=prompt,
-                journal_context=state.journal.context(self.config.max_journal_chars),
+                journal_context=state.journal.context(config.max_journal_chars),
                 best_nodes=state.best_nodes,
                 canonical_workspace=state.artifact_destination_workspace,
             )
@@ -221,10 +363,20 @@ class AIScientistAgent(BaseAgent):
         finally:
             # JSONL traces get the same directly-renderable graph that verbose
             # agent logs store at top level. This is written even for a partial
-            # run; the last_state tree contains every node recorded so far.
-            trace.write("graph_snapshot", self._trace_metadata())
+            # run; the local search state contains every node recorded so far.
+            graph = self._trace_metadata(state, owner.messages)
+            trace.write("graph_snapshot", graph)
             pool.close_all()
-            self._branch_tool_statistics = pool.tool_statistics()
+            branch_tool_statistics = pool.tool_statistics()
+            session.set_agent_state(
+                _SCIENTIST_STATE_NAMESPACE,
+                self._state_payload(
+                    state,
+                    owner.messages,
+                    status="partial",
+                    tool_statistics=branch_tool_statistics,
+                ),
+            )
 
         state.llm_calls = gateway.call_count - initial_llm_calls
         state.llm_tokens = getattr(gateway, "token_count", 0) - initial_llm_tokens
@@ -237,17 +389,131 @@ class AIScientistAgent(BaseAgent):
                 "llm_tokens": state.llm_tokens,
             },
         )
-        return answer
+        usage = AgentUsage(
+            input_tokens=int(owner.cumulative_token_usage.get("prompt_tokens", 0)),
+            output_tokens=int(owner.cumulative_token_usage.get("completion_tokens", 0)),
+            llm_calls=state.llm_calls,
+        )
+        metadata = {
+            "tool_statistics": branch_tool_statistics,
+            "graph": self._trace_metadata(state, owner.messages),
+        }
+        session.set_agent_state(
+            _SCIENTIST_STATE_NAMESPACE,
+            self._state_payload(
+                state,
+                owner.messages,
+                status="completed",
+                tool_statistics=branch_tool_statistics,
+            ),
+        )
+        return answer, usage, metadata
 
-    def _agent_run_result(self, answer: str) -> AgentRunResult:
-        """Attach isolated branch calls to the benchmark-facing run result."""
-        result = super()._agent_run_result(answer)
-        if self._branch_tool_statistics is not None:
-            result.metadata["tool_statistics"] = self._branch_tool_statistics
-        return result
+    async def run_session(self, session: AgentSession) -> AgentOutcome:
+        """Run search, experimentation, and synthesis through session branches."""
+        owner = _GatewayOwner()
+        session.set_agent_state(
+            _SCIENTIST_STATE_NAMESPACE,
+            self._state_payload(None, (), status="running"),
+        )
+        try:
+            async with BlockingPortal() as portal:
+                answer, usage, metadata = await anyio.to_thread.run_sync(
+                    lambda: self._execute_session(session, owner, portal)
+                )
+        except LLMBudgetExceeded as exc:
+            session.set_agent_state(
+                _SCIENTIST_STATE_NAMESPACE,
+                {
+                    **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
+                    "status": "iteration_limit",
+                    "error": str(exc),
+                },
+            )
+            return AgentOutcome(status="iteration_limit", error=str(exc))
+        except BudgetExhaustedError as exc:
+            session.set_agent_state(
+                _SCIENTIST_STATE_NAMESPACE,
+                {
+                    **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
+                    "status": "budget_exhausted",
+                    "error": str(exc),
+                },
+            )
+            return AgentOutcome(status="budget_exhausted", error=str(exc))
+        except Exception as exc:
+            session.set_agent_state(
+                _SCIENTIST_STATE_NAMESPACE,
+                {
+                    **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
+                    "status": "failed",
+                    "error": str(exc),
+                },
+            )
+            return AgentOutcome(status="agent_failure", error=str(exc))
 
-    def _trace_metadata(self) -> dict[str, Any]:
-        """Describe the experiment tree without modifying ``self.messages``.
+        for message in owner.messages:
+            await session.record_message(message)
+        answer = answer.strip()
+        if not answer:
+            session.set_agent_state(
+                _SCIENTIST_STATE_NAMESPACE,
+                {
+                    **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
+                    "status": "protocol_failure",
+                    "error": "AI Scientist produced an empty final answer",
+                },
+            )
+            return AgentOutcome(
+                status="protocol_failure",
+                error="AI Scientist produced an empty final answer",
+                usage=usage,
+                metadata=metadata,
+            )
+        submission = await session.execute(
+            Action(
+                name=SUBMIT_ANSWER_TOOL_NAME,
+                arguments={"answer": answer},
+                content=answer,
+                metadata={"agent": type(self).__name__},
+            )
+        )
+        if not submission.success:
+            session.set_agent_state(
+                _SCIENTIST_STATE_NAMESPACE,
+                {
+                    **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
+                    "status": "protocol_failure",
+                    "error": f"submit_answer failed: {submission.error}",
+                },
+            )
+            return AgentOutcome(
+                status="protocol_failure",
+                error=f"submit_answer failed: {submission.error}",
+                usage=usage,
+                metadata=metadata,
+            )
+        session.set_agent_state(
+            _SCIENTIST_STATE_NAMESPACE,
+            {
+                **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
+                "status": "completed",
+                "error": None,
+            },
+        )
+        return AgentOutcome(
+            status="completed",
+            answer=answer,
+            usage=usage,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _trace_metadata(
+        state: ScientistState | None,
+        messages: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Describe an experiment tree without mutating canonical messages.
 
         The returned object is stored as a sibling of ``messages`` in verbose
         agent logs. Consumers can render the tree directly from ``nodes`` and
@@ -256,7 +522,6 @@ class AIScientistAgent(BaseAgent):
         ``name`` field contains a node id. No custom key is ever placed on an
         API-bound message.
         """
-        state = self.last_state
         if state is None:
             return {
                 "schema": "corral.ai_scientist.graph",
@@ -301,9 +566,7 @@ class AIScientistAgent(BaseAgent):
             )
 
         message_links = []
-        for index, message in enumerate(self.messages):
-            if not isinstance(message, dict):
-                continue
+        for index, message in enumerate(messages):
             name = message.get("name")
             if not isinstance(name, str):
                 continue
@@ -348,11 +611,3 @@ class AIScientistAgent(BaseAgent):
             },
             "message_links": message_links,
         }
-
-    @staticmethod
-    def _get_tool_payload(interface: Any, task_id: str) -> dict[str, Any]:
-        """Prefer the plan-specified MCP schema, tolerating older routers."""
-        get_mcp_schema = getattr(interface, "get_mcp_tool_schema", None)
-        if callable(get_mcp_schema):
-            return get_mcp_schema(task_id)
-        return interface.get_available_tools_for_task(task_id)

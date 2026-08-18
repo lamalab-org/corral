@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 import pytest
 
-from corral.agents.ai_scientist.workers import base
 from corral.agents.ai_scientist.workers.base import (
     LiteLLMStructuredModel,
     LLMBudgetExceeded,
@@ -27,7 +26,7 @@ class Owner:
         self.accumulated_usage.append(usage)
 
 
-def gateway(*, max_calls=4, use_structured_output=True):
+def gateway(*, max_calls=4, use_structured_output=True, completion_runner=None):
     return LiteLLMStructuredModel(
         owner=Owner(),
         default_model="test-model",
@@ -37,10 +36,11 @@ def gateway(*, max_calls=4, use_structured_output=True):
         api_endpoint=None,
         max_calls=max_calls,
         use_structured_output=use_structured_output,
+        completion_runner=completion_runner or (lambda **_kwargs: FakeResponse()),
     )
 
 
-def test_structured_fallback_counts_both_physical_provider_requests(monkeypatch):
+def test_structured_fallback_counts_both_physical_provider_requests():
     calls = []
 
     def fake_llm_call(**kwargs):
@@ -49,8 +49,7 @@ def test_structured_fallback_counts_both_physical_provider_requests(monkeypatch)
             raise ValueError("response_format is not supported by this provider")
         return FakeResponse(usage={"total_tokens": 7})
 
-    monkeypatch.setattr(base, "llm_call", fake_llm_call)
-    model = gateway()
+    model = gateway(completion_runner=fake_llm_call)
 
     result = model.generate("prompt", FinalAnswer, purpose="answer")
 
@@ -61,15 +60,14 @@ def test_structured_fallback_counts_both_physical_provider_requests(monkeypatch)
     assert model.use_structured_output is False
 
 
-def test_fallback_cannot_exceed_the_physical_request_budget(monkeypatch):
+def test_fallback_cannot_exceed_the_physical_request_budget():
     calls = []
 
     def reject_structured(**kwargs):
         calls.append(kwargs)
         raise ValueError("structured output is unsupported")
 
-    monkeypatch.setattr(base, "llm_call", reject_structured)
-    model = gateway(max_calls=1)
+    model = gateway(max_calls=1, completion_runner=reject_structured)
 
     with pytest.raises(LLMBudgetExceeded, match="json_fallback"):
         model.generate("prompt", FinalAnswer, purpose="answer")
@@ -78,12 +76,11 @@ def test_fallback_cannot_exceed_the_physical_request_budget(monkeypatch):
     assert len(calls) == 1
 
 
-def test_transient_failure_does_not_disable_structured_output(monkeypatch):
+def test_transient_failure_does_not_disable_structured_output():
     def time_out(**kwargs):
         raise TimeoutError("temporary provider timeout")
 
-    monkeypatch.setattr(base, "llm_call", time_out)
-    model = gateway()
+    model = gateway(completion_runner=time_out)
 
     with pytest.raises(TimeoutError, match="temporary"):
         model.generate("prompt", FinalAnswer)
@@ -92,15 +89,14 @@ def test_transient_failure_does_not_disable_structured_output(monkeypatch):
     assert model.use_structured_output is True
 
 
-def test_text_mode_counts_one_physical_request(monkeypatch):
+def test_text_mode_counts_one_physical_request():
     calls = []
 
     def fake_llm_call(**kwargs):
         calls.append(kwargs)
         return FakeResponse()
 
-    monkeypatch.setattr(base, "llm_call", fake_llm_call)
-    model = gateway(use_structured_output=False)
+    model = gateway(use_structured_output=False, completion_runner=fake_llm_call)
 
     model.generate("prompt", FinalAnswer)
 
@@ -109,15 +105,14 @@ def test_text_mode_counts_one_physical_request(monkeypatch):
     assert "response_format" not in calls[0]
 
 
-def test_transcript_names_every_role_without_mutating_api_messages(monkeypatch):
+def test_transcript_names_every_role_without_mutating_api_messages():
     calls = []
 
     def fake_llm_call(**kwargs):
         calls.append(kwargs)
         return FakeResponse()
 
-    monkeypatch.setattr(base, "llm_call", fake_llm_call)
-    model = gateway()
+    model = gateway(completion_runner=fake_llm_call)
 
     model.generate("prompt", FinalAnswer, purpose="evaluate_node_0007")
 
@@ -132,7 +127,7 @@ def test_transcript_names_every_role_without_mutating_api_messages(monkeypatch):
     assert all("name" not in message for message in calls[0]["messages"])
 
 
-def test_multimodal_generation_attaches_local_images(monkeypatch, tmp_path):
+def test_multimodal_generation_attaches_local_images(tmp_path):
     calls = []
 
     def fake_llm_call(**kwargs):
@@ -141,8 +136,7 @@ def test_multimodal_generation_attaches_local_images(monkeypatch, tmp_path):
 
     image = tmp_path / "curve.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\nplot")
-    monkeypatch.setattr(base, "llm_call", fake_llm_call)
-    model = gateway()
+    model = gateway(completion_runner=fake_llm_call)
 
     result = model.generate_multimodal(
         "inspect the convergence curve",

@@ -19,7 +19,7 @@ SITE_DIR = Path(__file__).resolve().parent
 TASKS_ROOT = ROOT / "tasks"
 SKIP_ENVS = {"samplemath"}
 
-# Verbosity tag regex (same as VerbosityConfig._keyword_regex)
+# Structured authoring tags used by the landing-page documentation extractor.
 SUPPORTED_KEYWORDS = [
     "BRIEF",
     "DETAILED",

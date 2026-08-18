@@ -12,8 +12,14 @@ from corral.agents.ai_scientist.state import (
 )
 
 
-def scientist_with_tree() -> tuple[AIScientistAgent, ExperimentNode, ExperimentNode]:
-    agent = AIScientistAgent(model="test-model")
+def scientist_with_tree() -> (
+    tuple[
+        ScientistState,
+        list[dict[str, str]],
+        ExperimentNode,
+        ExperimentNode,
+    ]
+):
     state = ScientistState(
         task_prompt="Find the answer",
         tools=[],
@@ -44,8 +50,7 @@ def scientist_with_tree() -> tuple[AIScientistAgent, ExperimentNode, ExperimentN
         stage=ResearchStage.PRELIMINARY,
         best_node_id=root.id,
     )
-    agent.last_state = state
-    agent.messages = [
+    messages = [
         {
             "role": "system",
             "content": "Evaluate scientific evidence",
@@ -63,14 +68,14 @@ def scientist_with_tree() -> tuple[AIScientistAgent, ExperimentNode, ExperimentN
             "id": "response-1",
         },
     ]
-    return agent, root, child
+    return state, messages, root, child
 
 
 def test_scientist_trace_metadata_labels_tree_without_mutating_messages():
-    agent, root, child = scientist_with_tree()
-    original_messages = [message.copy() for message in agent.messages]
+    state, messages, root, child = scientist_with_tree()
+    original_messages = [message.copy() for message in messages]
 
-    metadata = agent._trace_metadata()
+    metadata = AIScientistAgent._trace_metadata(state, messages)
 
     assert metadata["schema"] == "corral.ai_scientist.graph"
     assert metadata["root_node_ids"] == [root.id]
@@ -101,28 +106,7 @@ def test_scientist_trace_metadata_labels_tree_without_mutating_messages():
             "node_ids": [child.id],
         },
     ]
-    assert agent.messages == original_messages
+    assert messages == original_messages
     assert all(
-        set(message) <= {"role", "content", "name", "id"} for message in agent.messages
+        set(message) <= {"role", "content", "name", "id"} for message in messages
     )
-
-
-def test_verbose_save_puts_graph_beside_messages(monkeypatch):
-    agent, root, child = scientist_with_tree()
-    original_messages = [message.copy() for message in agent.messages]
-    saved = {}
-
-    def capture_save(**kwargs):
-        saved.update(kwargs)
-        return "unused.json"
-
-    monkeypatch.setattr("corral.agents.base_agent.save_agent_messages", capture_save)
-
-    agent._save_run_messages("task-1", "brief")
-
-    assert saved["messages"] == original_messages
-    assert saved["trace_metadata"]["root_node_ids"] == [root.id]
-    assert saved["trace_metadata"]["edges"] == [
-        {"source": root.id, "target": child.id, "kind": "parent"}
-    ]
-    assert agent.messages == original_messages

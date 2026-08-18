@@ -16,10 +16,10 @@ from ml.score import (
 )
 from ml.tools import create_ml_tools
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition
-from corral.backend.tool import Tool
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.state import State
+from corral.core.task import EnvironmentSetup, InputRef, TaskDefinition
+from corral.core.tool import Tool
 
 logger.info(f"Using BASE_WORK_DIR: {BASE_WORK_DIR}")
 # Registry of scoring functions
@@ -109,7 +109,7 @@ def load_tasks_from_json(
     return tasks
 
 
-def _ml_task_prompt(env: Environment) -> str:
+def _ml_task_prompt(env: Environment, state: State) -> str:
     """Task prompt that names the isolated workspace path explicitly."""
     task = env.current_task
     prompt = f"""Task: {task.name}
@@ -123,10 +123,9 @@ Required submission format:
     prompt += "\nAvailable input data:\n"
 
     # Display resolved inputs from dependencies
+    resolved = env.resolve_inputs(state)
     for input_name, ref in task.input_map.items():
-        if env.state.is_completed(ref.task_id):
-            value = env.state.get_output(ref.task_id, ref.key)
-            prompt += f"- {input_name} (from {ref.task_id}): {value}\n"
+        prompt += f"- {input_name} (from {ref.task_id}): {resolved[input_name]}\n"
 
     # Display initial input data
     for key, value in task.initial_input.items():
@@ -134,16 +133,19 @@ Required submission format:
             prompt += f"- {key}: {value}\n"
 
     # Add workspace info
-    if env.state.workspace:
-        prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace {env.state.workspace}\n"
+    if env.workspace_path:
+        prompt += f"\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace {env.workspace_path}\n"
 
     return prompt
 
 
-def _expose_workspace(env: Environment) -> str:
-    """Expose the trial workspace to tools as a hidden `work_dir` argument."""
-    env.hidden_args = {"work_dir": env.get_current_work_dir()}
-    return "Workspace exposed to tools."
+def _expose_workspace(env: Environment, state: State) -> EnvironmentSetup:
+    """Expose the task workspace to tools as a hidden `work_dir` argument."""
+    del state
+    return EnvironmentSetup(
+        hidden_arguments={"work_dir": env.workspace_path or ""},
+        status="Workspace exposed to tools.",
+    )
 
 
 def create_environments(
@@ -186,24 +188,12 @@ def create_environments(
 if __name__ == "__main__":
     import argparse as _argparse
 
-    parser = _argparse.ArgumentParser(description="ML Benchmark Server")
+    parser = _argparse.ArgumentParser(description="Inspect ML environments")
     parser.add_argument(
         "tasks_json_path",
         nargs="?",
         default=None,
         help="Path to tasks JSON file or directory (optional if --mode is provided)",
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
-        help="Host to run the server on",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("CORRAL_PORT", "8000")),
-        help="Port to run the server on",
     )
     parser.add_argument(
         "--mode",
@@ -249,8 +239,6 @@ if __name__ == "__main__":
             logger.error(f"Task config not found: {tasks_json_path}")
             sys.exit(1)
 
-    host = args.host
-    port = args.port
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
 
@@ -267,7 +255,3 @@ if __name__ == "__main__":
         logger.info(f"  Task: {env.current_task.name}")
         if env.current_task.input_map:
             logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
-
-    # --- Run Server ---
-    logger.info(f"Running server on {host}:{port}")
-    run_server(environments, host, port)

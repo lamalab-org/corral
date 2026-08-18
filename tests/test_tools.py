@@ -1,10 +1,12 @@
 from typing import Literal, Union
 
 import pytest
+from jsonschema.validators import validator_for
 from pydantic import Field
 
-from corral.backend.tool import Tool, tool
-from corral.backend.tool_utils import format_json_schema_type, format_type_annotation
+from corral.core.tool import Tool, tool
+from corral.core.tool_utils import format_json_schema_type, format_type_annotation
+from corral.workspace import WorkspaceFilesystem, build_workspace_tools
 
 
 # Sample functions for testing (new Field-based style)
@@ -280,9 +282,9 @@ def test_integration_with_field_annotations():
     assert result == "Test result"
 
 
-# Tests for MCP integration methods
-def test_tool_for_mcp_basic():
-    """Test basic conversion of tool to MCP format"""
+# Tests for provider tool schemas
+def test_tool_openai_format_basic():
+    """Test basic conversion of a tool to OpenAI function format."""
 
     @tool
     def sample_tool(param1: str, param2: int = 5) -> str:
@@ -297,19 +299,21 @@ def test_tool_for_mcp_basic():
         """
         return f"{param1}-{param2}"
 
-    mcp_def = sample_tool.to_mcp()
+    tool_def = sample_tool.get_openai_tool_format()
+    function = tool_def["function"]
 
     # Check structure
-    assert "name" in mcp_def
-    assert "description" in mcp_def
-    assert "inputSchema" in mcp_def
+    assert tool_def["type"] == "function"
+    assert "name" in function
+    assert "description" in function
+    assert "parameters" in function
 
     # Check values
-    assert mcp_def["name"] == "sample_tool"
-    assert "Sample tool description" in mcp_def["description"]
+    assert function["name"] == "sample_tool"
+    assert "Sample tool description" in function["description"]
 
     # Check schema
-    schema = mcp_def["inputSchema"]
+    schema = function["parameters"]
     assert schema["type"] == "object"
     assert "properties" in schema
     assert "required" in schema
@@ -332,8 +336,8 @@ def test_tool_for_mcp_basic():
     assert schema["properties"]["param2"]["default"] == 5
 
 
-def test_tool_for_mcp_with_choices():
-    """Test MCP conversion with parameter choices"""
+def test_tool_openai_format_with_choices():
+    """Test provider schema conversion with parameter choices."""
 
     @tool
     def tool_with_choices(mode: Literal["fast", "accurate", "balanced"]) -> str:
@@ -347,51 +351,19 @@ def test_tool_for_mcp_with_choices():
         """
         return f"Mode: {mode}"
 
-    mcp_def = tool_with_choices.to_mcp()
+    schema = tool_with_choices.get_openai_tool_format()["function"]["parameters"]
 
     # Check that choices are converted to enum
-    assert "enum" in mcp_def["inputSchema"]["properties"]["mode"]
-    assert mcp_def["inputSchema"]["properties"]["mode"]["enum"] == [
+    assert "enum" in schema["properties"]["mode"]
+    assert schema["properties"]["mode"]["enum"] == [
         "fast",
         "accurate",
         "balanced",
     ]
 
 
-def test_tool_for_mcp_with_verbosity():
-    """Test MCP conversion with different verbosity levels"""
-    from corral.router.verbosity import ToolVerbosity
-
-    @tool
-    def verbose_tool(param: str) -> str:
-        """Brief description of the tool
-
-        Long detailed description that should be filtered
-        based on verbosity level.
-
-        Args:
-            param: Parameter description
-
-        Returns:
-            Result
-        """
-        return param
-
-    # Test COMPREHENSIVE (default)
-    comprehensive = verbose_tool.to_mcp()
-    assert "Brief description" in comprehensive["description"]
-
-    # Test BRIEF
-    brief = verbose_tool.to_mcp(verbosity=ToolVerbosity.BRIEF)
-    assert "description" in brief
-
-    # Test WORKFLOW
-    workflow = verbose_tool.to_mcp(verbosity=ToolVerbosity.WORKFLOW)
-    assert "description" in workflow
-
-
-def test_tool_for_mcp_complex_types():
-    """Test MCP conversion with complex parameter types"""
+def test_tool_openai_format_complex_types():
+    """Test provider schema conversion with complex parameter types."""
 
     @tool
     def complex_tool(
@@ -411,8 +383,8 @@ def test_tool_for_mcp_complex_types():
         """
         return "result"
 
-    mcp_def = complex_tool.to_mcp()
-    props = mcp_def["inputSchema"]["properties"]
+    schema = complex_tool.get_openai_tool_format()["function"]["parameters"]
+    props = schema["properties"]
 
     # Check type mappings (required params have simple types)
     assert props["name"]["type"] == "string"
@@ -428,35 +400,17 @@ def test_tool_for_mcp_complex_types():
         assert tags_type == "string"
 
     # Check required fields
-    required = mcp_def["inputSchema"]["required"]
+    required = schema["required"]
     assert "name" in required
     assert "count" in required
     assert "value" in required
     assert "active" in required
-    assert "tags" not in required  # Has default
+    # Strict provider schemas keep nullable/defaulted fields in `required`.
+    assert "tags" in required
 
 
-def test_tool_from_mcp_raises_not_implemented():
-    """Test that from_mcp raises NotImplementedError"""
-
-    mcp_definition = {
-        "name": "test_tool",
-        "description": "Test tool",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"param": {"type": "string"}},
-            "required": ["param"],
-        },
-    }
-
-    with pytest.raises(NotImplementedError) as exc_info:
-        Tool.from_mcp(mcp_definition)
-
-    assert "is not currently supported." in str(exc_info.value)
-
-
-def test_tool_for_mcp_preserves_descriptions():
-    """Test that parameter descriptions are preserved in MCP format"""
+def test_tool_openai_format_preserves_descriptions():
+    """Test that parameter descriptions are preserved in provider format."""
 
     @tool
     def documented_tool(param1: str, param2: int) -> str:
@@ -471,15 +425,15 @@ def test_tool_for_mcp_preserves_descriptions():
         """
         return "result"
 
-    mcp_def = documented_tool.to_mcp()
-    props = mcp_def["inputSchema"]["properties"]
+    schema = documented_tool.get_openai_tool_format()["function"]["parameters"]
+    props = schema["properties"]
 
     assert "detailed description of param1" in props["param1"]["description"]
     assert "detailed description of param2" in props["param2"]["description"]
 
 
-def test_tool_for_mcp_with_hidden_args():
-    """Test that hidden args are not exposed in MCP format"""
+def test_tool_openai_format_with_hidden_args():
+    """Test that hidden args are not exposed in provider format."""
 
     @tool(hidden_args=["api_key"])
     def api_tool(endpoint: str, api_key: str = "secret") -> str:
@@ -493,32 +447,22 @@ def test_tool_for_mcp_with_hidden_args():
         """
         return f"Calling {endpoint} with {api_key}"
 
-    mcp_def = api_tool.to_mcp()
-    props = mcp_def["inputSchema"]["properties"]
+    schema = api_tool.get_openai_tool_format()["function"]["parameters"]
+    props = schema["properties"]
 
     # Only endpoint should be in the schema
     assert "endpoint" in props
     assert "api_key" not in props
 
     # endpoint should be required
-    assert "endpoint" in mcp_def["inputSchema"]["required"]
+    assert "endpoint" in schema["required"]
 
 
 def test_file_tool_schemas_pass_metaschema_validation(tmp_path):
-    """Every filesystem tool (write_file, grep, ...) must be metaschema-valid.
+    """Every filesystem tool schema must satisfy its JSON metaschema."""
 
-    Exercises the same validation OpenHands runs on each MCP tool schema, so a
-    Python type name (e.g. `"str"`) leaking into a file-tool schema — the
-    original OpenHands `write_file` failure — is caught here.
-    """
-    from jsonschema.validators import validator_for
-
-    from corral.utils.io_tools import FSManager, build_file_tools
-
-    tools = build_file_tools(FSManager("file", base_path=str(tmp_path)))
+    tools = build_workspace_tools(WorkspaceFilesystem(tmp_path))
     assert "write_file" in tools
-    for name, file_tool in tools.items():
+    for file_tool in tools.values():
         schema = file_tool.params_json_schema
         validator_for(schema).check_schema(schema)
-        mcp_schema = file_tool.to_mcp()["inputSchema"]
-        validator_for(mcp_schema).check_schema(mcp_schema), name

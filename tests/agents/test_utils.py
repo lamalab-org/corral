@@ -1,7 +1,9 @@
+import asyncio
 import json
 import tempfile
 from pathlib import Path
 from typing import cast
+from unittest.mock import AsyncMock, Mock
 
 import openai
 import pytest
@@ -59,20 +61,41 @@ class MockLiteLLMUsage:
         self.total_tokens = 30
 
 
+class MockAsyncStream:
+    """Reusable async iterator returned by a streaming LiteLLM request."""
+
+    def __init__(self, chunks):
+        self.chunks = chunks
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for chunk in self.chunks:
+            yield chunk
+
+
 class MockLiteLLM:
     """Mock LiteLLM class."""
 
     def __init__(self):
-        self.completion = MockFunction()
+        self.acompletion = AsyncMock()
+        self.stream_chunk_builder = Mock()
 
 
 def setup_mock_litellm(monkeypatch, return_usage=False):
     """Helper to set up LiteLLM mocking."""
     mock_litellm = MockLiteLLM()
     mock_response = MockLiteLLMResponse(include_usage=return_usage)
-    mock_litellm.completion.return_value = mock_response
+    mock_litellm.acompletion.return_value = MockAsyncStream(["chunk"])
+    mock_litellm.stream_chunk_builder.return_value = mock_response
     monkeypatch.setattr("corral.agents.utils.litellm", mock_litellm)
     return mock_litellm, mock_response
+
+
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
 
 
 def setup_mock_logger(monkeypatch):
@@ -158,35 +181,41 @@ def test_litellm_message_structure():
     assert msg2["id"] == "msg_123"
 
 
-def test_llm_call_basic(monkeypatch):
+@pytest.mark.anyio()
+async def test_llm_call_basic(monkeypatch):
     """Test basic llm_call without tools."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
-    result = llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
+    result = await llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
 
     # Check that result is LLMResponse wrapper
     assert isinstance(result, LLMResponse)
     assert result.message == mock_response.choices[0].message
     assert result.content == "This is a response"
     assert result.id == "mock_response_id"  # ID should always be included
-    mock_litellm.completion.assert_called_once_with(
+    mock_litellm.acompletion.assert_awaited_once_with(
         model="gpt-3.5-turbo",
         messages=messages,
         temperature=0.7,
         api_base=None,
+        stream=True,
+    )
+    mock_litellm.stream_chunk_builder.assert_called_once_with(
+        ["chunk"], messages=messages
     )
 
 
-def test_llm_call_with_tools(monkeypatch):
+@pytest.mark.anyio()
+async def test_llm_call_with_tools(monkeypatch):
     """Test llm_call with tools."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
     tools = [{"type": "function", "function": {"name": "test_tool"}}]
 
-    result = llm_call(
+    result = await llm_call(
         model="gpt-3.5-turbo", messages=messages, temperature=0.7, tools=tools
     )
 
@@ -194,23 +223,25 @@ def test_llm_call_with_tools(monkeypatch):
     assert isinstance(result, LLMResponse)
     assert result.message == mock_response.choices[0].message
     assert result.id == "mock_response_id"
-    mock_litellm.completion.assert_called_once_with(
+    mock_litellm.acompletion.assert_awaited_once_with(
         model="gpt-3.5-turbo",
         messages=messages,
         temperature=0.7,
         tools=tools,
         tool_choice="auto",
         api_base=None,
+        stream=True,
     )
 
 
-def test_llm_call_anthropic_model(monkeypatch):
+@pytest.mark.anyio()
+async def test_llm_call_anthropic_model(monkeypatch):
     """Test llm_call with anthropic model adds max_tokens."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
-    result = llm_call(
+    result = await llm_call(
         model="anthropic/claude-3-sonnet", messages=messages, temperature=0.7
     )
 
@@ -218,22 +249,24 @@ def test_llm_call_anthropic_model(monkeypatch):
     assert isinstance(result, LLMResponse)
     assert result.message == mock_response.choices[0].message
     assert result.id == "mock_response_id"
-    mock_litellm.completion.assert_called_once_with(
+    mock_litellm.acompletion.assert_awaited_once_with(
         model="anthropic/claude-3-sonnet",
         messages=messages,
         temperature=0.7,
         max_tokens=8192,
         api_base=None,
+        stream=True,
     )
 
 
-def test_llm_call_reasoning_effort_forces_temperature_one(monkeypatch):
+@pytest.mark.anyio()
+async def test_llm_call_reasoning_effort_forces_temperature_one(monkeypatch):
     """Reasoning effort must override temperature to 1 (Anthropic thinking rule)."""
     mock_litellm, _ = setup_mock_litellm(monkeypatch)
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
-    llm_call(
+    await llm_call(
         model="anthropic/claude-3-sonnet",
         messages=messages,
         temperature=0.0,
@@ -242,23 +275,25 @@ def test_llm_call_reasoning_effort_forces_temperature_one(monkeypatch):
 
     # Anthropic rejects any temperature other than 1 when thinking is enabled,
     # so the requested 0.0 is overridden to 1 while reasoning_effort passes through.
-    mock_litellm.completion.assert_called_once_with(
+    mock_litellm.acompletion.assert_awaited_once_with(
         model="anthropic/claude-3-sonnet",
         messages=messages,
         temperature=1,
         max_tokens=8192,
         api_base=None,
         reasoning_effort="medium",
+        stream=True,
     )
 
 
-def test_llm_call_with_usage_info(monkeypatch):
+@pytest.mark.anyio()
+async def test_llm_call_with_usage_info(monkeypatch):
     """Test llm_call with return_usage=True."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch, return_usage=True)
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
-    result = llm_call(
+    result = await llm_call(
         model="gpt-3.5-turbo", messages=messages, temperature=0.7, return_usage=True
     )
 
@@ -273,7 +308,8 @@ def test_llm_call_with_usage_info(monkeypatch):
     }
 
 
-def test_llm_call_with_logprobs(monkeypatch):
+@pytest.mark.anyio()
+async def test_llm_call_with_logprobs(monkeypatch):
     """Test llm_call with logprobs=True in kwargs."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
     # Set logprobs on the mock response
@@ -281,7 +317,7 @@ def test_llm_call_with_logprobs(monkeypatch):
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
-    result = llm_call(
+    result = await llm_call(
         model="gpt-3.5-turbo",
         messages=messages,
         temperature=0.7,
@@ -295,13 +331,14 @@ def test_llm_call_with_logprobs(monkeypatch):
     assert result.id == "mock_response_id"
 
 
-def test_llm_call_without_logprobs(monkeypatch):
+@pytest.mark.anyio()
+async def test_llm_call_without_logprobs(monkeypatch):
     """Test llm_call without logprobs (default behavior)."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
-    result = llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
+    result = await llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
 
     # Check that result does NOT include logprobs when not requested
     assert isinstance(result, LLMResponse)
@@ -309,18 +346,72 @@ def test_llm_call_without_logprobs(monkeypatch):
     assert result.id == "mock_response_id"
 
 
-def test_llm_call_exception_handling(monkeypatch):
+@pytest.mark.anyio()
+async def test_llm_call_exception_handling(monkeypatch):
     """Test llm_call exception handling."""
     mock_litellm = MockLiteLLM()
-    mock_litellm.completion.side_effect = Exception("API Error")
+    mock_litellm.acompletion.side_effect = Exception("API Error")
     monkeypatch.setattr("corral.agents.utils.litellm", mock_litellm)
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
     with pytest.raises(Exception) as exc_info:
-        llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
+        await llm_call(model="gpt-3.5-turbo", messages=messages, temperature=0.7)
 
     assert str(exc_info.value) == "API Error"
+
+
+@pytest.mark.anyio()
+async def test_llm_calls_can_overlap(monkeypatch):
+    """Independent provider requests must not be serialized by the helper."""
+    active = 0
+    max_active = 0
+    response = MockLiteLLMResponse()
+
+    async def acompletion(**_kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return MockAsyncStream([response])
+
+    mock_litellm = MockLiteLLM()
+    mock_litellm.acompletion.side_effect = acompletion
+    mock_litellm.stream_chunk_builder.side_effect = lambda chunks, **_kwargs: chunks[0]
+    monkeypatch.setattr("corral.agents.utils.litellm", mock_litellm)
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+
+    await asyncio.gather(
+        llm_call(model="model-a", messages=messages, temperature=0.0),
+        llm_call(model="model-b", messages=messages, temperature=0.0),
+    )
+
+    assert max_active == 2
+
+
+@pytest.mark.anyio()
+async def test_llm_call_rejects_an_empty_stream(monkeypatch):
+    """An empty stream must fail explicitly instead of causing an index error."""
+    mock_litellm = MockLiteLLM()
+    mock_litellm.acompletion.return_value = MockAsyncStream([])
+    mock_litellm.stream_chunk_builder.return_value = None
+    monkeypatch.setattr("corral.agents.utils.litellm", mock_litellm)
+
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+    with pytest.raises(ValueError, match="no response chunks"):
+        await llm_call(model="model", messages=messages, temperature=0.0)
+
+
+@pytest.mark.anyio()
+async def test_llm_call_cannot_be_downgraded_to_non_streaming(monkeypatch):
+    """The shared helper keeps streaming enabled for every caller."""
+    mock_litellm, _ = setup_mock_litellm(monkeypatch)
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+
+    await llm_call(model="model", messages=messages, temperature=0.0, stream=False)
+
+    assert mock_litellm.acompletion.await_args.kwargs["stream"] is True
 
 
 def test_format_examples_none():

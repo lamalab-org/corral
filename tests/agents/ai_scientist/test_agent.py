@@ -1,1486 +1,225 @@
-import re
-import shutil
-import threading
-import time
-from dataclasses import dataclass
-from pathlib import Path
+"""Session-boundary tests for AI Scientist."""
 
+import asyncio
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock
+
+import anyio
 import pytest
+from anyio.from_thread import BlockingPortal
 
-from corral.agents import (
-    AIScientistAgent,
-    AIScientistConfig,
-    SakanaAIScientistConfig,
+from corral.agents import Agent, AIScientistAgent
+from corral.agents.ai_scientist import agent as agent_module
+from corral.agents.ai_scientist.agent import (
+    _BranchSessionRegistry,
+    _call_llm_from_harness,
 )
-from corral.agents.ai_scientist.search.nodes import (
-    ExperimentDecision,
-    MeasuredMetric,
-    NodeEvaluation,
-    NodeProposal,
-    NodeType,
-    PlanningBatch,
-    Recommendation,
-    ResearchStage,
-    StageWinnerSelection,
-    SubstageCompletion,
-    SubstagePlan,
-)
-from corral.agents.ai_scientist.state import Hypothesis, TaskFormulation
-from corral.agents.ai_scientist.workers.synthesizer import FinalAnswer
+from corral.agents.ai_scientist.manager import ExperimentManager
+from corral.agents.schema import AgentUsage
+from corral.agents.session import AgentSession
+from corral.core.action import Action
+from corral.core.environment import Environment, Toolset
+from corral.core.task import TaskDefinition
+from corral.core.tool import tool
 
 
-@dataclass
-class ToolResponse:
-    success: bool
-    result: str | None = None
-    error: str | None = None
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
 
 
-class FakeRouter:
-    def __init__(self):
-        self.tool_calls = []
-        self.trial_tool_calls = []
-        self.created_trials = []
-        self.closed_trials = []
+def make_session(calls, *, max_iterations=64):
+    def measure(value: int) -> str:
+        """Return a measurement."""
+        calls.append(value)
+        return str(value)
 
-    def get_task_prompt(self, task_id):
-        return "Determine the measured value and return one integer."
-
-    def get_mcp_tool_schema(self, task_id):
-        return {
-            "tools": [
-                {
-                    "name": "measure",
-                    "description": "Return a measurement",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {"value": {"type": "integer"}},
-                        "required": ["value"],
-                    },
-                }
-            ],
-            "mcp_schema_sha256": "digest",
-        }
-
-    def execute_tool(self, task_id, tool_name, arguments):
-        self.tool_calls.append((task_id, tool_name, arguments))
-        return ToolResponse(success=True, result="42")
-
-    def create_trial(self, task_id):
-        trial_runtime_id = f"trial-{len(self.created_trials) + 1}"
-        self.created_trials.append(trial_runtime_id)
-        return {
-            "trial_runtime_id": trial_runtime_id,
-            "workspace": f"/fake/{trial_runtime_id}",
-        }
-
-    def for_trial(self, trial_runtime_id, task_id, *, verbosity=None, workspace=None):
-        return FakeTrialRouter(self, trial_runtime_id)
-
-    def close_trial(self, trial_runtime_id):
-        self.closed_trials.append(trial_runtime_id)
-
-    def execute_trial_tool(self, trial_runtime_id, task_id, tool_name, arguments):
-        call = (task_id, tool_name, arguments)
-        self.tool_calls.append(call)
-        self.trial_tool_calls.append((trial_runtime_id, *call))
-        return ToolResponse(success=True, result="42")
+    task = TaskDefinition(
+        name="science",
+        description="measure",
+        tools=["measure"],
+        scoring_fn=lambda _answer: 1.0,
+        submission_format={"answer": "string"},
+        resolve_answer=False,
+    )
+    environment = Environment(
+        "science",
+        task,
+        toolset=Toolset(
+            pool={"measure": tool(measure)},
+            workspace_factory=None,
+        ),
+    )
+    return AgentSession(
+        environment,
+        environment.initial_state(started_at=datetime.now(timezone.utc)),
+        max_iterations=max_iterations,
+    )
 
 
-class FakeTrialRouter:
-    def __init__(self, parent, trial_runtime_id):
-        self.parent = parent
-        self.trial_runtime_id = trial_runtime_id
+def test_ai_scientist_exposes_only_the_session_entrypoint():
+    agent = AIScientistAgent(model="test-model")
 
-    def execute_tool(self, task_id, tool_name, arguments):
-        return self.parent.execute_trial_tool(
-            self.trial_runtime_id, task_id, tool_name, arguments
+    assert isinstance(agent, Agent)
+    assert callable(agent.run_session)
+    assert not hasattr(agent, "run")
+    assert not hasattr(agent, "arun")
+    assert not hasattr(agent, "run_agent")
+    assert not hasattr(agent, "arun_agent")
+    assert not hasattr(agent, "step")
+    assert not hasattr(agent, "last_state")
+    assert not hasattr(agent, "messages")
+    assert not hasattr(agent, "_available_tools")
+    assert not hasattr(agent, "_branch_tool_statistics")
+    assert not hasattr(AgentSession, "_adopt_state")
+
+
+def test_experiment_manager_is_not_a_second_agent_entrypoint():
+    assert callable(ExperimentManager.execute_search)
+    assert not hasattr(ExperimentManager, "run")
+    assert not hasattr(ExperimentManager, "run_session")
+
+
+def test_ai_scientist_uses_the_session_model_call_budget():
+    agent = AIScientistAgent(model="test-model")
+    session = make_session([], max_iterations=7)
+
+    assert not hasattr(agent.config, "max_llm_calls")
+    assert session.iteration_limit == 7
+
+
+@pytest.mark.anyio()
+async def test_scientist_harness_uses_native_async_llm_call(monkeypatch):
+    response = object()
+    async_call = AsyncMock(return_value=response)
+    monkeypatch.setattr(agent_module, "llm_call", async_call)
+
+    async with BlockingPortal() as portal:
+        result = await anyio.to_thread.run_sync(
+            lambda: _call_llm_from_harness(portal, model="test-model")
         )
 
-
-class ConcurrentToolRouter(FakeRouter):
-    def __init__(self):
-        super().__init__()
-        self._lock = threading.Lock()
-        self._active = 0
-        self.max_active = 0
-
-    def execute_trial_tool(self, trial_runtime_id, task_id, tool_name, arguments):
-        with self._lock:
-            self._active += 1
-            self.max_active = max(self.max_active, self._active)
-        time.sleep(0.03)
-        try:
-            return super().execute_trial_tool(
-                trial_runtime_id, task_id, tool_name, arguments
-            )
-        finally:
-            with self._lock:
-                self._active -= 1
+    assert result is response
+    async_call.assert_awaited_once_with(model="test-model")
 
 
-class ArtifactRouter(FakeRouter):
-    def __init__(self, root: Path):
-        super().__init__()
-        self.root = root
-        self.trial_runtime_id = "outer-trial"
-        self.trial_workspace = str(root / "canonical")
-        Path(self.trial_workspace).mkdir()
-        self.workspaces = {self.trial_runtime_id: self.trial_workspace}
+@pytest.mark.anyio()
+async def test_scientist_branches_execute_through_agent_sessions():
+    calls = []
+    parent = make_session(calls)
 
-    def create_trial(self, task_id):
-        descriptor = super().create_trial(task_id)
-        workspace = self.root / descriptor["trial_runtime_id"]
-        workspace.mkdir()
-        descriptor["workspace"] = str(workspace)
-        self.workspaces[descriptor["trial_runtime_id"]] = str(workspace)
-        return descriptor
+    async with BlockingPortal() as portal:
+        sessions = _BranchSessionRegistry(parent, portal)
+        first = sessions.create_branch()
+        second = sessions.create_branch()
 
-    def execute_trial_tool(self, trial_runtime_id, task_id, tool_name, arguments):
-        artifact = Path(self.workspaces[trial_runtime_id]) / "results" / "model.json"
-        artifact.parent.mkdir()
-        artifact.write_text('{"value": 42}', encoding="utf-8")
-        return super().execute_trial_tool(
-            trial_runtime_id, task_id, tool_name, arguments
+        first_response = await anyio.to_thread.run_sync(
+            lambda: first.execute(Action(name="measure", arguments={"value": 1}))
+        )
+        second_response = await anyio.to_thread.run_sync(
+            lambda: second.execute(Action(name="measure", arguments={"value": 2}))
         )
 
-    def promote_trial_artifacts(
-        self, source_trial_runtime_id, destination_trial_runtime_id
-    ):
-        source = Path(self.workspaces[source_trial_runtime_id])
-        destination = Path(self.workspaces[destination_trial_runtime_id])
-        shutil.copytree(source, destination, dirs_exist_ok=True)
-        return {
-            "files": [
-                str(item.relative_to(source))
-                for item in source.rglob("*")
-                if item.is_file()
-            ]
-        }
+        first_session = sessions.session(first.execution_id)
+        second_session = sessions.session(second.execution_id)
+        assert first_response.success is True
+        assert second_response.success is True
+        assert first_session.state.tool_statistics == {"measure": 1}
+        assert second_session.state.tool_statistics == {"measure": 1}
+        assert first_session.state.actions[0].arguments == {"value": 1}
+        assert second_session.state.actions[0].arguments == {"value": 2}
+        assert first_session.state.actions[0].actor_id == "agent_0"
+        assert second_session.state.actions[0].actor_id == "agent_0"
+
+    assert calls == [1, 2]
 
 
-class ScriptedModel:
-    def __init__(
-        self,
-        actions_per_plan=1,
-        *,
-        validity=0.95,
-        evidence_strength=0.9,
-        recommendation=Recommendation.FINALIZE,
-        substage_complete=True,
-    ):
-        self.call_count = 0
-        self.token_count = 0
-        self.purposes = []
-        self.records = []
-        self.actions_per_plan = actions_per_plan
-        self.validity = validity
-        self.evidence_strength = evidence_strength
-        self.recommendation = recommendation
-        self.substage_complete = substage_complete
-
-    def generate(
-        self, prompt, response_model, *, model=None, purpose="scientific_worker"
-    ):
-        self.call_count += 1
-        self.token_count += 10
-        self.purposes.append(purpose)
-        self.records.append((purpose, prompt))
-        if response_model is TaskFormulation:
-            return TaskFormulation(
-                objective="measure the value",
-                required_answer="one integer",
-                candidate_hypotheses=[
-                    Hypothesis(statement="The value is 42", rationale="candidate")
-                ],
-                observable_quantities=["measurement"],
-                possible_experiments=["call measure"],
-                success_criteria=["replicated value"],
-                tunable_parameters=[],
-            )
-        if response_model is PlanningBatch:
-            node_type = next(
-                (
-                    item
-                    for item in NodeType
-                    if item.value in purpose.removeprefix("plan_")
-                ),
-                NodeType.RESEARCH,
-            )
-            match = re.search(r"Design (\d+)", prompt)
-            count = int(match.group(1)) if match else 1
-            slot_match = re.search(
-                r"Proposal slots?.*?\[\s*(\d+)", prompt, flags=re.DOTALL
-            )
-            proposal_offset = int(slot_match.group(1)) - 1 if slot_match else 0
-            return PlanningBatch(
-                proposals=[
-                    NodeProposal(
-                        node_type=node_type,
-                        hypothesis=f"proposal {proposal_offset + index}",
-                        rationale="discriminating experiment",
-                        experiment_goal="measure the value",
-                        success_criteria=["obtain a measurement"],
-                    )
-                    for index in range(count)
-                ]
-            )
-        if response_model is ExperimentDecision:
-            step = int(purpose.rsplit("_", 1)[-1])
-            if step > self.actions_per_plan:
-                return ExperimentDecision(
-                    decision="finish",
-                    rationale="the requested measurements are complete",
-                    conclusion="The measured value is 42",
-                )
-            return ExperimentDecision(
-                decision="act",
-                rationale="take the next measurement",
-                purpose="measure",
-                tool_name="measure",
-                arguments={"value": step - 1},
-                expected_information="the value",
-            )
-        if response_model is NodeEvaluation:
-            return NodeEvaluation(
-                validity=self.validity,
-                task_progress=0.95,
-                evidence_strength=self.evidence_strength,
-                information_gain=0.8,
-                consistency=0.95,
-                recommendation=self.recommendation,
-                reason="the tool repeatedly returned 42",
-                conclusions=["The value is 42"],
-            )
-        if response_model is StageWinnerSelection:
-            candidate_ids = re.findall(r'"id": "(node_\d+)"', prompt)
-            return StageWinnerSelection(
-                selected_node_id=candidate_ids[-1],
-                reason="the last candidate is the strongest controlled follow-up",
-                candidate_comparison=["Compared all valid candidates directly."],
-            )
-        if response_model is SubstagePlan:
-            return SubstagePlan(
-                goal="Resolve the largest remaining uncertainty.",
-                rationale="The preceding substage did not meet its criteria.",
-                objectives=["Run a materially different measurement."],
-                completion_criteria=["Obtain valid discriminating evidence."],
-            )
-        if response_model is SubstageCompletion:
-            return SubstageCompletion(
-                complete=self.substage_complete,
-                reason=(
-                    "Valid observations satisfy the current agenda."
-                    if self.substage_complete
-                    else "The observations do not satisfy the agenda yet."
-                ),
-                satisfied_criteria=(
-                    ["Obtain valid discriminating evidence."]
-                    if self.substage_complete
-                    else []
-                ),
-                unmet_criteria=(
-                    []
-                    if self.substage_complete
-                    else ["Obtain valid discriminating evidence."]
-                ),
-            )
-        if response_model is FinalAnswer:
-            return FinalAnswer(final_answer="42")
-        raise AssertionError(response_model)
-
-
-class ConcurrentProbeModel(ScriptedModel):
-    def __init__(self):
-        super().__init__()
-        self._lock = threading.Lock()
-        self._active = 0
-        self.max_active = 0
-
-    def generate(
-        self, prompt, response_model, *, model=None, purpose="scientific_worker"
-    ):
-        is_parallel_worker = response_model in {
-            PlanningBatch,
-            ExperimentDecision,
-            NodeEvaluation,
-        }
-        if is_parallel_worker:
-            with self._lock:
-                self._active += 1
-                self.max_active = max(self.max_active, self._active)
-            time.sleep(0.03)
-        try:
-            return super().generate(
-                prompt, response_model, model=model, purpose=purpose
-            )
-        finally:
-            if is_parallel_worker:
-                with self._lock:
-                    self._active -= 1
-
-
-class SeedPreferringModel(ScriptedModel):
-    def generate(
-        self, prompt, response_model, *, model=None, purpose="scientific_worker"
-    ):
-        if response_model is StageWinnerSelection and purpose == "select_best_research":
-            self.call_count += 1
-            self.token_count += 10
-            self.purposes.append(purpose)
-            self.records.append((purpose, prompt))
-            seed_match = re.search(r"Inherited seed node id:\s*(node_\d+)", prompt)
-            assert seed_match is not None
-            return StageWinnerSelection(
-                selected_node_id=seed_match.group(1),
-                reason="none of the research candidates improves the inherited seed",
-                candidate_comparison=["The seed remains strongest."],
-            )
-        return super().generate(prompt, response_model, model=model, purpose=purpose)
-
-
-class TunableScriptedModel(ScriptedModel):
-    def generate(
-        self, prompt, response_model, *, model=None, purpose="scientific_worker"
-    ):
-        result = super().generate(
-            prompt,
-            response_model,
-            model=model,
-            purpose=purpose,
-        )
-        if response_model is TaskFormulation:
-            return result.model_copy(update={"tunable_parameters": ["temperature"]})
-        return result
-
-
-class MeasuredScriptedModel(ScriptedModel):
-    def generate(
-        self, prompt, response_model, *, model=None, purpose="scientific_worker"
-    ):
-        result = super().generate(
-            prompt,
-            response_model,
-            model=model,
-            purpose=purpose,
-        )
-        if response_model is TaskFormulation:
-            return result.model_copy(
-                update={
-                    "measured_metric": MeasuredMetric(
-                        name="score",
-                        maximize=True,
-                    )
-                }
-            )
-        return result
-
-
-class SeededMetricRouter(FakeRouter):
-    def get_mcp_tool_schema(self, task_id):
-        return {
-            "tools": [
-                {
-                    "name": "measure",
-                    "description": "Return a seeded measurement",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "value": {"type": "integer"},
-                            "seed": {"type": "integer"},
-                        },
-                        "required": ["value"],
-                    },
-                }
-            ],
-            "mcp_schema_sha256": "seeded-digest",
-        }
-
-    def execute_trial_tool(self, trial_runtime_id, task_id, tool_name, arguments):
-        call = (task_id, tool_name, arguments)
-        self.tool_calls.append(call)
-        self.trial_tool_calls.append((trial_runtime_id, *call))
-        score = float(arguments["seed"] + 1) if "seed" in arguments else 10.0
-        return ToolResponse(success=True, result=f'{{"score": {score}}}')
-
-
-class VisualScriptedModel(ScriptedModel):
-    def __init__(self):
-        super().__init__()
-        self.multimodal_paths = []
-
-    def generate_multimodal(
-        self,
-        prompt,
-        response_model,
-        *,
-        image_paths,
-        model=None,
-        purpose="multimodal_scientific_worker",
-    ):
-        self.multimodal_paths.append(list(image_paths))
-        evaluation = self.generate(
-            prompt,
-            response_model,
-            model=model,
-            purpose=purpose,
-        )
-        return evaluation.model_copy(
-            update={"visual_feedback": ["The plotted measurement converged to 42."]}
-        )
-
-
-class VisualArtifactRouter(ArtifactRouter):
-    def execute_trial_tool(self, trial_runtime_id, task_id, tool_name, arguments):
-        response = super().execute_trial_tool(
-            trial_runtime_id, task_id, tool_name, arguments
-        )
-        plot = Path(self.workspaces[trial_runtime_id]) / "results" / "curve.png"
-        plot.write_bytes(b"\x89PNG\r\n\x1a\nvisual-test")
-        return response
-
-
-def test_agent_runs_all_scientific_stages_without_using_scorer(tmp_path):
-    model = ScriptedModel()
-    config = AIScientistConfig(
-        initial_drafts=2,
-        preliminary_node_budget=2,
-        tuning_node_budget=0,
-        research_node_budget=2,
-        verification_node_budget=4,
-        verification_min_nodes=4,
-        adaptive_substages=False,
-        stage_boundary_replications=1,
-        max_nodes=20,
-        max_tool_calls=20,
-        max_llm_calls=80,
-        max_actions_per_node=1,
-        trace_path=tmp_path,
+@pytest.mark.anyio()
+async def test_scientist_branches_inherit_current_hook_state():
+    calls = []
+    parent = make_session(calls)
+    await parent.record_message(
+        {"role": "assistant", "content": "hook-provided context"}
     )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-    router = FakeRouter()
-
-    result = agent.run_agent(router, "scientific-task")
-
-    assert result.answer == "42"
-    assert agent.requires_answer_extraction is False
-    assert agent.last_state.current_stage == ResearchStage.COMPLETE
-    assert (
-        len(
-            agent.last_state.tree.by_stage(
-                ResearchStage.PRELIMINARY, include_boundary=False
-            )
-        )
-        == 2
-    )
-    assert (
-        len(
-            agent.last_state.tree.by_stage(
-                ResearchStage.RESEARCH, include_boundary=False
-            )
-        )
-        == 2
-    )
-    verification = agent.last_state.tree.by_stage(
-        ResearchStage.VERIFICATION, include_boundary=False
-    )
-    assert [node.node_type for node in verification] == [
-        NodeType.ABLATION,
-        NodeType.ABLATION,
-        NodeType.ABLATION,
-        NodeType.COUNTERFACTUAL,
-    ]
-    assert len(router.tool_calls) == 11
-    assert agent.last_state.scientific_tool_calls == 11
-    assert agent.last_state.replay_tool_calls == 0
-    assert agent.last_state.trial_runtimes_created == 11
-    assert router.closed_trials == router.created_trials
-    assert model.call_count == 49
-    assert (tmp_path / "scientific-task.jsonl").is_file()
-
-    preliminary = agent.last_state.tree.by_stage(
-        ResearchStage.PRELIMINARY, include_boundary=False
-    )
-    assert [node.branch_workspace for node in preliminary] == [
-        "/fake/trial-1",
-        "/fake/trial-2",
-    ]
-    assert len({node.branch_id for node in preliminary}) == 2
-    assert len({node.trial_runtime_id for node in preliminary}) == 2
-    preliminary_progress = agent.last_state.stage_progress(ResearchStage.PRELIMINARY)
-    research_progress = agent.last_state.stage_progress(ResearchStage.RESEARCH)
-    verification_progress = agent.last_state.stage_progress(ResearchStage.VERIFICATION)
-    assert preliminary_progress.best_node_id == "node_0002"
-    assert research_progress.seed_node_id == preliminary_progress.best_node_id
-    assert research_progress.best_node_id == "node_0006"
-    assert verification_progress.seed_node_id == research_progress.best_node_id
-    assert all(
-        node.stage_seed_id == preliminary_progress.best_node_id
-        for node in agent.last_state.tree.by_stage(
-            ResearchStage.RESEARCH, include_boundary=False
+    hook_response = await parent.execute(
+        Action(
+            name="measure",
+            arguments={"value": 0},
+            metadata={"source": "hook-intervention"},
         )
     )
-    assert all(
-        node.boundary_validation
-        for stage in (
-            ResearchStage.PRELIMINARY,
-            ResearchStage.RESEARCH,
-            ResearchStage.VERIFICATION,
+    assert hook_response.success
+
+    async with BlockingPortal() as portal:
+        sessions = _BranchSessionRegistry(parent, portal)
+        branch = sessions.create_branch()
+        response = await anyio.to_thread.run_sync(
+            lambda: branch.execute(Action(name="measure", arguments={"value": 1}))
         )
-        for node in agent.last_state.tree.by_stage(stage)
-        if node.node_type in {NodeType.REPLICATION, NodeType.AGGREGATION}
+        branch_state = sessions.session(branch.execution_id).state
+
+    assert response.success
+    assert calls == [0, 1]
+    assert branch_state.tool_statistics == {"measure": 2}
+    assert branch_state.actions[0].metadata == {"source": "hook-intervention"}
+    assert any(
+        message.get("content") == "hook-provided context"
+        for message in branch_state.messages
     )
-    assert sum(purpose.startswith("select_best_") for purpose in model.purposes) == 3
-    planning_prompts = [
-        prompt for purpose, prompt in model.records if purpose.startswith("plan_")
-    ]
-    assert all("Trial-relative workspace" in prompt for prompt in planning_prompts)
-    assert all("Existing child experiments" in prompt for prompt in planning_prompts)
-    assert all("Proposal slot" in prompt for prompt in planning_prompts)
 
 
-def test_boundary_validation_does_not_consume_the_search_node_cap():
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        stage_boundary_replications=1,
-        max_validation_nodes=2,
-        max_nodes=1,
-        max_tool_calls=2,
-        max_llm_calls=12,
-        max_actions_per_node=1,
+@pytest.mark.anyio()
+async def test_ai_scientist_maps_harness_result_to_outcome(monkeypatch):
+    agent = AIScientistAgent(model="test-model")
+    session = make_session([])
+
+    monkeypatch.setattr(
+        agent,
+        "_execute_session",
+        lambda _session, _owner, _portal: (
+            "42",
+            AgentUsage(input_tokens=4, output_tokens=1, llm_calls=2),
+            {"graph": {}},
+        ),
     )
-    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
+    outcome = await agent.run_session(session)
 
-    agent.run_agent(FakeRouter(), "separate-node-budgets-task")
-
-    search_nodes = [
-        node for node in agent.last_state.tree.nodes if not node.boundary_validation
-    ]
-    validation_nodes = [
-        node for node in agent.last_state.tree.nodes if node.boundary_validation
-    ]
-    assert len(search_nodes) == 1
-    assert [node.node_type for node in validation_nodes] == [
-        NodeType.REPLICATION,
-        NodeType.AGGREGATION,
-    ]
-    summary = validation_nodes[-1].replication_summary
-    assert summary is not None
-    assert summary.n_runs == summary.n_successful == 1
-    assert summary.metric_name is None
-    assert summary.model_dump()["values"] == []
-    assert summary.mean is summary.std is summary.stderr is None
-    assert summary.seeds == [None]
+    assert outcome.status == "completed"
+    assert outcome.answer == "42"
+    assert outcome.usage.llm_calls == 2
+    assert session.state.submission == "42"
+    assert session.state.tool_statistics == {"submit_answer": 1}
+    scientist_state = session.get_agent_state("ai_scientist")
+    assert scientist_state is not None
+    assert scientist_state["status"] == "completed"
 
 
-def test_tuning_and_verification_use_fixed_stage_baselines():
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=4,
-        research_node_budget=1,
-        verification_node_budget=4,
-        verification_min_nodes=4,
-        adaptive_substages=False,
-        stage_boundary_replications=0,
-        max_search_nodes=10,
-        max_tool_calls=10,
-        max_llm_calls=64,
-        max_actions_per_node=1,
+@pytest.mark.anyio()
+async def test_ai_scientist_instance_is_reentrant_across_sessions(monkeypatch):
+    agent = AIScientistAgent(model="test-model")
+    first = make_session([])
+    second = make_session([])
+    first.execution_id = "first"
+    second.execution_id = "second"
+
+    monkeypatch.setattr(
+        agent,
+        "_execute_session",
+        lambda session, _owner, _portal: (
+            session.execution_id,
+            AgentUsage(llm_calls=1),
+            {"graph": {"execution_id": session.execution_id}},
+        ),
     )
-    agent = AIScientistAgent(config=config, model_gateway=TunableScriptedModel())
 
-    agent.run_agent(FakeRouter(), "fixed-stage-baselines-task")
-
-    tuning_progress = agent.last_state.stage_progress(ResearchStage.TUNING)
-    tuning_nodes = agent.last_state.tree.by_stage(
-        ResearchStage.TUNING,
-        include_boundary=False,
+    first_outcome, second_outcome = await asyncio.gather(
+        agent.run_session(first),
+        agent.run_session(second),
     )
-    assert len(tuning_nodes) == 4
-    assert {node.parent_id for node in tuning_nodes} == {tuning_progress.seed_node_id}
-    assert {node.node_type for node in tuning_nodes} == {NodeType.PARAMETER_SEARCH}
 
-    verification_progress = agent.last_state.stage_progress(ResearchStage.VERIFICATION)
-    verification_nodes = agent.last_state.tree.by_stage(
-        ResearchStage.VERIFICATION,
-        include_boundary=False,
-    )
-    assert len(verification_nodes) == 4
-    assert {node.parent_id for node in verification_nodes} == {
-        verification_progress.seed_node_id
-    }
-
-
-def test_sakana_profile_runs_full_stage_four_budget_with_only_ablations():
-    config = SakanaAIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=4,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=0,
-        max_search_nodes=6,
-        max_tool_calls=6,
-        max_llm_calls=40,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
-
-    agent.run_agent(FakeRouter(), "sakana-verification-task")
-
-    verification = agent.last_state.tree.by_stage(
-        ResearchStage.VERIFICATION,
-        include_boundary=False,
-    )
-    seed_id = agent.last_state.stage_progress(ResearchStage.VERIFICATION).seed_node_id
-    assert len(verification) == 4
-    assert {node.node_type for node in verification} == {NodeType.ABLATION}
-    assert {node.parent_id for node in verification} == {seed_id}
-
-
-def test_sakana_parallel_bfts_fills_four_workers_from_diverse_root_trees():
-    model = ScriptedModel(
-        evidence_strength=0.9,
-        recommendation=Recommendation.CONTINUE,
-    )
-    config = SakanaAIScientistConfig(
-        initial_drafts=3,
-        preliminary_node_budget=7,
-        preliminary_evidence_threshold=0.95,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=0,
-        max_search_nodes=7,
-        max_tool_calls=7,
-        max_llm_calls=80,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-    router = ConcurrentToolRouter()
-
-    agent.run_agent(router, "sakana-parallel-parent-task")
-
-    preliminary = agent.last_state.tree.by_stage(
-        ResearchStage.PRELIMINARY,
-        include_boundary=False,
-    )
-    roots = preliminary[:3]
-    expanded = preliminary[3:]
-    assert len(expanded) == 4
-    assert {node.parent_id for node in expanded} == {node.id for node in roots}
-    assert router.max_active == 4
-    assert agent.last_state.experimental_search_terminated_reason is not None
-
-
-def test_sakana_research_uses_full_budget_and_llm_parent_selection():
-    model = ScriptedModel()
-    config = SakanaAIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=5,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=0,
-        max_search_nodes=7,
-        max_tool_calls=7,
-        max_llm_calls=100,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "sakana-full-research-task")
-
-    research = agent.last_state.tree.by_stage(
-        ResearchStage.RESEARCH,
-        include_boundary=False,
-    )
-    assert len(research) == 5
-    # The listwise test model selects the last candidate. On the second BFTS
-    # batch this is the last child from the first batch, while deterministic
-    # equal-score selection would fall back to the inherited seed.
-    assert research[-1].parent_id == research[-2].id
-    assert model.purposes.count("select_best_research") >= 2
-
-
-def test_sakana_validates_a_best_node_after_research_budget_exhaustion():
-    model = ScriptedModel(recommendation=Recommendation.CONTINUE)
-    config = SakanaAIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=2,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=1,
-        aggregate_stage_replications=False,
-        max_search_nodes=4,
-        max_validation_nodes=3,
-        max_tool_calls=7,
-        max_llm_calls=80,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "sakana-budget-validation-task")
-
-    progress = agent.last_state.stage_progress(ResearchStage.RESEARCH)
-    assert progress.completion_criteria_met is False
-    assert progress.search_budget_exhausted is True
-    assert progress.boundary_validation_reason == "search_budget_exhausted"
-    assert len(progress.replication_node_ids) == 1
-    replication = agent.last_state.tree.get(progress.replication_node_ids[0])
-    assert replication.node_type == NodeType.REPLICATION
-    assert replication.boundary_validation is True
-
-
-def test_sakana_replication_exactly_replays_actions_with_seed_only_overrides():
-    model = MeasuredScriptedModel()
-    config = SakanaAIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=3,
-        aggregate_stage_replications=True,
-        max_search_nodes=1,
-        max_validation_nodes=4,
-        max_tool_calls=4,
-        max_llm_calls=20,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-    router = SeededMetricRouter()
-
-    agent.run_agent(router, "sakana-exact-replication-task")
-
-    progress = agent.last_state.stage_progress(ResearchStage.PRELIMINARY)
-    winner = agent.last_state.tree.get(progress.best_node_id)
-    replications = [
-        agent.last_state.tree.get(node_id) for node_id in progress.replication_node_ids
-    ]
-    assert len(replications) == 3
-    assert winner.plan[0].arguments == {"value": 0}
-    assert [node.replication_seed for node in replications] == [0, 1, 2]
-    assert [node.plan[0].arguments for node in replications] == [
-        {"value": 0, "seed": 0},
-        {"value": 0, "seed": 1},
-        {"value": 0, "seed": 2},
-    ]
-    assert all(
-        node.replication_seed_overrides == ["action_0.measure.seed"]
-        for node in replications
-    )
-    assert all(node.plan[0].purpose == winner.plan[0].purpose for node in replications)
-    assert all(
-        node.plan[0].expected_information == winner.plan[0].expected_information
-        for node in replications
-    )
-    assert len({node.trial_runtime_id for node in replications}) == 3
-    assert winner.trial_runtime_id not in {
-        node.trial_runtime_id for node in replications
-    }
-    assert all(
-        not any(
-            purpose.startswith(f"experiment_{node.id}_step_")
-            for purpose in model.purposes
-        )
-        for node in replications
-    )
-    assert agent.last_state.scientific_tool_calls == 4
-    assert agent.last_state.replay_tool_calls == 0
-
-    aggregation = agent.last_state.tree.get(progress.aggregation_node_id)
-    summary = aggregation.replication_summary
-    assert summary is not None
-    assert summary.n_runs == summary.n_successful == 3
-    assert summary.metric_name == "score"
-    assert summary.model_dump()["values"] == [1.0, 2.0, 3.0]
-    assert summary.mean == 2.0
-    assert summary.std == 1.0
-    assert summary.stderr == pytest.approx(1 / (3**0.5))
-    assert summary.seeds == [0, 1, 2]
-    aggregation_prompt = next(
-        prompt
-        for purpose, prompt in model.records
-        if purpose == f"evaluate_{aggregation.id}"
-    )
-    assert '"replication_summary"' in aggregation_prompt
-    assert '"mean": 2.0' in aggregation_prompt
-
-
-def test_sakana_exact_replication_is_unseeded_when_tool_exposes_no_seed():
-    config = SakanaAIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=1,
-        aggregate_stage_replications=False,
-        max_search_nodes=1,
-        max_validation_nodes=1,
-        max_tool_calls=2,
-        max_llm_calls=12,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
-
-    agent.run_agent(FakeRouter(), "sakana-unseeded-replication-task")
-
-    progress = agent.last_state.stage_progress(ResearchStage.PRELIMINARY)
-    winner = agent.last_state.tree.get(progress.best_node_id)
-    replication = agent.last_state.tree.get(progress.replication_node_ids[0])
-    assert replication.replication_seed is None
-    assert replication.replication_seed_overrides == []
-    assert replication.plan == winner.plan
-    assert "independent clean-trial replay" in replication.rationale
-
-
-def test_sakana_forces_tuning_for_procedural_parameters():
-    config = SakanaAIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=1,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=0,
-        max_search_nodes=4,
-        max_tool_calls=4,
-        max_llm_calls=32,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
-
-    agent.run_agent(FakeRouter(), "sakana-forced-tuning-task")
-
-    assert agent.last_state.formulation.tunable_parameters == []
-    tuning = agent.last_state.tree.by_stage(
-        ResearchStage.TUNING,
-        include_boundary=False,
-    )
-    assert len(tuning) == 1
-    assert tuning[0].node_type == NodeType.PARAMETER_SEARCH
-
-
-def test_sakana_preliminary_gate_accepts_a_working_low_validity_node():
-    model = ScriptedModel(validity=0.1, recommendation=Recommendation.ABANDON)
-    config = SakanaAIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=0,
-        max_search_nodes=3,
-        max_tool_calls=3,
-        max_llm_calls=24,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "sakana-working-stage-one-task")
-
-    preliminary = agent.last_state.tree.by_stage(
-        ResearchStage.PRELIMINARY,
-        include_boundary=False,
-    )
-    assert preliminary[0].status.value == "successful"
-    assert (
-        agent.last_state.stage_progress(
-            ResearchStage.PRELIMINARY
-        ).completion_criteria_met
-        is True
-    )
-    assert ResearchStage.RESEARCH in agent.last_state.stages
-    assert agent.last_state.experimental_search_terminated_reason is None
-
-
-def test_sakana_does_not_debug_a_nonfailed_critic_flagged_node():
-    model = ScriptedModel(
-        evidence_strength=0.1,
-        recommendation=Recommendation.DEBUG,
-    )
-    config = SakanaAIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=2,
-        preliminary_evidence_threshold=0.95,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=0,
-        max_search_nodes=2,
-        max_tool_calls=2,
-        max_llm_calls=16,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "sakana-failed-leaf-debug-only-task")
-
-    preliminary = agent.last_state.tree.by_stage(
-        ResearchStage.PRELIMINARY,
-        include_boundary=False,
-    )
-    assert [node.node_type for node in preliminary] == [
-        NodeType.DRAFT,
-        NodeType.REFINE,
-    ]
-
-
-def test_agent_marks_budget_truncated_node_partial_and_does_not_rank_it():
-    model = ScriptedModel(actions_per_plan=2)
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        stage_boundary_replications=0,
-        max_nodes=3,
-        max_tool_calls=1,
-        max_llm_calls=8,
-        max_actions_per_node=3,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-    router = FakeRouter()
-
-    result = agent.run_agent(router, "budgeted-task")
-
-    assert result.answer == "42"
-    assert len(router.tool_calls) == 1
-    assert len(agent.last_state.tree.nodes) == 1
-    node = agent.last_state.tree.nodes[0]
-    assert node.status.value == "partial"
-    assert node.allocated_action_budget == 1
-    assert node.termination_reason.value == "action_budget_exhausted"
-    assert len(node.plan) == 1
-    assert agent.last_state.best_nodes == []
-    assert agent.last_state.journal.claims == []
-    assert model.call_count == 6
-
-
-def test_parallel_nodes_reserve_shared_tool_budget_before_execution():
-    model = ScriptedModel(actions_per_plan=2)
-    config = AIScientistConfig(
-        initial_drafts=2,
-        preliminary_node_budget=2,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=2,
-        max_tool_calls=3,
-        max_llm_calls=14,
-        max_actions_per_node=2,
-        parallel_experiment_workers=2,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "parallel-budget-reservation-task")
-
-    assert [len(node.plan) for node in agent.last_state.tree.nodes] == [2, 1]
-    assert [node.status.value for node in agent.last_state.tree.nodes] == [
-        "successful",
-        "partial",
-    ]
-    assert agent.last_state.scientific_tool_calls == 3
-    assert agent.last_state.replay_tool_calls == 0
-
-
-class FourStepModel(ScriptedModel):
-    def __init__(self):
-        super().__init__()
-        self.actions_taken = 0
-
-    def generate(
-        self, prompt, response_model, *, model=None, purpose="scientific_worker"
-    ):
-        if response_model is ExperimentDecision:
-            self.call_count += 1
-            self.token_count += 10
-            self.purposes.append(purpose)
-            self.records.append((purpose, prompt))
-            if self.actions_taken < 4:
-                next_action = self.actions_taken + 1
-                if "You have 0 tool action(s) left" not in prompt:
-                    self.actions_taken = next_action
-                return ExperimentDecision(
-                    decision="act",
-                    rationale="complete the next workflow step",
-                    purpose=f"workflow step {next_action}",
-                    tool_name="measure",
-                    arguments={"value": next_action},
-                    expected_information="the next intermediate result",
-                )
-            return ExperimentDecision(
-                decision="finish",
-                rationale="all four workflow steps are complete",
-                conclusion="The four-step workflow completed.",
-            )
-        return super().generate(prompt, response_model, model=model, purpose=purpose)
-
-
-def test_partial_node_is_continued_in_the_same_physical_branch():
-    model = FourStepModel()
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=2,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=2,
-        max_tool_calls=4,
-        max_llm_calls=14,
-        max_actions_per_node=3,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "four-step-task")
-
-    first, continuation = agent.last_state.tree.nodes
-    assert first.status.value == "partial"
-    assert continuation.node_type == NodeType.CONTINUE
-    assert continuation.status.value == "successful"
-    assert continuation.parent_id == first.id
-    assert continuation.branch_id == first.branch_id
-    assert continuation.hypothesis == first.hypothesis
-    assert len(first.executed_actions) == 3
-    assert len(continuation.executed_actions) == 1
-    continuation_prompt = next(
-        prompt
-        for purpose, prompt in model.records
-        if purpose == f"experiment_{continuation.id}_step_1"
-    )
-    assert "Prior partial checkpoint being continued" in continuation_prompt
-    assert '"result": "42"' in continuation_prompt
-
-
-def test_stage_four_does_not_substitute_aggregation_when_tools_are_exhausted():
-    model = ScriptedModel()
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=2,
-        max_tool_calls=1,
-        max_llm_calls=8,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    result = agent.run_agent(FakeRouter(), "zero-tool-aggregation-task")
-
-    assert [node.node_type for node in agent.last_state.tree.nodes] == [NodeType.DRAFT]
-    assert (
-        agent.last_state.stage_progress(ResearchStage.PRELIMINARY).replication_node_ids
-        == []
-    )
-    assert agent.last_state.scientific_tool_calls == 1
-    assert agent.last_state.replay_tool_calls == 0
-    assert result.metadata["tool_statistics"]["total_calls"] == 1
-    assert result.metadata["tool_statistics"]["successful_calls"] == 1
-
-
-def test_agent_promotes_winning_artifacts_into_the_scored_trial(tmp_path):
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=1,
-        max_tool_calls=1,
-        max_llm_calls=6,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
-    router = ArtifactRouter(tmp_path)
-
-    agent.run_agent(router, "artifact-task")
-
-    promoted = Path(router.trial_workspace) / "results" / "model.json"
-    assert promoted.read_text(encoding="utf-8") == '{"value": 42}'
-    assert agent.last_state.promoted_artifacts == ["results/model.json"]
-    assert agent.last_state.artifact_destination_workspace == router.trial_workspace
-    assert router.closed_trials == router.created_trials
-
-
-def test_reusable_injected_model_gets_a_fresh_per_run_llm_budget():
-    model = ScriptedModel()
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        stage_boundary_replications=0,
-        max_nodes=3,
-        max_tool_calls=4,
-        max_llm_calls=16,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    first = agent.run_agent(FakeRouter(), "first-task")
-    first_run_calls = model.call_count
-    second = agent.run_agent(FakeRouter(), "second-task")
-
-    assert first.answer == second.answer == "42"
-    assert first_run_calls > 0
-    assert model.call_count == first_run_calls * 2
-    assert len(agent.last_state.tree.nodes) == 3
-
-
-def test_agent_stops_expansion_after_total_llm_token_budget():
-    model = ScriptedModel()
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=3,
-        max_tool_calls=3,
-        max_llm_calls=10,
-        max_llm_tokens=25,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-    router = FakeRouter()
-
-    result = agent.run_agent(router, "token-budgeted-task")
-
-    assert result.answer == "42"
-    assert len(router.tool_calls) == 1
-    assert len(agent.last_state.tree.nodes) == 1
-    # Formulation + planning + adaptive action + explicit completion +
-    # evaluation crossed the token ceiling; final synthesis remained reserved.
-    assert agent.last_state.llm_calls == 6
-    assert agent.last_state.llm_tokens == 60
-
-
-def test_low_validity_tool_success_is_marked_invalid_and_not_ranked_best():
-    model = ScriptedModel(validity=0.1, recommendation=Recommendation.ABANDON)
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=3,
-        max_tool_calls=1,
-        max_llm_calls=8,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    result = agent.run_agent(FakeRouter(), "invalid-evidence-task")
-
-    assert result.answer == "42"
-    node = agent.last_state.tree.nodes[0]
-    assert node.status.value == "invalid"
-    assert agent.last_state.best_nodes == []
-    assert set(agent.last_state.stages) == {ResearchStage.PRELIMINARY}
-    assert agent.last_state.experimental_search_terminated_reason is not None
-    assert agent.last_state.journal.failed_experiments[0].errors == [
-        "the tool repeatedly returned 42"
-    ]
-
-
-def test_critic_debug_recommendation_drives_the_next_node_type():
-    model = ScriptedModel(
-        validity=0.9,
-        evidence_strength=0.1,
-        recommendation=Recommendation.DEBUG,
-    )
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=2,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=2,
-        max_tool_calls=2,
-        max_llm_calls=10,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "debug-recommendation-task")
-
-    assert [node.node_type for node in agent.last_state.tree.nodes] == [
-        NodeType.DRAFT,
-        NodeType.DEBUG,
-    ]
-
-
-def test_llm_planning_and_evaluation_overlap_for_independent_roots():
-    model = ConcurrentProbeModel()
-    config = AIScientistConfig(
-        initial_drafts=2,
-        preliminary_node_budget=2,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=2,
-        max_tool_calls=2,
-        max_llm_calls=10,
-        max_actions_per_node=1,
-        parallel_llm_workers=2,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "parallel-llm-task")
-
-    assert model.max_active >= 2
-
-
-def test_tool_execution_overlaps_for_isolated_root_trials():
-    model = ScriptedModel()
-    config = AIScientistConfig(
-        initial_drafts=2,
-        preliminary_node_budget=2,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=2,
-        max_tool_calls=2,
-        max_llm_calls=9,
-        max_actions_per_node=1,
-        parallel_llm_workers=1,
-        parallel_experiment_workers=2,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-    router = ConcurrentToolRouter()
-
-    agent.run_agent(router, "parallel-tool-task")
-
-    assert router.max_active == 2
-    assert agent.last_state.peak_simultaneous_trials == 2
-
-
-def test_parallel_root_planning_preserves_the_reserved_final_llm_call():
-    model = ScriptedModel()
-    config = AIScientistConfig(
-        initial_drafts=3,
-        preliminary_node_budget=3,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        max_nodes=3,
-        max_tool_calls=3,
-        max_llm_calls=6,
-        max_actions_per_node=3,
-        parallel_llm_workers=3,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    result = agent.run_agent(FakeRouter(), "parallel-budget-task")
-
-    assert result.answer == "42"
-    assert len(agent.last_state.tree.nodes) == 1
-    assert len(agent.last_state.tree.nodes[0].plan) == 1
-    assert model.call_count == 6
-
-
-def test_research_keeps_searching_when_comparison_prefers_the_stage_seed():
-    model = SeedPreferringModel()
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=3,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        candidates_per_expansion=1,
-        adaptive_substages=False,
-        stage_boundary_replications=0,
-        max_nodes=4,
-        max_tool_calls=4,
-        max_llm_calls=24,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "seed-remains-best-task")
-
-    research_nodes = agent.last_state.tree.by_stage(
-        ResearchStage.RESEARCH, include_boundary=False
-    )
-    progress = agent.last_state.stage_progress(ResearchStage.RESEARCH)
-    assert len(research_nodes) == 3
-    assert progress.best_node_id == progress.seed_node_id
-    assert progress.improved_over_seed is False
-    assert progress.completion_criteria_met is False
-
-
-def test_manager_creates_evidence_dependent_substages():
-    model = ScriptedModel(
-        evidence_strength=0.1,
-        recommendation=Recommendation.CONTINUE,
-    )
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=3,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        candidates_per_expansion=1,
-        nodes_per_substage=1,
-        max_substages_per_stage=3,
-        stage_boundary_replications=0,
-        max_nodes=3,
-        max_tool_calls=3,
-        max_llm_calls=24,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "adaptive-substage-task")
-
-    progress = agent.last_state.stage_progress(ResearchStage.PRELIMINARY)
-    assert [substage.id for substage in progress.substages] == [
-        "preliminary.1",
-        "preliminary.2",
-        "preliminary.3",
-    ]
-    assert [len(substage.node_ids) for substage in progress.substages] == [1, 1, 1]
-    assert [
-        purpose
-        for purpose in model.purposes
-        if purpose.startswith("manage_preliminary_substage_")
-    ] == ["manage_preliminary_substage_2", "manage_preliminary_substage_3"]
-
-
-def test_node_count_alone_does_not_advance_an_incomplete_substage():
-    model = ScriptedModel(
-        evidence_strength=0.1,
-        recommendation=Recommendation.CONTINUE,
-        substage_complete=False,
-    )
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=3,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        candidates_per_expansion=1,
-        nodes_per_substage=1,
-        max_substages_per_stage=3,
-        stage_boundary_replications=0,
-        max_nodes=3,
-        max_tool_calls=3,
-        max_llm_calls=24,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(FakeRouter(), "incomplete-substage-task")
-
-    progress = agent.last_state.stage_progress(ResearchStage.PRELIMINARY)
-    assert [substage.id for substage in progress.substages] == ["preliminary.1"]
-    assert progress.current_substage.completion_criteria_met is False
-    assert progress.current_substage.last_completion_check_node_count == 2
-    assert model.purposes.count("evaluate_preliminary_substage") == 2
-
-
-def test_plot_artifacts_are_sent_to_multimodal_critic_and_journal(tmp_path):
-    model = VisualScriptedModel()
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=1,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        stage_boundary_replications=0,
-        max_nodes=1,
-        max_tool_calls=1,
-        max_llm_calls=6,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=model)
-
-    agent.run_agent(VisualArtifactRouter(tmp_path), "visual-feedback-task")
-
-    node = agent.last_state.tree.nodes[0]
-    assert len(node.visual_artifacts) == 1
-    assert node.visual_artifacts[0].endswith("results/curve.png")
-    assert model.multimodal_paths == [node.visual_artifacts]
-    assert agent.last_state.journal.visual_feedback == [
-        {
-            "node_id": node.id,
-            "artifacts": node.visual_artifacts,
-            "feedback": ["The plotted measurement converged to 42."],
-        }
-    ]
-
-
-def test_default_expansion_uses_three_clean_parallel_siblings():
-    config = AIScientistConfig(
-        initial_drafts=1,
-        preliminary_node_budget=1,
-        tuning_node_budget=0,
-        research_node_budget=3,
-        verification_node_budget=1,
-        verification_min_nodes=1,
-        adaptive_substages=False,
-        stage_boundary_replications=0,
-        max_nodes=4,
-        max_tool_calls=4,
-        max_llm_calls=24,
-        max_actions_per_node=1,
-    )
-    agent = AIScientistAgent(config=config, model_gateway=ScriptedModel())
-
-    agent.run_agent(FakeRouter(), "parallel-clean-expansion-task")
-
-    research_nodes = agent.last_state.tree.by_stage(
-        ResearchStage.RESEARCH, include_boundary=False
-    )
-    seed_id = agent.last_state.stage_progress(ResearchStage.RESEARCH).seed_node_id
-    assert len(research_nodes) == 3
-    assert {node.parent_id for node in research_nodes} == {seed_id}
-    assert all(not node.physical_state_inherited for node in research_nodes)
-    assert len({node.branch_id for node in research_nodes}) == 3
-    assert agent.last_state.replay_tool_calls == 0
+    assert first_outcome.answer == "first"
+    assert second_outcome.answer == "second"
+    assert first.state.submission == "first"
+    assert second.state.submission == "second"
+    assert first.get_agent_state("ai_scientist")["status"] == "completed"
+    assert second.get_agent_state("ai_scientist")["status"] == "completed"

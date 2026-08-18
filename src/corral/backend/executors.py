@@ -21,10 +21,10 @@ from loguru import logger
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from corral.backend.tool import Tool
+    from corral.core.tool import Tool
 
-# Default per-trial background-job concurrency. Bounds how many jobs actually
-# execute at once inside one trial runtime; jobs beyond it queue. Kept modest
+# Default per-execution background-job concurrency. Bounds how many jobs actually
+# execute at once inside one execution runtime; jobs beyond it queue. Kept modest
 # because background tools are typically expensive (simulations, solvers). This
 # is the single source of truth; :mod:`corral.backend.jobs` re-exports it.
 DEFAULT_JOB_CONCURRENCY = 4
@@ -245,7 +245,7 @@ class SubprocessExecutor(_PooledExecutor):
     `make_efficiency.md` §8 recommends for LAMMPS / Gaussian / xTB and other
     command-line programs, because a dedicated child process gives:
 
-    * **process isolation** — a crash can't take the benchmark server down;
+    * **process isolation** — a crash can't take the benchmark worker down;
     * **true cancellation** — the child (and its whole process group) is killed;
     * **stdout/stderr capture** — surfaced on failure for provenance;
     * **a clean working directory** — the job's resolved workspace is its cwd.

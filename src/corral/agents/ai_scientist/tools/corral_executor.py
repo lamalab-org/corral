@@ -1,4 +1,4 @@
-"""Schema-validating execution through a trial-scoped Corral router."""
+"""Schema-validating execution through canonical Corral actions."""
 
 import time
 from collections.abc import Callable
@@ -14,6 +14,8 @@ from corral.agents.ai_scientist.search.nodes import (
     Observation,
     PlannedAction,
 )
+from corral.agents.session import ToolResponse
+from corral.core.action import Action
 
 
 class ToolCallBudgetExceeded(RuntimeError):
@@ -82,8 +84,7 @@ class CorralExecutor:
     def __init__(
         self,
         *,
-        interface: Any,
-        task_id: str,
+        execute_action: Callable[[Action], ToolResponse],
         tools: dict[str, Any] | list[dict[str, Any]],
         max_tool_calls: int,
         max_observation_chars: int | None = 12_000,
@@ -92,8 +93,7 @@ class CorralExecutor:
         on_executed: Callable[[ExecutedAction], None] | None = None,
         on_tool_call: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
-        self.interface = interface
-        self.task_id = task_id
+        self.execute_action = execute_action
         self.max_tool_calls = max_tool_calls
         self.max_observation_chars = max_observation_chars
         self.stop_on_error = stop_on_error
@@ -179,29 +179,14 @@ class CorralExecutor:
             # sequentially because a Corral task workspace may be stateful.
             started_at = datetime.now(tz=timezone.utc).isoformat()
             started = time.perf_counter()
-            server_call: dict[str, Any] | None = None
             try:
-                response = self.interface.execute_tool(
-                    self.task_id, action.tool_name, action.arguments
+                response = self.execute_action(
+                    Action(name=action.tool_name, arguments=action.arguments)
                 )
                 success = bool(getattr(response, "success", False))
                 result = getattr(response, "result", None)
                 response_error = getattr(response, "error", None)
 
-                # HTTP Corral routers return the environment's serialized
-                # ToolCall record inside ToolResponse.result. Unwrap that
-                # envelope so an environment-level execution error remains a
-                # failed scientific observation instead of looking successful
-                # merely because the HTTP request itself returned 200.
-                if (
-                    success
-                    and isinstance(result, dict)
-                    and {"tool_name", "arguments", "status"}.issubset(result)
-                ):
-                    server_call = result
-                    success = result.get("status") == "success"
-                    response_error = result.get("error_message")
-                    result = result.get("result")
                 if success:
                     observation = Observation(
                         action_index=index,
@@ -237,24 +222,12 @@ class CorralExecutor:
                         "tool_name": action.tool_name,
                         "arguments": dict(action.arguments),
                         "result": observation.result,
-                        "status": (
-                            server_call.get("status")
-                            if server_call is not None
-                            else "success"
-                            if observation.success
-                            else "execution_error"
-                        ),
+                        "status": "success"
+                        if observation.success
+                        else "execution_error",
                         "error_message": observation.error,
-                        "duration": (
-                            server_call.get("duration")
-                            if server_call is not None
-                            else time.perf_counter() - started
-                        ),
-                        "timestamp": (
-                            server_call.get("timestamp")
-                            if server_call is not None
-                            else started_at
-                        ),
+                        "duration": time.perf_counter() - started,
+                        "timestamp": started_at,
                     }
                 )
 

@@ -7,10 +7,10 @@ from pathlib import Path
 from loguru import logger
 from samplemath.tools import calculator, percentage_calculator
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition
-from corral.backend.tool import Tool
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.state import State
+from corral.core.task import InputRef, TaskDefinition
+from corral.core.tool import Tool
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:
@@ -169,9 +169,7 @@ def load_tasks_from_json(
             tools=entry.get("tools", []),
             scoring_fn=scoring_fn,
             submission_format=entry.get("submission_format", ""),
-            input_map={
-                dep: InputRef(dep) for dep in entry.get("input_from_tasks", [])
-            },
+            input_map={dep: InputRef(dep) for dep in entry.get("input_from_tasks", [])},
             initial_input=initial_input,
             prompt_fn=_samplemath_prompt,
             resolve_answer=False,
@@ -180,7 +178,7 @@ def load_tasks_from_json(
     return tasks
 
 
-def _samplemath_prompt(env: Environment) -> str:
+def _samplemath_prompt(env: Environment, state: State) -> str:
     """Task prompt rendering the resolved dependency outputs.
 
     Inputs are resolved strictly: by the time the prompt is requested every
@@ -197,7 +195,7 @@ def _samplemath_prompt(env: Environment) -> str:
     """
 
     # Strict resolution: raises if a dependency has not produced an output.
-    resolved = env.state.resolve_inputs(task)
+    resolved = env.resolve_inputs(state)
 
     prompt += "\nAvailable input data:\n"
 
@@ -211,7 +209,7 @@ def _samplemath_prompt(env: Environment) -> str:
             prompt += f"- {key}: {value}\n"
 
     # Add workspace info
-    if env.state.workspace:
+    if env.workspace_path:
         prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
 
     logger.info(f"DEBUG: Generated prompt for {env.task_id}:\n{prompt}")
@@ -267,9 +265,6 @@ if __name__ == "__main__":
             Path(__file__).parent / "tasks" / "catalysis_tasks.json",
         )
 
-    # Get server settings from environment if provided
-    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
-    port = int(os.environ.get("CORRAL_PORT", "8000"))
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
     Path(work_dir).mkdir(parents=True, exist_ok=True)
     # Create environments
@@ -284,6 +279,3 @@ if __name__ == "__main__":
         logger.info(f"  Task: {env.current_task.name}")
         if env.current_task.input_map:
             logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
-
-    # Run server
-    run_server(environments, host, port)

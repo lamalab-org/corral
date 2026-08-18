@@ -2,11 +2,8 @@
 
 import json
 from typing import Any
-from urllib.parse import quote, urlencode
 
 import pytest
-
-from corral.types import ToolResponse
 
 
 class MockPrompt:
@@ -22,97 +19,6 @@ class MockPrompt:
             # Fill all keys including framework keys
             result = result.replace(f"{{{{{key}}}}}", str(value))
         return result
-
-
-class MockBenchmarkInterface:
-    """Mock BenchmarkInterface for testing."""
-
-    def __init__(self):
-        self.base_url = "http://test-server:8000"
-        self.current_verbosity = "brief"
-        self.task_guide = "Test task guide"
-        self.task_prompt = "Test task prompt"
-        self.available_tools = {
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "test_tool",
-                        "description": "A test tool",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "Test query",
-                                }
-                            },
-                            "required": ["query"],
-                        },
-                    },
-                }
-            ]
-        }
-        self.tool_responses = []
-        self.tool_calls = []
-        self.call_counts = {}
-        self.get_last_score = None  # Can be overridden in tests
-
-    def get_task_guide(self, task_id: str) -> str:
-        self._record_call("get_task_guide", task_id)
-        return self.task_guide
-
-    def get_task_prompt(self, task_id: str) -> str:
-        self._record_call("get_task_prompt", task_id)
-        return self.task_prompt
-
-    def get_available_tools_for_task(
-        self, task_id: str, verbosity: str | None = None
-    ) -> dict:
-        self._record_call("get_available_tools_for_task", task_id)
-        return self.available_tools
-
-    def get_mcp_tool_schema(self, task_id: str, verbosity: str | None = None) -> dict:
-        self._record_call("get_mcp_tool_schema", task_id)
-        return {"tools": [], "mcp_schema_sha256": "deadbeef"}
-
-    def mcp_url(self, task_id: str, verbosity: str | None = None) -> str:
-        # Mirror CorralRouter.mcp_url so agents get the task-scoped MCP URL.
-        self._record_call("mcp_url", task_id)
-        verbosity = verbosity or self.current_verbosity or "brief"
-        base_url = self.base_url.rstrip("/")
-        encoded_task_id = quote(str(task_id), safe="")
-        query = urlencode({"verbosity": verbosity})
-        return f"{base_url}/tasks/{encoded_task_id}/mcp/?{query}"
-
-    def execute_tool(
-        self, task_id: str, tool_name: str, arguments: dict
-    ) -> ToolResponse:
-        self._record_call("execute_tool", task_id, tool_name, arguments)
-        self.tool_calls.append(
-            {"task_id": task_id, "tool_name": tool_name, "arguments": arguments}
-        )
-        if self.tool_responses:
-            return self.tool_responses.pop(0)
-        return ToolResponse(success=True, result="Tool execution result", error=None)
-
-    def _record_call(self, method_name: str, *args, **kwargs):
-        """Record method calls for verification."""
-        if method_name not in self.call_counts:
-            self.call_counts[method_name] = 0
-        self.call_counts[method_name] += 1
-
-    def assert_called_once_with(self, method_name: str, *expected_args):
-        """Assert that a method was called once with expected arguments."""
-        assert (
-            self.call_counts.get(method_name, 0) == 1
-        ), f"{method_name} was not called exactly once"
-
-    def assert_not_called(self, method_name: str):
-        """Assert that a method was not called."""
-        assert (
-            self.call_counts.get(method_name, 0) == 0
-        ), f"{method_name} was called when it shouldn't have been"
 
 
 class MockMessage:
@@ -187,8 +93,6 @@ def mock_prompt_store():
             # Return specific prompts for known IDs
             if "system_prompt" in prompt_name:
                 return MockPrompt("You are a helpful assistant.")
-            elif "extractor_prompt" in prompt_name:
-                return MockPrompt("Extract the answer from: {{answer}}")
             elif "user_prompt" in prompt_name:
                 return MockPrompt("Task: {{task_guide}}")
             else:
@@ -212,8 +116,6 @@ def mock_promptstore_module(monkeypatch):
             """Return mock prompts based on prompt_name."""
             if "system_prompt" in prompt_name:
                 return MockPrompt("You are a helpful assistant.")
-            elif "extractor_prompt" in prompt_name:
-                return MockPrompt("Extract the answer from: {{answer}}")
             elif "user_prompt" in prompt_name:
                 return MockPrompt("Task: {{task_guide}}")
             else:
@@ -223,24 +125,6 @@ def mock_promptstore_module(monkeypatch):
     monkeypatch.setattr("promptstore.PromptStore", MockPromptStoreClass)
     # Also mock it where it's imported in the agents module
     monkeypatch.setattr("corral.agents.base_agent.PromptStore", MockPromptStoreClass)
-
-
-@pytest.fixture()
-def mock_interface():
-    """Mock BenchmarkInterface for testing."""
-    return MockBenchmarkInterface()
-
-
-@pytest.fixture()
-def mock_tool_response():
-    """Mock ToolResponse for testing."""
-    return ToolResponse(success=True, result="Tool execution result", error=None)
-
-
-@pytest.fixture()
-def mock_tool_response_with_error():
-    """Mock ToolResponse with error for testing."""
-    return ToolResponse(success=False, result=None, error="Tool execution failed")
 
 
 class Call:

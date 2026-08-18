@@ -23,7 +23,6 @@ from pathlib import Path
 from loguru import logger
 
 HF_REPO = "jablonkagroup/corral-environment-tasks"
-TASKS_ROOT = Path("tasks")
 
 
 def load_task_entries(

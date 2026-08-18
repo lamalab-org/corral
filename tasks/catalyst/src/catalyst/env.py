@@ -15,10 +15,9 @@ from catalyst.score import (
 from catalyst.tools import create_tools
 from loguru import logger
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition
-from corral.backend.tool import Tool
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.task import InputRef, TaskDefinition
+from corral.core.tool import Tool
 from corral.utils.task_loader import (
     load_task_entries,
     load_task_entries_from_env_package,
@@ -147,24 +146,12 @@ def create_environments(
 if __name__ == "__main__":
     import argparse as _argparse
 
-    parser = _argparse.ArgumentParser(description="Catalyst Benchmark Server")
+    parser = _argparse.ArgumentParser(description="Inspect Catalyst environments")
     parser.add_argument(
         "tasks_json_path",
         nargs="?",
         default=None,
         help="Path to tasks JSON file or directory (optional if --mode is provided)",
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
-        help="Host to run the server on",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("CORRAL_PORT", "8000")),
-        help="Port to run the server on",
     )
     parser.add_argument(
         "--mode",
@@ -210,12 +197,7 @@ if __name__ == "__main__":
             logger.error(f"Task config not found: {local_dir}")
             sys.exit(1)
 
-    host = args.host
-    port = args.port
-    # Absolute so the workspace path the server reports to a sandbox-running
-    # agent (e.g. Codex) resolves the same in that agent's process (a different
-    # cwd) instead of silently missing and losing files. BASE_WORK_DIR is already
-    # absolute; resolve() also normalizes a relative CORRAL_WORK_DIR override.
+    # Resolve the configured workspace root before constructing definitions.
     work_dir = str(Path(os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)).resolve())
     Path(work_dir).mkdir(parents=True, exist_ok=True)
 
@@ -230,6 +212,3 @@ if __name__ == "__main__":
         logger.info(f"  Task: {env.current_task.name}")
         if env.current_task.input_map:
             logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
-
-    logger.info(f"Running server on {host}:{port}")
-    run_server(environments, host, port)

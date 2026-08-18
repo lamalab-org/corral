@@ -1,290 +1,249 @@
-"""Tests for the core hook system."""
+"""Tests for AgentSession-native lifecycle hooks."""
+
+from datetime import datetime, timezone
 
 import pytest
 
-from corral.agents.hooks.core import (
+from corral.agents.hooks import (
     AgentHooks,
     CriticalHookError,
     HookContext,
     HookPoint,
 )
+from corral.agents.schema import AgentOutcome
+from corral.agents.session import AgentSession, run_agent_session
+from corral.core.action import Action
+from corral.core.environment import Environment, Toolset
+from corral.core.task import TaskDefinition
 
 
-class MockAgent:
-    """Mock agent for testing."""
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
 
 
-class MockInterface:
-    """Mock interface for testing."""
+class SessionAgent:
+    model = "test-model"
+
+    def __init__(self, hooks: AgentHooks | None = None) -> None:
+        self.hooks = hooks or AgentHooks()
+
+    async def run_session(self, session: AgentSession) -> AgentOutcome:
+        assert any(
+            message.get("content") == "injected context" for message in session.messages
+        )
+        response = await session.execute(
+            Action(name="submit_answer", arguments={"answer": "42"})
+        )
+        assert response.success
+        return AgentOutcome(status="completed", answer="42")
 
 
-def test_hook_registration_and_execution():
-    """Test basic hook registration and execution."""
-    hooks = AgentHooks()
-    executed = []
-
-    def test_hook(context: HookContext) -> None:
-        executed.append(context.task_id)
-
-    hooks.register(HookPoint.BEFORE_TASK, test_hook)
-
-    context = HookContext(
-        task_id="test_task",
-        agent=MockAgent(),
-        interface=MockInterface(),
-        messages=[],
-        iteration=0,
+def make_session(*, agent: SessionAgent | None = None) -> AgentSession:
+    task = TaskDefinition(
+        name="test_task",
+        description="answer 42",
+        tools=[],
+        scoring_fn=lambda answer: float(answer == "42"),
+        submission_format={"answer": "string"},
+        resolve_answer=False,
+    )
+    environment = Environment(
+        "test_task",
+        task,
+        toolset=Toolset(pool={}, workspace_factory=None),
+    )
+    state = environment.initial_state(started_at=datetime.now(timezone.utc))
+    return AgentSession(
+        environment,
+        state,
+        hooks=agent.hooks if agent is not None else None,
+        agent=agent,
     )
 
-    hooks.execute(HookPoint.BEFORE_TASK, context)
 
-    assert executed == ["test_task"]
+def context(
+    session: AgentSession,
+    agent: SessionAgent,
+    point: HookPoint = HookPoint.BEFORE_TASK,
+) -> HookContext:
+    return HookContext(session=session, agent=agent, hook_point=point)
 
 
-def test_hook_priority_order():
-    """Test that hooks execute in priority order (highest first)."""
+@pytest.mark.anyio()
+async def test_sync_and_async_hooks_run_in_priority_order():
     hooks = AgentHooks()
-    execution_order = []
+    order: list[str] = []
 
-    def hook_low(context: HookContext) -> None:
-        execution_order.append("low")
+    def low(_context: HookContext) -> None:
+        order.append("low")
 
-    def hook_high(context: HookContext) -> None:
-        execution_order.append("high")
+    async def high(_context: HookContext) -> None:
+        order.append("high")
 
-    def hook_medium(context: HookContext) -> None:
-        execution_order.append("medium")
+    hooks.register(HookPoint.BEFORE_TASK, low, priority=1)
+    hooks.register(HookPoint.BEFORE_TASK, high, priority=10)
+    agent = SessionAgent(hooks)
 
-    hooks.register(HookPoint.BEFORE_TASK, hook_low, priority=1)
-    hooks.register(HookPoint.BEFORE_TASK, hook_high, priority=10)
-    hooks.register(HookPoint.BEFORE_TASK, hook_medium, priority=5)
+    await hooks.run(HookPoint.BEFORE_TASK, context(make_session(), agent))
 
-    context = HookContext(
-        task_id="test_task",
-        agent=MockAgent(),
-        interface=MockInterface(),
-        messages=[],
-        iteration=0,
-    )
-
-    hooks.execute(HookPoint.BEFORE_TASK, context)
-
-    assert execution_order == ["high", "medium", "low"]
+    assert order == ["high", "low"]
 
 
-def test_hook_context_modification():
-    """Test that hooks can modify context."""
+@pytest.mark.anyio()
+async def test_hook_context_exposes_only_the_current_session_surface():
+    agent = SessionAgent()
+    session = make_session()
+    hook_context = context(session, agent)
+
+    assert hook_context.session is session
+    assert hook_context.state is session.state
+    assert hook_context.messages == session.messages
+    assert isinstance(hook_context.messages, tuple)
+    assert not hasattr(hook_context, "interface")
+    assert not hasattr(hook_context, "iteration_data")
+    assert not hasattr(agent.hooks, "execute")
+
+
+@pytest.mark.anyio()
+async def test_hook_stop_flag_prevents_lower_priority_callbacks():
     hooks = AgentHooks()
+    order: list[str] = []
 
-    def modify_hook(context: HookContext) -> None:
-        context.metadata["modified"] = True
-        context.messages.append({"role": "user", "content": "Modified"})
+    def stop(hook_context: HookContext) -> None:
+        order.append("stop")
+        hook_context.should_continue = False
 
-    hooks.register(HookPoint.BEFORE_TASK, modify_hook)
+    def never(_context: HookContext) -> None:
+        order.append("never")
 
-    context = HookContext(
-        task_id="test_task",
-        agent=MockAgent(),
-        interface=MockInterface(),
-        messages=[],
-        iteration=0,
-    )
+    hooks.register(HookPoint.BEFORE_TASK, stop, priority=10)
+    hooks.register(HookPoint.BEFORE_TASK, never, priority=1)
+    agent = SessionAgent(hooks)
+    result = await hooks.run(HookPoint.BEFORE_TASK, context(make_session(), agent))
 
-    hooks.execute(HookPoint.BEFORE_TASK, context)
-
-    assert context.metadata["modified"] is True
-    assert len(context.messages) == 1
-    assert context.messages[0]["content"] == "Modified"
+    assert order == ["stop"]
+    assert result.should_continue is False
 
 
-def test_hook_should_continue_flag():
-    """Test that should_continue flag stops execution."""
+@pytest.mark.anyio()
+async def test_critical_errors_propagate_and_noncritical_errors_do_not():
     hooks = AgentHooks()
-    execution_order = []
+    continued: list[bool] = []
 
-    def stop_hook(context: HookContext) -> None:
-        execution_order.append("stop")
-        context.should_continue = False
+    def noncritical(_context: HookContext) -> None:
+        raise ValueError("ignored")
 
-    def never_executed(context: HookContext) -> None:
-        execution_order.append("never")
+    def normal(_context: HookContext) -> None:
+        continued.append(True)
 
-    hooks.register(HookPoint.BEFORE_TASK, stop_hook, priority=10)
-    hooks.register(HookPoint.BEFORE_TASK, never_executed, priority=5)
+    hooks.register(HookPoint.BEFORE_TASK, noncritical, priority=10)
+    hooks.register(HookPoint.BEFORE_TASK, normal, priority=1)
+    agent = SessionAgent(hooks)
+    await hooks.run(HookPoint.BEFORE_TASK, context(make_session(), agent))
+    assert continued == [True]
 
-    context = HookContext(
-        task_id="test_task",
-        agent=MockAgent(),
-        interface=MockInterface(),
-        messages=[],
-        iteration=0,
-    )
+    def critical(_context: HookContext) -> None:
+        raise CriticalHookError("stop")
 
-    hooks.execute(HookPoint.BEFORE_TASK, context)
-
-    assert execution_order == ["stop"]
-    assert context.should_continue is False
-
-
-def test_critical_hook_error_propagates():
-    """Test that CriticalHookError is re-raised."""
-    hooks = AgentHooks()
-
-    def critical_error_hook(context: HookContext) -> None:
-        raise CriticalHookError("Critical failure")
-
-    hooks.register(HookPoint.BEFORE_TASK, critical_error_hook)
-
-    context = HookContext(
-        task_id="test_task",
-        agent=MockAgent(),
-        interface=MockInterface(),
-        messages=[],
-        iteration=0,
-    )
-
-    with pytest.raises(CriticalHookError) as exc_info:
-        hooks.execute(HookPoint.BEFORE_TASK, context)
-
-    assert "Critical failure" in str(exc_info.value)
+    hooks.register(HookPoint.AFTER_TASK, critical)
+    with pytest.raises(CriticalHookError, match="stop"):
+        await hooks.run(
+            HookPoint.AFTER_TASK,
+            context(make_session(), agent, HookPoint.AFTER_TASK),
+        )
 
 
-def test_non_critical_error_is_caught(caplog):
-    """Test that non-critical errors are logged but don't stop execution."""
-    hooks = AgentHooks()
-    executed = []
-
-    def error_hook(context: HookContext) -> None:
-        raise ValueError("Non-critical error")
-
-    def normal_hook(context: HookContext) -> None:
-        executed.append("normal")
-
-    hooks.register(HookPoint.BEFORE_TASK, error_hook, priority=10)
-    hooks.register(HookPoint.BEFORE_TASK, normal_hook, priority=5)
-
-    context = HookContext(
-        task_id="test_task",
-        agent=MockAgent(),
-        interface=MockInterface(),
-        messages=[],
-        iteration=0,
-    )
-
-    # Should not raise
-    hooks.execute(HookPoint.BEFORE_TASK, context)
-
-    # Normal hook should still execute
-    assert executed == ["normal"]
-
-
-def test_no_hooks_registered():
-    """Test execution with no hooks registered."""
+def test_registration_remove_and_clear():
     hooks = AgentHooks()
 
-    context = HookContext(
-        task_id="test_task",
-        agent=MockAgent(),
-        interface=MockInterface(),
-        messages=[],
-        iteration=0,
-    )
-
-    # Should return immediately without error
-    result = hooks.execute(HookPoint.BEFORE_TASK, context)
-    assert result is context
-
-
-def test_hook_remove():
-    """Test removing a specific hook."""
-    hooks = AgentHooks()
-    executed = []
-
-    def hook1(context: HookContext) -> None:
-        executed.append("hook1")
-
-    def hook2(context: HookContext) -> None:
-        executed.append("hook2")
-
-    hooks.register(HookPoint.BEFORE_TASK, hook1)
-    hooks.register(HookPoint.BEFORE_TASK, hook2)
-
-    # Remove hook1
-    hooks.remove(HookPoint.BEFORE_TASK, hook1)
-
-    context = HookContext(
-        task_id="test_task",
-        agent=MockAgent(),
-        interface=MockInterface(),
-        messages=[],
-        iteration=0,
-    )
-
-    hooks.execute(HookPoint.BEFORE_TASK, context)
-
-    assert executed == ["hook2"]
-
-
-def test_hook_clear_all():
-    """Test clearing all hooks."""
-    hooks = AgentHooks()
-
-    def hook1(context: HookContext) -> None:
+    def callback(_context: HookContext) -> None:
         pass
 
-    def hook2(context: HookContext) -> None:
-        pass
-
-    hooks.register(HookPoint.BEFORE_TASK, hook1)
-    hooks.register(HookPoint.AFTER_TASK, hook2)
-
+    hooks.register(HookPoint.BEFORE_TASK, callback)
+    hooks.register(HookPoint.AFTER_TASK, callback)
     assert hooks.has_hooks(HookPoint.BEFORE_TASK)
     assert hooks.has_hooks(HookPoint.AFTER_TASK)
 
-    hooks.clear()
-
+    hooks.remove(HookPoint.BEFORE_TASK, callback)
     assert not hooks.has_hooks(HookPoint.BEFORE_TASK)
+    hooks.clear()
     assert not hooks.has_hooks(HookPoint.AFTER_TASK)
 
 
-def test_hook_clear_specific_point():
-    """Test clearing hooks for a specific point."""
+@pytest.mark.anyio()
+async def test_shared_runner_invokes_hooks_and_persists_hook_state():
     hooks = AgentHooks()
+    events: list[str] = []
 
-    def hook1(context: HookContext) -> None:
-        pass
+    async def before(hook_context: HookContext) -> None:
+        events.append(hook_context.hook_point.value)
+        hook_context.metadata["source"] = "test"
+        await hook_context.session.record_message(
+            {"role": "assistant", "content": "injected context"}
+        )
 
-    def hook2(context: HookContext) -> None:
-        pass
+    def after(hook_context: HookContext) -> None:
+        events.append(hook_context.hook_point.value)
+        assert hook_context.data["status"] == "completed"
 
-    hooks.register(HookPoint.BEFORE_TASK, hook1)
-    hooks.register(HookPoint.AFTER_TASK, hook2)
+    hooks.register(HookPoint.BEFORE_TASK, before)
+    hooks.register(HookPoint.AFTER_TASK, after)
+    agent = SessionAgent(hooks)
+    session = make_session(agent=agent)
 
-    hooks.clear(HookPoint.BEFORE_TASK)
-
-    assert not hooks.has_hooks(HookPoint.BEFORE_TASK)
-    assert hooks.has_hooks(HookPoint.AFTER_TASK)
-
-
-def test_iteration_data_in_context():
-    """Test that iteration_data can be populated and accessed."""
-    hooks = AgentHooks()
-
-    def check_iteration_data(context: HookContext) -> None:
-        context.iteration_data["llm_response"] = "test response"
-        context.iteration_data["parsed_actions"] = []
-
-    hooks.register(HookPoint.AFTER_ITERATION, check_iteration_data)
-
-    context = HookContext(
-        task_id="test_task",
-        agent=MockAgent(),
-        interface=MockInterface(),
-        messages=[],
-        iteration=0,
+    result = await run_agent_session(
+        agent,
+        session.environment,
+        session.state,
+        max_iterations=10,
     )
 
-    hooks.execute(HookPoint.AFTER_ITERATION, context)
+    assert result.outcome == AgentOutcome(status="completed", answer="42")
+    assert events == ["before_task", "after_task"]
+    hook_state = result.state.runtime.metadata["agent_state"]["hooks"]
+    assert hook_state["metadata"] == {"source": "test"}
 
-    assert context.iteration_data["llm_response"] == "test response"
-    assert context.iteration_data["parsed_actions"] == []
+
+@pytest.mark.anyio()
+async def test_before_task_hook_can_cancel_the_agent():
+    hooks = AgentHooks()
+
+    def cancel(hook_context: HookContext) -> None:
+        hook_context.should_continue = False
+
+    hooks.register(HookPoint.BEFORE_TASK, cancel)
+    agent = SessionAgent(hooks)
+    session = make_session(agent=agent)
+
+    result = await run_agent_session(
+        agent, session.environment, session.state, max_iterations=10
+    )
+
+    assert result.outcome.status == "cancelled"
+    assert result.state.submission is None
+
+
+@pytest.mark.anyio()
+async def test_after_task_hook_runs_when_the_agent_raises():
+    hooks = AgentHooks()
+    seen: list[str] = []
+
+    def after(hook_context: HookContext) -> None:
+        seen.append(str(hook_context.data["status"]))
+
+    hooks.register(HookPoint.AFTER_TASK, after)
+
+    class RaisingAgent(SessionAgent):
+        async def run_session(self, session: AgentSession) -> AgentOutcome:
+            raise RuntimeError("agent broke")
+
+    agent = RaisingAgent(hooks)
+    session = make_session(agent=agent)
+
+    with pytest.raises(RuntimeError, match="agent broke"):
+        await run_agent_session(
+            agent, session.environment, session.state, max_iterations=10
+        )
+
+    assert seen == ["raised"]

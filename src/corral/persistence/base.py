@@ -32,14 +32,41 @@ class StateStore(Protocol):
         self,
         state: State,
         transition_id: str | None = None,
+        *,
+        advance_head: bool = False,
     ) -> State:
-        """Persist a complete State after validating its parent relationship."""
+        """Persist a complete State after validating its parent relationship.
+
+        ``advance_head`` atomically moves the execution's durable head to this
+        State. It is used for the canonical task path; speculative branches may
+        be saved without moving the head.
+        """
         ...
 
     async def load(self, state_hash: str) -> State:
         """Load and integrity-check the complete State with this content hash."""
         ...
 
+    async def load_initial(self, state_id: str) -> State | None:
+        """Load the initial State for an execution identity, if it exists."""
+        ...
+
+    async def load_head(self, state_id: str) -> State | None:
+        """Load the latest canonical checkpoint for an execution identity."""
+        ...
+
     async def children(self, state_hash: str) -> tuple[State, ...]:
         """Return every directly persisted fork of the selected State."""
+        ...
+
+    async def load_transition(
+        self,
+        parent_hash: str,
+        transition_id: str,
+    ) -> State | None:
+        """Return an already-committed transition, or ``None``.
+
+        Action proposal and observation checkpoints use stable transition IDs,
+        so retrying the same parent transition is an idempotent lookup.
+        """
         ...

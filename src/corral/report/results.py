@@ -5,7 +5,10 @@ from typing import Any
 
 from loguru import logger
 
+from corral.evaluation import EvaluationResult
 from corral.report.metrics.base import Metric, TaskMetric
+
+DEFAULT_TOOL_VERBOSITY = "brief"
 
 
 @dataclass
@@ -17,6 +20,9 @@ class TaskTrialResult:
     score: float
     state: dict[str, Any]  # TODO replace Any with specific types
     tool_statistics: dict[str, Any]  # TODO replace Any with specific types
+    output: dict[str, Any] | None = None
+    evaluation: EvaluationResult | None = None
+    evaluation_error: str | None = None
     messages: list[dict[str, Any]] | None = None  # Agent messages (verbose only)
     duration: float | None = None
     token_usage: dict[str, int] | None = None
@@ -25,8 +31,17 @@ class TaskTrialResult:
 
     @property
     def success(self) -> bool:
-        """Whether the trial was successful"""
+        """Whether the external evaluation passed for reporting purposes."""
         return self.score > 0 and self.error_message is None and not self.surrendered
+
+    @property
+    def output_ready(self) -> bool:
+        """Whether downstream execution may consume this runtime output."""
+        return (
+            self.output is not None
+            and self.error_message is None
+            and not self.surrendered
+        )
 
     @property
     def tool_execution_duration(self) -> float:
@@ -68,7 +83,7 @@ class BenchmarkResult:
     task_results: dict[str, TaskTrialResults]
     k: list[int] = field(default_factory=lambda: [5])
     total_duration: float | None = None
-    verbosity: str | None = None
+    verbosity: str = DEFAULT_TOOL_VERBOSITY
     verbose: bool = False  # Whether to include messages and tool_calls in report
     metrics: list[Metric] | None = None  # Explicit metrics list
     metric_registry: Any = (
@@ -182,8 +197,6 @@ class BenchmarkResult:
         Returns:
             Dictionary containing all report data ready for JSON export
         """
-        from corral.agents.utils import serialize_messages
-
         # Map registry metric results to report format
         report_data = {"metrics": {}}
 
@@ -227,9 +240,13 @@ class BenchmarkResult:
                 trial_data = {
                     "trial_id": trial.trial_id,
                     "score": trial.score,
-                    "submitted_answer": trial.state.get("submitted_answer")
-                    if trial.state and isinstance(trial.state, dict)
-                    else None,
+                    "output": trial.output,
+                    "evaluation": (
+                        trial.evaluation.model_dump(mode="json")
+                        if trial.evaluation is not None
+                        else None
+                    ),
+                    "evaluation_error": trial.evaluation_error,
                     "success": trial.success,
                     "surrendered": trial.surrendered,
                     "tool_execution_duration": trial.tool_execution_duration,
@@ -245,7 +262,9 @@ class BenchmarkResult:
 
                 # Add messages if available (verbose mode only)
                 if self.verbose and trial.messages is not None:
-                    trial_data["messages"] = serialize_messages(trial.messages)
+                    trial_data["messages"] = [
+                        dict(message) for message in trial.messages
+                    ]
 
                 # Add tool calls data if available (verbose mode only)
                 if self.verbose and "tool_calls" in trial.tool_statistics:

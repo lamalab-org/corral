@@ -26,7 +26,7 @@ from corral.backend.executors import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from corral.backend.tool import Tool
+    from corral.core.tool import Tool
 
 # Re-exported for backwards compatibility: callers historically imported
 # `JobExecutor` / `ThreadExecutor` / `DEFAULT_JOB_CONCURRENCY` from this
@@ -95,7 +95,7 @@ class JobStatus(str, Enum):
 
 @dataclass(frozen=True)
 class JobContext:
-    """Immutable provenance a job is permanently bound to at submit time.
+    """Immutable execution inputs a job is bound to at submit time.
 
     `arguments` are the *visible* arguments the agent supplied and are safe to
     surface in reports. `call_arguments` additionally carry any injected hidden
@@ -110,9 +110,6 @@ class JobContext:
     call_arguments: dict[str, Any]
     hidden_arg_names: tuple[str, ...]
     workspace: str | None
-    benchmark_run_id: str | None
-    episode_id: str | None
-    trial_runtime_id: str | None
     concurrency_key: str | None = None
 
 
@@ -138,7 +135,7 @@ class JobRecord:
 
         The hidden argument *values* in `call_arguments` are deliberately
         excluded; only the visible arguments and the names of injected hidden
-        arguments are reported, mirroring how :meth:`CorralState.snapshot`
+        arguments are reported, matching the State-v2 environment snapshot
         redacts `hidden_args`.
         """
         ctx = self.context
@@ -150,9 +147,6 @@ class JobRecord:
             "hidden_arg_names": list(ctx.hidden_arg_names),
             "workspace": ctx.workspace,
             "concurrency_key": ctx.concurrency_key,
-            "benchmark_run_id": ctx.benchmark_run_id,
-            "episode_id": ctx.episode_id,
-            "trial_runtime_id": ctx.trial_runtime_id,
             "submitted_at": self.submitted_at.isoformat(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
@@ -167,9 +161,8 @@ class JobRecord:
 class JobManager:
     """Per-runtime registry that runs background jobs and tracks their state.
 
-    One manager belongs to one trial runtime, so its jobs share that runtime's
-    provenance and never mix with another trial's. Bookkeeping is guarded by a
-    single lock; the actual tool execution happens off-lock in the executor.
+    One manager belongs to one task execution. Bookkeeping is guarded by a
+    single lock; tool execution happens off-lock in the executor.
 
     Cancellation is best-effort by nature: a queued job is dropped before it
     starts, but Python cannot force-stop a thread already inside a tool call, so
@@ -184,7 +177,6 @@ class JobManager:
         executor: JobExecutor | None = None,
         executors: dict[str, JobExecutor] | None = None,
         max_concurrency: int = DEFAULT_JOB_CONCURRENCY,
-        provenance_provider: Callable[[], dict[str, str | None]] | None = None,
         key_lock_factory: Callable[[str], ExclusiveLock] | None = None,
     ) -> None:
         # Executors are keyed by the name a tool requests via
@@ -199,7 +191,6 @@ class JobManager:
         if executor is not None:
             self._executors.setdefault(DEFAULT_EXECUTOR, executor)
         self._executors_guard = threading.Lock()
-        self._provenance_provider = provenance_provider or dict
         self._lock = threading.Lock()
         self._jobs: dict[str, JobRecord] = {}
         self._futures: dict[str, Future] = {}
@@ -249,7 +240,6 @@ class JobManager:
         :class:`JobContext` here, at submit time.
         """
         job_id = f"job_{uuid.uuid4().hex[:16]}"
-        prov = self._provenance_provider()
         context = JobContext(
             job_id=job_id,
             tool_name=tool.name,
@@ -257,9 +247,6 @@ class JobManager:
             call_arguments=dict(call_arguments),
             hidden_arg_names=tuple(hidden_arg_names),
             workspace=workspace,
-            benchmark_run_id=prov.get("benchmark_run_id"),
-            episode_id=prov.get("episode_id"),
-            trial_runtime_id=prov.get("trial_runtime_id"),
             concurrency_key=concurrency_key or getattr(tool, "concurrency_key", None),
         )
         record = JobRecord(context=context)
@@ -429,15 +416,15 @@ class JobManager:
             ]
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
-        """Full `{job_id: record}` view for embedding in a trial report."""
+        """Full `{job_id: record}` view for embedding in a execution report."""
         with self._lock:
             return {job_id: record.to_dict() for job_id, record in self._jobs.items()}
 
     def shutdown(self, wait: bool = False) -> None:
         """Cancel outstanding jobs and tear down every executor it created.
 
-        Called when a trial runtime closes so no job thread (or child process /
-        cluster job) outlives the trial that owns it. Each running job's cancel
+        Called when a execution runtime closes so no job thread (or child process /
+        cluster job) outlives the execution that owns it. Each running job's cancel
         event is set so a cancellation-aware executor stops its work.
         """
         with self._lock:

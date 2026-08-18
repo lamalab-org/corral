@@ -78,6 +78,7 @@ def test_reasoning_effort_is_applied_to_real_llm():
         model="openai/gpt-5.6", api_key="x", reasoning_effort="low"
     )._make_llm()
     assert llm.reasoning_effort == "low"
+    assert llm.stream is True
 
     # Unset defers to the SDK's own default rather than pinning a value here.
     default_llm = OpenHandsAgent(model="openai/gpt-5.6", api_key="x")._make_llm()

@@ -1,20 +1,93 @@
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
-#: Sentinel returned verbatim by an agent's run method when it gives up on a
-#: task. It is passed through :meth:`BaseAgent.run_agent` without running the
-#: answer extractor, and :class:`CorralRunner` checks for exactly this string
-#: before calling surrender_task(). Every agent must emit this same value so
-#: surrender handling stays homogeneous across agents.
+from corral.core.action import Action
+
+AgentStatus = Literal[
+    "completed",
+    "surrendered",
+    "iteration_limit",
+    "timeout",
+    "budget_exhausted",
+    "cancelled",
+    "tool_failure",
+    "protocol_failure",
+    "harness_failure",
+    "agent_failure",
+]
+
+
+class BudgetExhaustedError(RuntimeError):
+    """Raised when a model provider rejects the available budget."""
+
+
+@dataclass(frozen=True, slots=True)
+class AgentUsage:
+    """Provider usage reported by one complete session agent run.
+
+    ``llm_calls`` counts physical requests for direct model agents. For native
+    harnesses, one SDK-reported turn is treated as one comparable LLM call.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    llm_calls: int = 0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name in ("input_tokens", "output_tokens", "llm_calls"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"AgentUsage.{name} cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class AgentOutcome:
+    """Typed terminal result returned by a first-class session agent."""
+
+    status: AgentStatus
+    answer: str | None = None
+    error: str | None = None
+    usage: AgentUsage = field(default_factory=AgentUsage)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.status == "completed":
+            if self.answer is None:
+                raise ValueError("a completed AgentOutcome requires an answer")
+            if self.error is not None:
+                raise ValueError("a completed AgentOutcome cannot contain an error")
+            return
+        if self.status == "surrendered":
+            if self.answer is not None or self.error is not None:
+                raise ValueError(
+                    "a surrendered AgentOutcome has neither an answer nor an error"
+                )
+            return
+        if self.answer is not None:
+            raise ValueError("a failed AgentOutcome cannot contain an answer")
+        if not self.error:
+            raise ValueError("a failed AgentOutcome requires an error")
+
+    @property
+    def is_submit_worthy(self) -> bool:
+        return self.status in {"completed", "surrendered"}
+
+
+__all__ = [
+    "SURRENDER_SENTINEL",
+    "Action",
+    "AgentOutcome",
+    "AgentStatus",
+    "AgentUsage",
+    "BudgetExhaustedError",
+    "Thought",
+]
+
+#: Exact value an agent submits through ``submit_answer`` when it gives up on a
+#: task. The canonical tool transition derives the surrendered status from this
+#: shared sentinel.
 SURRENDER_SENTINEL = "SURRENDER"
-
-
-@dataclass
-class Action:
-    """Represents an action to be taken"""
-
-    tool_name: str
-    arguments: dict[str, Any]
 
 
 @dataclass
@@ -22,40 +95,3 @@ class Thought:
     """Represents agent's reasoning step"""
 
     content: str
-
-
-@dataclass
-class AgentRunResult:
-    """Outcome of running an agent on a single task.
-
-    Returned by :meth:`BaseAgent.run_agent`. Using named fields instead of a
-    bare tuple makes the return value self-documenting and prevents accidental
-    misuse (e.g. unpacking the elements in the wrong order).
-
-    Attributes:
-        answer: The final answer produced by the agent. May be the sentinel
-            `"SURRENDER"` when the agent gave up, or a string starting with
-            `"Error"` when the run failed.
-        messages: The full list of messages exchanged during the task.
-        token_usage: Aggregate token usage for the run, with
-            `prompt_tokens`, `completion_tokens` and `total_tokens` keys.
-        status: The terminal status of the run. `"success"` and `"surrender"`
-            are the only statuses whose `answer` should be submitted to the task
-            scorer; any other value (`"timeout"`, `"sdk_failure"`,
-            `"tool_failure"`, `"max_iterations"`/`"max_turns"`, `"stuck"`,
-            `"agent_error"`, ...) marks an infrastructure failure whose `answer`
-            is an error string, not a real model answer. Black-box harness
-            agents populate this from their `HarnessRunResult`; agents without a
-            structured result leave it at the `"success"` default.
-        error_message: Human-readable failure detail when `status` is not a
-            submit-worthy status; `None` otherwise.
-        metadata: Free-form run provenance (harness/SDK versions, tool schema
-            hashes, tool-call counts, ...) for the benchmark record.
-    """
-
-    answer: str
-    messages: list[dict[str, Any]] = field(default_factory=list)
-    token_usage: dict[str, int] = field(default_factory=dict)
-    status: str = "success"
-    error_message: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)

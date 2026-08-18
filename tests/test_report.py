@@ -4,6 +4,9 @@ import json
 
 import pytest
 
+from corral.report.errors import (
+    InsufficientTrialsError,
+)
 from corral.report.metrics import (
     AverageScoreMetric,
     Metric,
@@ -11,9 +14,6 @@ from corral.report.metrics import (
     get_default_metrics,
 )
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
-from corral.types import (
-    InsufficientTrialsError,
-)
 
 
 def create_dummy_results():

@@ -52,6 +52,9 @@ def _run_lammps(
     Args:
         input_file (str): Path to the LAMMPS input script file.
         log_file (str): Path where the log file output will be stored.
+        local_workspace (str | None): Local workspace prefix to rewrite in the
+            uploaded input script.
+        remote_workspace (str | None): Modal-mounted replacement for that prefix.
 
     Returns:
         dict: A dictionary containing the log file content and input file content.
@@ -658,7 +661,12 @@ def execute_python_code(
         "/test_files": volume_test_files,
     },
 )
-def run_lammps(input_file: str, log_file: str) -> None:
+def run_lammps(
+    input_file: str,
+    log_file: str,
+    local_workspace: str | None = None,
+    remote_workspace: str | None = None,
+) -> None:
     """
     Run a LAMMPS simulation.
 
@@ -688,6 +696,10 @@ def run_lammps(input_file: str, log_file: str) -> None:
 
         logger.info("Original input content:\n%s", text)
 
+        original_text = text
+        if local_workspace and remote_workspace:
+            text = text.replace(local_workspace, remote_workspace)
+
         log_cmd_re = re.compile(r"^\s*log\s+", re.IGNORECASE)
         lines = text.splitlines(keepends=True)
 
@@ -703,11 +715,13 @@ def run_lammps(input_file: str, log_file: str) -> None:
                 continue
             cleaned.append(line)
 
-        if removed == 0:
-            logger.info("No log commands found; no changes made.")
-            return
-
         new_text = "".join(cleaned)
+
+        if removed == 0 and new_text == original_text:
+            logger.info(
+                "No log commands or local workspace paths found; no changes made."
+            )
+            return
 
         # Write
         try:
@@ -719,7 +733,10 @@ def run_lammps(input_file: str, log_file: str) -> None:
         logger.info("Removed %d log command(s) from %s", removed, input_file)
         volume_sim.commit()
 
+    original_input: str | None = None
     try:
+        volume_sim.reload()
+        original_input = Path(input_file).read_text(encoding="utf-8")
         sanitize_lammps_input_inplace(input_file)
         volume_sim.reload()
         input_path = Path(input_file)
@@ -736,6 +753,14 @@ def run_lammps(input_file: str, log_file: str) -> None:
             raw = log_path.read_bytes()
             log_path.write_text(raw.decode("utf-8", errors="ignore"), encoding="utf-8")
         raise ValueError(f"{e!s}") from e
+    finally:
+        # The local copy remains the source of truth. Restore the uploaded input
+        # after any path rewriting so downloading the workspace never leaks a
+        # Modal-only /results/corral/jobs/... path into it.
+        if original_input is not None:
+            Path(input_file).write_text(original_input, encoding="utf-8")
+        volume_sim.commit()
+
 
 @app.function(
     image=lammps_image,

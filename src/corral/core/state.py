@@ -18,6 +18,7 @@ from pydantic import Field, model_validator
 from pydantic import JsonValue as JSONValue
 
 from corral.core._immutable import FrozenModel, validate_sha256_hex
+from corral.core.action import Action
 from corral.core.workspace import WorkspaceState
 
 if TYPE_CHECKING:
@@ -229,37 +230,143 @@ class State(FrozenModel):
             ),
         )
 
+    @property
+    def actions(self) -> tuple[Action, ...]:
+        """Return actions derived from canonical assistant messages."""
+        actions: list[Action] = []
+        for message in self.messages:
+            tool_calls = message.get("tool_calls")
+            if not isinstance(tool_calls, list | tuple):
+                continue
+            actor = message.get("actor_id")
+            actor_id = str(actor) if actor is not None else None
+            raw_content = message.get("content")
+            content = raw_content if isinstance(raw_content, str) else None
+            raw_metadata = message.get("metadata")
+            metadata = raw_metadata if isinstance(raw_metadata, Mapping) else None
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, Mapping):
+                    continue
+                try:
+                    actions.append(
+                        Action.from_tool_call(
+                            tool_call,
+                            actor_id=actor_id,
+                            content=content,
+                            metadata=metadata,
+                        )
+                    )
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+        return tuple(actions)
 
-class AgentStateView(FrozenModel):
-    """Read-only State projection passed to future stateless agents."""
+    @property
+    def last_action(self) -> Action | None:
+        """Return the most recently proposed action, if any."""
+        actions = self.actions
+        return actions[-1] if actions else None
 
-    id: str = Field(min_length=1)
-    revision: int = Field(ge=0)
-    state_hash: str
-    metadata: StateMetadata
-    messages: tuple[Mapping[str, JSONValue], ...]
-    environment: Mapping[str, JSONValue]
-    workspace: WorkspaceState
-    usage: UsageState
-    runtime: RuntimeState
-    dependency_outputs: Mapping[str, TaskOutput]
+    def _successful_tool_call_ids(self) -> set[str]:
+        successful: set[str] = set()
+        for message in self.messages:
+            if message.get("role") != "tool":
+                continue
+            tool_call_id = message.get("tool_call_id")
+            if not isinstance(tool_call_id, str):
+                continue
+            raw_metadata = message.get("metadata")
+            metadata = raw_metadata if isinstance(raw_metadata, Mapping) else {}
+            status = metadata.get("status", "success")
+            success = metadata.get("success", status == "success")
+            if success is True or status == "success":
+                successful.add(tool_call_id)
+        return successful
 
-    @model_validator(mode="after")
-    def _validate_state_hash(self) -> AgentStateView:
-        validate_sha256_hex(self.state_hash, field_name="state_hash")
-        return self
+    @property
+    def pending_action(self) -> Action | None:
+        """Return the latest action without a corresponding tool result."""
+        completed_ids = {
+            message.get("tool_call_id")
+            for message in self.messages
+            if message.get("role") == "tool"
+            and isinstance(message.get("tool_call_id"), str)
+        }
+        for action in reversed(self.actions):
+            if action.id not in completed_ids:
+                return action
+        return None
 
-    @classmethod
-    def from_state(cls, state: State) -> AgentStateView:
-        return cls(
-            id=state.id,
-            revision=state.revision,
-            state_hash=state.state_hash,
-            metadata=state.metadata,
-            messages=state.messages,
-            environment=state.environment,
-            workspace=state.workspace,
-            usage=state.usage,
-            runtime=state.runtime,
-            dependency_outputs=state.dependency_outputs,
+    @property
+    def submission(self) -> str | None:
+        """Return the latest successfully executed submitted answer."""
+        successful_ids = self._successful_tool_call_ids()
+        for action in reversed(self.actions):
+            if not action.is_submission or action.id not in successful_ids:
+                continue
+            answer = action.arguments.get("answer")
+            if isinstance(answer, str):
+                return answer
+        return None
+
+    @property
+    def is_terminal(self) -> bool:
+        """Whether the trace records a completed submission or terminal status."""
+        return self.submission is not None or self.runtime.status in {
+            "submitted",
+            "surrendered",
+            "terminal",
+            "failed",
+        }
+
+    @property
+    def tool_statistics(self) -> dict[str, int]:
+        """Count proposed tool actions by canonical tool name."""
+        statistics: dict[str, int] = {}
+        for action in self.actions:
+            statistics[action.name] = statistics.get(action.name, 0) + 1
+        return statistics
+
+
+def checkpoint_state(parent: State, source: State) -> State:
+    """Create one durable child containing the complete ``source`` value.
+
+    Agents may create several immutable in-memory forks while composing a model
+    message or updating their namespaced runtime data. Persistence checkpoints
+    only the semantically important boundaries. This helper squashes those
+    intermediate forks into one direct child of the latest durable ``parent``
+    while preserving the complete environment, agent history, workspace,
+    usage, runtime, and dependency state.
+
+    The operation is analogous to creating a Git commit from the current
+    working tree: the parent identifies the previous durable snapshot and the
+    new child contains the entire current value.
+    """
+    if source.id != parent.id:
+        raise ValueError("a checkpoint cannot change State identity")
+    if source.metadata != parent.metadata:
+        raise ValueError("a checkpoint cannot change immutable State metadata")
+    if source == parent:
+        return parent
+
+    source_workspace = source.workspace
+    if (
+        source_workspace.files == parent.workspace.files
+        and source_workspace.artifacts == parent.workspace.artifacts
+    ):
+        workspace = parent.workspace
+    else:
+        workspace = WorkspaceState(
+            id=parent.workspace.id,
+            revision=parent.workspace.revision + 1,
+            files=source_workspace.files,
+            artifacts=source_workspace.artifacts,
         )
+
+    return parent.fork(
+        messages=source.messages,
+        environment=source.environment,
+        workspace=workspace,
+        usage=source.usage,
+        runtime=source.runtime,
+        dependency_outputs=source.dependency_outputs,
+    )

@@ -90,9 +90,9 @@ coverage and this margin.
 
 If you prefer not to activate the environment, use `uv run` to prefix the commands below.
 
-## Run The Server
+## Inspect The Environment Definitions
 
-Start the retrosynthesis environment server from this directory:
+Build and list the retrosynthesis environment definitions from this directory:
 
 ```bash
 cd tasks/retrosynthesis
@@ -108,21 +108,13 @@ source .venv/bin/activate
 python -m retrosynthesis.env --level 1 --subtask_level True
 ```
 
-The server also accepts these options:
+The inspection command accepts these options:
 
-- `--host`: Bind host. Defaults to `CORRAL_HOST` or `0.0.0.0`.
-- `--port`: Bind port. Defaults to `CORRAL_PORT` or `8000`.
 - `--level`: Benchmark level to load. Levels are stored under `environments/level_1`, `environments/level_2`, and `environments/level_3`.
 - `--subtask_level`: Set to `True` to load `subtasks_json/` instead of `tasks_json/` for the selected level.
 
-## See The Tasks
-
-```bash
-curl http://localhost:8000/tasks/
-```
-
 ## Notes
 
-- Before starting, the server validates database connectivity and schema. Startup fails early if the production database is unavailable or incomplete.
+- Before constructing definitions, the command validates database connectivity and schema. It fails early if the production database is unavailable or incomplete.
 - Database credentials default to local PostgreSQL values, but can be overridden with `RETRO_DB_HOST`, `RETRO_DB_PORT`, `RETRO_DB_NAME`, `RETRO_DB_USER`, and `RETRO_DB_PASSWORD`.
 - Pricing and availability use the bundled SQLite snapshot and never contact supplier services at runtime.

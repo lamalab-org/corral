@@ -1,10 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Any
-from urllib.parse import quote
 
-import requests
 from litellm import embedding
 from loguru import logger
 from tenacity import (
@@ -57,9 +54,19 @@ def find_file_by_name(filename: str, base_dir: str | None = None) -> str:
     if not base_dir or not Path(base_dir).exists():
         return filename
 
-    # Search for the file recursively
+    # Search for the file recursively. A symlink is never a valid workspace
+    # file, even if its current target happens to remain below ``base_dir``.
+    from corral.workspace import confine_workspace_path
+
     base_path = Path(base_dir)
-    matches = list(base_path.rglob(filename))
+    matches = []
+    for match in base_path.rglob(filename):
+        try:
+            confined = confine_workspace_path(base_path, match)
+        except ValueError:
+            continue
+        if confined.is_file():
+            matches.append(confined)
 
     if matches:
         # Return the most recent file
@@ -69,78 +76,35 @@ def find_file_by_name(filename: str, base_dir: str | None = None) -> str:
 
 
 def smart_resolve_path(input_path: str, base_dir: str | None = None) -> str:
-    """Resolve path intelligently - use absolute path if exists, search only as fallback.
+    """Resolve a path, confining task submissions to ``base_dir`` when supplied.
 
-    When `base_dir` is given, the fallback file search is scoped to that
-    directory (typically a trial's isolated workspace) instead of the
-    process-global `CORRAL_WORK_DIR`. This is what keeps two concurrent trials
-    that both submit the same bare filename from resolving to each other's file.
+    With an explicit ``base_dir``, both direct paths and fallback searches are
+    restricted to that one task workspace. Existing absolute sibling paths,
+    ``..`` traversal, and symlink aliases are rejected instead of being passed
+    to a scorer. Without ``base_dir`` the legacy process-global lookup remains
+    available for non-runtime callers.
     """
     extracted_path = extract_path_from_answer(input_path)
+
+    if base_dir is not None:
+        from corral.workspace import confine_workspace_path
+
+        candidate = confine_workspace_path(base_dir, extracted_path)
+        if candidate.is_file():
+            return str(candidate)
+
+        # Preserve the historical basename fallback, but search this execution
+        # root only. A missing result remains rooted inside the workspace so a
+        # relative process cwd can never redirect the scorer elsewhere.
+        found = find_file_by_name(Path(extracted_path).name, base_dir)
+        if Path(found).is_absolute():
+            return found
+        return str(confine_workspace_path(base_dir, Path(extracted_path).name))
 
     if Path(extracted_path).exists():
         return extracted_path  # Use the extracted path directly
     else:
-        # Search as fallback, scoped to base_dir when provided.
-        return find_file_by_name(Path(extracted_path).name, base_dir)
-
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(
-        (requests.exceptions.RequestException, requests.exceptions.HTTPError)
-    ),
-)
-def make_api_request(
-    url: str,
-    method: str = "GET",
-    headers: dict[str, str] | None = None,
-    params: dict[str, Any] | None = None,
-    json_data: dict[str, Any] | None = None,
-    verbose: bool = False,
-    json: bool = True,
-) -> dict[str, Any]:
-    """
-    Make an API request with retry capabilities.
-
-    Args:
-        url (str): The API endpoint URL
-        method (str, optional): HTTP method (GET, POST, PUT, etc.). Defaults to "GET".
-        headers (dict[str, str], optional): Request headers. Defaults to None.
-        params (dict[str, Any], optional): URL parameters. Defaults to None.
-        json_data (dict[str, Any], optional): JSON data for POST/PUT requests. Defaults to None.
-        verbose (bool, optional): Whether to print verbose output. Defaults to False.
-        json (bool, optional): Whether to parse response as JSON. Defaults to True.
-
-    Returns:
-        dict[str, Any]: JSON response from the API
-
-    Raises:
-        requests.exceptions.RequestException: If the request fails after retries
-    """
-    method = method.upper()
-    url = quote(url, safe=":/?&=%")
-    logger.info(f"Making {method} request to {url}")
-
-    if verbose:
-        logger.debug(f"Headers: {headers}")
-        logger.debug(f"Params: {params}")
-        if json_data:
-            logger.debug(f"JSON data: {json_data}")
-
-    response = requests.request(
-        method=method, url=url, headers=headers, params=params, json=json_data
-    )
-
-    if verbose:
-        logger.debug(f"Response status code: {response.status_code}")
-        logger.debug(f"Response content: {response.text[:500]}...")
-
-    response.raise_for_status()
-    if json:
-        return response.json()
-    return response.text
+        return find_file_by_name(Path(extracted_path).name)
 
 
 @retry(

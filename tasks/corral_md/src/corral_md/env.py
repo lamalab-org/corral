@@ -4,6 +4,7 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import ClassVar
 
 from corral_md.score import (
     check_log,
@@ -13,6 +14,7 @@ from corral_md.score import (
     check_structure,
 )
 from corral_md.tools import (
+    build_run_lammps_tool,
     convert_structure_to_lammps_data,
     execute_python_script,
     get_nth_run_log,
@@ -24,12 +26,16 @@ from corral_md.tools import (
 )
 from loguru import logger
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition
-from corral.backend.tool import Tool
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.state import State
+from corral.core.task import InputRef, TaskDefinition
+from corral.core.tool import Tool
 from corral.utils.context7_tools import get_library_documentation
-from corral.utils.io_tools import FSManager, build_file_tools
+from corral.workspace import (
+    WorkspaceFilesystem,
+    build_workspace_tools,
+    confine_workspace_path,
+)
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/corral_md")
 
@@ -123,9 +129,8 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
 
 
 def _md_file_tools(workspace: str) -> dict[str, Tool]:
-    """MD-specific filesystem tools backed by the simagent FSManager."""
-    fs_manager = FSManager("file", base_path=workspace, app="simagent")
-    tools = build_file_tools(fs_manager)
+    """MD filesystem and LAMMPS tools bound to one local workspace."""
+    tools = build_workspace_tools(WorkspaceFilesystem(workspace))
     return {
         **{
             name: tools[name]
@@ -141,12 +146,44 @@ def _md_file_tools(workspace: str) -> dict[str, Tool]:
         },
         "library_docs": get_library_documentation,
         "execute_python_script": execute_python_script,
+        # Overrides the statically selected tool with a workspace-aware variant
+        # that handles Modal upload and download internally.
+        "run_lammps": build_run_lammps_tool(workspace),
     }
 
 
-def _md_task_prompt(env: Environment) -> str:
-    """Generate the MD task prompt with resource and logging guidance."""
+class MolecularDynamicsEnvironment(Environment):
+    """Confine every agent-controlled domain-tool path to this task workspace."""
 
+    _PATH_ARGUMENTS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "get_structure_from_mp_text": ("file_path",),
+        "convert_structure_to_lammps_data": ("structure_path", "output_file"),
+        "run_lammps": ("input_file",),
+        "get_nth_run_log": ("path", "save"),
+        "keyword_log_extractor": ("path",),
+        "execute_python_script": ("script_path", "working_dir"),
+        "visualisation_tool": ("path",),
+    }
+
+    def preprocess_arguments(self, tool_name: str, args: dict) -> dict:
+        parsed = super().preprocess_arguments(tool_name, args)
+        if not self.workspace_path:
+            return parsed
+        for argument in self._PATH_ARGUMENTS.get(tool_name, ()):
+            value = parsed.get(argument)
+            if isinstance(value, str) and value:
+                parsed[argument] = str(
+                    confine_workspace_path(
+                        self.workspace_path,
+                        value,
+                        allow_root=argument == "working_dir",
+                    )
+                )
+        return parsed
+
+
+def _md_task_prompt(env: Environment, state: State) -> str:
+    """Generate the MD task prompt with resource and logging guidance."""
     prompt = f"""\nTask: {env.current_task.name}
 Description: {env.current_task.description}
 
@@ -160,10 +197,9 @@ Required submission format:
     prompt += "All the potentials, can be found at /potentials/.\n\n"
 
     # Display resolved inputs from dependencies
+    resolved = env.resolve_inputs(state)
     for input_name, ref in env.current_task.input_map.items():
-        if env.state.is_completed(ref.task_id):
-            value = env.state.get_output(ref.task_id, ref.key)
-            prompt += f"- {input_name} (from {ref.task_id}): {value}\n"
+        prompt += f"- {input_name} (from {ref.task_id}): {resolved[input_name]}\n"
 
     # Display initial input data
     for key, value in env.current_task.initial_input.items():
@@ -171,10 +207,12 @@ Required submission format:
             prompt += f"- {key}: {value}\n"
 
     # Add workspace info
-    if env.state.workspace:
+    if env.workspace_path:
         prompt += (
-            f"\nYour current workspace directory is: {env.state.workspace}\n"
-            "All files you generate should be saved in this directory.\n\n"
+            "\nYou have an isolated task workspace. Filesystem and domain tools "
+            "resolve paths against it automatically. Always pass workspace-relative "
+            "POSIX paths such as `input/run.in`; never pass an absolute host path "
+            "to a workspace tool.\n\n"
             "### Important Resource and File Access Guidelines ###\n"
             "1. **Potential Files**:\n"
             "   - These files are *fully verified and correct*.\n"
@@ -205,6 +243,10 @@ def create_environments(
     taskgroup_common_tools: dict[str, Tool] | None = None,
 ) -> dict[str, Environment]:
     logger.info("Creating environments for MD")
+    # Modal path rewriting needs one stable spelling of the local workspace.
+    # Advertising an absolute path also keeps paths written into LAMMPS inputs
+    # directly mappable to the isolated /results/corral/jobs/... directory.
+    work_dir = str(Path(work_dir).expanduser().resolve())
 
     if subtask_level:
         logger.info("Creating environments with subtask level enabled")
@@ -244,7 +286,8 @@ def create_environments(
     }
 
     # Create environments for all tasks; grouping is derived from the graph.
-    # MD uses a simagent-backed FSManager for workspaces and file tools.
+    # The task workspace is local. Only the workspace-bound run_lammps tool
+    # stages it through Modal.
     return build_environments(
         tasks,
         base_work_dir=work_dir,
@@ -254,24 +297,12 @@ def create_environments(
             common=taskgroup_common_tools or {},
             workspace_factory=_md_file_tools,
         ),
-        fs_manager=FSManager("file", base_path=work_dir, app="simagent"),
+        env_cls=MolecularDynamicsEnvironment,
     )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Corral MD Benchmark Server")
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
-        help="Host to run the server on",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("CORRAL_PORT", "8000")),
-        help="Port to run the server on",
-    )
+    parser = argparse.ArgumentParser(description="Inspect Corral MD environments")
     parser.add_argument(
         "--level",
         type=int,
@@ -301,9 +332,3 @@ if __name__ == "__main__":
         logger.info(f"  Task: {env.current_task.name}")
         if env.current_task.input_map:
             logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
-
-    run_server(
-        environments=environments,
-        host=args.host,
-        port=args.port,
-    )

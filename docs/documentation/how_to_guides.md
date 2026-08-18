@@ -1,11 +1,6 @@
-###1. How to [create a custom `Environment` in `Corral`](how_tos/custom_env.md)
+# How-to guides
 
-###2. How to [create a custom `Agent` in `Corral`](how_tos/custom_agent.md)
+## [Configure Temporal benchmark concurrency](how_tos/concurrent_benchmarking.md)
 
-###3. How to [prepare `Tasks` and scoring function (Material Science example)](how_tos/scoring_function.md)
-
-###4. How to [implement `Task` chaining](how_tos/task_chaining.md)
-
-###5. How to [add `Tool` verbosity control support](how_tos/tool_verbosity.md)
-
-###6. How to [run benchmarks concurrently (`abench`)](how_tos/concurrent_benchmarking.md)
+Environment, scoring, and agent authoring guides will be added for the new
+State/Action API as those migrations settle.

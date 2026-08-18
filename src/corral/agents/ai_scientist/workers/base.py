@@ -5,14 +5,15 @@ import json
 import mimetypes
 import re
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
-from corral.agents.utils import LiteLLMMessage, llm_call
-from corral.types import BudgetExhaustedError
+from corral.agents.schema import BudgetExhaustedError
+from corral.agents.utils import LiteLLMMessage
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
@@ -104,6 +105,7 @@ class LiteLLMStructuredModel:
         api_endpoint: str | None,
         max_calls: int,
         use_structured_output: bool,
+        completion_runner: Callable[..., Any],
         llm_kwargs: dict[str, Any] | None = None,
     ) -> None:
         self.owner = owner
@@ -114,6 +116,7 @@ class LiteLLMStructuredModel:
         self.api_endpoint = api_endpoint
         self.max_calls = max_calls
         self.use_structured_output = use_structured_output
+        self._completion_runner = completion_runner
         self.llm_kwargs = llm_kwargs or {}
         self.call_count = 0
         self.token_count = 0
@@ -194,7 +197,7 @@ class LiteLLMStructuredModel:
         response = None
         if use_structured_output:
             try:
-                response = llm_call(
+                response = self._completion_runner(
                     model=selected_model,
                     messages=messages,
                     temperature=self.temperature,
@@ -222,7 +225,7 @@ class LiteLLMStructuredModel:
                 # The fallback is a second physical provider request, so
                 # reserve it independently from the rejected structured call.
                 self._reserve_request(f"{purpose}_json_fallback")
-            response = llm_call(
+            response = self._completion_runner(
                 model=selected_model,
                 messages=messages,
                 temperature=self.temperature,

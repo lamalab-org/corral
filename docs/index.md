@@ -160,11 +160,15 @@ Through this formalism, `Corral` provides a flexible and robust framework for de
 
 `Corral` is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform follows a client-server design and comprises two primary services:
 
-`CorralServer`: This dedicated microservice is responsible for hosting and managing environments and providing the interface for interaction (`CorralRouter`).
+`TaskRuntime`: Persists a content-addressed State chain at task setup, before
+and after every tool call, and at task completion.
 
-`CorralRunner`: This service is tasked with executing agents. It orchestrates the agent's lifecycle, feeding it observations, and relaying its chosen actions.
+`Temporal`: Owns task and benchmark Workflows, including retries,
+concurrency, dependency readiness, evaluation, and progress tracking.
 
-The interaction between an agent (running within `CorralRunner`) and its environment (hosted by `CorralServer`) occurs through REST API communication.
+`CorralRunner`: A thin client-side metadata adapter. It builds a
+`BenchmarkWorkflowInput`, delegates it to Temporal, and projects the durable
+result into reports and metrics.
 
 /// info
     open: True

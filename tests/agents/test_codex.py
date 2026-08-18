@@ -1,458 +1,247 @@
-"""Tests for the CodexAgent (OpenAI Codex harness wrapper).
+"""Tests for the Codex native session adapter."""
 
-The Codex SDK is an optional dependency and is not installed in CI, so these
-tests patch the SDK names on the corral.agents.codex module with fakes that
-mimic the SDK's Codex / Thread / turn-stream shapes.
-"""
-
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
+import anyio
 import pytest
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+pytest.importorskip("openai_codex")
 
 from corral.agents import CodexAgent
-from corral.agents import codex as codex_module
+from corral.agents.codex import HarnessRunResult
+from corral.core.action import submit_answer_tool
+from corral.core.environment import Environment, Toolset
+from corral.core.task import TaskDefinition
+from corral.persistence import JSONLStateStore
+from corral.runtime import TaskRuntime
 
 
-@pytest.fixture(autouse=True)
-def _require_api_key(monkeypatch):
-    """CodexAgent.run now requires OPENAI_API_KEY (isolated CODEX_HOME)."""
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
+
+
+class Session:
+    prompt = "solve"
+    tools = (
+        {
+            "type": "function",
+            "function": {
+                "name": "measure",
+                "description": "measure",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        submit_answer_tool(),
+    )
+    surrender_allowed = False
+    execution_id = "execution-1"
+    execution_workspace = None
+    iteration_limit = 1
+    initial_state = SimpleNamespace(metadata=SimpleNamespace(task={"id": "task-1"}))
+
+    def __init__(self, submission=None, submission_status=None):
+        self.messages = []
+        self.submission = submission
+        self.submission_status = submission_status
+
+    @asynccontextmanager
+    async def open_mcp(self):
+        yield SimpleNamespace(url="http://127.0.0.1:1234/mcp")
+
+    async def record_message(self, message):
+        self.messages.append(message)
+
+
+@pytest.mark.anyio()
+async def test_codex_uses_session_mcp_and_returns_typed_outcome(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    captured = {}
+
+    def fake_run(self, *, run, **kwargs):
+        captured.update(kwargs)
+        captured["max_sdk_turns"] = run.metadata["max_sdk_turns"]
+        run.messages.append({"role": "assistant", "content": "42"})
+        run.usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 2,
+            "total_tokens": 12,
+        }
+        run.result = HarnessRunResult(
+            status="success", answer="42", metadata={"session_id": "codex-1"}
+        )
+        return "42"
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", fake_run)
+    agent = CodexAgent(model="gpt-test", system_prompt="system")
+    outcome = await agent.run_session(Session("42", "submitted"))
+
+    assert outcome.status == "completed"
+    assert outcome.answer == "42"
+    assert outcome.usage.input_tokens == 10
+    assert outcome.usage.llm_calls == 1
+    assert outcome.metadata["session_id"] == "codex-1"
+    assert captured["mcp_url"] == "http://127.0.0.1:1234/mcp"
+    assert captured["max_sdk_turns"] == 1
+    assert agent.__dict__.keys().isdisjoint(
+        {
+            "messages",
+            "token_usage",
+            "cumulative_token_usage",
+            "harness_result",
+            "_run_meta",
+            "_available_tools",
+        }
+    )
+    assert not hasattr(agent, "run")
+    assert not hasattr(agent, "arun")
+    assert not hasattr(agent, "step")
+    assert not hasattr(agent, "arun_agent")
+
+
+@pytest.mark.anyio()
+async def test_codex_plain_text_answer_is_not_a_submission(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
+    def fake_run(self, *, run, **_kwargs):
+        run.result = HarnessRunResult(status="success", answer="42")
+        return "42"
 
-class FakeApprovalMode:
-    deny_all = "deny_all"
-    auto_review = "auto_review"
+    monkeypatch.setattr(CodexAgent, "_execute_harness", fake_run)
+    outcome = await CodexAgent(system_prompt="system").run_session(Session())
 
-
-class FakeSandbox:
-    read_only = "read-only"
-
-
-class FakeCodexConfig:
-    def __init__(self, *, cwd=None, env=None):
-        self.cwd = cwd
-        self.env = env
+    assert outcome.status == "protocol_failure"
+    assert "without calling submit_answer" in outcome.error
 
 
-class _Enum:
-    """Minimal stand-in for a pydantic enum exposing .value."""
+@pytest.mark.anyio()
+async def test_codex_maps_native_timeout(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-    def __init__(self, value):
-        self.value = value
+    def fake_run(self, *, run, **_kwargs):
+        run.result = HarnessRunResult(status="timeout", error="deadline")
+        return "Error solving the task: deadline"
 
+    monkeypatch.setattr(CodexAgent, "_execute_harness", fake_run)
+    outcome = await CodexAgent(system_prompt="system").run_session(Session())
 
-class FakeItem:
-    """A completed thread item (ItemCompletedNotification.item.root)."""
-
-    def __init__(self, type, **kwargs):  # noqa: A002
-        self.type = type
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
-
-class FakeTurn:
-    def __init__(self, status="completed", error=None, duration_ms=42):
-        self.status = _Enum(status)
-        self.error = error
-        self.duration_ms = duration_ms
+    assert outcome.status == "timeout"
+    assert outcome.error == "deadline"
 
 
-class _Payload:
-    def __init__(self, **kwargs):
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
-
-class FakeEvent:
-    def __init__(self, method, payload):
-        self.method = method
-        self.payload = payload
-
-
-class FakeTurnHandle:
-    def __init__(self, events, interrupts):
-        self._events = events
-        self._interrupts = interrupts
-
-    def interrupt(self):
-        self._interrupts.append(True)
-
-    def stream(self):
-        return _ClosableIter(self._events)
-
-
-class _ClosableIter:
-    def __init__(self, events):
-        self._it = iter(events)
-
-    def __iter__(self):
-        return self._it
-
-    def __next__(self):
-        return next(self._it)
-
-    def close(self):
-        pass
-
-
-class FakeThread:
-    def __init__(self, events, captured, interrupts):
-        self._events = events
-        self._captured = captured
-        self._interrupts = interrupts
-
-    def turn(self, prompt, **kwargs):
-        self._captured["turn_prompt"] = prompt
-        self._captured["turn_kwargs"] = kwargs
-        return FakeTurnHandle(self._events, self._interrupts)
-
-
-class FakeCodex:
-    def __init__(self, events, captured, interrupts):
-        self._events = events
-        self._captured = captured
-        self._interrupts = interrupts
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def login_api_key(self, api_key):
-        self._captured["login_api_key"] = api_key
-
-    def thread_start(self, **kwargs):
-        self._captured["thread_start_kwargs"] = kwargs
-        return FakeThread(self._events, self._captured, self._interrupts)
-
-
-def _install_fake_sdk(monkeypatch, events):
-    """Patch the SDK names on codex_module and capture what Codex saw."""
-    captured: dict = {"interrupts": []}
-
-    def _codex_factory(config=None):
-        captured["config"] = config
-        return FakeCodex(events, captured, captured["interrupts"])
-
-    monkeypatch.setattr(codex_module, "Codex", _codex_factory)
-    monkeypatch.setattr(codex_module, "CodexConfig", FakeCodexConfig)
-    monkeypatch.setattr(codex_module, "ApprovalMode", FakeApprovalMode)
-    monkeypatch.setattr(codex_module, "Sandbox", FakeSandbox)
-    return captured
-
-
-def _usage_event():
-    total = _Payload(
-        input_tokens=100,
-        cached_input_tokens=10,
-        output_tokens=25,
-        total_tokens=125,
-    )
-    return FakeEvent(
-        "thread/tokenUsage/updated",
-        _Payload(token_usage=_Payload(total=total), turn_id="t1"),
+def test_codex_configuration_exposes_only_task_mcp_tools():
+    config = CodexAgent(system_prompt="system")._render_config_toml(
+        "http://127.0.0.1/capability/mcp", ["read_file", "submit_answer"]
     )
 
+    assert 'web_search = "disabled"' in config
+    assert "shell_tool = false" in config
+    assert "unified_exec = false" in config
+    assert "apps = false" in config
+    assert "multi_agent = false" in config
+    assert "view_image = false" in config
+    assert 'enabled_tools = ["read_file", "submit_answer"]' in config
 
-def _agent_message_event(text, phase="final_answer"):
-    item = FakeItem("agentMessage", text=text, phase=_Enum(phase) if phase else None)
-    return FakeEvent("item/completed", _Payload(item=_Payload(root=item), turn_id="t1"))
+
+@pytest.mark.anyio()
+async def test_codex_never_receives_the_physical_task_workspace(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    task_workspace = tmp_path / "task-a"
+    sibling_workspace = tmp_path / "task-b"
+    task_workspace.mkdir()
+    sibling_workspace.mkdir()
+    (sibling_workspace / "secret.txt").write_text("sibling", encoding="utf-8")
+    captured = {}
+
+    def fake_turn(self, *, workspace, **_kwargs):
+        captured["cwd"] = workspace
+        captured["exists_during_run"] = workspace.is_dir()
+        return "42"
+
+    monkeypatch.setattr(CodexAgent, "_execute_codex_turn", fake_turn)
+    session = Session()
+    session.execution_workspace = str(task_workspace)
+    outcome = await CodexAgent(system_prompt="system").run_session(session)
+
+    cwd = Path(captured["cwd"])
+    assert captured["exists_during_run"] is True
+    assert cwd != task_workspace
+    assert tmp_path not in cwd.parents
+    assert not cwd.exists()
+    assert outcome.metadata["workspace_access"] == "mcp_only"
+    assert outcome.metadata["codex_cwd_is_execution_workspace"] is False
 
 
-def _tool_call_event(tool, arguments, result=None, error=None):
-    item = FakeItem(
-        "mcpToolCall",
-        id="tc-1",
-        tool=tool,
-        server="corral",
-        arguments=arguments,
-        result=result,
-        error=error,
+@pytest.mark.anyio()
+async def test_codex_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_run(self, *, mcp_url, run, **_kwargs):
+        async def submit() -> None:
+            async with (
+                streamablehttp_client(mcp_url) as streams,
+                ClientSession(streams[0], streams[1]) as mcp_session,
+            ):
+                await mcp_session.initialize()
+                result = await mcp_session.call_tool("submit_answer", {"answer": "42"})
+                assert result.isError is False
+
+        anyio.run(submit)
+        run.messages.append(
+            {"role": "assistant", "content": "Codex completed the task"}
+        )
+        run.usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 2,
+            "total_tokens": 12,
+            "cached_input_tokens": 3,
+        }
+        run.metadata.update({"num_tool_calls": 1, "duration_ms": 25})
+        run.result = self._result(run, "success", answer="42")
+        return "42"
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", fake_run)
+    task = TaskDefinition(
+        name="task",
+        description="answer 42",
+        tools=[],
+        scoring_fn=lambda answer: float(answer == "42"),
+        submission_format={"answer": "string"},
+        resolve_answer=False,
     )
-    return FakeEvent("item/completed", _Payload(item=_Payload(root=item), turn_id="t1"))
-
-
-def _completed_event(status="completed", error=None):
-    return FakeEvent(
-        "turn/completed", _Payload(turn=FakeTurn(status=status, error=error))
+    environment = Environment(
+        "task",
+        task,
+        toolset=Toolset(pool={}, workspace_factory=None),
     )
+    agent = CodexAgent(model="gpt-test", system_prompt="system")
 
+    with JSONLStateStore(tmp_path / "states.jsonl") as store:
+        final = await TaskRuntime(store).run(
+            agent,
+            environment,
+            execution_id="codex-state-fold",
+            started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            max_iterations=1,
+        )
 
-def test_model_split_between_harness_and_extractor():
-    agent = CodexAgent(model="gpt-5.4")
-    assert agent.harness_model == "gpt-5.4"
-    # Base machinery gets a LiteLLM-routable model derived from the harness one.
-    assert agent.model == "openai/gpt-5.4"
-
-    agent2 = CodexAgent(model="gpt-5.4", extractor_model="openai/gpt-4o")
-    assert agent2.model == "openai/gpt-4o"
-    # No second (extractor) model call: the harness answer is submitted verbatim.
-    assert agent2.requires_answer_extraction is False
-
-
-def test_run_returns_final_answer_and_reuses_task_mcp(mock_interface, monkeypatch):
-    events = [
-        FakeEvent(
-            "item/completed",
-            _Payload(
-                item=_Payload(root=FakeItem("reasoning", content=["let me think"])),
-                turn_id="t1",
-            ),
-        ),
-        _tool_call_event("test_tool", {"query": "hi"}, result="tool-ok"),
-        _usage_event(),
-        _agent_message_event("42"),
-        _completed_event(),
-    ]
-    captured = _install_fake_sdk(monkeypatch, events)
-
-    agent = CodexAgent(model="gpt-5.4", reasoning_effort="high")
-    answer = agent.run(mock_interface, "task-1")
-
-    # Answer extraction is off by default: the harness answer is submitted
-    # verbatim and appears in the transcript exactly once (no duplicate append).
-    assert answer == "42"
-    assert [m.get("content") for m in agent.messages].count("42") == 1
-
-    # The harness connects to the environment server's task-scoped MCP endpoint,
-    # with the REST tool verbosity (default "brief") forwarded as a query param.
-    meta = agent.harness_result.metadata
-    assert meta["mcp_url"] == (
-        "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief"
+    assert final.submission == "42"
+    assert final.usage.input_tokens == 10
+    assert final.usage.output_tokens == 2
+    assert final.usage.metadata["cached_input_tokens"] == 3
+    assert final.tool_statistics == {"submit_answer": 1}
+    assert any(
+        message.get("content") == "Codex completed the task"
+        for message in final.messages
     )
-    assert meta["tool_verbosity"] == "brief"
-    assert meta["mcp_tools_enabled"] == ["test_tool"]
-    assert meta["model_requested"] == "gpt-5.4"
-    # The schema hash reflects the MCP schema Codex actually sees.
-    assert meta["mcp_tool_schema_sha256"] == "deadbeef"
-
-    # Read-only sandbox + deny-all approvals + isolated CODEX_HOME.
-    ts_kwargs = captured["thread_start_kwargs"]
-    assert ts_kwargs["sandbox"] == FakeSandbox.read_only
-    assert ts_kwargs["approval_mode"] == FakeApprovalMode.deny_all
-    assert ts_kwargs["ephemeral"] is True
-    assert ts_kwargs["model"] == "gpt-5.4"
-    config = captured["config"]
-    assert "CODEX_HOME" in config.env
-    assert "corral-codex-" in config.env["CODEX_HOME"]
-    # The isolated CODEX_HOME has no auth.json, so the API key is logged in
-    # explicitly (otherwise the harness hits /v1/responses with no bearer token).
-    assert captured["login_api_key"] == "test-key"
-    # Effort is configured explicitly on the turn.
-    assert captured["turn_kwargs"]["effort"] == "high"
-
-    # Reasoning, tool-use, and tool-result are recorded in the transcript. The
-    # tool-result message is named after the actual tool, not a generic label.
-    roles = [(m.get("role"), m.get("name")) for m in agent.messages]
-    assert ("assistant", "thinking") in roles
-    assert ("tool", "test_tool") in roles
-    tool_call_msg = next(m for m in agent.messages if m.get("tool_calls"))
-    assert tool_call_msg["tool_calls"][0]["function"]["name"] == "test_tool"
-
-    # Token usage mapped from the Codex thread usage.
-    usage = agent.get_total_token_usage()
-    assert usage["prompt_tokens"] == 100
-    assert usage["completion_tokens"] == 25
-    assert usage["total_tokens"] == 125
-    assert agent.token_usage["cached_input_tokens"] == 10
-
-    assert agent.harness_result.status == "success"
-    assert agent.harness_result.answer == "42"
-    assert agent.harness_result.num_tool_calls == 1
-    assert agent.harness_result.duration_ms == 42
-    # First message is the task prompt; last message is the final answer.
-    assert agent.messages[0]["role"] == "user"
-    assert agent.messages[-1]["content"] == "42"
-
-
-def test_config_toml_is_isolated_and_task_scoped(monkeypatch, mock_interface, tmp_path):
-    """The generated config disables built-ins and allowlists only task tools."""
-    agent = CodexAgent(model="gpt-5.4")
-    toml = agent._render_config_toml(
-        "http://test-server:8000/tasks/task-1/mcp?verbosity=brief", ["add"]
-    )
-    assert 'web_search = "disabled"' in toml
-    assert "shell_tool = false" in toml
-    assert "unified_exec = false" in toml
-    assert "multi_agent = false" in toml
-    assert "[mcp_servers.corral]" in toml
-    assert 'url = "http://test-server:8000/tasks/task-1/mcp?verbosity=brief"' in toml
-    assert "required = true" in toml
-    assert 'enabled_tools = ["add"]' in toml
-    # Allowlisted corral tools run without interactive approval (non-interactive
-    # benchmark); this does not widen access beyond enabled_tools.
-    assert 'default_tools_approval_mode = "approve"' in toml
-
-
-def test_unexpected_interrupt_is_infra_failure(mock_interface, monkeypatch):
-    """An interrupted turn with no local timeout cause is a failure."""
-    events = [
-        _agent_message_event("partial", phase=None),
-        _completed_event(status="interrupted"),
-    ]
-    _install_fake_sdk(monkeypatch, events)
-
-    agent = CodexAgent(model="gpt-5.4")
-    answer = agent.run(mock_interface, "task-1")
-
-    assert "Error solving the task" in answer
-    assert agent.harness_result.status == "sdk_failure"
-
-
-def test_missing_api_key_raises(mock_interface, monkeypatch):
-    """Without OPENAI_API_KEY the agent fails fast (isolated CODEX_HOME)."""
-    _install_fake_sdk(monkeypatch, [])
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    agent = CodexAgent(model="gpt-5.4")
-    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
-        agent.run(mock_interface, "task-1")
-
-
-def test_failed_turn_is_infra_failure(mock_interface, monkeypatch):
-    events = [_completed_event(status="failed", error=_Payload(message="boom"))]
-    _install_fake_sdk(monkeypatch, events)
-
-    agent = CodexAgent(model="gpt-5.4")
-    answer = agent.run(mock_interface, "task-1")
-
-    assert "Error solving the task" in answer
-    assert agent.harness_result.status == "sdk_failure"
-    assert "boom" in agent.harness_result.error
-
-
-def test_default_instructions_omit_final_answer_marker():
-    """With extraction off (default) the harness is not asked for the marker."""
-    agent = CodexAgent(model="gpt-5.4")
-    assert agent.requires_answer_extraction is False
-    instructions = agent._developer_instructions(enable_surrender=False)
-    assert "Final Answer:" not in instructions
-    assert "reply with your final answer and nothing else" in instructions
-
-
-def test_relative_path_directive_only_with_file_tools():
-    """The relative-path directive appears iff a file-writing tool is available.
-
-    Codex advertises a throwaway temp dir as its sandbox cwd; an absolute path
-    built from it points outside the scored trial workspace and is lost. The
-    directive steers the model to relative paths, but only when a task actually
-    exposes a file-writing tool, so other tasks' prompts are unchanged.
-    """
-    agent = CodexAgent(model="gpt-5.4")
-
-    no_tools = agent._developer_instructions(enable_surrender=False, tool_names=[])
-    assert "RELATIVE path" not in no_tools
-
-    non_file = agent._developer_instructions(
-        enable_surrender=False, tool_names=["get_structure_from_mp_text"]
-    )
-    assert "RELATIVE path" not in non_file
-
-    with_write = agent._developer_instructions(
-        enable_surrender=False, tool_names=["write_file", "read_file"]
-    )
-    assert "RELATIVE path" in with_write
-    # The directive must not swallow the final-answer instruction that follows it.
-    assert "reply with your final answer and nothing else" in with_write
-
-
-def test_extraction_on_strips_marker_and_avoids_duplicate(mock_interface, monkeypatch):
-    """When extraction is enabled, the `Final Answer:` marker is stripped once."""
-    # Enable extraction so the deterministic marker-stripping path runs.
-    monkeypatch.setattr(
-        CodexAgent, "requires_answer_extraction", property(lambda self: True)
-    )
-    events = [
-        _agent_message_event("Final Answer: 42"),
-        _completed_event(),
-    ]
-    _install_fake_sdk(monkeypatch, events)
-
-    agent = CodexAgent(model="gpt-5.4")
-    # The harness is asked for the marker precisely because extraction will strip it.
-    assert "Final Answer:" in agent._developer_instructions(enable_surrender=False)
-
-    answer = agent.run(mock_interface, "task-1")
-    assert answer == "42"
-    # The raw marked message and the normalized answer are both present, but the
-    # normalized answer is appended only once.
-    contents = [m.get("content") for m in agent.messages]
-    assert "Final Answer: 42" in contents
-    assert contents.count("42") == 1
-
-
-def test_cwd_uses_trial_workspace_and_survives(mock_interface, monkeypatch, tmp_path):
-    """Codex's cwd is the trial's own workspace, which is not deleted on exit.
-
-    Regression test: when the model writes its answer file to the sandbox cwd,
-    that directory must be the *scored* trial workspace (so the file survives to
-    scoring), not a throwaway temp dir this agent removes when the turn ends.
-    """
-    workspace = tmp_path / "trial-ws"
-    workspace.mkdir()
-    mock_interface.trial_workspace = str(workspace)
-
-    events = [_agent_message_event("slab_with_co2.cif"), _completed_event()]
-    captured = _install_fake_sdk(monkeypatch, events)
-
-    agent = CodexAgent(model="gpt-5.4")
-    answer = agent.run(mock_interface, "task-1")
-
-    assert answer == "slab_with_co2.cif"
-    # Codex is pointed at the trial workspace both for the config and the thread.
-    assert captured["config"].cwd == str(workspace)
-    assert captured["thread_start_kwargs"]["cwd"] == str(workspace)
-    # The scored workspace is left intact (only CODEX_HOME is a throwaway dir).
-    assert workspace.is_dir()
-    assert agent.harness_result.metadata["codex_cwd"] == str(workspace)
-    assert agent.harness_result.metadata["codex_cwd_is_trial_workspace"] is True
-
-
-def test_cwd_is_absolute_when_server_reports_a_relative_workspace(
-    mock_interface, monkeypatch, tmp_path
-):
-    """A relative trial workspace is resolved before being handed to Codex.
-
-    `cwd` is interpreted by the `codex app-server` subprocess, whose working
-    directory need not match this process's, so a relative path would point the
-    sandbox at a different directory than the one the scorer reads.
-    """
-    workspace = tmp_path / "trial-ws"
-    workspace.mkdir()
-    # The server reports the workspace relative to the runner's cwd.
-    monkeypatch.chdir(tmp_path)
-    mock_interface.trial_workspace = "trial-ws"
-
-    events = [_agent_message_event("42"), _completed_event()]
-    captured = _install_fake_sdk(monkeypatch, events)
-
-    agent = CodexAgent(model="gpt-5.4")
-    agent.run(mock_interface, "task-1")
-
-    cwd = captured["config"].cwd
-    assert Path(cwd).is_absolute()
-    assert Path(cwd) == workspace.resolve()
-    assert captured["thread_start_kwargs"]["cwd"] == cwd
-    assert agent.harness_result.metadata["codex_cwd_is_trial_workspace"] is True
-
-
-def test_cwd_falls_back_to_temp_dir_and_is_cleaned_up(mock_interface, monkeypatch):
-    """Without a local trial workspace, cwd is an isolated temp dir, then removed."""
-    # The default mock interface exposes no `trial_workspace`.
-    assert getattr(mock_interface, "trial_workspace", None) is None
-
-    events = [_agent_message_event("42"), _completed_event()]
-    captured = _install_fake_sdk(monkeypatch, events)
-
-    agent = CodexAgent(model="gpt-5.4")
-    answer = agent.run(mock_interface, "task-1")
-
-    assert answer == "42"
-    cwd = captured["config"].cwd
-    # A throwaway per-run workspace under the corral-codex temp root.
-    assert "corral-codex-" in cwd
-    assert cwd.endswith("workspace")
-    assert agent.harness_result.metadata["codex_cwd_is_trial_workspace"] is False
-    # The temp root (and thus the temp workspace) is cleaned up on exit.
-    assert not Path(cwd).exists()
+    assert final.runtime.metadata["agent_status"] == "completed"
+    session_metadata = final.runtime.metadata["session_metadata"]
+    assert session_metadata["harness_status"] == "success"
+    assert session_metadata["num_tool_calls"] == 1
+    assert not hasattr(agent, "harness_result")
+    assert not hasattr(agent, "messages")

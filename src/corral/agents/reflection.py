@@ -170,7 +170,7 @@ class ReflectionModule:
         self.api_endpoint = api_endpoint
         self.kwargs = kwargs
 
-    def generate_reflection(
+    async def generate_reflection(
         self,
         task_id: str,
         trial_id: str,
@@ -218,7 +218,7 @@ class ReflectionModule:
             )
 
         try:
-            response = llm_call(
+            response = await llm_call(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,

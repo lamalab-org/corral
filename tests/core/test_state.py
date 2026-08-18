@@ -8,8 +8,8 @@ import pytest
 from pydantic import ValidationError
 
 from corral.core.state import (
-    AgentStateView,
     State,
+    checkpoint_state,
 )
 
 
@@ -36,6 +36,21 @@ def test_state_mints_globally_unique_ids():
     assert first.id != second.id
     assert str(UUID(first.id)) == first.id
     assert str(UUID(second.id)) == second.id
+
+
+def test_checkpoint_state_squashes_in_memory_forks_into_one_direct_child():
+    parent = make_state(messages=({"role": "user", "content": "start"},))
+    working = parent.fork(
+        messages=(*parent.messages, {"role": "assistant", "content": "thinking"})
+    )
+    working = working.fork(environment={"temperature": 298.15})
+
+    checkpoint = checkpoint_state(parent, working)
+
+    assert checkpoint.revision == parent.revision + 1
+    assert checkpoint.parent_hash == parent.state_hash
+    assert checkpoint.messages == working.messages
+    assert checkpoint.environment == working.environment
 
 
 def test_state_metadata_describes_the_execution_without_benchmark_identity():
@@ -82,19 +97,16 @@ def test_artifacts_are_owned_by_the_workspace():
         make_state(artifacts={"final_report": {"path": "report.pdf"}})
 
 
-def test_state_is_deeply_immutable_and_agent_view_is_read_only():
+def test_state_is_deeply_immutable():
     state = make_state(
         environment={"inventory": {"sample": [1, 2]}},
         messages=({"role": "user", "content": "measure"},),
     )
-    view = AgentStateView.from_state(state)
 
     with pytest.raises(ValidationError):
         state.revision = 3
     with pytest.raises(TypeError, match=r"State\.fork"):
         state.environment["inventory"]["sample"].append(3)
-    with pytest.raises(TypeError, match=r"State\.fork"):
-        view.messages[0]["content"] = "changed"
     with pytest.raises(TypeError, match=r"State\.fork"):
         state.model_copy(update={"revision": 3})
 
@@ -129,17 +141,12 @@ def test_immutable_state_supports_copy_and_pickle_round_trips():
     ],
 )
 def test_hash_fields_require_exact_lowercase_sha256_hex(invalid_hash):
-    state = make_state()
-    view_data = AgentStateView.from_state(state).model_dump()
-
     with pytest.raises(ValidationError, match="lowercase SHA-256"):
         make_state(
             revision=1,
             parent_revision=0,
             parent_hash=invalid_hash,
         )
-    with pytest.raises(ValidationError, match="lowercase SHA-256"):
-        AgentStateView(**{**view_data, "state_hash": invalid_hash})
 
 
 def test_fork_creates_one_linked_revision_and_preserves_base():

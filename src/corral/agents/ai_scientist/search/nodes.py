@@ -304,7 +304,7 @@ class ExperimentNode(BaseModel):
     id: str
     parent_id: str | None = None
     branch_id: str | None = None
-    trial_runtime_id: str | None = None
+    execution_id: str | None = None
     branch_workspace: str | None = None
     stage: ResearchStage
     stage_seed_id: str | None = None

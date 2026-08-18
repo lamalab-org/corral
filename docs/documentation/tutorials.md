@@ -1,3 +1,5 @@
-### Tutorial 1: [your First `Corral` Benchmark ](tutorials/tut_1_first_benchmark.md)
-### Tutorial 2: [building a Multi-Tool `Environment`](tutorials/tut_2_multi_tool_env.md)
-### Tutorial 3: [creating a Custom `Agent`](tutorials/tut_3_custom_agent.md)
+# Tutorials
+
+The current Temporal runner walkthrough is maintained in the repository
+[README](../../README.md#-getting-started). Agents can implement either the
+action protocol or the task-session protocol described in the API reference.

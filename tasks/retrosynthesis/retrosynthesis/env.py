@@ -1,12 +1,4 @@
-"""
-Retrosynthesis Benchmark Server
-
-Command-line arguments:
-    --host: Host address to run the server (default: value of CORRAL_HOST env var or '0.0.0.0').
-    --port: Port to run the server (default: value of CORRAL_PORT env var or 8000).
-    --level: Level of the environment (1, 2, or 3) (default: 1).
-    --subtask_level: Whether to use subtask-level tasks (default: False).
-"""
+"""Retrosynthesis environment definitions."""
 
 import argparse
 import json
@@ -25,9 +17,9 @@ from retrosynthesis.score import (
 )
 from retrosynthesis.tools import create_tools
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition, with_fixed_inputs
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.state import State
+from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "CORRAL_WORK_DIR/rethrosynthesis")
 
@@ -84,7 +76,7 @@ def load_tasks_from_json(
     return tasks
 
 
-def _retro_prompt(env: Environment) -> str:
+def _retro_prompt(env: Environment, state: State) -> str:
     """Task prompt that echoes each dependency's question and answer."""
     task = env.current_task
     prompt = (
@@ -100,12 +92,11 @@ def _retro_prompt(env: Environment) -> str:
         prompt += "\nAvailable input data:\n"
 
         # Display resolved inputs from dependencies
-        for ref in task.input_map.values():
+        resolved = env.resolve_inputs(state)
+        for input_name, ref in task.input_map.items():
             logger.info(f"Checking dependency: {ref.task_id}")
-            if env.state.is_completed(ref.task_id):
-                value = env.state.get_output(ref.task_id, ref.key)
-                dep_prompt = env.group_tasks[ref.task_id].description
-                prompt += f"- Input from '{ref.task_id}' with question: '{dep_prompt}' and answer: '{value}'\n"
+            dep_prompt = env.group_tasks[ref.task_id].description
+            prompt += f"- Input from '{ref.task_id}' with question: '{dep_prompt}' and answer: '{resolved[input_name]}'\n"
 
     # Display initial input data
     if task.initial_input:
@@ -133,7 +124,10 @@ def create_rethrosynthesis_environments(
         )
     else:
         json_path = (
-            Path(__file__).parent.parent / "environments" / f"level_{level}" / "tasks_json"
+            Path(__file__).parent.parent
+            / "environments"
+            / f"level_{level}"
+            / "tasks_json"
         )
     if not json_path.exists():
         raise ValueError(f"Task file {json_path} does not exist.")
@@ -160,19 +154,7 @@ def create_rethrosynthesis_environments(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Rethrosynthesis Benchmark Server")
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
-        help="Host to run the server on",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("CORRAL_PORT", "8000")),
-        help="Port to run the server on",
-    )
+    parser = argparse.ArgumentParser(description="Inspect retrosynthesis environments")
 
     parser.add_argument(
         "--level",
@@ -216,9 +198,3 @@ if __name__ == "__main__":
         logger.info(f"  Task: {env.current_task.name}")
         if env.current_task.input_map:
             logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
-
-    run_server(
-        environments=environments,
-        host=args.host,
-        port=args.port,
-    )

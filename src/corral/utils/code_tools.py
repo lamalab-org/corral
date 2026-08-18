@@ -3,11 +3,12 @@ import subprocess
 import sys
 import tempfile
 import traceback
+from contextlib import suppress
 from pathlib import Path
 
 from loguru import logger
 
-from corral.backend.tool import tool
+from corral.core.tool import tool
 
 
 def ensure_directory_exists(file_path: str) -> None:
@@ -17,8 +18,6 @@ def ensure_directory_exists(file_path: str) -> None:
     Args:
         file_path: Path to a file
     """
-    from pathlib import Path
-
     if file_path:
         Path(file_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -169,9 +168,6 @@ def parse_execution_output(stdout: str) -> tuple[dict, list[str]]:
     Returns:
         tuple: (execution_result dict, output_lines list)
     """
-    import json
-    from contextlib import suppress
-
     stdout_lines = stdout.strip().split("\n") if stdout.strip() else []
     execution_result = {}
     output_lines = []
@@ -184,26 +180,6 @@ def parse_execution_output(stdout: str) -> tuple[dict, list[str]]:
             output_lines.append(line)
 
     return execution_result, output_lines
-
-
-def execute_python_code_given_code(code: str) -> str:
-    """
-    Executes a given Python code string.
-    This is a placeholder and should be replaced with your actual implementation.
-    """
-    try:
-        # Create a dictionary to hold local variables during execution
-        exec_globals = {}
-        exec_locals = {}
-        exec(code, exec_globals, exec_locals)
-        # Assuming the filtering code will produce a 'output' variable
-        return json.dumps(
-            {"success": True, "execution_result": {"output": exec_locals.get("output")}}
-        )
-    except Exception as e:
-        return json.dumps(
-            {"success": False, "error": str(e), "traceback": traceback.format_exc()}
-        )
 
 
 @tool
@@ -302,12 +278,6 @@ def execute_python_code(
     - Does not persist state between executions
     [/LIMITATIONS]
     """
-    import json
-    import subprocess
-    import sys
-    import traceback
-    from pathlib import Path
-
     try:
         # Ensure timeout is valid
         timeout = safe_convert_timeout(timeout)
@@ -372,8 +342,6 @@ def execute_python_code(
         return json.dumps(result, indent=2)
 
     except subprocess.TimeoutExpired:
-        from pathlib import Path
-
         if "temp_file" in locals() and Path(temp_file).exists():
             Path(temp_file).unlink()
         return json.dumps(
@@ -400,142 +368,3 @@ def execute_python_code(
                 "execution_result": {},
             }
         )
-
-
-@tool
-def execute_python_script(
-    script_path: str,
-    args: list | None = None,
-    timeout: int = 600,
-    working_dir: str | None = None,
-) -> str:
-    """[BRIEF] Execute a Python script file with arguments in a controlled environment. [/BRIEF]
-
-    [DETAILED] This tool executes existing Python script files with command-line arguments, providing a controlled environment for running complex analysis workflows, data processing pipelines, or computational simulations.
-    It captures all output streams and provides comprehensive execution monitoring with timeout protection.
-    This is essential for integrating existing Python scripts into automated workflows and materials analysis pipelines. [/DETAILED]
-
-    [PROCEDURAL] When to use this tool:
-    - Use when you need to execute existing Python scripts with specific arguments. You can also use io tool to write a script and then execute it.
-    - Best suited for running complex analysis workflows or simulations
-    - Essential for integrating external Python tools into automated pipelines
-    - Recommended for batch processing and computational workflows
-    - Avoid for simple code execution
-    [/PROCEDURAL]
-
-    [CONTEXTUAL] How this tool works:
-    - Validates script file existence and accessibility
-    - Constructs command with script path and provided arguments
-    - Executes script in subprocess with timeout protection
-    - Captures standard output, error streams, and return codes
-    - Provides comprehensive execution monitoring and error reporting
-    - Supports custom working directory for script execution
-    [/CONTEXTUAL]
-
-    [WORKFLOW_INTEGRATION] Typical workflow integration example:
-    1. [PREREQUISITE] Ensure script file exists and is executable with proper dependencies [/PREREQUISITE]
-    2. [CURRENT] Execute script with appropriate arguments and timeout [/CURRENT]
-    3. [FOLLOW_UP] Process script output and results for further analysis. Can be used to process json script as required [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
-
-    [SYNTACTICAL] Usage examples:
-    `execute_python_script("analysis.py", ["--input", "data.json", "--output", "results.json"], 300)`,
-    `execute_python_script("simulation.py", ["--steps", "1000", "--temp", "300"], 1800, "/path/to/workdir")`,
-    `execute_python_script("processing.py", None, 600, None)`,
-    [/SYNTACTICAL]
-
-    Args:
-        script_path: [ARGS_BRIEF] Path to the Python script file to execute. [/ARGS_BRIEF]
-                    [ARGS_DETAILED] Complete file path to the Python script that should be executed.
-                    The script must exist and be readable.
-                    The path can be relative to the current working directory or absolute.
-                    The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/ARGS_DETAILED]
-                    [ARGS_SYNTACTICAL] "Valid file path to Python script" [/ARGS_SYNTACTICAL]
-                    [ARGS_EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/ARGS_EXAMPLES]
-        args: [ARGS_BRIEF] Optional list of command-line arguments for the script. [/ARGS_BRIEF]
-             [ARGS_DETAILED] A list of strings representing command-line arguments to pass to the script.
-             These arguments will be passed to the script in the order provided.
-             Common arguments include input files, output paths, configuration parameters, and processing options.
-             If None, the script will be executed without arguments. [/ARGS_DETAILED]
-             [ARGS_SYNTACTICAL] ["arg1", "arg2", "arg3", ...] or None [/ARGS_SYNTACTICAL]
-             [ARGS_EXAMPLES] ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/ARGS_EXAMPLES]
-        timeout: [ARGS_BRIEF] Maximum execution time in seconds. Defaults to 600. [/ARGS_BRIEF]
-                [ARGS_DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
-                This prevents runaway processes and ensures resource management.
-                Choose appropriate values based on expected script execution time.
-                For computational simulations, longer timeouts may be necessary. [/ARGS_DETAILED]
-                [ARGS_SYNTACTICAL] positive integer representing seconds [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/ARGS_EXAMPLES]
-        working_dir: [ARGS_BRIEF] Optional working directory for script execution. [/ARGS_BRIEF]
-                    [ARGS_DETAILED] The directory from which the script should be executed.
-                    This affects relative path resolution and file I/O operations within the script.
-                    If None, the current working directory will be used.
-                    This is useful when scripts expect to run from specific directories or access relative files. [/ARGS_DETAILED]
-                    [ARGS_SYNTACTICAL] Valid directory path or None [/ARGS_SYNTACTICAL]
-                    [ARGS_EXAMPLES] "/path/to/project", "data/analysis", None [/ARGS_EXAMPLES]
-
-    Returns:
-        str: [RETURNS_BRIEF] JSON string with comprehensive execution results and monitoring data. [/RETURNS_BRIEF]
-             [RETURNS_DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, return code, and the complete command that was executed.
-             This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/RETURNS_DETAILED]
-             [RETURNS_EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}" [/RETURNS_EXAMPLES]
-
-    [RAISES] Exceptions:
-        FileNotFoundError: [ERROR_WHEN] When the specified script file doesn't exist [/ERROR_WHEN]
-                          [ERROR_DETAILS] Script path is invalid or file is not accessible [/ERROR_DETAILS]
-                          [ERROR_RECOVERY] Verify script path exists and is readable [/ERROR_RECOVERY]
-        TimeoutExpired: [ERROR_WHEN] When script execution exceeds the specified timeout [/ERROR_WHEN]
-                       [ERROR_DETAILS] Script terminated due to timeout limit [/ERROR_DETAILS]
-                       [ERROR_RECOVERY] Increase timeout value or optimize script performance [/ERROR_RECOVERY]
-        PermissionError: [ERROR_WHEN] When script file lacks execute permissions [/ERROR_WHEN]
-                        [ERROR_DETAILS] Insufficient permissions to execute the script [/ERROR_DETAILS]
-                        [ERROR_RECOVERY] Check file permissions and ensure script is executable [/ERROR_RECOVERY]
-    [/RAISES]
-
-    [LIMITATIONS] Known limitations:
-    - Cannot modify script execution environment beyond working directory
-    - Limited to Python scripts and available system Python installation
-    - No real-time output streaming during execution
-    - Cannot interact with scripts requiring user input
-    [/LIMITATIONS]
-    """
-    try:
-        if not Path(script_path).exists():
-            return json.dumps(
-                {"success": False, "error": f"Script file not found: {script_path}"}
-            )
-
-        # Prepare command
-        cmd = [sys.executable, script_path]
-        if args:
-            cmd.extend(str(arg) for arg in args)
-
-        # Execute
-        process = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=working_dir or Path.cwd(),
-            check=False,
-        )
-
-        result = {
-            "success": process.returncode == 0,
-            "stdout": process.stdout,
-            "stderr": process.stderr,
-            "return_code": process.returncode,
-            "command": " ".join(cmd),
-        }
-
-        return json.dumps(result, indent=2)
-
-    except subprocess.TimeoutExpired:
-        return json.dumps(
-            {
-                "success": False,
-                "error": f"Script execution timed out after {timeout} seconds",
-            }
-        )
-    except Exception as e:
-        return json.dumps({"success": False, "error": str(e)})

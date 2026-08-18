@@ -19,7 +19,7 @@ Existing child experiments from this checkpoint:
 Proposal slots in this expansion:
 {{proposal_slots}}
 
-Trial-relative workspaces, one per proposal in proposal order:
+Execution-relative workspaces, one per proposal in proposal order:
 {{branch_workspaces}}
 
 All reliable evidence:

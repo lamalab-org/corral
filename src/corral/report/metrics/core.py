@@ -1,7 +1,11 @@
 from statistics import mean
 
+from corral.report.errors import (
+    InsufficientTrialsError,
+    NoResultsError,
+    TaskNotFoundError,
+)
 from corral.report.metrics.base import Metric, MetricContext, MetricMetadata, TaskMetric
-from corral.types import InsufficientTrialsError, NoResultsError, TaskNotFoundError
 
 
 class AverageScoreMetric(Metric):

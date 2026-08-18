@@ -15,7 +15,7 @@ from corral.persistence.base import (
     StateStoreError,
     StateTransitionConflictError,
 )
-from corral.persistence.sqlite import SQLiteStateStore
+from corral.persistence.jsonl import JSONLStateStore
 from corral.persistence.workspace import (
     WorkspaceDestinationError,
     WorkspaceManager,
@@ -28,8 +28,8 @@ __all__ = [
     "ArtifactNotFoundError",
     "ArtifactStore",
     "ArtifactStoreError",
+    "JSONLStateStore",
     "LocalArtifactStore",
-    "SQLiteStateStore",
     "StateIntegrityError",
     "StateNotFoundError",
     "StateStore",

@@ -29,8 +29,14 @@ To run subtask mode:
 python src/corral_md/env.py --level 1 --subtask_level True
 ```
 
-## See the tasks
+The command constructs and lists the selected environment definitions; execution is handled by registered Temporal workers.
 
-```bash
-curl http://localhost:8000/tasks/
-```
+## Local workspaces and Modal
+
+Task files are stored in the local Corral workspace. `run_lammps` automatically
+uploads that workspace to an isolated directory in the Modal `simulations`
+Volume, runs LAMMPS, and downloads the complete resulting directory before the
+tool returns. Redeploy `modal_app/lammps_app.py` after changing its worker code.
+
+Set `CORRAL_MD_MODAL_APP` or `CORRAL_MD_MODAL_VOLUME` to override the default
+`simagent` app and `simulations` Volume names.

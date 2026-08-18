@@ -4,19 +4,19 @@ import json
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
-from corral.backend.tool import Tool, ToolConcurrency
+from corral.core.tool import Tool, ToolConcurrency
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from corral.backend.env import Environment
+    from corral.core.environment import Environment
 
 
 class _CallableTool(Tool):
     """A :class:`Tool` whose behaviour is a bound Python callable.
 
     Used for the generated background/control tools, whose logic is a closure
-    over the trial's environment and job manager rather than a module-level
+    over the execution's environment and job manager rather than a module-level
     `@tool` function.
     """
 
@@ -27,12 +27,14 @@ class _CallableTool(Tool):
         params_json_schema: dict[str, Any],
         fn: Callable[..., Any],
         concurrency: ToolConcurrency = ToolConcurrency.SERIAL,
+        hidden_args: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             name=name,
             description=description,
             params_json_schema=params_json_schema,
             concurrency=concurrency,
+            hidden_args=hidden_args,
         )
         self._fn = fn
 
@@ -88,6 +90,7 @@ def _make_start_tool(env: Environment, tool: Tool) -> _CallableTool:
         description=_start_description(tool),
         params_json_schema=schema,
         fn=_start,
+        hidden_args=dict(tool.hidden_args),
     )
 
 
@@ -185,7 +188,7 @@ def _make_control_tools(env: Environment) -> list[_CallableTool]:
         ),
         _CallableTool(
             name="list_jobs",
-            description="List all background jobs submitted in this trial.",
+            description="List all background jobs submitted in this execution.",
             params_json_schema={"type": "object", "properties": {}, "required": []},
             fn=_list_jobs,
             concurrency=ToolConcurrency.READ_ONLY,
@@ -196,7 +199,7 @@ def _make_control_tools(env: Environment) -> list[_CallableTool]:
 def attach_background_tools(env: Environment) -> None:
     """Add `start_<tool>` + control tools to `env` for its background tools.
 
-    A no-op unless the trial's resolved toolset contains at least one
+    A no-op unless the execution's resolved toolset contains at least one
     background-capable tool. The original (blocking) tools are left in place, so
     an agent may still call them directly; the generated variants are additive.
     Must be called after :attr:`Environment.job_manager` is set.

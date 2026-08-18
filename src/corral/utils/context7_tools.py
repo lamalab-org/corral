@@ -10,7 +10,7 @@ from loguru import logger
 from mcp import ClientSession, types
 from mcp.client.streamable_http import streamablehttp_client
 
-from corral.backend.tool import tool
+from corral.core.tool import tool
 
 # Context7 remote MCP server URL
 CONTEXT7_URL = "https://mcp.context7.com/mcp"

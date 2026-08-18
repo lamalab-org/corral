@@ -16,7 +16,7 @@ from tenacity import (
     wait_fixed,
 )
 
-from corral.types import BudgetExhaustedError
+from corral.agents.schema import BudgetExhaustedError
 
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
@@ -156,7 +156,7 @@ class LiteLLMMessage(TypedDict, total=False):
     before_sleep=before_sleep_loguru,
     reraise=True,
 )
-def llm_call(
+async def llm_call(
     model: str,
     messages: list[LiteLLMMessage],
     temperature: float,
@@ -166,7 +166,7 @@ def llm_call(
     **kwargs,
 ) -> LLMResponse:
     """
-    Call LiteLLM API with or without tools based on parameters
+    Call LiteLLM with a streaming transport and reconstruct its final response.
 
     Args:
         model (str): The model to use.
@@ -176,6 +176,7 @@ def llm_call(
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
         return_usage (bool, optional): If True, includes token usage in metadata. Defaults to True.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
+            Streaming is always enabled, even if ``stream=False`` is supplied.
             If 'logprobs' is True in kwargs, logprobs will be included in response metadata.
 
     Returns:
@@ -196,7 +197,7 @@ def llm_call(
         # When extended thinking is on (LiteLLM turns `reasoning_effort` into an
         # Anthropic `thinking` block), Anthropic rejects any `temperature` other
         # than 1 with a 400. Force it so a reasoning run is not aborted; this also
-        # covers the base-class answer extractor, which reuses these kwargs.
+        # covers reasoning calls made through this shared LiteLLM helper.
         if kwargs.get("reasoning_effort") or kwargs.get("thinking"):
             params["temperature"] = 1
 
@@ -207,10 +208,17 @@ def llm_call(
                     "tool_choice": "auto",
                 }
             )
-            response = litellm.completion(**params)
-
-        else:
-            response = litellm.completion(**params)
+        # Always consume the provider response as a stream. Besides making long
+        # generations observable at the transport layer, this keeps an active
+        # response from looking idle to gateways with read/idle timeouts. Build
+        # the chunks back into LiteLLM's ordinary ModelResponse so callers keep
+        # the same message, tool-call, logprob, and usage interface.
+        params["stream"] = True
+        response_stream = await litellm.acompletion(**params)
+        chunks = [chunk async for chunk in response_stream]
+        response = litellm.stream_chunk_builder(chunks, messages=messages)
+        if response is None:
+            raise ValueError("LLM stream returned no response chunks")
 
         message = response.choices[0].message
 
