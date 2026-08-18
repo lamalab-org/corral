@@ -6,9 +6,8 @@ import traceback
 from contextlib import suppress
 from pathlib import Path
 
-from loguru import logger
-
 from corral.core.tool import tool
+from corral.logging import logger
 
 
 def ensure_directory_exists(file_path: str) -> None:

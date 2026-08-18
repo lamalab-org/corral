@@ -16,9 +16,11 @@ from uuid import NAMESPACE_URL, uuid5
 
 from corral.agents.schema import BudgetExhaustedError
 from corral.agents.session import Agent, AgentSession, run_agent_session
+from corral.core.errors import concise_error_message
 from corral.core.state import RuntimeState, State, TaskOutput, checkpoint_state
+from corral.logging import event, exception_fields
 from corral.observability import (
-    NoOpObserver,
+    LoggingObserver,
     Observation,
     ObservationContext,
     Observer,
@@ -50,7 +52,7 @@ class TaskRuntime:
         observer: Observer | None = None,
     ) -> None:
         self.state_store = state_store
-        self.observer = observer or NoOpObserver()
+        self.observer = observer or LoggingObserver()
 
     @staticmethod
     def _context(
@@ -108,7 +110,17 @@ class TaskRuntime:
                     transition_id=transition_id,
                     advance_head=True,
                 )
-            except StateTransitionConflictError:
+            except StateTransitionConflictError as exc:
+                event(
+                    "WARNING",
+                    "persistence.transition_conflict",
+                    subsystem="persistence",
+                    execution_id=context.execution_id,
+                    task_id=context.task_id,
+                    state_hash=parent.state_hash,
+                    transition_id=transition_id,
+                    **exception_fields(exc),
+                )
                 committed = await self.state_store.load_transition(
                     parent.state_hash,
                     transition_id,
@@ -195,6 +207,7 @@ class TaskRuntime:
                     metadata={
                         **dict(current.runtime.metadata),
                         "error": result.error or "session agent failed",
+                        "error_type": "AgentOutcomeError",
                     },
                 ),
             )
@@ -263,7 +276,17 @@ class TaskRuntime:
             ) as restore:
                 update_safely(restore, state_after=current)
         if current.is_terminal:
-            return current
+            with observe_safely(
+                self.observer,
+                Observation(
+                    name="task.run",
+                    context=context,
+                    state_before=initial,
+                    metadata={"resumed": True},
+                ),
+            ) as task_span:
+                update_safely(task_span, state_after=current)
+                return current
 
         # Workspace materialization has the same synchronous compatibility
         # boundary as capture above.
@@ -275,6 +298,7 @@ class TaskRuntime:
                 name="task.run",
                 context=context,
                 state_before=initial,
+                metadata={"resumed": current != initial},
             ),
         ) as task_span:
             try:
@@ -340,7 +364,8 @@ class TaskRuntime:
                         ended_at=datetime.now(timezone.utc),
                         metadata={
                             **dict(durable.runtime.metadata),
-                            "error": str(exc),
+                            "error": concise_error_message(exc),
+                            "error_type": type(exc).__name__,
                         },
                     )
                 )

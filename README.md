@@ -30,9 +30,8 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
 ## 🚀 Quick Start: Run One Task from One Environment
 
 The shortest useful Corral run does not need `CorralRunner`, trials, scoring,
-or report generation. Import an agent, load one environment task, and send it
-directly through a Temporal task Workflow. The example starts its Corral worker
-in the same process, so the only separate service is Temporal itself.
+or report generation. `corral run` sends one independent task through a direct
+Temporal task Workflow and starts its Corral worker in the same process.
 
 You need Python 3.11 or newer for SampleMath, [`uv`](https://docs.astral.sh/uv/),
 a model API key such as `OPENAI_API_KEY`, and the Temporal CLI. Clone the
@@ -40,8 +39,8 @@ repository and install SampleMath together with the framework:
 
 ```bash
 git clone https://github.com/lamalab-org/corral.git
-cd corral
-uv sync --project tasks/samplemath
+cd corral/tasks/samplemath
+uv sync
 ```
 
 Start a local Temporal service in one terminal:
@@ -50,7 +49,24 @@ Start a local Temporal service in one terminal:
 temporal server start-dev
 ```
 
-Save this as `quickstart.py` in the repository root:
+In another terminal, run one task with one agent and model:
+
+```bash
+uv run corral run \
+  --agent tool-calling \
+  --environment samplemath \
+  --task task1 \
+  --model openai/gpt-5.6
+```
+
+This path always uses `evaluate=False`: it prints the final status, submitted
+answer, and State hash, and writes the durable State to
+`.corral/run-states.jsonl`. It does not create trials, invoke a scorer, or
+generate a benchmark report. Because it executes exactly one task, it rejects a
+task with upstream dependencies and points to `corral bench` instead.
+
+The equivalent Python API is below. Save this as `quickstart.py` in the current
+`tasks/samplemath` directory:
 
 ```python
 import asyncio
@@ -121,35 +137,80 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Run it with the SampleMath environment's virtual environment:
+Run it with the current SampleMath virtual environment:
 
 ```bash
-uv run --project tasks/samplemath python quickstart.py
+uv run python quickstart.py
 ```
 
 `evaluate=False` is explicit here: the result is the agent's final immutable
 `State`, and the example prints only its status and submitted answer. No scorer,
-aggregate metric, or benchmark report runs. `task1` is independent; use the
-task-group path below for a task such as `task4` whose inputs come from earlier
-tasks.
+aggregate metric, or benchmark report runs. `task1` is independent; use
+`corral bench` for a task such as `task4` whose inputs come from earlier tasks.
 
 ## 📊 Running Benchmarks
 
-### Run `ToolCallingAgent` from the command line
+### Run any agent with the `corral` CLI
 
-[`run_scripts/run_tool_calling.py`](run_scripts/run_tool_calling.py) starts a Corral
-worker in the same process and runs the selected environment through the normal
-Temporal benchmark path. The runner infers `BenchmarkTaskMetadata` and includes
-the selected task's dependencies automatically. Start a local Temporal service
-first:
+The installed `corral` command can run every public concrete agent against a
+registered environment. Start a local Temporal service first:
 
 ```bash
 temporal server start-dev
 ```
 
-Run the script with the virtual environment belonging to the task package.
-For example, to inspect SampleMath and then run `task4` (including its transitive
-dependencies):
+Each task environment is a separate Python project because it has its own
+dependencies. Change into that project once, then `uv` automatically uses its
+environment and no `--project` option is needed:
+
+```bash
+cd tasks/samplemath
+uv sync
+uv run corral bench \
+  --agent react \
+  --environment samplemath \
+  --model openai/gpt-4o \
+  --task task4 \
+  --trials 3 \
+  --report .corral/samplemath-react-report.json
+```
+
+If that environment is already activated, `uv run` is optional and the command
+is simply `corral bench ...`. The `--project` form is only needed when invoking
+`uv` from elsewhere in the monorepo.
+
+The available agent names are `ai-scientist`, `claude-code`, `codex`,
+`llm-planner`, `openhands`, `react`, `reflexion`, `terminus`, and
+`tool-calling`. Class names and underscore spellings such as `ReActAgent` and
+`tool_calling` are accepted as aliases. Claude Code, Codex, and OpenHands need
+their corresponding optional package extra and report an installation hint if
+it is missing.
+
+Use `--agent-kwargs` for constructor-specific settings. Where the agent supports
+them, explicit `--model`, `--api-endpoint`, and `--temperature` options take
+precedence over the same keys in that JSON object:
+
+```bash
+uv run corral bench \
+  --agent codex --environment samplemath --task task1 \
+  --model gpt-5.4 \
+  --agent-kwargs '{"reasoning_effort": "high"}'
+```
+
+`ReflexionAgent` wraps `ToolCallingAgent` by default. Select another actor with
+`{"actor": "react", "actor_kwargs": {...}}`. For `AIScientistAgent`, a JSON
+`config` object is validated as `AIScientistConfig`; add
+`"config_profile": "sakana"` to use `SakanaAIScientistConfig`.
+
+### Compatibility `ToolCallingAgent` script
+
+[`run_scripts/run_tool_calling.py`](run_scripts/run_tool_calling.py) starts a Corral
+worker in the same process and runs the selected environment through the normal
+Temporal benchmark path. The runner infers `BenchmarkTaskMetadata` and includes
+the selected task's dependencies automatically. Its existing options, defaults,
+and invocation remain supported:
+
+From the repository root:
 
 ```bash
 uv sync --project tasks/samplemath

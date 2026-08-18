@@ -1,7 +1,7 @@
 """Fixed projection of structured tool docstrings into runtime metadata.
 
 Corral no longer routes or varies tool verbosity. Runtime tool schemas always
-use the historical default: the ``[BRIEF]`` section when present, otherwise the
+use the historical default: the `[BRIEF]` section when present, otherwise the
 ordinary untagged description. Broader tags may remain in source docstrings as
 authoring material, but they never become a benchmark parameter.
 """

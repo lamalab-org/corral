@@ -5,8 +5,6 @@ from itertools import cycle
 from math import sqrt
 from statistics import fmean, stdev
 
-from loguru import logger
-
 from corral.agents.ai_scientist.config import AIScientistConfig
 from corral.agents.ai_scientist.journal import JSONLTraceWriter
 from corral.agents.ai_scientist.search.evaluator import (
@@ -46,6 +44,7 @@ from corral.agents.ai_scientist.workers.base import StructuredModel
 from corral.agents.ai_scientist.workers.critic import ScientificCritic
 from corral.agents.ai_scientist.workers.experimenter import Experimenter
 from corral.agents.ai_scientist.workers.planner import NodePlanner
+from corral.logging import logger
 
 
 class ExperimentManager:
@@ -53,7 +52,7 @@ class ExperimentManager:
 
     This is an implementation component of :class:`AIScientistAgent`, not a
     Corral agent entry point. The agent-facing lifecycle is exclusively
-    ``AIScientistAgent.run_session``.
+    `AIScientistAgent.run_session`.
     """
 
     def __init__(

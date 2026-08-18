@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import cloudpickle
-from loguru import logger
+
+from corral.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable

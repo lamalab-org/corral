@@ -201,7 +201,7 @@ class WetlabState:
 
 
 class WetlabEngine:
-    """Disposable Reaktoro runtime reconstructed from ``ChemicalSystemSpec``."""
+    """Disposable Reaktoro runtime reconstructed from `ChemicalSystemSpec`."""
 
     def __init__(self, spec: ChemicalSystemSpec):
         spec.assert_compatible()

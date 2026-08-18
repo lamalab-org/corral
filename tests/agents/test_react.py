@@ -73,3 +73,32 @@ async def test_iteration_limit_is_a_typed_outcome(monkeypatch, agent):
     assert outcome.error == "agent exhausted its 2 interaction budget"
     sent = model_call.await_args_list[0].kwargs["messages"]
     assert {"role": "user", "content": "resume from canonical state"} in sent
+
+
+@pytest.mark.anyio()
+async def test_model_failure_keeps_only_the_final_error_message(monkeypatch, agent):
+    async def fail_model(**_kwargs):
+        try:
+            raise ValueError("Required field 'answer' is missing.")
+        except ValueError as cause:
+            raise RuntimeError("provider adapter failed") from cause
+
+    monkeypatch.setattr("corral.agents.base_agent.llm_call", fail_model)
+
+    class Session:
+        prompt = "solve"
+        surrender_allowed = False
+        tools = ()
+        examples = ()
+        iteration_limit = 1
+        initial_state = SimpleNamespace(
+            messages=(), metadata=SimpleNamespace(scaffold={})
+        )
+
+        def __init__(self):
+            self.messages = []
+
+    outcome = await agent.run_session(Session())
+
+    assert outcome.status == "agent_failure"
+    assert outcome.error == "Required field 'answer' is missing."

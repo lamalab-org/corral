@@ -18,7 +18,7 @@ def confine_workspace_path(
     *,
     allow_root: bool = False,
 ) -> Path:
-    """Resolve a local path while proving it remains below ``root``.
+    """Resolve a local path while proving it remains below `root`.
 
     This helper is for trusted server code that needs a physical path (for
     example, evaluation of a file submission). Agent-facing filesystem tools

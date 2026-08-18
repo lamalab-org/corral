@@ -49,7 +49,7 @@ class TaskDefinition:
     - `setup_fn(env, state)` returns serializable environment values and hidden
       tool arguments for a task execution; it never mutates the environment or
       State.
-    - `scoring_fn(answer)` is consumed by an evaluation-layer ``TaskScorer``;
+    - `scoring_fn(answer)` is consumed by an evaluation-layer `TaskScorer`;
       task execution never invokes it.
     - `resolve_answer` controls whether the submitted answer is path-resolved
       for evaluation (off for non-file answers such as numbers, SMILES or

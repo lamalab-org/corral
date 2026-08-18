@@ -5,9 +5,9 @@ import os
 import platform
 from collections.abc import Callable
 from pathlib import Path
+from time import perf_counter
 
 import nanosurf
-from loguru import logger
 
 # ----------------------------------------------------------
 # Safe pythoncom import (Windows only)
@@ -21,6 +21,7 @@ from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.state import State
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
+from corral.logging import event, exception_fields
 from corral.utils.code_tools import execute_python_code
 from score import (
     check_file_exists,
@@ -40,7 +41,13 @@ from tools import (
 )
 
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt_4o").strip()
-logger.info(f"[SERVER] Using LLM_MODEL={LLM_MODEL}")
+event(
+    "DEBUG",
+    "environment.configuration",
+    subsystem="runtime",
+    benchmark="afm",
+    llm_model=LLM_MODEL,
+)
 ENVIRONMENT = "enviroment"
 TASK_TYPE = "subtasks_1"  # "single_task" or "subtasks"
 BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\{TASK_TYPE}"
@@ -85,7 +92,13 @@ def load_tasks_from_json(
     Returns:
         dictionary of task definitions keyed by task ID
     """
-    logger.info(f"Loading task definitions from {json_path}")
+    event(
+        "DEBUG",
+        "environment.tasks_loading",
+        subsystem="runtime",
+        benchmark="afm",
+        task_source=str(json_path),
+    )
     if not Path(json_path).exists():
         raise FileNotFoundError(f"Task definition file not found: {json_path}")
 
@@ -178,10 +191,14 @@ class AFMEnvironment(Environment):
         # if "mode" in params:
         #     opmode.OperatingMode = getattr(spm.OperatingMode, params["mode"])
 
-        logger.info(
-            f"AFM parameters have been reset to initial values. "
-            f"AFM images will be saved at {application.GetGalleryHistoryDirectoryPath}. "
-            f"Corral's current working directory is {self.afm_dir}."
+        event(
+            "DEBUG",
+            "environment.configuration_completed",
+            subsystem="runtime",
+            benchmark="afm",
+            task_id=self.task_id,
+            workspace=self.afm_dir,
+            image_directory=application.GetGalleryHistoryDirectoryPath,
         )
 
         # Cleanup
@@ -218,11 +235,16 @@ class AFMEnvironment(Environment):
         if self.afm_dir:
             prompt += f"\nIMPORTANT: You have access to filesystem tools. All image scans will automatically be saved in your isolated workspace which is {self.afm_dir}."
 
-        # logger.info(f"PROMPT : {prompt}")
         return prompt
 
     def configure(self, state: State) -> tuple[State, str]:
-        logger.info("configuration taking place!!!!!!!")
+        event(
+            "DEBUG",
+            "environment.configuration_started",
+            subsystem="runtime",
+            benchmark="afm",
+            task_id=self.task_id,
+        )
         self.reset_params()
         return state, "No external object configuration needed for this task."
 
@@ -243,12 +265,22 @@ def create_environments(
         dictionary of environments keyed by task ID
     """
 
-    logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
-
-    # Load tasks from JSON
-    tasks = load_tasks_from_json(task_json_path, work_dir)
-
-    logger.info(f"Creating linked task environments with ID: {ENVIRONMENT}")
+    started = perf_counter()
+    event(
+        "INFO",
+        "environment.started",
+        subsystem="runtime",
+        benchmark="afm",
+        operation="create",
+    )
+    event(
+        "DEBUG",
+        "environment.creation_details",
+        subsystem="runtime",
+        benchmark="afm",
+        task_source=str(task_json_path),
+        work_dir=work_dir,
+    )
 
     subtask_specific_tools = {
         "visualize_grain_boxes": visualize_grain_boxes,
@@ -260,17 +292,42 @@ def create_environments(
         "execute_python_code": execute_python_code,
     }
 
-    # Create environments for all tasks; grouping is derived from the graph
-    return build_environments(
-        tasks,
-        base_work_dir=work_dir,
-        name=ENVIRONMENT,
-        toolset=Toolset(
-            pool=subtask_specific_tools,
-            common=taskgroup_common_tools or {},
-        ),
-        env_cls=AFMEnvironment,
+    try:
+        tasks = load_tasks_from_json(task_json_path, work_dir)
+        environments = build_environments(
+            tasks,
+            base_work_dir=work_dir,
+            name=ENVIRONMENT,
+            toolset=Toolset(
+                pool=subtask_specific_tools,
+                common=taskgroup_common_tools or {},
+            ),
+            env_cls=AFMEnvironment,
+        )
+    except Exception as exc:
+        event(
+            "ERROR",
+            "environment.failed",
+            subsystem="runtime",
+            benchmark="afm",
+            operation="create",
+            status="failed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            **exception_fields(exc),
+        )
+        raise
+
+    event(
+        "INFO",
+        "environment.completed",
+        subsystem="runtime",
+        benchmark="afm",
+        operation="create",
+        status="completed",
+        duration_ms=round((perf_counter() - started) * 1000, 3),
+        environment_count=len(environments),
     )
+    return environments
 
 
 if __name__ == "__main__":
@@ -281,15 +338,25 @@ if __name__ == "__main__":
         / ENVIRONMENT
         / f"{TASK_TYPE}.json"
     )
-    logger.info(f"task directory {tasks_json_path}")
+    event(
+        "DEBUG",
+        "environment.task_source_resolved",
+        subsystem="runtime",
+        benchmark="afm",
+        task_source=str(tasks_json_path),
+    )
     work_dir = BASE_WORK_DIR
     environments = create_environments(
         task_json_path=tasks_json_path,
         work_dir=work_dir,
     )
-    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        logger.info(f"- {env_id}")
-        logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_map:
-            logger.info(f"Depends on: {sorted(env.current_task.dependencies())}")
+        event(
+            "DEBUG",
+            "environment.created",
+            subsystem="runtime",
+            benchmark="afm",
+            task_id=env_id,
+            task_name=env.current_task.name,
+            dependencies=sorted(env.current_task.dependencies()),
+        )

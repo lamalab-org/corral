@@ -7,8 +7,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Protocol
 
-from loguru import logger
-
 from corral.agents.ai_scientist.search.nodes import (
     ExecutedAction,
     ExperimentNode,
@@ -22,6 +20,7 @@ from corral.agents.ai_scientist.tools.corral_executor import (
 )
 from corral.agents.session import ToolResponse
 from corral.core.action import Action
+from corral.logging import logger
 
 
 class ReplayDiverged(RuntimeError):
@@ -203,7 +202,7 @@ class ExecutionPool:
         prefer_existing: bool,
         prefer_clone: bool = False,
     ) -> BranchExecution:
-        """Get a runtime at ``parent``, cloning or replaying when needed."""
+        """Get a runtime at `parent`, cloning or replaying when needed."""
         if parent is None:
             return self.create()
         if prefer_existing and parent.branch_id is not None:
@@ -222,7 +221,7 @@ class ExecutionPool:
         prefer_existing: bool,
         prefer_clone: bool = False,
     ) -> int:
-        """Return physical calls needed to place a runtime at ``parent``."""
+        """Return physical calls needed to place a runtime at `parent`."""
         if parent is None:
             return 0
         if prefer_existing and parent.branch_id is not None:
@@ -502,7 +501,7 @@ class ExecutionPool:
     ) -> BranchExecution:
         """Clone a parent runtime without replaying its physical trajectory.
 
-        Providers may expose ``clone_branch(source_execution_id)`` to return a
+        Providers may expose `clone_branch(source_execution_id)` to return a
         ready branch session at the same physical checkpoint. The logical action
         history is retained for provenance and fallback replay, but cloned
         actions do not consume the physical tool-call budget.

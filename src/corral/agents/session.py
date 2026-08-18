@@ -55,7 +55,7 @@ class Agent(Protocol):
 
     A worker may call the same registered agent instance for overlapping task
     activities. Implementations must therefore keep invocation-specific state
-    on ``AgentSession`` or in local variables rather than on the agent object.
+    on `AgentSession` or in local variables rather than on the agent object.
     """
 
     async def run_session(self, session: AgentSession) -> AgentOutcome:
@@ -338,7 +338,7 @@ class AgentSession:
 
         Agent objects contain configuration only. Any task- or attempt-specific
         value needed by a later decision belongs under this namespace in the
-        immutable Corral State. ``previous=True`` reads the explicitly supplied
+        immutable Corral State. `previous=True` reads the explicitly supplied
         prior State, which is how reflective agents consume an earlier attempt
         without retaining hidden Python-object memory.
         """
@@ -392,7 +392,7 @@ class AgentSession:
 
     @property
     def submission(self) -> str | None:
-        """Return the answer accepted through ``submit_answer``, if any."""
+        """Return the answer accepted through `submit_answer`, if any."""
         return self.state.submission
 
     @property
@@ -423,7 +423,7 @@ class AgentSession:
     ) -> HookContext:
         """Run one lifecycle point against this session's canonical State.
 
-        Hook callbacks receive this ``AgentSession`` directly. Their metadata is
+        Hook callbacks receive this `AgentSession` directly. Their metadata is
         stored under the session's durable agent-state namespace so concurrent
         invocations never leak hook state through the shared agent object.
         """
@@ -637,16 +637,16 @@ class AgentSession:
         """Run a delegated agent through the canonical bound-session lifecycle.
 
         Composite agents use this method instead of calling a child's
-        ``run_session`` method directly.  The child therefore receives the same
+        `run_session` method directly.  The child therefore receives the same
         hook lifecycle, typed-outcome validation, and authoritative
-        ``submit_answer`` enforcement as a top-level agent, while continuing on
-        this exact State branch. ``max_iterations`` scopes the child to the
+        `submit_answer` enforcement as a top-level agent, while continuing on
+        this exact State branch. `max_iterations` scopes the child to the
         outer agent's remaining task budget without changing the durable task
         configuration.
 
         Usage is deliberately not folded into :class:`UsageState` here.  The
         composite agent remains responsible for combining its own and its
-        delegate's :class:`AgentUsage`; the outer ``run_agent_session`` call then
+        delegate's :class:`AgentUsage`; the outer `run_agent_session` call then
         records that combined usage exactly once.
         """
         if not isinstance(agent, Agent):
@@ -782,7 +782,7 @@ def _enforce_tool_submission(
     result: AgentOutcome,
     interface: AgentSession,
 ) -> AgentOutcome:
-    """Make the canonical ``submit_answer`` transition authoritative.
+    """Make the canonical `submit_answer` transition authoritative.
 
     A session agent may report completion only after executing the tool.  This
     prevents a plain-text or adapter-returned answer from bypassing the same

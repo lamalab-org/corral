@@ -1,6 +1,6 @@
 """Immutable, revisioned execution state.
 
-State v2 is deliberately independent of the current ``Environment`` execution
+State v2 is deliberately independent of the current `Environment` execution
 loop.  It establishes the durable boundary that later runtime PRs can adopt
 without making persistence depend on live agent or environment objects.
 """
@@ -328,12 +328,12 @@ class State(FrozenModel):
 
 
 def checkpoint_state(parent: State, source: State) -> State:
-    """Create one durable child containing the complete ``source`` value.
+    """Create one durable child containing the complete `source` value.
 
     Agents may create several immutable in-memory forks while composing a model
     message or updating their namespaced runtime data. Persistence checkpoints
     only the semantically important boundaries. This helper squashes those
-    intermediate forks into one direct child of the latest durable ``parent``
+    intermediate forks into one direct child of the latest durable `parent`
     while preserving the complete environment, agent history, workspace,
     usage, runtime, and dependency state.
 

@@ -93,7 +93,7 @@ def extract_measured_outcome(
     """Parse a declared metric from successful physical tool observations.
 
     Extraction requires the task-wide metric established during formulation.
-    An explicit ``measured_outcome`` object is accepted only when its name and
+    An explicit `measured_outcome` object is accepted only when its name and
     direction match that declaration; otherwise a tool could make an unrelated
     scalar outrank the research objective. Matching JSON/dict keys and results
     consisting solely of one number are also accepted. This deliberately avoids

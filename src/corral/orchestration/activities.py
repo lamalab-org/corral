@@ -6,13 +6,17 @@ import asyncio
 import contextlib
 import threading
 from datetime import datetime
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from temporalio import activity
 
 from corral.core.state import State, TaskOutput
 from corral.evaluation import TaskScorer
+from corral.logging import event, exception_fields, log_context
 from corral.observability import (
+    CompositeObserver,
+    LoggingObserver,
     Observation,
     ObservationContext,
     Observer,
@@ -164,7 +168,13 @@ class CorralActivities:
     ) -> None:
         self.state_store = state_store
         self.registry = registry
-        self.observer = observer or observer_from_env()
+        self.observer = (
+            observer_from_env()
+            if observer is None
+            else observer
+            if isinstance(observer, LoggingObserver)
+            else CompositeObserver(LoggingObserver(), observer)
+        )
         self.runtime = TaskRuntime(state_store, self.observer)
 
     @staticmethod
@@ -188,34 +198,62 @@ class CorralActivities:
             temporal_run_id=workflow_run_id,
         )
 
+    @staticmethod
+    def _activity_fields(name: str) -> dict[str, Any]:
+        fields: dict[str, Any] = {"activity": name, "attempt": 1}
+        with contextlib.suppress(RuntimeError):
+            info = activity.info()
+            fields.update(
+                attempt=info.attempt,
+                workflow_id=info.workflow_id,
+                workflow_run_id=info.workflow_run_id,
+            )
+        return fields
+
     @activity.defn(name="corral.run_task")
     async def run_task(self, request: RunTaskInput) -> StateRef:
-        agent = self.registry.agent(request.agent_id)
-        environment = self.registry.environment(
-            request.environment_id, request.execution_id
-        )
-        dependencies = {
-            task_id: TaskOutput(output=output)
-            for task_id, output in request.dependency_outputs.items()
+        started = perf_counter()
+        activity_fields = self._activity_fields("corral.run_task")
+        correlation = {
+            "benchmark_run_id": request.benchmark_run_id,
+            "execution_id": request.execution_id,
+            "task_id": request.task_id,
+            **activity_fields,
         }
-        observation_context = self._context(
-            execution_id=request.execution_id,
-            task_id=request.task_id,
-            benchmark_run_id=request.benchmark_run_id,
+        event(
+            "INFO",
+            "activity.started",
+            subsystem="orchestration",
+            status="running",
+            **correlation,
         )
-        last_evaluation = self.registry.last_evaluation(request.task_id)
-        previous_state = None
-        if last_evaluation is not None:
-            previous_hash = last_evaluation.get("state_hash")
-            if isinstance(previous_hash, str):
-                try:
-                    previous_state = await self.state_store.load(previous_hash)
-                except StateNotFoundError:
-                    # Evaluation context remains useful even if a deployment
-                    # pruned the referenced State between attempts.
-                    previous_state = None
 
         async def invoke() -> State:
+            agent = self.registry.agent(request.agent_id)
+            environment = self.registry.environment(
+                request.environment_id, request.execution_id
+            )
+            dependencies = {
+                task_id: TaskOutput(output=output)
+                for task_id, output in request.dependency_outputs.items()
+            }
+            observation_context = self._context(
+                execution_id=request.execution_id,
+                task_id=request.task_id,
+                benchmark_run_id=request.benchmark_run_id,
+            )
+            last_evaluation = self.registry.last_evaluation(request.task_id)
+            previous_state = None
+            if last_evaluation is not None:
+                previous_hash = last_evaluation.get("state_hash")
+                if isinstance(previous_hash, str):
+                    try:
+                        previous_state = await self.state_store.load(previous_hash)
+                    except StateNotFoundError:
+                        # Evaluation context remains useful even if a deployment
+                        # pruned the referenced State between attempts.
+                        previous_state = None
+
             configured_model = request.model
             if configured_model is None:
                 agent_model = getattr(agent, "model", None)
@@ -240,62 +278,122 @@ class CorralActivities:
                 observation_context=observation_context,
             )
 
-        state = await _with_heartbeats(
-            invoke(),
-            details=f"run-task:{request.execution_id}",
+        try:
+            with log_context(**correlation):
+                state = await _with_heartbeats(
+                    invoke(),
+                    details=f"run-task:{request.execution_id}",
+                )
+        except Exception as exc:
+            event(
+                "WARNING",
+                "activity.attempt_failed",
+                subsystem="orchestration",
+                status="retryable_failure",
+                duration_ms=round((perf_counter() - started) * 1000, 3),
+                **correlation,
+                **exception_fields(exc),
+            )
+            raise
+        event(
+            "INFO",
+            "activity.completed",
+            subsystem="orchestration",
+            status="completed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            state_hash=state.state_hash,
+            **correlation,
         )
         return state_ref(state)
 
     @activity.defn(name="corral.evaluate_task")
     async def evaluate_task(self, request: EvaluateTaskInput) -> EvaluationRef:
-        state = await self.state_store.load(request.state_hash)
-        observation_context = self._context(
-            execution_id=request.execution_id,
-            task_id=request.task_id,
-            benchmark_run_id=request.benchmark_run_id,
+        started = perf_counter()
+        activity_fields = self._activity_fields("corral.evaluate_task")
+        correlation = {
+            "benchmark_run_id": request.benchmark_run_id,
+            "execution_id": request.execution_id,
+            "task_id": request.task_id,
+            **activity_fields,
+        }
+        event(
+            "INFO",
+            "activity.started",
+            subsystem="orchestration",
+            status="running",
+            **correlation,
         )
-        with observe_safely(
-            self.observer,
-            Observation(
-                name="restore",
-                context=observation_context,
-                input={"state_hash": state.state_hash},
-            ),
-        ) as restore:
-            update_safely(restore, state_after=state)
-        environment = self.registry.environment(
-            request.environment_id, request.execution_id
-        )
-        with observe_safely(
-            self.observer,
-            Observation(
-                name="task.evaluate",
-                context=observation_context,
-                as_type="evaluator",
-                state_before=state,
-            ),
-        ) as evaluation:
-            result = await _with_heartbeats(
-                asyncio.to_thread(
-                    TaskScorer(
-                        environment.current_task,
-                        workspace=environment.workspace_path,
-                    ).evaluate,
-                    state,
+        try:
+            state = await self.state_store.load(request.state_hash)
+            observation_context = self._context(
+                execution_id=request.execution_id,
+                task_id=request.task_id,
+                benchmark_run_id=request.benchmark_run_id,
+            )
+            with observe_safely(
+                self.observer,
+                Observation(
+                    name="restore",
+                    context=observation_context,
+                    input={"state_hash": state.state_hash},
                 ),
-                details=f"evaluate:{request.execution_id}",
+            ) as restore:
+                update_safely(restore, state_after=state)
+            environment = self.registry.environment(
+                request.environment_id, request.execution_id
             )
-            if request.task_id is not None:
-                self.registry.record_evaluation(
-                    request.task_id,
-                    request.execution_id,
-                    result.model_dump(mode="json"),
+            with observe_safely(
+                self.observer,
+                Observation(
+                    name="task.evaluate",
+                    context=observation_context,
+                    as_type="evaluator",
+                    state_before=state,
+                    metadata={"recoverable": True},
+                ),
+            ) as evaluation:
+                result = await _with_heartbeats(
+                    asyncio.to_thread(
+                        TaskScorer(
+                            environment.current_task,
+                            workspace=environment.workspace_path,
+                        ).evaluate,
+                        state,
+                    ),
+                    details=f"evaluate:{request.execution_id}",
                 )
-            update_safely(
-                evaluation,
-                state_after=state,
-                output=result.model_dump(mode="json"),
+                if request.task_id is not None:
+                    self.registry.record_evaluation(
+                        request.task_id,
+                        request.execution_id,
+                        result.model_dump(mode="json"),
+                    )
+                update_safely(
+                    evaluation,
+                    state_after=state,
+                    output=result.model_dump(mode="json"),
+                )
+        except Exception as exc:
+            event(
+                "WARNING",
+                "activity.attempt_failed",
+                subsystem="orchestration",
+                status="retryable_failure",
+                duration_ms=round((perf_counter() - started) * 1000, 3),
+                **correlation,
+                **exception_fields(exc),
             )
+            raise
+        event(
+            "INFO",
+            "activity.completed",
+            subsystem="orchestration",
+            status="completed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            state_hash=state.state_hash,
+            score=result.score,
+            **correlation,
+        )
         return EvaluationRef(
             state_hash=result.state_hash,
             score=result.score,

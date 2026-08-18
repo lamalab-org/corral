@@ -12,7 +12,7 @@ class AIScientistConfig(BaseModel):
     Search-node budgets are upper bounds for each stage, not unconditional
     iteration counts. Boundary replications and aggregations have a separate
     validation-node budget, so validating one stage can never consume the
-    capacity reserved for later scientific search. ``max_llm_tokens`` stops
+    capacity reserved for later scientific search. `max_llm_tokens` stops
     further search after the provider-reported total reaches the ceiling; final
     synthesis is still reserved so the run can return an answer.
     """
@@ -68,7 +68,7 @@ class AIScientistConfig(BaseModel):
     aggregate_stage_replications: bool = True
     # Exact replication bypasses the adaptive experiment worker and replays the
     # selected node's realized actions in clean executions. When a tool schema
-    # exposes ``seed`` or ``random_state``, only those arguments are changed.
+    # exposes `seed` or `random_state`, only those arguments are changed.
     deterministic_replication: bool = False
 
     # Stage 4 is systematic ablation/assumption testing. Counterfactuals are a
@@ -86,8 +86,8 @@ class AIScientistConfig(BaseModel):
     # as tunable and therefore always attempts the stage when it has a budget.
     force_tuning_stage: bool = False
 
-    # ``auto`` uses the branch-session provider's optional cloning capability and
-    # otherwise starts non-continuation children clean. ``replay`` reconstructs
+    # `auto` uses the branch-session provider's optional cloning capability and
+    # otherwise starts non-continuation children clean. `replay` reconstructs
     # parent state when cloning is unavailable.
     execution_state_inheritance: Literal["auto", "clean", "replay"] = "auto"
 

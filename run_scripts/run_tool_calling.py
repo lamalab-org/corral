@@ -13,20 +13,9 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from temporalio.client import Client
 
-from corral import (
-    ENVIRONMENT_NAMES,
-    ActivityPolicy,
-    CorralActivities,
-    CorralRunner,
-    RuntimeRegistry,
-    TemporalBenchmarkExecutor,
-    create_worker,
-    load_environment_group,
-)
-from corral.agents import ToolCallingAgent
-from corral.persistence import JSONLStateStore
+from corral import ENVIRONMENT_NAMES
+from corral.cli import run_benchmark
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -95,86 +84,8 @@ def _print_results(run_id: str, result: Any) -> None:
 
 
 async def run(args: argparse.Namespace) -> int:
-    environments = load_environment_group(
-        args.environment,
-        env_kwargs=args.env_kwargs,
-    )
-    if args.list_tasks:
-        _list_tasks(environments)
-        return 0
-    environment_name = args.environment
-    run_id = args.run_id or (
-        f"tool-calling-{_slug(environment_name)}-{uuid4().hex[:12]}"
-    )
-    task_queue = args.task_queue or f"corral-{_slug(run_id)}"
-    store = JSONLStateStore(Path(args.state_file).expanduser().resolve())
-    registry = RuntimeRegistry(
-        agents={
-            AGENT_ID: ToolCallingAgent(
-                model=args.model,
-                api_endpoint=args.api_endpoint,
-                temperature=args.temperature,
-                # The chat-completions transport cannot combine function tools
-                # with the reasoning mode enabled by default for GPT-5.6.
-                reasoning_effort="none",
-            )
-        },
-        environments=environments,
-    )
-
-    try:
-        try:
-            client = await Client.connect(
-                args.temporal_address,
-                namespace=args.temporal_namespace,
-            )
-        except Exception as exc:
-            raise ConnectionError(
-                f"could not connect to Temporal at {args.temporal_address!r}; "
-                "start it with 'temporal server start-dev' or pass "
-                "--temporal-address"
-            ) from exc
-
-        activities = CorralActivities(store, registry)
-        async with create_worker(
-            client,
-            task_queue=task_queue,
-            activities=activities,
-            max_concurrent_activities=args.max_parallel,
-        ):
-            # CorralRunner infers BenchmarkTaskMetadata and dependencies from
-            # the environments. Explicit metadata remains available through
-            # CorralRunner(..., tasks={...}) for advanced deployments.
-            runner = CorralRunner(
-                TemporalBenchmarkExecutor(client, task_queue=task_queue),
-                environments=environments,
-                agent_id=AGENT_ID,
-                model=args.model,
-                max_iterations=args.max_iterations,
-                state_store=store,
-            )
-            result = await runner.run(
-                run_id,
-                task_ids=args.tasks or None,
-                trials_per_task=args.trials,
-                max_parallel=args.max_parallel,
-                max_parallel_per_task=args.max_parallel_per_task,
-                enable_surrender=args.enable_surrender,
-                evaluate=not args.no_evaluate,
-                verbose=args.verbose,
-                activity_policy=ActivityPolicy(
-                    start_to_close_seconds=args.activity_timeout,
-                    heartbeat_timeout_seconds=args.heartbeat_timeout,
-                    maximum_attempts=args.max_attempts,
-                ),
-            )
-    finally:
-        registry.close()
-        store.close()
-
-    result.generate_report(args.report)
-    _print_results(run_id, result)
-    return int(any(trial.error_message for trial in result.all_results))
+    """Preserve the legacy ToolCallingAgent command via the shared CLI path."""
+    return await run_benchmark(args, agent_name=AGENT_ID)
 
 
 def build_parser() -> argparse.ArgumentParser:

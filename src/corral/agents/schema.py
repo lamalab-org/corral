@@ -26,7 +26,7 @@ class BudgetExhaustedError(RuntimeError):
 class AgentUsage:
     """Provider usage reported by one complete session agent run.
 
-    ``llm_calls`` counts physical requests for direct model agents. For native
+    `llm_calls` counts physical requests for direct model agents. For native
     harnesses, one SDK-reported turn is treated as one comparable LLM call.
     """
 
@@ -84,7 +84,7 @@ __all__ = [
     "Thought",
 ]
 
-#: Exact value an agent submits through ``submit_answer`` when it gives up on a
+#: Exact value an agent submits through `submit_answer` when it gives up on a
 #: task. The canonical tool transition derives the surrendered status from this
 #: shared sentinel.
 SURRENDER_SENTINEL = "SURRENDER"

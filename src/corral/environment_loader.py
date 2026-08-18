@@ -179,9 +179,9 @@ def load_environment_group(
 ) -> dict[str, Environment]:
     """Load a task-keyed group of Corral environments.
 
-    ``environment`` selects one of the registered factories. ``env_kwargs``
-    configures that environment; the common ``level``, ``subtasks``,
-    ``task_config``, and ``work_dir`` keys are normalized across factories,
+    `environment` selects one of the registered factories. `env_kwargs`
+    configures that environment; the common `level`, `subtasks`,
+    `task_config`, and `work_dir` keys are normalized across factories,
     while any remaining keys are forwarded directly to the selected factory.
     """
     root = (

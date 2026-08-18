@@ -70,7 +70,7 @@ class ExperimentTree:
         return list(reversed(path))
 
     def executed_trajectory(self, node_id: str) -> list[ExecutedAction]:
-        """Return the physical actions needed to reconstruct ``node_id``."""
+        """Return the physical actions needed to reconstruct `node_id`."""
         return [
             executed
             for node in self.trajectory(node_id)

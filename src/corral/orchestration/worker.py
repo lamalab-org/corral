@@ -18,6 +18,18 @@ if TYPE_CHECKING:
     from corral.orchestration.activities import CorralActivities
 
 
+def create_workflow_runner() -> SandboxedWorkflowRunner:
+    """Build Corral's sandbox runner for workers and deterministic replayers."""
+
+    # OpenHands installs beartype's process-wide import hook. Re-importing
+    # beartype inside Temporal's isolated module table can then observe a
+    # partially initialized `beartype.claw` module and prevent otherwise
+    # unrelated Corral workflows from loading.
+    return SandboxedWorkflowRunner(
+        restrictions=SandboxRestrictions.default.with_passthrough_modules("beartype")
+    )
+
+
 def create_worker(
     client: Client,
     *,
@@ -28,19 +40,12 @@ def create_worker(
 ) -> Worker:
     """Build a worker polling the configured Corral task queue."""
     options = dict(worker_options)
-    # OpenHands installs beartype's process-wide import hook. Re-importing
-    # beartype inside Temporal's isolated module table can then observe a
-    # partially initialized ``beartype.claw`` module and prevent otherwise
-    # unrelated Corral workflows from loading. The hook is not workflow logic;
-    # reuse the already imported package while keeping Corral workflow modules
-    # sandboxed and deterministic. Callers can still provide their own runner.
+    # The hook is not workflow logic; reuse the already imported package while
+    # keeping Corral workflow modules sandboxed and deterministic. Callers can
+    # still provide their own runner.
     options.setdefault(
         "workflow_runner",
-        SandboxedWorkflowRunner(
-            restrictions=SandboxRestrictions.default.with_passthrough_modules(
-                "beartype"
-            )
-        ),
+        create_workflow_runner(),
     )
     if max_concurrent_activities is not None:
         options["max_concurrent_activities"] = max_concurrent_activities
@@ -53,4 +58,4 @@ def create_worker(
     )
 
 
-__all__ = ["create_worker"]
+__all__ = ["create_worker", "create_workflow_runner"]

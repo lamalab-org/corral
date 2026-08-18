@@ -12,8 +12,9 @@ from importlib.metadata import version as _pkg_version
 from typing import Any
 
 import anyio
-from loguru import logger
 from promptstore import PromptStore
+
+from corral.logging import logger
 
 # The Claude Agent SDK ships as the optional `corral[claude]` extra. Wrap the
 # import so an environment without the extra gets an actionable install hint
@@ -160,8 +161,8 @@ class ClaudeCodeAgent:
 
     Claude owns its SDK loop, context management, and result extraction. Corral
     owns the task-bound MCP endpoint, canonical tool transitions, usage folding,
-    and final ``submit_answer`` action. The adapter has no legacy ``run`` or
-    ``arun_agent`` entry point and keeps no task transcript on the instance.
+    and final `submit_answer` action. The adapter has no legacy `run` or
+    `arun_agent` entry point and keeps no task transcript on the instance.
     """
 
     def __init__(
@@ -680,7 +681,6 @@ class ClaudeCodeAgent:
             status = "harness_failure"
             error = str(exc)
 
-        logger.error(f"Claude Code harness {status}: {error}")
         await session.record_message(
             dict(
                 LiteLLMMessage(
@@ -717,7 +717,7 @@ class ClaudeCodeAgent:
                 metadata=dict(run.metadata),
             )
         if session.submission_status == "surrendered":
-            logger.info(f"Agent retiring from execution {session.execution_id}")
+            logger.debug(f"Agent retiring from execution {session.execution_id}")
             return AgentOutcome(
                 status="surrendered",
                 usage=self._usage(run),

@@ -11,8 +11,6 @@ from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Protocol
 
-from loguru import logger
-
 from corral.backend.executors import (
     DEFAULT_EXECUTOR,
     DEFAULT_JOB_CONCURRENCY,
@@ -22,6 +20,7 @@ from corral.backend.executors import (
     ThreadExecutor,
     build_executor,
 )
+from corral.logging import event, exception_fields
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -255,15 +254,20 @@ class JobManager:
         with self._lock:
             self._jobs[job_id] = record
             self._cancel_events[job_id] = cancel_event
+        event(
+            "INFO",
+            "job.submitted",
+            subsystem="tool",
+            job_id=job_id,
+            tool_name=tool.name,
+            executor=getattr(tool, "executor", None) or DEFAULT_EXECUTOR,
+            status=record.status.value,
+        )
         future = executor.submit(
             partial(self._run, tool, record, executor, cancel_event)
         )
         with self._lock:
             self._futures[job_id] = future
-        logger.debug(
-            f"Submitted background job {job_id} for tool {tool.name!r} on "
-            f"{getattr(tool, 'executor', None) or DEFAULT_EXECUTOR!r} executor"
-        )
         return record
 
     def _run(
@@ -319,6 +323,18 @@ class JobManager:
                 record.result = rendered
                 record.status = JobStatus.SUCCEEDED
                 record.ended_at = _utcnow()
+                duration = record.duration_seconds()
+            event(
+                "INFO",
+                "job.completed",
+                subsystem="tool",
+                job_id=job_id,
+                tool_name=tool.name,
+                status=JobStatus.SUCCEEDED.value,
+                duration_ms=(
+                    round(duration * 1000, 3) if duration is not None else None
+                ),
+            )
         except JobCancelled:
             # The executor stopped the work in response to a cancel; `cancel`
             # already marked the record CANCELLED, so leave it untouched.
@@ -329,7 +345,20 @@ class JobManager:
                     record.error = str(exc)
                     record.status = JobStatus.FAILED
                     record.ended_at = _utcnow()
-            logger.warning(f"Background job {job_id} ({tool.name!r}) failed: {exc}")
+                    duration = record.duration_seconds()
+                else:
+                    duration = None
+            if duration is not None:
+                event(
+                    "ERROR",
+                    "job.failed",
+                    subsystem="tool",
+                    job_id=job_id,
+                    tool_name=tool.name,
+                    status=JobStatus.FAILED.value,
+                    duration_ms=round(duration * 1000, 3),
+                    **exception_fields(exc),
+                )
         finally:
             if key_lock is not None:
                 key_lock.release()
@@ -406,6 +435,19 @@ class JobManager:
             cancel_event.set()
         if future is not None:
             future.cancel()  # only succeeds if it has not started yet
+        event(
+            "INFO",
+            "job.cancelled",
+            subsystem="tool",
+            job_id=job_id,
+            tool_name=record.context.tool_name,
+            status=JobStatus.CANCELLED.value,
+            duration_ms=(
+                round(record.duration_seconds() * 1000, 3)
+                if record.duration_seconds() is not None
+                else None
+            ),
+        )
         return snapshot
 
     def list_jobs(self) -> list[dict[str, Any]]:
@@ -427,15 +469,30 @@ class JobManager:
         cluster job) outlives the execution that owns it. Each running job's cancel
         event is set so a cancellation-aware executor stops its work.
         """
+        cancelled: list[JobRecord] = []
         with self._lock:
             for job_id, record in self._jobs.items():
                 if not record.status.is_terminal:
                     self._cancelled.add(job_id)
                     record.status = JobStatus.CANCELLED
                     record.ended_at = _utcnow()
-                    event = self._cancel_events.get(job_id)
-                    if event is not None:
-                        event.set()
+                    cancel_signal = self._cancel_events.get(job_id)
+                    if cancel_signal is not None:
+                        cancel_signal.set()
+                    cancelled.append(record)
             executors = list(self._executors.values())
+        for record in cancelled:
+            duration = record.duration_seconds()
+            event(
+                "INFO",
+                "job.cancelled",
+                subsystem="tool",
+                job_id=record.context.job_id,
+                tool_name=record.context.tool_name,
+                status=JobStatus.CANCELLED.value,
+                duration_ms=(
+                    round(duration * 1000, 3) if duration is not None else None
+                ),
+            )
         for executor in executors:
             executor.shutdown(wait=wait)

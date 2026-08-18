@@ -2,7 +2,7 @@
 
 The runner does not execute agents, schedule trials, manage concurrency, or
 checkpoint progress. Temporal owns those responsibilities. This module only
-turns immutable per-task metadata into a ``BenchmarkWorkflowInput``, delegates
+turns immutable per-task metadata into a `BenchmarkWorkflowInput`, delegates
 it once, and asks the reporting layer to project the durable result.
 """
 
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from corral.core.environment import Environment
 from corral.core.task import assert_dependencies_selected, order_selected
+from corral.logging import event, exception_fields, log_context
 from corral.orchestration.models import (
     ActivityPolicy,
     BenchmarkWorkflowInput,
@@ -200,9 +201,9 @@ class CorralRunner:
     ) -> None:
         """Create a runner from environments or explicit advanced metadata.
 
-        Passing ``environments`` is the convenience path: task dependencies,
+        Passing `environments` is the convenience path: task dependencies,
         environment IDs, model metadata, and iteration budgets are inferred.
-        Passing ``tasks`` preserves complete per-task control for deployments
+        Passing `tasks` preserves complete per-task control for deployments
         that use custom worker IDs, queues, or budgets.
         """
         if (tasks is None) == (environments is None):
@@ -317,31 +318,59 @@ class CorralRunner:
         )
 
         started = perf_counter()
-        workflow_result = await self.executor.execute(request)
-        duration = perf_counter() - started
-        if workflow_result.benchmark_run_id != benchmark_run_id:
-            raise RuntimeError(
-                "Temporal returned a result for benchmark "
-                f"{workflow_result.benchmark_run_id!r}, expected {benchmark_run_id!r}"
+        with log_context(benchmark_run_id=benchmark_run_id):
+            event(
+                "INFO",
+                "benchmark.started",
+                subsystem="runtime",
+                task_count=len(request.task_ids),
+                trials_per_task=request.trials_per_task,
             )
-        if workflow_result.task_ids != request.task_ids:
-            raise RuntimeError(
-                "Temporal returned different task metadata: "
-                f"{workflow_result.task_ids!r} != {request.task_ids!r}"
+            try:
+                workflow_result = await self.executor.execute(request)
+                duration = perf_counter() - started
+                if workflow_result.benchmark_run_id != benchmark_run_id:
+                    raise RuntimeError(
+                        "Temporal returned a result for benchmark "
+                        f"{workflow_result.benchmark_run_id!r}, expected {benchmark_run_id!r}"
+                    )
+                if workflow_result.task_ids != request.task_ids:
+                    raise RuntimeError(
+                        "Temporal returned different task metadata: "
+                        f"{workflow_result.task_ids!r} != {request.task_ids!r}"
+                    )
+                if workflow_result.trials_per_task != request.trials_per_task:
+                    raise RuntimeError(
+                        "Temporal returned a different trials_per_task value: "
+                        f"{workflow_result.trials_per_task} != {request.trials_per_task}"
+                    )
+                report = await project_benchmark_result(
+                    workflow_result,
+                    state_store=self.state_store,
+                    k_values=k_values,
+                    total_duration=duration,
+                    verbose=verbose,
+                    metrics=self.metrics,
+                )
+            except Exception as exc:
+                event(
+                    "ERROR",
+                    "benchmark.failed",
+                    subsystem="runtime",
+                    status="failed",
+                    duration_ms=round((perf_counter() - started) * 1000, 3),
+                    **exception_fields(exc),
+                )
+                raise
+            event(
+                "INFO",
+                "benchmark.completed",
+                subsystem="runtime",
+                status="completed",
+                duration_ms=round(duration * 1000, 3),
+                trial_count=len(workflow_result.trials),
             )
-        if workflow_result.trials_per_task != request.trials_per_task:
-            raise RuntimeError(
-                "Temporal returned a different trials_per_task value: "
-                f"{workflow_result.trials_per_task} != {request.trials_per_task}"
-            )
-        return await project_benchmark_result(
-            workflow_result,
-            state_store=self.state_store,
-            k_values=k_values,
-            total_duration=duration,
-            verbose=verbose,
-            metrics=self.metrics,
-        )
+            return report
 
 
 __all__ = [

@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 import anyio
-from loguru import logger
+
+from corral.logging import logger
 
 # The Codex SDK ships as the optional `corral[codex]` extra. Wrap the import so
 # an environment without the extra gets an actionable install hint instead of a
@@ -61,7 +62,7 @@ HarnessStatus = Literal[
 class HarnessRunResult:
     """Structured outcome of one Codex harness run.
 
-    ``CodexAgent.run_session`` maps this provider result onto ``AgentOutcome``
+    `CodexAgent.run_session` maps this provider result onto `AgentOutcome`
     so, for example, a timeout is never scored as a wrong answer.
     """
 
@@ -151,7 +152,7 @@ class CodexAgent(BaseAgent):
             harness. If None, uses the default corral system prompt.
         **kwargs: Additional provider configuration retained as provenance.
 
-    ``run_session`` opens the task-local MCP endpoint and offloads the Codex
+    `run_session` opens the task-local MCP endpoint and offloads the Codex
     SDK's synchronous event stream without blocking the task runtime.
     """
 
@@ -707,7 +708,7 @@ class CodexAgent(BaseAgent):
         """Drive the harness and retain its terminal text for diagnostics.
 
         Completion still requires the harness to call the session's
-        ``submit_answer`` MCP tool; this returned text is never submitted by the
+        `submit_answer` MCP tool; this returned text is never submitted by the
         adapter.
         """
         # CODEX_HOME is always a throwaway temp dir this agent owns and deletes,
@@ -759,7 +760,7 @@ class CodexAgent(BaseAgent):
             enable_surrender
             and final_answer.casefold() == SURRENDER_SENTINEL.casefold()
         ):
-            logger.info(f"Agent retiring from task {task_id}")
+            logger.debug(f"Agent retiring from task {task_id}")
             run.result = self._result(run, "surrender", answer=SURRENDER_SENTINEL)
             return SURRENDER_SENTINEL
 
@@ -818,7 +819,6 @@ class CodexAgent(BaseAgent):
         exc: BaseException,
     ) -> str:
         """Record an infrastructure failure and return an error answer string."""
-        logger.error(f"Codex harness {status}: {error}")
         run.messages.append(
             LiteLLMMessage(
                 role="assistant",

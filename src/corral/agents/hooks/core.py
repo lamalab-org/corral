@@ -8,7 +8,7 @@ from enum import Enum
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Protocol
 
-from loguru import logger
+from corral.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Mapping
@@ -34,9 +34,9 @@ class HookPoint(str, Enum):
 class HookContext:
     """One hook invocation backed exclusively by an :class:`AgentSession`.
 
-    The canonical transcript is deliberately read-only through ``messages``.
-    Hooks that need to add context must call ``await session.record_message(...)``;
-    hooks that need to act must call ``await session.execute(Action(...))``. This
+    The canonical transcript is deliberately read-only through `messages`.
+    Hooks that need to add context must call `await session.record_message(...)`;
+    hooks that need to act must call `await session.execute(Action(...))`. This
     prevents an intervention from maintaining a second mutable conversation or
     bypassing State transitions.
     """
@@ -93,7 +93,7 @@ class AgentHooks:
         callback: HookCallback,
         priority: int = 0,
     ) -> None:
-        """Register ``callback`` in descending priority order."""
+        """Register `callback` in descending priority order."""
         point = self._point(hook_point)
         with self._lock:
             callbacks = self._hooks.setdefault(point, [])
@@ -122,10 +122,9 @@ class AgentHooks:
                 if not context.should_continue:
                     break
             except CriticalHookError:
-                logger.critical(f"Critical error in hook at {point.value}")
                 raise
             except Exception as exc:
-                logger.error(f"Error executing hook at {point.value}: {exc}")
+                logger.warning(f"Hook at {point.value} failed and was skipped: {exc}")
         return context
 
     def remove(self, hook_point: HookPoint | str, callback: HookCallback) -> None:
@@ -149,7 +148,7 @@ class AgentHooks:
                 self._hooks.pop(self._point(hook_point), None)
 
     def has_hooks(self, hook_point: HookPoint | str) -> bool:
-        """Return whether at least one callback is registered for ``hook_point``."""
+        """Return whether at least one callback is registered for `hook_point`."""
         point = self._point(hook_point)
         with self._lock:
             return bool(self._hooks.get(point))

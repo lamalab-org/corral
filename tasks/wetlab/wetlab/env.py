@@ -5,10 +5,10 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from dotenv import load_dotenv
-from loguru import logger
 from wetlab.engine import (
     ChemicalSystemSpec,
     Solution,
@@ -24,6 +24,7 @@ from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.state import State, TaskOutput
 from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
 from corral.core.tool import Tool
+from corral.logging import event, exception_fields
 
 SCORING_FUNCTIONS = {
     "none_checker": none_checker,
@@ -286,7 +287,7 @@ def load_tasks_from_json(
 class QualitativeAnalysisEnvironment(Environment):
     """Environment for one QualitativeAnalysisTask.
 
-    The active inventory is serialized in ``State.environment``. Reaktoro
+    The active inventory is serialized in `State.environment`. Reaktoro
     objects are materialized only for the duration of a tool call and are never
     retained by the Environment.
 
@@ -333,9 +334,13 @@ class QualitativeAnalysisEnvironment(Environment):
     def configure(self, state: State) -> tuple[State, str]:
         """Commit the task's structured chemistry snapshot to runtime State."""
         wetlab_state = self._state_for_configuration(state)
-        logger.info(
-            f"WetlabState configured with system '{self.current_task.sys}' "
-            f"for {self.task_id}."
+        event(
+            "DEBUG",
+            "environment.configuration_completed",
+            subsystem="runtime",
+            benchmark="wetlab",
+            task_id=self.task_id,
+            chemical_system=self.current_task.sys,
         )
         hidden = dict(state.environment.get("hidden_arguments", {}))
         hidden["wetlab"] = wetlab_state.to_dict()
@@ -375,7 +380,14 @@ class QualitativeAnalysisEnvironment(Environment):
                 if key != "work_dir":
                     prompt += f"- {key}: {value}\n"
 
-        logger.info(f"Task prompt for {self.task_id}:\n{prompt}")
+        event(
+            "DEBUG",
+            "environment.prompt_generated",
+            subsystem="runtime",
+            benchmark="wetlab",
+            task_id=self.task_id,
+            prompt=prompt,
+        )
         return prompt
 
     def execute_tool(
@@ -384,7 +396,7 @@ class QualitativeAnalysisEnvironment(Environment):
         tool: Tool,
         arguments: dict[str, Any],
     ) -> Any:
-        """Execute against a disposable engine restored from ``WetlabState``."""
+        """Execute against a disposable engine restored from `WetlabState`."""
         if "wetlab" not in tool.hidden_args:
             return super().execute_tool(state, tool, arguments)
 
@@ -433,35 +445,64 @@ def create_qualysis_environments(
     subtask: bool = False,
 ) -> dict[str, Environment]:
     """Create environments for the WetLab (Qualitative Inorganic Analysis) benchmark tasks."""
-    logger.info("Creating environments for Qualitative Inorganic Analysis tasks...")
+    started = perf_counter()
+    name = "wetlab"
+    event(
+        "INFO",
+        "environment.started",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+    )
     if subtask:
         json_path = Path(__file__).parent / "subtasks_json" / f"level_{level}"
     else:
         json_path = Path(__file__).parent / "tasks_json" / f"level_{level}"
-    if not json_path.exists():
-        raise ValueError(f"The path {json_path} does not exist.")
-
-    logger.info(f"Loading tasks from {json_path}")
-
-    tasks = load_tasks_from_json(json_path)
-
-    logger.info(f"Creating linked task environments with {len(tasks)} tasks")
-
-    # Wetlab keeps a subclass for its structured State restore/capture hooks;
-    # grouping is derived.
-    # An empty `tools` list means "the whole pool" and `excluded_tools` (a base
-    # TaskDefinition field) is honoured generically by Toolset.resolve, so the
-    # old `_add_task_tools` override is gone.
-    return build_environments(
-        tasks,
-        name="wetlab",
-        toolset=Toolset(
-            pool=create_tools(),
-            workspace_factory=None,
-            select_all_when_unspecified=True,
-        ),
-        env_cls=QualitativeAnalysisEnvironment,
+    event(
+        "DEBUG",
+        "environment.tasks_loading",
+        subsystem="runtime",
+        benchmark=name,
+        task_source=str(json_path),
     )
+    try:
+        if not json_path.exists():
+            raise ValueError(f"The path {json_path} does not exist.")
+        tasks = load_tasks_from_json(json_path)
+        environments = build_environments(
+            tasks,
+            name=name,
+            toolset=Toolset(
+                pool=create_tools(),
+                workspace_factory=None,
+                select_all_when_unspecified=True,
+            ),
+            env_cls=QualitativeAnalysisEnvironment,
+        )
+    except Exception as exc:
+        event(
+            "ERROR",
+            "environment.failed",
+            subsystem="runtime",
+            benchmark=name,
+            operation="create",
+            status="failed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            **exception_fields(exc),
+        )
+        raise
+
+    event(
+        "INFO",
+        "environment.completed",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+        status="completed",
+        duration_ms=round((perf_counter() - started) * 1000, 3),
+        environment_count=len(environments),
+    )
+    return environments
 
 
 if __name__ == "__main__":
@@ -482,9 +523,13 @@ if __name__ == "__main__":
     # Create all environments
     environments = create_qualysis_environments(level=args.level, subtask=args.subtask)
 
-    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        logger.info(f"- {env_id}")
-        logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_map:
-            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
+        event(
+            "DEBUG",
+            "environment.created",
+            subsystem="runtime",
+            benchmark="wetlab",
+            task_id=env_id,
+            task_name=env.current_task.name,
+            dependencies=sorted(env.current_task.dependencies()),
+        )

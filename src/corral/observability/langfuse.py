@@ -10,8 +10,10 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from typing import TYPE_CHECKING, Any
 
+from corral.logging import event, exception_fields, redact_sensitive_data
+
 from .base import (
-    NoOpObserver,
+    CompositeObserver,
     Observation,
     ObservationSpan,
     Observer,
@@ -19,6 +21,7 @@ from .base import (
     observation_metadata,
     observation_output,
 )
+from .logging import LoggingObserver
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -60,6 +63,7 @@ def mask_sensitive_data(data: Any = None, **kwargs: Any) -> Any:
 
     if data is None and "data" in kwargs:
         data = kwargs["data"]
+    data = redact_sensitive_data(data, include_payloads=True)
     if isinstance(data, Mapping):
         return {
             str(key): (_REDACTED if _sensitive_key(key) else mask_sensitive_data(value))
@@ -278,20 +282,48 @@ class LangfuseObserver:
 
 
 def observer_from_env() -> Observer:
-    """Create Langfuse only when credentials are present; otherwise no-op."""
+    """Always log locally and add Langfuse when it is configured successfully."""
 
+    local = LoggingObserver()
     enabled = os.getenv("CORRAL_LANGFUSE_ENABLED", "").strip().lower()
     if enabled in {"0", "false", "no", "off"}:
-        return NoOpObserver()
+        event(
+            "DEBUG",
+            "observability.disabled",
+            subsystem="observability",
+            backend="langfuse",
+        )
+        return local
     configured = bool(os.getenv("LANGFUSE_PUBLIC_KEY")) and bool(
         os.getenv("LANGFUSE_SECRET_KEY")
     )
     if not configured and enabled not in {"1", "true", "yes", "on"}:
-        return NoOpObserver()
+        event(
+            "DEBUG",
+            "observability.disabled",
+            subsystem="observability",
+            backend="langfuse",
+        )
+        return local
     try:
-        return LangfuseObserver()
-    except BaseException:
-        return NoOpObserver()
+        remote = LangfuseObserver()
+    except BaseException as exc:
+        event(
+            "WARNING",
+            "observability.initialization_failed",
+            subsystem="observability",
+            message="Langfuse initialization failed; local logging remains enabled",
+            backend="langfuse",
+            **exception_fields(exc),
+        )
+        return local
+    event(
+        "INFO",
+        "observability.enabled",
+        subsystem="observability",
+        backend="langfuse",
+    )
+    return CompositeObserver(local, remote)
 
 
 __all__ = [

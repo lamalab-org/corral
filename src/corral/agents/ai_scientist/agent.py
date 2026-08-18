@@ -36,6 +36,7 @@ from corral.agents.schema import AgentOutcome, AgentUsage, BudgetExhaustedError
 from corral.agents.session import AgentSession
 from corral.agents.utils import llm_call
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
+from corral.core.errors import concise_error_message
 
 _SCIENTIST_SYSTEM_PROMPT = """
 You are the reasoning component of a scientific experiment manager. Interact
@@ -422,35 +423,38 @@ class AIScientistAgent(BaseAgent):
                     lambda: self._execute_session(session, owner, portal)
                 )
         except LLMBudgetExceeded as exc:
+            error = concise_error_message(exc)
             session.set_agent_state(
                 _SCIENTIST_STATE_NAMESPACE,
                 {
                     **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
                     "status": "iteration_limit",
-                    "error": str(exc),
+                    "error": error,
                 },
             )
-            return AgentOutcome(status="iteration_limit", error=str(exc))
+            return AgentOutcome(status="iteration_limit", error=error)
         except BudgetExhaustedError as exc:
+            error = concise_error_message(exc)
             session.set_agent_state(
                 _SCIENTIST_STATE_NAMESPACE,
                 {
                     **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
                     "status": "budget_exhausted",
-                    "error": str(exc),
+                    "error": error,
                 },
             )
-            return AgentOutcome(status="budget_exhausted", error=str(exc))
+            return AgentOutcome(status="budget_exhausted", error=error)
         except Exception as exc:
+            error = concise_error_message(exc)
             session.set_agent_state(
                 _SCIENTIST_STATE_NAMESPACE,
                 {
                     **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
                     "status": "failed",
-                    "error": str(exc),
+                    "error": error,
                 },
             )
-            return AgentOutcome(status="agent_failure", error=str(exc))
+            return AgentOutcome(status="agent_failure", error=error)
 
         for message in owner.messages:
             await session.record_message(message)

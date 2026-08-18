@@ -9,11 +9,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
-
 from corral.agents.hooks.core import CriticalHookError, HookCallback, HookContext
 from corral.agents.utils import convert_outermost_triple_quotes
 from corral.core.action import Action
+from corral.logging import logger
 
 
 def _rewrite_workspace_paths(
@@ -26,7 +25,7 @@ def _rewrite_workspace_paths(
     if not old_workspace or not new_workspace or old_workspace == new_workspace:
         return rewritten
 
-    logger.info(f"Rewriting trace paths: {old_workspace} -> {new_workspace}")
+    logger.debug(f"Rewriting trace paths: {old_workspace} -> {new_workspace}")
     for step in rewritten:
         content = step.get("content")
         if isinstance(content, str):
@@ -99,7 +98,7 @@ def _load_trace_steps(
 
 
 def _parse_react_actions(text: str) -> list[Action]:
-    """Parse ReAct XML-like actions into current immutable ``Action`` values."""
+    """Parse ReAct XML-like actions into current immutable `Action` values."""
     actions: list[Action] = []
     matches = re.finditer(
         r"<action>(.*?)</action>(?:.*?<action_input>(.*?)</action_input>)?",
@@ -118,7 +117,7 @@ def _parse_react_actions(text: str) -> list[Action]:
                 raise ValueError("action_input must be a JSON object")
             actions.append(Action(name=match.group(1).strip(), arguments=arguments))
         except (json.JSONDecodeError, TypeError, ValueError, SyntaxError) as exc:
-            logger.error(f"Failed to parse intervention action: {exc}")
+            logger.warning(f"Ignoring malformed intervention action: {exc}")
     return actions
 
 
@@ -241,7 +240,7 @@ def create_intervention_hook(
         intervention = intervention_map.get(context.task_id)
         if intervention is None:
             return
-        logger.info(f"Injecting intervention for task {context.task_id}")
+        logger.debug(f"Injecting intervention for task {context.task_id}")
         context.metadata["intervention_applied"] = True
         context.metadata["intervention_thought"] = intervention
         is_react = type(context.agent).__name__ == "ReActAgent"

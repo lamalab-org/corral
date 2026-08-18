@@ -13,7 +13,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
 
 # Temporal requires either Start-to-Close or Schedule-to-Close on every
-# Activity. Public ``None`` means no operational deadline, so use a 100-year
+# Activity. Public `None` means no operational deadline, so use a 100-year
 # Schedule-to-Close value as the protocol-level representation of "unbounded".
 _UNBOUNDED_ACTIVITY_TIMEOUT = timedelta(days=365 * 100)
 
@@ -55,6 +55,19 @@ def _activity_options(policy: ActivityPolicy) -> dict[str, Any]:
     return options
 
 
+def _workflow_log(level: str, name: str, **fields: Any) -> None:
+    """Emit through Temporal's replay-aware standard-library logger."""
+
+    getattr(workflow.logger, level.lower())(
+        name,
+        extra={"event": name, "subsystem": "orchestration", **fields},
+    )
+
+
+def _workflow_duration_ms(started_at: Any) -> float:
+    return round((workflow.now() - started_at).total_seconds() * 1000, 3)
+
+
 async def _execute_activity(
     name: str,
     argument: Any,
@@ -76,25 +89,48 @@ class TaskWorkflow:
 
     @workflow.run
     async def run(self, request: TaskWorkflowInput) -> TaskWorkflowResult:
+        workflow_started = workflow.now()
+        _workflow_log(
+            "info",
+            "task_workflow.started",
+            benchmark_run_id=request.benchmark_run_id,
+            execution_id=request.execution_id,
+            task_id=request.task_id,
+            status="running",
+        )
         policy = request.activity_policy
         started_at = request.started_at or workflow.now().isoformat()
-        current = await _execute_activity(
-            "corral.run_task",
-            RunTaskInput(
+        try:
+            current = await _execute_activity(
+                "corral.run_task",
+                RunTaskInput(
+                    execution_id=request.execution_id,
+                    task_id=request.task_id,
+                    environment_id=request.environment_id,
+                    agent_id=request.agent_id,
+                    started_at=started_at,
+                    max_iterations=request.max_iterations,
+                    model=request.model,
+                    dependency_outputs=request.dependency_outputs,
+                    enable_surrender=request.enable_surrender,
+                    benchmark_run_id=request.benchmark_run_id,
+                ),
+                result_type=StateRef,
+                policy=policy,
+            )
+        except Exception as exc:
+            _workflow_log(
+                "warning",
+                "task_workflow.failed",
+                benchmark_run_id=request.benchmark_run_id,
                 execution_id=request.execution_id,
                 task_id=request.task_id,
-                environment_id=request.environment_id,
-                agent_id=request.agent_id,
-                started_at=started_at,
-                max_iterations=request.max_iterations,
-                model=request.model,
-                dependency_outputs=request.dependency_outputs,
-                enable_surrender=request.enable_surrender,
-                benchmark_run_id=request.benchmark_run_id,
-            ),
-            result_type=StateRef,
-            policy=policy,
-        )
+                status="failed",
+                duration_ms=_workflow_duration_ms(workflow_started),
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+            raise
 
         evaluation: EvaluationRef | None = None
         evaluation_error: str | None = None
@@ -115,7 +151,17 @@ class TaskWorkflow:
             except Exception as exc:  # evaluation cannot invalidate runtime output
                 evaluation_error = str(exc)
 
-        return TaskWorkflowResult(
+                _workflow_log(
+                    "warning",
+                    "evaluation.degraded",
+                    benchmark_run_id=request.benchmark_run_id,
+                    execution_id=request.execution_id,
+                    task_id=request.task_id,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
+
+        result = TaskWorkflowResult(
             task_id=request.task_id,
             trial_index=request.trial_index,
             execution_id=request.execution_id,
@@ -124,6 +170,16 @@ class TaskWorkflow:
             evaluation_error=evaluation_error,
             error=current.error if current.status == "failed" else None,
         )
+        _workflow_log(
+            "info",
+            "task_workflow.completed",
+            benchmark_run_id=request.benchmark_run_id,
+            execution_id=request.execution_id,
+            task_id=request.task_id,
+            status="failed" if result.error is not None else "completed",
+            duration_ms=_workflow_duration_ms(workflow_started),
+        )
+        return result
 
 
 class _NoopAsyncContext(AbstractAsyncContextManager[None]):
@@ -200,7 +256,35 @@ class BenchmarkWorkflow:
 
     @workflow.run
     async def run(self, request: BenchmarkWorkflowInput) -> BenchmarkWorkflowResult:
-        _validate_graph(request)
+        workflow_started = workflow.now()
+        _workflow_log(
+            "info",
+            (
+                "benchmark_workflow.started"
+                if request.next_trial_index == 0
+                else "benchmark_workflow.resumed"
+            ),
+            benchmark_run_id=request.benchmark_run_id,
+            status="running",
+        )
+        try:
+            _validate_graph(request)
+        except ApplicationError as exc:
+            _workflow_log(
+                "warning",
+                "benchmark_workflow.invalid",
+                benchmark_run_id=request.benchmark_run_id,
+                status="failed",
+                duration_ms=_workflow_duration_ms(workflow_started),
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+            raise
+        _workflow_log(
+            "debug",
+            "benchmark.graph_validated",
+            benchmark_run_id=request.benchmark_run_id,
+        )
         self._run_id = request.benchmark_run_id
         self._total = len(request.task_ids) * request.trials_per_task
         self._carried = request.completed
@@ -233,6 +317,16 @@ class BenchmarkWorkflow:
                 result = await handles[(trial_index, dependency)]
                 if not result.output_ready:
                     self._status[key] = "unreachable"
+                    _workflow_log(
+                        "warning",
+                        "benchmark.task_unreachable",
+                        benchmark_run_id=request.benchmark_run_id,
+                        task_id=task_id,
+                        execution_id=(
+                            f"{request.benchmark_run_id}:{task_id}:{trial_index}"
+                        ),
+                        status="unreachable",
+                    )
                     return TaskWorkflowResult(
                         task_id=task_id,
                         trial_index=trial_index,
@@ -301,6 +395,16 @@ class BenchmarkWorkflow:
                 return result
             except Exception as exc:
                 self._status[key] = "failed"
+                _workflow_log(
+                    "error",
+                    "benchmark.task_failed",
+                    benchmark_run_id=request.benchmark_run_id,
+                    task_id=task_id,
+                    execution_id=f"{request.benchmark_run_id}:{task_id}:{trial_index}",
+                    status="failed",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
                 return TaskWorkflowResult(
                     task_id=task_id,
                     trial_index=trial_index,
@@ -324,6 +428,13 @@ class BenchmarkWorkflow:
         completed = (*request.completed, *batch_results)
 
         if batch_end < request.trials_per_task:
+            _workflow_log(
+                "info",
+                "benchmark_workflow.continued_as_new",
+                benchmark_run_id=request.benchmark_run_id,
+                status="continued",
+                duration_ms=_workflow_duration_ms(workflow_started),
+            )
             workflow.continue_as_new(
                 replace(
                     request,
@@ -342,12 +453,20 @@ class BenchmarkWorkflow:
                 ),
             )
         )
-        return BenchmarkWorkflowResult(
+        result = BenchmarkWorkflowResult(
             benchmark_run_id=request.benchmark_run_id,
             task_ids=request.task_ids,
             trials_per_task=request.trials_per_task,
             trials=ordered,
         )
+        _workflow_log(
+            "info",
+            "benchmark_workflow.completed",
+            benchmark_run_id=request.benchmark_run_id,
+            status="completed",
+            duration_ms=_workflow_duration_ms(workflow_started),
+        )
+        return result
 
 
 __all__ = ["BenchmarkWorkflow", "TaskWorkflow"]

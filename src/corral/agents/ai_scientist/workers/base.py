@@ -9,11 +9,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
-from loguru import logger
 from pydantic import BaseModel, ValidationError
 
 from corral.agents.schema import BudgetExhaustedError
 from corral.agents.utils import LiteLLMMessage
+from corral.logging import logger
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
@@ -241,9 +241,9 @@ class LiteLLMStructuredModel:
 
         # The worker contexts are intentionally isolated, but the full sequence
         # remains visible to Corral's normal verbose transcript machinery. Add
-        # the same legal ``name`` to every role in the recorded call so node
+        # the same legal `name` to every role in the recorded call so node
         # turns can be grouped without inference from adjacency. These are
-        # copies made *after* the provider request: the API-bound ``messages``
+        # copies made *after* the provider request: the API-bound `messages`
         # above remain untouched and contain no trace-only fields.
         recorded_messages: list[LiteLLMMessage] = []
         for message in messages:

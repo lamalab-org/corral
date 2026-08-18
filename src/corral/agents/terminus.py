@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Any
 
 from jsonschema import Draft202012Validator
-from loguru import logger
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -32,6 +31,8 @@ from corral.agents.schema import (
 )
 from corral.agents.utils import LiteLLMMessage
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
+from corral.core.errors import concise_error_message
+from corral.logging import logger
 
 if TYPE_CHECKING:
     from corral.agents.session import AgentSession
@@ -329,11 +330,15 @@ Rules:
                 response = await self._call(run)
             except BudgetExhaustedError as exc:
                 return AgentOutcome(
-                    status="budget_exhausted", error=str(exc), usage=run.usage.outcome()
+                    status="budget_exhausted",
+                    error=concise_error_message(exc),
+                    usage=run.usage.outcome(),
                 )
             except Exception as exc:
                 return AgentOutcome(
-                    status="agent_failure", error=str(exc), usage=run.usage.outcome()
+                    status="agent_failure",
+                    error=concise_error_message(exc),
+                    usage=run.usage.outcome(),
                 )
 
             raw_usage = getattr(response, "usage", None)

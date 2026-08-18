@@ -3,8 +3,8 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from time import perf_counter
 
-from loguru import logger
 from ml.score import (
     BASE_WORK_DIR,
     ml_dataset_preparation_quality_binary,
@@ -20,8 +20,15 @@ from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.state import State
 from corral.core.task import EnvironmentSetup, InputRef, TaskDefinition
 from corral.core.tool import Tool
+from corral.logging import event, exception_fields
 
-logger.info(f"Using BASE_WORK_DIR: {BASE_WORK_DIR}")
+event(
+    "DEBUG",
+    "environment.configuration",
+    subsystem="runtime",
+    benchmark="ml",
+    work_dir=BASE_WORK_DIR,
+)
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     "ml_pipeline_score": ml_pipeline_score,
@@ -164,25 +171,59 @@ def create_environments(
         dictionary of environments keyed by task ID
     """
 
-    logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
-
-    # Load tasks from JSON
-    tasks = load_tasks_from_json(task_json_path, work_dir)
-
     task_json_path = Path(task_json_path)
     name = task_json_path.name if task_json_path.is_dir() else task_json_path.stem
-    logger.info(f"Creating linked task environments for group: {name}")
-
-    # Create environments for all tasks; grouping is derived from the graph
-    return build_environments(
-        tasks,
-        base_work_dir=str(work_dir),
-        name=name,
-        toolset=Toolset(
-            pool=create_ml_tools(),
-            common=taskgroup_common_tools or {},
-        ),
+    started = perf_counter()
+    event(
+        "INFO",
+        "environment.started",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
     )
+    event(
+        "DEBUG",
+        "environment.creation_details",
+        subsystem="runtime",
+        benchmark=name,
+        task_source=str(task_json_path),
+        work_dir=str(work_dir),
+    )
+    try:
+        tasks = load_tasks_from_json(task_json_path, work_dir)
+        environments = build_environments(
+            tasks,
+            base_work_dir=str(work_dir),
+            name=name,
+            toolset=Toolset(
+                pool=create_ml_tools(),
+                common=taskgroup_common_tools or {},
+            ),
+        )
+    except Exception as exc:
+        event(
+            "ERROR",
+            "environment.failed",
+            subsystem="runtime",
+            benchmark=name,
+            operation="create",
+            status="failed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            **exception_fields(exc),
+        )
+        raise
+
+    event(
+        "INFO",
+        "environment.completed",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+        status="completed",
+        duration_ms=round((perf_counter() - started) * 1000, 3),
+        environment_count=len(environments),
+    )
+    return environments
 
 
 if __name__ == "__main__":
@@ -226,7 +267,15 @@ if __name__ == "__main__":
             raise ValueError(f"Unsupported mode: {args.mode}")
 
         if not Path(tasks_json_path).exists():
-            logger.error(f"Task config not found: {tasks_json_path}")
+            error = FileNotFoundError(f"Task config not found: {tasks_json_path}")
+            event(
+                "ERROR",
+                "environment.configuration_failed",
+                subsystem="runtime",
+                benchmark="ml",
+                status="failed",
+                **exception_fields(error),
+            )
             sys.exit(1)
     else:
         tasks_json_path = (
@@ -236,7 +285,15 @@ if __name__ == "__main__":
             / "tasks_json"
         )
         if not Path(tasks_json_path).exists():
-            logger.error(f"Task config not found: {tasks_json_path}")
+            error = FileNotFoundError(f"Task config not found: {tasks_json_path}")
+            event(
+                "ERROR",
+                "environment.configuration_failed",
+                subsystem="runtime",
+                benchmark="ml",
+                status="failed",
+                **exception_fields(error),
+            )
             sys.exit(1)
 
     work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
@@ -249,9 +306,13 @@ if __name__ == "__main__":
         taskgroup_common_tools=taskgroup_common_tools,
     )
 
-    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        logger.info(f"- {env_id}")
-        logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_map:
-            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
+        event(
+            "DEBUG",
+            "environment.created",
+            subsystem="runtime",
+            benchmark="ml",
+            task_id=env_id,
+            task_name=env.current_task.name,
+            dependencies=sorted(env.current_task.dependencies()),
+        )

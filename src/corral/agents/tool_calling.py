@@ -19,6 +19,7 @@ from corral.agents.schema import (
 )
 from corral.agents.utils import LiteLLMMessage
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action, with_submit_answer_tool
+from corral.core.errors import concise_error_message
 
 if TYPE_CHECKING:
     from corral.agents.session import AgentSession
@@ -126,13 +127,13 @@ class ToolCallingAgent(BaseAgent):
             except BudgetExhaustedError as exc:
                 return AgentOutcome(
                     status="budget_exhausted",
-                    error=str(exc),
+                    error=concise_error_message(exc),
                     usage=usage.outcome(),
                 )
             except Exception as exc:
                 return AgentOutcome(
                     status="agent_failure",
-                    error=str(exc),
+                    error=concise_error_message(exc),
                     usage=usage.outcome(),
                 )
 

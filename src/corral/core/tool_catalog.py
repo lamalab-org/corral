@@ -139,7 +139,7 @@ class ToolCatalogSnapshot(FrozenModel):
 
 
 def state_tool_catalog(state: State) -> ToolCatalogSnapshot:
-    """Read and validate the authoritative catalog persisted on ``state``."""
+    """Read and validate the authoritative catalog persisted on `state`."""
     raw = state.metadata.environment.get(TOOL_CATALOG_METADATA_KEY)
     if not isinstance(raw, Mapping):
         raise MissingToolCatalogError(

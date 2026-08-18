@@ -7,7 +7,6 @@ import litellm
 import openai
 from litellm.exceptions import BudgetExceededError, RateLimitError
 from litellm.types.utils import Message
-from loguru import logger
 from tenacity import (
     retry,
     retry_if_exception,
@@ -17,6 +16,7 @@ from tenacity import (
 )
 
 from corral.agents.schema import BudgetExhaustedError
+from corral.logging import logger
 
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
@@ -70,9 +70,15 @@ def before_sleep_loguru(retry_state):
     cause = f"{type(exc).__name__}: {exc}" if exc is not None else "unknown error"
     next_action = retry_state.next_action
     wait = f"{next_action.sleep:.0f}s" if next_action is not None else "unknown"
-    logger.warning(
-        f"LLM call retry {retry_state.attempt_number}/3 after {cause}; waiting {wait}"
+    retry_object = getattr(retry_state, "retry_object", None)
+    stop = getattr(retry_object, "stop", None)
+    maximum_attempts = getattr(stop, "max_attempt_number", 3)
+    attempt_label = (
+        f"{retry_state.attempt_number}/{maximum_attempts}"
+        if maximum_attempts is not None
+        else str(retry_state.attempt_number)
     )
+    logger.warning(f"LLM call retry {attempt_label} after {cause}; waiting {wait}")
 
 
 class LLMResponseMetadata(TypedDict, total=False):
@@ -176,7 +182,7 @@ async def llm_call(
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
         return_usage (bool, optional): If True, includes token usage in metadata. Defaults to True.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
-            Streaming is always enabled, even if ``stream=False`` is supplied.
+            Streaming is always enabled, even if `stream=False` is supplied.
             If 'logprobs' is True in kwargs, logprobs will be included in response metadata.
 
     Returns:
@@ -192,7 +198,7 @@ async def llm_call(
         }
 
         # GPT-5.6 rejects chat-completions requests that combine function tools
-        # with reasoning controls. The explicit LiteLLM ``responses/`` route
+        # with reasoning controls. The explicit LiteLLM `responses/` route
         # keeps the configured provider model unchanged while selecting the
         # endpoint that supports both features. This is also stable across the
         # range of LiteLLM versions used by the task-specific environments.
@@ -266,7 +272,6 @@ async def llm_call(
 
     except STOP_BENCHMARK_EXCEPTIONS as e:
         # Re-raise as BudgetExhaustedError to stop benchmark immediately
-        logger.error(f"Budget/credits exhausted or authentication failed: {e}")
         raise BudgetExhaustedError(
             f"Benchmark stopped: {type(e).__name__} - {e}"
         ) from e
@@ -275,7 +280,6 @@ async def llm_call(
         # Check if this is a quota exhaustion (not a temporary rate limit)
         error_str = str(e).lower()
         if any(keyword in error_str for keyword in QUOTA_EXHAUSTED_KEYWORDS):
-            logger.error(f"API quota/credits exhausted: {e}")
             raise BudgetExhaustedError(
                 f"Benchmark stopped - quota exhausted: {e}"
             ) from e
@@ -376,7 +380,7 @@ def save_agent_messages(
         tools (list[dict], optional): List of available tools used by the agent. Defaults to None.
         tool_verbosity (str, optional): Verbosity level for tool descriptions. Defaults to "brief".
         trace_metadata (dict, optional): Agent-specific trace information saved
-            beside ``messages``. It is deliberately not merged into individual
+            beside `messages`. It is deliberately not merged into individual
             messages, which keeps replayed/API-bound messages schema-compatible.
 
     Returns:

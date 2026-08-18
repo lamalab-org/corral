@@ -440,7 +440,7 @@ def check_numerical(target: float, tolerance: float) -> Callable[[Any], float]:
 def check_structure(target, atom_style):
     """
     Create a scoring function that evaluates a local structure result against a
-    reference stored in the read-only ``eval_structures`` Modal Volume.
+    reference stored in the read-only `eval_structures` Modal Volume.
 
     This is a higher-order function that returns `score_fn`, a callable which:
     - Accepts a single argument `result` (str or None).

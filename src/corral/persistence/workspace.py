@@ -32,7 +32,7 @@ class WorkspaceDestinationError(WorkspaceStoreError):
 class WorkspaceManager:
     """Translate between local directories and immutable WorkspaceState.
 
-    ``artifact_store`` is the only byte-storage dependency. It defaults to a
+    `artifact_store` is the only byte-storage dependency. It defaults to a
     local content-addressed store but can be replaced by an S3 implementation
     without changing manifests, State, or materialization callers.
     """
@@ -92,8 +92,8 @@ class WorkspaceManager:
     ) -> WorkspaceState:
         """Upload a directory and return its complete portable manifest.
 
-        An unchanged snapshot returns ``previous`` exactly. New or modified
-        files are attributed to ``created_by_action``; unchanged files retain
+        An unchanged snapshot returns `previous` exactly. New or modified
+        files are attributed to `created_by_action`; unchanged files retain
         their original provenance.
         """
         if created_by_action is not None and not created_by_action.strip():

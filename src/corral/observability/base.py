@@ -9,7 +9,6 @@ of view.
 from __future__ import annotations
 
 import dataclasses
-import logging
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -19,11 +18,11 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import BaseModel
 
+from corral.logging import event, exception_fields
+
 if TYPE_CHECKING:
     from corral.core.action import Action
     from corral.core.state import State
-
-logger = logging.getLogger(__name__)
 
 ObservationType = Literal[
     "span",
@@ -107,8 +106,69 @@ class NoOpObserver:
         return None
 
 
+class _CompositeSpan:
+    def __init__(self, spans: tuple[ObservationSpan, ...]) -> None:
+        self._spans = spans
+
+    def update(
+        self,
+        *,
+        state_after: State | None = None,
+        action: Action | None = None,
+        output: Mapping[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        for span in self._spans:
+            try:
+                span.update(
+                    state_after=state_after,
+                    action=action,
+                    output=output,
+                    metadata=metadata,
+                )
+            except BaseException as exc:
+                _observer_failure("update", exc)
+
+    def end(self, error: BaseException | None = None) -> None:
+        for span in self._spans:
+            try:
+                span.end(error)
+            except BaseException as exc:
+                _observer_failure("end", exc)
+
+
+class CompositeObserver:
+    """Fan observations out to independent, failure-isolated backends."""
+
+    def __init__(self, *observers: Observer) -> None:
+        self.observers = tuple(observers)
+
+    def start(self, observation: Observation) -> ObservationSpan:
+        spans: list[ObservationSpan] = []
+        for observer in self.observers:
+            try:
+                spans.append(observer.start(observation))
+            except BaseException as exc:
+                _observer_failure("start", exc)
+        return _CompositeSpan(tuple(spans))
+
+    def flush(self) -> None:
+        for observer in self.observers:
+            try:
+                observer.flush()
+            except BaseException as exc:
+                _observer_failure("flush", exc)
+
+
 def _observer_failure(operation: str, exc: BaseException) -> None:
-    logger.warning("observer failed during %s: %s", operation, exc)
+    event(
+        "WARNING",
+        "observer.failed",
+        subsystem="observability",
+        message=f"Observer failed during {operation}",
+        operation=operation,
+        **exception_fields(exc),
+    )
 
 
 @contextmanager
@@ -300,6 +360,7 @@ def observation_metadata(
 
 
 __all__ = [
+    "CompositeObserver",
     "NoOpObserver",
     "Observation",
     "ObservationContext",

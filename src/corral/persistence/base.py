@@ -37,7 +37,7 @@ class StateStore(Protocol):
     ) -> State:
         """Persist a complete State after validating its parent relationship.
 
-        ``advance_head`` atomically moves the execution's durable head to this
+        `advance_head` atomically moves the execution's durable head to this
         State. It is used for the canonical task path; speculative branches may
         be saved without moving the head.
         """
@@ -64,7 +64,7 @@ class StateStore(Protocol):
         parent_hash: str,
         transition_id: str,
     ) -> State | None:
-        """Return an already-committed transition, or ``None``.
+        """Return an already-committed transition, or `None`.
 
         Action proposal and observation checkpoints use stable transition IDs,
         so retrying the same parent transition is an idempotent lookup.

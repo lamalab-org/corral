@@ -9,7 +9,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from typing import Any, Literal
 
-from loguru import logger
+from corral.logging import logger
 
 # The OpenHands SDK ships as the optional `corral[openhands]` extra, which is
 # gated to Python >= 3.12. Wrap the import so an environment without the extra
@@ -97,8 +97,8 @@ HarnessStatus = Literal[
 class HarnessRunResult:
     """Structured outcome of one OpenHands harness run.
 
-    ``OpenHandsAgent.run_session`` maps this provider result onto
-    ``AgentOutcome`` so infrastructure failures are never scored as wrong
+    `OpenHandsAgent.run_session` maps this provider result onto
+    `AgentOutcome` so infrastructure failures are never scored as wrong
     answers.
     """
 
@@ -204,7 +204,7 @@ class OpenHandsAgent(BaseAgent):
             final-answer instructions are appended automatically.
         **kwargs: Additional provider configuration retained as provenance.
 
-    ``run_session`` drives ``Conversation.arun()`` directly on the scheduler's
+    `run_session` drives `Conversation.arun()` directly on the scheduler's
     event loop and exposes environment tools exclusively through the session's
     task-local MCP endpoint.
     """
@@ -528,7 +528,7 @@ class OpenHandsAgent(BaseAgent):
 
         Owns the per-episode working directory and maps a drive failure to a
         precise terminal status via :meth:`_harness_failure_answer`. Completion
-        still requires the session's ``submit_answer`` MCP tool.
+        still requires the session's `submit_answer` MCP tool.
         """
         # Fresh, empty, per-episode working directory; cleaned up afterwards.
         cwd = tempfile.mkdtemp(prefix="corral-openhands-")
@@ -590,7 +590,7 @@ class OpenHandsAgent(BaseAgent):
             enable_surrender
             and final_answer.casefold() == SURRENDER_SENTINEL.casefold()
         ):
-            logger.info(f"Agent retiring from task {task_id}")
+            logger.debug(f"Agent retiring from task {task_id}")
             run.result = self._result(run, "surrender", answer=SURRENDER_SENTINEL)
             return SURRENDER_SENTINEL
 
@@ -658,7 +658,7 @@ class OpenHandsAgent(BaseAgent):
             # OpenHands deliberately falls back to a blocking response when
             # streaming is enabled without a token callback. A no-op callback
             # keeps the SDK on its streaming transport while completed events
-            # continue to be recorded through ``on_event`` above.
+            # continue to be recorded through `on_event` above.
             token_callbacks=[lambda _chunk: None],
             workspace=cwd,
             max_iteration_per_run=iteration_limit,
@@ -707,14 +707,27 @@ class OpenHandsAgent(BaseAgent):
                 action = getattr(event, "action", None)
                 if isinstance(action, FinishAction):
                     message = (getattr(action, "message", "") or "").strip()
-                    logger.info(f"[openhands] finish → {_truncate(message)}")
+                    logger.bind(
+                        event="agent.finished",
+                        subsystem="agent",
+                        result=_truncate(message),
+                    ).debug("OpenHands finished")
                     return
                 thought = _content_to_text(getattr(event, "thought", "") or "").strip()
                 if thought:
-                    logger.info(f"[openhands] thinking: {_truncate(thought)}")
+                    logger.bind(
+                        event="agent.thinking",
+                        subsystem="agent",
+                        reasoning=_truncate(thought),
+                    ).debug("OpenHands reasoning")
                 tool_name = getattr(event, "tool_name", "") or "?"
                 args = _truncate(json.dumps(self._action_arguments(event), default=str))
-                logger.info(f"[openhands] call {tool_name}({args})")
+                logger.bind(
+                    event="agent.tool_call",
+                    subsystem="agent",
+                    tool_name=tool_name,
+                    arguments=args,
+                ).debug("OpenHands tool call")
             elif isinstance(event, ObservationEvent):
                 observation = getattr(event, "observation", None)
                 is_error = bool(getattr(event, "error", None)) or bool(
@@ -723,13 +736,28 @@ class OpenHandsAgent(BaseAgent):
                 tool_name = getattr(event, "tool_name", "") or "tool"
                 text = _truncate(self._event_text(event))
                 if is_error:
-                    logger.warning(f"[openhands] {tool_name} error: {text}")
+                    logger.bind(
+                        event="agent.tool_failed",
+                        subsystem="agent",
+                        tool_name=tool_name,
+                        error_message=text,
+                    ).warning("OpenHands tool failed")
                 else:
-                    logger.info(f"[openhands] result {tool_name}: {text}")
+                    logger.bind(
+                        event="agent.tool_result",
+                        subsystem="agent",
+                        tool_name=tool_name,
+                        result=text,
+                    ).debug("OpenHands tool result")
             elif isinstance(event, ConversationErrorEvent):
                 code = getattr(event, "code", None)
                 detail = getattr(event, "detail", None) or ""
-                logger.warning(f"[openhands] run error {code}: {_truncate(detail)}")
+                logger.bind(
+                    event="agent.run_error",
+                    subsystem="agent",
+                    error_type=str(code or "ConversationError"),
+                    error_message=_truncate(detail),
+                ).warning("OpenHands run error")
         except Exception:
             logger.debug("Could not log OpenHands event", exc_info=True)
 
@@ -1074,7 +1102,6 @@ class OpenHandsAgent(BaseAgent):
         exc: BaseException,
     ) -> str:
         """Record an infrastructure failure and return an error answer string."""
-        logger.error(f"OpenHands harness {status}: {error}")
         run.messages.append(
             LiteLLMMessage(
                 role="assistant",

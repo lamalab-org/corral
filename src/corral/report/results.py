@@ -3,9 +3,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
+from rich.console import Console
 
 from corral.evaluation import EvaluationResult
+from corral.logging import event, logger
 from corral.report.metrics.base import Metric, TaskMetric
 
 DEFAULT_TOOL_VERBOSITY = "brief"
@@ -396,7 +397,7 @@ class BenchmarkResult:
             calculated_metrics: Pre-calculated metrics dictionary
         """
         summary_string = self._build_summary_string(calculated_metrics)
-        logger.info(f"\n{summary_string}")
+        Console().print(summary_string)
 
     def generate_report(self, report_path: str | None = None) -> None:
         """
@@ -411,14 +412,16 @@ class BenchmarkResult:
 
         # Save JSON report if path is provided
         if report_path:
-            try:
-                report_data = self._prepare_report_data(calculated_metrics)
-                with Path(report_path).open("w") as f:
-                    json.dump(report_data, f, indent=2)
-                logger.info(f"Saved detailed report to: {report_path}")
-            except Exception as e:
-                logger.error(f"Error saving report file: {e}")
-                raise
+            report_data = self._prepare_report_data(calculated_metrics)
+            with Path(report_path).open("w") as f:
+                json.dump(report_data, f, indent=2)
+            event(
+                "INFO",
+                "report.saved",
+                subsystem="evaluation",
+                path=report_path,
+            )
 
         # Display report to console
         self._display_console_report(calculated_metrics)
+        event("INFO", "report.generated", subsystem="evaluation")

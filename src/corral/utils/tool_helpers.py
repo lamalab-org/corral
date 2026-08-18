@@ -3,13 +3,14 @@ import re
 from pathlib import Path
 
 from litellm import embedding
-from loguru import logger
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
+
+from corral.logging import logger
 
 
 def extract_path_from_answer(answer: str) -> str:
@@ -55,7 +56,7 @@ def find_file_by_name(filename: str, base_dir: str | None = None) -> str:
         return filename
 
     # Search for the file recursively. A symlink is never a valid workspace
-    # file, even if its current target happens to remain below ``base_dir``.
+    # file, even if its current target happens to remain below `base_dir`.
     from corral.workspace import confine_workspace_path
 
     base_path = Path(base_dir)
@@ -76,12 +77,12 @@ def find_file_by_name(filename: str, base_dir: str | None = None) -> str:
 
 
 def smart_resolve_path(input_path: str, base_dir: str | None = None) -> str:
-    """Resolve a path, confining task submissions to ``base_dir`` when supplied.
+    """Resolve a path, confining task submissions to `base_dir` when supplied.
 
-    With an explicit ``base_dir``, both direct paths and fallback searches are
+    With an explicit `base_dir`, both direct paths and fallback searches are
     restricted to that one task workspace. Existing absolute sibling paths,
-    ``..`` traversal, and symlink aliases are rejected instead of being passed
-    to a scorer. Without ``base_dir`` the legacy process-global lookup remains
+    `..` traversal, and symlink aliases are rejected instead of being passed
+    to a scorer. Without `base_dir` the legacy process-global lookup remains
     available for non-runtime callers.
     """
     extracted_path = extract_path_from_answer(input_path)
@@ -135,10 +136,9 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
         or not isinstance(chunks, list)
         or not all(isinstance(chunk, str) for chunk in chunks)
     ):
-        logger.error("Invalid input: chunks must be a non-empty list of strings")
         raise ValueError("Input must be a non-empty list of strings")
 
-    logger.info(
+    logger.debug(
         f"Embedding {len(chunks)} {'chemical' if chemical else 'text'} chunks using model: {model}"
     )
 
@@ -147,22 +147,21 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
 
     # Process in batches if the input is large
     if len(chunks) > BATCH_SIZE:
-        logger.info(f"Input size exceeds {BATCH_SIZE} chunks, processing in batches")
+        logger.debug(f"Input size exceeds {BATCH_SIZE} chunks, processing in batches")
         all_embeddings = []
 
         # Process chunks in batches
         for i in range(0, len(chunks), BATCH_SIZE):
             batch = chunks[i : i + BATCH_SIZE]
-            logger.info("Processing batched chunks")
+            logger.debug("Processing batched chunks")
 
             try:
                 batch_embeddings = embed_text(batch, model=model, chemical=chemical)
                 all_embeddings.extend(batch_embeddings)
-            except Exception as e:
-                logger.error(f"Error in batch {i // BATCH_SIZE + 1}: {e!s}")
+            except Exception:
                 raise
 
-        logger.info(
+        logger.debug(
             f"Successfully generated {len(all_embeddings)} embeddings across all batches"
         )
         return all_embeddings
@@ -173,7 +172,7 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
             import torch
             from transformers import AutoModel, AutoTokenizer
 
-            logger.info("Using MoLFormer model for chemical embeddings")
+            logger.debug("Using MoLFormer model for chemical embeddings")
 
             # Load model & tokenizer
             tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
@@ -193,11 +192,12 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
             # Extract embeddings
             embeddings = outputs.pooler_output.tolist()  # Convert to list format
 
-            logger.info(f"Successfully generated {len(embeddings)} chemical embeddings")
+            logger.debug(
+                f"Successfully generated {len(embeddings)} chemical embeddings"
+            )
             return embeddings
 
         except Exception as e:
-            logger.error(f"Error generating chemical embeddings: {e!s}", exc_info=True)
             raise RuntimeError(f"Failed to generate chemical embeddings: {e!s}") from e
 
     # For text embeddings, use litellm as before
@@ -206,10 +206,9 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
             model=model,
             input=chunks,
         )
-        logger.info(
+        logger.debug(
             f"Successfully generated {len(result_embeddings['data'])} embeddings"
         )
         return [item["embedding"] for item in result_embeddings["data"]]
     except Exception as e:
-        logger.error(f"Error generating embeddings: {e!s}", exc_info=True)
         raise RuntimeError(f"Failed to generate embeddings: {e!s}") from e

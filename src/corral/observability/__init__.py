@@ -1,6 +1,7 @@
 """Passive task observability with optional Langfuse export."""
 
 from corral.observability.base import (
+    CompositeObserver,
     NoOpObserver,
     Observation,
     ObservationContext,
@@ -17,9 +18,12 @@ from corral.observability.langfuse import (
     mask_sensitive_data,
     observer_from_env,
 )
+from corral.observability.logging import LoggingObserver
 
 __all__ = [
+    "CompositeObserver",
     "LangfuseObserver",
+    "LoggingObserver",
     "NoOpObserver",
     "Observation",
     "ObservationContext",

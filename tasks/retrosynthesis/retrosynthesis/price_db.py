@@ -14,7 +14,7 @@ SQLITE_PARAMETER_LIMIT = 900
 
 
 def canonicalize_smiles(smiles: str) -> str | None:
-    """Return an atom-map-free canonical SMILES, or ``None`` if invalid."""
+    """Return an atom-map-free canonical SMILES, or `None` if invalid."""
     if not isinstance(smiles, str):
         return None
 

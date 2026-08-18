@@ -20,7 +20,7 @@ Usage:
 import json
 from pathlib import Path
 
-from loguru import logger
+from corral.logging import logger
 
 HF_REPO = "jablonkagroup/corral-environment-tasks"
 

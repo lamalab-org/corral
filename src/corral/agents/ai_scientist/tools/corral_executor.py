@@ -127,8 +127,8 @@ class CorralExecutor:
         """Copy an exact realized plan, changing only exposed seed arguments.
 
         Tool schemas, rather than argument-name guesses, determine whether an
-        action supports a seed. This means tools without an explicit ``seed``
-        or ``random_state`` property are replayed byte-for-byte at the logical
+        action supports a seed. This means tools without an explicit `seed`
+        or `random_state` property are replayed byte-for-byte at the logical
         action level and are reported as independent unseeded repetitions.
         """
         plan: list[PlannedAction] = []

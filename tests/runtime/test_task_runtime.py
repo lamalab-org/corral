@@ -99,6 +99,17 @@ class OutcomeSessionAgent:
         return self.outcome
 
 
+class WrappedFailureAgent:
+    model = "test-model"
+
+    async def run_session(self, session):
+        del session
+        try:
+            raise ValueError("Required field 'answer' is missing.")
+        except ValueError as cause:
+            raise RuntimeError("provider adapter failed") from cause
+
+
 class ResumeAwareAgent:
     model = "test-model"
 
@@ -547,6 +558,25 @@ async def test_failed_session_outcome_is_not_submitted(tmp_path):
     assert final.runtime.metadata["agent_status"] == "harness_failure"
     assert final.runtime.metadata["error"] == "SDK process crashed"
     assert final.tool_statistics == {}
+
+
+@pytest.mark.anyio()
+async def test_non_retryable_exception_records_only_final_message_in_state(tmp_path):
+    counter = {"calls": 0, "action_ids": []}
+    environment = _environment(counter)
+
+    with JSONLStateStore(tmp_path / "non-retryable-failure.jsonl") as store:
+        final = await TaskRuntime(store).run(
+            WrappedFailureAgent(),
+            environment,
+            execution_id="non-retryable-failure",
+            started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            max_iterations=1,
+        )
+
+    assert final.runtime.status == "failed"
+    assert final.runtime.metadata["error"] == "Required field 'answer' is missing."
+    assert "provider adapter failed" not in final.runtime.metadata["error"]
 
 
 @pytest.mark.anyio()

@@ -11,8 +11,6 @@ from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
-from loguru import logger
-
 from corral.backend.background_tools import attach_background_tools
 from corral.backend.jobs import (
     DEFAULT_JOB_CONCURRENCY,
@@ -36,6 +34,7 @@ from corral.core.tool_catalog import (
     validate_tool_catalog_binding,
 )
 from corral.core.workspace import WorkspaceState
+from corral.logging import logger
 from corral.persistence.workspace import WorkspaceManager
 from corral.workspace import WorkspaceFilesystem, build_workspace_tools
 
@@ -397,7 +396,7 @@ class Environment:
         """Bind this definition to one isolated task execution.
 
         The returned definition shares immutable task/tool configuration and is
-        bound to a workspace materialization namespaced by ``task_execution_id``.
+        bound to a workspace materialization namespaced by `task_execution_id`.
         Its State is supplied by the runtime and is never owned by Environment.
 
         Stateful subclasses that hold non-clonable resources (hardware handles,
@@ -405,8 +404,8 @@ class Environment:
         should override this to build — or lease — their own isolated runtime
         rather than inherit this definition-only reconstruction.
 
-        ``max_job_concurrency`` sizes this task execution's background-job pool;
-        ``None`` falls back to the definition's default.
+        `max_job_concurrency` sizes this task execution's background-job pool;
+        `None` falls back to the definition's default.
         """
         return type(self)(
             task_id=self.task_id,
@@ -430,7 +429,7 @@ class Environment:
         """Create an unambiguous local materialization for one execution.
 
         Runtime identifiers are orchestration data, not path fragments. Hashing
-        the complete ``(task_id, execution_id)`` tuple prevents separators,
+        the complete `(task_id, execution_id)` tuple prevents separators,
         traversal text, and ambiguous concatenations from selecting another
         execution's directory.
         """
@@ -450,7 +449,7 @@ class Environment:
             raise ValueError("task workspace cannot be a symbolic link")
         if workspace.exists() and not workspace.is_dir():
             raise ValueError(f"task workspace is not a directory: {workspace}")
-        logger.info(f"Creating workspace: {workspace}")
+        logger.debug(f"Creating workspace: {workspace}")
         if self.fs_manager:
             self.fs_manager.mkdir(str(workspace), create_parents=True)
         else:
@@ -544,7 +543,7 @@ class Environment:
         )
 
     def validate_state_tool_catalog(self, state: State) -> ToolCatalogSnapshot:
-        """Refuse to bind ``state`` when its executable tool catalog has drifted."""
+        """Refuse to bind `state` when its executable tool catalog has drifted."""
         return validate_tool_catalog_binding(state, self.tool_catalog_snapshot())
 
     def preprocess_arguments(
@@ -597,7 +596,7 @@ class Environment:
                         )
                         return parsed
                     except json.JSONDecodeError as e:
-                        logger.error(
+                        logger.warning(
                             f"Failed to parse JSON for argument '{key}': {e}. Returning original value."
                         )
                         return value
@@ -618,7 +617,7 @@ class Environment:
 
         The default tool contract is stateless. Environments with structured
         domain state may override this hook to decode an explicit State
-        namespace, call the tool, and return a ``ToolExecutionResult`` carrying
+        namespace, call the tool, and return a `ToolExecutionResult` carrying
         the complete updated namespace. The Environment must never retain the
         supplied State or decoded values.
         """
@@ -678,7 +677,7 @@ class Environment:
         """Give the bound task execution a JobManager and background tools.
 
         When the resolved toolset has no background-capable tool the manager is
-        left ``None``. Otherwise a fresh manager is created for this bound
+        left `None`. Otherwise a fresh manager is created for this bound
         task execution so job ids never span independent State chains.
         """
         has_background = any(
@@ -701,7 +700,7 @@ class Environment:
     def submit_job(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Submit a background-capable tool as a job and return its handle.
 
-        Receives hidden arguments injected from State by ``execute_action`` and
+        Receives hidden arguments injected from State by `execute_action` and
         resolves the workspace **now** (at submit time), so a later State can
         never redirect a running job at a different task's workspace. Returns a
         job handle the agent polls with the generated control tools.
@@ -814,13 +813,13 @@ def build_environments(
     """
     validate_task_graph(tasks)
 
-    logger.info("Task Dependencies:")
+    logger.debug("Task Dependencies:")
     for task_id, deps in build_dependency_graph(tasks).items():
-        logger.info(f"- {task_id}: depends on {deps}")
+        logger.debug(f"- {task_id}: depends on {deps}")
 
-    logger.info("Task Execution Order:")
+    logger.debug("Task Execution Order:")
     for i, task_id in enumerate(topological_order(tasks)):
-        logger.info(f"{i + 1}. {task_id}")
+        logger.debug(f"{i + 1}. {task_id}")
 
     environments: dict[str, Environment] = {}
     for component in connected_components(tasks):

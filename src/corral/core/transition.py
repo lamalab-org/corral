@@ -36,7 +36,7 @@ class ToolExecutionResult:
     """A tool observation plus an optional complete environment namespace.
 
     Most tools only return content. A stateful tool returns this value with a
-    complete JSON-serializable ``environment`` replacement; it never receives
+    complete JSON-serializable `environment` replacement; it never receives
     the mutable State object and never patches State in place.
     """
 
@@ -143,7 +143,7 @@ def _capture_workspace(
 def execute_action(environment: Environment, state: State, action: Action) -> State:
     """Execute one pending Action and return exactly one immutable child.
 
-    ``state`` must already contain ``action`` as its sole pending action. The
+    `state` must already contain `action` as its sole pending action. The
     runtime durably commits that before-tool State, then this function records
     the observation and the runtime commits the returned after-tool child. The
     parent is never mutated, including its nested hidden-tool namespace.

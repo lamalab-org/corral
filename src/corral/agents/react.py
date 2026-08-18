@@ -6,8 +6,6 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
 from corral.agents.base_agent import (
     BaseAgent,
     _UsageAccumulator,
@@ -27,6 +25,8 @@ from corral.core.action import (
     Action,
     with_submit_answer_tool,
 )
+from corral.core.errors import concise_error_message
+from corral.logging import logger
 
 if TYPE_CHECKING:
     from corral.agents.session import AgentSession
@@ -80,7 +80,7 @@ class ReActAgent(BaseAgent):
                     raise ValueError("action_input must be a JSON object")
                 actions.append(Action(name=match.group(1).strip(), arguments=arguments))
             except (json.JSONDecodeError, ValueError, SyntaxError) as exc:
-                logger.error(f"Parsing error: {exc}")
+                logger.warning(f"Ignoring malformed agent action: {exc}")
         return thoughts or None, actions or None
 
     def _initial_messages(self, session: AgentSession) -> list[dict[str, Any]]:
@@ -162,13 +162,13 @@ class ReActAgent(BaseAgent):
             except BudgetExhaustedError as exc:
                 return AgentOutcome(
                     status="budget_exhausted",
-                    error=str(exc),
+                    error=concise_error_message(exc),
                     usage=usage.outcome(),
                 )
             except Exception as exc:
                 return AgentOutcome(
                     status="agent_failure",
-                    error=str(exc),
+                    error=concise_error_message(exc),
                     usage=usage.outcome(),
                 )
 

@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
 from corral.agents.base_agent import BaseAgent, _UsageAccumulator
 from corral.agents.reflection import (
     Reflection,
@@ -16,6 +14,8 @@ from corral.agents.reflection import (
 )
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.session import Agent
+from corral.core.errors import concise_error_message
+from corral.logging import logger
 
 if TYPE_CHECKING:
     from corral.agents.session import AgentSession
@@ -40,7 +40,7 @@ class ReflexionAgent(BaseAgent):
     """Generate verbal memory from a prior evaluation, then run an actor.
 
     The task State is authoritative for the model used to generate reflections.
-    ``reflection_model`` remains a construction-time hint so older worker
+    `reflection_model` remains a construction-time hint so older worker
     registrations can populate that metadata, but it is never read from the
     wrapped actor and never overrides the model recorded for a session.
     """
@@ -185,7 +185,9 @@ class ReflexionAgent(BaseAgent):
         try:
             reflection_module = self._reflection_module(session)
         except ValueError as exc:
-            return AgentOutcome(status="agent_failure", error=str(exc))
+            return AgentOutcome(
+                status="agent_failure", error=concise_error_message(exc)
+            )
         reflection_model = reflection_module.model
         task_id = str(
             session.initial_state.metadata.task.get("id") or session.execution_id

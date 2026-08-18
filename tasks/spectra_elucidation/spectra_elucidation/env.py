@@ -4,8 +4,8 @@ import argparse
 import json
 import os
 from pathlib import Path
+from time import perf_counter
 
-from loguru import logger
 from spectra_elucidation.score import (
     score_formula_match,
     score_isotopic_distribution,
@@ -30,6 +30,7 @@ from corral.core.task import (
     TaskDefinition,
     with_fixed_inputs,
 )
+from corral.logging import event, exception_fields
 
 BASE_WORK_DIR = os.environ.get(
     "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/spectra_elucidation"
@@ -112,7 +113,14 @@ def _spectra_prompt(env: Environment, state: State) -> str:
             if key != "work_dir":
                 prompt += f"- {key}: {value}\n"
 
-    logger.info(f"Task prompt for {env.task_id}:\n{prompt}")
+    event(
+        "DEBUG",
+        "environment.prompt_generated",
+        subsystem="runtime",
+        benchmark="spectra_elucidation",
+        task_id=env.task_id,
+        prompt=prompt,
+    )
     return prompt
 
 
@@ -131,7 +139,7 @@ def create_spectra_elu_environments(
     level: int = 1,
 ) -> dict[str, Environment]:
     """Create environments for the spectra elucidation benchmark tasks."""
-    logger.info("Creating environments for spectra elucidation tasks...")
+    started = perf_counter()
     if subtask_level:
         json_path = (
             Path(__file__).parent.parent
@@ -146,22 +154,55 @@ def create_spectra_elu_environments(
             / f"level_{level}"
             / "tasks_json"
         )
-    if not json_path.exists():
-        raise ValueError(f"Task file {json_path} does not exist.")
-
-    logger.info(f"Loading tasks from {json_path}")
-
-    tasks = load_tasks_from_json(json_path, work_dir=work_dir)
-
-    logger.info(f"Creating linked task environments with {len(tasks)} tasks")
-
-    # Spectra tasks have no filesystem workspace; grouping is derived.
-    return build_environments(
-        tasks,
-        base_work_dir=work_dir,
-        name="spectra_elucidation",
-        toolset=Toolset(pool=create_tools(), workspace_factory=None),
+    name = "spectra_elucidation"
+    event(
+        "INFO",
+        "environment.started",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
     )
+    event(
+        "DEBUG",
+        "environment.tasks_loading",
+        subsystem="runtime",
+        benchmark=name,
+        task_source=str(json_path),
+    )
+    try:
+        if not json_path.exists():
+            raise ValueError(f"Task file {json_path} does not exist.")
+        tasks = load_tasks_from_json(json_path, work_dir=work_dir)
+        environments = build_environments(
+            tasks,
+            base_work_dir=work_dir,
+            name=name,
+            toolset=Toolset(pool=create_tools(), workspace_factory=None),
+        )
+    except Exception as exc:
+        event(
+            "ERROR",
+            "environment.failed",
+            subsystem="runtime",
+            benchmark=name,
+            operation="create",
+            status="failed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            **exception_fields(exc),
+        )
+        raise
+
+    event(
+        "INFO",
+        "environment.completed",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+        status="completed",
+        duration_ms=round((perf_counter() - started) * 1000, 3),
+        environment_count=len(environments),
+    )
+    return environments
 
 
 if __name__ == "__main__":
@@ -189,9 +230,13 @@ if __name__ == "__main__":
         work_dir=BASE_WORK_DIR, subtask_level=args.subtask_level, level=args.level
     )
 
-    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        logger.info(f"- {env_id}")
-        logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_map:
-            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
+        event(
+            "DEBUG",
+            "environment.created",
+            subsystem="runtime",
+            benchmark="spectra_elucidation",
+            task_id=env_id,
+            task_name=env.current_task.name,
+            dependencies=sorted(env.current_task.dependencies()),
+        )

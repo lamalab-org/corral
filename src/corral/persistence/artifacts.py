@@ -78,7 +78,7 @@ def _hash_file(path: Path) -> tuple[str, int]:
 class LocalArtifactStore:
     """Filesystem-backed ArtifactStore using SHA-256 object keys.
 
-    Blobs are laid out as ``<root>/<first two digest chars>/<digest>``. Writes
+    Blobs are laid out as `<root>/<first two digest chars>/<digest>`. Writes
     use a temporary file and atomic replacement, so concurrent identical puts
     are idempotent and interrupted uploads never become visible as blobs.
     """

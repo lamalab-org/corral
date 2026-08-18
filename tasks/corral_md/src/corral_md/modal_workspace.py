@@ -148,7 +148,7 @@ def run_lammps_in_modal(
     """Run LAMMPS on Modal and replace the local workspace with its outputs.
 
     The complete local workspace is uploaded to a unique directory in the
-    ``simulations`` Volume. The deployed ``run_lammps`` function executes there,
+    `simulations` Volume. The deployed `run_lammps` function executes there,
     commits its writes, and this function downloads the complete directory into
     a staging area before atomically publishing it at the original local path.
     """

@@ -16,6 +16,7 @@ from corral.agents.react import ReActAgent
 from corral.agents.schema import AgentOutcome, AgentUsage, BudgetExhaustedError
 from corral.agents.utils import LiteLLMMessage
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
+from corral.core.errors import concise_error_message
 
 if TYPE_CHECKING:
     from corral.agents.session import AgentSession
@@ -81,9 +82,13 @@ class LLMPlanner(BaseAgent):
                 kwargs=self._call_kwargs(),
             )
         except BudgetExhaustedError as exc:
-            return AgentOutcome(status="budget_exhausted", error=str(exc))
+            return AgentOutcome(
+                status="budget_exhausted", error=concise_error_message(exc)
+            )
         except Exception as exc:
-            return AgentOutcome(status="agent_failure", error=str(exc))
+            return AgentOutcome(
+                status="agent_failure", error=concise_error_message(exc)
+            )
 
         usage.add(getattr(response, "usage", None))
         plan = (getattr(response, "content", None) or "").strip()

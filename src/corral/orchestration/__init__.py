@@ -41,6 +41,10 @@ _EXPORTS = {
         "benchmark_workflow_id",
     ),
     "create_worker": ("corral.orchestration.worker", "create_worker"),
+    "create_workflow_runner": (
+        "corral.orchestration.worker",
+        "create_workflow_runner",
+    ),
     "execute_task": ("corral.orchestration.executor", "execute_task"),
     "task_workflow_id": ("corral.orchestration.executor", "task_workflow_id"),
 }
@@ -63,6 +67,7 @@ __all__ = [
     "TemporalTaskExecutor",
     "benchmark_workflow_id",
     "create_worker",
+    "create_workflow_runner",
     "execute_task",
     "task_workflow_id",
 ]

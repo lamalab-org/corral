@@ -239,7 +239,7 @@ class TreeSelector:
         *,
         stage: ResearchStage | None = None,
     ) -> int:
-        """Return how many more alternative children ``node`` may spawn."""
+        """Return how many more alternative children `node` may spawn."""
         return max(
             0,
             self.max_children_per_node - self._child_count(tree, node, stage),

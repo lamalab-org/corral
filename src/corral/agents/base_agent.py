@@ -26,9 +26,9 @@ llm_call = _default_llm_call
 
 
 class BaseAgent(ABC):
-    """Common configuration for agents implementing ``run_session``.
+    """Common configuration for agents implementing `run_session`.
 
-    ``run_session`` is the sole agent execution contract.
+    `run_session` is the sole agent execution contract.
     """
 
     def __init__(
