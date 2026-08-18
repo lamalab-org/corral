@@ -12,6 +12,11 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
 
+# Temporal requires either Start-to-Close or Schedule-to-Close on every
+# Activity. Public ``None`` means no operational deadline, so use a 100-year
+# Schedule-to-Close value as the protocol-level representation of "unbounded".
+_UNBOUNDED_ACTIVITY_TIMEOUT = timedelta(days=365 * 100)
+
 with workflow.unsafe.imports_passed_through():
     from corral.orchestration.models import (
         ActivityPolicy,
@@ -29,7 +34,6 @@ with workflow.unsafe.imports_passed_through():
 
 def _activity_options(policy: ActivityPolicy) -> dict[str, Any]:
     options: dict[str, Any] = {
-        "start_to_close_timeout": timedelta(seconds=policy.start_to_close_seconds),
         "retry_policy": RetryPolicy(
             initial_interval=timedelta(seconds=policy.initial_interval_seconds),
             backoff_coefficient=policy.backoff_coefficient,
@@ -38,6 +42,12 @@ def _activity_options(policy: ActivityPolicy) -> dict[str, Any]:
             non_retryable_error_types=policy.non_retryable_error_types,
         ),
     }
+    if policy.start_to_close_seconds is None:
+        options["schedule_to_close_timeout"] = _UNBOUNDED_ACTIVITY_TIMEOUT
+    else:
+        options["start_to_close_timeout"] = timedelta(
+            seconds=policy.start_to_close_seconds
+        )
     if policy.heartbeat_timeout_seconds is not None:
         options["heartbeat_timeout"] = timedelta(
             seconds=policy.heartbeat_timeout_seconds

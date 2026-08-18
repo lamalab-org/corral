@@ -191,6 +191,19 @@ async def llm_call(
             **kwargs,
         }
 
+        # GPT-5.6 rejects chat-completions requests that combine function tools
+        # with reasoning controls. The explicit LiteLLM ``responses/`` route
+        # keeps the configured provider model unchanged while selecting the
+        # endpoint that supports both features. This is also stable across the
+        # range of LiteLLM versions used by the task-specific environments.
+        use_gpt_5_6_responses = (
+            tools is not None
+            and kwargs.get("reasoning_effort") is not None
+            and model.startswith("openai/gpt-5.6")
+        )
+        if use_gpt_5_6_responses:
+            params["model"] = model.replace("openai/", "openai/responses/", 1)
+
         if "anthropic" in model:
             params["max_tokens"] = 8192
 
@@ -202,12 +215,11 @@ async def llm_call(
             params["temperature"] = 1
 
         if tools is not None:
-            params.update(
-                {
-                    "tools": tools,
-                    "tool_choice": "auto",
-                }
-            )
+            params["tools"] = tools
+            # Responses defaults to automatic tool selection. Older LiteLLM
+            # bridges reject the otherwise redundant chat-completions value.
+            if not use_gpt_5_6_responses:
+                params["tool_choice"] = "auto"
         # Always consume the provider response as a stream. Besides making long
         # generations observable at the transport layer, this keeps an active
         # response from looking idle to gateways with read/idle timeouts. Build

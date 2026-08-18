@@ -13,9 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import modal
 from corral_md.modal_workspace import run_lammps_in_modal
-from loguru import logger
 
 from corral.core.tool import tool
 
@@ -311,8 +309,8 @@ def get_potential_metadata(file_path: str) -> str:
     """
     [BRIEF] Returns metadata from a known LAMMPS potential file given the file path. The metadata includes potential type, elements supported, and the LAMMPS-compatible pair style keyword. Raises an exception if the path is invalid or the potential file is not recognized. [/BRIEF]
 
-    [DETAILED] This tool provides a quick and reliable way to identify the type and supported elements of a LAMMPS potential file based on its filename, after first verifying that the file path is accessible.
-    It eliminates the need to parse the often large and complex contents of potential files, which can exceed processing limits in many systems. The tool first validates that the provided file path is non-empty and then checks file accessibility using a remote file inspection call. If the file path is invalid or inaccessible, a FileNotFoundError is raised. If the file is accessible, the tool extracts the filename using pathlib and matches it against a predefined set of known potential files. For recognized files, it returns a structured metadata string describing the potential type, supported elements, and the LAMMPS pair style.
+    [DETAILED] This tool provides a quick and reliable way to identify the type and supported elements of a LAMMPS potential file based on its path in the local catalog.
+    It eliminates the need to parse the often large and complex contents of potential files, which can exceed processing limits in many systems. The tool validates the provided path against the known files mounted into the LAMMPS runtime. For recognized files, it returns a structured metadata string describing the potential type, supported elements, and the LAMMPS pair style.
     If the filename does not match any known potential, a ValueError is raised.
     [/DETAILED]
 
@@ -331,7 +329,7 @@ def get_potential_metadata(file_path: str) -> str:
 
     [CONTEXTUAL] How this tool works:
         - Validates that the input file path is non-empty
-        - Checks file accessibility using a remote file inspection call
+        - Validates remote mount paths against the local potential catalog
         - Extracts the filename from the provided path using pathlib
         - Matches it against a set of known potential filenames
         - Returns a structured metadata string for recognized files
@@ -341,10 +339,10 @@ def get_potential_metadata(file_path: str) -> str:
 
     [SYNTACTICAL] Usage examples:
     [
-        `get_potential_metadata("sim_data/Al99.eam.alloy")`,
-        `get_potential_metadata("/path/to/potentials/Mg_Zhou04.eam.alloy")`,
-        `get_potential_metadata("/data/Fe-C_Hepburn_Ackland.eam.fs")`,
-        `get_potential_metadata("Cu_Zhou04.eam.alloy")`
+        `get_potential_metadata("/potentials/EAM/Al99.eam.alloy")`,
+        `get_potential_metadata("/potentials/EAM/Mg_Zhou04.eam.alloy")`,
+        `get_potential_metadata("/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs")`,
+        `get_potential_metadata("/potentials/SW/Si.sw")`
     ]
     [/SYNTACTICAL]
 
@@ -369,7 +367,7 @@ def get_potential_metadata(file_path: str) -> str:
 
         FileNotFoundError:
             [ERROR_WHEN] If the file path is invalid or the file is not accessible. [/ERROR_WHEN]
-            [ERROR_DETAILS] Raised when the remote file accessibility check fails for the given path. [/ERROR_DETAILS]
+            [ERROR_DETAILS] Raised when the path is neither a local file nor an entry in the mounted potential catalog. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Verify that the file exists at the given path and that it is accessible in the execution environment. [/ERROR_RECOVERY]
     [/RAISES]
 
@@ -393,24 +391,31 @@ def get_potential_metadata(file_path: str) -> str:
             "pair_style : hybrid/overlay buck/coul/long + kspace_style pppm}"
         ),
     }
-    # 1) Validate input
+    POTENTIAL_PATHS = {
+        "Si.sw": "/potentials/SW/Si.sw",
+        "2007_SiO.tersoff": "/potentials/TERSOFF/2007_SiO.tersoff",
+        "Al99.eam.alloy": "/potentials/EAM/Al99.eam.alloy",
+        "Cu_Zhou04.eam.alloy": "/potentials/EAM/Cu_Zhou04.eam.alloy",
+        "Mg_Zhou04.eam.alloy": "/potentials/EAM/Mg_Zhou04.eam.alloy",
+        "Fe-C_Hepburn_Ackland.eam.fs": ("/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs"),
+        "pot.mod": "/potentials/BKS/pot.mod",
+    }
+
     if not file_path or not file_path.strip():
         raise ValueError("File path must not be None or empty.")
 
-    # 2) Check existence / accessibility via modal
-    try:
-        info = modal.Function.from_name("simagent", "file_info").remote(file_path)
-        logger.info(f"Potential file info: {info}")
-    except Exception as e:
-        logger.warning(f"Potential file existence check failed for '{file_path}': {e}")
-        raise FileNotFoundError(f"Incorrect potential file path: {file_path}") from e
-
-    # 3) Identify potential by filename
-    potential_name = Path(file_path).name
-
+    potential_path = Path(file_path.strip())
+    potential_name = potential_path.name
     metadata = POTENTIALS.get(potential_name)
     if metadata is None:
         raise ValueError(f"Unrecognized potential file: {potential_name}")
+
+    expected_remote_path = POTENTIAL_PATHS[potential_name]
+    if (
+        not potential_path.is_file()
+        and potential_path.as_posix() != expected_remote_path
+    ):
+        raise FileNotFoundError(f"Incorrect potential file path: {file_path}")
 
     return metadata
 

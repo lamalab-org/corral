@@ -25,19 +25,17 @@ def check_potential_file(target: str):
     """
     Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.
 
-    Behavior :This is a higher-order function that returns `score_fn`, a callable which:
+    Behavior: This is a higher-order function that returns `score_fn`, a callable which:
         - Accepts a single argument `result` (str or None).
         - Logs a warning and returns 0.0 if `result` is None.
-        - Otherwise, calls the remote Modal function "simagent/check_potential"
-        with `target` and `result`, and returns its float score.
+        - Otherwise, compares the selected catalog path with the expected path locally.
 
     Args:
         target (str): The target identifier or path to evaluate results against.
 
     Returns:
         Callable[[str | None], float]: A function that takes a result string (or None)
-        and returns a floating-point score from the remote checker, or 0.0 if the
-        result is None.
+        and returns 1.0 for the expected path or 0.0 otherwise.
     """
 
     def score_fn(result: str | None = None) -> float:
@@ -45,9 +43,11 @@ def check_potential_file(target: str):
             logger.warning("Received None as result in check_potential_file")
             return 0.0
 
-        return modal.Function.from_name("simagent", "check_potential").remote(
-            target, result
-        )
+        try:
+            return 1.0 if Path(result).resolve() == Path(target).resolve() else 0.0
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning(f"Could not validate potential path {result!r}: {exc}")
+            return 0.0
 
     return score_fn
 

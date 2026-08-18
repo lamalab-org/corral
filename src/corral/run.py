@@ -13,6 +13,7 @@ from time import perf_counter
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
+from corral.core.environment import Environment
 from corral.core.task import assert_dependencies_selected, order_selected
 from corral.orchestration.models import (
     ActivityPolicy,
@@ -109,9 +110,47 @@ def _normalise_task_metadata(
     return normalised
 
 
+def _metadata_from_environments(
+    environments: Mapping[str, Environment],
+    *,
+    agent_id: str,
+    model: str | None,
+    max_iterations: int,
+) -> dict[str, BenchmarkTaskMetadata]:
+    """Infer routine benchmark metadata from task-keyed environments."""
+    if not environments:
+        raise ValueError("CorralRunner requires at least one environment")
+    if not agent_id:
+        raise ValueError("agent_id cannot be empty")
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be at least 1")
+    if model == "":
+        raise ValueError("model cannot be empty")
+
+    metadata: dict[str, BenchmarkTaskMetadata] = {}
+    for task_id, environment in environments.items():
+        if not isinstance(environment, Environment):
+            raise TypeError(f"environment for task {task_id!r} must be an Environment")
+        if environment.task_id != task_id:
+            raise ValueError(
+                f"environment mapping key {task_id!r} does not match its "
+                f"task_id {environment.task_id!r}"
+            )
+        metadata[task_id] = BenchmarkTaskMetadata(
+            agent_id=agent_id,
+            environment_id=task_id,
+            dependencies=tuple(sorted(environment.current_task.dependencies())),
+            max_iterations=max_iterations,
+            model=model,
+        )
+    return metadata
+
+
 def _selected_task_ids(
     tasks: Mapping[str, BenchmarkTaskMetadata],
     task_ids: Iterable[str] | None,
+    *,
+    include_dependencies: bool,
 ) -> tuple[str, ...]:
     selected = list(tasks) if task_ids is None else list(task_ids)
     if not selected:
@@ -124,7 +163,18 @@ def _selected_task_ids(
         raise ValueError(f"unknown benchmark task(s): {sorted(unknown)}")
 
     graph = {task_id: list(tasks[task_id].dependencies) for task_id in tasks}
-    assert_dependencies_selected(selected, graph)
+    if include_dependencies:
+        selected_set = set(selected)
+        pending = list(selected)
+        while pending:
+            task_id = pending.pop()
+            for dependency in graph[task_id]:
+                if dependency not in selected_set:
+                    selected.append(dependency)
+                    selected_set.add(dependency)
+                    pending.append(dependency)
+    else:
+        assert_dependencies_selected(selected, graph)
     return tuple(order_selected(selected, graph))
 
 
@@ -139,11 +189,32 @@ class CorralRunner:
     def __init__(
         self,
         executor: BenchmarkExecutor,
-        tasks: Mapping[str, BenchmarkTaskMetadata],
+        tasks: Mapping[str, BenchmarkTaskMetadata] | None = None,
         *,
+        environments: Mapping[str, Environment] | None = None,
+        agent_id: str = "agent",
+        model: str | None = None,
+        max_iterations: int = 10,
         state_store: StateStore | None = None,
         metrics: Iterable[Metric] | None = None,
     ) -> None:
+        """Create a runner from environments or explicit advanced metadata.
+
+        Passing ``environments`` is the convenience path: task dependencies,
+        environment IDs, model metadata, and iteration budgets are inferred.
+        Passing ``tasks`` preserves complete per-task control for deployments
+        that use custom worker IDs, queues, or budgets.
+        """
+        if (tasks is None) == (environments is None):
+            raise ValueError("pass exactly one of tasks or environments")
+        if environments is not None:
+            tasks = _metadata_from_environments(
+                environments,
+                agent_id=agent_id,
+                model=model,
+                max_iterations=max_iterations,
+            )
+        assert tasks is not None
         self.executor = executor
         self.tasks = MappingProxyType(_normalise_task_metadata(tasks))
         self.state_store = state_store
@@ -163,9 +234,14 @@ class CorralRunner:
         evaluate: bool = True,
         activity_policy: ActivityPolicy | None = None,
         rounds_per_run: int = 0,
+        include_dependencies: bool = True,
     ) -> BenchmarkWorkflowInput:
         """Build the complete serializable benchmark plan for Temporal."""
-        selected = _selected_task_ids(self.tasks, task_ids)
+        selected = _selected_task_ids(
+            self.tasks,
+            task_ids,
+            include_dependencies=include_dependencies,
+        )
         metadata = {task_id: self.tasks[task_id] for task_id in selected}
         return BenchmarkWorkflowInput(
             benchmark_run_id=benchmark_run_id,
@@ -218,6 +294,7 @@ class CorralRunner:
         evaluate: bool = True,
         activity_policy: ActivityPolicy | None = None,
         rounds_per_run: int = 0,
+        include_dependencies: bool = True,
         verbose: bool = False,
     ) -> BenchmarkResult:
         """Execute the Temporal benchmark and return its reporting projection."""
@@ -236,6 +313,7 @@ class CorralRunner:
             evaluate=evaluate,
             activity_policy=activity_policy,
             rounds_per_run=rounds_per_run,
+            include_dependencies=include_dependencies,
         )
 
         started = perf_counter()

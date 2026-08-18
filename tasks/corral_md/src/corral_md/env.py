@@ -194,7 +194,16 @@ Required submission format:
 
     prompt += "\nAvailable input data:\n"
 
-    prompt += "All the potentials, can be found at /potentials/.\n\n"
+    prompt += (
+        "All potentials are mounted read-only below /potentials/. Use these exact "
+        "catalog paths in LAMMPS inputs: /potentials/SW/Si.sw, "
+        "/potentials/TERSOFF/2007_SiO.tersoff, "
+        "/potentials/EAM/Al99.eam.alloy, "
+        "/potentials/EAM/Cu_Zhou04.eam.alloy, "
+        "/potentials/EAM/Mg_Zhou04.eam.alloy, "
+        "/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs, and "
+        "/potentials/BKS/pot.mod.\n\n"
+    )
 
     # Display resolved inputs from dependencies
     resolved = env.resolve_inputs(state)

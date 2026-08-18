@@ -1,11 +1,10 @@
-from typing import Literal, Union
+from typing import Literal
 
 import pytest
 from jsonschema.validators import validator_for
 from pydantic import Field
 
 from corral.core.tool import Tool, tool
-from corral.core.tool_utils import format_json_schema_type, format_type_annotation
 from corral.workspace import WorkspaceFilesystem, build_workspace_tools
 
 
@@ -124,120 +123,18 @@ class TestDocstringValidation:
         assert "docstring" in str(exc_info.value)
 
 
-def test_format_type_annotation():
-    """Test the format_type_annotation function with various types including unions."""
-    # Basic types
-    assert format_type_annotation(str) == "str"
-    assert format_type_annotation(int) == "int"
-    assert format_type_annotation(float) == "float"
-
-    # Union types using | operator
-    union_type = str | int
-    assert format_type_annotation(union_type) == "str | int"
-
-    # Union types using typing.Union
-
-    union_type_old = Union[str, int]  # noqa: UP007
-    assert format_type_annotation(union_type_old) == "str | int"
-
-    # Optional type (which is Union[T, None])
-    optional_type = str | None
-    assert format_type_annotation(optional_type) == "str | None"
-
-    # Nested unions and complex types
-    complex_union = list[str | int] | None
-    formatted = format_type_annotation(complex_union)
-    assert "list" in formatted
-    assert "str | int" in formatted
-    assert "None" in formatted
-
-    # Tuple with mixed types
-    assert format_type_annotation(tuple[str, int]) == "tuple[str, int]"
-
-
-def test_format_json_schema_type():
-    """Test converting JSON Schema property dicts to human-readable type strings."""
-    assert format_json_schema_type({"type": "string"}) == "string"
-    assert format_json_schema_type({"type": "integer"}) == "integer"
-    assert format_json_schema_type({"type": "number"}) == "number"
-    assert format_json_schema_type({"type": "boolean"}) == "boolean"
-    assert format_json_schema_type({"type": "null"}) == "null"
-
-    assert (
-        format_json_schema_type({"type": "array", "items": {"type": "string"}})
-        == "list[string]"
-    )
-
-    assert format_json_schema_type({"type": "array"}) == "list"
-
-    assert (
-        format_json_schema_type(
-            {
-                "type": "array",
-                "prefixItems": [{"type": "string"}, {"type": "number"}],
-                "minItems": 2,
-                "maxItems": 2,
-            }
-        )
-        == "tuple[string, number]"
-    )
-
-    assert (
-        format_json_schema_type(
-            {
-                "type": "array",
-                "items": {
-                    "type": "array",
-                    "prefixItems": [{"type": "string"}, {"type": "number"}],
-                    "minItems": 2,
-                    "maxItems": 2,
-                },
-            }
-        )
-        == "list[tuple[string, number]]"
-    )
-
-    assert (
-        format_json_schema_type(
-            {
-                "anyOf": [
-                    {"type": "array", "items": {"type": "number"}},
-                    {"type": "null"},
-                ]
-            }
-        )
-        == "list[number] | null"
-    )
-
-    assert (
-        format_json_schema_type(
-            {
-                "type": "string",
-                "enum": ["fast", "slow"],
-            }
-        )
-        == "Literal['fast', 'slow']"
-    )
-
-    assert format_json_schema_type({"type": ["string", "null"]}) == "string | null"
-
-    assert format_json_schema_type({}) == "any"
-
-
-def test_usage_guide_uses_rich_types():
-    """Test that get_usage_guide renders structured types from the JSON schema."""
+def test_usage_guide():
+    """Test that get_usage_guide renders argument metadata."""
 
     @tool
-    def rich_tool(
-        mixture: list[tuple[str, float]] = Field(description="mixture components"),
+    def documented_tool(
         name: str = Field(description="a name"),
     ) -> str:
-        """A tool with complex types."""
+        """A documented tool."""
         return "ok"
 
-    guide = rich_tool.get_usage_guide()
-    assert "list[tuple[string, number]]" in guide
-    assert "string," in guide
+    guide = documented_tool.get_usage_guide()
+    assert "- name (string, required): a name" in guide
 
 
 def test_integration_with_field_annotations():

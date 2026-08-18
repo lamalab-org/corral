@@ -10,8 +10,8 @@ from typing import Any
 class ActivityPolicy:
     """Timeout and retry policy applied to Corral Activities."""
 
-    start_to_close_seconds: float = 300.0
-    heartbeat_timeout_seconds: float | None = 30.0
+    start_to_close_seconds: float | None = None
+    heartbeat_timeout_seconds: float | None = None
     maximum_attempts: int = 3
     initial_interval_seconds: float = 1.0
     maximum_interval_seconds: float = 30.0
@@ -19,7 +19,7 @@ class ActivityPolicy:
     non_retryable_error_types: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.start_to_close_seconds <= 0:
+        if self.start_to_close_seconds is not None and self.start_to_close_seconds <= 0:
             raise ValueError("start_to_close_seconds must be greater than 0")
         if (
             self.heartbeat_timeout_seconds is not None

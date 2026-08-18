@@ -6,7 +6,10 @@ runtime path.
 
 ## `BenchmarkTaskMetadata`
 
-Describes one benchmark task using durable worker registry IDs:
+Describes one benchmark task using durable worker registry IDs. Most callers do
+not need to construct it: `CorralRunner` infers it from an environment mapping.
+Construct it explicitly only for per-task worker IDs, queues, models, or
+budgets:
 
 ```python
 BenchmarkTaskMetadata(
@@ -25,17 +28,45 @@ BenchmarkTaskMetadata(
 builds a `BenchmarkWorkflowInput`, delegates once to a benchmark executor, and
 projects the durable result into reporting models.
 
+The default construction path infers task metadata and dependencies:
+
 ```python
-runner = CorralRunner(executor, tasks, state_store=state_store)
+runner = CorralRunner(
+    executor,
+    environments=environments,
+    agent_id="tool-calling",
+    model="openai/gpt-4o",
+    max_iterations=10,
+    state_store=state_store,
+)
+```
+
+```python
 result = await runner.run(
     "benchmark-run-id",
-    task_ids=["task-a", "task-b"],
+    task_ids=["task-b"],  # task-b's dependencies are included automatically
     trials_per_task=3,
     k_values=[1, 2, 3],
     max_parallel=8,
     max_parallel_per_task=2,
 )
 ```
+
+Set `include_dependencies=False` for strict validation instead of automatic
+dependency expansion.
+
+Pass `tasks={...}` with explicit `BenchmarkTaskMetadata` instead when the
+automatic one-environment-ID-per-task convention is not suitable:
+
+```python
+runner = CorralRunner(executor, tasks=task_metadata, state_store=state_store)
+```
+
+`ActivityPolicy` defaults both `start_to_close_seconds` and
+`heartbeat_timeout_seconds` to `None`. Temporal requires one closing timeout at
+the protocol level, so Corral represents an unset Start-to-Close deadline with
+a 100-year Schedule-to-Close timeout. Explicit positive values retain the
+normal Temporal timeout behavior.
 
 The runner has no synchronous execution path, checkpoint scheduler, HTTP
 router, or tool-verbosity parameter. Reporting records the fixed framework

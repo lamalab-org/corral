@@ -287,6 +287,32 @@ async def test_llm_call_reasoning_effort_forces_temperature_one(monkeypatch):
 
 
 @pytest.mark.anyio()
+async def test_llm_call_routes_gpt_5_6_reasoning_tools_to_responses(monkeypatch):
+    """GPT-5.6 reasoning plus tools uses the provider's Responses endpoint."""
+    mock_litellm, _ = setup_mock_litellm(monkeypatch)
+    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
+    tools = [{"type": "function", "function": {"name": "submit_answer"}}]
+
+    await llm_call(
+        model="openai/gpt-5.6-terra",
+        messages=messages,
+        tools=tools,
+        temperature=1.0,
+        reasoning_effort="none",
+    )
+
+    mock_litellm.acompletion.assert_awaited_once_with(
+        model="openai/responses/gpt-5.6-terra",
+        messages=messages,
+        temperature=1,
+        tools=tools,
+        api_base=None,
+        reasoning_effort="none",
+        stream=True,
+    )
+
+
+@pytest.mark.anyio()
 async def test_llm_call_with_usage_info(monkeypatch):
     """Test llm_call with return_usage=True."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch, return_usage=True)

@@ -1,4 +1,4 @@
-"""Task execution with durable, Git-like State checkpoints.
+"""Task runner with durable, Git-like State checkpoints.
 
 The canonical execution head is persisted at task setup, immediately before
 every tool call, immediately after every tool observation, and at task end.
@@ -231,7 +231,12 @@ class TaskRuntime:
         state_id = str(uuid5(NAMESPACE_URL, f"corral:execution:{execution_id}"))
         initial = await self.state_store.load_initial(state_id)
         if initial is None:
-            initial = environment.initial_state(
+            # Environment State construction snapshots the task workspace via
+            # a synchronous compatibility boundary. Keep that boundary off the
+            # Temporal Activity event loop (and off every other async caller's
+            # loop) so WorkspaceManager can safely run its async artifact I/O.
+            initial = await asyncio.to_thread(
+                environment.initial_state,
                 dependency_outputs=dependency_outputs,
                 state_id=state_id,
                 started_at=started_at,
@@ -260,7 +265,9 @@ class TaskRuntime:
         if current.is_terminal:
             return current
 
-        environment.prepare_workspace(current.workspace)
+        # Workspace materialization has the same synchronous compatibility
+        # boundary as capture above.
+        await asyncio.to_thread(environment.prepare_workspace, current.workspace)
 
         with observe_safely(
             self.observer,

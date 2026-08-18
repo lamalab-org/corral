@@ -27,70 +27,185 @@
 
 A comprehensive benchmarking framework for evaluating AI agents on science tasks. The system provides standardized environments, tools, and evaluation metrics to test agent performance across diverse materials science challenges.
 
-## 🚀 Getting Started
+## 🚀 Quick Start: Run One Task from One Environment
 
-### Prerequisites
+The shortest useful Corral run does not need `CorralRunner`, trials, scoring,
+or report generation. Import an agent, load one environment task, and send it
+directly through a Temporal task Workflow. The example starts its Corral worker
+in the same process, so the only separate service is Temporal itself.
 
-- Python 3.10 or higher
-- `uv` (recommended) or `pip` for package management
-- A Temporal service and Corral worker with the benchmark's agents and
-  environments registered by durable ID
+You need Python 3.11 or newer for SampleMath, [`uv`](https://docs.astral.sh/uv/),
+a model API key such as `OPENAI_API_KEY`, and the Temporal CLI. Clone the
+repository and install SampleMath together with the framework:
 
-### Installation
+```bash
+git clone https://github.com/lamalab-org/corral.git
+cd corral
+uv sync --project tasks/samplemath
+```
 
-1. **Clone the repository**
+Start a local Temporal service in one terminal:
 
-   ```bash
-   git clone https://github.com/lamalab-org/corral.git
-   cd corral
-   ```
+```bash
+temporal server start-dev
+```
 
-2. **Install the framework**
-
-   ```bash
-   uv pip install -e .
-   ```
-
-### Quick Start
-
-Agents and environments are registered on Temporal workers. The client-side
-runner contains only their IDs and benchmark scheduling metadata:
+Save this as `quickstart.py` in the repository root:
 
 ```python
+import asyncio
+from uuid import uuid4
+
+from dotenv import load_dotenv
 from temporalio.client import Client
 
-from corral import BenchmarkTaskMetadata, CorralRunner, TemporalBenchmarkExecutor
+from corral import (
+    CorralActivities,
+    RuntimeRegistry,
+    TaskWorkflowInput,
+    TemporalTaskExecutor,
+    create_worker,
+    execute_task,
+    load_environment_group,
+)
+from corral.agents import ToolCallingAgent
 from corral.persistence import JSONLStateStore
 
+AGENT_ID = "tool-calling"
+TASK_ID = "task1"
+TASK_QUEUE = "corral-quickstart"
+MODEL = "openai/gpt-5.6"
 
-async def run_benchmark():
-    client = await Client.connect("localhost:7233")
-    store = JSONLStateStore(".corral/states.jsonl")
-    executor = TemporalBenchmarkExecutor(client, task_queue="corral")
-    runner = CorralRunner(
-        executor,
-        {
-            "math_1": BenchmarkTaskMetadata(
-                agent_id="react-gpt4o",
-                environment_id="samplemath",
-                model="gpt-4o",
-                max_iterations=10,
-            )
-        },
-        state_store=store,
+
+async def main():
+    load_dotenv()
+    environment = load_environment_group("samplemath")[TASK_ID]
+    store = JSONLStateStore(".corral/quickstart-states.jsonl")
+    registry = RuntimeRegistry(
+        agents={AGENT_ID: ToolCallingAgent(model=MODEL)},
+        environments={TASK_ID: environment},
     )
 
-    return await runner.run("samplemath-run-1")
+    try:
+        client = await Client.connect("localhost:7233")
+        async with create_worker(
+            client,
+            task_queue=TASK_QUEUE,
+            activities=CorralActivities(store, registry),
+        ):
+            state = await execute_task(
+                executor=TemporalTaskExecutor(
+                    client,
+                    state_store=store,
+                    task_queue=TASK_QUEUE,
+                ),
+                task=TaskWorkflowInput(
+                    execution_id=f"samplemath-task1-{uuid4().hex}",
+                    task_id=TASK_ID,
+                    environment_id=TASK_ID,
+                    agent_id=AGENT_ID,
+                    model=MODEL,
+                    max_iterations=10,
+                    evaluate=False,
+                ),
+            )
+    finally:
+        registry.close()
+        store.close()
+
+    print(f"status: {state.runtime.status}")
+    print(f"answer: {state.submission}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
+
+Run it with the SampleMath environment's virtual environment:
+
+```bash
+uv run --project tasks/samplemath python quickstart.py
+```
+
+`evaluate=False` is explicit here: the result is the agent's final immutable
+`State`, and the example prints only its status and submitted answer. No scorer,
+aggregate metric, or benchmark report runs. `task1` is independent; use the
+task-group path below for a task such as `task4` whose inputs come from earlier
+tasks.
 
 ## 📊 Running Benchmarks
 
-### Selecting Tasks and Trials
+### Run `ToolCallingAgent` from the command line
+
+[`run_scripts/run_tool_calling.py`](run_scripts/run_tool_calling.py) starts a Corral
+worker in the same process and runs the selected environment through the normal
+Temporal benchmark path. The runner infers `BenchmarkTaskMetadata` and includes
+the selected task's dependencies automatically. Start a local Temporal service
+first:
+
+```bash
+temporal server start-dev
+```
+
+Run the script with the virtual environment belonging to the task package.
+For example, to inspect SampleMath and then run `task4` (including its transitive
+dependencies):
+
+```bash
+uv sync --project tasks/samplemath
+uv run --project tasks/samplemath python run_scripts/run_tool_calling.py \
+  --environment samplemath --list-tasks
+
+uv run --project tasks/samplemath python run_scripts/run_tool_calling.py \
+  --environment samplemath --task task4 --model openai/gpt-4o \
+  --report .corral/samplemath-report.json
+```
+
+The built-in presets are `afm`, `catalyst`, `corral_md`, `ml`,
+`resistor_network`, `retrosynthesis`, `samplemath`, `spectra_elucidation`, and
+`wetlab`. These are fixed choices for `--environment`. Use `--env-kwargs` for
+environment-specific configuration, including the common `level`, `subtasks`,
+`task_config`, and `work_dir` keys. Environment dependencies and credentials
+still need to be configured as described in each task package's README.
+
+Omit `--task` to run every task returned by the environment. Pass `--task`
+multiple times to select specific tasks; their required dependencies are
+included automatically.
+
+Activity and heartbeat timeouts are disabled by default. Set either one in
+seconds when a deployment needs a deadline or liveness detection, for example
+`--activity-timeout 1800 --heartbeat-timeout 30`; both options also accept
+`none` explicitly.
+
+For example, select SampleMath's subtask set with one environment argument:
+
+```bash
+python run_scripts/run_tool_calling.py --environment samplemath \
+  --env-kwargs '{"subtasks": true}'
+```
+
+### Scored, Multi-Trial Benchmarks
+
+`CorralRunner` is the higher-level convenience layer for repeated trials,
+evaluation, metric calculation, and reports. Use it after the direct execution
+path above when those benchmark features are actually needed. Given the
+`client`, `store`, and all-task worker from the task-group example:
 
 ```python
+from corral import CorralRunner, TemporalBenchmarkExecutor
+
+environments = load_environment_group("samplemath")
+runner = CorralRunner(
+    TemporalBenchmarkExecutor(client, task_queue=TASK_QUEUE),
+    environments=environments,
+    agent_id=AGENT_ID,
+    model=MODEL,
+    max_iterations=10,
+    state_store=store,
+)
 result = await runner.run(
     "samplemath-run-2",
-    task_ids=["math_1", "math_2"],
+    task_ids=["task1", "task2"],
     trials_per_task=3,
     k_values=[1, 2, 3],
     max_parallel=4,
@@ -120,97 +235,18 @@ The framework includes several built-in agent types:
 
 ### AIScientistAgent
 
-Uses progressive tree search over Corral tool experiments. It formulates
-hypotheses, runs preliminary and discriminating investigations, optionally tunes
-experimental parameters, verifies conclusions, and synthesizes a submit-ready
-answer from a global evidence journal. Each tree node is one bounded scientific
-experiment: an experiment worker chooses one tool action, observes its result,
-and then chooses the next action without branching the tree between tool calls.
+Uses progressive tree search to formulate hypotheses, run experiments, refine
+results, and verify conclusions. It is based on Sakana AI's original
+[AI Scientist v2 implementation](https://github.com/SakanaAI/AI-Scientist-v2).
 
 ```python
-from corral.agents import AIScientistAgent, AIScientistConfig
+from corral.agents import AIScientistAgent
 
 agent = AIScientistAgent(
     model="gpt-4o",
     evaluator_model="gpt-4o",
-    config=AIScientistConfig(
-        max_tool_calls=24,
-        max_actions_per_node=3,
-        max_children_per_node=3,
-        tree_exploration_weight=0.1,
-        max_llm_tokens=200_000,
-    ),
 )
 ```
-
-The default configuration now relies on its per-stage search budgets (18
-ordinary nodes in total) instead of a three-node global cap. Search nodes and
-stage-boundary validation nodes have independent optional caps via
-`max_search_nodes` and `max_validation_nodes`. A failed preliminary stage is a
-hard gate, so later research never
-builds on a non-working baseline.
-
-Successful internal checkpoints remain expandable until their child cap is
-reached, allowing several alternative refinements instead of only one chain.
-Each main stage has its own search scope and is seeded explicitly by the
-previous stage's listwise-selected winner. Tuning and research continue until a
-new checkpoint beats that seed or their budget is exhausted; the manager can
-create a new evidence-dependent substage only after the critic confirms that
-the current agenda's observable criteria have been met. Tuning experiments all
-derive from the Stage-1 winner and verification experiments all derive from the
-Stage-3 winner, except continuations/debugs that repair one experiment. Winning
-checkpoints are independently replicated and aggregated at stage boundaries,
-while Stage 4 remains focused on ablations and optional counterfactual tests.
-
-When tools expose a declared task-internal scalar, the manager parses its value
-and provenance from actual observations and uses it as the objective ranking
-anchor; it never reads the benchmark score. Non-continuation children use the
-`auto` trial-state strategy by default: clone-capable environments inherit a
-checkpoint, while other environments start clean. Set
-`trial_state_inheritance="replay"` only when a stateful environment requires
-inheritance but cannot clone trials. If a local trial produces plot/image artifacts,
-the evaluator sends them to a multimodal-capable model gateway and records its
-visual feedback in the research journal. Boundary repetitions can be disabled
-for deterministic or especially costly tasks with
-`stage_boundary_replications=0`.
-
-For comparison with AI Scientist v2 rather than the cheaper Corral defaults,
-use `SakanaAIScientistConfig`. It supplies the 20/12/12/18 stage budgets,
-0.5 debug probability, debug depth 3, and four experiment workers. Stage 1/3
-fill each worker batch by selecting parents independently, prefer distinct root
-trees before reuse, and use listwise LLM selection with deterministic metric
-fallback. The profile also uses fixed-baseline tuning/ablation, runs Stage 3/4
-to their full budgets, validates the best result when a non-initial stage
-exhausts its budget, allows up to 16 children and 16 adaptive actions per node,
-debugs failed leaves as a chain instead of repeatedly branching from an
-already-expanded failure, always attempts Stage 2 (including procedural or
-experimental tuning), and treats any tool-successful working Stage-1 node as
-sufficient to advance without an extra critic-validity gate.
-
-Sakana-profile boundary replication replays the winner's exact realized action
-sequence in clean trials rather than asking an LLM to reconstruct it. A
-schema-declared `seed` or `random_state` argument is changed to seeds 0, 1, and
-2; tools without either field receive independent byte-for-byte logical
-replays. Aggregation records deterministic run/success counts and, when all
-replications expose the declared scalar objective, its values, mean, sample
-standard deviation, standard error, and seeds before the critic interprets the
-evidence. The profile does not include AI Scientist's manuscript, citation, or
-review pipeline.
-
-Agent constructors contain model/scaffold configuration only. The interaction
-budget is configured once per task through
-`BenchmarkTaskMetadata(max_iterations=...)` and is supplied to every agent by
-its `AgentSession`; agent-level `max_iterations`/`max_turns` arguments are not
-supported.
-
-Compound agents use the same session protocol as direct agents. LLMPlanner and
-Reflexion run their executor/actor with `AgentSession.run_delegate(...)`, which
-applies the normal hook and `submit_answer` lifecycle without double-counting
-usage; planning/reflection calls are deducted before the delegate receives the
-remaining task interaction budget. AI Scientist creates isolated speculative histories with
-`fork_branch(...)` and promotes its selected history with `adopt_branch(...)`;
-its tree-search behavior remains distinct while every physical action still
-crosses an `AgentSession` boundary.
 
 ### ReActAgent
 

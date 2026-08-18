@@ -13,7 +13,6 @@ from corral.core.tool_description import (
     default_argument_description,
     default_tool_description,
 )
-from corral.core.tool_utils import format_json_schema_type
 
 
 class ToolCallStatus(Enum):
@@ -212,16 +211,13 @@ class Tool:
 
     def get_usage_guide(self) -> str:
         """Generate a human-readable usage guide for the tool."""
-        properties = self._params_json_schema.get("properties", {})
         args_desc = []
         for arg in self.arguments:
-            prop = properties.get(arg.name, {})
-            type_str = format_json_schema_type(prop) if prop else arg.type
             required = (
                 "required" if arg.required else f"optional, default: {arg.default}"
             )
             args_desc.append(
-                f"- {arg.name} ({type_str}, {required}): "
+                f"- {arg.name} ({arg.type}, {required}): "
                 f"{default_argument_description(arg.description)}"
             )
 
@@ -353,7 +349,6 @@ def tool(
         class _FunctionTool(Tool):
             def __init__(self):
                 self._func = func
-                self._openai_function_tool = ft
                 self._field_defaults = _extract_field_defaults(func)
                 super().__init__(
                     name=ft.name,

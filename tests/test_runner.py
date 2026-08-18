@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from corral.core import submit_answer_action
+from corral.core.environment import Environment, Toolset
 from corral.core.state import RuntimeState, State, UsageState
+from corral.core.task import InputRef, TaskDefinition
 from corral.orchestration import (
     BenchmarkWorkflowResult,
     EvaluationRef,
@@ -93,6 +95,62 @@ def _metadata() -> dict[str, BenchmarkTaskMetadata]:
     }
 
 
+def _environment(task_id: str, *dependencies: str) -> Environment:
+    return Environment(
+        task_id,
+        TaskDefinition(
+            name=task_id,
+            description=f"Run {task_id}",
+            tools=[],
+            scoring_fn=lambda answer: float(bool(answer)),
+            submission_format={"answer": "string"},
+            input_map={dependency: InputRef(dependency) for dependency in dependencies},
+            resolve_answer=False,
+        ),
+        toolset=Toolset(workspace_factory=None),
+    )
+
+
+def test_runner_infers_metadata_from_environments_by_default():
+    result = BenchmarkWorkflowResult("benchmark", (), 1, ())
+    runner = CorralRunner(
+        RecordingExecutor(result),
+        environments={
+            "upstream": _environment("upstream"),
+            "downstream": _environment("downstream", "upstream"),
+        },
+        agent_id="tool-calling",
+        model="openai/gpt-4o",
+        max_iterations=12,
+    )
+
+    assert runner.tasks == {
+        "upstream": BenchmarkTaskMetadata(
+            agent_id="tool-calling",
+            environment_id="upstream",
+            model="openai/gpt-4o",
+            max_iterations=12,
+        ),
+        "downstream": BenchmarkTaskMetadata(
+            agent_id="tool-calling",
+            environment_id="downstream",
+            dependencies=("upstream",),
+            model="openai/gpt-4o",
+            max_iterations=12,
+        ),
+    }
+
+
+def test_runner_requires_one_metadata_source():
+    result = BenchmarkWorkflowResult("benchmark", (), 1, ())
+    executor = RecordingExecutor(result)
+
+    with pytest.raises(ValueError, match="exactly one"):
+        CorralRunner(executor)
+    with pytest.raises(ValueError, match="exactly one"):
+        CorralRunner(executor, _metadata(), environments={})
+
+
 def test_runner_builds_dependency_closed_temporal_metadata():
     executor = RecordingExecutor(BenchmarkWorkflowResult("benchmark", (), 1, ()))
     runner = CorralRunner(executor, _metadata())
@@ -129,7 +187,23 @@ def test_runner_rejects_an_incomplete_task_selection():
     runner = CorralRunner(RecordingExecutor(result), _metadata())
 
     with pytest.raises(ValueError, match="dependency-closed"):
-        runner.build_workflow_input("benchmark", task_ids=("downstream",))
+        runner.build_workflow_input(
+            "benchmark",
+            task_ids=("downstream",),
+            include_dependencies=False,
+        )
+
+
+def test_runner_includes_dependencies_by_default():
+    result = BenchmarkWorkflowResult("benchmark", (), 1, ())
+    runner = CorralRunner(RecordingExecutor(result), _metadata())
+
+    request = runner.build_workflow_input(
+        "benchmark",
+        task_ids=("downstream",),
+    )
+
+    assert request.task_ids == ("upstream", "downstream")
 
 
 @pytest.mark.anyio()

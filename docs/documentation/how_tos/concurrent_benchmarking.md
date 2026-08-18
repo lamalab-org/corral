@@ -48,10 +48,11 @@ tasks = {
 }
 ```
 
-Dependencies are metadata too. A selected task set must be dependency-closed;
-the runner validates it before starting the Workflow. Temporal waits for
-same-round parents, propagates their runtime outputs, and marks descendants
-unreachable when a parent produces no valid output.
+Dependencies are metadata too. The runner makes a selected task set
+dependency-closed automatically before starting the Workflow. Temporal waits
+for same-round parents, propagates their runtime outputs, and marks descendants
+unreachable when a parent produces no valid output. Pass
+`include_dependencies=False` to request strict validation instead.
 
 ```python
 tasks = {

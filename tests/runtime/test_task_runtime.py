@@ -3,6 +3,7 @@
 import json
 from datetime import datetime, timezone
 from itertools import pairwise
+from pathlib import Path
 from typing import Any, Literal
 from uuid import NAMESPACE_URL, uuid5
 
@@ -267,6 +268,41 @@ async def test_runtime_persists_each_tool_boundary_and_reuses_completion(tmp_pat
     ]
     assert len(heads) == len(states)
     assert heads[-1]["state_hash"] == final.state_hash
+
+
+@pytest.mark.anyio()
+async def test_runtime_captures_workspace_without_nesting_event_loops(tmp_path):
+    task = TaskDefinition(
+        name="workspace-task",
+        description="submit an answer",
+        tools=[],
+        scoring_fn=lambda _answer: 1.0,
+        submission_format={"answer": "string"},
+        resolve_answer=False,
+    )
+    environment = Environment(
+        "workspace-task",
+        task,
+        base_work_dir=str(tmp_path / "workspaces"),
+        toolset=Toolset(pool={}, workspace_factory=lambda _root: {}),
+        task_execution_id="workspace-execution",
+    )
+    workspace_path = environment.workspace_path
+    assert workspace_path is not None
+    workspace_file = Path(workspace_path) / "input.txt"
+    workspace_file.write_text("workspace input")
+
+    with JSONLStateStore(tmp_path / "workspace-states.jsonl") as store:
+        final = await TaskRuntime(store).run(
+            OutcomeSessionAgent(AgentOutcome(status="completed", answer="42")),
+            environment,
+            execution_id="workspace-runtime",
+            started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            max_iterations=1,
+        )
+
+    assert final.runtime.status == "submitted"
+    assert final.workspace.files["input.txt"].size == len("workspace input")
 
 
 @pytest.mark.anyio()

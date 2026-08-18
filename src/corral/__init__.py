@@ -15,6 +15,16 @@ _EXPORTS = {
     "CorralActivities": ("corral.orchestration", "CorralActivities"),
     "CorralRunner": ("corral.run", "CorralRunner"),
     "EvaluationResult": ("corral.evaluation", "EvaluationResult"),
+    "ENVIRONMENT_NAMES": (
+        "corral.environment_loader",
+        "ENVIRONMENT_NAMES",
+    ),
+    "ENVIRONMENT_PRESETS": (
+        "corral.environment_loader",
+        "ENVIRONMENT_PRESETS",
+    ),
+    "EnvironmentPreset": ("corral.environment_loader", "EnvironmentPreset"),
+    "EnvironmentName": ("corral.environment_loader", "EnvironmentName"),
     "Metric": ("corral.report.metrics", "Metric"),
     "MetricMetadata": ("corral.report.metrics", "MetricMetadata"),
     "LangfuseObserver": ("corral.observability", "LangfuseObserver"),
@@ -36,15 +46,27 @@ _EXPORTS = {
     "create_worker": ("corral.orchestration", "create_worker"),
     "execute_task": ("corral.orchestration", "execute_task"),
     "get_default_metrics": ("corral.report.metrics", "get_default_metrics"),
+    "load_environment_group": (
+        "corral.environment_loader",
+        "load_environment_group",
+    ),
+    "normalise_environment_name": (
+        "corral.environment_loader",
+        "normalise_environment_name",
+    ),
     "project_benchmark_result": ("corral.run", "project_benchmark_result"),
 }
 
 __all__ = [
+    "ENVIRONMENT_NAMES",
+    "ENVIRONMENT_PRESETS",
     "ActivityPolicy",
     "BenchmarkTaskMetadata",
     "BenchmarkWorkflowInput",
     "CorralActivities",
     "CorralRunner",
+    "EnvironmentName",
+    "EnvironmentPreset",
     "EvaluationResult",
     "LangfuseObserver",
     "Metric",
@@ -61,6 +83,8 @@ __all__ = [
     "create_worker",
     "execute_task",
     "get_default_metrics",
+    "load_environment_group",
+    "normalise_environment_name",
     "project_benchmark_result",
 ]
 
