@@ -65,6 +65,11 @@ answer, and State hash, and writes the durable State to
 generate a benchmark report. Because it executes exactly one task, it rejects a
 task with upstream dependencies and points to `corral bench` instead.
 
+Keep the command running while its in-process worker executes the task. Temporal
+retains the durable Workflow history; re-running with the same `--execution-id`,
+task queue, and State file attaches to that execution with a new in-process
+worker.
+
 The equivalent Python API is below. Save this as `quickstart.py` in the current
 `tasks/samplemath` directory:
 
@@ -175,6 +180,11 @@ uv run corral bench \
   --report .corral/samplemath-react-report.json
 ```
 
+`corral bench` calls the same `CorralRunner` and
+`TemporalBenchmarkExecutor` used by Python callers. It hosts the Temporal worker,
+worker-side registry, and Activities in the CLI process for the duration of the
+benchmark.
+
 If that environment is already activated, `uv run` is optional and the command
 is simply `corral bench ...`. The `--project` form is only needed when invoking
 `uv` from elsewhere in the monorepo.
@@ -204,11 +214,11 @@ uv run corral bench \
 
 ### Compatibility `ToolCallingAgent` script
 
-[`run_scripts/run_tool_calling.py`](run_scripts/run_tool_calling.py) starts a Corral
-worker in the same process and runs the selected environment through the normal
-Temporal benchmark path. The runner infers `BenchmarkTaskMetadata` and includes
-the selected task's dependencies automatically. Its existing options, defaults,
-and invocation remain supported:
+[`run_scripts/run_tool_calling.py`](run_scripts/run_tool_calling.py) delegates to
+the same local benchmark execution function as `corral bench`; it does not maintain
+a separate runner implementation. The runner infers `BenchmarkTaskMetadata`
+and includes the selected task's dependencies automatically. Its existing
+options, defaults, and invocation remain supported:
 
 From the repository root:
 
@@ -236,7 +246,8 @@ included automatically.
 Activity and heartbeat timeouts are disabled by default. Set either one in
 seconds when a deployment needs a deadline or liveness detection, for example
 `--activity-timeout 1800 --heartbeat-timeout 30`; both options also accept
-`none` explicitly.
+`none` explicitly. Activities emit heartbeats every five seconds while long
+operations are running.
 
 For example, select SampleMath's subtask set with one environment argument:
 
@@ -428,7 +439,6 @@ directory and post-processing LLM call are gone.
    from corral.core.task import TaskDefinition
 
    from .tools import my_custom_tool
-
 
    task = TaskDefinition(
        name="task_1",
