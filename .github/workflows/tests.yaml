@@ -88,8 +88,9 @@ jobs:
       - name: Discover tasks with tests
         id: discover
         run: |
-          # Find all directories in tasks/ that have both pyproject.toml and tests/
+          # Wetlab is tested separately because it requires a Conda-only dependency.
           tasks=$(find tasks -maxdepth 1 -type d -name "*" | while read task_dir; do
+            if [[ "$(basename "$task_dir")" == "wetlab" ]]; then continue; fi
             if [[ -f "$task_dir/pyproject.toml" ]] && [[ -d "$task_dir/tests" ]]; then
               echo "$(basename "$task_dir")"
             fi
@@ -138,6 +139,31 @@ jobs:
           # Run tests using uv run and ensure pytest uses the local config
           uv run python -m pytest tests -v --rootdir=.
         working-directory: ./tasks/${{ matrix.task }}
+
+  # Wetlab requires Reaktoro, which is available from Conda but not from PyPI
+  test-wetlab:
+    needs: [code-quality, test-main]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Install Conda
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          activate-environment: ""
+          auto-activate: false
+          conda-remove-defaults: true
+          miniforge-version: latest
+
+      - name: Create wetlab environment
+        run: conda env create --file environment.yml
+        working-directory: ./tasks/wetlab
+
+      - name: Run wetlab tests
+        run: conda run --no-capture-output -n wetlab python -m pytest tests -v --rootdir=.
+        working-directory: ./tasks/wetlab
 
   # Discover tasks with env.py files for server setup checking
   discover-env-tasks:
@@ -207,7 +233,7 @@ jobs:
 
   # Summary job to check all results
   test-summary:
-    needs: [test-main, test-tasks, check-env-servers]
+    needs: [test-main, test-tasks, test-wetlab, check-env-servers]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -216,12 +242,14 @@ jobs:
           env_result="${{ needs.check-env-servers.result }}"
           if [[ "${{ needs.test-main.result }}" == "success" ]] && \
              [[ "${{ needs.test-tasks.result }}" == "success" ]] && \
+             [[ "${{ needs.test-wetlab.result }}" == "success" ]] && \
              [[ "$env_result" == "success" || "$env_result" == "skipped" ]]; then
             echo "✅ All tests passed!"
           else
             echo "❌ Some tests failed:"
             echo "Main tests: ${{ needs.test-main.result }}"
             echo "Task tests: ${{ needs.test-tasks.result }}"
+            echo "Wetlab tests: ${{ needs.test-wetlab.result }}"
             echo "Env server checks: $env_result"
             exit 1
           fi
