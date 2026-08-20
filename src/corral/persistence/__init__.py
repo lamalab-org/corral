@@ -1,4 +1,4 @@
-"""Persistence backends for immutable Corral State revisions."""
+"""Persistence backends for authored execution commits and artifacts."""
 
 from corral.persistence.artifacts import (
     ArtifactIntegrityError,
@@ -9,13 +9,15 @@ from corral.persistence.artifacts import (
     StoredBlob,
 )
 from corral.persistence.base import (
-    StateIntegrityError,
-    StateNotFoundError,
-    StateStore,
-    StateStoreError,
-    StateTransitionConflictError,
+    AuthorPermissionError,
+    BoundCommitStore,
+    CommitConflictError,
+    CommitIntegrityError,
+    CommitNotFoundError,
+    CommitStore,
+    CommitStoreError,
 )
-from corral.persistence.jsonl import JSONLStateStore
+from corral.persistence.sqlite import SQLiteCommitStore
 from corral.persistence.workspace import (
     WorkspaceDestinationError,
     WorkspaceManager,
@@ -28,13 +30,15 @@ __all__ = [
     "ArtifactNotFoundError",
     "ArtifactStore",
     "ArtifactStoreError",
-    "JSONLStateStore",
+    "AuthorPermissionError",
+    "BoundCommitStore",
+    "CommitConflictError",
+    "CommitIntegrityError",
+    "CommitNotFoundError",
+    "CommitStore",
+    "CommitStoreError",
     "LocalArtifactStore",
-    "StateIntegrityError",
-    "StateNotFoundError",
-    "StateStore",
-    "StateStoreError",
-    "StateTransitionConflictError",
+    "SQLiteCommitStore",
     "StoredBlob",
     "WorkspaceDestinationError",
     "WorkspaceManager",

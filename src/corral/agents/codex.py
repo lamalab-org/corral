@@ -33,6 +33,7 @@ from corral.agents.schema import (
     AgentUsage,
 )
 from corral.agents.session import AgentSession
+from corral.agents.usage import usage_field
 from corral.agents.utils import LiteLLMMessage
 
 # Name under which the corral MCP server is registered with the Codex harness
@@ -534,21 +535,48 @@ class CodexAgent(BaseAgent):
         )
 
     def _record_usage(self, usage: Any, run: _RunState) -> None:
-        """Map the Codex thread token usage onto the base token-usage schema."""
-        total = getattr(usage, "total", None) or usage
-        input_tokens = int(getattr(total, "input_tokens", 0) or 0)
-        cached = int(getattr(total, "cached_input_tokens", 0) or 0)
-        completion_tokens = int(getattr(total, "output_tokens", 0) or 0)
-        total_tokens = int(
-            getattr(total, "total_tokens", 0) or (input_tokens + completion_tokens)
-        )
+        """Record canonical scratch usage from a Codex token-usage update."""
+        normalized = self._usage(usage)
+        total = usage_field(usage, "total", None)
+        total = usage if total is None else total
+        cached = int(usage_field(total, "cached_input_tokens", 0) or 0)
         run.usage = {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "input_tokens": input_tokens,
+            "input_tokens": normalized.input_tokens,
+            "output_tokens": normalized.output_tokens,
+            "reasoning_tokens": normalized.reasoning_tokens,
+            "total_tokens": normalized.input_tokens + normalized.output_tokens,
             "cached_input_tokens": cached,
         }
+
+    def _usage(
+        self,
+        raw_usage: Any,
+        *,
+        llm_calls: int = 0,
+    ) -> AgentUsage:
+        """Extract Codex's nested ``usage.total`` token fields."""
+        total = usage_field(raw_usage, "total", None)
+        total = raw_usage if total is None else total
+        return super()._usage(
+            {
+                "input_tokens": usage_field(
+                    total,
+                    "input_tokens",
+                    usage_field(total, "prompt_tokens", 0),
+                ),
+                "output_tokens": usage_field(
+                    total,
+                    "output_tokens",
+                    usage_field(total, "completion_tokens", 0),
+                ),
+                "reasoning_tokens": usage_field(
+                    total,
+                    "reasoning_tokens",
+                    usage_field(total, "reasoning_output_tokens", 0),
+                ),
+            },
+            llm_calls=llm_calls,
+        )
 
     def _normalize_prompt(self, task_guide: Any) -> tuple[str, bool]:
         """Flatten a raw task prompt into the plain-text Codex input.
@@ -613,9 +641,7 @@ class CodexAgent(BaseAgent):
         # Record the hash of the MCP tool schema the harness actually receives
         # (`tools/list` == `Tool.to_mcp`), so the run provenance well and truly
         # captures what tools the agent saw.
-        task_id = str(
-            session.initial_state.metadata.task.get("id") or session.execution_id
-        )
+        task_id = str(getattr(session, "task_id", session.execution_id))
         developer_instructions = self._developer_instructions(
             session.surrender_allowed, tool_names
         )
@@ -646,15 +672,9 @@ class CodexAgent(BaseAgent):
         for message in run.messages:
             await session.record_message(message)
         result = run.result
-        usage = AgentUsage(
-            input_tokens=int(run.usage.get("prompt_tokens", 0) or 0),
-            output_tokens=int(run.usage.get("completion_tokens", 0) or 0),
+        usage = self._usage(
+            run.usage,
             llm_calls=int(run.metadata.get("sdk_turns", 0) or 0),
-            metadata={
-                key: value
-                for key, value in run.usage.items()
-                if key not in {"prompt_tokens", "completion_tokens", "total_tokens"}
-            },
         )
         if result is None:
             return AgentOutcome(

@@ -19,7 +19,7 @@ from corral.agents.schema import AgentOutcome
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
-from corral.persistence import JSONLStateStore
+from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
 
@@ -199,6 +199,22 @@ def test_claude_is_only_a_new_session_agent():
     assert not hasattr(agent, "harness_result")
 
 
+def test_claude_usage_includes_cached_and_cache_created_input_tokens():
+    usage = ClaudeCodeAgent()._usage(
+        {
+            "input_tokens": 100,
+            "output_tokens": 25,
+            "cache_read_input_tokens": 5,
+            "cache_creation_input_tokens": 7,
+        },
+        llm_calls=3,
+    )
+
+    assert usage.input_tokens == 112
+    assert usage.output_tokens == 25
+    assert usage.llm_calls == 3
+
+
 @pytest.mark.anyio()
 async def test_run_session_returns_typed_outcome_and_preserves_harness(
     monkeypatch,
@@ -237,7 +253,7 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
     assert outcome.usage.input_tokens == 105
     assert outcome.usage.output_tokens == 25
     assert outcome.usage.llm_calls == 3
-    assert outcome.usage.metadata["cache_read_input_tokens"] == 5
+    assert outcome.usage.reasoning_tokens == 0
     assert outcome.metadata["session_id"] == "claude-session-1"
     assert outcome.metadata["mcp_tools_exposed"] == ["submit_answer", "test_tool"]
 
@@ -450,7 +466,7 @@ async def test_claude_submits_through_the_session_mcp_tool(monkeypatch, tmp_path
         toolset=Toolset(pool={}, workspace_factory=None),
     )
 
-    with JSONLStateStore(tmp_path / "states.jsonl") as store:
+    with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
         final = await TaskRuntime(store).run(
             ClaudeCodeAgent(),
             environment,

@@ -17,7 +17,7 @@ from corral.agents.codex import HarnessRunResult
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
-from corral.persistence import JSONLStateStore
+from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
 
@@ -102,6 +102,26 @@ async def test_codex_uses_session_mcp_and_returns_typed_outcome(monkeypatch):
     assert not hasattr(agent, "arun")
     assert not hasattr(agent, "step")
     assert not hasattr(agent, "arun_agent")
+
+
+def test_codex_extracts_usage_from_nested_total():
+    agent = CodexAgent(model="gpt-test", system_prompt="system")
+
+    usage = agent._usage(
+        SimpleNamespace(
+            total=SimpleNamespace(
+                input_tokens=13,
+                output_tokens=5,
+                reasoning_output_tokens=2,
+            )
+        ),
+        llm_calls=1,
+    )
+
+    assert usage.input_tokens == 13
+    assert usage.output_tokens == 5
+    assert usage.reasoning_tokens == 2
+    assert usage.llm_calls == 1
 
 
 @pytest.mark.anyio()
@@ -221,7 +241,7 @@ async def test_codex_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
     )
     agent = CodexAgent(model="gpt-test", system_prompt="system")
 
-    with JSONLStateStore(tmp_path / "states.jsonl") as store:
+    with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
         final = await TaskRuntime(store).run(
             agent,
             environment,
@@ -233,14 +253,15 @@ async def test_codex_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
     assert final.submission == "42"
     assert final.usage.input_tokens == 10
     assert final.usage.output_tokens == 2
-    assert final.usage.metadata["cached_input_tokens"] == 3
+    assert final.usage.reasoning_tokens == 0
     assert final.tool_statistics == {"submit_answer": 1}
     assert any(
         message.get("content") == "Codex completed the task"
-        for message in final.messages
+        for conversation in final.conversations.values()
+        for message in conversation
     )
     assert final.runtime.metadata["agent_status"] == "completed"
-    session_metadata = final.runtime.metadata["session_metadata"]
+    session_metadata = next(iter(final.agent_runs.values())).metadata
     assert session_metadata["harness_status"] == "success"
     assert session_metadata["num_tool_calls"] == 1
     assert not hasattr(agent, "harness_result")

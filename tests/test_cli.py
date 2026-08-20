@@ -252,7 +252,7 @@ def test_run_parser_requires_one_task_and_has_non_benchmark_defaults():
     assert args.agent == "react"
     assert args.task == "task1"
     assert args.model == "openai/test-model"
-    assert args.state_file == ".corral/run-states.jsonl"
+    assert args.commit_file == ".corral/run-commits.sqlite3"
     assert not hasattr(args, "trials")
     assert not hasattr(args, "report")
 
@@ -319,8 +319,8 @@ def test_run_executes_one_task_without_a_benchmark(monkeypatch, tmp_path, capsys
             "task1",
             "--execution-id",
             "cli-direct-task",
-            "--state-file",
-            str(tmp_path / "run-states.jsonl"),
+            "--commit-file",
+            str(tmp_path / "run-commits.sqlite3"),
         ]
     )
 

@@ -69,9 +69,9 @@ tasks = {
 ```
 
 Retries, cancellation, progress tracking, and benchmark-batch Continue-As-New
-are handled by Temporal. Each task is one Activity, while its StateStore history
-contains task setup, before-tool, after-tool, and task-end checkpoints. The
-execution head advances atomically, so a retry resumes the latest canonical
-State and finishes an already-proposed Action before asking the agent for a new
-decision. There is no local checkpoint directory or synchronous
+are handled by Temporal. Each task is one Activity, while its commit history
+contains typed setup, action, tool-effect, and terminal commits. The execution
+head advances atomically, so a retry replays the latest projection and finishes
+an already-proposed Action before asking the agent for a new decision. There is
+no local checkpoint directory or synchronous
 `bench()`/asynchronous `abench()` split.

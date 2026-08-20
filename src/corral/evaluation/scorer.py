@@ -1,9 +1,10 @@
 """Evaluation models and scorer implementations.
 
 Evaluation deliberately lives outside the task-execution runtime. A scorer
-receives an immutable, completed :class:`~corral.core.state.State`, computes
-benchmark-only information, and returns it as a sibling result. It cannot add
-correctness, ground-truth feedback, or benchmark coordinates to State.
+receives an immutable, completed :class:`~corral.core.state.ExecutionState`,
+computes benchmark-only information, and returns it as a sibling result. It
+cannot add correctness, ground-truth feedback, or benchmark coordinates to the
+execution projection.
 """
 
 from __future__ import annotations
@@ -18,14 +19,14 @@ from corral.core._immutable import FrozenModel, validate_sha256_hex
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from corral.core.state import State
+    from corral.core.state import ExecutionState
     from corral.core.task import TaskDefinition
 
 
 class EvaluationResult(FrozenModel):
-    """Benchmark-only result associated with one immutable final State."""
+    """Benchmark-only result associated with one immutable final projection."""
 
-    state_hash: str
+    commit_hash: str
     score: float
     metrics: dict[str, float] = Field(default_factory=dict)
     feedback: str | None = None
@@ -33,13 +34,13 @@ class EvaluationResult(FrozenModel):
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
     def model_post_init(self, __context: object, /) -> None:
-        validate_sha256_hex(self.state_hash, field_name="state_hash")
+        validate_sha256_hex(self.commit_hash, field_name="commit_hash")
 
 
 class Scorer(Protocol):
-    """Evaluate a completed State without mutating execution data."""
+    """Evaluate a completed projection without mutating execution data."""
 
-    def evaluate(self, state: State) -> EvaluationResult: ...
+    def evaluate(self, state: ExecutionState) -> EvaluationResult: ...
 
 
 def _callable_version(task: TaskDefinition) -> str:
@@ -74,24 +75,24 @@ class TaskScorer:
     workspace: str | Path | None = None
     scorer_version: str | None = None
 
-    def evaluate(self, state: State) -> EvaluationResult:
-        """Evaluate a successful runtime output and leave State unchanged."""
+    def evaluate(self, state: ExecutionState) -> EvaluationResult:
+        """Evaluate a successful runtime output and leave the projection unchanged."""
         if state.submission is None or state.runtime.status == "surrendered":
             raise ValueError(
                 "only a completed, non-surrendered submission can be evaluated"
             )
 
-        state_hash = state.state_hash
+        commit_hash = state.through_commit_hash
         answer = _resolve_submission(self.task, state.submission, self.workspace)
         score = float(self.task.scoring_fn(answer))
 
         # The immutable model already prevents normal mutation. Checking the
         # content hash makes score purity an explicit runtime invariant too.
-        if state.state_hash != state_hash:
-            raise RuntimeError("scorer mutated State")
+        if state.through_commit_hash != commit_hash:
+            raise RuntimeError("scorer mutated the execution projection")
 
         return EvaluationResult(
-            state_hash=state_hash,
+            commit_hash=commit_hash,
             score=score,
             metrics={"score": score},
             scorer_version=self.scorer_version or _callable_version(self.task),

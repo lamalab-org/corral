@@ -1,10 +1,4 @@
-"""Backend-independent, failure-isolated task observations.
-
-Observers receive immutable State snapshots at the transition boundaries. They
-never participate in persistence, retries, or control flow; a broken observer
-is deliberately equivalent to :class:`NoOpObserver` from the runtime's point
-of view.
-"""
+"""Failure-isolated observations centered on persisted authored commits."""
 
 from __future__ import annotations
 
@@ -21,22 +15,14 @@ from pydantic import BaseModel
 from corral.logging import event, exception_fields
 
 if TYPE_CHECKING:
-    from corral.core.action import Action
-    from corral.core.state import State
+    from corral.core.actors import ActorRef
+    from corral.core.commit import Commit
 
-ObservationType = Literal[
-    "span",
-    "agent",
-    "generation",
-    "tool",
-    "evaluator",
-]
+ObservationType = Literal["span", "agent", "generation", "tool", "evaluator"]
 
 
 @dataclass(frozen=True, slots=True)
 class ObservationContext:
-    """Worker-side correlation data that must not be persisted in State."""
-
     execution_id: str
     benchmark_run_id: str | None = None
     task_id: str | None = None
@@ -46,25 +32,22 @@ class ObservationContext:
 
 @dataclass(frozen=True, slots=True)
 class Observation:
-    """Description of one operation at a durable State boundary."""
+    """Description of an operation that may eventually persist a commit."""
 
     name: str
     context: ObservationContext
     as_type: ObservationType = "span"
-    state_before: State | None = None
-    action: Action | None = None
+    based_on_hash: str | None = None
+    actor: ActorRef | None = None
     input: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 class ObservationSpan(Protocol):
-    """One active observation returned by an :class:`Observer`."""
-
     def update(
         self,
         *,
-        state_after: State | None = None,
-        action: Action | None = None,
+        commit: Commit | None = None,
         output: Mapping[str, Any] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> None: ...
@@ -73,9 +56,11 @@ class ObservationSpan(Protocol):
 
 
 class Observer(Protocol):
-    """Starts passive observations around task operations."""
-
     def start(self, observation: Observation) -> ObservationSpan: ...
+
+    def record_commit(
+        self, commit: Commit, *, context: ObservationContext | None = None
+    ) -> None: ...
 
     def flush(self) -> None: ...
 
@@ -84,23 +69,25 @@ class _NoOpSpan:
     def update(
         self,
         *,
-        state_after: State | None = None,
-        action: Action | None = None,
+        commit: Commit | None = None,
         output: Mapping[str, Any] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
-        del state_after, action, output, metadata
+        del commit, output, metadata
 
     def end(self, error: BaseException | None = None) -> None:
         del error
 
 
 class NoOpObserver:
-    """Observer used when tracing is disabled or cannot be configured."""
-
     def start(self, observation: Observation) -> ObservationSpan:
         del observation
         return _NoOpSpan()
+
+    def record_commit(
+        self, commit: Commit, *, context: ObservationContext | None = None
+    ) -> None:
+        del commit, context
 
     def flush(self) -> None:
         return None
@@ -113,19 +100,13 @@ class _CompositeSpan:
     def update(
         self,
         *,
-        state_after: State | None = None,
-        action: Action | None = None,
+        commit: Commit | None = None,
         output: Mapping[str, Any] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
         for span in self._spans:
             try:
-                span.update(
-                    state_after=state_after,
-                    action=action,
-                    output=output,
-                    metadata=metadata,
-                )
+                span.update(commit=commit, output=output, metadata=metadata)
             except BaseException as exc:
                 _observer_failure("update", exc)
 
@@ -138,8 +119,6 @@ class _CompositeSpan:
 
 
 class CompositeObserver:
-    """Fan observations out to independent, failure-isolated backends."""
-
     def __init__(self, *observers: Observer) -> None:
         self.observers = tuple(observers)
 
@@ -151,6 +130,15 @@ class CompositeObserver:
             except BaseException as exc:
                 _observer_failure("start", exc)
         return _CompositeSpan(tuple(spans))
+
+    def record_commit(
+        self, commit: Commit, *, context: ObservationContext | None = None
+    ) -> None:
+        for observer in self.observers:
+            try:
+                observer.record_commit(commit, context=context)
+            except BaseException as exc:
+                _observer_failure("record_commit", exc)
 
     def flush(self) -> None:
         for observer in self.observers:
@@ -173,17 +161,13 @@ def _observer_failure(operation: str, exc: BaseException) -> None:
 
 @contextmanager
 def observe_safely(
-    observer: Observer,
-    observation: Observation,
+    observer: Observer, observation: Observation
 ) -> Iterator[ObservationSpan]:
-    """Run an observation without allowing it to change task behavior."""
-
     try:
         span = observer.start(observation)
     except BaseException as exc:
         _observer_failure("start", exc)
         span = _NoOpSpan()
-
     try:
         yield span
     except BaseException as exc:
@@ -202,27 +186,30 @@ def observe_safely(
 def update_safely(
     span: ObservationSpan,
     *,
-    state_after: State | None = None,
-    action: Action | None = None,
+    commit: Commit | None = None,
     output: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> None:
-    """Update an observation while preserving the execution outcome."""
-
     try:
-        span.update(
-            state_after=state_after,
-            action=action,
-            output=output,
-            metadata=metadata,
-        )
+        span.update(commit=commit, output=output, metadata=metadata)
     except BaseException as exc:
         _observer_failure("update", exc)
 
 
-def json_value(value: Any) -> Any:
-    """Convert common Corral values into data accepted by trace backends."""
+def record_commit_safely(
+    observer: Observer,
+    commit: Commit,
+    *,
+    context: ObservationContext | None = None,
+) -> None:
+    """Notify a passive observer only after the append transaction succeeds."""
+    try:
+        observer.record_commit(commit, context=context)
+    except BaseException as exc:
+        _observer_failure("record_commit", exc)
 
+
+def json_value(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
@@ -240,123 +227,60 @@ def json_value(value: Any) -> Any:
     return str(value)
 
 
-def state_snapshot(state: State) -> dict[str, Any]:
-    """Return a complete State payload, including its content hash."""
-
-    return {
-        "state_hash": state.state_hash,
-        **state.model_dump(mode="json"),
-    }
-
-
-def state_changes(before: State, after: State) -> dict[str, Any]:
-    """Return explicit before/after values for every changed State field."""
-
-    before_payload = before.model_dump(mode="json")
-    after_payload = after.model_dump(mode="json")
-    changes: dict[str, Any] = {}
-    for field_name in before_payload.keys() | after_payload.keys():
-        previous = before_payload.get(field_name)
-        current = after_payload.get(field_name)
-        if previous != current:
-            changes[field_name] = {"before": previous, "after": current}
-    return changes
-
-
-def observation_input(observation: Observation) -> dict[str, Any] | None:
-    """Build the full input exported for an observation."""
-
-    payload: dict[str, Any] = {}
-    if observation.state_before is not None:
-        payload["state"] = state_snapshot(observation.state_before)
-    if observation.action is not None:
-        payload["action"] = json_value(observation.action)
-    if observation.input:
-        payload["operation"] = json_value(observation.input)
-    return payload or None
-
-
-def observation_output(
-    observation: Observation,
-    *,
-    state_after: State | None,
-    output: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Build output with the complete State and an explicit State delta."""
-
-    payload: dict[str, Any] = {}
-    if state_after is not None:
-        payload["state"] = state_snapshot(state_after)
-        if observation.state_before is not None:
-            payload["state_changes"] = state_changes(
-                observation.state_before,
-                state_after,
-            )
-    if output:
-        payload["result"] = json_value(output)
-    return payload or None
-
-
-def observation_metadata(
-    observation: Observation,
-    *,
-    state_after: State | None,
-    action: Action | None,
-    metadata: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    """Build searchable correlation and State-revision attributes."""
-
-    context = observation.context
-    before = observation.state_before
-    state = state_after or before
-    current_action = action or observation.action
-    result: dict[str, Any] = {
-        "execution_id": context.execution_id,
-        "trial_id": context.execution_id,
-        "benchmark_run_id": context.benchmark_run_id,
-        "task_id": context.task_id,
-        "temporal_workflow_id": context.temporal_workflow_id,
-        "temporal_run_id": context.temporal_run_id,
-        "state_revision_before": before.revision if before is not None else None,
-        "state_hash_before": before.state_hash if before is not None else None,
-        "state_revision_after": (
-            state_after.revision if state_after is not None else None
-        ),
-        "state_hash_after": (
-            state_after.state_hash if state_after is not None else None
-        ),
-    }
-    if state is not None:
-        result.update(
-            {
-                "state_id": state.id,
-                "model": state.metadata.model.get("name"),
-                "agent_type": state.metadata.scaffold.get("name"),
-                "environment_type": state.metadata.environment.get("name"),
-            }
+def commit_input(commit: Commit) -> dict[str, Any] | None:
+    values = {
+        key: getattr(commit.event, key, None)
+        for key in (
+            "action_id",
+            "invocation_id",
+            "requested_by_run_id",
+            "child_run_id",
+            "source_run_id",
         )
-    if before is not None and state_after is not None:
-        changes = state_changes(before, state_after)
-        result.update(
-            {
-                "changed_state_fields": sorted(changes),
-                "environment_changed": "environment" in changes,
-                "workspace_changed": "workspace" in changes,
-            }
-        )
-    if current_action is not None:
-        result.update(
-            {
-                "action_id": current_action.id,
-                "action_name": current_action.name,
-            }
-        )
-    result.update(observation.metadata)
-    if metadata:
-        result.update(metadata)
-    return {
-        key: json_value(value) for key, value in result.items() if value is not None
+        if getattr(commit.event, key, None) is not None
     }
+    return json_value(values) or None
+
+
+def commit_output(commit: Commit) -> dict[str, Any]:
+    return {"event": commit.event.model_dump(mode="json")}
+
+
+def commit_metadata(commit: Commit) -> dict[str, Any]:
+    metadata = {
+        "commit_hash": commit.hash,
+        "parent_hash": commit.parent_hash,
+        "based_on_hash": commit.based_on_hash,
+        "execution_id": commit.execution_id,
+        "branch_id": commit.branch_id,
+        "sequence": commit.sequence,
+        "branch_sequence": commit.branch_sequence,
+        "event_type": commit.event.type,
+        "author_kind": commit.author.kind,
+        "author_id": commit.author.actor_id,
+        "author_run_id": commit.author.run_id,
+        "parent_run_id": commit.author.parent_run_id,
+    }
+    for key in (
+        "action_id",
+        "invocation_id",
+        "requested_by_run_id",
+        "agent_run_id",
+        "child_run_id",
+        "source_run_id",
+        "source_commit_ids",
+        "trace_head",
+    ):
+        value = getattr(commit.event, key, None)
+        if value is not None:
+            metadata[key] = json_value(value)
+    if getattr(commit.event, "child_run_id", None) is not None:
+        metadata["spawned_by"] = commit.author.run_id
+    if getattr(commit.event, "action_id", None) is not None:
+        metadata["caused_by"] = commit.event.action_id
+    if getattr(commit.event, "source_commit_ids", None) is not None:
+        metadata["imports"] = json_value(commit.event.source_commit_ids)
+    return metadata
 
 
 __all__ = [
@@ -367,12 +291,11 @@ __all__ = [
     "ObservationSpan",
     "ObservationType",
     "Observer",
+    "commit_input",
+    "commit_metadata",
+    "commit_output",
     "json_value",
-    "observation_input",
-    "observation_metadata",
-    "observation_output",
     "observe_safely",
-    "state_changes",
-    "state_snapshot",
+    "record_commit_safely",
     "update_safely",
 ]

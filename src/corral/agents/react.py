@@ -29,6 +29,8 @@ from corral.core.errors import concise_error_message
 from corral.logging import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from corral.agents.session import AgentSession
 
 
@@ -117,6 +119,7 @@ class ReActAgent(BaseAgent):
         usage: _UsageAccumulator,
         *,
         action: Action | None = None,
+        turn_usage: Mapping[str, Any] | None = None,
     ) -> AgentOutcome:
         answer = answer.strip()
         if not answer:
@@ -129,7 +132,7 @@ class ReActAgent(BaseAgent):
             name=SUBMIT_ANSWER_TOOL_NAME,
             arguments={"answer": answer},
         )
-        result = await session.execute(submission)
+        result = await session.execute(submission, usage=turn_usage)
         if not result.success:
             return AgentOutcome(
                 status="protocol_failure",
@@ -146,7 +149,7 @@ class ReActAgent(BaseAgent):
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Own the ReAct model/tool loop for one task-bound session."""
         messages = self._initial_messages(session)
-        usage = _UsageAccumulator()
+        usage = _UsageAccumulator(self._usage)
         iteration_limit = session.iteration_limit
 
         for _iteration in range(iteration_limit):
@@ -173,6 +176,7 @@ class ReActAgent(BaseAgent):
                 )
 
             usage.add(getattr(response, "usage", None))
+            turn_usage = getattr(response, "usage", None) or {}
             content = getattr(response, "content", None) or ""
             assistant = dict(
                 LiteLLMMessage(
@@ -195,6 +199,7 @@ class ReActAgent(BaseAgent):
                         arguments={"answer": SURRENDER_SENTINEL},
                         content=content,
                     ),
+                    turn_usage=turn_usage,
                 )
 
             _thoughts, actions = self.parse_llm_response(content)
@@ -214,7 +219,10 @@ class ReActAgent(BaseAgent):
                                 )
                             )
                             messages.append(feedback)
-                            await session.record_message(assistant)
+                            await session.record_message(
+                                assistant,
+                                usage=turn_usage,
+                            )
                             await session.record_message(feedback)
                             break
                         return await self._submit_outcome(
@@ -227,6 +235,7 @@ class ReActAgent(BaseAgent):
                                 arguments=parsed.arguments,
                                 content=content if index == 0 else None,
                             ),
+                            turn_usage=turn_usage,
                         )
 
                     action = Action(
@@ -235,7 +244,10 @@ class ReActAgent(BaseAgent):
                         arguments=parsed.arguments,
                         content=content if index == 0 else None,
                     )
-                    observation = await session.execute(action)
+                    observation = await session.execute(
+                        action,
+                        usage=(turn_usage if index == 0 else None),
+                    )
                     rendered = (
                         f"Observation: {observation.result}"
                         if observation.success
@@ -252,7 +264,10 @@ class ReActAgent(BaseAgent):
                     )
                 continue
 
-            await session.record_message(assistant)
+            await session.record_message(
+                assistant,
+                usage=turn_usage,
+            )
             feedback = dict(
                 LiteLLMMessage(
                     role="user",

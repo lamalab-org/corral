@@ -187,7 +187,6 @@ class InterceptHandler(stdlib_logging.Handler):
                 "event",
                 "execution_id",
                 "job_id",
-                "state_hash",
                 "status",
                 "subsystem",
                 "task_id",

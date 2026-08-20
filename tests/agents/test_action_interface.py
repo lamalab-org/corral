@@ -1,11 +1,11 @@
 """Architecture tests for the agent-owned session boundary."""
 
 import json
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from tests.agents.commit_session import start_session
 
 from corral.agents import (
     Agent,
@@ -26,7 +26,7 @@ def anyio_backend():
     return "asyncio"
 
 
-def make_session(
+async def make_session(
     calls: list[str],
     *,
     max_iterations: int = 10,
@@ -52,8 +52,7 @@ def make_session(
             workspace_factory=None,
         ),
     )
-    state = environment.initial_state(started_at=datetime.now(timezone.utc))
-    return AgentSession(environment, state, max_iterations=max_iterations)
+    return await start_session(environment, max_iterations=max_iterations)
 
 
 def tool_call(name: str, arguments: str, call_id: str) -> SimpleNamespace:
@@ -163,7 +162,7 @@ async def test_successful_submission_stops_the_local_agent_loop(
     model_call = AsyncMock(return_value=response)
     monkeypatch.setattr("corral.agents.base_agent.llm_call", model_call)
     environment_calls: list[str] = []
-    session = make_session(environment_calls)
+    session = await make_session(environment_calls)
 
     outcome = await agent.run_session(session)
 
@@ -198,7 +197,7 @@ async def test_tool_calling_agent_executes_submission_in_its_session(monkeypatch
         "corral.agents.base_agent.llm_call", AsyncMock(side_effect=responses)
     )
     calls: list[str] = []
-    session = make_session(calls)
+    session = await make_session(calls)
     outcome = await ToolCallingAgent(
         model="test-model",
         system_prompt="system",
@@ -241,7 +240,7 @@ async def test_react_agent_executes_tools_then_returns_typed_outcome(monkeypatch
         "corral.agents.base_agent.llm_call", AsyncMock(side_effect=responses)
     )
     calls: list[str] = []
-    session = make_session(calls)
+    session = await make_session(calls)
     outcome = await ReActAgent(
         model="test-model",
         system_prompt="system",
@@ -266,7 +265,7 @@ async def test_planner_uses_submit_tool_when_planning_already_solves_task(monkey
         )
     )
     monkeypatch.setattr("corral.agents.base_agent.llm_call", model_call)
-    session = make_session([])
+    session = await make_session([])
     await session.record_message(
         {"role": "user", "content": "resume from canonical state"}
     )
@@ -308,7 +307,7 @@ async def test_planner_and_executor_share_one_task_interaction_budget(monkeypatc
     )
     model_call = AsyncMock(side_effect=responses)
     monkeypatch.setattr("corral.agents.base_agent.llm_call", model_call)
-    session = make_session([], max_iterations=3)
+    session = await make_session([], max_iterations=3)
 
     outcome = await LLMPlanner(
         model="test-model",

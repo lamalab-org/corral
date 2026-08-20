@@ -49,12 +49,11 @@ class FakeSession:
         model="test-model",
         iteration_limit=10,
     ):
-        self.initial_state = SimpleNamespace(
-            metadata=SimpleNamespace(
-                task={"id": "task-1"},
-                model=({"name": model} if model is not None else {}),
-            )
+        self.state = SimpleNamespace(
+            task=SimpleNamespace(model=({"name": model} if model is not None else {}))
         )
+        self.task_id = "task-1"
+        self.actor = SimpleNamespace(actor_id="actor")
         self.previous_evaluation = previous_evaluation
         self.previous_state = previous_state
         self.iteration_limit = iteration_limit
@@ -67,11 +66,12 @@ class FakeSession:
         if previous:
             if self.previous_state is None:
                 return None
-            namespaces = self.previous_state.runtime.metadata.get("agent_state", {})
+            run = next(iter(self.previous_state.agent_runs.values()))
+            namespaces = run.algorithm_state
             return namespaces.get(namespace)
         return self.agent_state.get(namespace)
 
-    def set_agent_state(self, namespace, value):
+    async def set_agent_state(self, namespace, value):
         self.agent_state[namespace] = dict(value)
 
     async def record_message(self, message):
@@ -105,7 +105,7 @@ async def test_reflexion_requires_model_metadata_without_requiring_actor_model()
     outcome = await agent.run_session(FakeSession(model=None))
 
     assert outcome.status == "agent_failure"
-    assert "State.metadata.model.name" in str(outcome.error)
+    assert "ExecutionState.task.model.name" in str(outcome.error)
     assert actor.calls == 0
 
 
@@ -137,15 +137,21 @@ async def test_reflexion_generates_memory_before_next_actor_attempt(monkeypatch)
         generate_reflection,
     )
     previous_state = SimpleNamespace(
-        messages=tuple(first.messages),
-        state_hash="previous-state-hash",
-        runtime=SimpleNamespace(metadata={"agent_state": first.agent_state}),
+        through_commit_hash="a" * 64,
+        agent_runs={
+            "previous": SimpleNamespace(
+                run_id="previous",
+                actor_id="actor",
+                algorithm_state=first.agent_state,
+            )
+        },
+        conversations={"previous": tuple(first.messages)},
     )
     second = FakeSession(
         previous_evaluation={
             "trial_id": "trial-1",
             "score": 0.2,
-            "state_hash": "previous-state-hash",
+            "commit_hash": "a" * 64,
         },
         previous_state=previous_state,
     )
@@ -163,9 +169,7 @@ async def test_reflexion_generates_memory_before_next_actor_attempt(monkeypatch)
     memory = second.agent_state["reflexion"]["memory"]
     assert second.agent_state["reflexion"]["reflection_model"] == "test-model"
     assert len(memory["reflections"]) == 1
-    assert second.agent_state["reflexion"]["source_state_hash"] == (
-        "previous-state-hash"
-    )
+    assert second.agent_state["reflexion"]["source_commit_hash"] == ("a" * 64)
     assert any(
         "Check the measured value" in str(message.get("content"))
         for message in second.messages
@@ -177,9 +181,15 @@ async def test_reflexion_reserves_a_single_available_call_for_the_actor(monkeypa
     actor = Actor()
     agent = ReflexionAgent(actor=actor)
     previous_state = SimpleNamespace(
-        messages=({"role": "assistant", "content": "previous attempt"},),
-        state_hash="previous-state-hash",
-        runtime=SimpleNamespace(metadata={}),
+        through_commit_hash="a" * 64,
+        agent_runs={
+            "previous": SimpleNamespace(
+                run_id="previous", actor_id="actor", algorithm_state={}
+            )
+        },
+        conversations={
+            "previous": ({"role": "assistant", "content": "previous attempt"},)
+        },
     )
     session = FakeSession(
         previous_evaluation={"trial_id": "trial-1", "score": 0.0},

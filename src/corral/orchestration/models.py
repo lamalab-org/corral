@@ -36,11 +36,12 @@ class ActivityPolicy:
 
 @dataclass(frozen=True)
 class StateRef:
-    """Small Workflow-safe projection of a State stored outside Temporal."""
+    """Small Workflow-safe reference to a materialized commit projection."""
 
-    state_hash: str
-    state_id: str
-    revision: int
+    commit_hash: str
+    execution_id: str
+    branch_id: str
+    sequence: int
     status: str
     agent_steps: int
     submission: str | None = None
@@ -70,7 +71,8 @@ class RunTaskInput:
 class EvaluateTaskInput:
     execution_id: str
     environment_id: str
-    state_hash: str
+    commit_hash: str
+    branch_id: str = "main"
     task_id: str | None = None
     benchmark_run_id: str | None = None
 
@@ -110,7 +112,7 @@ class TaskWorkflowInput:
 
 @dataclass(frozen=True)
 class EvaluationRef:
-    state_hash: str
+    commit_hash: str
     score: float
     metrics: dict[str, float]
     scorer_version: str

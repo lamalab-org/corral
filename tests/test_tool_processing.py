@@ -6,13 +6,14 @@ import pytest
 
 from corral.core.action import Action
 from corral.core.environment import Environment, Toolset
+from corral.core.state import ActionState, ExecutionState
 from corral.core.task import TaskDefinition
 from corral.core.tool import (
     Tool,
     ToolArgument,
     ToolConcurrency,
 )
-from corral.core.transition import execute_action, propose_action
+from corral.core.transition import execute_action
 
 
 class _TestEnv(Environment):
@@ -301,8 +302,18 @@ class TestEnvironmentPreprocessing:
         # Mock the time functions to avoid real timing
         with patch("time.perf_counter", side_effect=[0.0, 0.1]):
             action = Action(name="dict_tool", arguments=args)
-            state = propose_action(self.env.initial_state(), action)
-            result = execute_action(self.env, state, action).messages[-1]
+            state = ExecutionState(
+                through_commit_hash="a" * 64,
+                execution_id="execution",
+                branch_id="main",
+                actions={
+                    action.id: ActionState(
+                        action=action,
+                        requested_by_run_id="agent",
+                    )
+                },
+            )
+            result = execute_action(self.env, state, action)
 
         # Verify tool was called with processed arguments
         dict_tool = self.env.tools["dict_tool"]
@@ -315,8 +326,8 @@ class TestEnvironmentPreprocessing:
         assert isinstance(call_args["config"], dict)
         assert call_args["output_path"] == "/tmp/integration.json"
 
-        assert result["metadata"]["status"] == "success"
-        assert result["name"] == "dict_tool"
+        assert result.status == "success"
+        assert result.observation == "dict_tool_result"
 
     def test_empty_and_null_values(self):
         """Test handling of empty and null values"""

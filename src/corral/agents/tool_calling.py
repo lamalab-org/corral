@@ -85,6 +85,7 @@ class ToolCallingAgent(BaseAgent):
         action: Action,
         session: AgentSession,
         usage: _UsageAccumulator,
+        turn_usage: Mapping[str, Any] | None = None,
     ) -> AgentOutcome:
         answer = answer.strip()
         if not answer:
@@ -93,7 +94,7 @@ class ToolCallingAgent(BaseAgent):
                 error="submit_answer contained an empty answer",
                 usage=usage.outcome(),
             )
-        result = await session.execute(action)
+        result = await session.execute(action, usage=turn_usage)
         if not result.success:
             return AgentOutcome(
                 status="protocol_failure",
@@ -111,7 +112,7 @@ class ToolCallingAgent(BaseAgent):
         """Run the complete native tool-calling loop for one task."""
         messages = self._initial_messages(session)
         tools = with_submit_answer_tool(session.tools)
-        usage = _UsageAccumulator()
+        usage = _UsageAccumulator(self._usage)
         iteration_limit = session.iteration_limit
 
         for _iteration in range(iteration_limit):
@@ -138,6 +139,7 @@ class ToolCallingAgent(BaseAgent):
                 )
 
             usage.add(getattr(response, "usage", None))
+            turn_usage = getattr(response, "usage", None) or {}
             raw_calls = list(getattr(response, "tool_calls", None) or [])
             content = getattr(response, "content", None)
 
@@ -150,7 +152,10 @@ class ToolCallingAgent(BaseAgent):
                     )
                 )
                 messages.append(assistant)
-                await session.record_message(assistant)
+                await session.record_message(
+                    assistant,
+                    usage=turn_usage,
+                )
                 feedback = dict(
                     LiteLLMMessage(
                         role="user",
@@ -196,9 +201,13 @@ class ToolCallingAgent(BaseAgent):
                         action,
                         session,
                         usage,
+                        turn_usage,
                     )
 
-                observation = await session.execute(action)
+                observation = await session.execute(
+                    action,
+                    usage=(turn_usage if index == 0 else None),
+                )
                 messages.append(
                     {
                         "role": "tool",

@@ -1,229 +1,149 @@
-"""Task runner with durable, Git-like State checkpoints.
-
-The canonical execution head is persisted at task setup, immediately before
-every tool call, immediately after every tool observation, and at task end.
-Each checkpoint is a complete immutable State with a content hash and parent
-hash, so a Temporal retry can resume an exact pending action instead of asking
-the agent to decide again.
-"""
+"""Task runtime driven entirely by replayable authored event commits."""
 
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
 from corral.agents.schema import BudgetExhaustedError
-from corral.agents.session import Agent, AgentSession, run_agent_session
+from corral.agents.session import (
+    Agent,
+    AgentSession,
+    agent_session_capabilities,
+    run_agent_session,
+)
+from corral.core.actors import ActorRef
+from corral.core.commit import Commit, CommitRequest
 from corral.core.errors import concise_error_message
-from corral.core.state import RuntimeState, State, TaskOutput, checkpoint_state
-from corral.logging import event, exception_fields
+from corral.core.events import (
+    AgentCompleted,
+    AgentStarted,
+    ExecutionCompleted,
+    ExecutionFailed,
+)
 from corral.observability import (
     LoggingObserver,
     Observation,
     ObservationContext,
     Observer,
     observe_safely,
+    record_commit_safely,
     update_safely,
 )
-from corral.persistence import StateTransitionConflictError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
     from pydantic import JsonValue
 
     from corral.core.environment import Environment
-    from corral.persistence import StateStore
-
-
-_TASK_CONFIGURED_TRANSITION_ID = "task:configured"
-_TASK_COMPLETED_TRANSITION_ID = "task:completed"
-_TASK_FAILED_TRANSITION_ID = "task:failed"
+    from corral.core.state import ExecutionState, TaskOutput
+    from corral.persistence import CommitStore
 
 
 class TaskRuntime:
-    """Execute a task while advancing its durable State head step by step."""
+    """Append lifecycle events, resume durable actions, and materialize results."""
 
     def __init__(
-        self,
-        state_store: StateStore,
-        observer: Observer | None = None,
+        self, state_store: CommitStore, observer: Observer | None = None
     ) -> None:
         self.state_store = state_store
         self.observer = observer or LoggingObserver()
 
     @staticmethod
     def _context(
-        state: State,
-        observation_context: ObservationContext | None,
+        execution_id: str,
+        task_id: str,
+        supplied: ObservationContext | None,
     ) -> ObservationContext:
-        if observation_context is not None:
-            return observation_context
-        task_id = state.metadata.task.get("id")
-        return ObservationContext(
-            execution_id=state.id,
-            task_id=str(task_id) if task_id is not None else None,
+        return supplied or ObservationContext(
+            execution_id=execution_id, task_id=task_id
         )
 
-    async def _save_initial(
-        self,
-        state: State,
-        context: ObservationContext,
-    ) -> State:
-        with observe_safely(
-            self.observer,
-            Observation(
-                name="state.commit",
-                context=context,
-                metadata={"boundary": "task-start"},
-            ),
-        ) as span:
-            committed = await self.state_store.save(state, advance_head=True)
-            update_safely(span, state_after=committed)
-            return committed
+    def _execution_store(self, execution_id: str) -> CommitStore:
+        factory = getattr(self.state_store, "for_execution", None)
+        if factory is not None:
+            return factory(execution_id)
+        bound = getattr(self.state_store, "execution_id", None)
+        if bound not in {None, execution_id}:
+            raise ValueError("commit store is bound to another execution")
+        return self.state_store
 
-    async def _save_checkpoint(
+    async def _append(
         self,
-        source: State,
+        store: CommitStore,
+        request: CommitRequest,
+        context: ObservationContext,
+    ) -> Commit:
+        commit = await store.bind(
+            request.author,
+            branch_id=request.branch_id,
+            execution_id=request.execution_id,
+        ).append(request)
+        record_commit_safely(self.observer, commit, context=context)
+        return commit
+
+    async def _complete_accepted_submission(
+        self,
+        store: CommitStore,
+        current: ExecutionState,
         *,
-        parent: State,
-        transition_id: str,
-        boundary: str,
+        runtime_actor: ActorRef,
+        agent_actor: ActorRef,
         context: ObservationContext,
-    ) -> State:
-        state = checkpoint_state(parent, source)
-        with observe_safely(
-            self.observer,
-            Observation(
-                name="state.commit",
-                context=context,
-                state_before=parent,
-                metadata={"boundary": boundary},
-            ),
-        ) as span:
-            reused = False
-            try:
-                committed = await self.state_store.save(
-                    state,
-                    transition_id=transition_id,
-                    advance_head=True,
+        recovery_error: Exception | None = None,
+    ) -> tuple[ExecutionState, Commit | None]:
+        """Close lifecycle records after an already durable submission."""
+        if current.runtime.status not in {"submitted", "surrendered"}:
+            return current, None
+        run = current.agent_runs.get(agent_actor.run_id)
+        if run is not None and run.status in {"created", "running"}:
+            metadata: dict[str, JsonValue] = {"recovered_after_submission": True}
+            if recovery_error is not None:
+                metadata.update(
+                    cleanup_error=concise_error_message(recovery_error),
+                    cleanup_error_type=type(recovery_error).__name__,
                 )
-            except StateTransitionConflictError as exc:
-                event(
-                    "WARNING",
-                    "persistence.transition_conflict",
-                    subsystem="persistence",
-                    execution_id=context.execution_id,
-                    task_id=context.task_id,
-                    state_hash=parent.state_hash,
-                    transition_id=transition_id,
-                    **exception_fields(exc),
-                )
-                committed = await self.state_store.load_transition(
-                    parent.state_hash,
-                    transition_id,
-                )
-                if committed is None:
-                    raise
-                reused = True
-            update_safely(
-                span,
-                state_after=committed,
-                metadata={"reused_after_conflict": reused},
-            )
-            return committed
-
-    async def _resume_pending_action(
-        self,
-        environment: Environment,
-        state: State,
-        *,
-        context: ObservationContext,
-    ) -> State:
-        """Finish a before-tool checkpoint restored after an interrupted run."""
-        session = AgentSession(
-            environment,
-            state,
-            state_store=self.state_store,
-            durable_state=state,
-            observer=self.observer,
-            observation_context=context,
-        )
-        try:
-            await session.resume_pending_action()
-            return session.state
-        finally:
-            session.close()
-
-    async def _run_agent(
-        self,
-        agent: Agent,
-        environment: Environment,
-        state: State,
-        *,
-        last_score: Mapping[str, Any] | None,
-        previous_state: State | None,
-        max_iterations: int,
-        context: ObservationContext,
-    ) -> State:
-        outcome = await run_agent_session(
-            agent,
-            environment,
-            state,
-            last_score=last_score,
-            previous_state=previous_state,
-            max_iterations=max_iterations,
-            state_store=self.state_store,
-            durable_state=state,
-            observer=self.observer,
-            observation_context=context,
-        )
-        result = outcome.outcome
-        runtime_metadata = {
-            **dict(outcome.runtime.metadata),
-            "agent_status": result.status,
-            "session_metadata": dict(result.metadata),
-        }
-        if result.error is not None:
-            runtime_metadata["agent_error"] = result.error
-        current = outcome.state.fork(
-            runtime=RuntimeState(
-                status=outcome.runtime.status,
-                started_at=outcome.runtime.started_at,
-                ended_at=outcome.runtime.ended_at,
-                metadata=runtime_metadata,
-            ),
-        )
-        if result.status == "budget_exhausted":
-            raise BudgetExhaustedError(result.error or "provider budget exhausted")
-        if not result.is_submit_worthy:
-            current = current.fork(
-                runtime=RuntimeState(
-                    status="failed",
-                    started_at=current.runtime.started_at,
-                    ended_at=datetime.now(timezone.utc),
-                    metadata={
-                        **dict(current.runtime.metadata),
-                        "error": result.error or "session agent failed",
-                        "error_type": "AgentOutcomeError",
-                    },
+            agent_completed = await self._append(
+                store,
+                CommitRequest(
+                    request_id=f"agent:{agent_actor.run_id}:completed",
+                    execution_id=current.execution_id,
+                    branch_id=current.branch_id,
+                    based_on_hash=current.through_commit_hash,
+                    author=runtime_actor,
+                    event=AgentCompleted(
+                        agent_run_id=agent_actor.run_id,
+                        status=(
+                            "surrendered"
+                            if current.runtime.status == "surrendered"
+                            else "completed"
+                        ),
+                        result_summary={"answer": current.submission},
+                        trace_head=current.through_commit_hash,
+                        metadata=metadata,
+                    ),
                 ),
+                context,
             )
-        else:
-            # A submit-worthy outcome is valid only after the agent has executed
-            # submit_answer inside its session. run_agent_session enforces that
-            # invariant; the runtime must not manufacture a submission afterward.
-            assert current.submission is not None
-
-        return await self._save_checkpoint(
-            current,
-            parent=outcome.durable_state,
-            transition_id=_TASK_COMPLETED_TRANSITION_ID,
-            boundary="task-end",
-            context=context,
+            current = await store.materialize(current.branch_id, agent_completed.hash)
+        if current.runtime.metadata.get("execution_completed"):
+            return current, None
+        terminal = await self._append(
+            store,
+            CommitRequest(
+                request_id="execution:completed",
+                execution_id=current.execution_id,
+                branch_id=current.branch_id,
+                based_on_hash=current.through_commit_hash,
+                author=runtime_actor,
+                event=ExecutionCompleted(status=current.runtime.status),  # type: ignore[arg-type]
+            ),
+            context,
         )
+        return await store.materialize(current.branch_id, terminal.hash), terminal
 
     async def run(
         self,
@@ -237,148 +157,266 @@ class TaskRuntime:
         model_metadata: Mapping[str, JsonValue] | None = None,
         scaffold_metadata: Mapping[str, JsonValue] | None = None,
         last_score: Mapping[str, Any] | None = None,
-        previous_state: State | None = None,
+        previous_state: ExecutionState | None = None,
         observation_context: ObservationContext | None = None,
-    ) -> State:
-        """Run or resume one task from its latest durable State checkpoint."""
-        state_id = str(uuid5(NAMESPACE_URL, f"corral:execution:{execution_id}"))
-        initial = await self.state_store.load_initial(state_id)
-        if initial is None:
-            # Environment State construction snapshots the task workspace via
-            # a synchronous compatibility boundary. Keep that boundary off the
-            # Temporal Activity event loop (and off every other async caller's
-            # loop) so WorkspaceManager can safely run its async artifact I/O.
-            initial = await asyncio.to_thread(
-                environment.initial_state,
+    ) -> ExecutionState:
+        if not isinstance(agent, Agent):
+            raise TypeError("an agent must implement run_session(AgentSession)")
+        store = self._execution_store(execution_id)
+        branch_id = "main"
+        context = self._context(execution_id, environment.task_id, observation_context)
+        runtime_actor = ActorRef(
+            kind="runtime",
+            actor_id="corral",
+            run_id=f"runtime:{execution_id}",
+        )
+        agent_actor = ActorRef(
+            kind="agent",
+            actor_id=type(agent).__name__,
+            run_id=str(uuid5(NAMESPACE_URL, f"corral:agent:{execution_id}:main")),
+        )
+        session_capabilities = agent_session_capabilities(agent)
+
+        head = await store.head(branch_id)
+        if head is None:
+            initial_event = await asyncio.to_thread(
+                environment.initial_event,
+                execution_id=execution_id,
                 dependency_outputs=dependency_outputs,
-                state_id=state_id,
                 started_at=started_at,
                 model_metadata=model_metadata,
-                scaffold_metadata=scaffold_metadata,
+                scaffold_metadata={
+                    **dict(scaffold_metadata or {}),
+                    "max_iterations": max_iterations,
+                    "previous_evaluation": last_score,
+                },
+                actor_id=agent_actor.actor_id,
             )
-        initial = await self._save_initial(
-            initial, self._context(initial, observation_context)
-        )
-        context = self._context(initial, observation_context)
-        current = await self.state_store.load_head(state_id) or initial
-        # Every executable or completed chain belongs to the current State
-        # protocol and therefore carries an authoritative tool catalog. There
-        # is no legacy terminal-state exception.
+            head = await self._append(
+                store,
+                CommitRequest(
+                    request_id="execution:started",
+                    execution_id=execution_id,
+                    branch_id=branch_id,
+                    based_on_hash=None,
+                    author=runtime_actor,
+                    event=initial_event,
+                    occurred_at=started_at,
+                ),
+                context,
+            )
+        current = await store.materialize(branch_id)
         environment.validate_state_tool_catalog(current)
-        if current != initial:
-            with observe_safely(
-                self.observer,
-                Observation(
-                    name="restore",
-                    context=context,
-                    input={"state_hash": current.state_hash},
-                ),
-            ) as restore:
-                update_safely(restore, state_after=current)
         if current.is_terminal:
-            with observe_safely(
-                self.observer,
-                Observation(
-                    name="task.run",
-                    context=context,
-                    state_before=initial,
-                    metadata={"resumed": True},
-                ),
-            ) as task_span:
-                update_safely(task_span, state_after=current)
-                return current
-
-        # Workspace materialization has the same synchronous compatibility
-        # boundary as capture above.
-        await asyncio.to_thread(environment.prepare_workspace, current.workspace)
+            current, _ = await self._complete_accepted_submission(
+                store,
+                current,
+                runtime_actor=runtime_actor,
+                agent_actor=agent_actor,
+                context=context,
+            )
+            return current
 
         with observe_safely(
             self.observer,
             Observation(
                 name="task.run",
                 context=context,
-                state_before=initial,
-                metadata={"resumed": current != initial},
+                based_on_hash=current.through_commit_hash,
+                actor=runtime_actor,
+                metadata={"resumed": head.sequence > 0},
             ),
         ) as task_span:
             try:
-                if current == initial:
-                    configured, configuration_status = await asyncio.to_thread(
-                        environment.configure,
-                        current,
+                event_types = [
+                    commit.event.type async for commit in store.iter_commits(branch_id)
+                ]
+                if "task.configured" not in event_types:
+                    configured_event = await asyncio.to_thread(
+                        environment.configure, current
                     )
-                    configured = configured.fork(
-                        runtime=RuntimeState(
-                            status=configured.runtime.status,
-                            started_at=configured.runtime.started_at,
-                            ended_at=configured.runtime.ended_at,
-                            metadata={
-                                **dict(configured.runtime.metadata),
-                                "configuration_status": configuration_status,
-                            },
-                        )
+                    head = await self._append(
+                        store,
+                        CommitRequest(
+                            request_id="task:configured",
+                            execution_id=execution_id,
+                            branch_id=branch_id,
+                            based_on_hash=current.through_commit_hash,
+                            author=runtime_actor,
+                            event=configured_event,
+                        ),
+                        context,
                     )
-                    current = await self._save_checkpoint(
-                        configured,
-                        parent=initial,
-                        transition_id=_TASK_CONFIGURED_TRANSITION_ID,
-                        boundary="task-configured",
-                        context=context,
-                    )
+                    current = await store.materialize(branch_id)
 
-                if current.pending_action is not None:
-                    current = await self._resume_pending_action(
+                if agent_actor.run_id not in current.agent_runs:
+                    head = await self._append(
+                        store,
+                        CommitRequest(
+                            request_id=f"agent:{agent_actor.run_id}:started",
+                            execution_id=execution_id,
+                            branch_id=branch_id,
+                            based_on_hash=current.through_commit_hash,
+                            author=runtime_actor,
+                            event=AgentStarted(
+                                agent_run_id=agent_actor.run_id,
+                                agent_id=agent_actor.actor_id,
+                                metadata={
+                                    "model": dict(model_metadata or {}),
+                                    "session_capabilities": (
+                                        session_capabilities.to_metadata()
+                                    ),
+                                },
+                            ),
+                        ),
+                        context,
+                    )
+                    current = await store.materialize(branch_id)
+
+                pending = tuple(
+                    action_state
+                    for action_state in current.actions.values()
+                    if action_state.requested_by_run_id == agent_actor.run_id
+                    and action_state.status in {"pending", "running"}
+                )
+                if pending:
+                    session = AgentSession(
                         environment,
                         current,
-                        context=context,
+                        actor=agent_actor,
+                        runtime_actor=runtime_actor,
+                        state_store=store,
+                        branch_id=branch_id,
+                        max_iterations=max_iterations,
+                        observer=self.observer,
+                        observation_context=context,
+                        agent=agent,
+                        hooks=getattr(agent, "hooks", None),
                     )
+                    try:
+                        await session.resume_pending_actions()
+                        current = session.state
+                    finally:
+                        session.close()
                     if current.is_terminal:
-                        update_safely(task_span, state_after=current)
+                        current, terminal = await self._complete_accepted_submission(
+                            store,
+                            current,
+                            runtime_actor=runtime_actor,
+                            agent_actor=agent_actor,
+                            context=context,
+                        )
+                        if terminal is not None:
+                            update_safely(task_span, commit=terminal)
                         return current
 
-                if not isinstance(agent, Agent):
-                    raise TypeError("an agent must implement run_session(AgentSession)")
-                current = await self._run_agent(
+                outcome = await run_agent_session(
                     agent,
                     environment,
                     current,
+                    actor=agent_actor,
+                    runtime_actor=runtime_actor,
+                    state_store=store,
+                    branch_id=branch_id,
                     last_score=last_score,
                     previous_state=previous_state,
                     max_iterations=max_iterations,
-                    context=context,
+                    observer=self.observer,
+                    observation_context=context,
                 )
+                result = outcome.outcome
+                if result.status == "budget_exhausted":
+                    raise BudgetExhaustedError(
+                        result.error or "provider budget exhausted"
+                    )
+                if not result.is_submit_worthy:
+                    terminal_event = ExecutionFailed(
+                        error=result.error or "session agent failed",
+                        error_type="AgentOutcomeError",
+                        metadata={"agent_status": result.status},
+                    )
+                    request_id = "execution:failed"
+                else:
+                    assert outcome.state.submission is not None
+                    terminal_event = ExecutionCompleted(
+                        status=outcome.state.runtime.status,  # type: ignore[arg-type]
+                        metadata={"agent_status": result.status},
+                    )
+                    request_id = "execution:completed"
+                terminal = await self._append(
+                    store,
+                    CommitRequest(
+                        request_id=request_id,
+                        execution_id=execution_id,
+                        branch_id=branch_id,
+                        based_on_hash=outcome.final_commit.hash,
+                        author=runtime_actor,
+                        event=terminal_event,
+                    ),
+                    context,
+                )
+                current = await store.materialize(branch_id, terminal.hash)
+                update_safely(task_span, commit=terminal)
+                return current
             except BudgetExhaustedError:
                 raise
             except Exception as exc:
-                durable = await self.state_store.load_head(state_id) or current
-                # The before-tool snapshot is intentionally recoverable. Do not
-                # turn it into a terminal failure if the worker, persistence
-                # backend, or process is interrupted before the observation is
-                # committed; Temporal can retry and execute this exact Action ID.
-                if durable.pending_action is not None:
-                    raise
-                failed = durable.fork(
-                    runtime=RuntimeState(
-                        status="failed",
-                        started_at=durable.runtime.started_at,
-                        ended_at=datetime.now(timezone.utc),
-                        metadata={
-                            **dict(durable.runtime.metadata),
-                            "error": concise_error_message(exc),
-                            "error_type": type(exc).__name__,
-                        },
+                current = await store.materialize(branch_id)
+                if current.runtime.status in {"submitted", "surrendered"}:
+                    current, terminal = await self._complete_accepted_submission(
+                        store,
+                        current,
+                        runtime_actor=runtime_actor,
+                        agent_actor=agent_actor,
+                        context=context,
+                        recovery_error=exc,
                     )
+                    if terminal is not None:
+                        update_safely(task_span, commit=terminal)
+                    return current
+                # Running invocations are intentionally resumable on retry.
+                if any(
+                    action.status in {"pending", "running"}
+                    for action in current.actions.values()
+                ):
+                    raise
+                run = current.agent_runs.get(agent_actor.run_id)
+                if run is not None and run.status in {"created", "running"}:
+                    agent_failed = await self._append(
+                        store,
+                        CommitRequest(
+                            request_id=f"agent:{agent_actor.run_id}:failed",
+                            execution_id=execution_id,
+                            branch_id=branch_id,
+                            based_on_hash=current.through_commit_hash,
+                            author=runtime_actor,
+                            event=AgentCompleted(
+                                agent_run_id=agent_actor.run_id,
+                                status="failed",
+                                result_summary={"error": concise_error_message(exc)},
+                                trace_head=current.through_commit_hash,
+                            ),
+                        ),
+                        context,
+                    )
+                    current = await store.materialize(branch_id, agent_failed.hash)
+                failed = await self._append(
+                    store,
+                    CommitRequest(
+                        request_id="execution:failed",
+                        execution_id=execution_id,
+                        branch_id=branch_id,
+                        based_on_hash=current.through_commit_hash,
+                        author=runtime_actor,
+                        event=ExecutionFailed(
+                            error=concise_error_message(exc),
+                            error_type=type(exc).__name__,
+                        ),
+                    ),
+                    context,
                 )
-                current = await self._save_checkpoint(
-                    failed,
-                    parent=durable,
-                    transition_id=_TASK_FAILED_TRANSITION_ID,
-                    boundary="task-failed",
-                    context=context,
-                )
-
-            update_safely(task_span, state_after=current)
-            return current
+                update_safely(task_span, commit=failed)
+                return await store.materialize(branch_id, failed.hash)
 
 
 __all__ = ["TaskRuntime"]

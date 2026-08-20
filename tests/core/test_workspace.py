@@ -3,7 +3,7 @@ import hashlib
 import pytest
 from pydantic import ValidationError
 
-from corral.core import Artifact, FileRef, State, WorkspaceState
+from corral.core import Artifact, FileRef, WorkspaceState
 
 
 def file_ref(path: str, content: bytes = b"content") -> FileRef:
@@ -28,12 +28,10 @@ def test_workspace_manifest_is_typed_serializable_and_deeply_immutable():
             )
         },
     )
-    state = State(id="state-1", workspace=workspace)
-    restored = State.from_json(state.to_json())
+    restored = WorkspaceState.model_validate_json(workspace.model_dump_json())
 
-    assert restored.workspace == workspace
-    assert restored.state_hash == state.state_hash
-    with pytest.raises(TypeError, match=r"WorkspaceState\.fork"):
+    assert restored == workspace
+    with pytest.raises(TypeError, match="immutable"):
         workspace.artifacts["dataset"].metadata["columns"].append("c")
 
 
@@ -71,15 +69,9 @@ def test_workspace_rejects_missing_artifact_file_and_file_parent_collision():
         )
 
 
-def test_state_accepts_only_next_revision_of_same_workspace():
-    state = State(id="state-1")
-    next_workspace = state.workspace.fork(files={"data.txt": file_ref("data.txt")})
+def test_workspace_fork_preserves_identity_and_increments_revision():
+    workspace = WorkspaceState(id="workspace")
+    next_workspace = workspace.fork(files={"data.txt": file_ref("data.txt")})
 
-    child = state.fork(workspace=next_workspace)
-
-    assert child.workspace.id == state.workspace.id
-    assert child.workspace.revision == state.workspace.revision + 1
-    with pytest.raises(ValueError, match="workspace identity"):
-        state.fork(workspace=WorkspaceState())
-    with pytest.raises(ValueError, match="next WorkspaceState revision"):
-        state.fork(workspace=next_workspace.fork())
+    assert next_workspace.id == workspace.id
+    assert next_workspace.revision == workspace.revision + 1

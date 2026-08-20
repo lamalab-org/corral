@@ -14,16 +14,16 @@ from corral.orchestration.workflows import BenchmarkWorkflow, TaskWorkflow
 if TYPE_CHECKING:
     from temporalio.client import Client
 
-    from corral.core.state import State
+    from corral.core.state import ExecutionState
     from corral.orchestration.models import (
         BenchmarkWorkflowInput,
         TaskWorkflowInput,
     )
-    from corral.persistence import StateStore
+    from corral.persistence import CommitStore
 
 
 class TaskExecutionError(RuntimeError):
-    """A Temporal task completed without a loadable final State."""
+    """A Temporal task completed without a loadable final projection."""
 
 
 def task_workflow_id(execution_id: str) -> str:
@@ -41,7 +41,7 @@ class TemporalTaskExecutor:
     """Start task Workflows; all execution control remains inside Temporal."""
 
     client: Client
-    state_store: StateStore
+    state_store: CommitStore
     task_queue: str = "corral"
 
     async def execute_result(self, request: TaskWorkflowInput) -> TaskWorkflowResult:
@@ -62,11 +62,14 @@ class TemporalTaskExecutor:
             )
         return await handle.result()
 
-    async def execute(self, request: TaskWorkflowInput) -> State:
+    async def execute(self, request: TaskWorkflowInput) -> ExecutionState:
         result = await self.execute_result(request)
         if result.state is None:
-            raise TaskExecutionError(result.error or "task produced no final State")
-        return await self.state_store.load(result.state.state_hash)
+            raise TaskExecutionError(
+                result.error or "task produced no final projection"
+            )
+        store = self.state_store.for_execution(result.state.execution_id)
+        return await store.materialize(result.state.branch_id, result.state.commit_hash)
 
 
 @dataclass(frozen=True)
@@ -102,7 +105,7 @@ async def execute_task(
     *,
     executor: TemporalTaskExecutor,
     task: TaskWorkflowInput,
-) -> State:
+) -> ExecutionState:
     """Execute one task by delegating its complete lifecycle to Temporal.
 
     This public function intentionally contains no loop, retry handling,

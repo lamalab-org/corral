@@ -21,9 +21,11 @@ from wetlab.tools import create_tools
 
 from corral.core import ToolExecutionResult
 from corral.core.environment import Environment, Toolset, build_environments
-from corral.core.state import State, TaskOutput
+from corral.core.events import TaskConfigured, WorkspaceDelta
+from corral.core.state import ExecutionState, TaskOutput
 from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
 from corral.core.tool import Tool
+from corral.core.transition import environment_operations
 from corral.logging import event, exception_fields
 
 SCORING_FUNCTIONS = {
@@ -298,7 +300,7 @@ class QualitativeAnalysisEnvironment(Environment):
         group_tasks (dict[str, TaskDefinition]): All linked task definitions
     """
 
-    def _state_for_configuration(self, state: State) -> WetlabState:
+    def _state_for_configuration(self, state: ExecutionState) -> WetlabState:
         """Resolve the initial or latest upstream inventory from durable State."""
         task_spec = self.current_task.chemical_system_spec
         if task_spec is None:
@@ -331,7 +333,7 @@ class QualitativeAnalysisEnvironment(Environment):
             )
         return wetlab_state
 
-    def configure(self, state: State) -> tuple[State, str]:
+    def configure(self, state: ExecutionState) -> TaskConfigured:
         """Commit the task's structured chemistry snapshot to runtime State."""
         wetlab_state = self._state_for_configuration(state)
         event(
@@ -342,21 +344,32 @@ class QualitativeAnalysisEnvironment(Environment):
             task_id=self.task_id,
             chemical_system=self.current_task.sys,
         )
-        hidden = dict(state.environment.get("hidden_arguments", {}))
+        hidden = dict(state.environment.values.get("hidden_arguments", {}))
         hidden["wetlab"] = wetlab_state.to_dict()
         environment = {
-            **dict(state.environment),
+            **dict(state.environment.values),
             "hidden_arguments": hidden,
         }
-        return (
-            state.fork(
-                environment=self.capture_environment(environment),
-                workspace=self.capture_workspace(state.workspace),
+        next_environment = self.capture_environment(environment)
+        operations = environment_operations(state.environment.values, next_environment)
+        workspace = self.capture_workspace(state.workspace)
+        workspace_delta = (
+            None
+            if workspace.files == state.workspace.files
+            and workspace.artifacts == state.workspace.artifacts
+            else WorkspaceDelta.from_workspace(workspace)
+        )
+        return TaskConfigured(
+            status="Wetlab chemical system and structured inventory configured.",
+            environment_operations=operations,
+            workspace_delta=workspace_delta,
+            expected_environment_revision=state.environment.revision,
+            expected_workspace_revision=(
+                state.workspace.revision if workspace_delta is not None else None
             ),
-            "Wetlab chemical system and structured inventory configured.",
         )
 
-    def get_task_prompt(self, state: State) -> str:
+    def get_task_prompt(self, state: ExecutionState) -> str:
         prompt = (
             f"Task {self.current_task.name}:\n"
             f"{self.current_task.description}\n\n"
@@ -392,7 +405,7 @@ class QualitativeAnalysisEnvironment(Environment):
 
     def execute_tool(
         self,
-        state: State,
+        state: ExecutionState,
         tool: Tool,
         arguments: dict[str, Any],
     ) -> Any:
@@ -408,19 +421,19 @@ class QualitativeAnalysisEnvironment(Environment):
         inventory = engine.restore(wetlab_state)
         call_arguments = {**arguments, "wetlab": inventory}
         content = tool.execute(**call_arguments)
-        hidden = dict(state.environment.get("hidden_arguments", {}))
+        hidden = dict(state.environment.values.get("hidden_arguments", {}))
         hidden["wetlab"] = engine.snapshot(inventory).to_dict()
         return ToolExecutionResult(
             content=content,
             environment={
-                **dict(state.environment),
+                **dict(state.environment.values),
                 "hidden_arguments": hidden,
             },
         )
 
     @staticmethod
-    def _wetlab_from_state(state: State) -> WetlabState:
-        hidden = state.environment.get("hidden_arguments", {})
+    def _wetlab_from_state(state: ExecutionState) -> WetlabState:
+        hidden = state.environment.values.get("hidden_arguments", {})
         if not isinstance(hidden, Mapping):
             raise TypeError("State hidden_arguments must be an object")
         raw_wetlab = hidden.get("wetlab")
@@ -428,7 +441,7 @@ class QualitativeAnalysisEnvironment(Environment):
             raise TypeError("WetlabState is not configured")
         return WetlabState.from_dict(raw_wetlab)
 
-    def get_task_output(self, state: State) -> TaskOutput | None:
+    def get_task_output(self, state: ExecutionState) -> TaskOutput | None:
         """Publish the answer and current inventory for chained task execution."""
         output = super().get_task_output(state)
         if output is None:

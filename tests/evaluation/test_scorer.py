@@ -2,26 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from corral.core.action import submit_answer_action
-from corral.core.state import RuntimeState, State
+from corral.core.state import ExecutionState, RuntimeState
 from corral.core.task import TaskDefinition
 from corral.evaluation import TaskScorer
 
 
-def _submitted_state(answer: str) -> State:
-    action = submit_answer_action(answer, action_id="submission-1")
-    return State(
-        messages=(
-            action.to_message(),
-            {
-                "role": "tool",
-                "tool_call_id": action.id,
-                "name": action.name,
-                "content": "answer accepted",
-                "metadata": {"status": "success", "success": True},
-            },
-        ),
+def _submitted_state(answer: str) -> ExecutionState:
+    return ExecutionState(
+        through_commit_hash="a" * 64,
+        execution_id="execution",
+        branch_id="main",
         runtime=RuntimeState(status="submitted"),
+        submission=answer,
     )
 
 
@@ -38,14 +30,14 @@ def _task(scoring_fn, *, resolve_answer: bool = False) -> TaskDefinition:
 
 def test_scorer_returns_sibling_result_without_changing_state():
     state = _submitted_state("42")
-    state_hash = state.state_hash
+    commit_hash = state.through_commit_hash
 
     result = TaskScorer(_task(lambda answer: answer == "42")).evaluate(state)
 
     assert result.score == 1.0
     assert result.metrics == {"score": 1.0}
-    assert result.state_hash == state_hash
-    assert state.state_hash == state_hash
+    assert result.commit_hash == commit_hash
+    assert state.through_commit_hash == commit_hash
     assert "score" not in state.model_dump()
     assert "submitted_answer" not in state.model_dump()
 
@@ -105,4 +97,10 @@ def test_file_submission_cannot_read_a_sibling_task_workspace(
 
 def test_scorer_rejects_state_without_runtime_output():
     with pytest.raises(ValueError, match="completed"):
-        TaskScorer(_task(lambda answer: 1.0)).evaluate(State())
+        TaskScorer(_task(lambda answer: 1.0)).evaluate(
+            ExecutionState(
+                through_commit_hash="a" * 64,
+                execution_id="execution",
+                branch_id="main",
+            )
+        )

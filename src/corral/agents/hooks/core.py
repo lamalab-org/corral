@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from corral.agents.session import Agent, AgentSession
-    from corral.core.state import State
+    from corral.core.state import ExecutionState
 
 
 class CriticalHookError(RuntimeError):
@@ -38,7 +38,7 @@ class HookContext:
     Hooks that need to add context must call `await session.record_message(...)`;
     hooks that need to act must call `await session.execute(Action(...))`. This
     prevents an intervention from maintaining a second mutable conversation or
-    bypassing State transitions.
+    bypassing commit creation.
     """
 
     session: AgentSession
@@ -50,13 +50,13 @@ class HookContext:
 
     @property
     def task_id(self) -> str:
-        """Return the task ID recorded in State, falling back to execution ID."""
-        value = self.session.initial_state.metadata.task.get("id")
+        """Return the projected task ID, falling back to execution ID."""
+        value = self.session.state.task.metadata.get("id")
         return str(value or self.session.execution_id)
 
     @property
-    def state(self) -> State:
-        """Return the session's current immutable State."""
+    def state(self) -> ExecutionState:
+        """Return the session's current immutable projection."""
         return self.session.state
 
     @property

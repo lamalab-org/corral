@@ -8,7 +8,6 @@ import io
 import json
 import logging
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -226,41 +225,26 @@ def test_standard_library_records_are_intercepted_with_schema():
     assert record["message"] == "dependency degraded"
 
 
-def test_logging_observer_emits_one_start_and_one_terminal_failure():
+def test_logging_observer_emits_one_failure_isolated_operation_record():
     records = _capture()
     observer = LoggingObserver()
     context = ObservationContext(execution_id="execution-a", task_id="task-a")
-    state = SimpleNamespace(
-        state_hash="a" * 64,
-        runtime=SimpleNamespace(
-            status="failed",
-            metadata={
-                "error": "Invalid parameter: response_format",
-                "error_type": "BadRequestError",
-            },
-        ),
-    )
-
     span = observer.start(Observation(name="task.run", context=context))
-    span.update(state_after=state)
-    span.end()
+    span.end(ValueError("Invalid parameter: response_format"))
 
-    task_records = [
+    operation_records = [
         item.record
         for item in records
-        if item.record["extra"]["event"].startswith("task.")
+        if item.record["extra"]["event"] == "observation.task.run.completed"
     ]
-    assert [item["extra"]["event"] for item in task_records] == [
-        "task.started",
-        "task.failed",
-    ]
-    assert sum(item["level"].name == "ERROR" for item in task_records) == 1
-    assert task_records[-1]["extra"]["error_message"] == (
+    assert len(operation_records) == 1
+    assert operation_records[0]["level"].name == "WARNING"
+    assert operation_records[0]["extra"]["error_message"] == (
         "Invalid parameter: response_format"
     )
 
 
-def test_retryable_task_attempt_warns_without_a_premature_error():
+def test_operation_failure_warns_without_affecting_runtime_logging():
     records = _capture()
     observer = LoggingObserver()
     context = ObservationContext(execution_id="execution-a", task_id="task-a")
@@ -268,17 +252,14 @@ def test_retryable_task_attempt_warns_without_a_premature_error():
     span = observer.start(Observation(name="task.run", context=context))
     span.end(ConnectionError("temporary outage"))
 
-    task_records = [
+    operation_records = [
         item.record
         for item in records
-        if item.record["extra"]["event"].startswith("task.")
+        if item.record["extra"]["event"] == "observation.task.run.completed"
     ]
-    assert [item["extra"]["event"] for item in task_records] == [
-        "task.started",
-        "task.attempt_failed",
-    ]
-    assert task_records[-1]["level"].name == "WARNING"
-    assert all(item["level"].name != "ERROR" for item in task_records)
+    assert len(operation_records) == 1
+    assert operation_records[0]["level"].name == "WARNING"
+    assert operation_records[0]["extra"]["error_type"] == "ConnectionError"
 
 
 def test_langfuse_initialization_failure_warns_and_keeps_local_observer(

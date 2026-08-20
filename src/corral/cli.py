@@ -21,7 +21,7 @@ from temporalio.client import Client
 
 import corral.orchestration as orchestration
 from corral.environment_loader import ENVIRONMENT_NAMES, load_environment_group
-from corral.persistence import JSONLStateStore
+from corral.persistence import SQLiteCommitStore
 from corral.run import CorralRunner
 
 
@@ -357,7 +357,7 @@ async def run_benchmark(
         f"{_slug(canonical_agent)}-{_slug(args.environment)}-{uuid4().hex[:12]}"
     )
     task_queue = args.task_queue or f"corral-{_slug(run_id)}"
-    store = JSONLStateStore(Path(args.state_file).expanduser().resolve())
+    store = SQLiteCommitStore(Path(args.commit_file).expanduser().resolve())
     registry = orchestration.RuntimeRegistry(
         agents={canonical_agent: agent},
         environments=environments,
@@ -433,7 +433,7 @@ async def run_task(args: argparse.Namespace) -> int:
         f"{_slug(args.task)}-{uuid4().hex[:12]}"
     )
     task_queue = args.task_queue or f"corral-{_slug(execution_id)}"
-    store = JSONLStateStore(Path(args.state_file).expanduser().resolve())
+    store = SQLiteCommitStore(Path(args.commit_file).expanduser().resolve())
     registry = orchestration.RuntimeRegistry(
         agents={canonical_agent: agent},
         environments={args.task: environment},
@@ -476,7 +476,7 @@ async def run_task(args: argparse.Namespace) -> int:
         f"- task: {args.task}\n"
         f"- status: {state.runtime.status}\n"
         f"- answer: {answer}\n"
-        f"- state: {state.state_hash}\n"
+        f"- commit: {state.through_commit_hash}\n"
     )
     return int(state.runtime.status == "failed")
 
@@ -527,7 +527,7 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
 def _add_temporal_arguments(
     execution: Any,
     *,
-    default_state_file: str,
+    default_commit_file: str,
 ) -> None:
     execution.add_argument("--task-queue")
     execution.add_argument("--temporal-address", default="localhost:7233")
@@ -547,7 +547,7 @@ def _add_temporal_arguments(
         help="Heartbeat timeout; default: none.",
     )
     execution.add_argument("--max-attempts", type=int, default=3)
-    execution.add_argument("--state-file", default=default_state_file)
+    execution.add_argument("--commit-file", default=default_commit_file)
 
 
 def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
@@ -573,7 +573,7 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     execution.add_argument("--run-id")
     _add_temporal_arguments(
         execution,
-        default_state_file=str(Path(".corral") / "benchmark-states.jsonl"),
+        default_commit_file=str(Path(".corral") / "benchmark-commits.sqlite3"),
     )
     execution.add_argument("--report")
     execution.add_argument("--verbose", action="store_true")
@@ -588,7 +588,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     execution.add_argument("--execution-id")
     _add_temporal_arguments(
         execution,
-        default_state_file=str(Path(".corral") / "run-states.jsonl"),
+        default_commit_file=str(Path(".corral") / "run-commits.sqlite3"),
     )
 
 

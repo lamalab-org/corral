@@ -19,7 +19,19 @@ from corral.backend.jobs import (
     JobManager,
 )
 from corral.core.action import with_submit_answer_tool
-from corral.core.state import RuntimeState, State, StateMetadata, TaskOutput
+from corral.core.events import (
+    ExecutionStarted,
+    RuntimeUpdate,
+    TaskConfigured,
+    WorkspaceDelta,
+)
+from corral.core.state import (
+    EnvironmentState,
+    ExecutionState,
+    RuntimeState,
+    TaskOutput,
+    TaskState,
+)
 from corral.core.task import (
     TaskDefinition,
     build_dependency_graph,
@@ -33,6 +45,7 @@ from corral.core.tool_catalog import (
     ToolCatalogSnapshot,
     validate_tool_catalog_binding,
 )
+from corral.core.transition import environment_operations
 from corral.core.workspace import WorkspaceState
 from corral.logging import logger
 from corral.persistence.workspace import WorkspaceManager
@@ -196,9 +209,9 @@ class Toolset:
 class Environment:
     """A stateless task definition and tool catalog.
 
-    Execution State is never stored on this object. Callers create a State with
-    :meth:`initial_state`, persist an agent decision, and pass the resulting
-    State and Action to :func:`corral.core.execute_action`. A task-bound
+    Execution State is never stored on this object. Callers append the event
+    returned by :meth:`initial_event`, commit an agent decision, and pass the
+    materialized projection and Action to :func:`corral.core.execute_action`. A task-bound
     definition may contain execution resources (a materialized workspace,
     locks, and a background-job executor), but those resources are not the
     durable source of truth and no interaction history lives here.
@@ -271,22 +284,20 @@ class Environment:
 
         self._attach_background_tools()
 
-    def initial_state(
+    def initial_event(
         self,
         *,
         dependency_outputs: Mapping[str, TaskOutput | Mapping[str, Any]] | None = None,
         actor_id: str = "agent_0",
-        state_id: str | None = None,
+        execution_id: str,
         started_at: datetime | None = None,
         model_metadata: Mapping[str, Any] | None = None,
         scaffold_metadata: Mapping[str, Any] | None = None,
-    ) -> State:
-        """Build the complete initial State v2 for this task definition."""
+    ) -> ExecutionStarted:
+        """Build the small event that initializes an execution projection."""
         tool_catalog = self.tool_catalog_snapshot()
-        workspace = (
-            WorkspaceState(id=str(uuid5(NAMESPACE_URL, f"corral:workspace:{state_id}")))
-            if state_id is not None
-            else WorkspaceState()
+        workspace = WorkspaceState(
+            id=str(uuid5(NAMESPACE_URL, f"corral:workspace:{execution_id}"))
         )
         if self.workspace_path:
             workspace = self.capture_workspace(workspace)
@@ -295,7 +306,7 @@ class Environment:
             "jobs": self.job_manager.snapshot() if self.job_manager else {},
             "values": {},
         }
-        runtime = RuntimeState(
+        runtime = RuntimeUpdate(
             status="running",
             started_at=started_at or datetime.now(timezone.utc),
             metadata={
@@ -303,55 +314,55 @@ class Environment:
                 "surrender_sentinel": "SURRENDER",
             },
         )
-        state = State(
-            **({"id": state_id} if state_id is not None else {}),
-            metadata=StateMetadata(
+        dependency_values = {
+            task_id: TaskOutput.model_validate(value).model_dump(mode="json")
+            for task_id, value in (dependency_outputs or {}).items()
+        }
+        task_metadata: dict[str, Any] = {"id": self.task_id}
+        provisional = ExecutionState(
+            through_commit_hash="0" * 64,
+            execution_id=execution_id,
+            branch_id="main",
+            task=TaskState(
+                metadata=task_metadata,
                 model=model_metadata or {},
                 scaffold=scaffold_metadata or {},
                 environment={
                     "name": self.component_id or type(self).__name__,
                     TOOL_CATALOG_METADATA_KEY: tool_catalog.model_dump(mode="json"),
                 },
-                # Resolved prompts are computed from the current State by the
-                # runtime endpoint. Keeping only immutable task configuration
-                # here lets a dependent runtime be opened before its readiness
-                # is queried, without persisting a stale prompt.
-                task={"id": self.task_id},
+                dependency_outputs={
+                    key: TaskOutput.model_validate(value)
+                    for key, value in dependency_values.items()
+                },
             ),
-            environment={
-                **environment_state,
-            },
+            environment=EnvironmentState(values=environment_state),
             workspace=workspace,
-            runtime=runtime,
-            dependency_outputs=dependency_outputs or {},
+            runtime=RuntimeState(
+                status=runtime.status or "created",
+                started_at=runtime.started_at,
+                metadata=runtime.metadata,
+            ),
         )
         if not all(
-            ref.task_id in state.dependency_outputs
+            ref.task_id in provisional.dependency_outputs
             for ref in self.current_task.input_map.values()
         ):
-            return state
+            prompt = None
+        else:
+            prompt = self.get_task_prompt(provisional)
 
-        # A task-bound session State must be self-contained. Build the prompt
-        # only after the provisional State exists because prompt hooks consume
-        # State, then freeze it into immutable metadata without creating a
-        # runtime revision. An unresolved dependent task remains constructible;
-        # its prompt endpoint will fail until its inputs exist.
-        prompt = self.get_task_prompt(state)
-        return State(
-            id=state.id,
-            metadata=StateMetadata(
-                model=state.metadata.model,
-                scaffold=state.metadata.scaffold,
-                environment=state.metadata.environment,
-                task={"id": self.task_id, "prompt": prompt},
-                extra=state.metadata.extra,
-            ),
-            messages=state.messages,
-            environment=state.environment,
-            workspace=state.workspace,
-            usage=state.usage,
-            runtime=state.runtime,
-            dependency_outputs=state.dependency_outputs,
+        if prompt is not None:
+            task_metadata["prompt"] = prompt
+        return ExecutionStarted(
+            task=task_metadata,
+            environment=environment_state,
+            environment_metadata=provisional.task.environment,
+            workspace=workspace,
+            scaffold=scaffold_metadata or {},
+            model=model_metadata or {},
+            dependency_outputs=dependency_values,
+            runtime=runtime,
         )
 
     def capture_workspace(
@@ -397,7 +408,7 @@ class Environment:
 
         The returned definition shares immutable task/tool configuration and is
         bound to a workspace materialization namespaced by `task_execution_id`.
-        Its State is supplied by the runtime and is never owned by Environment.
+        Its projection is supplied by the runtime and never owned by Environment.
 
         Stateful subclasses that hold non-clonable resources (hardware handles,
         live clients, subprocess pools, or a bespoke `__init__` signature)
@@ -456,8 +467,8 @@ class Environment:
             workspace.mkdir(parents=True, exist_ok=True)
         return str(workspace)
 
-    def resolve_inputs(self, state: State) -> dict[str, Any]:
-        """Resolve task inputs exclusively from the supplied State."""
+    def resolve_inputs(self, state: ExecutionState) -> dict[str, Any]:
+        """Resolve task inputs exclusively from the supplied projection."""
         resolved = dict(self.current_task.initial_input)
         for input_name, ref in self.current_task.input_map.items():
             output = state.dependency_outputs.get(ref.task_id)
@@ -477,19 +488,19 @@ class Environment:
             resolved[input_name] = value
         return resolved
 
-    def get_task_output(self, state: State) -> TaskOutput | None:
+    def get_task_output(self, state: ExecutionState) -> TaskOutput | None:
         """Publish a valid runtime output without consulting correctness."""
         if state.submission is None or state.runtime.status == "surrendered":
             return None
         return TaskOutput(output={"answer": state.submission})
 
-    def get_task_prompt(self, state: State) -> str | list[dict]:
-        """Return the task prompt computed from an immutable State."""
+    def get_task_prompt(self, state: ExecutionState) -> str | list[dict]:
+        """Return the task prompt computed from an immutable projection."""
         if self.current_task.prompt_fn is not None:
             return self.current_task.prompt_fn(self, state)
         return self._default_task_prompt(state)
 
-    def _default_task_prompt(self, state: State) -> str:
+    def _default_task_prompt(self, state: ExecutionState) -> str:
         """Render description + submission format + resolved inputs.
 
         Dependency inputs are resolved strictly: by the time the prompt is
@@ -542,7 +553,7 @@ class Environment:
             with_submit_answer_tool(self.get_available_tools())
         )
 
-    def validate_state_tool_catalog(self, state: State) -> ToolCatalogSnapshot:
+    def validate_state_tool_catalog(self, state: ExecutionState) -> ToolCatalogSnapshot:
         """Refuse to bind `state` when its executable tool catalog has drifted."""
         return validate_tool_catalog_binding(state, self.tool_catalog_snapshot())
 
@@ -609,17 +620,17 @@ class Environment:
 
     def execute_tool(
         self,
-        _state: State,
+        _state: ExecutionState,
         tool: Tool,
         arguments: dict[str, Any],
     ) -> Any:
-        """Execute a tool against values materialized from the supplied State.
+        """Execute a tool against values materialized from the supplied projection.
 
         The default tool contract is stateless. Environments with structured
-        domain state may override this hook to decode an explicit State
+        domain state may override this hook to decode an explicit environment
         namespace, call the tool, and return a `ToolExecutionResult` carrying
         the complete updated namespace. The Environment must never retain the
-        supplied State or decoded values.
+        supplied projection or decoded values.
         """
         return tool.execute(**arguments)
 
@@ -678,7 +689,7 @@ class Environment:
 
         When the resolved toolset has no background-capable tool the manager is
         left `None`. Otherwise a fresh manager is created for this bound
-        task execution so job ids never span independent State chains.
+        task execution so job ids never span independent commit streams.
         """
         has_background = any(
             getattr(t, "background_capable", False) for t in self.tools.values()
@@ -700,8 +711,8 @@ class Environment:
     def submit_job(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Submit a background-capable tool as a job and return its handle.
 
-        Receives hidden arguments injected from State by `execute_action` and
-        resolves the workspace **now** (at submit time), so a later State can
+        Receives hidden arguments injected from the projection by `execute_action`
+        and resolves the workspace **now** (at submit time), so a later commit can
         never redirect a running job at a different task's workspace. Returns a
         job handle the agent polls with the generated control tools.
         """
@@ -758,23 +769,41 @@ class Environment:
         if self.job_manager is not None:
             self.job_manager.shutdown()
 
-    def configure(self, state: State) -> tuple[State, str]:
-        """Run the pure setup hook and commit its values as a State fork."""
+    def configure(self, state: ExecutionState) -> TaskConfigured:
+        """Run the setup hook and return its typed shared-namespace effects."""
         if self.current_task.setup_fn is None:
-            return state, "No external app/service configuration needed for this task."
+            return TaskConfigured(
+                status="No external app/service configuration needed for this task."
+            )
         setup = self.current_task.setup_fn(self, state)
         if setup is None:
-            return state, "Additional apps/services configured for this task."
+            return TaskConfigured(
+                status="Additional apps/services configured for this task."
+            )
         environment = {
-            **dict(state.environment),
+            **dict(state.environment.values),
             "hidden_arguments": dict(setup.hidden_arguments),
             "values": dict(setup.values),
         }
         environment = dict(self.capture_environment(environment))
         workspace = self.capture_workspace(state.workspace)
-        return (
-            state.fork(environment=environment, workspace=workspace),
-            setup.status,
+        operations = environment_operations(state.environment.values, environment)
+        workspace_delta = (
+            None
+            if workspace.files == state.workspace.files
+            and workspace.artifacts == state.workspace.artifacts
+            else WorkspaceDelta.from_workspace(workspace)
+        )
+        return TaskConfigured(
+            status=setup.status,
+            environment_operations=operations,
+            workspace_delta=workspace_delta,
+            expected_environment_revision=(
+                state.environment.revision if operations else None
+            ),
+            expected_workspace_revision=(
+                state.workspace.revision if workspace_delta is not None else None
+            ),
         )
 
 
@@ -791,7 +820,7 @@ def build_environments(
     """Build one environment per task from a flat collection of definitions.
 
     Grouping is derived, not declared. Dependency outputs are supplied to each
-    task's initial State by the runtime, so definitions never share a mutable
+    task's execution-start commit by the runtime, so definitions never share a mutable
     run store.
 
     Args:

@@ -28,18 +28,15 @@ def _combined_usage(reflection: AgentUsage, actor: AgentUsage) -> AgentUsage:
     return AgentUsage(
         input_tokens=reflection.input_tokens + actor.input_tokens,
         output_tokens=reflection.output_tokens + actor.output_tokens,
+        reasoning_tokens=reflection.reasoning_tokens + actor.reasoning_tokens,
         llm_calls=reflection.llm_calls + actor.llm_calls,
-        metadata={
-            "reflection": dict(reflection.metadata),
-            "actor": dict(actor.metadata),
-        },
     )
 
 
 class ReflexionAgent(BaseAgent):
     """Generate verbal memory from a prior evaluation, then run an actor.
 
-    The task State is authoritative for the model used to generate reflections.
+    The task projection is authoritative for the reflection model.
     `reflection_model` remains a construction-time hint so older worker
     registrations can populate that metadata, but it is never read from the
     wrapped actor and never overrides the model recorded for a session.
@@ -78,11 +75,11 @@ class ReflexionAgent(BaseAgent):
         self.reflection_system_prompt = reflection_system_prompt
 
     def _reflection_module(self, session: AgentSession) -> ReflectionModule:
-        """Build a run-local reflection client from canonical State metadata."""
-        raw_model = session.initial_state.metadata.model.get("name")
+        """Build a run-local reflection client from projection metadata."""
+        raw_model = session.state.task.model.get("name")
         if not isinstance(raw_model, str) or not raw_model.strip():
             raise ValueError(
-                "ReflexionAgent requires State.metadata.model.name to be a "
+                "ReflexionAgent requires ExecutionState.task.model.name to be a "
                 "non-empty string"
             )
         return ReflectionModule(
@@ -94,7 +91,7 @@ class ReflexionAgent(BaseAgent):
         )
 
     def _memory_from_state(self, session: AgentSession) -> ReflectionMemory:
-        """Restore bounded verbal memory from Corral State, never the agent object."""
+        """Restore bounded verbal memory from agent-state events."""
         payload = session.get_agent_state(_REFLEXION_STATE_NAMESPACE)
         if payload is None:
             payload = session.get_agent_state(
@@ -106,7 +103,7 @@ class ReflexionAgent(BaseAgent):
             try:
                 memory = ReflectionMemory.from_dict(raw_memory)
             except (KeyError, TypeError, ValueError):
-                logger.warning("Ignoring invalid Reflexion memory in Corral State")
+                logger.warning("Ignoring invalid Reflexion memory in agent state")
             else:
                 # Configuration is authoritative if it changed between runs.
                 if memory.max_size == self.max_reflections:
@@ -119,14 +116,27 @@ class ReflexionAgent(BaseAgent):
 
     @staticmethod
     def _trajectory_from_state(session: AgentSession) -> list[dict[str, Any]]:
-        """Read the evaluated attempt's canonical transcript from its State."""
+        """Read the evaluated attempt's canonical projected transcript."""
         previous_state = session.previous_state
         if previous_state is None:
             return []
-        return [dict(message) for message in previous_state.messages]
+        run = next(
+            (
+                candidate
+                for candidate in previous_state.agent_runs.values()
+                if candidate.actor_id == session.actor.actor_id
+            ),
+            None,
+        )
+        if run is None:
+            return []
+        return [
+            dict(message)
+            for message in previous_state.conversations.get(run.run_id, ())
+        ]
 
     @staticmethod
-    def _store_memory(
+    async def _store_memory(
         session: AgentSession,
         memory: ReflectionMemory,
         *,
@@ -134,14 +144,16 @@ class ReflexionAgent(BaseAgent):
         actor_status: str | None = None,
     ) -> None:
         previous_state = session.previous_state
-        session.set_agent_state(
+        await session.set_agent_state(
             _REFLEXION_STATE_NAMESPACE,
             {
                 "schema_version": 1,
                 "reflection_model": reflection_model,
                 "memory": memory.to_dict(),
-                "source_state_hash": (
-                    previous_state.state_hash if previous_state is not None else None
+                "source_commit_hash": (
+                    previous_state.through_commit_hash
+                    if previous_state is not None
+                    else None
                 ),
                 "actor_status": actor_status,
             },
@@ -176,7 +188,7 @@ class ReflexionAgent(BaseAgent):
                 score=score,
             )
         )
-        usage = _UsageAccumulator()
+        usage = _UsageAccumulator(self._usage)
         usage.add(raw_usage)
         return usage.outcome()
 
@@ -189,9 +201,7 @@ class ReflexionAgent(BaseAgent):
                 status="agent_failure", error=concise_error_message(exc)
             )
         reflection_model = reflection_module.model
-        task_id = str(
-            session.initial_state.metadata.task.get("id") or session.execution_id
-        )
+        task_id = str(getattr(session, "task_id", session.execution_id))
         memory = self._memory_from_state(session)
         previous_trajectory = self._trajectory_from_state(session)
         reflection_usage = AgentUsage()
@@ -222,7 +232,7 @@ class ReflexionAgent(BaseAgent):
             except Exception as exc:
                 logger.warning(f"Reflexion memory update failed: {exc}")
 
-        self._store_memory(
+        await self._store_memory(
             session,
             memory,
             reflection_model=reflection_model,
@@ -235,7 +245,7 @@ class ReflexionAgent(BaseAgent):
             self.actor,
             max_iterations=remaining_iterations,
         )
-        self._store_memory(
+        await self._store_memory(
             session,
             memory,
             reflection_model=reflection_model,

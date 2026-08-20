@@ -19,11 +19,15 @@ class FakeResponse:
 class Owner:
     def __init__(self):
         self.messages = []
+        self.turn_usages = []
         self.token_usage = None
         self.accumulated_usage = []
 
     def _accumulate_token_usage(self, usage):
         self.accumulated_usage.append(usage)
+
+    def _record_turn_usage(self, usage):
+        self.turn_usages.append(usage)
 
 
 def gateway(*, max_calls=4, use_structured_output=True, completion_runner=None):
@@ -125,6 +129,7 @@ def test_transcript_names_every_role_without_mutating_api_messages():
         message["name"] == "evaluate_node_0007" for message in model.owner.messages
     )
     assert all("name" not in message for message in calls[0]["messages"])
+    assert model.owner.turn_usages == [{}]
 
 
 def test_multimodal_generation_attaches_local_images(tmp_path):

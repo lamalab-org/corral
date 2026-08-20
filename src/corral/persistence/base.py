@@ -1,72 +1,103 @@
-"""StateStore interface and storage-domain errors."""
+"""Commit-store interface and persistence-domain errors."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from corral.core.state import State
+    from collections.abc import AsyncIterator
+
+    from corral.core.actors import ActorRef
+    from corral.core.commit import Commit, CommitRequest
+    from corral.core.state import ExecutionState
 
 
-class StateStoreError(RuntimeError):
-    """Base error for State persistence failures."""
+class CommitStoreError(RuntimeError):
+    """Base error for commit-ledger persistence failures."""
 
 
-class StateNotFoundError(StateStoreError):
-    """The requested State or revision does not exist."""
+class CommitNotFoundError(CommitStoreError):
+    """The requested commit or execution branch does not exist."""
 
 
-class StateTransitionConflictError(StateStoreError):
-    """A transition ID was reused for a different child State."""
+class CommitConflictError(CommitStoreError):
+    """An append, branch, idempotency, or shared-state precondition conflicts."""
 
 
-class StateIntegrityError(StateStoreError):
-    """Persisted data does not match its content hash or revision chain."""
+class CommitIntegrityError(CommitStoreError):
+    """Persisted commit data fails schema, hash, or history validation."""
+
+
+class AuthorPermissionError(CommitStoreError, PermissionError):
+    """An actor is not authorized to author the requested event."""
 
 
 @runtime_checkable
-class StateStore(Protocol):
-    """Content-addressed persistence contract for complete immutable States."""
+class CommitStore(Protocol):
+    """Persistence contract for a linear authored log per explicit branch."""
 
-    async def save(
+    execution_id: str | None
+
+    async def append(self, request: CommitRequest) -> Commit: ...
+
+    async def head(self, branch_id: str) -> Commit | None: ...
+
+    def iter_commits(
         self,
-        state: State,
-        transition_id: str | None = None,
+        branch_id: str | None = None,
         *,
-        advance_head: bool = False,
-    ) -> State:
-        """Persist a complete State after validating its parent relationship.
+        after_sequence: int = -1,
+        through_hash: str | None = None,
+    ) -> AsyncIterator[Commit]: ...
 
-        `advance_head` atomically moves the execution's durable head to this
-        State. It is used for the canonical task path; speculative branches may
-        be saved without moving the head.
-        """
-        ...
+    async def materialize(
+        self, branch_id: str, at_hash: str | None = None
+    ) -> ExecutionState: ...
 
-    async def load(self, state_hash: str) -> State:
-        """Load and integrity-check the complete State with this content hash."""
-        ...
+    async def get_commit(self, commit_hash: str) -> Commit: ...
 
-    async def load_initial(self, state_id: str) -> State | None:
-        """Load the initial State for an execution identity, if it exists."""
-        ...
+    async def trace_commits(
+        self, run_id: str, *, branch_id: str | None = None
+    ) -> tuple[Commit, ...]: ...
 
-    async def load_head(self, state_id: str) -> State | None:
-        """Load the latest canonical checkpoint for an execution identity."""
-        ...
-
-    async def children(self, state_hash: str) -> tuple[State, ...]:
-        """Return every directly persisted fork of the selected State."""
-        ...
-
-    async def load_transition(
+    async def create_branch(
         self,
-        parent_hash: str,
-        transition_id: str,
-    ) -> State | None:
-        """Return an already-committed transition, or `None`.
+        *,
+        branch_id: str,
+        from_hash: str,
+        execution_id: str | None = None,
+    ) -> None: ...
 
-        Action proposal and observation checkpoints use stable transition IDs,
-        so retrying the same parent transition is an idempotent lookup.
-        """
-        ...
+    def bind(
+        self,
+        author: ActorRef,
+        *,
+        branch_id: str = "main",
+        execution_id: str | None = None,
+    ) -> BoundCommitStore: ...
+
+    def for_execution(self, execution_id: str) -> CommitStore: ...
+
+
+@runtime_checkable
+class BoundCommitStore(Protocol):
+    """A commit capability bound to one trusted author and branch."""
+
+    @property
+    def author(self) -> ActorRef: ...
+
+    @property
+    def branch_id(self) -> str: ...
+
+    async def append(self, request: CommitRequest) -> Commit: ...
+
+
+__all__ = [
+    "AuthorPermissionError",
+    "BoundCommitStore",
+    "CommitConflictError",
+    "CommitIntegrityError",
+    "CommitNotFoundError",
+    "CommitStore",
+    "CommitStoreError",
+]

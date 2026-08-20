@@ -26,11 +26,8 @@ def _merge_usage(planner: AgentUsage, executor: AgentUsage) -> AgentUsage:
     return AgentUsage(
         input_tokens=planner.input_tokens + executor.input_tokens,
         output_tokens=planner.output_tokens + executor.output_tokens,
+        reasoning_tokens=planner.reasoning_tokens + executor.reasoning_tokens,
         llm_calls=planner.llm_calls + executor.llm_calls,
-        metadata={
-            "planner": dict(planner.metadata),
-            "executor": dict(executor.metadata),
-        },
     )
 
 
@@ -70,7 +67,7 @@ class LLMPlanner(BaseAgent):
         messages = [dict(message) for message in initial] + provider_messages(
             session.messages
         )
-        usage = _UsageAccumulator()
+        usage = _UsageAccumulator(self._usage)
 
         try:
             response = await call_model(
@@ -91,6 +88,7 @@ class LLMPlanner(BaseAgent):
             )
 
         usage.add(getattr(response, "usage", None))
+        turn_usage = getattr(response, "usage", None) or {}
         plan = (getattr(response, "content", None) or "").strip()
         planner_message = dict(
             LiteLLMMessage(
@@ -100,7 +98,10 @@ class LLMPlanner(BaseAgent):
                 id=getattr(response, "id", None),
             )
         )
-        await session.record_message(planner_message)
+        await session.record_message(
+            planner_message,
+            usage=turn_usage,
+        )
 
         if "Final Answer:" in plan:
             answer = plan.rsplit("Final Answer:", 1)[1].strip()

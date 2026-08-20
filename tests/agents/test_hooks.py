@@ -1,8 +1,7 @@
 """Tests for AgentSession-native lifecycle hooks."""
 
-from datetime import datetime, timezone
-
 import pytest
+from tests.agents.commit_session import start_session
 
 from corral.agents.hooks import (
     AgentHooks,
@@ -39,7 +38,7 @@ class SessionAgent:
         return AgentOutcome(status="completed", answer="42")
 
 
-def make_session(*, agent: SessionAgent | None = None) -> AgentSession:
+async def make_session(*, agent: SessionAgent | None = None) -> AgentSession:
     task = TaskDefinition(
         name="test_task",
         description="answer 42",
@@ -53,13 +52,7 @@ def make_session(*, agent: SessionAgent | None = None) -> AgentSession:
         task,
         toolset=Toolset(pool={}, workspace_factory=None),
     )
-    state = environment.initial_state(started_at=datetime.now(timezone.utc))
-    return AgentSession(
-        environment,
-        state,
-        hooks=agent.hooks if agent is not None else None,
-        agent=agent,
-    )
+    return await start_session(environment, agent=agent)
 
 
 def context(
@@ -85,7 +78,7 @@ async def test_sync_and_async_hooks_run_in_priority_order():
     hooks.register(HookPoint.BEFORE_TASK, high, priority=10)
     agent = SessionAgent(hooks)
 
-    await hooks.run(HookPoint.BEFORE_TASK, context(make_session(), agent))
+    await hooks.run(HookPoint.BEFORE_TASK, context(await make_session(), agent))
 
     assert order == ["high", "low"]
 
@@ -93,7 +86,7 @@ async def test_sync_and_async_hooks_run_in_priority_order():
 @pytest.mark.anyio()
 async def test_hook_context_exposes_only_the_current_session_surface():
     agent = SessionAgent()
-    session = make_session()
+    session = await make_session()
     hook_context = context(session, agent)
 
     assert hook_context.session is session
@@ -120,7 +113,9 @@ async def test_hook_stop_flag_prevents_lower_priority_callbacks():
     hooks.register(HookPoint.BEFORE_TASK, stop, priority=10)
     hooks.register(HookPoint.BEFORE_TASK, never, priority=1)
     agent = SessionAgent(hooks)
-    result = await hooks.run(HookPoint.BEFORE_TASK, context(make_session(), agent))
+    result = await hooks.run(
+        HookPoint.BEFORE_TASK, context(await make_session(), agent)
+    )
 
     assert order == ["stop"]
     assert result.should_continue is False
@@ -140,7 +135,7 @@ async def test_critical_errors_propagate_and_noncritical_errors_do_not():
     hooks.register(HookPoint.BEFORE_TASK, noncritical, priority=10)
     hooks.register(HookPoint.BEFORE_TASK, normal, priority=1)
     agent = SessionAgent(hooks)
-    await hooks.run(HookPoint.BEFORE_TASK, context(make_session(), agent))
+    await hooks.run(HookPoint.BEFORE_TASK, context(await make_session(), agent))
     assert continued == [True]
 
     def critical(_context: HookContext) -> None:
@@ -150,7 +145,7 @@ async def test_critical_errors_propagate_and_noncritical_errors_do_not():
     with pytest.raises(CriticalHookError, match="stop"):
         await hooks.run(
             HookPoint.AFTER_TASK,
-            context(make_session(), agent, HookPoint.AFTER_TASK),
+            context(await make_session(), agent, HookPoint.AFTER_TASK),
         )
 
 
@@ -190,18 +185,21 @@ async def test_shared_runner_invokes_hooks_and_persists_hook_state():
     hooks.register(HookPoint.BEFORE_TASK, before)
     hooks.register(HookPoint.AFTER_TASK, after)
     agent = SessionAgent(hooks)
-    session = make_session(agent=agent)
+    session = await make_session(agent=agent)
 
     result = await run_agent_session(
         agent,
         session.environment,
         session.state,
+        actor=session.actor,
+        runtime_actor=session.runtime_actor,
+        state_store=session.state_store,
         max_iterations=10,
     )
 
     assert result.outcome == AgentOutcome(status="completed", answer="42")
     assert events == ["before_task", "after_task"]
-    hook_state = result.state.runtime.metadata["agent_state"]["hooks"]
+    hook_state = result.state.agent_runs[session.actor.run_id].algorithm_state["hooks"]
     assert hook_state["metadata"] == {"source": "test"}
 
 
@@ -214,10 +212,16 @@ async def test_before_task_hook_can_cancel_the_agent():
 
     hooks.register(HookPoint.BEFORE_TASK, cancel)
     agent = SessionAgent(hooks)
-    session = make_session(agent=agent)
+    session = await make_session(agent=agent)
 
     result = await run_agent_session(
-        agent, session.environment, session.state, max_iterations=10
+        agent,
+        session.environment,
+        session.state,
+        actor=session.actor,
+        runtime_actor=session.runtime_actor,
+        state_store=session.state_store,
+        max_iterations=10,
     )
 
     assert result.outcome.status == "cancelled"
@@ -239,11 +243,17 @@ async def test_after_task_hook_runs_when_the_agent_raises():
             raise RuntimeError("agent broke")
 
     agent = RaisingAgent(hooks)
-    session = make_session(agent=agent)
+    session = await make_session(agent=agent)
 
     with pytest.raises(RuntimeError, match="agent broke"):
         await run_agent_session(
-            agent, session.environment, session.state, max_iterations=10
+            agent,
+            session.environment,
+            session.state,
+            actor=session.actor,
+            runtime_actor=session.runtime_actor,
+            state_store=session.state_store,
+            max_iterations=10,
         )
 
     assert seen == ["raised"]

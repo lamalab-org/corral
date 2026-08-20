@@ -366,7 +366,7 @@ def tool(
                     if param_name not in kwargs:
                         kwargs[param_name] = default_val
                 result = func(**kwargs)
-                # Stateful State-v2 tools return a structured observation and
+                # Stateful tools return a structured observation and
                 # complete environment replacement. Preserve that value for
                 # the runtime; ordinary function tools keep their textual tool
                 # result contract.

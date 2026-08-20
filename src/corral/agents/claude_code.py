@@ -42,6 +42,7 @@ from corral.agents.hooks import AgentHooks
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.session import AgentSession
+from corral.agents.usage import usage_from_mapping
 from corral.agents.utils import LiteLLMMessage
 
 # Name under which the corral MCP server is registered with the Claude Code
@@ -573,22 +574,37 @@ class ClaudeCodeAgent:
             if value is not None:
                 run.metadata[attr] = value
 
-    @staticmethod
-    def _record_usage(usage: dict[str, Any], run: _RunState) -> None:
-        """Normalize the SDK's aggregate usage for the typed session outcome."""
-        input_tokens = int(usage.get("input_tokens", 0) or 0)
-        cache_read = int(usage.get("cache_read_input_tokens", 0) or 0)
-        cache_creation = int(usage.get("cache_creation_input_tokens", 0) or 0)
-        completion_tokens = int(usage.get("output_tokens", 0) or 0)
-        prompt_tokens = input_tokens + cache_read + cache_creation
+    def _record_usage(self, usage: dict[str, Any], run: _RunState) -> None:
+        """Record canonical scratch usage from Claude's aggregate usage."""
+        normalized = self._usage(usage)
         run.usage = {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-            "input_tokens": input_tokens,
-            "cache_read_input_tokens": cache_read,
-            "cache_creation_input_tokens": cache_creation,
+            "input_tokens": normalized.input_tokens,
+            "output_tokens": normalized.output_tokens,
+            "reasoning_tokens": normalized.reasoning_tokens,
+            "total_tokens": normalized.input_tokens + normalized.output_tokens,
         }
+
+    def _usage(
+        self,
+        raw_usage: Mapping[str, Any] | None,
+        *,
+        llm_calls: int = 0,
+    ) -> AgentUsage:
+        """Include Claude cache reads and cache creation in input tokens."""
+        raw_usage = raw_usage or {}
+        if "input_tokens" in raw_usage:
+            input_tokens = int(raw_usage.get("input_tokens", 0) or 0)
+            input_tokens += int(raw_usage.get("cache_read_input_tokens", 0) or 0)
+            input_tokens += int(raw_usage.get("cache_creation_input_tokens", 0) or 0)
+        else:
+            input_tokens = int(raw_usage.get("prompt_tokens", 0) or 0)
+        return usage_from_mapping(
+            {
+                **raw_usage,
+                "input_tokens": input_tokens,
+            },
+            llm_calls=llm_calls,
+        )
 
     def _normalize_prompt(self, task_guide: Any) -> tuple[Any, Any]:
         """Split a raw task prompt into `(transcript_content, sdk_prompt)`.
@@ -617,10 +633,10 @@ class ClaudeCodeAgent:
         prompt_input: Any,
         messages: tuple[Mapping[str, Any], ...] | list[dict[str, Any]],
     ) -> Any:
-        """Add the canonical State conversation to a fresh harness query.
+        """Add the canonical agent conversation to a fresh harness query.
 
         Claude Code owns a new SDK session for each Corral task attempt, so an
-        existing immutable State chain cannot be restored through an SDK session
+        existing commit history cannot be restored through an SDK session
         id.  Supplying its provider-safe messages in the query gives the harness
         the same resumable context without introducing adapter-owned memory.
         """
@@ -633,7 +649,7 @@ class ClaudeCodeAgent:
             default=str,
         )
         context = (
-            "Continue from this canonical Corral State.messages conversation. "
+            "Continue from this canonical Corral agent conversation. "
             "Treat it as prior context and do not repeat completed tool calls:\n"
             f"{history}\n\nCurrent task input follows."
         )
@@ -641,24 +657,11 @@ class ClaudeCodeAgent:
             return f"{context}\n\n{prompt_input}"
         return [{"type": "text", "text": context}, *list(prompt_input)]
 
-    def _usage(self, run: _RunState) -> AgentUsage:
+    def _run_usage(self, run: _RunState) -> AgentUsage:
         llm_calls = int(run.metadata.get("num_turns", 0) or 0)
         if llm_calls == 0 and "subtype" in run.metadata:
             llm_calls = 1
-        return AgentUsage(
-            input_tokens=int(run.usage.get("prompt_tokens", 0) or 0),
-            output_tokens=int(run.usage.get("completion_tokens", 0) or 0),
-            llm_calls=llm_calls,
-            metadata={
-                "input_tokens": int(run.usage.get("input_tokens", 0) or 0),
-                "cache_read_input_tokens": int(
-                    run.usage.get("cache_read_input_tokens", 0) or 0
-                ),
-                "cache_creation_input_tokens": int(
-                    run.usage.get("cache_creation_input_tokens", 0) or 0
-                ),
-            },
-        )
+        return self._usage(run.usage, llm_calls=llm_calls)
 
     async def _failure_outcome(
         self,
@@ -693,7 +696,7 @@ class ClaudeCodeAgent:
         return AgentOutcome(
             status=status,
             error=error,
-            usage=self._usage(run),
+            usage=self._run_usage(run),
             metadata=dict(run.metadata),
         )
 
@@ -713,20 +716,20 @@ class ClaudeCodeAgent:
             return AgentOutcome(
                 status="protocol_failure",
                 error="Claude Code finished without calling submit_answer",
-                usage=self._usage(run),
+                usage=self._run_usage(run),
                 metadata=dict(run.metadata),
             )
         if session.submission_status == "surrendered":
             logger.debug(f"Agent retiring from execution {session.execution_id}")
             return AgentOutcome(
                 status="surrendered",
-                usage=self._usage(run),
+                usage=self._run_usage(run),
                 metadata=dict(run.metadata),
             )
         return AgentOutcome(
             status="completed",
             answer=submission,
-            usage=self._usage(run),
+            usage=self._run_usage(run),
             metadata=dict(run.metadata),
         )
 

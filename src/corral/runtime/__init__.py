@@ -1,4 +1,4 @@
-"""Small State/Action execution primitives used by orchestrators."""
+"""Commit-backed execution primitives used by orchestrators."""
 
 from corral.runtime.task_runner import TaskRuntime
 

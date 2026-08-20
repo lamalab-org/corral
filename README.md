@@ -60,14 +60,14 @@ uv run corral run \
 ```
 
 This path always uses `evaluate=False`: it prints the final status, submitted
-answer, and State hash, and writes the durable State to
-`.corral/run-states.jsonl`. It does not create trials, invoke a scorer, or
+answer, and commit hash, and writes the authored commit ledger to
+`.corral/run-commits.sqlite3`. It does not create trials, invoke a scorer, or
 generate a benchmark report. Because it executes exactly one task, it rejects a
 task with upstream dependencies and points to `corral bench` instead.
 
 Keep the command running while its in-process worker executes the task. Temporal
 retains the durable Workflow history; re-running with the same `--execution-id`,
-task queue, and State file attaches to that execution with a new in-process
+task queue, and commit database attaches to that execution with a new in-process
 worker.
 
 The equivalent Python API is below. Save this as `quickstart.py` in the current
@@ -90,7 +90,7 @@ from corral import (
     load_environment_group,
 )
 from corral.agents import ToolCallingAgent
-from corral.persistence import JSONLStateStore
+from corral.persistence import SQLiteCommitStore
 
 AGENT_ID = "tool-calling"
 TASK_ID = "task1"
@@ -101,7 +101,7 @@ MODEL = "openai/gpt-5.6"
 async def main():
     load_dotenv()
     environment = load_environment_group("samplemath")[TASK_ID]
-    store = JSONLStateStore(".corral/quickstart-states.jsonl")
+    store = SQLiteCommitStore(".corral/quickstart-commits.sqlite3")
     registry = RuntimeRegistry(
         agents={AGENT_ID: ToolCallingAgent(model=MODEL)},
         environments={TASK_ID: environment},
@@ -149,7 +149,7 @@ uv run python quickstart.py
 ```
 
 `evaluate=False` is explicit here: the result is the agent's final immutable
-`State`, and the example prints only its status and submitted answer. No scorer,
+`ExecutionState` projection, and the example prints only its status and submitted answer. No scorer,
 aggregate metric, or benchmark report runs. `task1` is independent; use
 `corral bench` for a task such as `task4` whose inputs come from earlier tasks.
 
@@ -374,16 +374,29 @@ reflexion_agent = ReflexionAgent(
 )
 ```
 
-## 💾 Checkpoint System
+## 💾 Commit Ledger
 
-Corral persists a complete immutable State immediately before and after every
-tool call. Each snapshot contains the agent history, namespaced agent state,
-environment, workspace manifest, usage, and runtime data, linked to its parent
-by a content hash. An append-only execution head identifies the canonical
-branch, while AI Scientist may retain speculative sibling branches. If a worker
-stops after the before-tool checkpoint, Temporal resumes the exact pending
-Action ID instead of asking the model to decide again. The old runner checkpoint
-directory and post-processing LLM call are gone.
+Corral persists one small, immutable, typed commit for every durable event in a
+SQLite ledger. `parent_hash` links each ordinary commit to the current branch
+head, while `based_on_hash` records the projection the author actually saw.
+`ExecutionState` is rebuilt from the ledger plus occasional replay snapshots;
+agents receive an authorized `AgentContext`, not the complete execution trace.
+
+Agent and tool authors are bound capabilities. Subagents share the same linear
+branch and appear in the parent conversation as ordinary tool calls with
+automatic result summaries. Their full conversations and state remain private
+unless the parent chooses to inspect and import selected details. Parallel tool
+completions are stored in real completion order and presented to the model in
+declared action order. Shared environment and workspace effects carry revision
+preconditions, so overlapping writes conflict instead of silently rebasing.
+Explicit experiments use `SQLiteCommitStore.create_branch()`; spawning a
+subagent never creates a branch.
+
+Subagent inspection is opt-in per agent. Agents declaring
+`AgentSessionCapabilities(inspect_subagents=True)` receive an
+`inspect_subagent` tool that returns a bounded authorized child context through
+the normal tool-call ledger path. AI Scientist enables it; other built-in
+agents do not expose it.
 
 ## 🔧 Contributing
 

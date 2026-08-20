@@ -1,4 +1,4 @@
-"""Local views and tools for materialized State v2 workspaces."""
+"""Local views and tools for materialized execution workspaces."""
 
 from corral.workspace.filesystem import (
     WorkspaceFilesystem,

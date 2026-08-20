@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from corral.core.environment import Environment
-    from corral.core.state import State
+    from corral.core.state import ExecutionState
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,8 @@ class TaskDefinition:
 
     Tasks are immutable configuration describing the static DAG: dependencies
     are declared per input field via `input_map`. Runtime inputs and outputs
-    live in immutable :class:`corral.core.state.State` revisions.
+    live in commit-materialized :class:`corral.core.state.ExecutionState`
+    projections.
 
     Behaviour is injected through the (immutable, callable) hooks rather than
     by subclassing the environment:
@@ -48,7 +49,7 @@ class TaskDefinition:
     - `prompt_fn(env, state)` overrides the default task prompt.
     - `setup_fn(env, state)` returns serializable environment values and hidden
       tool arguments for a task execution; it never mutates the environment or
-      State.
+      execution projection.
     - `scoring_fn(answer)` is consumed by an evaluation-layer `TaskScorer`;
       task execution never invokes it.
     - `resolve_answer` controls whether the submitted answer is path-resolved
@@ -71,8 +72,10 @@ class TaskDefinition:
     # Named inputs that come from other tasks' outputs
     input_map: dict[str, InputRef] = field(default_factory=dict)
     # Optional behaviour hooks (immutable config, never mutated at runtime)
-    prompt_fn: Callable[[Environment, State], str | list[dict]] | None = None
-    setup_fn: Callable[[Environment, State], EnvironmentSetup | None] | None = None
+    prompt_fn: Callable[[Environment, ExecutionState], str | list[dict]] | None = None
+    setup_fn: (
+        Callable[[Environment, ExecutionState], EnvironmentSetup | None] | None
+    ) = None
     resolve_answer: bool = True
 
     def dependencies(self) -> set[str]:

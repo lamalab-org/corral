@@ -1,4 +1,4 @@
-"""State-backed interventions for the current async agent-session API."""
+"""Commit-backed interventions for the current async agent-session API."""
 
 from __future__ import annotations
 
@@ -162,7 +162,7 @@ async def _inject_react_text(
     execute_tools: bool,
     wrap_thought: bool,
 ) -> None:
-    """Inject ReAct text, recording every effect in the session State."""
+    """Inject ReAct text, recording every effect through the session ledger."""
     if not execute_tools:
         content = _strip_react_actions(text)
         if wrap_thought and content and not content.startswith("<thought>"):
@@ -234,7 +234,7 @@ def create_intervention_hook(
     intervention_map: Mapping[str, str],
     execute_tools: bool = False,
 ) -> HookCallback:
-    """Create a BEFORE_TASK-compatible State-backed intervention hook."""
+    """Create a BEFORE_TASK-compatible commit-backed intervention hook."""
 
     async def intervention_hook(context: HookContext) -> None:
         intervention = intervention_map.get(context.task_id)
@@ -270,7 +270,7 @@ def create_trace_intervention_hook(
     num_steps: int,
     execute_tools: bool = False,
 ) -> HookCallback:
-    """Create an intervention that replays selected trace decisions via State."""
+    """Create an intervention that replays selected decisions through commits."""
 
     def eligible_traces(pool: str | Sequence[str]) -> list[str]:
         paths = [pool] if isinstance(pool, str) else list(pool)

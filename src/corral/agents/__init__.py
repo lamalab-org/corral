@@ -16,7 +16,12 @@ from corral.agents.schema import (
     AgentUsage,
     Thought,
 )
-from corral.agents.session import Agent
+from corral.agents.session import (
+    INSPECT_SUBAGENT_TOOL_NAME,
+    Agent,
+    AgentSessionCapabilities,
+    inspect_subagent_tool,
+)
 from corral.agents.terminus import TerminusAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.core.action import Action
@@ -50,12 +55,14 @@ def __dir__():
 
 
 __all__ = [
+    "INSPECT_SUBAGENT_TOOL_NAME",
     "SURRENDER_SENTINEL",
     "AIScientistAgent",
     "AIScientistConfig",
     "Action",
     "Agent",
     "AgentOutcome",
+    "AgentSessionCapabilities",
     "AgentStatus",
     "AgentUsage",
     "BaseAgent",
@@ -69,4 +76,5 @@ __all__ = [
     "TerminusAgent",
     "Thought",
     "ToolCallingAgent",
+    "inspect_subagent_tool",
 ]

@@ -141,7 +141,8 @@ class TaskWorkflow:
                     EvaluateTaskInput(
                         execution_id=request.execution_id,
                         environment_id=request.environment_id,
-                        state_hash=current.state_hash,
+                        commit_hash=current.commit_hash,
+                        branch_id=current.branch_id,
                         task_id=request.task_id,
                         benchmark_run_id=request.benchmark_run_id,
                     ),

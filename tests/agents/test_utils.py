@@ -12,6 +12,7 @@ from corral.agents.utils import (
     RETRY_EXCEPTIONS,
     LiteLLMMessage,
     LLMResponse,
+    _reasoning_tokens,
     before_sleep_loguru,
     format_examples,
     llm_call,
@@ -144,6 +145,12 @@ def test_retry_exceptions_are_openai_exceptions():
 
     # Test that the tuple is not empty
     assert len(RETRY_EXCEPTIONS) > 0
+
+
+def test_reasoning_tokens_support_responses_usage_shape():
+    assert (
+        _reasoning_tokens({"output_tokens_details": {"reasoning_tokens": 832}}) == 832
+    )
 
 
 def test_before_sleep_loguru_logs_retry_info(monkeypatch):
@@ -316,6 +323,7 @@ async def test_llm_call_routes_gpt_5_6_reasoning_tools_to_responses(monkeypatch)
 async def test_llm_call_with_usage_info(monkeypatch):
     """Test llm_call with return_usage=True."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch, return_usage=True)
+    mock_response.usage.completion_tokens_details = {"reasoning_tokens": 12}
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
 
@@ -331,6 +339,7 @@ async def test_llm_call_with_usage_info(monkeypatch):
         "prompt_tokens": 10,
         "completion_tokens": 20,
         "total_tokens": 30,
+        "reasoning_tokens": 12,
     }
 
 

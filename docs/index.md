@@ -160,8 +160,8 @@ Through this formalism, `Corral` provides a flexible and robust framework for de
 
 `Corral` is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform follows a client-server design and comprises two primary services:
 
-`TaskRuntime`: Persists a content-addressed State chain at task setup, before
-and after every tool call, and at task completion.
+`TaskRuntime`: Appends small, authored commits for setup, agent turns, tool
+effects, and lifecycle events, then materializes the current projection.
 
 `Temporal`: Owns task and benchmark Workflows, including retries,
 concurrency, dependency readiness, evaluation, and progress tracking.

@@ -32,11 +32,16 @@ class AgentUsage:
 
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int = 0
     llm_calls: int = 0
-    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        for name in ("input_tokens", "output_tokens", "llm_calls"):
+        for name in (
+            "input_tokens",
+            "output_tokens",
+            "reasoning_tokens",
+            "llm_calls",
+        ):
             if getattr(self, name) < 0:
                 raise ValueError(f"AgentUsage.{name} cannot be negative")
 

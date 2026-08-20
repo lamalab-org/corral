@@ -46,12 +46,12 @@ class FakeSession:
         self.calls = []
         self.messages = []
 
-    async def execute(self, action):
+    async def execute(self, action, **_kwargs):
         self.calls.append(action)
         result = "answer accepted" if action.name == "submit_answer" else "measured:a"
         return ToolResponse(success=True, result=result, error=None)
 
-    async def record_message(self, message):
+    async def record_message(self, message, **_kwargs):
         self.messages.append(message)
 
     def final_messages(self):

@@ -1,10 +1,10 @@
-"""Tests for State-backed intervention hooks."""
+"""Tests for commit-backed intervention hooks."""
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from tests.agents.commit_session import start_session
 
 from corral.agents.hooks import AgentHooks, CriticalHookError, HookPoint
 from corral.agents.hooks.intervention import (
@@ -71,8 +71,17 @@ def make_environment(calls: list[str], *, fail: bool = False) -> Environment:
     )
 
 
-def make_state(environment: Environment):
-    return environment.initial_state(started_at=datetime.now(timezone.utc))
+async def run_test_agent(agent, environment: Environment):
+    session = await start_session(environment, max_iterations=10, agent=agent)
+    return await run_agent_session(
+        agent,
+        environment,
+        session.state,
+        actor=session.actor,
+        runtime_actor=session.runtime_actor,
+        state_store=session.state_store,
+        max_iterations=10,
+    )
 
 
 def test_parse_react_actions_uses_current_action_type():
@@ -101,18 +110,16 @@ async def test_text_intervention_is_recorded_in_canonical_state():
     agent = RecordingAgent(hooks)
     environment = make_environment([])
 
-    result = await run_agent_session(
-        agent, environment, make_state(environment), max_iterations=10
-    )
+    result = await run_test_agent(agent, environment)
 
     assert any(
         message.get("content") == "use the calibration result"
         for message in agent.seen_messages
     )
     assert (
-        result.state.runtime.metadata["agent_state"]["hooks"]["metadata"][
-            "intervention_applied"
-        ]
+        result.state.agent_runs[result.final_commit.author.run_id].algorithm_state[
+            "hooks"
+        ]["metadata"]["intervention_applied"]
         is True
     )
 
@@ -135,9 +142,7 @@ async def test_react_intervention_without_execution_strips_actions():
     agent = ReActAgent(hooks)
     environment = make_environment([])
 
-    await run_agent_session(
-        agent, environment, make_state(environment), max_iterations=10
-    )
+    await run_test_agent(agent, environment)
 
     injected = str(agent.seen_messages[0]["content"])
     assert injected == "<thought>inspect first</thought>"
@@ -164,13 +169,11 @@ async def test_react_intervention_executes_through_agent_session():
     agent = ReActAgent(hooks)
     environment = make_environment(calls)
 
-    result = await run_agent_session(
-        agent, environment, make_state(environment), max_iterations=10
-    )
+    result = await run_test_agent(agent, environment)
 
     assert calls == ["sample"]
     assert result.state.tool_statistics == {"search": 1, "submit_answer": 1}
-    intervention_action = result.state.actions[0]
+    intervention_action = next(iter(result.state.actions.values())).action
     assert intervention_action.name == "search"
     assert intervention_action.metadata == {"source": "hook-intervention"}
 
@@ -194,9 +197,7 @@ async def test_intervention_tool_failure_is_critical():
     environment = make_environment([], fail=True)
 
     with pytest.raises(CriticalHookError, match="execution failed"):
-        await run_agent_session(
-            agent, environment, make_state(environment), max_iterations=10
-        )
+        await run_test_agent(agent, environment)
 
 
 @pytest.mark.anyio()
@@ -238,10 +239,9 @@ async def test_tool_call_trace_replay_uses_new_actions(tmp_path: Path):
     agent = RecordingAgent(hooks)
     environment = make_environment(calls)
 
-    result = await run_agent_session(
-        agent, environment, make_state(environment), max_iterations=10
-    )
+    result = await run_test_agent(agent, environment)
 
     assert calls == ["trace"]
-    assert result.state.actions[0].name == "search"
-    assert result.state.actions[0].id != "old-trace-id"
+    replayed_action = next(iter(result.state.actions.values())).action
+    assert replayed_action.name == "search"
+    assert replayed_action.id != "old-trace-id"

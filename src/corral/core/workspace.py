@@ -1,7 +1,7 @@
-"""Immutable logical workspaces for State v2.
+"""Immutable logical workspaces used by execution projections.
 
 A workspace contains only a portable manifest. File bytes are addressed by
-content and live in an ArtifactStore, never in State or in a durable local path.
+content and live in an ArtifactStore, never in a commit or durable local path.
 """
 
 from __future__ import annotations

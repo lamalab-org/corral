@@ -46,6 +46,7 @@ from pydantic import SecretStr
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
 from corral.agents.schema import SURRENDER_SENTINEL, AgentOutcome, AgentUsage
 from corral.agents.session import AgentSession
+from corral.agents.usage import usage_field
 from corral.agents.utils import LiteLLMMessage
 
 # Name under which the corral MCP server is registered with the OpenHands
@@ -438,9 +439,7 @@ class OpenHandsAgent(BaseAgent):
         prompt, dropped_images = self._normalize_prompt(session.prompt)
         prompt = prompt_with_state_history(prompt, session.messages)
         run.messages.append(dict(LiteLLMMessage(role="user", content=prompt)))
-        task_id = str(
-            session.initial_state.metadata.task.get("id") or session.execution_id
-        )
+        task_id = str(getattr(session, "task_id", session.execution_id))
 
         async with session.open_mcp() as mcp:
             run.metadata = self._harness_metadata(
@@ -466,9 +465,8 @@ class OpenHandsAgent(BaseAgent):
 
         for message in run.messages:
             await session.record_message(message)
-        usage = AgentUsage(
-            input_tokens=int(run.usage.get("prompt_tokens", 0) or 0),
-            output_tokens=int(run.usage.get("completion_tokens", 0) or 0),
+        usage = self._usage(
+            run.usage,
             llm_calls=int(run.metadata.get("sdk_turns", 0) or 0),
         )
         result = run.result
@@ -1045,17 +1043,46 @@ class OpenHandsAgent(BaseAgent):
             # each SDK turn as one comparable LLM call, matching Claude's
             # `num_turns` and Codex's single `thread.turn(...)` accounting.
             run.metadata["sdk_turns"] = len(token_usages)
-        token_metrics = getattr(metrics, "accumulated_token_usage", None)
-        prompt_tokens = int(getattr(token_metrics, "prompt_tokens", 0) or 0)
-        completion_tokens = int(getattr(token_metrics, "completion_tokens", 0) or 0)
+        normalized = self._usage(metrics)
         run.usage = {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
+            "input_tokens": normalized.input_tokens,
+            "output_tokens": normalized.output_tokens,
+            "reasoning_tokens": normalized.reasoning_tokens,
+            "total_tokens": normalized.input_tokens + normalized.output_tokens,
         }
         cost = getattr(metrics, "accumulated_cost", None)
         if cost is not None:
             run.metadata["total_cost_usd"] = cost
+
+    def _usage(
+        self,
+        raw_usage: Any,
+        *,
+        llm_calls: int = 0,
+    ) -> AgentUsage:
+        """Extract aggregate token counts from an OpenHands metrics object."""
+        token_metrics = usage_field(raw_usage, "accumulated_token_usage", None)
+        token_metrics = raw_usage if token_metrics is None else token_metrics
+        return super()._usage(
+            {
+                "input_tokens": usage_field(
+                    token_metrics,
+                    "input_tokens",
+                    usage_field(token_metrics, "prompt_tokens", 0),
+                ),
+                "output_tokens": usage_field(
+                    token_metrics,
+                    "output_tokens",
+                    usage_field(token_metrics, "completion_tokens", 0),
+                ),
+                "reasoning_tokens": usage_field(
+                    token_metrics,
+                    "reasoning_tokens",
+                    0,
+                ),
+            },
+            llm_calls=llm_calls,
+        )
 
     @staticmethod
     def _classify_error(exc: BaseException) -> HarnessStatus:

@@ -16,7 +16,7 @@ from corral.agents.openhands import HarnessRunResult
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
-from corral.persistence import JSONLStateStore
+from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
 
@@ -154,10 +154,12 @@ def test_openhands_counts_each_sdk_completion_as_one_llm_call():
 
     assert run.metadata["sdk_turns"] == 3
     assert run.usage == {
-        "prompt_tokens": 12,
-        "completion_tokens": 4,
+        "input_tokens": 12,
+        "output_tokens": 4,
+        "reasoning_tokens": 0,
         "total_tokens": 16,
     }
+    assert agent._usage(metrics, llm_calls=3).llm_calls == 3
 
 
 @pytest.mark.anyio()
@@ -273,7 +275,7 @@ async def test_openhands_run_data_is_folded_into_final_state(monkeypatch, tmp_pa
     )
     agent = OpenHandsAgent(model="openai/test", api_key="key", system_prompt="system")
 
-    with JSONLStateStore(tmp_path / "states.jsonl") as store:
+    with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
         final = await TaskRuntime(store).run(
             agent,
             environment,
@@ -288,10 +290,11 @@ async def test_openhands_run_data_is_folded_into_final_state(monkeypatch, tmp_pa
     assert final.tool_statistics == {"submit_answer": 1}
     assert any(
         message.get("content") == "OpenHands completed the task"
-        for message in final.messages
+        for conversation in final.conversations.values()
+        for message in conversation
     )
     assert final.runtime.metadata["agent_status"] == "completed"
-    session_metadata = final.runtime.metadata["session_metadata"]
+    session_metadata = next(iter(final.agent_runs.values())).metadata
     assert session_metadata["harness_status"] == "success"
     assert session_metadata["num_events"] == 4
     assert session_metadata["total_cost_usd"] == 0.01

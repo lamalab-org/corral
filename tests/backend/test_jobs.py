@@ -20,11 +20,9 @@ import time
 from pydantic import Field
 
 from corral.backend.jobs import JobManager, JobStatus, ThreadExecutor
-from corral.core.action import Action
 from corral.core.environment import Toolset, build_environments
 from corral.core.task import TaskDefinition
 from corral.core.tool import tool
-from corral.core.transition import execute_action, propose_action
 
 
 class _FakeTool:
@@ -47,12 +45,6 @@ def _wait_until(predicate, timeout=2.0, interval=0.005):
             return True
         time.sleep(interval)
     return False
-
-
-def _call(env, state, name, arguments):
-    action = Action(name=name, arguments=arguments)
-    child = execute_action(env, propose_action(state, action), action)
-    return child, child.messages[-1]
 
 
 def test_submit_returns_immediately_then_succeeds():
@@ -337,85 +329,3 @@ def test_for_task_defaults_to_template_job_concurrency():
     runtime = template.for_task("task_default")
     assert runtime.max_job_concurrency == template.max_job_concurrency
     runtime.shutdown_jobs()
-
-
-def test_env_start_tool_runs_job_end_to_end():
-    env = _bg_env().for_task("task_1")
-    state = env.initial_state()
-    state, call = _call(env, state, "start_slow_square", {"x": 4})
-    handle = json.loads(call["content"])
-    assert handle["status"] in {"queued", "running"}
-    job_id = handle["job_id"]
-
-    state, call = _call(
-        env, state, "wait_for_job", {"job_id": job_id, "timeout_seconds": 3}
-    )
-    done = json.loads(call["content"])
-    assert done["status"] == "succeeded"
-    assert done["result"] == "16"
-    env.shutdown_jobs()
-
-
-def test_env_submit_job_injects_hidden_args_and_redacts_them():
-    env = _bg_env(hidden=True).for_task("task_1")
-    state = env.initial_state()
-    state = state.fork(
-        environment={
-            **dict(state.environment),
-            "hidden_arguments": {"secret_scale": 3.0},
-        }
-    )
-
-    state, call = _call(env, state, "start_scaled", {"x": 5})
-    handle = json.loads(call["content"])
-    state, call = _call(
-        env,
-        state,
-        "wait_for_job",
-        {"job_id": handle["job_id"], "timeout_seconds": 3},
-    )
-    done = json.loads(call["content"])
-    assert done["result"] == "15.0"  # 5 * hidden 3.0
-    assert done["hidden_arg_names"] == ["secret_scale"]
-    assert "3.0" not in json.dumps(done["arguments"])
-    env.shutdown_jobs()
-
-
-def test_env_submit_job_errors_when_hidden_arg_missing():
-    env = _bg_env(hidden=True).for_task("task_1")
-    state = env.initial_state()
-    _, call = _call(env, state, "start_scaled", {"x": 5})
-    assert call["metadata"]["success"] is False
-    assert "secret_scale" in call["content"]
-    env.shutdown_jobs()
-
-
-def test_environment_jobs_contain_no_runner_identity():
-    env = _bg_env().for_task("task_1")
-    state = env.initial_state()
-    state, call = _call(env, state, "start_slow_square", {"x": 2})
-    handle = json.loads(call["content"])
-    state, _ = _call(
-        env,
-        state,
-        "wait_for_job",
-        {"job_id": handle["job_id"], "timeout_seconds": 3},
-    )
-
-    jobs = state.environment["jobs"]
-    assert handle["job_id"] in jobs
-    record = jobs[handle["job_id"]]
-    assert record["tool_name"] == "slow_square"
-    assert "execution_id" not in record
-    assert "benchmark_run_id" not in record
-    assert record["result"] == "4"
-    env.shutdown_jobs()
-
-
-def test_unknown_job_id_via_tool_returns_error():
-    env = _bg_env().for_task("task_1")
-    state = env.initial_state()
-    _, call = _call(env, state, "get_job_status", {"job_id": "job_missing"})
-    result = json.loads(call["content"])
-    assert "error" in result
-    env.shutdown_jobs()

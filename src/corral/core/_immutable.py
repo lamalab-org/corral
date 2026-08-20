@@ -18,7 +18,7 @@ class FrozenDict(dict[str, Any]):
     def _immutable(*args: Any, **kwargs: Any) -> None:
         del args, kwargs
         raise TypeError(
-            "State values are immutable; use State.fork() or WorkspaceState.fork()"
+            "projection values are immutable; append an event to change them"
         )
 
     __setitem__ = _immutable
@@ -48,7 +48,7 @@ class FrozenList(list[Any]):
     def _immutable(*args: Any, **kwargs: Any) -> None:
         del args, kwargs
         raise TypeError(
-            "State values are immutable; use State.fork() or WorkspaceState.fork()"
+            "projection values are immutable; append an event to change them"
         )
 
     __setitem__ = _immutable
@@ -108,10 +108,7 @@ class FrozenModel(BaseModel):
     ) -> FrozenModel:
         """Copy frozen data but reject Pydantic's unvalidated update shortcut."""
         if update:
-            raise TypeError(
-                "State models are immutable; use State.fork() or "
-                "WorkspaceState.fork()"
-            )
+            raise TypeError("projection models are immutable; append an event instead")
         return super().model_copy(deep=deep)
 
 

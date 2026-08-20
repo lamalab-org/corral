@@ -134,7 +134,7 @@ class JobRecord:
 
         The hidden argument *values* in `call_arguments` are deliberately
         excluded; only the visible arguments and the names of injected hidden
-        arguments are reported, matching the State-v2 environment snapshot
+        arguments are reported, matching the committed environment projection
         redacts `hidden_args`.
         """
         ctx = self.context

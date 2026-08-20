@@ -34,7 +34,7 @@ class WorkspaceManager:
 
     `artifact_store` is the only byte-storage dependency. It defaults to a
     local content-addressed store but can be replaced by an S3 implementation
-    without changing manifests, State, or materialization callers.
+    without changing manifests, projections, or materialization callers.
     """
 
     def __init__(
@@ -148,7 +148,7 @@ class WorkspaceManager:
         can never silently enter the logical workspace.
         """
         if not isinstance(workspace, WorkspaceState):
-            raise TypeError("materialize() requires WorkspaceState v2")
+            raise TypeError("materialize() requires a current WorkspaceState")
 
         destination_path = Path(destination)
         if destination_path.is_symlink():

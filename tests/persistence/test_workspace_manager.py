@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from corral.core import Artifact, State
+from corral.core import Artifact, WorkspaceState
 from corral.persistence import (
     StoredBlob,
     WorkspaceDestinationError,
@@ -33,10 +33,9 @@ def test_workspace_snapshot_restores_under_a_completely_different_path(tmp_path)
             artifacts={"dataset": Artifact(path="results/data.bin", kind="binary")},
         )
     )
-    state = State(id="state-portable", workspace=workspace)
-    restored_state = State.from_json(state.to_json())
+    restored_workspace = WorkspaceState.model_validate_json(workspace.model_dump_json())
     destination = tmp_path / "machine-b" / "unrelated-name"
-    restored = run(manager.materialize(restored_state.workspace, destination))
+    restored = run(manager.materialize(restored_workspace, destination))
 
     assert restored == destination
     assert (restored / "notes.txt").read_text(encoding="utf-8") == "hello"

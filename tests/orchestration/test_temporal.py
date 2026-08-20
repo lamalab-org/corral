@@ -21,7 +21,7 @@ from corral.orchestration import (
     execute_task,
 )
 from corral.orchestration.models import RunTaskInput
-from corral.persistence import JSONLStateStore
+from corral.persistence import SQLiteCommitStore
 from corral.run import BenchmarkTaskMetadata, CorralRunner
 from corral.runtime import TaskRuntime
 
@@ -49,7 +49,7 @@ class PreviousStateAgent(SubmitAgent):
     async def run_session(self, session):
         assert session.previous_state is not None
         assert session.previous_state.submission == "42"
-        self.seen_previous_hash = session.previous_state.state_hash
+        self.seen_previous_hash = session.previous_state.through_commit_hash
         return await super().run_session(session)
 
 
@@ -89,6 +89,9 @@ class RecordingObserver:
         self.observations.append(observation)
         return _RecordingSpan()
 
+    def record_commit(self, commit, *, context=None):
+        del commit, context
+
     def flush(self):
         return None
 
@@ -113,8 +116,8 @@ def _environment(task_id: str, dependency: str | None = None) -> Environment:
 
 
 @pytest.mark.anyio()
-async def test_activity_restores_prior_state_for_reflective_agents(tmp_path):
-    store = JSONLStateStore(tmp_path / "prior-states.jsonl")
+async def test_activity_restores_prior_projection_for_reflective_agents(tmp_path):
+    store = SQLiteCommitStore(tmp_path / "prior-commits.sqlite3")
     environment = _environment("reflective")
     prior = await TaskRuntime(store).run(
         SubmitAgent(),
@@ -131,7 +134,7 @@ async def test_activity_restores_prior_state_for_reflective_agents(tmp_path):
     registry.record_evaluation(
         "reflective",
         "prior",
-        {"state_hash": prior.state_hash, "score": 1.0},
+        {"commit_hash": prior.through_commit_hash, "score": 1.0},
     )
 
     try:
@@ -150,12 +153,12 @@ async def test_activity_restores_prior_state_for_reflective_agents(tmp_path):
         store.close()
 
     assert result.submission == "42"
-    assert agent.seen_previous_hash == prior.state_hash
+    assert agent.seen_previous_hash == prior.through_commit_hash
 
 
 @pytest.mark.anyio()
 async def test_activities_do_not_serialize_requests_by_agent_id(tmp_path):
-    store = JSONLStateStore(tmp_path / "concurrent-states.jsonl")
+    store = SQLiteCommitStore(tmp_path / "concurrent-commits.sqlite3")
     agent = ConcurrentAgent()
     registry = RuntimeRegistry(
         agents={"shared": agent},
@@ -193,7 +196,7 @@ async def test_activities_do_not_serialize_requests_by_agent_id(tmp_path):
 
 @pytest.mark.anyio()
 async def test_temporal_owns_task_and_benchmark_lifecycle(tmp_path):
-    store = JSONLStateStore(tmp_path / "states.jsonl")
+    store = SQLiteCommitStore(tmp_path / "commits.sqlite3")
     registry = RuntimeRegistry(
         agents={"agent": SubmitAgent()},
         environments={
@@ -230,7 +233,7 @@ async def test_temporal_owns_task_and_benchmark_lifecycle(tmp_path):
 
             assert state.runtime.status == "submitted"
             assert state.submission == "42"
-            assert retried.state_hash == state.state_hash
+            assert retried.through_commit_hash == state.through_commit_hash
 
             benchmark = await TemporalBenchmarkExecutor(
                 temporal.client,
@@ -240,10 +243,7 @@ async def test_temporal_owns_task_and_benchmark_lifecycle(tmp_path):
                     benchmark_run_id="benchmark-1",
                     task_ids=("upstream", "downstream"),
                     trials_per_task=2,
-                    agent_by_task={
-                        "upstream": "agent",
-                        "downstream": "agent",
-                    },
+                    agent_by_task={"upstream": "agent", "downstream": "agent"},
                     environment_by_task={
                         "upstream": "upstream",
                         "downstream": "downstream",
@@ -252,10 +252,7 @@ async def test_temporal_owns_task_and_benchmark_lifecycle(tmp_path):
                         "upstream": (),
                         "downstream": ("upstream",),
                     },
-                    max_iterations_by_task={
-                        "upstream": 1,
-                        "downstream": 1,
-                    },
+                    max_iterations_by_task={"upstream": 1, "downstream": 1},
                     max_parallel=2,
                     max_parallel_per_task=2,
                     rounds_per_run=1,
@@ -298,9 +295,9 @@ async def test_temporal_owns_task_and_benchmark_lifecycle(tmp_path):
 
             assert report.verbosity == "brief"
             assert report.task_results["upstream"].trials[0].score == 1.0
-            assert report.task_results["upstream"].trials[0].state["metadata"][
-                "model"
-            ] == {"name": "test-model"}
+            assert report.task_results["upstream"].trials[0].state["task"]["model"] == {
+                "name": "test-model"
+            }
             assert report.task_results["downstream"].trials[0].output == {
                 "answer": "42"
             }
@@ -313,10 +310,7 @@ async def test_temporal_owns_task_and_benchmark_lifecycle(tmp_path):
             assert len(benchmark_evaluations) == 4
             assert {
                 observation.context.task_id for observation in benchmark_evaluations
-            } == {
-                "upstream",
-                "downstream",
-            }
+            } == {"upstream", "downstream"}
             assert all(
                 observation.context.temporal_workflow_id
                 for observation in benchmark_evaluations

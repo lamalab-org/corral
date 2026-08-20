@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
@@ -155,6 +156,28 @@ class LiteLLMMessage(TypedDict, total=False):
     id: str | None
 
 
+def _usage_member(value: Any, key: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _reasoning_tokens(usage: Any) -> int | None:
+    """Read reasoning-token details from Chat Completions or Responses usage."""
+    direct = _usage_member(usage, "reasoning_tokens")
+    if direct is not None:
+        return int(direct or 0)
+    for details_key in (
+        "completion_tokens_details",
+        "output_tokens_details",
+    ):
+        details = _usage_member(usage, details_key)
+        reported = _usage_member(details, "reasoning_tokens")
+        if reported is not None:
+            return int(reported or 0)
+    return None
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90)),
@@ -256,17 +279,36 @@ async def llm_call(
 
         # Include usage info if requested
         if return_usage:
-            metadata["usage"] = {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0)
-                if response.usage
-                else 0,
-                "completion_tokens": getattr(response.usage, "completion_tokens", 0)
-                if response.usage
-                else 0,
-                "total_tokens": getattr(response.usage, "total_tokens", 0)
-                if response.usage
-                else 0,
+            response_usage = response.usage
+            usage = {
+                "prompt_tokens": int(
+                    (
+                        _usage_member(response_usage, "prompt_tokens")
+                        or _usage_member(response_usage, "input_tokens")
+                        or 0
+                    )
+                    if response_usage
+                    else 0
+                ),
+                "completion_tokens": int(
+                    (
+                        _usage_member(response_usage, "completion_tokens")
+                        or _usage_member(response_usage, "output_tokens")
+                        or 0
+                    )
+                    if response_usage
+                    else 0
+                ),
+                "total_tokens": int(
+                    (_usage_member(response_usage, "total_tokens") or 0)
+                    if response_usage
+                    else 0
+                ),
             }
+            reasoning_tokens = _reasoning_tokens(response_usage)
+            if reasoning_tokens is not None:
+                usage["reasoning_tokens"] = reasoning_tokens
+            metadata["usage"] = usage
 
         return LLMResponse(message, metadata)
 

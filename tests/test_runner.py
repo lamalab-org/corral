@@ -6,7 +6,13 @@ import pytest
 
 from corral.core import submit_answer_action
 from corral.core.environment import Environment, Toolset
-from corral.core.state import RuntimeState, State, UsageState
+from corral.core.state import (
+    ActionState,
+    ExecutionState,
+    RuntimeState,
+    ToolInvocationState,
+    UsageState,
+)
 from corral.core.task import InputRef, TaskDefinition
 from corral.orchestration import (
     BenchmarkWorkflowResult,
@@ -32,47 +38,82 @@ class RecordingExecutor:
         return self.result
 
 
-class MemoryStateStore:
-    def __init__(self, state: State) -> None:
+class MemoryCommitStore:
+    def __init__(self, state: ExecutionState) -> None:
         self.state = state
         self.loaded = []
 
-    async def load(self, state_hash: str) -> State:
-        self.loaded.append(state_hash)
-        assert state_hash == self.state.state_hash
+    def for_execution(self, execution_id: str):
+        assert execution_id == self.state.execution_id
+        return self
+
+    async def materialize(self, branch_id: str, commit_hash: str) -> ExecutionState:
+        self.loaded.append(commit_hash)
+        assert branch_id == self.state.branch_id
+        assert commit_hash == self.state.through_commit_hash
         return self.state
 
 
-def _submitted_state() -> State:
+def _submitted_state() -> ExecutionState:
     started_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     action = submit_answer_action("42", action_id="submit-1")
-    return State(
-        messages=(
-            action.to_message(),
-            {
-                "role": "tool",
-                "tool_call_id": action.id,
-                "name": action.name,
-                "content": "answer accepted",
-                "metadata": {
-                    "status": "success",
-                    "success": True,
-                    "duration_ms": 5.0,
+    invocation_id = "submit-invocation"
+    return ExecutionState(
+        through_commit_hash="a" * 64,
+        execution_id="benchmark-1:upstream:0",
+        branch_id="main",
+        conversations={
+            "main": (
+                action.to_message(),
+                {
+                    "role": "tool",
+                    "tool_call_id": action.id,
+                    "name": action.name,
+                    "content": "answer accepted",
+                    "metadata": {
+                        "status": "success",
+                        "success": True,
+                        "duration_ms": 5.0,
+                    },
                 },
-            },
-        ),
-        usage=UsageState(
-            input_tokens=12,
-            output_tokens=3,
-            llm_calls=1,
-            tool_calls=1,
-            agent_steps=1,
-        ),
+            )
+        },
+        actions={
+            action.id: ActionState(
+                action=action,
+                requested_by_run_id="main",
+                status="completed",
+                invocation_ids=(invocation_id,),
+            )
+        },
+        tool_invocations={
+            invocation_id: ToolInvocationState(
+                invocation_id=invocation_id,
+                action_id=action.id,
+                requested_by_run_id="main",
+                tool_name=action.name,
+                started_commit_hash="b" * 64,
+                status="completed",
+                observation="answer accepted",
+                duration_ms=5.0,
+            )
+        },
+        usage_by_run={
+            "main": UsageState(
+                input_tokens=12,
+                output_tokens=3,
+                reasoning_tokens=2,
+                llm_calls=1,
+                tool_calls=1,
+                agent_steps=1,
+            )
+        },
         runtime=RuntimeState(
             status="submitted",
             started_at=started_at,
             ended_at=started_at + timedelta(seconds=2),
         ),
+        submission="42",
     )
 
 
@@ -225,16 +266,17 @@ async def test_invalid_reporting_metadata_does_not_start_workflow():
 async def test_runner_delegates_once_and_projects_state_for_reporting():
     state = _submitted_state()
     state_ref = StateRef(
-        state_hash=state.state_hash,
-        state_id=state.id,
-        revision=state.revision,
+        commit_hash=state.through_commit_hash,
+        execution_id=state.execution_id,
+        branch_id=state.branch_id,
+        sequence=9,
         status="submitted",
         agent_steps=1,
         submission="42",
         output={"answer": "42"},
     )
     evaluation = EvaluationRef(
-        state_hash=state.state_hash,
+        commit_hash=state.through_commit_hash,
         score=1.0,
         metrics={"score": 1.0},
         scorer_version="test:v1",
@@ -254,7 +296,7 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
         ),
     )
     executor = RecordingExecutor(workflow_result)
-    store = MemoryStateStore(state)
+    store = MemoryCommitStore(state)
     runner = CorralRunner(
         executor,
         {"upstream": _metadata()["upstream"]},
@@ -265,7 +307,7 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
 
     assert len(executor.requests) == 1
     assert executor.requests[0].benchmark_run_id == "benchmark-1"
-    assert store.loaded == [state.state_hash]
+    assert store.loaded == [state.through_commit_hash]
     trial = report.task_results["upstream"].trials[0]
     assert trial.trial_id == "benchmark-1:upstream:0"
     assert trial.output == {"answer": "42"}
@@ -274,6 +316,7 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
     assert trial.token_usage == {
         "input_tokens": 12,
         "output_tokens": 3,
+        "reasoning_tokens": 2,
         "llm_calls": 1,
         "tool_calls": 1,
         "agent_steps": 1,

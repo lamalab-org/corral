@@ -266,6 +266,9 @@ class LiteLLMStructuredModel:
                 self.token_count += int(response.usage.get("total_tokens", 0))
                 self.owner.token_usage = response.usage
                 self.owner._accumulate_token_usage(response.usage)
+            record_usage = getattr(self.owner, "_record_turn_usage", None)
+            if callable(record_usage):
+                record_usage(dict(response.usage or {}))
         return parsed
 
     def _reserve_request(self, purpose: str) -> None:

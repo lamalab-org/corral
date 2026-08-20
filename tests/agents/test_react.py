@@ -64,7 +64,7 @@ async def test_iteration_limit_is_a_typed_outcome(monkeypatch, agent):
         def final_messages(self):
             return tuple(self.messages)
 
-        async def record_message(self, message):
+        async def record_message(self, message, **_kwargs):
             self.messages.append(message)
 
     outcome = await agent.run_session(Session())

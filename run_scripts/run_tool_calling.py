@@ -84,7 +84,7 @@ def _print_results(run_id: str, result: Any) -> None:
 
 
 async def run(args: argparse.Namespace) -> int:
-    """Preserve the legacy ToolCallingAgent command via the shared CLI path."""
+    """Run ToolCallingAgent through the shared commit-backed CLI path."""
     return await run_benchmark(args, agent_name=AGENT_ID)
 
 
@@ -152,8 +152,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     execution.add_argument("--max-attempts", type=int, default=3)
     execution.add_argument(
-        "--state-file",
-        default=str(root / ".corral" / "tool-calling-states.jsonl"),
+        "--commit-file",
+        default=str(root / ".corral" / "tool-calling-commits.sqlite3"),
     )
     execution.add_argument("--report")
     execution.add_argument("--verbose", action="store_true")

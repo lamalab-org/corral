@@ -12,7 +12,7 @@ from pydantic import JsonValue, model_validator
 from corral.core._immutable import FrozenModel, validate_sha256_hex
 
 if TYPE_CHECKING:
-    from corral.core.state import State
+    from corral.core.state import ExecutionState
 
 
 TOOL_CATALOG_METADATA_KEY = "tool_catalog"
@@ -20,11 +20,11 @@ TOOL_CATALOG_SCHEMA_VERSION = 1
 
 
 class ToolCatalogBindingError(RuntimeError):
-    """A persisted State cannot safely use the supplied Environment catalog."""
+    """A persisted projection cannot use the supplied Environment catalog."""
 
 
 class MissingToolCatalogError(ToolCatalogBindingError):
-    """A State is missing its required authoritative catalog snapshot."""
+    """A projection is missing its authoritative catalog snapshot."""
 
 
 class InvalidToolCatalogError(ToolCatalogBindingError):
@@ -83,7 +83,7 @@ def tool_catalog_fingerprint(tools: Sequence[Mapping[str, Any]]) -> str:
 
 
 class ToolCatalogSnapshot(FrozenModel):
-    """Versioned catalog value persisted in immutable State metadata."""
+    """Versioned catalog value persisted by the execution-start commit."""
 
     schema_version: Literal[1] = TOOL_CATALOG_SCHEMA_VERSION
     tools: tuple[Mapping[str, JsonValue], ...]
@@ -138,30 +138,30 @@ class ToolCatalogSnapshot(FrozenModel):
         return tuple(detached)
 
 
-def state_tool_catalog(state: State) -> ToolCatalogSnapshot:
+def state_tool_catalog(state: ExecutionState) -> ToolCatalogSnapshot:
     """Read and validate the authoritative catalog persisted on `state`."""
-    raw = state.metadata.environment.get(TOOL_CATALOG_METADATA_KEY)
+    raw = state.task.environment.get(TOOL_CATALOG_METADATA_KEY)
     if not isinstance(raw, Mapping):
         raise MissingToolCatalogError(
-            f"State {state.id!r} revision {state.revision} has no "
+            f"Execution {state.execution_id!r} at {state.through_commit_hash} has no "
             "persisted tool catalog snapshot. Corral will not derive one from "
             "the current Environment. This execution does not implement the "
-            "current State protocol and cannot be run."
+            "current commit protocol and cannot be run."
         )
     try:
         return ToolCatalogSnapshot.model_validate(raw)
     except Exception as exc:
         raise InvalidToolCatalogError(
-            f"State {state.id!r} revision {state.revision} has an invalid "
+            f"Execution {state.execution_id!r} at {state.through_commit_hash} has an invalid "
             f"persisted tool catalog snapshot: {exc}"
         ) from exc
 
 
 def validate_tool_catalog_binding(
-    state: State,
+    state: ExecutionState,
     current: ToolCatalogSnapshot,
 ) -> ToolCatalogSnapshot:
-    """Validate and return the State-owned catalog for one Environment binding."""
+    """Validate the commit-projected catalog for one Environment binding."""
     stored = state_tool_catalog(state)
     if stored.fingerprint != current.fingerprint:
         stored_by_name = {
@@ -193,8 +193,8 @@ def validate_tool_catalog_binding(
             )
         )
         raise ToolCatalogMismatchError(
-            f"Tool catalog mismatch for State {state.id!r} revision "
-            f"{state.revision}: stored fingerprint={stored.fingerprint}, "
+            f"Tool catalog mismatch for execution {state.execution_id!r} at "
+            f"{state.through_commit_hash}: stored fingerprint={stored.fingerprint}, "
             f"current Environment fingerprint={current.fingerprint}; "
             f"stored_only={stored_only}, current_only={current_only}, "
             f"changed={changed}. Refusing "

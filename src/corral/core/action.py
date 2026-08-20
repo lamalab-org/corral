@@ -1,4 +1,4 @@
-"""Durable actions used by the State v2 agent interface."""
+"""Durable actions proposed by agents and referenced by commit events."""
 
 from __future__ import annotations
 

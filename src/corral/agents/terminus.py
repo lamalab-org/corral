@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any
 
 from jsonschema import Draft202012Validator
@@ -35,6 +35,8 @@ from corral.core.errors import concise_error_message
 from corral.logging import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from corral.agents.session import AgentSession
 
 
@@ -99,7 +101,7 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 @dataclass(slots=True)
 class _RunState:
     messages: list[dict[str, Any]]
-    usage: _UsageAccumulator = field(default_factory=_UsageAccumulator)
+    usage: _UsageAccumulator
     last_total_tokens: int = 0
     structured_output: bool = True
     pending_answer: str | None = None
@@ -321,7 +323,11 @@ Rules:
             ),
             *provider_messages(session.messages),
         ]
-        run = _RunState(messages=messages, structured_output=self.use_structured_output)
+        run = _RunState(
+            messages=messages,
+            usage=_UsageAccumulator(self._usage),
+            structured_output=self.use_structured_output,
+        )
         parse_failures = 0
 
         for _iteration in range(iteration_limit):
@@ -342,6 +348,7 @@ Rules:
                 )
 
             raw_usage = getattr(response, "usage", None)
+            turn_usage = raw_usage or {}
             run.usage.add(raw_usage)
             if raw_usage:
                 run.last_total_tokens = int(raw_usage.get("total_tokens", 0) or 0)
@@ -359,7 +366,7 @@ Rules:
                 parsed = self._parse(content)
             except (ValueError, ValidationError) as exc:
                 parse_failures += 1
-                await session.record_message(assistant)
+                await session.record_message(assistant, usage=turn_usage)
                 if parse_failures >= self.max_consecutive_parse_failures:
                     return AgentOutcome(
                         status="protocol_failure",
@@ -382,7 +389,8 @@ Rules:
                             name=SUBMIT_ANSWER_TOOL_NAME,
                             arguments={"answer": SURRENDER_SENTINEL},
                             content=content,
-                        )
+                        ),
+                        usage=turn_usage,
                     )
                     if result.success:
                         return AgentOutcome(
@@ -397,12 +405,13 @@ Rules:
                     "role": "user",
                     "content": "Surrender is disabled. Continue using the available tools.",
                 }
+                await session.record_message(assistant, usage=turn_usage)
                 run.messages.append(feedback)
                 await session.record_message(feedback)
                 continue
 
             if len(parsed.tool_calls) > self.max_actions_per_turn:
-                await session.record_message(assistant)
+                await session.record_message(assistant, usage=turn_usage)
                 feedback = {
                     "role": "user",
                     "content": (
@@ -416,6 +425,7 @@ Rules:
 
             observations: list[dict[str, Any]] = []
             executed = False
+            pending_usage: Mapping[str, Any] | None = turn_usage
             for index, call in enumerate(parsed.tool_calls):
                 if call.name not in definitions:
                     observations.append(
@@ -475,8 +485,10 @@ Rules:
                         name=call.name,
                         arguments=call.arguments,
                         content=content if index == 0 else None,
-                    )
+                    ),
+                    usage=pending_usage,
                 )
+                pending_usage = None
                 executed = True
                 if call.name == SUBMIT_ANSWER_TOOL_NAME:
                     if not result.success:
@@ -508,7 +520,7 @@ Rules:
                 )
 
             if not executed:
-                await session.record_message(assistant)
+                await session.record_message(assistant, usage=turn_usage)
             observation_message = {
                 "role": "user",
                 "content": json.dumps(

@@ -21,7 +21,7 @@ from corral.orchestration import (
 )
 from corral.orchestration.executor import task_workflow_id
 from corral.orchestration.workflows import TaskWorkflow
-from corral.persistence import JSONLStateStore
+from corral.persistence import SQLiteCommitStore
 
 
 @pytest.fixture()
@@ -62,7 +62,7 @@ async def test_temporal_replay_does_not_duplicate_workflow_logs(tmp_path):
             sinks=(LogSinkConfig(records.append, level="DEBUG"),),
         )
     )
-    store = JSONLStateStore(tmp_path / "states.jsonl")
+    store = SQLiteCommitStore(tmp_path / "commits.sqlite3")
     registry = RuntimeRegistry(
         agents={"agent": _SubmitAgent()},
         environments={"replay-logging": _environment()},

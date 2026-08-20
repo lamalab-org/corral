@@ -54,7 +54,7 @@ def concise_error_message(exc: BaseException) -> str:
 
     if message is None:
         message = str(selected).strip()
-    # State metadata is intended for reports and JSON, not traceback rendering.
+    # Projection metadata is intended for reports and JSON, not traceback rendering.
     # Keep embedded multi-line SDK text readable as one exception-only message.
     message = " ".join(message.split())
     return message or type(selected).__name__

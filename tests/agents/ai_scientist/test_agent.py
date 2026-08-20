@@ -1,14 +1,14 @@
 """Session-boundary tests for AI Scientist."""
 
 import asyncio
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import anyio
 import pytest
 from anyio.from_thread import BlockingPortal
+from tests.agents.commit_session import start_session
 
-from corral.agents import Agent, AIScientistAgent
+from corral.agents import INSPECT_SUBAGENT_TOOL_NAME, Agent, AIScientistAgent
 from corral.agents.ai_scientist import agent as agent_module
 from corral.agents.ai_scientist.agent import (
     _BranchSessionRegistry,
@@ -28,7 +28,7 @@ def anyio_backend():
     return "asyncio"
 
 
-def make_session(calls, *, max_iterations=64):
+async def make_session(calls, *, max_iterations=64, agent=None):
     def measure(value: int) -> str:
         """Return a measurement."""
         calls.append(value)
@@ -50,10 +50,11 @@ def make_session(calls, *, max_iterations=64):
             workspace_factory=None,
         ),
     )
-    return AgentSession(
+    return await start_session(
         environment,
-        environment.initial_state(started_at=datetime.now(timezone.utc)),
         max_iterations=max_iterations,
+        actor_id="agent_0",
+        agent=agent,
     )
 
 
@@ -80,12 +81,22 @@ def test_experiment_manager_is_not_a_second_agent_entrypoint():
     assert not hasattr(ExperimentManager, "run_session")
 
 
-def test_ai_scientist_uses_the_session_model_call_budget():
+@pytest.mark.anyio()
+async def test_ai_scientist_uses_the_session_model_call_budget():
     agent = AIScientistAgent(model="test-model")
-    session = make_session([], max_iterations=7)
+    session = await make_session([], max_iterations=7)
 
     assert not hasattr(agent.config, "max_llm_calls")
     assert session.iteration_limit == 7
+
+
+@pytest.mark.anyio()
+async def test_ai_scientist_opts_into_subagent_inspection_tool():
+    agent = AIScientistAgent(model="test-model")
+    session = await make_session([], agent=agent)
+
+    names = {tool["function"]["name"] for tool in session.tools}
+    assert INSPECT_SUBAGENT_TOOL_NAME in names
 
 
 @pytest.mark.anyio()
@@ -106,12 +117,12 @@ async def test_scientist_harness_uses_native_async_llm_call(monkeypatch):
 @pytest.mark.anyio()
 async def test_scientist_branches_execute_through_agent_sessions():
     calls = []
-    parent = make_session(calls)
+    parent = await make_session(calls)
 
     async with BlockingPortal() as portal:
         sessions = _BranchSessionRegistry(parent, portal)
-        first = sessions.create_branch()
-        second = sessions.create_branch()
+        first = await anyio.to_thread.run_sync(sessions.create_branch)
+        second = await anyio.to_thread.run_sync(sessions.create_branch)
 
         first_response = await anyio.to_thread.run_sync(
             lambda: first.execute(Action(name="measure", arguments={"value": 1}))
@@ -126,10 +137,12 @@ async def test_scientist_branches_execute_through_agent_sessions():
         assert second_response.success is True
         assert first_session.state.tool_statistics == {"measure": 1}
         assert second_session.state.tool_statistics == {"measure": 1}
-        assert first_session.state.actions[0].arguments == {"value": 1}
-        assert second_session.state.actions[0].arguments == {"value": 2}
-        assert first_session.state.actions[0].actor_id == "agent_0"
-        assert second_session.state.actions[0].actor_id == "agent_0"
+        first_action = next(iter(first_session.state.actions.values())).action
+        second_action = next(iter(second_session.state.actions.values())).action
+        assert first_action.arguments == {"value": 1}
+        assert second_action.arguments == {"value": 2}
+        assert first_action.actor_id == "agent_0"
+        assert second_action.actor_id == "agent_0"
 
     assert calls == [1, 2]
 
@@ -137,7 +150,7 @@ async def test_scientist_branches_execute_through_agent_sessions():
 @pytest.mark.anyio()
 async def test_scientist_branches_inherit_current_hook_state():
     calls = []
-    parent = make_session(calls)
+    parent = await make_session(calls)
     await parent.record_message(
         {"role": "assistant", "content": "hook-provided context"}
     )
@@ -152,7 +165,7 @@ async def test_scientist_branches_inherit_current_hook_state():
 
     async with BlockingPortal() as portal:
         sessions = _BranchSessionRegistry(parent, portal)
-        branch = sessions.create_branch()
+        branch = await anyio.to_thread.run_sync(sessions.create_branch)
         response = await anyio.to_thread.run_sync(
             lambda: branch.execute(Action(name="measure", arguments={"value": 1}))
         )
@@ -161,17 +174,20 @@ async def test_scientist_branches_inherit_current_hook_state():
     assert response.success
     assert calls == [0, 1]
     assert branch_state.tool_statistics == {"measure": 2}
-    assert branch_state.actions[0].metadata == {"source": "hook-intervention"}
+    assert next(iter(branch_state.actions.values())).action.metadata == {
+        "source": "hook-intervention"
+    }
     assert any(
         message.get("content") == "hook-provided context"
-        for message in branch_state.messages
+        for conversation in branch_state.conversations.values()
+        for message in conversation
     )
 
 
 @pytest.mark.anyio()
 async def test_ai_scientist_maps_harness_result_to_outcome(monkeypatch):
     agent = AIScientistAgent(model="test-model")
-    session = make_session([])
+    session = await make_session([])
 
     monkeypatch.setattr(
         agent,
@@ -197,10 +213,10 @@ async def test_ai_scientist_maps_harness_result_to_outcome(monkeypatch):
 @pytest.mark.anyio()
 async def test_ai_scientist_instance_is_reentrant_across_sessions(monkeypatch):
     agent = AIScientistAgent(model="test-model")
-    first = make_session([])
-    second = make_session([])
-    first.execution_id = "first"
-    second.execution_id = "second"
+    first = await make_session([])
+    second = await make_session([])
+    first_id = first.execution_id
+    second_id = second.execution_id
 
     monkeypatch.setattr(
         agent,
@@ -217,9 +233,9 @@ async def test_ai_scientist_instance_is_reentrant_across_sessions(monkeypatch):
         agent.run_session(second),
     )
 
-    assert first_outcome.answer == "first"
-    assert second_outcome.answer == "second"
-    assert first.state.submission == "first"
-    assert second.state.submission == "second"
+    assert first_outcome.answer == first_id
+    assert second_outcome.answer == second_id
+    assert first.state.submission == first_id
+    assert second.state.submission == second_id
     assert first.get_agent_state("ai_scientist")["status"] == "completed"
     assert second.get_agent_state("ai_scientist")["status"] == "completed"

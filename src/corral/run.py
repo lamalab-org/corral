@@ -26,7 +26,7 @@ from corral.report.projection import normalise_k_values, project_benchmark_resul
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-    from corral.persistence import StateStore
+    from corral.persistence import CommitStore
     from corral.report.metrics import Metric
     from corral.report.results import BenchmarkResult
 
@@ -196,7 +196,7 @@ class CorralRunner:
         agent_id: str = "agent",
         model: str | None = None,
         max_iterations: int = 10,
-        state_store: StateStore | None = None,
+        state_store: CommitStore | None = None,
         metrics: Iterable[Metric] | None = None,
     ) -> None:
         """Create a runner from environments or explicit advanced metadata.

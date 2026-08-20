@@ -33,7 +33,7 @@ from corral.agents.ai_scientist.workers.planner import NodePlanner, TaskFormulat
 from corral.agents.ai_scientist.workers.synthesizer import FinalSynthesizer
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
 from corral.agents.schema import AgentOutcome, AgentUsage, BudgetExhaustedError
-from corral.agents.session import AgentSession
+from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.utils import llm_call
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
@@ -56,6 +56,7 @@ class _GatewayOwner:
     """Per-run transcript/usage sink expected by LiteLLMStructuredModel."""
 
     messages: list[dict[str, Any]] = field(default_factory=list)
+    turn_usages: list[dict[str, int]] = field(default_factory=list)
     token_usage: dict[str, int] = field(default_factory=dict)
     cumulative_token_usage: dict[str, int] = field(default_factory=dict)
 
@@ -65,6 +66,9 @@ class _GatewayOwner:
                 key, 0
             ) + int(value or 0)
 
+    def _record_turn_usage(self, usage: dict[str, int]) -> None:
+        self.turn_usages.append(usage)
+
 
 def _call_llm_from_harness(portal: BlockingPortal, **call_kwargs: Any) -> Any:
     """Run one native-async LiteLLM call from the blocking search harness."""
@@ -72,7 +76,7 @@ def _call_llm_from_harness(portal: BlockingPortal, **call_kwargs: Any) -> Any:
 
 
 class _BranchSessionRegistry:
-    """Create logical/physical AI Scientist branches from canonical State."""
+    """Create logical/physical AI Scientist branches from a commit projection."""
 
     def __init__(self, parent: AgentSession, portal: BlockingPortal) -> None:
         self.parent = parent
@@ -87,7 +91,7 @@ class _BranchSessionRegistry:
         source: AgentSession,
     ) -> BranchSessionHandle:
         execution_id = f"{self.parent.execution_id}-scientist-{uuid4()}"
-        session = source.fork_branch(execution_id=execution_id)
+        session = self.portal.call(partial(source.fork_branch, branch_id=execution_id))
         with self._lock:
             self._sessions[execution_id] = session
         return BranchSessionHandle(
@@ -126,6 +130,8 @@ class AIScientistAgent(BaseAgent):
     gateway that requires serial access.
     """
 
+    session_capabilities = AgentSessionCapabilities(inspect_subagents=True)
+
     def __init__(
         self,
         model: str = "openai/gpt-4o",
@@ -156,7 +162,7 @@ class AIScientistAgent(BaseAgent):
 
     @staticmethod
     def _search_snapshot(state: ScientistState) -> dict[str, Any]:
-        """Serialize search progress and provenance into Corral State."""
+        """Serialize search progress and provenance as agent-state events."""
         return {
             "formulation": state.formulation.model_dump(mode="json"),
             "current_stage": state.current_stage.value,
@@ -248,10 +254,8 @@ class AIScientistAgent(BaseAgent):
             completion_runner=partial(_call_llm_from_harness, portal),
             llm_kwargs=self.kwargs,
         )
-        task_id = str(
-            session.initial_state.metadata.task.get("id") or session.execution_id
-        )
-        examples = session.initial_state.metadata.scaffold.get("examples") or []
+        task_id = str(getattr(session, "task_id", session.execution_id))
+        examples = session.examples
         trace = JSONLTraceWriter(config.trace_path, task_id)
         formulator = TaskFormulator(
             gateway, max_tool_schema_chars=config.max_tool_schema_chars
@@ -323,11 +327,6 @@ class AIScientistAgent(BaseAgent):
                     node = state.tree.get(node.parent_id)
                 if selected_branch is not None:
                     break
-            if selected_branch is not None and selected_branch.execution_id is not None:
-                session.adopt_branch(
-                    branch_sessions.session(selected_branch.execution_id)
-                )
-
             promotion = pool.promote_artifacts(
                 state.best_nodes,
                 state.tree,
@@ -369,7 +368,8 @@ class AIScientistAgent(BaseAgent):
             trace.write("graph_snapshot", graph)
             pool.close_all()
             branch_tool_statistics = pool.tool_statistics()
-            session.set_agent_state(
+            portal.call(
+                session.set_agent_state,
                 _SCIENTIST_STATE_NAMESPACE,
                 self._state_payload(
                     state,
@@ -390,16 +390,16 @@ class AIScientistAgent(BaseAgent):
                 "llm_tokens": state.llm_tokens,
             },
         )
-        usage = AgentUsage(
-            input_tokens=int(owner.cumulative_token_usage.get("prompt_tokens", 0)),
-            output_tokens=int(owner.cumulative_token_usage.get("completion_tokens", 0)),
+        usage = self._usage(
+            owner.cumulative_token_usage,
             llm_calls=state.llm_calls,
         )
         metadata = {
             "tool_statistics": branch_tool_statistics,
             "graph": self._trace_metadata(state, owner.messages),
         }
-        session.set_agent_state(
+        portal.call(
+            session.set_agent_state,
             _SCIENTIST_STATE_NAMESPACE,
             self._state_payload(
                 state,
@@ -413,7 +413,7 @@ class AIScientistAgent(BaseAgent):
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Run search, experimentation, and synthesis through session branches."""
         owner = _GatewayOwner()
-        session.set_agent_state(
+        await session.set_agent_state(
             _SCIENTIST_STATE_NAMESPACE,
             self._state_payload(None, (), status="running"),
         )
@@ -424,7 +424,7 @@ class AIScientistAgent(BaseAgent):
                 )
         except LLMBudgetExceeded as exc:
             error = concise_error_message(exc)
-            session.set_agent_state(
+            await session.set_agent_state(
                 _SCIENTIST_STATE_NAMESPACE,
                 {
                     **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
@@ -435,7 +435,7 @@ class AIScientistAgent(BaseAgent):
             return AgentOutcome(status="iteration_limit", error=error)
         except BudgetExhaustedError as exc:
             error = concise_error_message(exc)
-            session.set_agent_state(
+            await session.set_agent_state(
                 _SCIENTIST_STATE_NAMESPACE,
                 {
                     **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
@@ -446,7 +446,7 @@ class AIScientistAgent(BaseAgent):
             return AgentOutcome(status="budget_exhausted", error=error)
         except Exception as exc:
             error = concise_error_message(exc)
-            session.set_agent_state(
+            await session.set_agent_state(
                 _SCIENTIST_STATE_NAMESPACE,
                 {
                     **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
@@ -456,11 +456,19 @@ class AIScientistAgent(BaseAgent):
             )
             return AgentOutcome(status="agent_failure", error=error)
 
-        for message in owner.messages:
-            await session.record_message(message)
+        if owner.turn_usages:
+            for index, turn_usage in enumerate(owner.turn_usages):
+                start = index * 3
+                await session.record_messages(
+                    owner.messages[start : start + 3],
+                    usage=turn_usage,
+                )
+        else:
+            for message in owner.messages:
+                await session.record_message(message)
         answer = answer.strip()
         if not answer:
-            session.set_agent_state(
+            await session.set_agent_state(
                 _SCIENTIST_STATE_NAMESPACE,
                 {
                     **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
@@ -474,6 +482,14 @@ class AIScientistAgent(BaseAgent):
                 usage=usage,
                 metadata=metadata,
             )
+        await session.set_agent_state(
+            _SCIENTIST_STATE_NAMESPACE,
+            {
+                **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
+                "status": "completed",
+                "error": None,
+            },
+        )
         submission = await session.execute(
             Action(
                 name=SUBMIT_ANSWER_TOOL_NAME,
@@ -483,7 +499,7 @@ class AIScientistAgent(BaseAgent):
             )
         )
         if not submission.success:
-            session.set_agent_state(
+            await session.set_agent_state(
                 _SCIENTIST_STATE_NAMESPACE,
                 {
                     **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
@@ -497,14 +513,6 @@ class AIScientistAgent(BaseAgent):
                 usage=usage,
                 metadata=metadata,
             )
-        session.set_agent_state(
-            _SCIENTIST_STATE_NAMESPACE,
-            {
-                **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
-                "status": "completed",
-                "error": None,
-            },
-        )
         return AgentOutcome(
             status="completed",
             answer=answer,

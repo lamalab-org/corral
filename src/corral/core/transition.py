@@ -1,10 +1,4 @@
-"""Immutable environment transitions.
-
-The functions in this module are the execution boundary introduced by PR 4.
-An :class:`~corral.core.environment.Environment` is a definition and tool catalog;
-all task-execution data is supplied in :class:`~corral.core.state.State` and a
-tool call produces a complete child State.
-"""
+"""Tool execution boundary producing typed event effects, never child States."""
 
 from __future__ import annotations
 
@@ -12,173 +6,188 @@ import json
 import time
 from collections.abc import Mapping
 from contextlib import nullcontext
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
 
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
-from corral.core.state import RuntimeState, State, UsageState
+from corral.core.events import (
+    AgentTurnRecorded,
+    EnvironmentOperation,
+    RuntimeUpdate,
+    UsageDelta,
+    WorkspaceDelta,
+)
 from corral.core.tool import ToolCallStatus
 
 if TYPE_CHECKING:
+    from pydantic import JsonValue
+
     from corral.core.environment import Environment
-    from corral.core.workspace import WorkspaceState
+    from corral.core.state import ExecutionState
 
 HIDDEN_ARGUMENTS_NAMESPACE = "hidden_arguments"
-# A tool may declare this as a hidden argument to receive the stable Action ID
-# as an API/instrument idempotency key. It is runtime-owned and never supplied
-# by the agent or persisted in the general hidden-argument namespace.
 CORRAL_ACTION_ID_ARGUMENT = "corral_action_id"
 
 
 @dataclass(frozen=True, slots=True)
 class ToolExecutionResult:
-    """A tool observation plus an optional complete environment namespace.
-
-    Most tools only return content. A stateful tool returns this value with a
-    complete JSON-serializable `environment` replacement; it never receives
-    the mutable State object and never patches State in place.
-    """
+    """A tool observation and optional complete environment namespace."""
 
     content: Any
     environment: Mapping[str, Any] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ToolEffects:
+    """Atomic effects returned by tool execution for one completion commit."""
+
+    observation: JsonValue
+    status: Literal["success", "invalid_tool", "invalid_args", "execution_error"]
+    environment_operations: tuple[EnvironmentOperation, ...] = ()
+    workspace_delta: WorkspaceDelta | None = None
+    usage_delta: UsageDelta = field(default_factory=lambda: UsageDelta(tool_calls=1))
+    runtime_update: RuntimeUpdate | None = None
+    expected_environment_revision: int | None = None
+    expected_workspace_revision: int | None = None
+    duration_ms: float | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.status == ToolCallStatus.SUCCESS.value
+
+
 def propose_action(
-    state: State,
     action: Action,
     *,
-    usage: UsageState | Mapping[str, Any] | None = None,
-) -> State:
-    """Record an agent action in the in-memory immutable State chain."""
-    if state.pending_action is not None:
-        raise ValueError("cannot propose an action while another action is pending")
-    if any(previous.id == action.id for previous in state.actions):
-        raise ValueError(f"action id {action.id!r} is already present in State")
-    return state.fork(
-        messages=(*state.messages, action.to_message()),
-        usage=usage,
+    messages: tuple[Mapping[str, JsonValue], ...] = (),
+    usage_delta: UsageDelta | None = None,
+    parallel_group_id: str | None = None,
+) -> AgentTurnRecorded:
+    """Build the durable agent event that proposes one action."""
+
+    assistant_message = action.to_message()
+    return AgentTurnRecorded(
+        messages=(*messages, assistant_message),
+        actions=(action,),
+        usage_delta=usage_delta or UsageDelta(),
+        parallel_group_id=parallel_group_id,
     )
 
 
 def _json_copy(value: Any) -> Any:
-    """Return a mutable JSON copy without leaking references out of State."""
-    return json.loads(json.dumps(value, allow_nan=False))
+    return json.loads(json.dumps(value, allow_nan=False, default=str))
 
 
-def _hidden_arguments(state: State) -> dict[str, Any]:
-    value = state.environment.get(HIDDEN_ARGUMENTS_NAMESPACE, {})
+def _hidden_arguments(state: ExecutionState) -> dict[str, Any]:
+    value = state.environment.values.get(HIDDEN_ARGUMENTS_NAMESPACE, {})
     if not isinstance(value, Mapping):
         raise ValueError(
-            f"State.environment.{HIDDEN_ARGUMENTS_NAMESPACE} must be an object"
+            f"ExecutionState.environment.{HIDDEN_ARGUMENTS_NAMESPACE} must be an object"
         )
     return _json_copy(value)
 
 
-def _tool_message(
-    action: Action,
-    *,
-    content: str,
-    status: ToolCallStatus,
-    duration: float,
-) -> dict[str, Any]:
-    success = status is ToolCallStatus.SUCCESS
-    return {
-        "role": "tool",
-        "tool_call_id": action.id,
-        "name": action.name,
-        "content": content,
-        "metadata": {
-            "status": status.value,
-            "success": success,
-            "duration_ms": round(duration * 1000, 3),
-        },
-    }
+def environment_operations(
+    before: Mapping[str, Any], after: Mapping[str, Any]
+) -> tuple[EnvironmentOperation, ...]:
+    """Return deterministic leaf/replacement operations from complete namespaces."""
 
+    operations: list[EnvironmentOperation] = []
 
-def _usage_after_tool(state: State) -> UsageState:
-    return UsageState(
-        input_tokens=state.usage.input_tokens,
-        output_tokens=state.usage.output_tokens,
-        llm_calls=state.usage.llm_calls,
-        tool_calls=state.usage.tool_calls + 1,
-        agent_steps=state.usage.agent_steps,
-        metadata=state.usage.metadata,
-    )
+    def visit(path: tuple[str, ...], previous: Any, current: Any) -> None:
+        if previous == current:
+            return
+        if isinstance(previous, Mapping) and isinstance(current, Mapping):
+            operations.extend(
+                EnvironmentOperation(operation="delete", path=(*path, str(key)))
+                for key in sorted(previous.keys() - current.keys())
+            )
+            for key in sorted(current):
+                if key not in previous:
+                    operations.append(
+                        EnvironmentOperation(
+                            operation="set",
+                            path=(*path, str(key)),
+                            value=_json_copy(current[key]),
+                        )
+                    )
+                else:
+                    visit((*path, str(key)), previous[key], current[key])
+            return
+        if not path:
+            raise ValueError("the environment namespace must remain a JSON object")
+        operations.append(
+            EnvironmentOperation(operation="set", path=path, value=_json_copy(current))
+        )
 
-
-def _runtime_after_submission(state: State, answer: str) -> RuntimeState:
-    surrendered = bool(
-        state.runtime.metadata.get("surrender_sentinel")
-    ) and answer == str(state.runtime.metadata["surrender_sentinel"])
-    return RuntimeState(
-        status="surrendered" if surrendered else "submitted",
-        started_at=state.runtime.started_at,
-        ended_at=datetime.now(timezone.utc),
-        metadata=state.runtime.metadata,
-    )
-
-
-def _submission_allowed(state: State, action: Action) -> bool:
-    raw_submitters = state.runtime.metadata.get("submitters")
-    if raw_submitters is None:
-        return True
-    if not isinstance(raw_submitters, list | tuple):
-        raise ValueError("State.runtime.metadata.submitters must be a list")
-    return action.actor_id is not None and action.actor_id in raw_submitters
+    visit((), before, after)
+    return tuple(operations)
 
 
 def _capture_workspace(
     environment: Environment,
-    state: State,
+    state: ExecutionState,
     action: Action,
-) -> WorkspaceState:
+) -> WorkspaceDelta | None:
     capture = getattr(environment, "capture_workspace", None)
     if capture is None:
-        return state.workspace
+        return None
     workspace = capture(state.workspace, created_by_action=action.id)
-    return state.workspace if workspace is None else workspace
+    if workspace is None or (
+        workspace.files == state.workspace.files
+        and workspace.artifacts == state.workspace.artifacts
+    ):
+        return None
+    return WorkspaceDelta.from_workspace(workspace)
 
 
-def execute_action(environment: Environment, state: State, action: Action) -> State:
-    """Execute one pending Action and return exactly one immutable child.
+def execute_action(
+    environment: Environment,
+    state: ExecutionState,
+    action: Action,
+) -> ToolEffects:
+    """Execute an already-committed action and return its atomic typed effects."""
 
-    `state` must already contain `action` as its sole pending action. The
-    runtime durably commits that before-tool State, then this function records
-    the observation and the runtime commits the returned after-tool child. The
-    parent is never mutated, including its nested hidden-tool namespace.
-    """
-    if not isinstance(state, State):
-        raise TypeError("execute_action() requires State v2")
-    if not isinstance(action, Action):
-        raise TypeError("execute_action() requires Action")
-    if state.pending_action != action:
-        raise ValueError("action must be the pending action in State")
     if state.is_terminal:
-        raise ValueError("cannot execute an action from a terminal State")
+        raise ValueError("cannot execute an action from a terminal execution")
+    action_state = state.actions.get(action.id)
+    if action_state is None or action_state.action != action:
+        raise ValueError("action must already be recorded in ExecutionState")
+    if action_state.status not in {"pending", "running"}:
+        raise ValueError("action has already reached a terminal status")
 
     prepare_workspace = getattr(environment, "prepare_workspace", None)
     if prepare_workspace is not None:
         prepare_workspace(state.workspace)
 
     started = time.perf_counter()
-    next_environment: Mapping[str, Any] = state.environment
-    next_runtime = state.runtime
+    before_environment = state.environment.values
+    next_environment: Mapping[str, Any] = before_environment
 
     if action.name == SUBMIT_ANSWER_TOOL_NAME:
         answer = action.arguments.get("answer")
         if set(action.arguments) != {"answer"} or not isinstance(answer, str):
             status = ToolCallStatus.INVALID_ARGS
-            content = (
+            content: Any = (
                 "submit_answer requires exactly one string argument named 'answer'"
             )
-        elif not _submission_allowed(state, action):
-            status = ToolCallStatus.EXECUTION_ERROR
-            content = f"actor {action.actor_id!r} is not allowed to submit"
         else:
-            status = ToolCallStatus.SUCCESS
-            content = "answer accepted"
-            next_runtime = _runtime_after_submission(state, answer)
+            raw_submitters = state.runtime.metadata.get("submitters")
+            allowed = raw_submitters is None or (
+                isinstance(raw_submitters, list | tuple)
+                and action.actor_id is not None
+                and action.actor_id in raw_submitters
+            )
+            if raw_submitters is not None and not isinstance(
+                raw_submitters, list | tuple
+            ):
+                raise ValueError("RuntimeState.metadata.submitters must be a list")
+            if not allowed:
+                status = ToolCallStatus.EXECUTION_ERROR
+                content = f"actor {action.actor_id!r} is not allowed to submit"
+            else:
+                status = ToolCallStatus.SUCCESS
+                content = "answer accepted"
     else:
         tool = environment.tools.get(action.name)
         if tool is None:
@@ -198,7 +207,6 @@ def execute_action(environment: Environment, state: State, action: Action) -> St
                     missing.append(hidden_name)
                 else:
                     call_arguments[hidden_name] = hidden_values[hidden_name]
-
             if missing:
                 status = ToolCallStatus.INVALID_ARGS
                 content = (
@@ -216,58 +224,46 @@ def execute_action(environment: Environment, state: State, action: Action) -> St
                         context = guard(tool) if guard is not None else nullcontext()
                         with context:
                             raw_result = environment.execute_tool(
-                                state,
-                                tool,
-                                call_arguments,
+                                state, tool, call_arguments
                             )
                         if isinstance(raw_result, ToolExecutionResult):
-                            content_value = raw_result.content
+                            content = raw_result.content
                             if raw_result.environment is not None:
                                 next_environment = raw_result.environment
                         else:
-                            content_value = raw_result
-                        content = (
-                            content_value
-                            if isinstance(content_value, str)
-                            else json.dumps(
-                                content_value,
-                                allow_nan=False,
-                                ensure_ascii=False,
-                                default=str,
-                            )
-                        )
+                            content = raw_result
                         status = ToolCallStatus.SUCCESS
-                    except Exception as exc:  # tool failures are observations
+                    except Exception as exc:  # tool failures remain observations
                         status = ToolCallStatus.EXECUTION_ERROR
                         content = str(exc)
 
     capture_environment = getattr(environment, "capture_environment", None)
     if capture_environment is not None:
         next_environment = capture_environment(next_environment)
-
-    duration = time.perf_counter() - started
-    next_workspace = _capture_workspace(environment, state, action)
-    return state.fork(
-        messages=(
-            *state.messages,
-            _tool_message(
-                action,
-                content=content,
-                status=status,
-                duration=duration,
-            ),
+    operations = environment_operations(before_environment, next_environment)
+    workspace_delta = _capture_workspace(environment, state, action)
+    observation = _json_copy(content)
+    return ToolEffects(
+        observation=observation,
+        status=status.value,
+        environment_operations=operations,
+        workspace_delta=workspace_delta,
+        expected_environment_revision=(
+            state.environment.revision if operations else None
         ),
-        environment=next_environment,
-        workspace=next_workspace,
-        usage=_usage_after_tool(state),
-        runtime=next_runtime,
+        expected_workspace_revision=(
+            state.workspace.revision if workspace_delta is not None else None
+        ),
+        duration_ms=round((time.perf_counter() - started) * 1000, 3),
     )
 
 
 __all__ = [
     "CORRAL_ACTION_ID_ARGUMENT",
     "HIDDEN_ARGUMENTS_NAMESPACE",
+    "ToolEffects",
     "ToolExecutionResult",
+    "environment_operations",
     "execute_action",
     "propose_action",
 ]

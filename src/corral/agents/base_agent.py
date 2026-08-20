@@ -13,10 +13,11 @@ from promptstore import PromptStore
 from corral.agents.hooks import AgentHooks
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
 from corral.agents.schema import AgentOutcome, AgentUsage
+from corral.agents.usage import usage_from_mapping
 from corral.agents.utils import llm_call as _default_llm_call
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from corral.agents.session import AgentSession
 
@@ -76,6 +77,15 @@ class BaseAgent(ABC):
     def _call_kwargs(self) -> dict[str, Any]:
         return dict(self.kwargs)
 
+    def _usage(
+        self,
+        raw_usage: Mapping[str, Any] | None,
+        *,
+        llm_calls: int = 0,
+    ) -> AgentUsage:
+        """Convert provider usage fields into Corral's canonical schema."""
+        return usage_from_mapping(raw_usage, llm_calls=llm_calls)
+
     @abstractmethod
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Run the agent-owned loop against one task-bound session."""
@@ -85,37 +95,28 @@ class BaseAgent(ABC):
 class _UsageAccumulator:
     """Accumulate physical provider usage for one session run."""
 
+    convert: Callable[..., AgentUsage] = field(
+        default=usage_from_mapping,
+        repr=False,
+    )
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int = 0
     llm_calls: int = 0
-    metadata: dict[str, Any] = field(default_factory=dict)
 
     def add(self, usage: Mapping[str, Any] | None) -> None:
-        self.llm_calls += 1
-        if not usage:
-            return
-        prompt = int(usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0)
-        completion = int(
-            usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0
-        )
-        self.input_tokens += prompt
-        self.output_tokens += completion
-        for key, value in usage.items():
-            if key not in {
-                "input_tokens",
-                "prompt_tokens",
-                "output_tokens",
-                "completion_tokens",
-                "total_tokens",
-            }:
-                self.metadata[str(key)] = value
+        normalized = self.convert(usage, llm_calls=1)
+        self.input_tokens += normalized.input_tokens
+        self.output_tokens += normalized.output_tokens
+        self.reasoning_tokens += normalized.reasoning_tokens
+        self.llm_calls += normalized.llm_calls
 
     def outcome(self) -> AgentUsage:
         return AgentUsage(
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
+            reasoning_tokens=self.reasoning_tokens,
             llm_calls=self.llm_calls,
-            metadata=dict(self.metadata),
         )
 
 
@@ -164,7 +165,7 @@ def prompt_with_state_history(
     prompt: str,
     messages: Sequence[Mapping[str, Any]],
 ) -> str:
-    """Prepend canonical State messages to an opaque harness's text prompt."""
+    """Prepend canonical agent-context messages to an opaque harness prompt."""
     history = provider_messages(messages)
     if not history:
         return prompt
@@ -176,7 +177,7 @@ def prompt_with_state_history(
         default=str,
     )
     return (
-        "Continue from this canonical Corral State.messages conversation. "
+        "Continue from this canonical Corral agent conversation. "
         "Treat it as prior context and do not repeat completed tool calls:\n"
         f"{rendered}\n\nCurrent task input follows.\n\n{prompt}"
     )

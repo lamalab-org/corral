@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
@@ -10,14 +9,16 @@ from corral.evaluation import EvaluationResult
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 
 if TYPE_CHECKING:
-    from corral.core.state import State
+    from collections.abc import Iterable
+
+    from corral.core.state import ExecutionState
     from corral.orchestration.models import (
         BenchmarkWorkflowResult,
         EvaluationRef,
         StateRef,
         TaskWorkflowResult,
     )
-    from corral.persistence import StateStore
+    from corral.persistence import CommitStore
     from corral.report.metrics import Metric
 
 
@@ -47,7 +48,7 @@ def _evaluation_result(evaluation: EvaluationRef | None) -> EvaluationResult | N
     if evaluation is None:
         return None
     return EvaluationResult(
-        state_hash=evaluation.state_hash,
+        commit_hash=evaluation.commit_hash,
         score=evaluation.score,
         metrics=dict(evaluation.metrics),
         feedback=evaluation.feedback,
@@ -60,7 +61,7 @@ def _state_ref_data(state_ref: StateRef | None) -> dict[str, Any]:
     return {} if state_ref is None else asdict(state_ref)
 
 
-def _duration_seconds(state: State | None) -> float | None:
+def _duration_seconds(state: ExecutionState | None) -> float | None:
     if state is None:
         return None
     started_at = state.runtime.started_at
@@ -70,53 +71,55 @@ def _duration_seconds(state: State | None) -> float | None:
     return max(0.0, (ended_at - started_at).total_seconds())
 
 
-def _token_usage(state: State | None) -> dict[str, int] | None:
+def _token_usage(state: ExecutionState | None) -> dict[str, int] | None:
     if state is None:
         return None
     usage = state.usage
     return {
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
+        "reasoning_tokens": usage.reasoning_tokens,
         "llm_calls": usage.llm_calls,
         "tool_calls": usage.tool_calls,
         "agent_steps": usage.agent_steps,
     }
 
 
-def _tool_statistics(state: State | None) -> dict[str, Any]:
+def _tool_statistics(state: ExecutionState | None) -> dict[str, Any]:
     if state is None:
         return {}
 
-    results: dict[str, Mapping[str, Any]] = {}
-    for message in state.messages:
-        if message.get("role") != "tool":
-            continue
-        tool_call_id = message.get("tool_call_id")
-        if isinstance(tool_call_id, str):
-            results[tool_call_id] = message
-
     calls: list[dict[str, Any]] = []
-    for action in state.actions:
-        result = results.get(action.id, {})
-        raw_metadata = result.get("metadata")
-        metadata = raw_metadata if isinstance(raw_metadata, Mapping) else {}
-        duration = metadata.get("duration")
-        if duration is None and isinstance(metadata.get("duration_ms"), int | float):
-            duration = float(metadata["duration_ms"]) / 1000.0
-        status = str(metadata.get("status", "pending"))
-        content = result.get("content")
+    for action_state in state.actions.values():
+        action = action_state.action
+        invocation = next(
+            (
+                state.tool_invocations[invocation_id]
+                for invocation_id in reversed(action_state.invocation_ids)
+                if invocation_id in state.tool_invocations
+            ),
+            None,
+        )
+        status = action_state.status
+        content = None if invocation is None else invocation.observation
         calls.append(
             {
                 "tool_name": action.name,
                 "arguments": dict(action.arguments),
                 "result": content,
                 "status": status,
-                "error": status not in {"success", "pending"},
+                "error": status == "failed",
                 "error_message": (
-                    str(content) if status not in {"success", "pending"} else None
+                    invocation.error
+                    if invocation is not None and status == "failed"
+                    else None
                 ),
-                "duration": duration,
-                "timestamp": metadata.get("timestamp"),
+                "duration": (
+                    None
+                    if invocation is None or invocation.duration_ms is None
+                    else invocation.duration_ms / 1000.0
+                ),
+                "timestamp": None,
                 "action_id": action.id,
                 "actor_id": action.actor_id,
             }
@@ -124,7 +127,9 @@ def _tool_statistics(state: State | None) -> dict[str, Any]:
     return {"tool_calls": calls, "by_tool": state.tool_statistics}
 
 
-def _runtime_error(result: TaskWorkflowResult, state: State | None) -> str | None:
+def _runtime_error(
+    result: TaskWorkflowResult, state: ExecutionState | None
+) -> str | None:
     if result.error is not None:
         return result.error
     if state is None or state.runtime.status != "failed":
@@ -135,17 +140,24 @@ def _runtime_error(result: TaskWorkflowResult, state: State | None) -> str | Non
 
 async def _project_trial(
     result: TaskWorkflowResult,
-    state_store: StateStore | None,
+    state_store: CommitStore | None,
 ) -> TaskTrialResult:
-    state: State | None = None
+    state: ExecutionState | None = None
     if state_store is not None and result.state is not None:
-        state = await state_store.load(result.state.state_hash)
+        store = state_store.for_execution(result.state.execution_id)
+        state = await store.materialize(
+            result.state.branch_id, result.state.commit_hash
+        )
 
     evaluation = _evaluation_result(result.evaluation)
     unreachable = result.unreachable_dependency
     if state is not None:
         state_data = state.model_dump(mode="json")
-        messages = [dict(message) for message in state.messages]
+        messages = [
+            {"agent_run_id": run_id, **dict(message)}
+            for run_id, conversation in state.conversations.items()
+            for message in conversation
+        ]
     else:
         state_data = _state_ref_data(result.state)
         messages = None
@@ -182,7 +194,7 @@ async def _project_trial(
 async def project_benchmark_result(
     result: BenchmarkWorkflowResult,
     *,
-    state_store: StateStore | None = None,
+    state_store: CommitStore | None = None,
     k_values: int | Iterable[int] | None = None,
     total_duration: float | None = None,
     verbose: bool = False,

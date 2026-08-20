@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from temporalio import activity
 
-from corral.core.state import State, TaskOutput
+from corral.core.state import ExecutionState, TaskOutput
 from corral.evaluation import TaskScorer
 from corral.logging import event, exception_fields, log_context
 from corral.observability import (
@@ -30,21 +30,22 @@ from corral.orchestration.models import (
     RunTaskInput,
     StateRef,
 )
-from corral.persistence import StateNotFoundError
+from corral.persistence import CommitNotFoundError
 from corral.runtime import TaskRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Mapping
 
     from corral.agents.session import Agent
+    from corral.core.commit import Commit
     from corral.core.environment import Environment
-    from corral.persistence import StateStore
+    from corral.persistence import CommitStore
 
 T = TypeVar("T")
 
 
-def state_ref(state: State) -> StateRef:
-    """Project a complete State into the small value kept in Workflow history."""
+def state_ref(state: ExecutionState, commit: Commit) -> StateRef:
+    """Project a materialized head into the small value kept in Workflow history."""
     output = (
         {"answer": state.submission}
         if state.submission is not None and state.runtime.status != "surrendered"
@@ -52,9 +53,10 @@ def state_ref(state: State) -> StateRef:
     )
     raw_error = state.runtime.metadata.get("error")
     return StateRef(
-        state_hash=state.state_hash,
-        state_id=state.id,
-        revision=state.revision,
+        commit_hash=commit.hash,
+        execution_id=state.execution_id,
+        branch_id=state.branch_id,
+        sequence=commit.sequence,
         status=state.runtime.status,
         agent_steps=state.usage.agent_steps,
         submission=state.submission,
@@ -134,7 +136,7 @@ class RuntimeRegistry:
         execution_id: str,
         result: Mapping[str, Any],
     ) -> None:
-        """Expose an evaluation and its State hash to the next task attempt."""
+        """Expose an evaluation and its commit hash to the next task attempt."""
         with self._lock:
             self._last_evaluations[task_id] = {
                 "trial_id": execution_id,
@@ -162,7 +164,7 @@ class CorralActivities:
 
     def __init__(
         self,
-        state_store: StateStore,
+        state_store: CommitStore,
         registry: RuntimeRegistry,
         observer: Observer | None = None,
     ) -> None:
@@ -228,7 +230,7 @@ class CorralActivities:
             **correlation,
         )
 
-        async def invoke() -> State:
+        async def invoke() -> ExecutionState:
             agent = self.registry.agent(request.agent_id)
             environment = self.registry.environment(
                 request.environment_id, request.execution_id
@@ -245,13 +247,18 @@ class CorralActivities:
             last_evaluation = self.registry.last_evaluation(request.task_id)
             previous_state = None
             if last_evaluation is not None:
-                previous_hash = last_evaluation.get("state_hash")
+                previous_hash = last_evaluation.get("commit_hash")
                 if isinstance(previous_hash, str):
                     try:
-                        previous_state = await self.state_store.load(previous_hash)
-                    except StateNotFoundError:
+                        execution_store = self.state_store.for_execution(
+                            str(last_evaluation.get("trial_id"))
+                        )
+                        previous_state = await execution_store.materialize(
+                            "main", previous_hash
+                        )
+                    except CommitNotFoundError:
                         # Evaluation context remains useful even if a deployment
-                        # pruned the referenced State between attempts.
+                        # pruned the referenced commit between attempts.
                         previous_state = None
 
             configured_model = request.model
@@ -301,10 +308,14 @@ class CorralActivities:
             subsystem="orchestration",
             status="completed",
             duration_ms=round((perf_counter() - started) * 1000, 3),
-            state_hash=state.state_hash,
+            commit_hash=state.through_commit_hash,
             **correlation,
         )
-        return state_ref(state)
+        execution_store = self.state_store.for_execution(request.execution_id)
+        head = await execution_store.head("main")
+        if head is None:
+            raise RuntimeError("task runtime returned without a branch head")
+        return state_ref(state, head)
 
     @activity.defn(name="corral.evaluate_task")
     async def evaluate_task(self, request: EvaluateTaskInput) -> EvaluationRef:
@@ -324,7 +335,10 @@ class CorralActivities:
             **correlation,
         )
         try:
-            state = await self.state_store.load(request.state_hash)
+            execution_store = self.state_store.for_execution(request.execution_id)
+            state = await execution_store.materialize(
+                request.branch_id, request.commit_hash
+            )
             observation_context = self._context(
                 execution_id=request.execution_id,
                 task_id=request.task_id,
@@ -335,10 +349,11 @@ class CorralActivities:
                 Observation(
                     name="restore",
                     context=observation_context,
-                    input={"state_hash": state.state_hash},
+                    based_on_hash=state.through_commit_hash,
+                    input={"commit_hash": state.through_commit_hash},
                 ),
             ) as restore:
-                update_safely(restore, state_after=state)
+                update_safely(restore)
             environment = self.registry.environment(
                 request.environment_id, request.execution_id
             )
@@ -348,7 +363,7 @@ class CorralActivities:
                     name="task.evaluate",
                     context=observation_context,
                     as_type="evaluator",
-                    state_before=state,
+                    based_on_hash=state.through_commit_hash,
                     metadata={"recoverable": True},
                 ),
             ) as evaluation:
@@ -370,7 +385,6 @@ class CorralActivities:
                     )
                 update_safely(
                     evaluation,
-                    state_after=state,
                     output=result.model_dump(mode="json"),
                 )
         except Exception as exc:
@@ -390,12 +404,12 @@ class CorralActivities:
             subsystem="orchestration",
             status="completed",
             duration_ms=round((perf_counter() - started) * 1000, 3),
-            state_hash=state.state_hash,
+            commit_hash=state.through_commit_hash,
             score=result.score,
             **correlation,
         )
         return EvaluationRef(
-            state_hash=result.state_hash,
+            commit_hash=result.commit_hash,
             score=result.score,
             metrics=dict(result.metrics),
             scorer_version=result.scorer_version,

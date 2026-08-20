@@ -45,10 +45,10 @@ class Session:
     def final_messages(self):
         return tuple(self.messages)
 
-    async def record_message(self, message):
+    async def record_message(self, message, **_kwargs):
         self.messages.append(message)
 
-    async def execute(self, action):
+    async def execute(self, action, **_kwargs):
         self.calls.append(action)
         return ToolResponse(success=True, result="pong", error=None)
 
