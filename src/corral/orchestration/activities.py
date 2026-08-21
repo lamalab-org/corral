@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import tempfile
 import threading
-from datetime import datetime
+from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from temporalio import activity
 
-from corral.core.state import ExecutionState, TaskOutput
 from corral.evaluation import TaskScorer
-from corral.logging import event, exception_fields, log_context
 from corral.observability import (
     CompositeObserver,
     LoggingObserver,
@@ -24,45 +23,42 @@ from corral.observability import (
     observer_from_env,
     update_safely,
 )
+from corral.orchestration.launchers import (
+    DockerTaskLauncher,
+    LocalTaskLauncher,
+    state_ref,
+)
 from corral.orchestration.models import (
     EvaluateTaskInput,
     EvaluationRef,
     RunTaskInput,
     StateRef,
 )
-from corral.persistence import CommitNotFoundError
-from corral.runtime import TaskRuntime
+from corral.report.logging import event, exception_fields, log_context
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Mapping
 
     from corral.agents.session import Agent
-    from corral.core.commit import Commit
     from corral.core.environment import Environment
+    from corral.core.state import ExecutionState
     from corral.persistence import CommitStore
 
 T = TypeVar("T")
 
 
-def state_ref(state: ExecutionState, commit: Commit) -> StateRef:
-    """Project a materialized head into the small value kept in Workflow history."""
-    output = (
-        {"answer": state.submission}
-        if state.submission is not None and state.runtime.status != "surrendered"
-        else None
-    )
-    raw_error = state.runtime.metadata.get("error")
-    return StateRef(
-        commit_hash=commit.hash,
-        execution_id=state.execution_id,
-        branch_id=state.branch_id,
-        sequence=commit.sequence,
-        status=state.runtime.status,
-        agent_steps=state.usage.agent_steps,
-        submission=state.submission,
-        output=output,
-        error=str(raw_error) if raw_error is not None else None,
-    )
+@contextlib.asynccontextmanager
+async def _evaluation_workspace(manager: Any, state: ExecutionState):
+    if manager is not None:
+        async with manager.temporary_materialization(state.workspace) as path:
+            yield path
+        return
+    if state.workspace.files:
+        raise RuntimeError(
+            "evaluation cannot restore workspace files without their ArtifactStore"
+        )
+    with tempfile.TemporaryDirectory(prefix="corral-evaluation-") as temporary:
+        yield Path(temporary)
 
 
 def _heartbeat(details: str) -> None:
@@ -101,11 +97,13 @@ class RuntimeRegistry:
         *,
         agents: Mapping[str, Agent],
         environments: Mapping[str, Environment],
+        workspace_manager_factory: Any | None = None,
     ) -> None:
         self._agents = dict(agents)
         self._environments = dict(environments)
         self._bound: dict[tuple[str, str], Environment] = {}
         self._last_evaluations: dict[str, dict[str, Any]] = {}
+        self._workspace_manager_factory = workspace_manager_factory
         self._lock = threading.RLock()
 
     def agent(self, agent_id: str) -> Agent:
@@ -127,6 +125,8 @@ class RuntimeRegistry:
                     f"Temporal worker has no environment {environment_id!r}"
                 ) from exc
             bound = template.for_task(execution_id)
+            if self._workspace_manager_factory is not None:
+                bound.workspace_manager = self._workspace_manager_factory(execution_id)
             self._bound[key] = bound
             return bound
 
@@ -167,6 +167,9 @@ class CorralActivities:
         state_store: CommitStore,
         registry: RuntimeRegistry,
         observer: Observer | None = None,
+        *,
+        local_launcher: LocalTaskLauncher | None = None,
+        docker_launcher: DockerTaskLauncher | None = None,
     ) -> None:
         self.state_store = state_store
         self.registry = registry
@@ -177,7 +180,10 @@ class CorralActivities:
             if isinstance(observer, LoggingObserver)
             else CompositeObserver(LoggingObserver(), observer)
         )
-        self.runtime = TaskRuntime(state_store, self.observer)
+        self.local_launcher = local_launcher or LocalTaskLauncher(
+            state_store, registry, self.observer
+        )
+        self.docker_launcher = docker_launcher
 
     @staticmethod
     def _context(
@@ -230,64 +236,28 @@ class CorralActivities:
             **correlation,
         )
 
-        async def invoke() -> ExecutionState:
-            agent = self.registry.agent(request.agent_id)
-            environment = self.registry.environment(
-                request.environment_id, request.execution_id
-            )
-            dependencies = {
-                task_id: TaskOutput(output=output)
-                for task_id, output in request.dependency_outputs.items()
-            }
+        async def invoke() -> StateRef:
             observation_context = self._context(
                 execution_id=request.execution_id,
                 task_id=request.task_id,
                 benchmark_run_id=request.benchmark_run_id,
             )
-            last_evaluation = self.registry.last_evaluation(request.task_id)
-            previous_state = None
-            if last_evaluation is not None:
-                previous_hash = last_evaluation.get("commit_hash")
-                if isinstance(previous_hash, str):
-                    try:
-                        execution_store = self.state_store.for_execution(
-                            str(last_evaluation.get("trial_id"))
-                        )
-                        previous_state = await execution_store.materialize(
-                            "main", previous_hash
-                        )
-                    except CommitNotFoundError:
-                        # Evaluation context remains useful even if a deployment
-                        # pruned the referenced commit between attempts.
-                        previous_state = None
-
-            configured_model = request.model
-            if configured_model is None:
-                agent_model = getattr(agent, "model", None)
-                if isinstance(agent_model, str) and agent_model:
-                    configured_model = agent_model
-            return await self.runtime.run(
-                agent,
-                environment,
-                execution_id=request.execution_id,
-                started_at=datetime.fromisoformat(request.started_at),
-                max_iterations=request.max_iterations,
-                dependency_outputs=dependencies,
-                model_metadata=(
-                    {"name": configured_model} if configured_model is not None else {}
-                ),
-                scaffold_metadata={
-                    "name": type(agent).__name__,
-                    "enable_surrender": request.enable_surrender,
-                },
-                last_score=last_evaluation,
-                previous_state=previous_state,
+            if request.sandbox.mode == "docker":
+                if self.docker_launcher is None:
+                    raise RuntimeError(
+                        "worker received a Docker task without a DockerTaskLauncher"
+                    )
+                launcher = self.docker_launcher
+            else:
+                launcher = self.local_launcher
+            return await launcher.run(
+                request,
                 observation_context=observation_context,
             )
 
         try:
             with log_context(**correlation):
-                state = await _with_heartbeats(
+                result = await _with_heartbeats(
                     invoke(),
                     details=f"run-task:{request.execution_id}",
                 )
@@ -308,14 +278,10 @@ class CorralActivities:
             subsystem="orchestration",
             status="completed",
             duration_ms=round((perf_counter() - started) * 1000, 3),
-            commit_hash=state.through_commit_hash,
+            commit_hash=result.commit_hash,
             **correlation,
         )
-        execution_store = self.state_store.for_execution(request.execution_id)
-        head = await execution_store.head("main")
-        if head is None:
-            raise RuntimeError("task runtime returned without a branch head")
-        return state_ref(state, head)
+        return result
 
     @activity.defn(name="corral.evaluate_task")
     async def evaluate_task(self, request: EvaluateTaskInput) -> EvaluationRef:
@@ -357,6 +323,12 @@ class CorralActivities:
             environment = self.registry.environment(
                 request.environment_id, request.execution_id
             )
+            manager_factory = getattr(self.state_store, "workspace_manager", None)
+            workspace_manager = (
+                manager_factory(request.execution_id)
+                if manager_factory is not None
+                else environment.workspace_manager
+            )
             with observe_safely(
                 self.observer,
                 Observation(
@@ -367,16 +339,19 @@ class CorralActivities:
                     metadata={"recoverable": True},
                 ),
             ) as evaluation:
-                result = await _with_heartbeats(
-                    asyncio.to_thread(
-                        TaskScorer(
-                            environment.current_task,
-                            workspace=environment.workspace_path,
-                        ).evaluate,
-                        state,
-                    ),
-                    details=f"evaluate:{request.execution_id}",
-                )
+                async with _evaluation_workspace(
+                    workspace_manager, state
+                ) as evaluation_workspace:
+                    result = await _with_heartbeats(
+                        asyncio.to_thread(
+                            TaskScorer(
+                                environment.current_task,
+                                workspace=evaluation_workspace,
+                            ).evaluate,
+                            state,
+                        ),
+                        details=f"evaluate:{request.execution_id}",
+                    )
                 if request.task_id is not None:
                     self.registry.record_evaluation(
                         request.task_id,

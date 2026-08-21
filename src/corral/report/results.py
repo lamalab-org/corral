@@ -1,12 +1,15 @@
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from rich.console import Console
 
 from corral.evaluation import EvaluationResult
-from corral.logging import event, logger
+from corral.report.logging import event, logger
 from corral.report.metrics.base import Metric, TaskMetric
 
 DEFAULT_TOOL_VERBOSITY = "brief"
@@ -87,6 +90,7 @@ class BenchmarkResult:
     verbosity: str = DEFAULT_TOOL_VERBOSITY
     verbose: bool = False  # Whether to include messages and tool_calls in report
     metrics: list[Metric] | None = None  # Explicit metrics list
+    metadata: dict[str, Any] = field(default_factory=dict)
     metric_registry: Any = (
         None  # Instance-level by default, Any to avoid circular import
     )
@@ -199,7 +203,12 @@ class BenchmarkResult:
             Dictionary containing all report data ready for JSON export
         """
         # Map registry metric results to report format
-        report_data = {"metrics": {}}
+        report_data = {
+            "schema_version": 1,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": dict(self.metadata),
+            "metrics": {},
+        }
 
         # Add all metrics to the report (sorted alphabetically by display name)
         sorted_metrics = []
@@ -248,6 +257,7 @@ class BenchmarkResult:
                         else None
                     ),
                     "evaluation_error": trial.evaluation_error,
+                    "error_message": trial.error_message,
                     "success": trial.success,
                     "surrendered": trial.surrendered,
                     "tool_execution_duration": trial.tool_execution_duration,
@@ -413,13 +423,27 @@ class BenchmarkResult:
         # Save JSON report if path is provided
         if report_path:
             report_data = self._prepare_report_data(calculated_metrics)
-            with Path(report_path).open("w") as f:
-                json.dump(report_data, f, indent=2)
+            path = Path(report_path).expanduser()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+            )
+            temporary = Path(temporary_name)
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    json.dump(report_data, stream, indent=2, sort_keys=True)
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                temporary.replace(path)
+            except Exception:
+                temporary.unlink(missing_ok=True)
+                raise
             event(
                 "INFO",
                 "report.saved",
                 subsystem="evaluation",
-                path=report_path,
+                path=str(path),
             )
 
         # Display report to console

@@ -12,7 +12,7 @@ from typing import Any
 from corral.agents.hooks.core import CriticalHookError, HookCallback, HookContext
 from corral.agents.utils import convert_outermost_triple_quotes
 from corral.core.action import Action
-from corral.logging import logger
+from corral.report.logging import logger
 
 
 def _rewrite_workspace_paths(

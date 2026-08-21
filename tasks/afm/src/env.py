@@ -21,7 +21,7 @@ from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.state import State
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
-from corral.logging import event, exception_fields
+from corral.report.logging import event, exception_fields
 from corral.utils.code_tools import execute_python_code
 from score import (
     check_file_exists,

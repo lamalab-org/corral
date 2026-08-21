@@ -176,14 +176,74 @@ uv run corral bench \
   --environment samplemath \
   --model openai/gpt-4o \
   --task task4 \
-  --trials 3 \
-  --report .corral/samplemath-react-report.json
+  --trials 3
 ```
 
 `corral bench` calls the same `CorralRunner` and
 `TemporalBenchmarkExecutor` used by Python callers. It hosts the Temporal worker,
 worker-side registry, and Activities in the CLI process for the duration of the
 benchmark.
+
+Benchmarks run one Docker container per `(run, task, trial)` by default. Corral
+builds `corral-benchmark:latest` from `docker/benchmark.Dockerfile` when that
+image is missing, resolves it to an immutable image ID before scheduling any
+trial, and applies these defaults: 2 CPUs, 4 GiB memory, 256 PIDs, a read-only
+root filesystem, and Docker's `bridge` network so the container has outbound
+network access. Pass `--sandbox-network none` for fully network-isolated trials.
+Use `--sandbox local` only for worker-local debugging; `corral run` remains
+local and never contacts Docker.
+
+By default, each invocation creates one descriptive, self-contained directory
+below `.corral/runs/`. Its name records the UTC start time, agent, model,
+environment, requested tasks, k/trial count, and sandbox mode. The exact task
+and trial checkpoint layout is:
+
+```text
+.corral/runs/<descriptive-run-name>/
+├── report.json
+├── run-metadata.json
+└── task-<task-id>/
+    └── k-<1-based-trial>/
+        ├── metadata.json
+        ├── commits.sqlite3
+        ├── artifacts/
+        ├── workspace-snapshots/
+        │   ├── <revision>.json
+        │   └── latest.json
+        ├── state-snapshots/
+        │   ├── <sequence>-<commit>.json
+        │   ├── latest.json
+        │   └── final.json
+        └── recovery/
+```
+
+Workspace snapshot manifests reference the content-addressed files in
+`artifacts/`, so the combination is a complete, restorable workspace snapshot.
+State projections are exported at the ledger interval and again at terminal
+completion; `commits.sqlite3` remains the authoritative, replayable history.
+Docker runs also place `request.json`, `result.json`, and `sandbox.json` in the
+trial directory.
+
+The final `report.json` includes the resolved agent, model, environment, task
+mapping, benchmark settings, concurrency, retry policy, sandbox configuration,
+and output paths. Credential-like values in runtime option dictionaries are
+redacted. `--output-dir` (also accepted as `--state-dir`) moves the runs root,
+and `--report` overrides the default report location. If an Activity or worker
+fails, its retry discards the old container and volume, creates a clean
+workspace, and restores the last committed workspace revision. Completed
+actions are not repeated; filesystem changes from an action interrupted before
+its completion commit are deliberately excluded. `--keep-sandboxes on-failure`
+or `always` retains Docker resources for inspection without making them the
+recovery source of truth.
+
+The main isolation controls all have CLI defaults and can be overridden with
+`--sandbox-image`, `--sandbox-cpus`, `--sandbox-memory`,
+`--sandbox-pids-limit`, `--sandbox-network`, `--keep-sandboxes`, and repeated
+`--sandbox-env NAME` arguments. Only allowlisted host variables are forwarded;
+the built-in list covers common model-provider credentials. Environment stacks
+that need dependencies beyond the base image should provide their own image
+with `--sandbox-image`, optionally paired with an image-specific registry via
+`--sandbox-registry-module module:create_registry`.
 
 If that environment is already activated, `uv run` is optional and the command
 is simply `corral bench ...`. The `--project` form is only needed when invoking

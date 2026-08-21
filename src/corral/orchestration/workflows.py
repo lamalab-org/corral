@@ -114,6 +114,10 @@ class TaskWorkflow:
                     dependency_outputs=request.dependency_outputs,
                     enable_surrender=request.enable_surrender,
                     benchmark_run_id=request.benchmark_run_id,
+                    trial_index=request.trial_index,
+                    sandbox=request.sandbox,
+                    agent_runtime=request.agent_runtime,
+                    environment_runtime=request.environment_runtime,
                 ),
                 result_type=StateRef,
                 policy=policy,
@@ -389,6 +393,11 @@ class BenchmarkWorkflow:
                             enable_surrender=request.enable_surrender,
                             evaluate=request.evaluate,
                             activity_policy=request.activity_policy,
+                            sandbox=request.sandbox,
+                            agent_runtime=request.agent_runtime_by_task.get(task_id),
+                            environment_runtime=(
+                                request.environment_runtime_by_task.get(task_id)
+                            ),
                         ),
                         **child_options,
                     )

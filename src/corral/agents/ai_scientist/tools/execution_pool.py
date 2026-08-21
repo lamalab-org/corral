@@ -20,7 +20,7 @@ from corral.agents.ai_scientist.tools.corral_executor import (
 )
 from corral.agents.session import ToolResponse
 from corral.core.action import Action
-from corral.logging import logger
+from corral.report.logging import logger
 
 
 class ReplayDiverged(RuntimeError):

@@ -26,7 +26,7 @@ from corral.core.action import (
     with_submit_answer_tool,
 )
 from corral.core.errors import concise_error_message
-from corral.logging import logger
+from corral.report.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

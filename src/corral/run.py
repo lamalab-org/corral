@@ -8,19 +8,22 @@ it once, and asks the reporting layer to project the durable result.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from time import perf_counter
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from corral.core.environment import Environment
 from corral.core.task import assert_dependencies_selected, order_selected
-from corral.logging import event, exception_fields, log_context
 from corral.orchestration.models import (
     ActivityPolicy,
+    AgentRuntimeDefinition,
     BenchmarkWorkflowInput,
     BenchmarkWorkflowResult,
+    EnvironmentRuntimeDefinition,
+    SandboxProfile,
 )
+from corral.report.logging import event, exception_fields, log_context
 from corral.report.projection import normalise_k_values, project_benchmark_result
 
 if TYPE_CHECKING:
@@ -56,6 +59,9 @@ class BenchmarkTaskMetadata:
     max_iterations: int = 10
     model: str | None = None
     task_queue: str | None = None
+    sandbox: SandboxProfile = field(default_factory=SandboxProfile.local)
+    agent_runtime: AgentRuntimeDefinition | None = None
+    environment_runtime: EnvironmentRuntimeDefinition | None = None
 
     def __post_init__(self) -> None:
         if not self.agent_id:
@@ -117,6 +123,9 @@ def _metadata_from_environments(
     agent_id: str,
     model: str | None,
     max_iterations: int,
+    sandbox: SandboxProfile,
+    agent_runtime: AgentRuntimeDefinition | None,
+    environment_runtime: EnvironmentRuntimeDefinition | None,
 ) -> dict[str, BenchmarkTaskMetadata]:
     """Infer routine benchmark metadata from task-keyed environments."""
     if not environments:
@@ -143,6 +152,9 @@ def _metadata_from_environments(
             dependencies=tuple(sorted(environment.current_task.dependencies())),
             max_iterations=max_iterations,
             model=model,
+            sandbox=sandbox,
+            agent_runtime=agent_runtime,
+            environment_runtime=environment_runtime,
         )
     return metadata
 
@@ -179,6 +191,99 @@ def _selected_task_ids(
     return tuple(order_selected(selected, graph))
 
 
+_SECRET_KEY_MARKERS = (
+    "api_key",
+    "apikey",
+    "credential",
+    "password",
+    "secret",
+    "token",
+)
+
+
+def _redact_secrets(value: Any) -> Any:
+    """Keep benchmark configuration useful without serializing credentials."""
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                "[REDACTED]"
+                if any(marker in str(key).casefold() for marker in _SECRET_KEY_MARKERS)
+                else _redact_secrets(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [_redact_secrets(item) for item in value]
+    return value
+
+
+def _report_metadata(
+    request: BenchmarkWorkflowInput,
+    *,
+    k_values: list[int],
+    include_dependencies: bool,
+    verbose: bool,
+) -> dict[str, Any]:
+    agent_runtime = {
+        task_id: _redact_secrets(asdict(runtime))
+        for task_id, runtime in request.agent_runtime_by_task.items()
+    }
+    environment_runtime = {
+        task_id: _redact_secrets(asdict(runtime))
+        for task_id, runtime in request.environment_runtime_by_task.items()
+    }
+    return {
+        "schema_version": 1,
+        "benchmark_run_id": request.benchmark_run_id,
+        "agent": {
+            "by_task": {
+                task_id: {
+                    "id": request.agent_by_task[task_id],
+                    "runtime": agent_runtime.get(task_id),
+                }
+                for task_id in request.task_ids
+            }
+        },
+        "model": {
+            "by_task": {
+                task_id: request.model_by_task.get(task_id)
+                for task_id in request.task_ids
+            }
+        },
+        "environment": {
+            "by_task": {
+                task_id: {
+                    "id": request.environment_by_task[task_id],
+                    "runtime": environment_runtime.get(task_id),
+                }
+                for task_id in request.task_ids
+            }
+        },
+        "benchmark": {
+            "task_ids": list(request.task_ids),
+            "trials_per_task": request.trials_per_task,
+            "k_values": k_values,
+            "dependency_graph": {
+                task_id: list(dependencies)
+                for task_id, dependencies in request.dependency_graph.items()
+            },
+            "include_dependencies": include_dependencies,
+            "max_iterations_by_task": dict(request.max_iterations_by_task),
+            "task_queue_by_task": dict(request.task_queue_by_task),
+            "max_parallel": request.max_parallel,
+            "max_parallel_per_task": request.max_parallel_per_task,
+            "max_parallel_by_model": dict(request.max_parallel_by_model),
+            "max_parallel_by_environment": dict(request.max_parallel_by_environment),
+            "enable_surrender": request.enable_surrender,
+            "evaluate": request.evaluate,
+            "activity_policy": asdict(request.activity_policy),
+            "rounds_per_run": request.rounds_per_run,
+            "sandbox": asdict(request.sandbox),
+            "verbose": verbose,
+        },
+    }
+
+
 class CorralRunner:
     """Build one Temporal benchmark request and project its durable result.
 
@@ -198,6 +303,9 @@ class CorralRunner:
         max_iterations: int = 10,
         state_store: CommitStore | None = None,
         metrics: Iterable[Metric] | None = None,
+        sandbox: SandboxProfile | None = None,
+        agent_runtime: AgentRuntimeDefinition | None = None,
+        environment_runtime: EnvironmentRuntimeDefinition | None = None,
     ) -> None:
         """Create a runner from environments or explicit advanced metadata.
 
@@ -214,6 +322,9 @@ class CorralRunner:
                 agent_id=agent_id,
                 model=model,
                 max_iterations=max_iterations,
+                sandbox=sandbox or SandboxProfile.local(),
+                agent_runtime=agent_runtime,
+                environment_runtime=environment_runtime,
             )
         assert tasks is not None
         self.executor = executor
@@ -244,6 +355,12 @@ class CorralRunner:
             include_dependencies=include_dependencies,
         )
         metadata = {task_id: self.tasks[task_id] for task_id in selected}
+        profiles = [task.sandbox for task in metadata.values()]
+        sandbox = profiles[0]
+        if any(profile != sandbox for profile in profiles[1:]):
+            raise ValueError(
+                "one benchmark Workflow cannot mix local and Docker sandbox profiles"
+            )
         return BenchmarkWorkflowInput(
             benchmark_run_id=benchmark_run_id,
             task_ids=selected,
@@ -278,6 +395,17 @@ class CorralRunner:
             evaluate=evaluate,
             activity_policy=activity_policy or ActivityPolicy(),
             rounds_per_run=rounds_per_run,
+            sandbox=sandbox,
+            agent_runtime_by_task={
+                task_id: task.agent_runtime
+                for task_id, task in metadata.items()
+                if task.agent_runtime is not None
+            },
+            environment_runtime_by_task={
+                task_id: task.environment_runtime
+                for task_id, task in metadata.items()
+                if task.environment_runtime is not None
+            },
         )
 
     async def run(
@@ -301,7 +429,7 @@ class CorralRunner:
         """Execute the Temporal benchmark and return its reporting projection."""
         # Invalid reporting metadata must fail before an expensive Workflow is
         # started, not after the benchmark has completed.
-        normalise_k_values(k_values, trials_per_task)
+        normalised_k = normalise_k_values(k_values, trials_per_task)
         request = self.build_workflow_input(
             benchmark_run_id,
             task_ids=task_ids,
@@ -347,10 +475,16 @@ class CorralRunner:
                 report = await project_benchmark_result(
                     workflow_result,
                     state_store=self.state_store,
-                    k_values=k_values,
+                    k_values=normalised_k,
                     total_duration=duration,
                     verbose=verbose,
                     metrics=self.metrics,
+                    metadata=_report_metadata(
+                        request,
+                        k_values=normalised_k,
+                        include_dependencies=include_dependencies,
+                        verbose=verbose,
+                    ),
                 )
             except Exception as exc:
                 event(

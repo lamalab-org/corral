@@ -47,8 +47,8 @@ from corral.core.tool_catalog import (
 )
 from corral.core.transition import environment_operations
 from corral.core.workspace import WorkspaceState
-from corral.logging import logger
 from corral.persistence.workspace import WorkspaceManager
+from corral.report.logging import logger
 from corral.workspace import WorkspaceFilesystem, build_workspace_tools
 
 
@@ -772,19 +772,20 @@ class Environment:
     def configure(self, state: ExecutionState) -> TaskConfigured:
         """Run the setup hook and return its typed shared-namespace effects."""
         if self.current_task.setup_fn is None:
-            return TaskConfigured(
-                status="No external app/service configuration needed for this task."
-            )
-        setup = self.current_task.setup_fn(self, state)
-        if setup is None:
-            return TaskConfigured(
-                status="Additional apps/services configured for this task."
-            )
-        environment = {
-            **dict(state.environment.values),
-            "hidden_arguments": dict(setup.hidden_arguments),
-            "values": dict(setup.values),
-        }
+            status = "No external app/service configuration needed for this task."
+            environment = dict(state.environment.values)
+        else:
+            setup = self.current_task.setup_fn(self, state)
+            if setup is None:
+                status = "Additional apps/services configured for this task."
+                environment = dict(state.environment.values)
+            else:
+                status = setup.status
+                environment = {
+                    **dict(state.environment.values),
+                    "hidden_arguments": dict(setup.hidden_arguments),
+                    "values": dict(setup.values),
+                }
         environment = dict(self.capture_environment(environment))
         workspace = self.capture_workspace(state.workspace)
         operations = environment_operations(state.environment.values, environment)
@@ -795,7 +796,7 @@ class Environment:
             else WorkspaceDelta.from_workspace(workspace)
         )
         return TaskConfigured(
-            status=setup.status,
+            status=status,
             environment_operations=operations,
             workspace_delta=workspace_delta,
             expected_environment_revision=(

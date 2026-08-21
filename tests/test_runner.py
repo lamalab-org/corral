@@ -15,7 +15,9 @@ from corral.core.state import (
 )
 from corral.core.task import InputRef, TaskDefinition
 from corral.orchestration import (
+    AgentRuntimeDefinition,
     BenchmarkWorkflowResult,
+    EnvironmentRuntimeDefinition,
     EvaluationRef,
     StateRef,
     TaskWorkflowResult,
@@ -299,7 +301,22 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
     store = MemoryCommitStore(state)
     runner = CorralRunner(
         executor,
-        {"upstream": _metadata()["upstream"]},
+        {
+            "upstream": BenchmarkTaskMetadata(
+                agent_id="agent-a",
+                environment_id="env-upstream",
+                max_iterations=3,
+                model="model-a",
+                agent_runtime=AgentRuntimeDefinition(
+                    name="tool-calling",
+                    model="model-a",
+                    options={"api_key": "must-not-leak", "seed": 7},
+                ),
+                environment_runtime=EnvironmentRuntimeDefinition(
+                    name="wetlab", options={"level": 2}
+                ),
+            )
+        },
         state_store=store,
     )
 
@@ -324,6 +341,24 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
     assert trial.tool_statistics["tool_calls"][0]["action_id"] == "submit-1"
     assert trial.state["runtime"]["status"] == "submitted"
     assert report.verbosity == "brief"
+    assert report.metadata["agent"]["by_task"]["upstream"] == {
+        "id": "agent-a",
+        "runtime": {
+            "name": "tool-calling",
+            "model": "model-a",
+            "api_endpoint": None,
+            "temperature": None,
+            "options": {"api_key": "[REDACTED]", "seed": 7},
+        },
+    }
+    assert report.metadata["model"]["by_task"] == {"upstream": "model-a"}
+    assert report.metadata["environment"]["by_task"]["upstream"]["runtime"] == {
+        "name": "wetlab",
+        "options": {"level": 2},
+        "repository_root": None,
+    }
+    assert report.metadata["benchmark"]["trials_per_task"] == 1
+    assert report.metadata["benchmark"]["k_values"] == [1]
 
 
 @pytest.mark.anyio()

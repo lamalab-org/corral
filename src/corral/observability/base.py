@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import BaseModel
 
-from corral.logging import event, exception_fields
+from corral.report.logging import event, exception_fields
 
 if TYPE_CHECKING:
     from corral.core.actors import ActorRef

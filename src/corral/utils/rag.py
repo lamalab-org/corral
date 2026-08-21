@@ -7,7 +7,7 @@ import chromadb
 import more_itertools
 import tiktoken
 
-from corral.logging import event, logger
+from corral.report.logging import event, logger
 from corral.utils.tool_helpers import embed_text
 
 

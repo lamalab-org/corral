@@ -18,7 +18,6 @@ from corral.core.events import (
     ToolStarted,
     UsageDelta,
 )
-from corral.logging import event, exception_fields, redact_sensitive_data
 from corral.observability.base import (
     CompositeObserver,
     NoOpObserver,
@@ -28,6 +27,7 @@ from corral.observability.base import (
     Observer,
 )
 from corral.observability.logging import LoggingObserver
+from corral.report.logging import event, exception_fields, redact_sensitive_data
 
 if TYPE_CHECKING:
     from langfuse import Langfuse

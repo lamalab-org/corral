@@ -17,6 +17,11 @@ from corral.persistence.base import (
     CommitStore,
     CommitStoreError,
 )
+from corral.persistence.sharded import (
+    ExecutionShard,
+    ShardedCommitStore,
+    execution_shard_name,
+)
 from corral.persistence.sqlite import SQLiteCommitStore
 from corral.persistence.workspace import (
     WorkspaceDestinationError,
@@ -37,11 +42,14 @@ __all__ = [
     "CommitNotFoundError",
     "CommitStore",
     "CommitStoreError",
+    "ExecutionShard",
     "LocalArtifactStore",
     "SQLiteCommitStore",
+    "ShardedCommitStore",
     "StoredBlob",
     "WorkspaceDestinationError",
     "WorkspaceManager",
     "WorkspacePathError",
     "WorkspaceStoreError",
+    "execution_shard_name",
 ]

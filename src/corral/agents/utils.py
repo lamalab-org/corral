@@ -17,7 +17,7 @@ from tenacity import (
 )
 
 from corral.agents.schema import BudgetExhaustedError
-from corral.logging import logger
+from corral.report.logging import logger
 
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,

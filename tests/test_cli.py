@@ -233,6 +233,29 @@ def test_benchmark_parser_accepts_agent_environment_model_and_json_options():
     assert args.agent_kwargs == {"seed": 7}
 
 
+def test_benchmark_parser_has_safe_docker_defaults():
+    args = cli.build_parser().parse_args(
+        ["bench", "--agent", "react", "--environment", "samplemath"]
+    )
+
+    assert args.sandbox == "docker"
+    assert args.sandbox_image == "corral-benchmark:latest"
+    assert args.sandbox_cpus == 2.0
+    assert args.sandbox_memory == "4g"
+    assert args.sandbox_pids_limit == 256
+    assert args.sandbox_network == "bridge"
+    assert args.keep_sandboxes == "never"
+    assert args.state_dir == ".corral/runs"
+
+
+def test_legacy_benchmark_namespace_also_defaults_to_docker():
+    sandbox = cli._sandbox_profile(argparse.Namespace())
+
+    assert sandbox.mode == "docker"
+    assert sandbox.docker is not None
+    assert sandbox.docker.image == "corral-benchmark:latest"
+
+
 def test_run_parser_requires_one_task_and_has_non_benchmark_defaults():
     args = cli.build_parser().parse_args(
         [

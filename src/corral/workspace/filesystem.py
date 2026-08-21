@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
 import shutil
+import signal
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from corral.core.tool import Tool, tool
 from corral.core.workspace import normalize_workspace_path
+
+_TERMINAL_MAX_TIMEOUT_SECONDS = 3600
+_TERMINAL_MAX_OUTPUT_CHARS = 100_000
 
 
 def confine_workspace_path(
@@ -359,3 +367,90 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
             grep,
         )
     }
+
+
+def build_terminal_tool(filesystem: WorkspaceFilesystem) -> Tool:
+    """Build a bounded shell tool rooted in one execution workspace."""
+
+    @tool
+    def terminal(
+        command: str,
+        timeout_seconds: int = 120,
+        max_output_chars: int = 20_000,
+    ) -> str:
+        """Run a foreground shell command inside the isolated workspace.
+
+        Args:
+            command: Shell program to run with the workspace as its cwd.
+            timeout_seconds: Wall-clock limit, at most one hour.
+            max_output_chars: Maximum combined stdout/stderr returned.
+        """
+        if not command.strip():
+            raise ValueError("terminal command cannot be empty")
+        if not 1 <= timeout_seconds <= _TERMINAL_MAX_TIMEOUT_SECONDS:
+            raise ValueError("timeout_seconds must be between 1 and 3600")
+        if not 1 <= max_output_chars <= _TERMINAL_MAX_OUTPUT_CHARS:
+            raise ValueError("max_output_chars must be between 1 and 100000")
+
+        terminal_uid = int(os.environ.get("CORRAL_TERMINAL_UID", str(os.geteuid())))
+        terminal_gid = int(os.environ.get("CORRAL_TERMINAL_GID", str(os.getegid())))
+
+        identity_options: dict[str, Any] = {}
+        if os.geteuid() == 0 and terminal_uid != 0:
+            # The runtime owns the volume; the terminal user owns only this
+            # materialization and never the separately mounted checkpoint path.
+            for entry in (filesystem.root, *filesystem.root.rglob("*")):
+                if entry.is_symlink():
+                    raise ValueError("workspace cannot contain symbolic links")
+                entry.chown(terminal_uid, terminal_gid)
+            identity_options = {
+                "user": terminal_uid,
+                "group": terminal_gid,
+                "extra_groups": (),
+            }
+
+        with tempfile.TemporaryFile() as output_stream:
+            process = subprocess.Popen(
+                ["/bin/sh", "-lc", command],
+                cwd=filesystem.root,
+                env={
+                    "HOME": str(filesystem.root),
+                    "LANG": "C.UTF-8",
+                    "PATH": "/usr/local/bin:/usr/bin:/bin",
+                },
+                stdout=output_stream,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                **identity_options,
+            )
+            timed_out = False
+            try:
+                process.wait(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            finally:
+                # Commands may not leave descendants in their process group,
+                # even when the foreground shell already exited cleanly.
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+
+            byte_count = output_stream.tell()
+            output_stream.seek(max(0, byte_count - max_output_chars * 4))
+            combined = output_stream.read().decode("utf-8", errors="replace")
+        truncated = byte_count > max_output_chars or len(combined) > max_output_chars
+        if len(combined) > max_output_chars:
+            combined = combined[-max_output_chars:]
+        return json.dumps(
+            {
+                "exit_code": process.returncode,
+                "output": combined,
+                "timed_out": timed_out,
+                "truncated": truncated,
+            },
+            indent=2,
+        )
+
+    return terminal

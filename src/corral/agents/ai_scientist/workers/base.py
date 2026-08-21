@@ -13,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 from corral.agents.schema import BudgetExhaustedError
 from corral.agents.utils import LiteLLMMessage
-from corral.logging import logger
+from corral.report.logging import logger
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
@@ -76,7 +76,7 @@ def _is_unsupported_structured_output_error(exc: Exception) -> bool:
 
 def _extract_object(content: str) -> dict[str, Any]:
     content = content.strip()
-    if content.startswith("```"):
+    if content.startswith("``"):
         content = re.sub(r"^`+[^\n]*\n?", "", content)
         content = re.sub(r"\n?`+\s*$", "", content).strip()
     try:

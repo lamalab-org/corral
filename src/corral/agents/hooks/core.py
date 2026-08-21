@@ -8,7 +8,7 @@ from enum import Enum
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Protocol
 
-from corral.logging import logger
+from corral.report.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Mapping

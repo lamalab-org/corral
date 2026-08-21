@@ -20,7 +20,7 @@ from corral.backend.executors import (
     ThreadExecutor,
     build_executor,
 )
-from corral.logging import event, exception_fields
+from corral.report.logging import event, exception_fields
 
 if TYPE_CHECKING:
     from collections.abc import Callable

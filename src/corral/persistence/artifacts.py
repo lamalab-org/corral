@@ -113,7 +113,8 @@ class LocalArtifactStore:
 
     def _commit_temporary_blob(self, temporary: Path, stored: StoredBlob) -> None:
         destination = self._blob_path(stored.blob_ref)
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o2770)
+        destination.parent.chmod(0o2770)
 
         if destination.exists():
             existing_size = self._verify(
@@ -127,6 +128,7 @@ class LocalArtifactStore:
             temporary.unlink()
             return
 
+        temporary.chmod(0o640)
         temporary.replace(destination)
 
     def _put_bytes(self, data: bytes) -> StoredBlob:

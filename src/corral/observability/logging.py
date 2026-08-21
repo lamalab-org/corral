@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from corral.logging import event, exception_fields
 from corral.observability.base import (
     Observation,
     ObservationContext,
     ObservationSpan,
     commit_metadata,
 )
+from corral.report.logging import event, exception_fields
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

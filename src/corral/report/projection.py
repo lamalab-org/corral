@@ -199,6 +199,7 @@ async def project_benchmark_result(
     total_duration: float | None = None,
     verbose: bool = False,
     metrics: Iterable[Metric] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> BenchmarkResult:
     """Load final States and project a Workflow result into report models."""
     normalised_k = normalise_k_values(k_values, result.trials_per_task)
@@ -228,6 +229,7 @@ async def project_benchmark_result(
         total_duration=total_duration,
         verbose=verbose,
         metrics=list(metrics) if metrics is not None else None,
+        metadata=dict(metadata or {}),
     )
 
 

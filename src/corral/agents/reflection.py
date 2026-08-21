@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from corral.agents.utils import LiteLLMMessage, llm_call
-from corral.logging import logger
+from corral.report.logging import logger
 
 
 @dataclass

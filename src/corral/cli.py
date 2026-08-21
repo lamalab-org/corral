@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import inspect
 import json
+import os
 import re
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from importlib import import_module
 from pathlib import Path
 from types import MappingProxyType
@@ -20,9 +24,12 @@ from dotenv import load_dotenv
 from temporalio.client import Client
 
 import corral.orchestration as orchestration
-from corral.environment_loader import ENVIRONMENT_NAMES, load_environment_group
-from corral.persistence import SQLiteCommitStore
+from corral.persistence import ShardedCommitStore, SQLiteCommitStore
 from corral.run import CorralRunner
+from corral.runtime.environment_loader import (
+    ENVIRONMENT_NAMES,
+    load_environment_group,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +281,54 @@ def _slug(value: str) -> str:
     return slug[:120] or uuid4().hex
 
 
+def _run_directory_name(run_id: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", run_id).strip("-")
+    digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:12]
+    if slug == run_id and len(slug) <= 220:
+        return slug
+    return f"{(slug or 'run')[:206]}--{digest}"
+
+
+def _default_benchmark_run_id(
+    *,
+    agent: str,
+    model: str,
+    environment: str,
+    task_ids: Sequence[str],
+    trials: int,
+    sandbox: str,
+) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    nonce = uuid4().hex[:8]
+    if len(task_ids) <= 2:
+        tasks = "+".join(_slug(task_id)[:36] for task_id in task_ids)
+    else:
+        tasks = str(len(task_ids))
+    return (
+        f"{timestamp}-{nonce}__agent-{_slug(agent)}__model-{_slug(model)}"
+        f"__env-{_slug(environment)}__tasks-{tasks}__k-{trials}"
+        f"__sandbox-{_slug(sandbox)}"
+    )
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def _print_results(run_id: str, result: Any) -> None:
     lines = [f"Run {run_id} completed:"]
     for task_id, task_results in result.task_results.items():
@@ -332,6 +387,38 @@ def _activity_policy(args: argparse.Namespace) -> Any:
     )
 
 
+def _sandbox_profile(args: argparse.Namespace) -> Any:
+    # Every benchmark entry point defaults to Docker, including legacy parsers
+    # whose Namespace predates the explicit sandbox options. Local execution
+    # remains available only through an explicit `--sandbox local` selection.
+    if getattr(args, "sandbox", "docker") == "local":
+        return orchestration.SandboxProfile.local()
+    spec = orchestration.DockerSandboxSpec(
+        image=getattr(args, "sandbox_image", "corral-benchmark:latest"),
+        cpus=getattr(args, "sandbox_cpus", 2.0),
+        memory=getattr(args, "sandbox_memory", "4g"),
+        pids_limit=getattr(args, "sandbox_pids_limit", 256),
+        network=getattr(args, "sandbox_network", "bridge"),
+        environment_allowlist=tuple(
+            dict.fromkeys(
+                getattr(
+                    args,
+                    "sandbox_env",
+                    orchestration.DockerSandboxSpec().environment_allowlist,
+                )
+            )
+        ),
+        retention=orchestration.SandboxRetention(
+            getattr(args, "keep_sandboxes", "never")
+        ),
+        registry_module=getattr(args, "sandbox_registry_module", None),
+    )
+    return orchestration.SandboxProfile(
+        mode=orchestration.SandboxMode.DOCKER,
+        docker=spec,
+    )
+
+
 async def run_benchmark(
     args: argparse.Namespace,
     *,
@@ -353,20 +440,91 @@ async def run_benchmark(
         agent_kwargs=agent_kwargs,
     )
 
-    run_id = args.run_id or (
-        f"{_slug(canonical_agent)}-{_slug(args.environment)}-{uuid4().hex[:12]}"
+    sandbox = _sandbox_profile(args)
+    if sandbox.mode == orchestration.SandboxMode.DOCKER.value:
+        assert sandbox.docker is not None
+        repository_root = Path(__file__).resolve().parents[2]
+        sandbox_image = getattr(args, "sandbox_image", "corral-benchmark:latest")
+        docker_executable = getattr(args, "docker_executable", "docker")
+        build_local = getattr(args, "build_sandbox_image", False) or (
+            sandbox_image == "corral-benchmark:latest"
+        )
+        resolved = await orchestration.DockerTaskLauncher.preflight(
+            sandbox.docker,
+            docker_executable=docker_executable,
+            build_context=repository_root if build_local else None,
+            dockerfile=(
+                repository_root / "docker" / "benchmark.Dockerfile"
+                if build_local
+                else None
+            ),
+        )
+        sandbox = orchestration.SandboxProfile(
+            mode=orchestration.SandboxMode.DOCKER,
+            docker=resolved,
+        )
+
+    requested_task_ids = tuple(args.tasks or environments)
+    run_id = args.run_id or _default_benchmark_run_id(
+        agent=canonical_agent,
+        model=model,
+        environment=args.environment,
+        task_ids=requested_task_ids,
+        trials=args.trials,
+        sandbox=sandbox.mode,
     )
     task_queue = args.task_queue or f"corral-{_slug(run_id)}"
-    store = SQLiteCommitStore(Path(args.commit_file).expanduser().resolve())
+
+    state_dir = getattr(args, "state_dir", None)
+    if state_dir is None:
+        commit_file = Path(getattr(args, "commit_file", ".corral/commits.sqlite3"))
+        state_dir = commit_file.parent / "runs"
+    runs_root = Path(state_dir).expanduser().resolve()
+    run_dir = runs_root / _run_directory_name(run_id)
+    configured_report = getattr(args, "report", None)
+    report_path = (
+        Path(configured_report) if configured_report else run_dir / "report.json"
+    )
+    report_path = report_path.expanduser().resolve()
+    run_manifest_path = run_dir / "run-metadata.json"
+    run_manifest = {
+        "schema_version": 1,
+        "benchmark_run_id": run_id,
+        "status": "running",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "output_directory": str(run_dir),
+        "report_path": str(report_path),
+        "agent": canonical_agent,
+        "model": model,
+        "environment": args.environment,
+        "requested_task_ids": list(requested_task_ids),
+        "trials_per_task": args.trials,
+        "sandbox": sandbox.mode,
+    }
+    _atomic_json(run_manifest_path, run_manifest)
+    store = ShardedCommitStore(run_dir, benchmark_run_id=run_id)
     registry = orchestration.RuntimeRegistry(
         agents={canonical_agent: agent},
         environments=environments,
+        workspace_manager_factory=store.workspace_manager,
     )
 
     try:
         client = await _connect_temporal(args)
 
-        activities = orchestration.CorralActivities(store, registry)
+        docker_launcher = (
+            orchestration.DockerTaskLauncher(
+                store,
+                docker_executable=getattr(args, "docker_executable", "docker"),
+            )
+            if sandbox.mode == orchestration.SandboxMode.DOCKER.value
+            else None
+        )
+        activities = orchestration.CorralActivities(
+            store,
+            registry,
+            docker_launcher=docker_launcher,
+        )
         async with orchestration.create_worker(
             client,
             task_queue=task_queue,
@@ -383,6 +541,21 @@ async def run_benchmark(
                 model=model,
                 max_iterations=args.max_iterations,
                 state_store=store,
+                sandbox=sandbox,
+                agent_runtime=orchestration.AgentRuntimeDefinition(
+                    name=canonical_agent,
+                    model=model,
+                    api_endpoint=args.api_endpoint,
+                    temperature=args.temperature,
+                    options={
+                        **dict(getattr(args, "agent_kwargs", {}) or {}),
+                        **dict(agent_kwargs or {}),
+                    },
+                ),
+                environment_runtime=orchestration.EnvironmentRuntimeDefinition(
+                    name=args.environment,
+                    options=dict(args.env_kwargs),
+                ),
             )
             result = await runner.run(
                 run_id,
@@ -395,12 +568,43 @@ async def run_benchmark(
                 verbose=args.verbose,
                 activity_policy=_activity_policy(args),
             )
+        result.metadata["storage"] = {
+            "run_directory": str(run_dir),
+            "report": str(report_path),
+            "task_directory_pattern": "task-<task-id>/k-<1-based-trial>",
+            "workspace_snapshots_directory": "workspace-snapshots",
+            "state_snapshots_directory": "state-snapshots",
+            "state_snapshot_interval": store.snapshot_interval,
+        }
+        result.metadata["orchestration"] = {
+            "task_queue": task_queue,
+            "temporal_address": args.temporal_address,
+            "temporal_namespace": args.temporal_namespace,
+        }
+        result.generate_report(str(report_path))
+        failed_trials = sum(
+            trial.error_message is not None for trial in result.all_results
+        )
+        run_manifest.update(
+            status="completed_with_errors" if failed_trials else "completed",
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            failed_trials=failed_trials,
+        )
+        _atomic_json(run_manifest_path, run_manifest)
+    except BaseException as exc:
+        run_manifest.update(
+            status="failed",
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        _atomic_json(run_manifest_path, run_manifest)
+        raise
     finally:
         registry.close()
         store.close()
 
-    result.generate_report(args.report)
     _print_results(run_id, result)
+    sys.stdout.write(f"Outputs: {run_dir}\n")
     return int(any(trial.error_message for trial in result.all_results))
 
 
@@ -577,6 +781,57 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     )
     execution.add_argument("--report")
     execution.add_argument("--verbose", action="store_true")
+    sandbox = parser.add_argument_group("sandbox")
+    sandbox.add_argument(
+        "--sandbox",
+        choices=("docker", "local"),
+        default="docker",
+        help="Trial isolation mode; default: docker.",
+    )
+    sandbox.add_argument(
+        "--sandbox-image",
+        default="corral-benchmark:latest",
+        metavar="IMAGE",
+        help="Benchmark image; resolved to an immutable image ID at preflight.",
+    )
+    sandbox.add_argument("--sandbox-cpus", type=float, default=2.0)
+    sandbox.add_argument("--sandbox-memory", default="4g")
+    sandbox.add_argument("--sandbox-pids-limit", type=int, default=256)
+    sandbox.add_argument(
+        "--sandbox-network",
+        default="bridge",
+        help="Docker network mode; default: bridge (outbound network enabled).",
+    )
+    sandbox.add_argument(
+        "--keep-sandboxes",
+        choices=("never", "on-failure", "always"),
+        default="never",
+    )
+    sandbox.add_argument(
+        "--sandbox-env",
+        action="append",
+        default=list(orchestration.DockerSandboxSpec().environment_allowlist),
+        metavar="NAME",
+        help="Host environment variable allowed into Docker; repeat as needed.",
+    )
+    sandbox.add_argument(
+        "--sandbox-registry-module",
+        metavar="MODULE:FACTORY",
+        help="Image-specific RuntimeRegistry factory for custom deployments.",
+    )
+    sandbox.add_argument(
+        "--build-sandbox-image",
+        action="store_true",
+        help="Build a missing custom image from docker/benchmark.Dockerfile.",
+    )
+    sandbox.add_argument("--docker-executable", default="docker")
+    sandbox.add_argument(
+        "--output-dir",
+        "--state-dir",
+        dest="state_dir",
+        default=str(Path(".corral") / "runs"),
+        help="Root for one self-contained directory per benchmark run.",
+    )
 
 
 def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
@@ -593,7 +848,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the top-level ``corral`` command parser."""
+    """Build the top-level `corral` command parser."""
     parser = argparse.ArgumentParser(
         prog="corral",
         description="Run scientific agents and benchmarks with Corral.",
@@ -611,11 +866,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_benchmark_arguments(bench)
     bench.set_defaults(_handler=run_benchmark)
+    internal = commands.add_parser("internal", help=argparse.SUPPRESS)
+    internal_commands = internal.add_subparsers(dest="internal_command", required=True)
+    internal_run_task = internal_commands.add_parser("run-task")
+    internal_run_task.add_argument("--request", required=True)
+    internal_run_task.add_argument("--result", required=True)
+
+    async def run_internal_task(args: argparse.Namespace) -> int:
+        from corral.orchestration.internal import run_task_from_files
+
+        return await run_task_from_files(args.request, args.result)
+
+    internal_run_task.set_defaults(_handler=run_internal_task)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Execute the installed ``corral`` command."""
+    """Execute the installed `corral` command."""
     load_dotenv()
     parser = build_parser()
     args = parser.parse_args(argv)

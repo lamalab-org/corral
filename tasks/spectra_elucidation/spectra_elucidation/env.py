@@ -30,7 +30,7 @@ from corral.core.task import (
     TaskDefinition,
     with_fixed_inputs,
 )
-from corral.logging import event, exception_fields
+from corral.report.logging import event, exception_fields
 
 BASE_WORK_DIR = os.environ.get(
     "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/spectra_elucidation"

@@ -10,7 +10,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from corral.logging import logger
+from corral.report.logging import logger
 
 
 def extract_path_from_answer(answer: str) -> str:

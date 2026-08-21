@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import cloudpickle
 
-from corral.logging import logger
+from corral.report.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable

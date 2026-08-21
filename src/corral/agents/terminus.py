@@ -32,7 +32,7 @@ from corral.agents.schema import (
 from corral.agents.utils import LiteLLMMessage
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
-from corral.logging import logger
+from corral.report.logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -81,7 +81,7 @@ class TerminusResponse(BaseModel):
 
 def _strip_code_fence(text: str) -> str:
     text = text.strip()
-    if text.startswith("```"):
+    if text.startswith("``"):
         text = re.sub(r"^`+[^\n]*\n?", "", text)
         text = re.sub(r"\n?`+\s*$", "", text)
     return text.strip()
@@ -304,7 +304,7 @@ Rules:
             ]
 
     async def run_session(self, session: AgentSession) -> AgentOutcome:
-        """Run Terminus's complete structured loop against ``session``."""
+        """Run Terminus's complete structured loop against `session`."""
         tools = tuple(dict(tool) for tool in session.tools)
         definitions = self._tool_definitions(tools)
         iteration_limit = session.iteration_limit

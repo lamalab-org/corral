@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +46,24 @@ if TYPE_CHECKING:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 _AUTHOR_KINDS: dict[type[Any], frozenset[str]] = {
@@ -196,6 +216,7 @@ class SQLiteCommitStore:
         execution_id: str | None = None,
         *,
         snapshot_interval: int = 50,
+        state_snapshot_root: str | Path | None = None,
     ) -> None:
         if snapshot_interval < 1:
             raise ValueError("snapshot_interval must be at least 1")
@@ -203,6 +224,13 @@ class SQLiteCommitStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.execution_id = execution_id
         self.snapshot_interval = snapshot_interval
+        self.state_snapshot_root = (
+            None
+            if state_snapshot_root is None
+            else Path(state_snapshot_root).expanduser()
+        )
+        if self.state_snapshot_root is not None:
+            self.state_snapshot_root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._closed = False
         self._connection = sqlite3.connect(
@@ -217,6 +245,23 @@ class SQLiteCommitStore:
         self._reducer = EventReducer()
         self._projection_cache: dict[tuple[str, str], ExecutionState] = {}
         self._create_schema()
+
+    def _publish_state_snapshot(
+        self,
+        commit: Commit,
+        state_json: str,
+        *,
+        terminal: bool,
+    ) -> None:
+        """Publish a human-readable projection beside the authoritative ledger."""
+        if self.state_snapshot_root is None:
+            return
+        state_data = json.loads(state_json)
+        filename = f"{commit.sequence:08d}-{commit.hash[:12]}.json"
+        _atomic_json(self.state_snapshot_root / filename, state_data)
+        _atomic_json(self.state_snapshot_root / "latest.json", state_data)
+        if terminal:
+            _atomic_json(self.state_snapshot_root / "final.json", state_data)
 
     def _create_schema(self) -> None:
         self._connection.executescript(
@@ -554,7 +599,19 @@ class SQLiteCommitStore:
                         raise CommitConflictError(
                             "idempotency key belongs to another branch"
                         )
+                    stored_snapshot = connection.execute(
+                        "SELECT state_json FROM snapshots WHERE execution_id = ? AND commit_hash = ?",
+                        (execution_id, persisted.hash),
+                    ).fetchone()
                     connection.commit()
+                    if stored_snapshot is not None:
+                        self._publish_state_snapshot(
+                            persisted,
+                            stored_snapshot["state_json"],
+                            terminal=isinstance(
+                                persisted.event, ExecutionCompleted | ExecutionFailed
+                            ),
+                        )
                     return persisted
 
                 branch = connection.execute(
@@ -725,17 +782,28 @@ class SQLiteCommitStore:
                     "UPDATE branch_heads SET head_hash = ? WHERE execution_id = ? AND branch_id = ?",
                     (commit.hash, execution_id, request.branch_id),
                 )
-                if commit.sequence % self.snapshot_interval == 0:
+                terminal_snapshot = isinstance(
+                    request.event, ExecutionCompleted | ExecutionFailed
+                )
+                state_json: str | None = None
+                if commit.sequence % self.snapshot_interval == 0 or terminal_snapshot:
+                    state_json = projected.model_dump_json()
                     connection.execute(
                         "INSERT OR REPLACE INTO snapshots(execution_id, commit_hash, state_json, created_at) VALUES (?, ?, ?, ?)",
                         (
                             execution_id,
                             commit.hash,
-                            projected.model_dump_json(),
+                            state_json,
                             recorded_at.isoformat(),
                         ),
                     )
                 connection.commit()
+                if state_json is not None:
+                    self._publish_state_snapshot(
+                        commit,
+                        state_json,
+                        terminal=terminal_snapshot,
+                    )
                 self._projection_cache[(execution_id, request.branch_id)] = projected
                 return commit
             except Exception:

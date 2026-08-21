@@ -11,7 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from corral.logging import (
+from corral.observability import LoggingObserver, Observation, ObservationContext
+from corral.observability.langfuse import observer_from_env
+from corral.report.logging import (
     LoggingConfig,
     LogSinkConfig,
     configure_logging,
@@ -19,8 +21,6 @@ from corral.logging import (
     log_context,
     logger,
 )
-from corral.observability import LoggingObserver, Observation, ObservationContext
-from corral.observability.langfuse import observer_from_env
 
 TASK_ENVIRONMENT_MODULES = (
     "tasks/afm/src/env.py",
@@ -392,4 +392,4 @@ def test_temporal_workflow_events_use_the_replay_aware_logger():
         Path(__file__).parents[1] / "src" / "corral" / "orchestration" / "workflows.py"
     ).read_text()
     assert "workflow.logger" in workflow_source
-    assert "from corral.logging" not in workflow_source
+    assert "from corral.report.logging" not in workflow_source

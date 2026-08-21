@@ -15,7 +15,7 @@ from corral.agents.reflection import (
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.session import Agent
 from corral.core.errors import concise_error_message
-from corral.logging import logger
+from corral.report.logging import logger
 
 if TYPE_CHECKING:
     from corral.agents.session import AgentSession

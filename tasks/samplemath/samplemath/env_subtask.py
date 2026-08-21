@@ -11,7 +11,7 @@ from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.state import State
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
-from corral.logging import event, exception_fields
+from corral.report.logging import event, exception_fields
 
 # Base working directory
 if "CORRAL_WORK_DIR" not in os.environ:

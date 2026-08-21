@@ -44,7 +44,7 @@ from corral.agents.ai_scientist.workers.base import StructuredModel
 from corral.agents.ai_scientist.workers.critic import ScientificCritic
 from corral.agents.ai_scientist.workers.experimenter import Experimenter
 from corral.agents.ai_scientist.workers.planner import NodePlanner
-from corral.logging import logger
+from corral.report.logging import logger
 
 
 class ExperimentManager:

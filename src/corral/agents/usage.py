@@ -20,7 +20,7 @@ def usage_from_mapping(
     *,
     llm_calls: int = 0,
 ) -> AgentUsage:
-    """Convert canonical or LiteLLM token fields into ``AgentUsage``."""
+    """Convert canonical or LiteLLM token fields into `AgentUsage`."""
     raw_usage = raw_usage or {}
     return AgentUsage(
         input_tokens=int(

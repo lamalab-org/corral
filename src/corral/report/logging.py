@@ -1,4 +1,4 @@
-"""Corral's structured, redacting Loguru configuration facade.
+"""Corral's structured, redacting reporting facade for Loguru.
 
 Application modules import :data:`logger` from here instead of configuring
 Loguru themselves.  This keeps event fields, correlation context, redaction,
@@ -147,7 +147,7 @@ class LoggingConfig:
 
     @classmethod
     def from_env(cls) -> LoggingConfig:
-        """Read the documented ``CORRAL_LOG_*`` environment variables."""
+        """Read the documented `CORRAL_LOG_*` environment variables."""
 
         raw_format = os.getenv("CORRAL_LOG_FORMAT", "console").strip().lower()
         log_format: LogFormat = "json" if raw_format == "json" else "console"

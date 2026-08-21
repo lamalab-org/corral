@@ -2,7 +2,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any
 
-from corral.logging import logger
+from corral.report.logging import logger
 
 from .base import Metric
 

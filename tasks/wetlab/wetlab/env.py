@@ -26,7 +26,7 @@ from corral.core.state import ExecutionState, TaskOutput
 from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
 from corral.core.tool import Tool
 from corral.core.transition import environment_operations
-from corral.logging import event, exception_fields
+from corral.report.logging import event, exception_fields
 
 SCORING_FUNCTIONS = {
     "none_checker": none_checker,

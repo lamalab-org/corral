@@ -18,7 +18,7 @@ from resistor_network.tools import create_tools
 from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
-from corral.logging import event, exception_fields
+from corral.report.logging import event, exception_fields
 
 event(
     "DEBUG",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
@@ -42,12 +43,44 @@ class WorkspaceManager:
         artifact_store: ArtifactStore | None = None,
         *,
         artifact_root: str | Path = ".corral/artifacts",
+        snapshot_root: str | Path | None = None,
     ) -> None:
         self.artifact_store: ArtifactStore = (
             artifact_store
             if artifact_store is not None
             else LocalArtifactStore(artifact_root)
         )
+        self.snapshot_root = (
+            None
+            if snapshot_root is None
+            else Path(snapshot_root).expanduser().resolve()
+        )
+        if self.snapshot_root is not None:
+            self.snapshot_root.mkdir(parents=True, exist_ok=True)
+
+    def _publish_manifest(self, workspace: WorkspaceState) -> None:
+        """Atomically publish a readable manifest after all blobs are durable."""
+        if self.snapshot_root is None:
+            return
+        payload = workspace.model_dump_json(indent=2).encode("utf-8") + b"\n"
+        for destination in (
+            self.snapshot_root / f"{workspace.revision:08d}.json",
+            self.snapshot_root / "latest.json",
+        ):
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{destination.name}.", suffix=".tmp", dir=self.snapshot_root
+            )
+            temporary = Path(temporary_name)
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                temporary.chmod(0o640)
+                temporary.replace(destination)
+            except Exception:
+                temporary.unlink(missing_ok=True)
+                raise
 
     @staticmethod
     def _hash_local_file(path: Path) -> tuple[str, int]:
@@ -131,10 +164,13 @@ class WorkspaceManager:
             artifact_manifest = dict(artifacts)
 
         if previous is None:
-            return WorkspaceState(files=file_refs, artifacts=artifact_manifest)
-        if previous.files == file_refs and previous.artifacts == artifact_manifest:
-            return previous
-        return previous.fork(files=file_refs, artifacts=artifact_manifest)
+            workspace = WorkspaceState(files=file_refs, artifacts=artifact_manifest)
+        elif previous.files == file_refs and previous.artifacts == artifact_manifest:
+            workspace = previous
+        else:
+            workspace = previous.fork(files=file_refs, artifacts=artifact_manifest)
+        await asyncio.to_thread(self._publish_manifest, workspace)
+        return workspace
 
     async def materialize(
         self,

@@ -1,6 +1,6 @@
-from corral import environment_loader
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
+from corral.runtime import environment_loader
 
 
 def _environment(task_id: str) -> Environment:

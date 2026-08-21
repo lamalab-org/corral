@@ -1,4 +1,4 @@
-"""Load registered environment factories with conventional arguments."""
+"""Load registered environment factories into executable runtime instances."""
 
 from __future__ import annotations
 

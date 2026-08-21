@@ -1,7 +1,9 @@
 """End-to-end Temporal tests for standalone and benchmark execution."""
 
 import asyncio
+import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from temporalio.testing import WorkflowEnvironment
@@ -11,17 +13,23 @@ from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.environment import Environment, Toolset
 from corral.core.task import InputRef, TaskDefinition
 from corral.orchestration import (
+    AgentRuntimeDefinition,
     BenchmarkWorkflowInput,
     CorralActivities,
+    DockerSandboxSpec,
+    EnvironmentRuntimeDefinition,
     RuntimeRegistry,
+    SandboxMode,
+    SandboxProfile,
+    StateRef,
     TaskWorkflowInput,
     TemporalBenchmarkExecutor,
     TemporalTaskExecutor,
     create_worker,
     execute_task,
 )
-from corral.orchestration.models import RunTaskInput
-from corral.persistence import SQLiteCommitStore
+from corral.orchestration.models import EvaluateTaskInput, RunTaskInput
+from corral.persistence import ShardedCommitStore, SQLiteCommitStore
 from corral.run import BenchmarkTaskMetadata, CorralRunner
 from corral.runtime import TaskRuntime
 
@@ -51,6 +59,27 @@ class PreviousStateAgent(SubmitAgent):
         assert session.previous_state.submission == "42"
         self.seen_previous_hash = session.previous_state.through_commit_hash
         return await super().run_session(session)
+
+
+class FileSubmitAgent:
+    model = "test-model"
+
+    async def run_session(self, session):
+        written = await session.execute(
+            Action(
+                name="write_file",
+                arguments={"path": "answer.txt", "content": "durable"},
+            )
+        )
+        assert written.success is True
+        submitted = await session.execute(
+            Action(
+                name=SUBMIT_ANSWER_TOOL_NAME,
+                arguments={"answer": "answer.txt"},
+            )
+        )
+        assert submitted.success is True
+        return AgentOutcome(status="completed", answer="answer.txt")
 
 
 class ConcurrentAgent(SubmitAgent):
@@ -94,6 +123,24 @@ class RecordingObserver:
 
     def flush(self):
         return None
+
+
+class RecordingDockerLauncher:
+    def __init__(self):
+        self.requests = []
+
+    async def run(self, request, *, observation_context=None):
+        self.requests.append((request, observation_context))
+        return StateRef(
+            commit_hash="d" * 64,
+            execution_id=request.execution_id,
+            branch_id="main",
+            sequence=4,
+            status="submitted",
+            agent_steps=1,
+            submission="42",
+            output={"answer": "42"},
+        )
 
 
 def _environment(task_id: str, dependency: str | None = None) -> Environment:
@@ -192,6 +239,61 @@ async def test_activities_do_not_serialize_requests_by_agent_id(tmp_path):
     assert first.submission == "42"
     assert second.submission == "42"
     assert agent.peak_active == 2
+
+
+@pytest.mark.anyio()
+async def test_evaluation_uses_durable_snapshot_after_live_workspace_is_deleted(
+    tmp_path,
+):
+    task = TaskDefinition(
+        name="file-task",
+        description="write a result",
+        tools=[],
+        scoring_fn=lambda path: float(Path(path).read_text() == "durable"),
+        submission_format={"answer": "path"},
+        resolve_answer=True,
+    )
+    environment = Environment(
+        "file-task", task, base_work_dir=str(tmp_path / "live-workspaces")
+    )
+    store = ShardedCommitStore(tmp_path / ".corral")
+    registry = RuntimeRegistry(
+        agents={"agent": FileSubmitAgent()},
+        environments={"file-task": environment},
+        workspace_manager_factory=store.workspace_manager,
+    )
+    activities = CorralActivities(store, registry)
+    execution_id = "durable-file-evaluation"
+
+    try:
+        state = await activities.run_task(
+            RunTaskInput(
+                execution_id=execution_id,
+                task_id="file-task",
+                environment_id="file-task",
+                agent_id="agent",
+                started_at=datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat(),
+            )
+        )
+        live_workspace = Path(
+            registry.environment("file-task", execution_id).workspace_path
+        )
+        shutil.rmtree(live_workspace)
+
+        evaluation = await activities.evaluate_task(
+            EvaluateTaskInput(
+                execution_id=execution_id,
+                environment_id="file-task",
+                commit_hash=state.commit_hash,
+                task_id="file-task",
+            )
+        )
+    finally:
+        registry.close()
+        store.close()
+
+    assert not live_workspace.exists()
+    assert evaluation.score == 1.0
 
 
 @pytest.mark.anyio()
@@ -318,3 +420,59 @@ async def test_temporal_owns_task_and_benchmark_lifecycle(tmp_path):
     finally:
         registry.close()
         store.close()
+
+
+@pytest.mark.anyio()
+async def test_temporal_round_trips_docker_runtime_definitions(tmp_path):
+    store = SQLiteCommitStore(tmp_path / "docker-payload.sqlite3")
+    registry = RuntimeRegistry(
+        agents={"agent": SubmitAgent()},
+        environments={"task": _environment("task")},
+    )
+    docker_launcher = RecordingDockerLauncher()
+    activities = CorralActivities(store, registry, docker_launcher=docker_launcher)
+    sandbox = SandboxProfile(
+        mode=SandboxMode.DOCKER,
+        docker=DockerSandboxSpec(
+            image="corral:test", image_digest="sha256:" + "c" * 64
+        ),
+    )
+
+    try:
+        async with (
+            await WorkflowEnvironment.start_time_skipping() as temporal,
+            create_worker(
+                temporal.client,
+                task_queue="corral-docker-payload",
+                activities=activities,
+            ),
+        ):
+            result = await TemporalTaskExecutor(
+                temporal.client, store, "corral-docker-payload"
+            ).execute_result(
+                TaskWorkflowInput(
+                    execution_id="docker-payload",
+                    task_id="task",
+                    environment_id="task",
+                    agent_id="agent",
+                    sandbox=sandbox,
+                    agent_runtime=AgentRuntimeDefinition(
+                        name="react", model="test-model"
+                    ),
+                    environment_runtime=EnvironmentRuntimeDefinition(
+                        name="samplemath", options={"level": 1}
+                    ),
+                )
+            )
+    finally:
+        registry.close()
+        store.close()
+
+    assert result.state is not None
+    assert result.state.submission == "42"
+    request, context = docker_launcher.requests[0]
+    assert request.sandbox.mode == "docker"
+    assert request.sandbox.docker is not None
+    assert request.sandbox.docker.memory == "4g"
+    assert request.environment_runtime.options == {"level": 1}
+    assert context.temporal_workflow_id

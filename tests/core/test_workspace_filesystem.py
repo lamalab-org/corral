@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ from corral.core.environment import Environment, Toolset, default_file_tools
 from corral.core.task import TaskDefinition
 from corral.workspace import (
     WorkspaceFilesystem,
+    build_terminal_tool,
     build_workspace_tools,
     confine_workspace_path,
 )
@@ -135,3 +137,40 @@ def test_parallel_task_workspaces_cannot_access_their_siblings(tmp_path):
     with pytest.raises(ValueError, match="workspace path"):
         filesystem.read_file("sibling-link/private.txt")
     assert (workspace_b / "private.txt").read_text(encoding="utf-8") == "B"
+
+
+def test_terminal_is_bounded_to_workspace_and_does_not_inherit_secrets(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-reach-shell")
+    terminal = build_terminal_tool(WorkspaceFilesystem(root))
+
+    raw = terminal.execute(
+        command='printf \'%s\\n\' "$PWD" "$OPENAI_API_KEY"; printf done > result.txt'
+    )
+    result = json.loads(raw)
+
+    assert result["exit_code"] == 0
+    assert result["timed_out"] is False
+    assert str(root) in result["output"]
+    assert "must-not-reach-shell" not in result["output"]
+    assert (root / "result.txt").read_text() == "done"
+
+    bounded = json.loads(
+        terminal.execute(command="printf 1234567890", max_output_chars=5)
+    )
+    assert bounded["output"] == "67890"
+    assert bounded["truncated"] is True
+
+
+def test_terminal_timeout_kills_the_command_process_group(tmp_path):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    terminal = build_terminal_tool(WorkspaceFilesystem(root))
+
+    result = json.loads(terminal.execute(command="sleep 30 & wait", timeout_seconds=1))
+
+    assert result["timed_out"] is True
+    assert result["exit_code"] != 0

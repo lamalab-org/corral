@@ -7,6 +7,10 @@ from typing import Any
 
 _EXPORTS = {
     "ActivityPolicy": ("corral.orchestration.models", "ActivityPolicy"),
+    "AgentRuntimeDefinition": (
+        "corral.orchestration.models",
+        "AgentRuntimeDefinition",
+    ),
     "BenchmarkProgress": ("corral.orchestration.models", "BenchmarkProgress"),
     "BenchmarkWorkflow": ("corral.orchestration.workflows", "BenchmarkWorkflow"),
     "BenchmarkWorkflowInput": (
@@ -18,8 +22,24 @@ _EXPORTS = {
         "BenchmarkWorkflowResult",
     ),
     "CorralActivities": ("corral.orchestration.activities", "CorralActivities"),
+    "DockerInfrastructureError": (
+        "corral.orchestration.launchers",
+        "DockerInfrastructureError",
+    ),
+    "DockerSandboxSpec": ("corral.orchestration.models", "DockerSandboxSpec"),
+    "DockerTaskLauncher": (
+        "corral.orchestration.launchers",
+        "DockerTaskLauncher",
+    ),
+    "EnvironmentRuntimeDefinition": (
+        "corral.orchestration.models",
+        "EnvironmentRuntimeDefinition",
+    ),
     "EvaluationRef": ("corral.orchestration.models", "EvaluationRef"),
     "RuntimeRegistry": ("corral.orchestration.activities", "RuntimeRegistry"),
+    "SandboxMode": ("corral.orchestration.models", "SandboxMode"),
+    "SandboxProfile": ("corral.orchestration.models", "SandboxProfile"),
+    "SandboxRetention": ("corral.orchestration.models", "SandboxRetention"),
     "StateRef": ("corral.orchestration.models", "StateRef"),
     "TaskExecutionError": (
         "corral.orchestration.executor",
@@ -51,13 +71,21 @@ _EXPORTS = {
 
 __all__ = [
     "ActivityPolicy",
+    "AgentRuntimeDefinition",
     "BenchmarkProgress",
     "BenchmarkWorkflow",
     "BenchmarkWorkflowInput",
     "BenchmarkWorkflowResult",
     "CorralActivities",
+    "DockerInfrastructureError",
+    "DockerSandboxSpec",
+    "DockerTaskLauncher",
+    "EnvironmentRuntimeDefinition",
     "EvaluationRef",
     "RuntimeRegistry",
+    "SandboxMode",
+    "SandboxProfile",
+    "SandboxRetention",
     "StateRef",
     "TaskExecutionError",
     "TaskWorkflow",

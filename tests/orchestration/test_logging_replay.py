@@ -10,7 +10,6 @@ from corral.agents.schema import AgentOutcome
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
-from corral.logging import LoggingConfig, LogSinkConfig, configure_logging
 from corral.orchestration import (
     CorralActivities,
     RuntimeRegistry,
@@ -22,6 +21,7 @@ from corral.orchestration import (
 from corral.orchestration.executor import task_workflow_id
 from corral.orchestration.workflows import TaskWorkflow
 from corral.persistence import SQLiteCommitStore
+from corral.report.logging import LoggingConfig, LogSinkConfig, configure_logging
 
 
 @pytest.fixture()

@@ -123,10 +123,10 @@ class _BranchSessionRegistry:
 class AIScientistAgent(BaseAgent):
     """Progressive tree search over scientific actions exposed by Corral.
 
-    ``model_gateway`` is an injection seam for offline tests or custom providers;
+    `model_gateway` is an injection seam for offline tests or custom providers;
     normal use leaves it unset and uses Corral's thread-safe LiteLLM utility with
     structured-output fallback. Custom gateways must support concurrent calls
-    when ``config.parallel_llm_workers`` is greater than one; set it to one for a
+    when `config.parallel_llm_workers` is greater than one; set it to one for a
     gateway that requires serial access.
     """
 
@@ -527,11 +527,11 @@ class AIScientistAgent(BaseAgent):
     ) -> dict[str, Any]:
         """Describe an experiment tree without mutating canonical messages.
 
-        The returned object is stored as a sibling of ``messages`` in verbose
-        agent logs. Consumers can render the tree directly from ``nodes`` and
-        ``edges``; readable labels avoid having to inspect a full node payload.
-        ``message_links`` correlates worker responses whose existing, legal
-        ``name`` field contains a node id. No custom key is ever placed on an
+        The returned object is stored as a sibling of `messages` in verbose
+        agent logs. Consumers can render the tree directly from `nodes` and
+        `edges`; readable labels avoid having to inspect a full node payload.
+        `message_links` correlates worker responses whose existing, legal
+        `name` field contains a node id. No custom key is ever placed on an
         API-bound message.
         """
         if state is None:

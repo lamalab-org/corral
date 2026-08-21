@@ -9,7 +9,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from typing import Any, Literal
 
-from corral.logging import logger
+from corral.report.logging import logger
 
 # The OpenHands SDK ships as the optional `corral[openhands]` extra, which is
 # gated to Python >= 3.12. Wrap the import so an environment without the extra

@@ -14,7 +14,7 @@ from typing import Any
 import anyio
 from promptstore import PromptStore
 
-from corral.logging import logger
+from corral.report.logging import logger
 
 # The Claude Agent SDK ships as the optional `corral[claude]` extra. Wrap the
 # import so an environment without the extra gets an actionable install hint

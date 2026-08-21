@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 import anyio
 
-from corral.logging import logger
+from corral.report.logging import logger
 
 # The Codex SDK ships as the optional `corral[codex]` extra. Wrap the import so
 # an environment without the extra gets an actionable install hint instead of a
@@ -554,7 +554,7 @@ class CodexAgent(BaseAgent):
         *,
         llm_calls: int = 0,
     ) -> AgentUsage:
-        """Extract Codex's nested ``usage.total`` token fields."""
+        """Extract Codex's nested `usage.total` token fields."""
         total = usage_field(raw_usage, "total", None)
         total = raw_usage if total is None else total
         return super()._usage(
