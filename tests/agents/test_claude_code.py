@@ -262,7 +262,7 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
     assert not Path(options.cwd).exists()
     assert options.model == "claude-opus-4-8"
     assert options.max_turns == 7
-    assert options.tools == []
+    assert options.tools == {"type": "preset", "preset": "claude_code"}
     assert options.allowed_tools == [
         "mcp__corral__test_tool",
         "mcp__corral__submit_answer",
@@ -271,7 +271,12 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
         "corral": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}
     }
     assert options.strict_mcp_config is True
-    assert options.permission_mode == "dontAsk"
+    assert options.permission_mode == "auto"
+    assert options.sandbox == {
+        "enabled": True,
+        "autoAllowBashIfSandboxed": True,
+        "allowUnsandboxedCommands": False,
+    }
     assert options.setting_sources == []
     assert options.skills == []
     assert options.plugins == []

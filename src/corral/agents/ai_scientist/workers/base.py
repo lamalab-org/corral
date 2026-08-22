@@ -76,7 +76,7 @@ def _is_unsupported_structured_output_error(exc: Exception) -> bool:
 
 def _extract_object(content: str) -> dict[str, Any]:
     content = content.strip()
-    if content.startswith("``"):
+    if content.startswith("```"):
         content = re.sub(r"^`+[^\n]*\n?", "", content)
         content = re.sub(r"\n?`+\s*$", "", content).strip()
     try:

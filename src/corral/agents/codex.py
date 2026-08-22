@@ -203,10 +203,10 @@ class CodexAgent(BaseAgent):
         instructions = (
             self.system_prompt
             + "\n\nYou are solving a task in a sandboxed evaluation environment. "
-            f"You may ONLY interact with it through the provided `{_MCP_SERVER_NAME}` "
-            "MCP tools; do not attempt to use the shell, filesystem, web search, or "
-            "any other tool, and do not request additional permissions. Do not invent "
-            "tool outputs. "
+            "You may use Codex's built-in tools as well as the provided "
+            f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
+            "operate in an isolated per-run workspace; use the MCP tools for task "
+            "environment data and actions. Do not invent tool outputs. "
         )
         # Only mention file paths when a file-writing tool is actually available,
         # so a task without one sees the exact same instructions as before. The
@@ -235,27 +235,14 @@ class CodexAgent(BaseAgent):
     def _render_config_toml(self, mcp_url: str, tool_names: list[str]) -> str:
         """Generate the isolated Codex `config.toml` for a run.
 
-        Disables every built-in capability and registers only the corral MCP
-        server, restricted to the exact tools available for this task. Codex
-        loads this from the run's isolated `CODEX_HOME`.
+        Leaves Codex's native built-in tool set enabled and registers the corral
+        MCP server, restricted to the exact task tools. Codex loads this from
+        the run's isolated `CODEX_HOME`, so no user plugins, skills, or MCP
+        servers are inherited.
         """
         lines = [
-            # Remove the built-in web-search tool.
-            'web_search = "disabled"',
-            "",
-            # Disable execution / multi-agent / plugin capabilities. Shell,
-            # unified exec, apps and multi-agent are otherwise on by default.
-            "[features]",
-            "shell_tool = false",
-            "unified_exec = false",
-            "apps = false",
-            "multi_agent = false",
-            "",
-            "[tools]",
-            "view_image = false",
-            "web_search = false",
-            "",
-            # The only actionable tools: the corral task endpoint over HTTP.
+            # Keep native Codex tool defaults. Only the external task endpoint
+            # is narrowed to the tools exposed by this Corral session.
             f"[mcp_servers.{_MCP_SERVER_NAME}]",
             f"url = {_toml_str(mcp_url)}",
             "required = true",
@@ -310,6 +297,9 @@ class CodexAgent(BaseAgent):
                 rest_tool_schema.encode("utf-8")
             ).hexdigest(),
             "mcp_tool_schema_sha256": mcp_schema_sha256,
+            "sdk_internal_tools_policy": "native_defaults",
+            "sandbox": Sandbox.read_only.value,
+            "approval_mode": ApprovalMode.auto_review.value,
         }
 
     def _execute_codex_turn(
@@ -349,7 +339,7 @@ class CodexAgent(BaseAgent):
                 model=self.harness_model,
                 cwd=str(workspace),
                 developer_instructions=developer_instructions,
-                approval_mode=ApprovalMode.deny_all,
+                approval_mode=ApprovalMode.auto_review,
                 sandbox=Sandbox.read_only,
                 ephemeral=True,
             )
@@ -367,7 +357,7 @@ class CodexAgent(BaseAgent):
             prompt,
             effort=self.reasoning_effort,
             sandbox=Sandbox.read_only,
-            approval_mode=ApprovalMode.deny_all,
+            approval_mode=ApprovalMode.auto_review,
         )
 
         # Watchdog: interrupt the turn if it outlives the wall-clock deadline.
@@ -737,15 +727,16 @@ class CodexAgent(BaseAgent):
         codex_home = root / "codex-home"
         codex_home.mkdir()
 
-        # Codex never receives the server-side execution path. Its cwd is an
-        # empty per-run directory, while every legitimate task file operation
-        # goes through the capability-scoped MCP endpoint. This prevents parent
-        # traversal or project discovery from exposing sibling task workspaces.
+        # Codex never receives the server-side execution path. Its built-in
+        # filesystem/shell tools operate in an empty per-run directory, while
+        # task file operations remain available through the capability-scoped
+        # MCP endpoint. This prevents project discovery from exposing sibling
+        # task workspaces without disabling the native tools.
         run_workspace = root / "workspace"
         run_workspace.mkdir()
         run.metadata["codex_cwd"] = str(run_workspace)
         run.metadata["codex_cwd_is_execution_workspace"] = False
-        run.metadata["workspace_access"] = "mcp_only"
+        run.metadata["workspace_access"] = "isolated_sdk_workspace_and_mcp"
 
         try:
             final_answer = self._execute_codex_turn(

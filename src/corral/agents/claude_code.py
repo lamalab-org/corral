@@ -210,10 +210,12 @@ class ClaudeCodeAgent:
         )
         append = (
             self.system_prompt
-            + "\n\nYou are solving a task in a sandboxed environment. You may ONLY "
-            f"interact with it through the provided `{_MCP_SERVER_NAME}` MCP tools; "
-            "do not attempt to use the filesystem, shell, web, or subagents. "
-            + final_answer_directive
+            + "\n\nYou are solving a task in a sandboxed environment. You may use "
+            "Claude Code's built-in tools as well as the provided "
+            f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
+            "start in a fresh per-run workspace and remain governed by Claude "
+            "Code's sandbox and path checks; use the MCP tools for task environment "
+            "data and actions. " + final_answer_directive
         )
         if enable_surrender:
             if self.surrender_prompt is not None:
@@ -236,17 +238,26 @@ class ClaudeCodeAgent:
         opts: dict[str, Any] = {
             "system_prompt": self._build_system_prompt(enable_surrender),
             "model": self.harness_model,
-            # Fail closed: expose *no* built-in tools (empty base tool set) and
-            # deny anything that was not explicitly pre-approved. Only the
-            # `mcp__corral__*` task tools reach the agent. This does not rely on
-            # a denylist, which would silently go stale as the SDK adds built-ins.
-            "tools": [],
+            # Follow the SDK-owned native preset so newly added Claude Code
+            # built-ins are available without maintaining a stale local list.
+            "tools": {"type": "preset", "preset": "claude_code"},
             "mcp_servers": {_MCP_SERVER_NAME: server},
             # Ignore project `.mcp.json`, user settings, and plugin MCP servers
             # so only the corral task endpoint is loaded.
             "strict_mcp_config": True,
             "allowed_tools": allowed_tools,
-            "permission_mode": "dontAsk",
+            # Native tools remain subject to Claude Code's automatic safety
+            # review. Task-scoped MCP tools are pre-approved above because the
+            # benchmark is non-interactive and the endpoint is capability-scoped.
+            "permission_mode": "auto",
+            # Bash and its children run inside Claude Code's OS sandbox and may
+            # not use the unsandboxed escape hatch. Read/Edit retain their SDK
+            # path permission checks and start from the fresh per-run cwd.
+            "sandbox": {
+                "enabled": True,
+                "autoAllowBashIfSandboxed": True,
+                "allowUnsandboxedCommands": False,
+            },
             # Load *no* filesystem configuration: `[]` (unlike `None`, which
             # loads user/project/local settings, CLAUDE.md, hooks, and MCP
             # config) keeps runs reproducible across machines.
@@ -300,6 +311,11 @@ class ClaudeCodeAgent:
             "wall_clock_timeout_s": self.wall_clock_timeout_s,
             "streaming_enabled": bool(
                 getattr(options, "include_partial_messages", False)
+            ),
+            "sdk_internal_tools_policy": "native_defaults",
+            "permission_mode": getattr(options, "permission_mode", None),
+            "sandbox_enabled": bool(
+                (getattr(options, "sandbox", None) or {}).get("enabled", False)
             ),
         }
 

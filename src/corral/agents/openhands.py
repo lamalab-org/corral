@@ -34,11 +34,13 @@ try:
     from openhands.sdk.mcp import MCPServer
     from openhands.sdk.mcp.exceptions import MCPError
     from openhands.sdk.mcp.tool import MCP_TOOL_TIMEOUT_SECONDS
-    from openhands.sdk.tool.builtins import FinishAction
+    from openhands.sdk.tool.builtins import BUILT_IN_TOOLS, FinishAction
+    from openhands.tools.preset.default import get_default_tools
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
     raise ModuleNotFoundError(
-        "OpenHandsAgent requires the OpenHands SDK, which ships as the optional "
-        "'openhands' extra (Python >= 3.12 only). Install it with "
+        "OpenHandsAgent requires the OpenHands SDK and native tools package, "
+        "which ship as the optional 'openhands' extra (Python >= 3.12 only). "
+        "Install them with "
         "`pip install 'corral[openhands]'`."
     ) from exc
 from pydantic import SecretStr
@@ -53,15 +55,10 @@ from corral.agents.utils import LiteLLMMessage
 # harness (the `mcp_config` table key).
 _MCP_SERVER_NAME = "corral"
 
-# OpenHands' internal-only tools: `FinishTool` lets the agent terminate with a
-# final answer and `ThinkTool` lets it reason. Neither can act outside the
-# process, so the corral MCP endpoint stays the only actionable surface.
-_INCLUDED_DEFAULT_TOOLS = ["FinishTool", "ThinkTool"]
-
-# Runtime tool *names* the two included default tools resolve to (OpenHands maps
-# the `FinishTool`/`ThinkTool` specs to tools named `finish`/`think`). Used to
-# build the expected runtime tool allowlist for the isolation self-check.
-_INCLUDED_DEFAULT_TOOL_NAMES = frozenset({"finish", "think"})
+# Derive the SDK-owned core defaults rather than maintaining a parallel list.
+# The environment-acting defaults (terminal/editor/task tracker/browser) come
+# from `openhands.tools.preset.default.get_default_tools()` at agent build time.
+_INCLUDED_DEFAULT_TOOLS = [tool.__name__ for tool in BUILT_IN_TOOLS]
 
 # OpenHands 1.35.0 caps every MCP tool call at a fixed *executor* timeout and
 # does NOT propagate `MCPServer.timeout` into that executor — the server-level
@@ -206,7 +203,7 @@ class OpenHandsAgent(BaseAgent):
         **kwargs: Additional provider configuration retained as provenance.
 
     `run_session` drives `Conversation.arun()` directly on the scheduler's
-    event loop and exposes environment tools exclusively through the session's
+    event loop and combines OpenHands' native default tools with the session's
     task-local MCP endpoint.
     """
 
@@ -279,10 +276,11 @@ class OpenHandsAgent(BaseAgent):
         suffix = (
             self.system_prompt
             + "\n\nYou are solving a task in a sandboxed evaluation environment. "
-            f"You may ONLY interact with it through the provided `{_MCP_SERVER_NAME}` "
-            "MCP tools; do not attempt to use the shell, filesystem, web, or any "
-            "other tool, and do not request additional permissions. Do not invent "
-            "tool outputs. " + final_answer_directive
+            "You may use OpenHands' built-in tools as well as the provided "
+            f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and terminal "
+            "tools start in a fresh per-run workspace; use the MCP tools for task "
+            "environment data and actions. Do not invent tool outputs. "
+            + final_answer_directive
         )
         if enable_surrender:
             if self.surrender_prompt is not None:
@@ -314,15 +312,13 @@ class OpenHandsAgent(BaseAgent):
         return LLM(**llm_kwargs)
 
     def _build_agent(self, llm: Any, mcp_url: str, enable_surrender: bool) -> Any:
-        """Assemble the fully-isolated OpenHands `Agent` for a run."""
+        """Assemble the reproducible OpenHands `Agent` for a run."""
         return Agent(
             llm=llm,
-            # Critical: register no OpenHands terminal/file-editor/browser tools
-            # and do NOT use the default tool preset. All externally-acting tools
-            # come exclusively from the corral MCP endpoint.
-            tools=[],
-            # Keep only OpenHands' internal reasoning/termination tools.
-            include_default_tools=list(_INCLUDED_DEFAULT_TOOLS),
+            # Use the SDK-owned standard preset (terminal, file editor, task
+            # tracker, and browser) so Corral follows OpenHands defaults as the
+            # SDK evolves. Core Finish/Think tools are included by Agent itself.
+            tools=get_default_tools(),
             mcp_config={
                 _MCP_SERVER_NAME: MCPServer(
                     url=mcp_url,
@@ -391,6 +387,8 @@ class OpenHandsAgent(BaseAgent):
             "mcp_url": mcp_url,
             "tool_verbosity": verbosity,
             "included_default_tools": list(_INCLUDED_DEFAULT_TOOLS),
+            "sdk_default_tools": [tool.name for tool in get_default_tools()],
+            "sdk_internal_tools_policy": "native_defaults",
             "system_prompt_identity_pinned": True,
             "mcp_tools_enabled": sorted(
                 t["function"]["name"]
@@ -628,7 +626,7 @@ class OpenHandsAgent(BaseAgent):
     ) -> str:
         """Drive the OpenHands conversation to completion and return its answer.
 
-        Owns the full conversation lifecycle: builds the isolated agent, drives
+        Owns the full conversation lifecycle: builds the per-run agent, drives
         it until completion or the iteration limit, records usage/transcript,
         validates the runtime tool set and terminal state, extracts the terminal
         `FinishAction` message, and always closes the conversation.
@@ -930,15 +928,12 @@ class OpenHandsAgent(BaseAgent):
             return _content_to_text(getattr(event, "observation", ""))
 
     def _verify_runtime_tools(self, conversation: Any, run: _RunState) -> None:
-        """Record and validate the actual runtime tool set OpenHands built.
+        """Record the runtime tools and require every task MCP capability.
 
-        `tools=[]` + `include_default_tools=[...]` is necessary but not
-        sufficient: OpenHands can still add ambient tools (e.g. a
-        `VisionInspectTool` for a non-vision model, or plugin-provided tools),
-        and default tools are not governed by `filter_tools_regex`. The only
-        actionable surface must be the corral MCP endpoint plus the two internal
-        reasoning/termination tools, so any *unexpected* runtime tool is treated
-        as a broken benchmark condition rather than a silent capability leak.
+        Native OpenHands tools are intentionally allowed by default, including
+        the concrete tools expanded from tool sets such as the browser preset.
+        The invariant retained here is that none of the task-scoped MCP tools
+        disappeared while the SDK assembled that native tool set.
         """
         runtime = self._runtime_tool_names(conversation)
         if runtime is None:
@@ -949,12 +944,11 @@ class OpenHandsAgent(BaseAgent):
             for t in run.available_tools
             if t.get("function", {}).get("name")
         }
-        expected = set(_INCLUDED_DEFAULT_TOOL_NAMES) | corral_tools
-        unexpected = runtime - expected
-        if unexpected:
+        missing = corral_tools - runtime
+        if missing:
             raise _OpenHandsError(
-                f"OpenHands initialized unexpected tools {sorted(unexpected)}; "
-                f"expected only {sorted(expected)}",
+                f"OpenHands did not initialize task MCP tools {sorted(missing)}; "
+                f"runtime tools were {sorted(runtime)}",
                 subtype="sdk_failure",
             )
 

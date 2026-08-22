@@ -154,17 +154,15 @@ async def test_codex_maps_native_timeout(monkeypatch):
     assert outcome.error == "deadline"
 
 
-def test_codex_configuration_exposes_only_task_mcp_tools():
+def test_codex_configuration_keeps_native_tools_and_scopes_task_mcp_tools():
     config = CodexAgent(system_prompt="system")._render_config_toml(
         "http://127.0.0.1/capability/mcp", ["read_file", "submit_answer"]
     )
 
-    assert 'web_search = "disabled"' in config
-    assert "shell_tool = false" in config
-    assert "unified_exec = false" in config
-    assert "apps = false" in config
-    assert "multi_agent = false" in config
-    assert "view_image = false" in config
+    assert "[features]" not in config
+    assert "[tools]" not in config
+    assert "web_search" not in config
+    assert "shell_tool" not in config
     assert 'enabled_tools = ["read_file", "submit_answer"]' in config
 
 
@@ -193,7 +191,7 @@ async def test_codex_never_receives_the_physical_task_workspace(monkeypatch, tmp
     assert cwd != task_workspace
     assert tmp_path not in cwd.parents
     assert not cwd.exists()
-    assert outcome.metadata["workspace_access"] == "mcp_only"
+    assert outcome.metadata["workspace_access"] == "isolated_sdk_workspace_and_mcp"
     assert outcome.metadata["codex_cwd_is_execution_workspace"] is False
 
 

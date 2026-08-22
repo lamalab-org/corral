@@ -81,7 +81,7 @@ class TerminusResponse(BaseModel):
 
 def _strip_code_fence(text: str) -> str:
     text = text.strip()
-    if text.startswith("``"):
+    if text.startswith("```"):
         text = re.sub(r"^`+[^\n]*\n?", "", text)
         text = re.sub(r"\n?`+\s*$", "", text)
     return text.strip()
