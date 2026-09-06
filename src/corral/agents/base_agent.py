@@ -32,6 +32,8 @@ class BaseAgent(ABC):
     `run_session` is the sole agent execution contract.
     """
 
+    tool_transport = "python"
+
     def __init__(
         self,
         *,

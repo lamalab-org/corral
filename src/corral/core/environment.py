@@ -244,9 +244,9 @@ class Environment:
         # gets its own JobManager bounded by this many simultaneous jobs.
         self.max_job_concurrency = max_job_concurrency
         # Preconfigured job executors, keyed by the name tools request via
-        # `@tool(executor=...)`. Lets a deployment inject a SlurmExecutor with
-        # cluster flags or a ModalExecutor bound to a deployed function; built-in
-        # thread/process/subprocess backends are created on demand when omitted.
+        # `@tool(executor=...)`. Built-in thread/process/subprocess backends
+        # are created on demand; deployments can inject configured or custom
+        # backends here.
         self.job_executors = job_executors
         self.job_manager: JobManager | None = None
         # The task orchestrator supplies an opaque execution id solely to

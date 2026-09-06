@@ -4,31 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-import secrets
-import socket
-import threading
-import time
-from collections.abc import AsyncIterator, Mapping, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Mapping, Sequence
+from contextlib import AsyncExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import anyio
-import uvicorn
-from mcp.server.fastmcp.server import StreamableHTTPASGIApp
-from mcp.server.lowlevel import Server as MCPServer
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from mcp.types import CallToolResult, TextContent
-from mcp.types import Tool as MCPTool
-from starlette.applications import Starlette
-from starlette.routing import Route
 
 from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.usage import usage_from_mapping
-from corral.core.action import Action
+from corral.backend.mcp import open_mcp_host
 from corral.core.actors import ActorRef
 from corral.core.commit import Commit, CommitRequest
 from corral.core.context import AgentContext, AgentContextResolver
@@ -47,13 +35,19 @@ from corral.core.events import (
     UsageDelta,
 )
 from corral.core.state import ExecutionState, UsageState
+from corral.core.tool import ToolConnection, ToolResponse
+from corral.core.tool_catalog import ToolCatalogSnapshot
 from corral.core.transition import ToolEffects, execute_action, propose_action
 from corral.observability import record_commit_safely
 from corral.persistence import CommitConflictError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from pydantic import JsonValue
 
+    from corral.backend.mcp import MCPHost
+    from corral.core.action import Action
     from corral.core.environment import Environment
     from corral.observability import ObservationContext, Observer
     from corral.persistence import CommitStore
@@ -148,13 +142,6 @@ def inspect_subagent_tool() -> dict[str, Any]:
 
 
 @dataclass(frozen=True, slots=True)
-class ToolResponse:
-    success: bool
-    result: str | None
-    error: str | None
-
-
-@dataclass(frozen=True, slots=True)
 class SubagentTrace:
     context: AgentContext
     commits: tuple[Commit, ...]
@@ -162,95 +149,6 @@ class SubagentTrace:
 
 def _json_value(value: Any) -> JsonValue:
     return json.loads(json.dumps(value, allow_nan=False, default=str))
-
-
-class _SessionMCPTransport:
-    """Task-local MCP facade used by black-box harness agents."""
-
-    def __init__(self, interface: AgentSession) -> None:
-        self.interface = interface
-        self._capability = secrets.token_urlsafe(32)
-        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._socket.bind(("127.0.0.1", 0))
-        self.port = int(self._socket.getsockname()[1])
-
-        server: MCPServer = MCPServer(f"corral-session-{interface.execution_id}")
-
-        @server.list_tools()
-        async def list_tools() -> list[MCPTool]:
-            result: list[MCPTool] = []
-            for raw in interface.tools:
-                function = raw.get("function", {})
-                result.append(
-                    MCPTool(
-                        name=str(function.get("name", "")),
-                        description=str(function.get("description", "")),
-                        inputSchema=dict(function.get("parameters", {})),
-                    )
-                )
-            return result
-
-        @server.call_tool()
-        async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
-            response = await interface.execute(
-                Action(name=name, arguments=arguments or {})
-            )
-            content = response.result if response.success else response.error
-            return CallToolResult(
-                content=[TextContent(type="text", text=str(content or ""))],
-                isError=not response.success,
-            )
-
-        self._manager = StreamableHTTPSessionManager(
-            app=server,
-            json_response=True,
-            stateless=True,
-        )
-        endpoint = StreamableHTTPASGIApp(self._manager)
-        app = Starlette(
-            routes=[Route(f"/{self._capability}/mcp", endpoint=endpoint)],
-            lifespan=lambda _app: self._manager.run(),
-        )
-        config = uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=self.port,
-            log_level="warning",
-            access_log=False,
-        )
-        self._server = uvicorn.Server(config)
-        self._thread = threading.Thread(
-            target=self._server.run,
-            kwargs={"sockets": [self._socket]},
-            name=f"corral-session-mcp-{self.port}",
-            daemon=True,
-        )
-
-    @property
-    def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/{self._capability}/mcp"
-
-    def start(self) -> None:
-        self._thread.start()
-        deadline = time.monotonic() + 10.0
-        while not self._server.started:
-            if not self._thread.is_alive():
-                raise RuntimeError("task session MCP server failed to start")
-            if time.monotonic() >= deadline:
-                raise TimeoutError("task session MCP server did not start")
-            time.sleep(0.01)
-
-    def close(self) -> None:
-        self._server.should_exit = True
-        if self._thread.is_alive():
-            self._thread.join(timeout=10.0)
-        self._socket.close()
-
-
-@dataclass(frozen=True, slots=True)
-class MCPConnection:
-    url: str
 
 
 class AgentSession:
@@ -274,12 +172,14 @@ class AgentSession:
         agent: Agent | None = None,
         require_submission: bool = True,
         capabilities: AgentSessionCapabilities | Mapping[str, Any] | None = None,
+        mcp_host: MCPHost | None = None,
     ) -> None:
         if actor.kind != "agent":
             raise ValueError("AgentSession must be bound to an agent ActorRef")
         if state.execution_id != (state_store.execution_id or state.execution_id):
             raise ValueError("session projection and commit store execution differ")
         self.environment = environment
+        self.mcp_host = mcp_host
         self.execution_id = state.execution_id
         self.execution_workspace = environment.workspace_path
         self.actor = actor
@@ -329,7 +229,9 @@ class AgentSession:
             f"corral_delegate_budget_{id(self)}", default=None
         )
         self._action_lock = anyio.Lock()
-        self._mcp_transport: _SessionMCPTransport | None = None
+        self._tool_connection: ContextVar[ToolConnection | None] = ContextVar(
+            f"corral_tool_connection_{id(self)}", default=None
+        )
         self._resolver = AgentContextResolver()
         self.state = state
         self._last_observed_hash = state.through_commit_hash
@@ -338,6 +240,7 @@ class AgentSession:
         self._tool_catalog = environment.validate_state_tool_catalog(state)
         self._subagent_tasks: dict[str, asyncio.Task[AgentOutcome]] = {}
         self._subagent_outcomes: dict[str, AgentOutcome] = {}
+        self._observed_subagents: set[str] = set()
 
     async def _notify(self, commit: Commit) -> None:
         if self.observer is None:
@@ -448,16 +351,40 @@ class AgentSession:
         return value if isinstance(value, str) and value else self.execution_id
 
     @property
-    def tools(self) -> tuple[dict[str, Any], ...]:
+    def tool_catalog(self) -> ToolCatalogSnapshot:
+        """The environment catalog plus this session's enabled actions."""
+        if not self.capabilities.inspect_subagents:
+            return self._tool_catalog
         tools = list(self._tool_catalog.detached_tools())
-        if self.capabilities.inspect_subagents:
-            names = {str(tool.get("function", {}).get("name", "")) for tool in tools}
-            if INSPECT_SUBAGENT_TOOL_NAME in names:
-                raise ValueError(
-                    f"{INSPECT_SUBAGENT_TOOL_NAME!r} is reserved for AgentSession"
-                )
-            tools.append(inspect_subagent_tool())
-        return tuple(tools)
+        names = {str(tool.get("function", {}).get("name", "")) for tool in tools}
+        if INSPECT_SUBAGENT_TOOL_NAME in names:
+            raise ValueError(
+                f"{INSPECT_SUBAGENT_TOOL_NAME!r} is reserved for AgentSession"
+            )
+        tools.append(inspect_subagent_tool())
+        return ToolCatalogSnapshot.capture(tools)
+
+    @property
+    def tools(self) -> tuple[dict[str, Any], ...]:
+        return self.tool_catalog.detached_tools()
+
+    @property
+    def tool_connection(self) -> ToolConnection:
+        """Access details supplied by the runtime for the current invocation."""
+        return self._tool_connection.get() or ToolConnection()
+
+    @contextmanager
+    def bind_tool_connection(self, connection: ToolConnection) -> Iterator[None]:
+        """Bind runtime access details without owning transport resources.
+
+        Context-local binding lets delegates share the session while using
+        different transports, and restores the caller's connection on exit.
+        """
+        token = self._tool_connection.set(connection)
+        try:
+            yield
+        finally:
+            self._tool_connection.reset(token)
 
     @property
     def workspace(self) -> str | None:
@@ -599,20 +526,6 @@ class AgentSession:
                 {"schema_version": 1, "metadata": context.metadata},
             )
         return context
-
-    @asynccontextmanager
-    async def open_mcp(self) -> AsyncIterator[MCPConnection]:
-        if self._mcp_transport is not None:
-            raise RuntimeError("this agent session already has an open MCP endpoint")
-        transport = _SessionMCPTransport(self)
-        self._mcp_transport = transport
-        try:
-            await anyio.to_thread.run_sync(transport.start)
-            yield MCPConnection(url=transport.url)
-        finally:
-            await anyio.to_thread.run_sync(transport.close)
-            if self._mcp_transport is transport:
-                self._mcp_transport = None
 
     async def _inspect_subagent_effects(
         self, arguments: Mapping[str, JsonValue]
@@ -762,9 +675,21 @@ class AgentSession:
             )
         else:
             try:
-                effects = await anyio.to_thread.run_sync(
-                    lambda: execute_action(self.environment, execution_state, trusted)
+                work = asyncio.create_task(
+                    anyio.to_thread.run_sync(
+                        lambda: execute_action(
+                            self.environment, execution_state, trusted
+                        )
+                    )
                 )
+                try:
+                    effects = await asyncio.shield(work)
+                except asyncio.CancelledError:
+                    # Raw asyncio cancellation bypasses AnyIO's thread shield.
+                    # Do not release this session while the tool can mutate it.
+                    with anyio.CancelScope(shield=True):
+                        await asyncio.gather(work, return_exceptions=True)
+                    raise
             except Exception as exc:
                 return await fail(exc)
         try:
@@ -1023,12 +948,14 @@ class AgentSession:
             agent=agent,
             require_submission=False,
             capabilities=child_capabilities,
+            mcp_host=self.mcp_host,
         )
         child._last_observed_hash = started.hash
 
         async def run_child() -> AgentOutcome:
             try:
                 outcome = await _run_bound_agent(agent, child)
+                await child._finish_subagents()
                 terminal = AgentCompleted(
                     agent_run_id=child_run_id,
                     status=outcome.status,
@@ -1053,17 +980,40 @@ class AgentSession:
                     result_summary={"error": str(exc)},
                     trace_head=child._last_observed_hash,
                 )
-                await child._append_runtime(
-                    terminal,
-                    f"agent:{child_run_id}:failed",
-                    based_on_hash=child._last_observed_hash,
-                )
+                with anyio.CancelScope(shield=True):
+                    await child._finish_subagents(cancel=True)
+                    await child._append_runtime(
+                        terminal,
+                        f"agent:{child_run_id}:failed",
+                        based_on_hash=child._last_observed_hash,
+                    )
                 raise
-            finally:
-                child.close()
 
         self._subagent_tasks[child_run_id] = asyncio.create_task(run_child())
         return child_run_id
+
+    async def _finish_subagents(self, *, cancel: bool = False) -> None:
+        tasks = dict(self._subagent_tasks)
+        if cancel:
+            with anyio.CancelScope(shield=True):
+                for task in tasks.values():
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks.values(), return_exceptions=True)
+        elif tasks:
+            # The owner cancels and awaits children in its cleanup path.
+            # Shield this wait so cancellation cannot interrupt their cleanup.
+            results = await asyncio.shield(
+                asyncio.gather(*tasks.values(), return_exceptions=True)
+            )
+            for run_id, result in zip(tasks, results, strict=True):
+                # Explicit waiters already received these errors and may have
+                # recovered. Cleanup only propagates unobserved failures.
+                if (
+                    isinstance(result, BaseException)
+                    and run_id not in self._observed_subagents
+                ):
+                    raise result
 
     async def list_subagents(self) -> tuple[str, ...]:
         state = await self._refresh()
@@ -1079,6 +1029,8 @@ class AgentSession:
             try:
                 return await task
             finally:
+                if task.done():
+                    self._observed_subagents.add(child_run_id)
                 state = await self._refresh()
                 self._last_observed_hash = state.through_commit_hash
         outcome = self._subagent_outcomes.get(child_run_id)
@@ -1183,13 +1135,8 @@ class AgentSession:
             observation_context=self.observation_context,
             hooks=self._hooks,
             agent=self._hook_agent,
+            mcp_host=self.mcp_host,
         )
-
-    def close(self) -> None:
-        transport = self._mcp_transport
-        if transport is not None:
-            transport.close()
-            self._mcp_transport = None
 
     def final_messages(self) -> tuple[Mapping[str, JsonValue], ...]:
         return self.messages[self._initial_message_count :]
@@ -1275,6 +1222,34 @@ def _enforce_tool_submission(
     )
 
 
+async def _run_agent_with_tools(agent: Agent, session: AgentSession) -> AgentOutcome:
+    """Borrow the execution host for the duration of this invocation."""
+    transport = getattr(agent, "tool_transport", "python")
+    if transport == "python":
+        with session.bind_tool_connection(ToolConnection()):
+            return await agent.run_session(session)
+    if transport == "mcp":
+        if session.mcp_host is None:
+            raise RuntimeError("MCP agents require an execution host")
+
+        async def execute(action: Action) -> ToolResponse:
+            # The URL is available after registration. Include it in callback
+            # context as well as the invocation context captured by the host.
+            with session.bind_tool_connection(connection):
+                return await session.execute(action)
+
+        async with session.mcp_host.bind(
+            catalog=session.tool_catalog,
+            execute=execute,
+            name=f"corral-{session.execution_id}-{session.actor.run_id}",
+        ) as connection:
+            with session.bind_tool_connection(connection):
+                return await agent.run_session(session)
+    raise ValueError(
+        f"Unsupported agent tool_transport {transport!r}; expected 'python' or 'mcp'"
+    )
+
+
 async def _run_bound_agent(agent: Agent, interface: AgentSession) -> AgentOutcome:
     raw_hooks = getattr(agent, "hooks", None)
     hooks = AgentHooks() if raw_hooks is None else raw_hooks
@@ -1303,7 +1278,7 @@ async def _run_bound_agent(agent: Agent, interface: AgentSession) -> AgentOutcom
                 error="agent session cancelled by a before-task hook",
             )
         else:
-            result = await agent.run_session(interface)
+            result = await _run_agent_with_tools(agent, interface)
         if not isinstance(result, AgentOutcome):
             raise TypeError("Agent.run_session() must return AgentOutcome")
         result = _enforce_tool_submission(_normalize_outcome(result), interface)
@@ -1342,56 +1317,53 @@ async def run_agent_session(
     max_iterations: int,
     observer: Observer | None = None,
     observation_context: ObservationContext | None = None,
+    mcp_host: MCPHost | None = None,
 ) -> AgentSessionOutcome:
     environment.prepare_workspace(state.workspace)
-    interface = AgentSession(
-        environment,
-        state,
-        actor=actor,
-        state_store=state_store,
-        branch_id=branch_id,
-        runtime_actor=runtime_actor,
-        last_score=last_score,
-        previous_state=previous_state,
-        max_iterations=max_iterations,
-        observer=observer,
-        observation_context=observation_context,
-        hooks=getattr(agent, "hooks", None),
-        agent=agent,
-    )
-    try:
-        result = await _run_bound_agent(agent, interface)
-        if interface._subagent_tasks:
-            await asyncio.gather(*tuple(interface._subagent_tasks.values()))
-        completed = await interface._append_agent(
-            AgentCompleted(
-                agent_run_id=actor.run_id,
-                status=result.status,
-                result_summary={"answer": result.answer, "error": result.error},
-                trace_head=interface._last_observed_hash,
-                usage_delta=_agent_usage_delta(
-                    result,
-                    interface.state.usage_by_run.get(actor.run_id),
+    async with AsyncExitStack() as stack:
+        if mcp_host is None:
+            mcp_host = await stack.enter_async_context(open_mcp_host())
+        interface = AgentSession(
+            environment,
+            state,
+            actor=actor,
+            state_store=state_store,
+            branch_id=branch_id,
+            runtime_actor=runtime_actor,
+            last_score=last_score,
+            previous_state=previous_state,
+            max_iterations=max_iterations,
+            observer=observer,
+            observation_context=observation_context,
+            hooks=getattr(agent, "hooks", None),
+            agent=agent,
+            mcp_host=mcp_host,
+        )
+        try:
+            result = await _run_bound_agent(agent, interface)
+            await interface._finish_subagents()
+            completed = await interface._append_agent(
+                AgentCompleted(
+                    agent_run_id=actor.run_id,
+                    status=result.status,
+                    result_summary={"answer": result.answer, "error": result.error},
+                    trace_head=interface._last_observed_hash,
+                    usage_delta=_agent_usage_delta(
+                        result,
+                        interface.state.usage_by_run.get(actor.run_id),
+                    ),
+                    metadata=result.metadata,
                 ),
-                metadata=result.metadata,
-            ),
-            f"agent:{actor.run_id}:completed",
-        )
-        return AgentSessionOutcome(
-            outcome=result,
-            state=interface.state,
-            final_commit=completed,
-            messages=interface.final_messages(),
-        )
-    finally:
-        pending_children = tuple(
-            task for task in interface._subagent_tasks.values() if not task.done()
-        )
-        for task in pending_children:
-            task.cancel()
-        if pending_children:
-            await asyncio.gather(*pending_children, return_exceptions=True)
-        interface.close()
+                f"agent:{actor.run_id}:completed",
+            )
+            return AgentSessionOutcome(
+                outcome=result,
+                state=interface.state,
+                final_commit=completed,
+                messages=interface.final_messages(),
+            )
+        finally:
+            await interface._finish_subagents(cancel=True)
 
 
 __all__ = [
@@ -1400,7 +1372,6 @@ __all__ = [
     "AgentSession",
     "AgentSessionCapabilities",
     "AgentSessionOutcome",
-    "MCPConnection",
     "SubagentTrace",
     "ToolResponse",
     "agent_session_capabilities",

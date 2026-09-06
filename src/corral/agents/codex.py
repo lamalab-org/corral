@@ -153,9 +153,11 @@ class CodexAgent(BaseAgent):
             harness. If None, uses the default corral system prompt.
         **kwargs: Additional provider configuration retained as provenance.
 
-    `run_session` opens the task-local MCP endpoint and offloads the Codex
+    `run_session` uses the runtime-provided MCP endpoint and offloads the Codex
     SDK's synchronous event stream without blocking the task runtime.
     """
+
+    tool_transport = "mcp"
 
     def __init__(
         self,
@@ -596,7 +598,7 @@ class CodexAgent(BaseAgent):
         return str(task_guide), False
 
     async def run_session(self, session: AgentSession) -> AgentOutcome:
-        """Run Codex's native harness against the task-local MCP session."""
+        """Run Codex using the MCP tool connection provided by the runtime."""
         # Each run uses an isolated CODEX_HOME, so an existing interactive Codex
         # login (stored under the developer's normal CODEX_HOME) is *not*
         # inherited. Require API-key auth explicitly for reproducible runs and a
@@ -628,36 +630,35 @@ class CodexAgent(BaseAgent):
         # Seed the message history so transcript saving has the task prompt first.
         run.messages.append(LiteLLMMessage(role="user", content=prompt))
 
-        # Record the hash of the MCP tool schema the harness actually receives
-        # (`tools/list` == `Tool.to_mcp`), so the run provenance well and truly
-        # captures what tools the agent saw.
+        # The runtime exposes this same catalog through MCP. Harness provenance
+        # records the schema advertised to the client.
         task_id = str(getattr(session, "task_id", session.execution_id))
         developer_instructions = self._developer_instructions(
             session.surrender_allowed, tool_names
         )
-        async with session.open_mcp() as mcp:
-            run.metadata = self._harness_metadata(
-                mcp.url,
-                verbosity,
-                tools,
-                mcp_schema_sha256=None,
-                iteration_limit=iteration_limit,
+        mcp_url = session.tool_connection.mcp_url
+        run.metadata = self._harness_metadata(
+            mcp_url,
+            verbosity,
+            tools,
+            mcp_schema_sha256=None,
+            iteration_limit=iteration_limit,
+        )
+        run.metadata["dropped_image_parts"] = dropped_images
+        # A Codex thread.turn(...) is one SDK turn for Corral usage
+        # accounting, even though it can contain many internal events.
+        run.metadata["sdk_turns"] = 1
+        await anyio.to_thread.run_sync(
+            lambda: self._execute_harness(
+                task_id=task_id,
+                prompt=prompt,
+                developer_instructions=developer_instructions,
+                mcp_url=mcp_url,
+                tool_names=tool_names,
+                enable_surrender=session.surrender_allowed,
+                run=run,
             )
-            run.metadata["dropped_image_parts"] = dropped_images
-            # A Codex thread.turn(...) is one SDK turn for Corral usage
-            # accounting, even though it can contain many internal events.
-            run.metadata["sdk_turns"] = 1
-            await anyio.to_thread.run_sync(
-                lambda: self._execute_harness(
-                    task_id=task_id,
-                    prompt=prompt,
-                    developer_instructions=developer_instructions,
-                    mcp_url=mcp.url,
-                    tool_names=tool_names,
-                    enable_surrender=session.surrender_allowed,
-                    run=run,
-                )
-            )
+        )
 
         for message in run.messages:
             await session.record_message(message)

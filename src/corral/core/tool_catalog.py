@@ -137,6 +137,17 @@ class ToolCatalogSnapshot(FrozenModel):
         )
         return tuple(detached)
 
+    def mcp_tools(self) -> tuple[dict[str, Any], ...]:
+        """Describe this exact catalog in MCP format without changing schemas."""
+        return tuple(
+            {
+                "name": tool["function"]["name"],
+                "description": tool["function"].get("description", ""),
+                "inputSchema": tool["function"].get("parameters", {}),
+            }
+            for tool in self.detached_tools()
+        )
+
 
 def state_tool_catalog(state: ExecutionState) -> ToolCatalogSnapshot:
     """Read and validate the authoritative catalog persisted on `state`."""

@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from mcp import ClientSession
@@ -19,6 +17,7 @@ from corral.agents.schema import AgentOutcome
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
+from corral.core.tool import ToolConnection
 from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
@@ -170,20 +169,12 @@ class FakeSession:
         self.iteration_limit = 7
         self.execution_id = "execution-1"
         self.messages: list[dict] = []
-        self.mcp_open = False
+        self.tool_connection = ToolConnection("mcp", "http://127.0.0.1:8765/mcp")
         self.submission = submission
         self.submission_status = submission_status
 
     async def record_message(self, message):
         self.messages.append(dict(message))
-
-    @asynccontextmanager
-    async def open_mcp(self):
-        self.mcp_open = True
-        try:
-            yield SimpleNamespace(url="http://127.0.0.1:8765/mcp")
-        finally:
-            self.mcp_open = False
 
 
 def test_claude_is_only_a_new_session_agent():
@@ -282,7 +273,6 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
     assert options.plugins == []
     assert options.include_partial_messages is True
     assert options.system_prompt["preset"] == "claude_code"
-    assert session.mcp_open is False
     assert session.messages[0] == {"role": "user", "content": "Test task"}
     assert {"role": "assistant", "content": "42"} not in session.messages
 

@@ -52,6 +52,97 @@ One model turn may propose an ordered parallel action group. Each tool gets a
 stable invocation ID. Completion commits retain real completion order, while an
 agent's next context presents tool results in declared action order.
 
+## Runtime-selected tool transport
+
+`Environment` owns the task's tool implementations, resolves the toolset, and
+provides the workspace and execution guards. `AgentSession.tool_catalog` exposes
+a validated schema snapshot derived from that environment, together with
+applicable runtime/session actions such as submission and subagent inspection.
+`session.tools` returns that catalog in provider format; the catalog's
+`mcp_tools()` method supplies the MCP representation of the same schemas.
+
+Agents request actions through `AgentSession`, which supplies agent identity,
+records commits, and dispatches task-tool execution to the environment. The
+session runner in `corral.agents.session` selects and provisions tool access for
+every agent invocation:
+
+- `tool_transport = "python"` uses direct `session.execute()` calls without an
+  MCP binding. This is the default when an agent omits the declaration.
+- `tool_transport = "mcp"` asks the runtime to expose the bound catalog through
+  HTTP/MCP. Codex, Claude Code and OpenHands declare this transport.
+
+The runtime supplies a `ToolConnection` through `session.tool_connection`.
+An external adapter reads its URL and runs the harness:
+
+```python
+mcp_url = session.tool_connection.mcp_url
+# Configure the harness with mcp_url and return its AgentOutcome.
+```
+
+The adapter owns no listener or server lifecycle. Run adapters through
+`TaskRuntime` or `run_agent_session()` so the runtime can supply their connection.
+Reading `mcp_url` without a provisioned MCP connection raises an explanatory error.
+
+Each active `TaskRuntime.run()` attempt owns a host that starts one localhost
+HTTP/MCP server when its first MCP invocation requests a binding. Python-only
+executions allocate no listener or server task. An MCP delegate or subagent can
+start the listener later; concurrent first bindings share the same startup.
+Failed or cancelled startup releases its resources and permits a later binding
+to retry. Already terminal executions follow the recovery path without creating
+a host. The host is local to the call, so concurrent executions on one runtime
+have independent listeners and state.
+
+The backend separates that server from its agent bindings:
+
+```python
+async with open_mcp_host() as host:
+    async with host.bind(catalog=catalog, execute=dispatcher) as connection:
+        ...
+```
+
+`corral.backend.mcp.open_mcp_host()` owns the listener and async server task.
+`host.bind()` starts the listener if needed and registers a catalog and authorized
+action dispatcher, with no dependency on agent classes. The runtime supplies
+`session.execute`, preserving
+the ordinary authored commit and environment tool execution path. Each binding
+has an unguessable route on the shared host and port; requests resolve directly
+to their binding. The transport creates no separate tool implementations.
+
+Transport selection also runs for `run_delegate()` and `spawn_subagent()`.
+Delegates sharing a session receive context-local connection details, and their
+caller's connection is restored when they return or raise. Subagents and forked
+sessions borrow the same host while retaining their own catalogs, identities,
+branches and dispatchers. Standalone `run_agent_session()` creates a host when
+none is supplied, and nested agents borrow it. Host and connection details are
+ephemeral; recovery provisions fresh resources against the saved execution
+history, and state snapshots contain only data.
+
+The server runs on the execution's event loop and preserves the application's
+signal handlers. Requests inherit the context captured when their binding was
+registered, including delegate iteration limits. Synchronous tools continue to
+run off the event loop through the session's execution path.
+
+When an invocation exits, the runtime revokes its route and drains accepted
+requests before recording agent completion. Other bindings remain usable.
+Before-task hooks run before binding registration, so a rejecting hook grants
+no tool connection and does not start a listener.
+At execution teardown, agents and their descendants finish or are cancelled,
+their requests are drained, and the server is stopped and awaited before the
+final execution commit. Accepting `submit_answer` does not stop the server: the
+HTTP response and the SDK's final processing must finish first. Cancellation
+awaits cleanup; a synchronous tool already running in a Python thread must
+finish before session resources can be released, with no cleanup timeout that
+silently abandons it.
+
+Completion waits for outstanding subagents and propagates unobserved child
+failures. A failure already delivered through `wait_for_subagent()` is not raised
+again by cleanup, allowing the caller to catch it and complete with a fallback.
+
+Custom adapters previously opening MCP themselves should declare
+`tool_transport = "mcp"` and consume `session.tool_connection.mcp_url`.
+`ToolConnection` and `ToolResponse` live in `corral.core.tool`.
+`AgentSession.close()` is removed; transport cleanup belongs to the runtime.
+
 ## Multi-agent context isolation
 
 `ExecutionState` partitions conversations, actions, tool invocations, usage,

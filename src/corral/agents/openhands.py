@@ -204,8 +204,10 @@ class OpenHandsAgent(BaseAgent):
 
     `run_session` drives `Conversation.arun()` directly on the scheduler's
     event loop and combines OpenHands' native default tools with the session's
-    task-local MCP endpoint.
+    runtime-provided MCP tool connection.
     """
+
+    tool_transport = "mcp"
 
     def __init__(
         self,
@@ -429,7 +431,7 @@ class OpenHandsAgent(BaseAgent):
         return str(task_guide), False
 
     async def run_session(self, session: AgentSession) -> AgentOutcome:
-        """Run OpenHands's native loop against the task-local MCP session."""
+        """Run OpenHands using the MCP tool connection provided by the runtime."""
         run = _RunState()
         iteration_limit = session.iteration_limit
         tools = [dict(tool) for tool in session.tools]
@@ -439,27 +441,27 @@ class OpenHandsAgent(BaseAgent):
         run.messages.append(dict(LiteLLMMessage(role="user", content=prompt)))
         task_id = str(getattr(session, "task_id", session.execution_id))
 
-        async with session.open_mcp() as mcp:
-            run.metadata = self._harness_metadata(
-                mcp.url,
-                "full",
-                tools,
-                mcp_schema_sha256=None,
-                iteration_limit=iteration_limit,
-            )
-            run.metadata["dropped_image_parts"] = dropped_images
-            # Keep a conservative fallback for adapters/tests that do not expose
-            # SDK metrics. The real OpenHands path replaces this with the count
-            # of per-completion token-usage records in `_record_usage`.
-            run.metadata["sdk_turns"] = 1
-            await self._execute_harness(
-                task_id=task_id,
-                prompt=prompt,
-                mcp_url=mcp.url,
-                enable_surrender=session.surrender_allowed,
-                iteration_limit=iteration_limit,
-                run=run,
-            )
+        mcp_url = session.tool_connection.mcp_url
+        run.metadata = self._harness_metadata(
+            mcp_url,
+            "full",
+            tools,
+            mcp_schema_sha256=None,
+            iteration_limit=iteration_limit,
+        )
+        run.metadata["dropped_image_parts"] = dropped_images
+        # Keep a conservative fallback for adapters/tests that do not expose
+        # SDK metrics. The real OpenHands path replaces this with the count
+        # of per-completion token-usage records in `_record_usage`.
+        run.metadata["sdk_turns"] = 1
+        await self._execute_harness(
+            task_id=task_id,
+            prompt=prompt,
+            mcp_url=mcp_url,
+            enable_surrender=session.surrender_allowed,
+            iteration_limit=iteration_limit,
+            run=run,
+        )
 
         for message in run.messages:
             await session.record_message(message)

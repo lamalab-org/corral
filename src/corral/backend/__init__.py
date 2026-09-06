@@ -1,8 +1,6 @@
 from corral.backend.executors import (
     JobWork,
-    ModalExecutor,
     ProcessExecutor,
-    SlurmExecutor,
     SubprocessExecutor,
 )
 from corral.backend.jobs import JobExecutor, JobManager, JobStatus, ThreadExecutor
@@ -12,9 +10,7 @@ __all__ = [
     "JobManager",
     "JobStatus",
     "JobWork",
-    "ModalExecutor",
     "ProcessExecutor",
-    "SlurmExecutor",
     "SubprocessExecutor",
     "ThreadExecutor",
 ]

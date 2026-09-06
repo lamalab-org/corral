@@ -3,7 +3,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from agents.tool import function_tool as openai_function_tool
 from pydantic.fields import FieldInfo
@@ -13,6 +13,36 @@ from corral.core.tool_description import (
     default_argument_description,
     default_tool_description,
 )
+
+ToolTransport = Literal["python", "mcp"]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolResponse:
+    success: bool
+    result: str | None
+    error: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ToolConnection:
+    """Runtime-provided access details for one agent invocation.
+
+    Connections are ephemeral and must not be restored from execution state.
+    Python callers execute actions directly; MCP callers receive a local URL.
+    """
+
+    transport: ToolTransport = "python"
+    url: str | None = None
+
+    @property
+    def mcp_url(self) -> str:
+        if self.transport != "mcp" or self.url is None:
+            raise RuntimeError(
+                "MCP tools have not been provisioned for this agent invocation; "
+                "run the agent through TaskRuntime or run_agent_session"
+            )
+        return self.url
 
 
 class ToolCallStatus(Enum):

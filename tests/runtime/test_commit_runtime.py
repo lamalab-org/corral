@@ -250,7 +250,6 @@ async def test_subagent_trace_is_private_until_imported(tmp_path):
     assert INSPECT_SUBAGENT_TOOL_NAME in {
         tool["function"]["name"] for tool in recovered_session.tools
     }
-    recovered_session.close()
     store.close()
 
 

@@ -13,6 +13,7 @@ from corral.agents.session import (
     agent_session_capabilities,
     run_agent_session,
 )
+from corral.backend.mcp import open_mcp_host
 from corral.core.actors import ActorRef
 from corral.core.commit import Commit, CommitRequest
 from corral.core.errors import concise_error_message
@@ -249,81 +250,83 @@ class TaskRuntime:
                     )
                     current = await store.materialize(branch_id)
 
-                if agent_actor.run_id not in current.agent_runs:
-                    head = await self._append(
-                        store,
-                        CommitRequest(
-                            request_id=f"agent:{agent_actor.run_id}:started",
-                            execution_id=execution_id,
-                            branch_id=branch_id,
-                            based_on_hash=current.through_commit_hash,
-                            author=runtime_actor,
-                            event=AgentStarted(
-                                agent_run_id=agent_actor.run_id,
-                                agent_id=agent_actor.actor_id,
-                                metadata={
-                                    "model": dict(model_metadata or {}),
-                                    "session_capabilities": (
-                                        session_capabilities.to_metadata()
-                                    ),
-                                },
+                async with open_mcp_host() as mcp_host:
+                    if agent_actor.run_id not in current.agent_runs:
+                        head = await self._append(
+                            store,
+                            CommitRequest(
+                                request_id=f"agent:{agent_actor.run_id}:started",
+                                execution_id=execution_id,
+                                branch_id=branch_id,
+                                based_on_hash=current.through_commit_hash,
+                                author=runtime_actor,
+                                event=AgentStarted(
+                                    agent_run_id=agent_actor.run_id,
+                                    agent_id=agent_actor.actor_id,
+                                    metadata={
+                                        "model": dict(model_metadata or {}),
+                                        "session_capabilities": (
+                                            session_capabilities.to_metadata()
+                                        ),
+                                    },
+                                ),
                             ),
-                        ),
-                        context,
-                    )
-                    current = await store.materialize(branch_id)
+                            context,
+                        )
+                        current = await store.materialize(branch_id)
 
-                pending = tuple(
-                    action_state
-                    for action_state in current.actions.values()
-                    if action_state.requested_by_run_id == agent_actor.run_id
-                    and action_state.status in {"pending", "running"}
-                )
-                if pending:
-                    session = AgentSession(
-                        environment,
-                        current,
-                        actor=agent_actor,
-                        runtime_actor=runtime_actor,
-                        state_store=store,
-                        branch_id=branch_id,
-                        max_iterations=max_iterations,
-                        observer=self.observer,
-                        observation_context=context,
-                        agent=agent,
-                        hooks=getattr(agent, "hooks", None),
+                    pending = tuple(
+                        action_state
+                        for action_state in current.actions.values()
+                        if action_state.requested_by_run_id == agent_actor.run_id
+                        and action_state.status in {"pending", "running"}
                     )
-                    try:
+                    if pending:
+                        session = AgentSession(
+                            environment,
+                            current,
+                            actor=agent_actor,
+                            runtime_actor=runtime_actor,
+                            state_store=store,
+                            branch_id=branch_id,
+                            max_iterations=max_iterations,
+                            observer=self.observer,
+                            observation_context=context,
+                            agent=agent,
+                            hooks=getattr(agent, "hooks", None),
+                            mcp_host=mcp_host,
+                        )
                         await session.resume_pending_actions()
                         current = session.state
-                    finally:
-                        session.close()
-                    if current.is_terminal:
-                        current, terminal = await self._complete_accepted_submission(
-                            store,
+                    outcome = None
+                    if not current.is_terminal:
+                        outcome = await run_agent_session(
+                            agent,
+                            environment,
                             current,
+                            actor=agent_actor,
                             runtime_actor=runtime_actor,
-                            agent_actor=agent_actor,
-                            context=context,
+                            state_store=store,
+                            branch_id=branch_id,
+                            last_score=last_score,
+                            previous_state=previous_state,
+                            max_iterations=max_iterations,
+                            observer=self.observer,
+                            observation_context=context,
+                            mcp_host=mcp_host,
                         )
-                        if terminal is not None:
-                            update_safely(task_span, commit=terminal)
-                        return current
 
-                outcome = await run_agent_session(
-                    agent,
-                    environment,
-                    current,
-                    actor=agent_actor,
-                    runtime_actor=runtime_actor,
-                    state_store=store,
-                    branch_id=branch_id,
-                    last_score=last_score,
-                    previous_state=previous_state,
-                    max_iterations=max_iterations,
-                    observer=self.observer,
-                    observation_context=context,
-                )
+                if outcome is None:
+                    current, terminal = await self._complete_accepted_submission(
+                        store,
+                        current,
+                        runtime_actor=runtime_actor,
+                        agent_actor=agent_actor,
+                        context=context,
+                    )
+                    if terminal is not None:
+                        update_safely(task_span, commit=terminal)
+                    return current
                 result = outcome.outcome
                 if result.status == "budget_exhausted":
                     raise BudgetExhaustedError(

@@ -1,6 +1,5 @@
 """Tests for the OpenHands native session adapter."""
 
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -16,6 +15,7 @@ from corral.agents.openhands import HarnessRunResult
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
+from corral.core.tool import ToolConnection
 from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
@@ -26,6 +26,7 @@ def anyio_backend():
 
 
 class Session:
+    tool_connection = ToolConnection("mcp", "http://127.0.0.1:1234/mcp")
     prompt = "solve"
     tools = (
         {
@@ -47,10 +48,6 @@ class Session:
         self.messages = []
         self.submission = submission
         self.submission_status = submission_status
-
-    @asynccontextmanager
-    async def open_mcp(self):
-        yield SimpleNamespace(url="http://127.0.0.1:1234/mcp")
 
     async def record_message(self, message):
         self.messages.append(message)

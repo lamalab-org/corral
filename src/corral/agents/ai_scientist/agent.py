@@ -112,7 +112,6 @@ class _BranchSessionRegistry:
         with self._lock:
             session = self._sessions.pop(execution_id, None)
         if session is not None:
-            session.close()
             session.environment.shutdown_jobs()
 
     def session(self, execution_id: str) -> AgentSession:

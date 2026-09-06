@@ -158,13 +158,15 @@ def _static_prompt(value: str | None, default_id: str) -> str:
 
 
 class ClaudeCodeAgent:
-    """First-class session agent backed by the native Claude Code harness.
+    """Session agent backed by the native Claude Code harness.
 
     Claude owns its SDK loop, context management, and result extraction. Corral
     owns the task-bound MCP endpoint, canonical tool transitions, usage folding,
     and final `submit_answer` action. The adapter has no legacy `run` or
     `arun_agent` entry point and keeps no task transcript on the instance.
     """
+
+    tool_transport = "mcp"
 
     def __init__(
         self,
@@ -763,22 +765,22 @@ class ClaudeCodeAgent:
 
         try:
             with tempfile.TemporaryDirectory(prefix="corral-claude-") as cwd:
-                async with session.open_mcp() as mcp:
-                    call = self._execute_harness(
-                        session,
-                        mcp.url,
-                        sdk_prompt,
-                        tools,
-                        session.surrender_allowed,
-                        cwd,
-                        max_turns,
-                        run,
-                    )
-                    if self.wall_clock_timeout_s is None:
+                mcp_url = session.tool_connection.mcp_url
+                call = self._execute_harness(
+                    session,
+                    mcp_url,
+                    sdk_prompt,
+                    tools,
+                    session.surrender_allowed,
+                    cwd,
+                    max_turns,
+                    run,
+                )
+                if self.wall_clock_timeout_s is None:
+                    final_answer = await call
+                else:
+                    with anyio.fail_after(self.wall_clock_timeout_s):
                         final_answer = await call
-                    else:
-                        with anyio.fail_after(self.wall_clock_timeout_s):
-                            final_answer = await call
         except ImportError:
             raise
         except Exception as exc:

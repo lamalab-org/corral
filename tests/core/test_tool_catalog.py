@@ -48,3 +48,24 @@ def test_snapshot_rejects_a_fingerprint_that_does_not_match_its_tools():
 def test_catalog_rejects_duplicate_tool_names():
     with pytest.raises(ValueError, match="duplicate tool"):
         ToolCatalogSnapshot.capture([_tool("duplicate"), _tool("duplicate")])
+
+
+def test_mcp_description_preserves_the_catalog_schema_and_is_detached():
+    definition = _tool("measure", "Measure a sample")
+    definition["function"]["parameters"] = {
+        "type": "object",
+        "properties": {"sample": {"type": "string", "enum": ["a", "b"]}},
+        "required": ["sample"],
+        "additionalProperties": False,
+    }
+    catalog = ToolCatalogSnapshot.capture([definition])
+    converted = catalog.mcp_tools()
+    assert converted == (
+        {
+            "name": "measure",
+            "description": "Measure a sample",
+            "inputSchema": definition["function"]["parameters"],
+        },
+    )
+    converted[0]["inputSchema"]["properties"]["sample"]["enum"].append("c")
+    assert catalog.detached_tools() == (definition,)
