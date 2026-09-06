@@ -1,14 +1,14 @@
 # Corral API reference
 
 Corral's execution API is built around authored commits, materialized execution projections, and
-Temporal orchestration. There is no benchmark HTTP server or router in the
+asyncio task scheduling. There is no benchmark HTTP server or router in the
 runtime path.
 
 ## `BenchmarkTaskMetadata`
 
-Describes one benchmark task using durable worker registry IDs. Most callers do
+Describes one benchmark task using runtime registry IDs. Most callers do
 not need to construct it: `CorralRunner` infers it from an environment mapping.
-Construct it explicitly only for per-task worker IDs, queues, models, or
+Construct it explicitly only for per-task resource IDs, models, or
 budgets:
 
 ```python
@@ -18,21 +18,19 @@ BenchmarkTaskMetadata(
     dependencies=("upstream-task",),
     max_iterations=10,
     model="gpt-4o",
-    task_queue="corral-cpu",
 )
 ```
 
 ## `CorralRunner`
 
-`CorralRunner` is a metadata adapter. It validates selected task metadata,
-builds a `BenchmarkWorkflowInput`, delegates once to a benchmark executor, and
-projects the durable result into reporting models.
+`CorralRunner` validates selected task metadata, schedules trials with bounded
+concurrency, and projects their persisted results into reporting models.
 
 The default construction path infers task metadata and dependencies:
 
 ```python
 runner = CorralRunner(
-    executor,
+    registry,
     environments=environments,
     agent_id="tool-calling",
     model="openai/gpt-4o",
@@ -59,14 +57,12 @@ Pass `tasks={...}` with explicit `BenchmarkTaskMetadata` instead when the
 automatic one-environment-ID-per-task convention is not suitable:
 
 ```python
-runner = CorralRunner(executor, tasks=task_metadata, state_store=state_store)
+runner = CorralRunner(registry, tasks=task_metadata, state_store=state_store)
 ```
 
-`ActivityPolicy` defaults both `start_to_close_seconds` and
-`heartbeat_timeout_seconds` to `None`. Temporal requires one closing timeout at
-the protocol level, so Corral represents an unset Start-to-Close deadline with
-a 100-year Schedule-to-Close timeout. Explicit positive values retain the
-normal Temporal timeout behavior.
+`RetryPolicy` defaults to three attempts with exponential backoff. The runner
+applies no time limit to task execution or evaluation. The CLI exposes
+`--max-attempts`.
 
 The runner has no synchronous execution path, checkpoint scheduler, HTTP
 router, or tool-verbosity parameter. Reporting records the fixed framework
@@ -86,15 +82,14 @@ API is `append`, `head`, `iter_commits`, `materialize`, `get_commit`, and
 `create_branch`. Agent and tool code obtains a trusted append capability with
 `bind(actor, branch_id=...)`; runtime code cannot supply ordering or hash fields.
 
-## Temporal executors
+## Task execution
 
-- `TemporalTaskExecutor.execute(TaskWorkflowInput)` executes one task attempt.
-- `TemporalBenchmarkExecutor.execute(BenchmarkWorkflowInput)` executes a task
-  DAG and its configured repetitions.
-- `execute_task(executor, task)` is the thin standalone task helper.
-
-Agents and environments are registered on workers with `RuntimeRegistry`.
-Only serializable IDs and commit-backed projection references enter Workflow history.
+`execute_task(task=RunTaskInput(...), registry=registry, state_store=store)`
+runs one task and returns a `StateRef` with its final status, submission, and
+commit hash. Load the full projection with
+`await store.for_execution(ref.execution_id).materialize(ref.branch_id, ref.commit_hash)`.
+Agents and environments are registered with `RuntimeRegistry`. Benchmarks use
+the same function for every trial, then evaluate the persisted result.
 
 ## Core transition API
 
@@ -150,6 +145,6 @@ and Reflexion memory; neither scaffold stores attempt data on its agent object.
 
 ## Reporting
 
-`project_benchmark_result` converts `BenchmarkWorkflowResult` into
+`project_benchmark_result` converts `BenchmarkExecutionResult` into
 `BenchmarkResult`. Supplying a `CommitStore` lets the projection include final
 messages, token usage, duration, and tool statistics.

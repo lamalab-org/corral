@@ -1,9 +1,10 @@
-"""JSON-serializable inputs and results carried by Temporal histories."""
+"""Inputs and results for task execution and benchmark scheduling."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -83,7 +84,7 @@ class DockerSandboxSpec:
 
 @dataclass(frozen=True)
 class SandboxProfile:
-    """Sandbox selection carried through replayable Workflow history."""
+    """Sandbox selection for a task or benchmark."""
 
     mode: str = SandboxMode.LOCAL.value
     docker: DockerSandboxSpec | None = None
@@ -131,11 +132,9 @@ class EnvironmentRuntimeDefinition:
 
 
 @dataclass(frozen=True)
-class ActivityPolicy:
-    """Timeout and retry policy applied to Corral Activities."""
+class RetryPolicy:
+    """Retry policy for task execution and evaluation."""
 
-    start_to_close_seconds: float | None = None
-    heartbeat_timeout_seconds: float | None = None
     maximum_attempts: int = 3
     initial_interval_seconds: float = 1.0
     maximum_interval_seconds: float = 30.0
@@ -143,13 +142,6 @@ class ActivityPolicy:
     non_retryable_error_types: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.start_to_close_seconds is not None and self.start_to_close_seconds <= 0:
-            raise ValueError("start_to_close_seconds must be greater than 0")
-        if (
-            self.heartbeat_timeout_seconds is not None
-            and self.heartbeat_timeout_seconds <= 0
-        ):
-            raise ValueError("heartbeat_timeout_seconds must be greater than 0")
         if self.maximum_attempts < 1:
             raise ValueError("maximum_attempts must be at least 1")
         if self.initial_interval_seconds <= 0 or self.maximum_interval_seconds <= 0:
@@ -160,7 +152,7 @@ class ActivityPolicy:
 
 @dataclass(frozen=True)
 class StateRef:
-    """Small Workflow-safe reference to a materialized commit projection."""
+    """Reference to a persisted task result."""
 
     commit_hash: str
     execution_id: str
@@ -173,10 +165,6 @@ class StateRef:
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def terminal(self) -> bool:
-        return self.status in {"submitted", "surrendered", "terminal", "failed"}
-
 
 @dataclass(frozen=True)
 class RunTaskInput:
@@ -184,49 +172,15 @@ class RunTaskInput:
     task_id: str
     environment_id: str
     agent_id: str
-    started_at: str
+    started_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     max_iterations: int = 10
     model: str | None = None
     dependency_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     enable_surrender: bool = False
     benchmark_run_id: str | None = None
     trial_index: int = 0
-    sandbox: SandboxProfile = field(default_factory=SandboxProfile.local)
-    agent_runtime: AgentRuntimeDefinition | None = None
-    environment_runtime: EnvironmentRuntimeDefinition | None = None
-
-
-@dataclass(frozen=True)
-class EvaluateTaskInput:
-    execution_id: str
-    environment_id: str
-    commit_hash: str
-    branch_id: str = "main"
-    task_id: str | None = None
-    benchmark_run_id: str | None = None
-
-
-@dataclass(frozen=True)
-class TaskWorkflowInput:
-    """Durable specification for one task attempt.
-
-    Agents and Environment definitions are deliberately addressed by IDs and
-    resolved by workers. Live Python objects never enter Workflow history.
-    """
-
-    execution_id: str
-    task_id: str
-    environment_id: str
-    agent_id: str
-    trial_index: int = 0
-    dependency_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
-    max_iterations: int = 10
-    model: str | None = None
-    enable_surrender: bool = False
-    evaluate: bool = False
-    activity_policy: ActivityPolicy = field(default_factory=ActivityPolicy)
-    started_at: str | None = None
-    benchmark_run_id: str | None = None
     sandbox: SandboxProfile = field(default_factory=SandboxProfile.local)
     agent_runtime: AgentRuntimeDefinition | None = None
     environment_runtime: EnvironmentRuntimeDefinition | None = None
@@ -253,6 +207,16 @@ class TaskWorkflowInput:
 
 
 @dataclass(frozen=True)
+class EvaluateTaskInput:
+    execution_id: str
+    environment_id: str
+    commit_hash: str
+    branch_id: str = "main"
+    task_id: str | None = None
+    benchmark_run_id: str | None = None
+
+
+@dataclass(frozen=True)
 class EvaluationRef:
     commit_hash: str
     score: float
@@ -263,7 +227,7 @@ class EvaluationRef:
 
 
 @dataclass(frozen=True)
-class TaskWorkflowResult:
+class TaskExecutionResult:
     task_id: str
     trial_index: int
     execution_id: str
@@ -279,8 +243,8 @@ class TaskWorkflowResult:
 
 
 @dataclass(frozen=True)
-class BenchmarkWorkflowInput:
-    """Everything Temporal needs to schedule and track a benchmark run."""
+class BenchmarkInput:
+    """Configuration for scheduling a benchmark run."""
 
     benchmark_run_id: str
     task_ids: tuple[str, ...]
@@ -290,17 +254,13 @@ class BenchmarkWorkflowInput:
     dependency_graph: dict[str, tuple[str, ...]] = field(default_factory=dict)
     max_iterations_by_task: dict[str, int] = field(default_factory=dict)
     model_by_task: dict[str, str] = field(default_factory=dict)
-    task_queue_by_task: dict[str, str] = field(default_factory=dict)
     max_parallel: int = 1
     max_parallel_per_task: int = 1
     max_parallel_by_model: dict[str, int] = field(default_factory=dict)
     max_parallel_by_environment: dict[str, int] = field(default_factory=dict)
     enable_surrender: bool = False
     evaluate: bool = True
-    activity_policy: ActivityPolicy = field(default_factory=ActivityPolicy)
-    rounds_per_run: int = 0
-    next_trial_index: int = 0
-    completed: tuple[TaskWorkflowResult, ...] = ()
+    retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
     sandbox: SandboxProfile = field(default_factory=SandboxProfile.local)
     agent_runtime_by_task: dict[str, AgentRuntimeDefinition] = field(
         default_factory=dict
@@ -318,8 +278,6 @@ class BenchmarkWorkflowInput:
             raise ValueError("trials_per_task must be at least 1")
         if self.max_parallel < 1 or self.max_parallel_per_task < 1:
             raise ValueError("parallelism limits must be at least 1")
-        if self.rounds_per_run < 0:
-            raise ValueError("rounds_per_run cannot be negative")
         missing_agents = set(self.task_ids) - self.agent_by_task.keys()
         missing_environments = set(self.task_ids) - self.environment_by_task.keys()
         if missing_agents or missing_environments:
@@ -356,40 +314,27 @@ class BenchmarkWorkflowInput:
 
 
 @dataclass(frozen=True)
-class BenchmarkProgress:
-    benchmark_run_id: str
-    total: int
-    pending: int
-    running: int
-    completed: int
-    failed: int
-    unreachable: int
-
-
-@dataclass(frozen=True)
-class BenchmarkWorkflowResult:
+class BenchmarkExecutionResult:
     benchmark_run_id: str
     task_ids: tuple[str, ...]
     trials_per_task: int
-    trials: tuple[TaskWorkflowResult, ...]
+    trials: tuple[TaskExecutionResult, ...]
 
 
 __all__ = [
     "RUNTIME_PROTOCOL_VERSION",
-    "ActivityPolicy",
     "AgentRuntimeDefinition",
-    "BenchmarkProgress",
-    "BenchmarkWorkflowInput",
-    "BenchmarkWorkflowResult",
+    "BenchmarkExecutionResult",
+    "BenchmarkInput",
     "DockerSandboxSpec",
     "EnvironmentRuntimeDefinition",
     "EvaluateTaskInput",
     "EvaluationRef",
+    "RetryPolicy",
     "RunTaskInput",
     "SandboxMode",
     "SandboxProfile",
     "SandboxRetention",
     "StateRef",
-    "TaskWorkflowInput",
-    "TaskWorkflowResult",
+    "TaskExecutionResult",
 ]

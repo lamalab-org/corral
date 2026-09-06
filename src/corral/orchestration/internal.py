@@ -13,9 +13,9 @@ from typing import Any
 from pydantic import TypeAdapter
 
 from corral.observability import LoggingObserver, ObservationContext
-from corral.orchestration.activities import RuntimeRegistry
 from corral.orchestration.launchers import LocalTaskLauncher
 from corral.orchestration.models import RUNTIME_PROTOCOL_VERSION, RunTaskInput
+from corral.orchestration.registry import RuntimeRegistry
 from corral.persistence import SQLiteCommitStore, WorkspaceManager
 from corral.workspace import WorkspaceFilesystem, build_terminal_tool
 

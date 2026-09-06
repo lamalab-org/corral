@@ -21,11 +21,10 @@ from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from temporalio.client import Client
 
 import corral.orchestration as orchestration
 from corral.persistence import ShardedCommitStore, SQLiteCommitStore
-from corral.run import CorralRunner
+from corral.run import CorralRunner, execute_task
 from corral.runtime.environment_loader import (
     ENVIRONMENT_NAMES,
     load_environment_group,
@@ -122,20 +121,6 @@ def _json_object(raw: str) -> dict[str, Any]:
         raise argparse.ArgumentTypeError(f"expected valid JSON: {exc}") from exc
     if not isinstance(value, dict):
         raise argparse.ArgumentTypeError("expected a JSON object")
-    return value
-
-
-def _optional_timeout(raw: str) -> float | None:
-    if raw.casefold() in {"none", "null"}:
-        return None
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "timeout must be a positive number or 'none'"
-        ) from exc
-    if value <= 0:
-        raise argparse.ArgumentTypeError("timeout must be greater than zero")
     return value
 
 
@@ -365,24 +350,8 @@ def _configured_agent(
     return canonical, agent, model
 
 
-async def _connect_temporal(args: argparse.Namespace) -> Client:
-    try:
-        return await Client.connect(
-            args.temporal_address,
-            namespace=args.temporal_namespace,
-        )
-    except Exception as exc:
-        raise ConnectionError(
-            f"could not connect to Temporal at {args.temporal_address!r}; "
-            "start it with 'temporal server start-dev' or pass "
-            "--temporal-address"
-        ) from exc
-
-
-def _activity_policy(args: argparse.Namespace) -> Any:
-    return orchestration.ActivityPolicy(
-        start_to_close_seconds=args.activity_timeout,
-        heartbeat_timeout_seconds=args.heartbeat_timeout,
+def _retry_policy(args: argparse.Namespace) -> Any:
+    return orchestration.RetryPolicy(
         maximum_attempts=args.max_attempts,
     )
 
@@ -425,7 +394,7 @@ async def run_benchmark(
     agent_name: str | None = None,
     agent_kwargs: Mapping[str, Any] | None = None,
 ) -> int:
-    """Run one CLI-configured benchmark through the normal Temporal path."""
+    """Run one CLI-configured benchmark with the task runner."""
     environments = load_environment_group(
         args.environment,
         env_kwargs=args.env_kwargs,
@@ -473,7 +442,6 @@ async def run_benchmark(
         trials=args.trials,
         sandbox=sandbox.mode,
     )
-    task_queue = args.task_queue or f"corral-{_slug(run_id)}"
 
     state_dir = getattr(args, "state_dir", None)
     if state_dir is None:
@@ -510,8 +478,6 @@ async def run_benchmark(
     )
 
     try:
-        client = await _connect_temporal(args)
-
         docker_launcher = (
             orchestration.DockerTaskLauncher(
                 store,
@@ -520,54 +486,41 @@ async def run_benchmark(
             if sandbox.mode == orchestration.SandboxMode.DOCKER.value
             else None
         )
-        activities = orchestration.CorralActivities(
-            store,
+        runner = CorralRunner(
             registry,
             docker_launcher=docker_launcher,
-        )
-        async with orchestration.create_worker(
-            client,
-            task_queue=task_queue,
-            activities=activities,
-            max_concurrent_activities=args.max_parallel,
-        ):
-            runner = CorralRunner(
-                orchestration.TemporalBenchmarkExecutor(
-                    client,
-                    task_queue=task_queue,
-                ),
-                environments=environments,
-                agent_id=canonical_agent,
+            environments=environments,
+            agent_id=canonical_agent,
+            model=model,
+            max_iterations=args.max_iterations,
+            state_store=store,
+            sandbox=sandbox,
+            agent_runtime=orchestration.AgentRuntimeDefinition(
+                name=canonical_agent,
                 model=model,
-                max_iterations=args.max_iterations,
-                state_store=store,
-                sandbox=sandbox,
-                agent_runtime=orchestration.AgentRuntimeDefinition(
-                    name=canonical_agent,
-                    model=model,
-                    api_endpoint=args.api_endpoint,
-                    temperature=args.temperature,
-                    options={
-                        **dict(getattr(args, "agent_kwargs", {}) or {}),
-                        **dict(agent_kwargs or {}),
-                    },
-                ),
-                environment_runtime=orchestration.EnvironmentRuntimeDefinition(
-                    name=args.environment,
-                    options=dict(args.env_kwargs),
-                ),
-            )
-            result = await runner.run(
-                run_id,
-                task_ids=args.tasks or None,
-                trials_per_task=args.trials,
-                max_parallel=args.max_parallel,
-                max_parallel_per_task=args.max_parallel_per_task,
-                enable_surrender=args.enable_surrender,
-                evaluate=not args.no_evaluate,
-                verbose=args.verbose,
-                activity_policy=_activity_policy(args),
-            )
+                api_endpoint=args.api_endpoint,
+                temperature=args.temperature,
+                options={
+                    **dict(getattr(args, "agent_kwargs", {}) or {}),
+                    **dict(agent_kwargs or {}),
+                },
+            ),
+            environment_runtime=orchestration.EnvironmentRuntimeDefinition(
+                name=args.environment,
+                options=dict(args.env_kwargs),
+            ),
+        )
+        result = await runner.run(
+            run_id,
+            task_ids=args.tasks or None,
+            trials_per_task=args.trials,
+            max_parallel=args.max_parallel,
+            max_parallel_per_task=args.max_parallel_per_task,
+            enable_surrender=args.enable_surrender,
+            evaluate=not args.no_evaluate,
+            verbose=args.verbose,
+            retry_policy=_retry_policy(args),
+        )
         result.metadata["storage"] = {
             "run_directory": str(run_dir),
             "report": str(report_path),
@@ -575,11 +528,6 @@ async def run_benchmark(
             "workspace_snapshots_directory": "workspace-snapshots",
             "state_snapshots_directory": "state-snapshots",
             "state_snapshot_interval": store.snapshot_interval,
-        }
-        result.metadata["orchestration"] = {
-            "task_queue": task_queue,
-            "temporal_address": args.temporal_address,
-            "temporal_namespace": args.temporal_namespace,
         }
         result.generate_report(str(report_path))
         failed_trials = sum(
@@ -636,7 +584,6 @@ async def run_task(args: argparse.Namespace) -> int:
         f"run-{_slug(canonical_agent)}-{_slug(args.environment)}-"
         f"{_slug(args.task)}-{uuid4().hex[:12]}"
     )
-    task_queue = args.task_queue or f"corral-{_slug(execution_id)}"
     store = SQLiteCommitStore(Path(args.commit_file).expanduser().resolve())
     registry = orchestration.RuntimeRegistry(
         agents={canonical_agent: agent},
@@ -644,32 +591,20 @@ async def run_task(args: argparse.Namespace) -> int:
     )
 
     try:
-        client = await _connect_temporal(args)
-        activities = orchestration.CorralActivities(store, registry)
-        async with orchestration.create_worker(
-            client,
-            task_queue=task_queue,
-            activities=activities,
-            max_concurrent_activities=1,
-        ):
-            state = await orchestration.execute_task(
-                executor=orchestration.TemporalTaskExecutor(
-                    client,
-                    state_store=store,
-                    task_queue=task_queue,
-                ),
-                task=orchestration.TaskWorkflowInput(
-                    execution_id=execution_id,
-                    task_id=args.task,
-                    environment_id=args.task,
-                    agent_id=canonical_agent,
-                    model=model,
-                    max_iterations=args.max_iterations,
-                    enable_surrender=args.enable_surrender,
-                    evaluate=False,
-                    activity_policy=_activity_policy(args),
-                ),
-            )
+        state = await execute_task(
+            state_store=store,
+            registry=registry,
+            retry_policy=_retry_policy(args),
+            task=orchestration.RunTaskInput(
+                execution_id=execution_id,
+                task_id=args.task,
+                environment_id=args.task,
+                agent_id=canonical_agent,
+                model=model,
+                max_iterations=args.max_iterations,
+                enable_surrender=args.enable_surrender,
+            ),
+        )
     finally:
         registry.close()
         store.close()
@@ -678,11 +613,11 @@ async def run_task(args: argparse.Namespace) -> int:
     sys.stdout.write(
         f"Run {execution_id} completed:\n"
         f"- task: {args.task}\n"
-        f"- status: {state.runtime.status}\n"
+        f"- status: {state.status}\n"
         f"- answer: {answer}\n"
-        f"- commit: {state.through_commit_hash}\n"
+        f"- commit: {state.commit_hash}\n"
     )
-    return int(state.runtime.status == "failed")
+    return int(state.status == "failed")
 
 
 def _add_environment_arguments(parser: argparse.ArgumentParser) -> None:
@@ -728,28 +663,11 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
     agent.add_argument("--enable-surrender", action="store_true")
 
 
-def _add_temporal_arguments(
+def _add_execution_arguments(
     execution: Any,
     *,
     default_commit_file: str,
 ) -> None:
-    execution.add_argument("--task-queue")
-    execution.add_argument("--temporal-address", default="localhost:7233")
-    execution.add_argument("--temporal-namespace", default="default")
-    execution.add_argument(
-        "--activity-timeout",
-        type=_optional_timeout,
-        default=None,
-        metavar="SECONDS|none",
-        help="Start-to-Close timeout; default: none.",
-    )
-    execution.add_argument(
-        "--heartbeat-timeout",
-        type=_optional_timeout,
-        default=None,
-        metavar="SECONDS|none",
-        help="Heartbeat timeout; default: none.",
-    )
     execution.add_argument("--max-attempts", type=int, default=3)
     execution.add_argument("--commit-file", default=default_commit_file)
 
@@ -775,7 +693,7 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     execution.add_argument("--max-parallel-per-task", type=int, default=1)
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--run-id")
-    _add_temporal_arguments(
+    _add_execution_arguments(
         execution,
         default_commit_file=str(Path(".corral") / "benchmark-commits.sqlite3"),
     )
@@ -841,7 +759,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
 
     execution = parser.add_argument_group("execution")
     execution.add_argument("--execution-id")
-    _add_temporal_arguments(
+    _add_execution_arguments(
         execution,
         default_commit_file=str(Path(".corral") / "run-commits.sqlite3"),
     )

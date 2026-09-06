@@ -30,12 +30,12 @@ if TYPE_CHECKING:
 
     from corral.core.commit import Commit
     from corral.observability import ObservationContext, Observer
-    from corral.orchestration.activities import RuntimeRegistry
+    from corral.orchestration.registry import RuntimeRegistry
     from corral.persistence import CommitStore
 
 
 class TaskLauncher(Protocol):
-    """Execution boundary selected by the worker-side Activity."""
+    """Execution boundary selected for a task."""
 
     async def run(
         self,
@@ -50,7 +50,7 @@ class DockerInfrastructureError(RuntimeError):
 
 
 def state_ref(state: ExecutionState, commit: Commit) -> StateRef:
-    """Project a materialized head into the small value kept in Workflow history."""
+    """Project a materialized head into a task result reference."""
     output = (
         {"answer": state.submission}
         if state.submission is not None and state.runtime.status != "surrendered"

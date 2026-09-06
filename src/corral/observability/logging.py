@@ -83,8 +83,6 @@ class LoggingObserver:
             fields.update(
                 benchmark_run_id=context.benchmark_run_id,
                 task_id=context.task_id,
-                workflow_id=context.temporal_workflow_id,
-                workflow_run_id=context.temporal_run_id,
             )
         event(
             "DEBUG",

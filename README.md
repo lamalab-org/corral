@@ -30,11 +30,11 @@ A comprehensive benchmarking framework for evaluating AI agents on science tasks
 ## 🚀 Quick Start: Run One Task from One Environment
 
 The shortest useful Corral run does not need `CorralRunner`, trials, scoring,
-or report generation. `corral run` sends one independent task through a direct
-Temporal task Workflow and starts its Corral worker in the same process.
+or report generation. `corral run` executes one independent task using
+the `execute_task` function in `run.py`.
 
 You need Python 3.11 or newer for SampleMath, [`uv`](https://docs.astral.sh/uv/),
-a model API key such as `OPENAI_API_KEY`, and the Temporal CLI. Clone the
+and a model API key such as `OPENAI_API_KEY`. Clone the
 repository and install SampleMath together with the framework:
 
 ```bash
@@ -43,13 +43,7 @@ cd corral/tasks/samplemath
 uv sync
 ```
 
-Start a local Temporal service in one terminal:
-
-```bash
-temporal server start-dev
-```
-
-In another terminal, run one task with one agent and model:
+Run one task with one agent and model:
 
 ```bash
 uv run corral run \
@@ -59,16 +53,14 @@ uv run corral run \
   --model openai/gpt-5.6
 ```
 
-This path always uses `evaluate=False`: it prints the final status, submitted
+This path skips evaluation: it prints the final status, submitted
 answer, and commit hash, and writes the authored commit ledger to
 `.corral/run-commits.sqlite3`. It does not create trials, invoke a scorer, or
 generate a benchmark report. Because it executes exactly one task, it rejects a
 task with upstream dependencies and points to `corral bench` instead.
 
-Keep the command running while its in-process worker executes the task. Temporal
-retains the durable Workflow history; re-running with the same `--execution-id`,
-task queue, and commit database attaches to that execution with a new in-process
-worker.
+Re-running with the same `--execution-id` and commit database restores the
+latest persisted task state.
 
 The equivalent Python API is below. Save this as `quickstart.py` in the current
 `tasks/samplemath` directory:
@@ -78,14 +70,10 @@ import asyncio
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from temporalio.client import Client
 
 from corral import (
-    CorralActivities,
     RuntimeRegistry,
-    TaskWorkflowInput,
-    TemporalTaskExecutor,
-    create_worker,
+    RunTaskInput,
     execute_task,
     load_environment_group,
 )
@@ -94,7 +82,6 @@ from corral.persistence import SQLiteCommitStore
 
 AGENT_ID = "tool-calling"
 TASK_ID = "task1"
-TASK_QUEUE = "corral-quickstart"
 MODEL = "openai/gpt-5.6"
 
 
@@ -108,33 +95,23 @@ async def main():
     )
 
     try:
-        client = await Client.connect("localhost:7233")
-        async with create_worker(
-            client,
-            task_queue=TASK_QUEUE,
-            activities=CorralActivities(store, registry),
-        ):
-            state = await execute_task(
-                executor=TemporalTaskExecutor(
-                    client,
-                    state_store=store,
-                    task_queue=TASK_QUEUE,
-                ),
-                task=TaskWorkflowInput(
-                    execution_id=f"samplemath-task1-{uuid4().hex}",
-                    task_id=TASK_ID,
-                    environment_id=TASK_ID,
-                    agent_id=AGENT_ID,
-                    model=MODEL,
-                    max_iterations=10,
-                    evaluate=False,
-                ),
-            )
+        state = await execute_task(
+            state_store=store,
+            registry=registry,
+            task=RunTaskInput(
+                execution_id=f"samplemath-task1-{uuid4().hex}",
+                task_id=TASK_ID,
+                environment_id=TASK_ID,
+                agent_id=AGENT_ID,
+                model=MODEL,
+                max_iterations=10,
+            ),
+        )
     finally:
         registry.close()
         store.close()
 
-    print(f"status: {state.runtime.status}")
+    print(f"status: {state.status}")
     print(f"answer: {state.submission}")
 
 
@@ -148,8 +125,8 @@ Run it with the current SampleMath virtual environment:
 uv run python quickstart.py
 ```
 
-`evaluate=False` is explicit here: the result is the agent's final immutable
-`ExecutionState` projection, and the example prints only its status and submitted answer. No scorer,
+The result is a `StateRef` pointing to the persisted final state, and the
+example prints its status and submitted answer. No scorer,
 aggregate metric, or benchmark report runs. `task1` is independent; use
 `corral bench` for a task such as `task4` whose inputs come from earlier tasks.
 
@@ -158,11 +135,7 @@ aggregate metric, or benchmark report runs. `task1` is independent; use
 ### Run any agent with the `corral` CLI
 
 The installed `corral` command can run every public concrete agent against a
-registered environment. Start a local Temporal service first:
-
-```bash
-temporal server start-dev
-```
+registered environment.
 
 Each task environment is a separate Python project because it has its own
 dependencies. Change into that project once, then `uv` automatically uses its
@@ -179,10 +152,8 @@ uv run corral bench \
   --trials 3
 ```
 
-`corral bench` calls the same `CorralRunner` and
-`TemporalBenchmarkExecutor` used by Python callers. It hosts the Temporal worker,
-worker-side registry, and Activities in the CLI process for the duration of the
-benchmark.
+`corral bench` calls the same `CorralRunner` used by Python callers. The runner
+schedules trials in the CLI process using `asyncio`.
 
 Benchmarks run one Docker container per `(run, task, trial)` by default. Corral
 builds `corral-benchmark:latest` from `docker/benchmark.Dockerfile` when that
@@ -190,7 +161,7 @@ image is missing, resolves it to an immutable image ID before scheduling any
 trial, and applies these defaults: 2 CPUs, 4 GiB memory, 256 PIDs, a read-only
 root filesystem, and Docker's `bridge` network so the container has outbound
 network access. Pass `--sandbox-network none` for fully network-isolated trials.
-Use `--sandbox local` only for worker-local debugging; `corral run` remains
+Use `--sandbox local` only for local debugging; `corral run` remains
 local and never contacts Docker.
 
 By default, each invocation creates one descriptive, self-contained directory
@@ -228,7 +199,7 @@ The final `report.json` includes the resolved agent, model, environment, task
 mapping, benchmark settings, concurrency, retry policy, sandbox configuration,
 and output paths. Credential-like values in runtime option dictionaries are
 redacted. `--output-dir` (also accepted as `--state-dir`) moves the runs root,
-and `--report` overrides the default report location. If an Activity or worker
+and `--report` overrides the default report location. If a task launch
 fails, its retry discards the old container and volume, creates a clean
 workspace, and restores the last committed workspace revision. Completed
 actions are not repeated; filesystem changes from an action interrupted before
@@ -303,11 +274,8 @@ Omit `--task` to run every task returned by the environment. Pass `--task`
 multiple times to select specific tasks; their required dependencies are
 included automatically.
 
-Activity and heartbeat timeouts are disabled by default. Set either one in
-seconds when a deployment needs a deadline or liveness detection, for example
-`--activity-timeout 1800 --heartbeat-timeout 30`; both options also accept
-`none` explicitly. Activities emit heartbeats every five seconds while long
-operations are running.
+The runner applies no time limit to task execution or evaluation. Failed attempts
+are retried up to `--max-attempts` times (default: 3).
 
 For example, select SampleMath's subtask set with one environment argument:
 
@@ -321,14 +289,19 @@ python run_scripts/run_tool_calling.py --environment samplemath \
 `CorralRunner` is the higher-level convenience layer for repeated trials,
 evaluation, metric calculation, and reports. Use it after the direct execution
 path above when those benchmark features are actually needed. Given the
-`client`, `store`, and all-task worker from the task-group example:
+`store` and model settings from the example above (keep the store open
+until the benchmark finishes):
 
 ```python
-from corral import CorralRunner, TemporalBenchmarkExecutor
+from corral import CorralRunner
 
 environments = load_environment_group("samplemath")
+registry = RuntimeRegistry(
+    agents={AGENT_ID: ToolCallingAgent(model=MODEL)},
+    environments=environments,
+)
 runner = CorralRunner(
-    TemporalBenchmarkExecutor(client, task_queue=TASK_QUEUE),
+    registry,
     environments=environments,
     agent_id=AGENT_ID,
     model=MODEL,
@@ -345,8 +318,8 @@ result = await runner.run(
 )
 ```
 
-Temporal owns concurrency, task-level retries, task-DAG readiness, and durable
-progress. Tool verbosity is fixed to Corral's default (`brief`) on this path.
+`CorralRunner` handles concurrency, task retries, and dependency readiness.
+Task state remains persisted in the commit store. Tool verbosity is fixed to Corral's default (`brief`) on this path.
 
 ## 🏗️ Available Environments
 
@@ -560,7 +533,7 @@ agents do not expose it.
    __all__ = ["MyAgent", ...]
    ```
 
-3. **Register your agent on the Temporal worker**
+3. **Register your agent for execution**
 
    ```python
    from corral.agents.my_agent import MyAgent

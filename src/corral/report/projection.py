@@ -1,4 +1,4 @@
-"""Projection from durable Temporal results into benchmark report models."""
+"""Projection from persisted task results into benchmark report models."""
 
 from __future__ import annotations
 
@@ -13,10 +13,10 @@ if TYPE_CHECKING:
 
     from corral.core.state import ExecutionState
     from corral.orchestration.models import (
-        BenchmarkWorkflowResult,
+        BenchmarkExecutionResult,
         EvaluationRef,
         StateRef,
-        TaskWorkflowResult,
+        TaskExecutionResult,
     )
     from corral.persistence import CommitStore
     from corral.report.metrics import Metric
@@ -128,7 +128,7 @@ def _tool_statistics(state: ExecutionState | None) -> dict[str, Any]:
 
 
 def _runtime_error(
-    result: TaskWorkflowResult, state: ExecutionState | None
+    result: TaskExecutionResult, state: ExecutionState | None
 ) -> str | None:
     if result.error is not None:
         return result.error
@@ -139,7 +139,7 @@ def _runtime_error(
 
 
 async def _project_trial(
-    result: TaskWorkflowResult,
+    result: TaskExecutionResult,
     state_store: CommitStore | None,
 ) -> TaskTrialResult:
     state: ExecutionState | None = None
@@ -192,7 +192,7 @@ async def _project_trial(
 
 
 async def project_benchmark_result(
-    result: BenchmarkWorkflowResult,
+    result: BenchmarkExecutionResult,
     *,
     state_store: CommitStore | None = None,
     k_values: int | Iterable[int] | None = None,
@@ -201,7 +201,7 @@ async def project_benchmark_result(
     metrics: Iterable[Metric] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> BenchmarkResult:
-    """Load final States and project a Workflow result into report models."""
+    """Load final states and project benchmark results into report models."""
     normalised_k = normalise_k_values(k_values, result.trials_per_task)
     task_results = {
         task_id: TaskTrialResults(task_id=task_id) for task_id in result.task_ids
@@ -214,13 +214,11 @@ async def project_benchmark_result(
             trial.trial_index,
         ),
     )
-    for workflow_trial in ordered_trials:
-        if workflow_trial.task_id not in task_results:
-            raise ValueError(
-                f"Workflow returned unknown task {workflow_trial.task_id!r}"
-            )
-        task_results[workflow_trial.task_id].trials.append(
-            await _project_trial(workflow_trial, state_store)
+    for trial in ordered_trials:
+        if trial.task_id not in task_results:
+            raise ValueError(f"Benchmark returned unknown task {trial.task_id!r}")
+        task_results[trial.task_id].trials.append(
+            await _project_trial(trial, state_store)
         )
 
     return BenchmarkResult(

@@ -3,10 +3,10 @@
 import argparse
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
-from temporalio.testing import WorkflowEnvironment
 
 from corral import cli
 from corral.agents.ai_scientist import AIScientistConfig, SakanaAIScientistConfig
@@ -347,16 +347,7 @@ def test_run_executes_one_task_without_a_benchmark(monkeypatch, tmp_path, capsys
         ]
     )
 
-    async def scenario():
-        async with await WorkflowEnvironment.start_time_skipping() as temporal:
-
-            async def connect(*args, **kwargs):
-                return temporal.client
-
-            monkeypatch.setattr(cli.Client, "connect", connect)
-            return await cli.run_task(args)
-
-    result = asyncio.run(scenario())
+    result = asyncio.run(cli.run_task(args))
 
     assert result == 0
     output = capsys.readouterr().out
@@ -411,3 +402,38 @@ def test_legacy_script_retains_existing_defaults():
     assert args.temperature == 1.0
     assert args.max_iterations == 20
     assert args.trials == 1
+
+
+def test_benchmark_runs_locally_and_writes_report(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        cli,
+        "load_environment_group",
+        lambda *args, **kwargs: {"task1": _environment("task1")},
+    )
+    monkeypatch.setattr(cli, "create_agent", lambda *args, **kwargs: SubmitAgent())
+    args = cli.build_parser().parse_args(
+        [
+            "bench",
+            "--agent",
+            "react",
+            "--environment",
+            "samplemath",
+            "--sandbox",
+            "local",
+            "--no-evaluate",
+            "--trials",
+            "2",
+            "--run-id",
+            "cli-benchmark",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert asyncio.run(cli.run_benchmark(args)) == 0
+    reports = list(tmp_path.rglob("report.json"))
+    assert len(reports) == 1
+    report = json.loads(reports[0].read_text())
+    assert report["metadata"]["benchmark"]["trials_per_task"] == 2
+    manifest = json.loads((reports[0].parent / "run-metadata.json").read_text())
+    assert manifest["status"] == "completed"
+    assert len(list(reports[0].parent.rglob("commits.sqlite3"))) == 2

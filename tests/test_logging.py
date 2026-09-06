@@ -385,11 +385,3 @@ def test_task_environments_follow_the_logging_convention():
 
     assert direct_logging_imports == []
     assert direct_logger_calls == []
-
-
-def test_temporal_workflow_events_use_the_replay_aware_logger():
-    workflow_source = (
-        Path(__file__).parents[1] / "src" / "corral" / "orchestration" / "workflows.py"
-    ).read_text()
-    assert "workflow.logger" in workflow_source
-    assert "from corral.report.logging" not in workflow_source

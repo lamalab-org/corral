@@ -39,20 +39,6 @@ def _json_object(raw: str) -> dict[str, Any]:
     return value
 
 
-def _optional_timeout(raw: str) -> float | None:
-    if raw.casefold() in {"none", "null"}:
-        return None
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "timeout must be a positive number or 'none'"
-        ) from exc
-    if value <= 0:
-        raise argparse.ArgumentTypeError("timeout must be greater than zero")
-    return value
-
-
 def _list_tasks(environments: Mapping[str, Any]) -> None:
     lines = []
     for task_id, environment in environments.items():
@@ -133,23 +119,6 @@ def build_parser() -> argparse.ArgumentParser:
     execution.add_argument("--max-parallel-per-task", type=int, default=1)
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--run-id")
-    execution.add_argument("--task-queue")
-    execution.add_argument("--temporal-address", default="localhost:7233")
-    execution.add_argument("--temporal-namespace", default="default")
-    execution.add_argument(
-        "--activity-timeout",
-        type=_optional_timeout,
-        default=None,
-        metavar="SECONDS|none",
-        help="Start-to-Close timeout; default: none.",
-    )
-    execution.add_argument(
-        "--heartbeat-timeout",
-        type=_optional_timeout,
-        default=None,
-        metavar="SECONDS|none",
-        help="Heartbeat timeout; default: none.",
-    )
     execution.add_argument("--max-attempts", type=int, default=3)
     execution.add_argument(
         "--commit-file",

@@ -178,7 +178,6 @@ class InterceptHandler(stdlib_logging.Handler):
         fields = {
             key: record.__dict__[key]
             for key in (
-                "activity",
                 "attempt",
                 "benchmark_run_id",
                 "duration_ms",
@@ -190,8 +189,6 @@ class InterceptHandler(stdlib_logging.Handler):
                 "status",
                 "subsystem",
                 "task_id",
-                "workflow_id",
-                "workflow_run_id",
             )
             if key in record.__dict__
         }
@@ -205,8 +202,6 @@ class InterceptHandler(stdlib_logging.Handler):
 
 
 def _stdlib_subsystem(name: str) -> str:
-    if name.startswith("temporalio"):
-        return "orchestration"
     if name.startswith("corral"):
         return "runtime"
     return "dependency"

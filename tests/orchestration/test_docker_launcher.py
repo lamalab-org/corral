@@ -5,7 +5,7 @@ import pytest
 
 from corral.orchestration import (
     AgentRuntimeDefinition,
-    BenchmarkWorkflowInput,
+    BenchmarkInput,
     DockerSandboxSpec,
     EnvironmentRuntimeDefinition,
     SandboxMode,
@@ -26,7 +26,7 @@ def anyio_backend():
 def test_docker_benchmark_accepts_complete_runtime_definitions():
     task_id = "task-a"
 
-    request = BenchmarkWorkflowInput(
+    request = BenchmarkInput(
         benchmark_run_id="benchmark",
         task_ids=(task_id,),
         trials_per_task=1,

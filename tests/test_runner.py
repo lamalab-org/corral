@@ -1,4 +1,4 @@
-"""Tests for the thin Temporal benchmark metadata adapter."""
+"""Tests for benchmark metadata validation and report projection."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -16,11 +16,11 @@ from corral.core.state import (
 from corral.core.task import InputRef, TaskDefinition
 from corral.orchestration import (
     AgentRuntimeDefinition,
-    BenchmarkWorkflowResult,
+    BenchmarkExecutionResult,
     EnvironmentRuntimeDefinition,
     EvaluationRef,
     StateRef,
-    TaskWorkflowResult,
+    TaskExecutionResult,
 )
 from corral.run import BenchmarkTaskMetadata, CorralRunner
 
@@ -31,13 +31,21 @@ def anyio_backend():
 
 
 class RecordingExecutor:
-    def __init__(self, result: BenchmarkWorkflowResult) -> None:
+    def __init__(self, result: BenchmarkExecutionResult) -> None:
         self.result = result
         self.requests = []
 
     async def execute(self, request):
         self.requests.append(request)
         return self.result
+
+
+def _runner(executor, *args, **kwargs):
+    runner = CorralRunner(
+        None, *args, state_store=kwargs.pop("state_store", None), **kwargs
+    )
+    runner._execute_benchmark = executor.execute
+    return runner
 
 
 class MemoryCommitStore:
@@ -133,7 +141,6 @@ def _metadata() -> dict[str, BenchmarkTaskMetadata]:
             dependencies=("upstream",),
             max_iterations=7,
             model="model-b",
-            task_queue="wetlab",
         ),
     }
 
@@ -155,8 +162,8 @@ def _environment(task_id: str, *dependencies: str) -> Environment:
 
 
 def test_runner_infers_metadata_from_environments_by_default():
-    result = BenchmarkWorkflowResult("benchmark", (), 1, ())
-    runner = CorralRunner(
+    result = BenchmarkExecutionResult("benchmark", (), 1, ())
+    runner = _runner(
         RecordingExecutor(result),
         environments={
             "upstream": _environment("upstream"),
@@ -185,20 +192,20 @@ def test_runner_infers_metadata_from_environments_by_default():
 
 
 def test_runner_requires_one_metadata_source():
-    result = BenchmarkWorkflowResult("benchmark", (), 1, ())
+    result = BenchmarkExecutionResult("benchmark", (), 1, ())
     executor = RecordingExecutor(result)
 
     with pytest.raises(ValueError, match="exactly one"):
-        CorralRunner(executor)
+        _runner(executor)
     with pytest.raises(ValueError, match="exactly one"):
-        CorralRunner(executor, _metadata(), environments={})
+        _runner(executor, _metadata(), environments={})
 
 
-def test_runner_builds_dependency_closed_temporal_metadata():
-    executor = RecordingExecutor(BenchmarkWorkflowResult("benchmark", (), 1, ()))
-    runner = CorralRunner(executor, _metadata())
+def test_runner_builds_dependency_closed_metadata():
+    executor = RecordingExecutor(BenchmarkExecutionResult("benchmark", (), 1, ()))
+    runner = _runner(executor, _metadata())
 
-    request = runner.build_workflow_input(
+    request = runner.build_input(
         "benchmark",
         task_ids=("downstream", "upstream"),
         trials_per_task=4,
@@ -220,17 +227,16 @@ def test_runner_builds_dependency_closed_temporal_metadata():
         "upstream": "model-a",
         "downstream": "model-b",
     }
-    assert request.task_queue_by_task == {"downstream": "wetlab"}
     assert request.max_parallel == 8
     assert request.max_parallel_per_task == 2
 
 
 def test_runner_rejects_an_incomplete_task_selection():
-    result = BenchmarkWorkflowResult("benchmark", (), 1, ())
-    runner = CorralRunner(RecordingExecutor(result), _metadata())
+    result = BenchmarkExecutionResult("benchmark", (), 1, ())
+    runner = _runner(RecordingExecutor(result), _metadata())
 
     with pytest.raises(ValueError, match="dependency-closed"):
-        runner.build_workflow_input(
+        runner.build_input(
             "benchmark",
             task_ids=("downstream",),
             include_dependencies=False,
@@ -238,10 +244,10 @@ def test_runner_rejects_an_incomplete_task_selection():
 
 
 def test_runner_includes_dependencies_by_default():
-    result = BenchmarkWorkflowResult("benchmark", (), 1, ())
-    runner = CorralRunner(RecordingExecutor(result), _metadata())
+    result = BenchmarkExecutionResult("benchmark", (), 1, ())
+    runner = _runner(RecordingExecutor(result), _metadata())
 
-    request = runner.build_workflow_input(
+    request = runner.build_input(
         "benchmark",
         task_ids=("downstream",),
     )
@@ -250,10 +256,10 @@ def test_runner_includes_dependencies_by_default():
 
 
 @pytest.mark.anyio()
-async def test_invalid_reporting_metadata_does_not_start_workflow():
-    result = BenchmarkWorkflowResult("benchmark", ("upstream",), 1, ())
+async def test_invalid_reporting_metadata_does_not_start_benchmark():
+    result = BenchmarkExecutionResult("benchmark", ("upstream",), 1, ())
     executor = RecordingExecutor(result)
-    runner = CorralRunner(
+    runner = _runner(
         executor,
         {"upstream": _metadata()["upstream"]},
     )
@@ -283,12 +289,12 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
         metrics={"score": 1.0},
         scorer_version="test:v1",
     )
-    workflow_result = BenchmarkWorkflowResult(
+    workflow_result = BenchmarkExecutionResult(
         benchmark_run_id="benchmark-1",
         task_ids=("upstream",),
         trials_per_task=1,
         trials=(
-            TaskWorkflowResult(
+            TaskExecutionResult(
                 task_id="upstream",
                 trial_index=0,
                 execution_id="benchmark-1:upstream:0",
@@ -299,7 +305,7 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
     )
     executor = RecordingExecutor(workflow_result)
     store = MemoryCommitStore(state)
-    runner = CorralRunner(
+    runner = _runner(
         executor,
         {
             "upstream": BenchmarkTaskMetadata(
@@ -363,12 +369,12 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
 
 @pytest.mark.anyio()
 async def test_unreachable_trials_project_without_loading_state():
-    workflow_result = BenchmarkWorkflowResult(
+    workflow_result = BenchmarkExecutionResult(
         benchmark_run_id="benchmark-2",
         task_ids=("upstream", "downstream"),
         trials_per_task=1,
         trials=(
-            TaskWorkflowResult(
+            TaskExecutionResult(
                 task_id="downstream",
                 trial_index=0,
                 execution_id="benchmark-2:downstream:0",
@@ -377,7 +383,7 @@ async def test_unreachable_trials_project_without_loading_state():
             ),
         ),
     )
-    runner = CorralRunner(RecordingExecutor(workflow_result), _metadata())
+    runner = _runner(RecordingExecutor(workflow_result), _metadata())
 
     report = await runner.run("benchmark-2")
 

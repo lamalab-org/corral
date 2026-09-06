@@ -1,64 +1,125 @@
-"""Thin benchmark metadata adapter for Temporal orchestration.
-
-The runner does not execute agents, schedule trials, manage concurrency, or
-checkpoint progress. Temporal owns those responsibilities. This module only
-turns immutable per-task metadata into a `BenchmarkWorkflowInput`, delegates
-it once, and asks the reporting layer to project the durable result.
-"""
+"""Task execution and benchmark scheduling with asyncio."""
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass, field
 from time import perf_counter
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from corral.core.environment import Environment
 from corral.core.task import assert_dependencies_selected, order_selected
+from corral.observability import (
+    CompositeObserver,
+    LoggingObserver,
+    ObservationContext,
+    observer_from_env,
+)
+from corral.orchestration.evaluation import evaluate_task
+from corral.orchestration.launchers import LocalTaskLauncher
 from corral.orchestration.models import (
-    ActivityPolicy,
     AgentRuntimeDefinition,
-    BenchmarkWorkflowInput,
-    BenchmarkWorkflowResult,
+    BenchmarkExecutionResult,
+    BenchmarkInput,
     EnvironmentRuntimeDefinition,
+    EvaluateTaskInput,
+    RetryPolicy,
+    RunTaskInput,
     SandboxProfile,
+    StateRef,
+    TaskExecutionResult,
 )
 from corral.report.logging import event, exception_fields, log_context
 from corral.report.projection import normalise_k_values, project_benchmark_result
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Awaitable, Callable, Iterable, Mapping
 
+    from corral.observability import Observer
+    from corral.orchestration.launchers import DockerTaskLauncher, TaskLauncher
+    from corral.orchestration.registry import RuntimeRegistry
     from corral.persistence import CommitStore
     from corral.report.metrics import Metric
     from corral.report.results import BenchmarkResult
 
 
-class BenchmarkExecutor(Protocol):
-    """The only execution capability needed by :class:`CorralRunner`."""
+T = TypeVar("T")
 
-    async def execute(
-        self,
-        request: BenchmarkWorkflowInput,
-    ) -> BenchmarkWorkflowResult: ...
+
+async def _with_retries(
+    operation: Callable[[], Awaitable[T]], policy: RetryPolicy
+) -> T:
+    delay = policy.initial_interval_seconds
+    for attempt in range(1, policy.maximum_attempts + 1):
+        try:
+            return await operation()
+        except Exception as exc:
+            if (
+                attempt == policy.maximum_attempts
+                or type(exc).__name__ in policy.non_retryable_error_types
+            ):
+                raise
+            await asyncio.sleep(min(delay, policy.maximum_interval_seconds))
+            delay *= policy.backoff_coefficient
+    raise AssertionError("retry policy must allow at least one attempt")
+
+
+def _task_observer(observer: Observer | None) -> Observer:
+    if observer is None:
+        return observer_from_env()
+    if isinstance(observer, LoggingObserver):
+        return observer
+    if isinstance(observer, CompositeObserver) and any(
+        isinstance(child, LoggingObserver) for child in observer.observers
+    ):
+        return observer
+    return CompositeObserver(LoggingObserver(), observer)
+
+
+async def execute_task(
+    *,
+    task: RunTaskInput,
+    state_store: CommitStore,
+    registry: RuntimeRegistry,
+    observer: Observer | None = None,
+    docker_launcher: DockerTaskLauncher | None = None,
+    retry_policy: RetryPolicy | None = None,
+) -> StateRef:
+    """Run one task and return a reference to its persisted final state."""
+    launcher: TaskLauncher
+    if task.sandbox.mode == "docker":
+        if docker_launcher is None:
+            raise ValueError("Docker tasks require a DockerTaskLauncher")
+        launcher = docker_launcher
+    else:
+        launcher = LocalTaskLauncher(state_store, registry, _task_observer(observer))
+    context = ObservationContext(
+        execution_id=task.execution_id,
+        benchmark_run_id=task.benchmark_run_id,
+        task_id=task.task_id,
+    )
+    with log_context(
+        execution_id=task.execution_id,
+        benchmark_run_id=task.benchmark_run_id,
+        task_id=task.task_id,
+    ):
+        return await _with_retries(
+            lambda: launcher.run(task, observation_context=context),
+            retry_policy or RetryPolicy(),
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class BenchmarkTaskMetadata:
-    """Durable worker IDs and scheduling metadata for one benchmark task.
-
-    The mapping key supplied to :class:`CorralRunner` is the task ID. Agents
-    and environments remain registered on Temporal workers and are referenced
-    here only by their durable IDs; live Python objects never enter Workflow
-    history.
-    """
+    """Resource IDs and scheduling metadata for one benchmark task."""
 
     agent_id: str
     environment_id: str
     dependencies: tuple[str, ...] = ()
     max_iterations: int = 10
     model: str | None = None
-    task_queue: str | None = None
     sandbox: SandboxProfile = field(default_factory=SandboxProfile.local)
     agent_runtime: AgentRuntimeDefinition | None = None
     environment_runtime: EnvironmentRuntimeDefinition | None = None
@@ -80,8 +141,6 @@ class BenchmarkTaskMetadata:
             raise ValueError("dependencies cannot contain duplicates")
         if self.model == "":
             raise ValueError("model cannot be empty")
-        if self.task_queue == "":
-            raise ValueError("task_queue cannot be empty")
 
 
 def _normalise_task_metadata(
@@ -218,7 +277,7 @@ def _redact_secrets(value: Any) -> Any:
 
 
 def _report_metadata(
-    request: BenchmarkWorkflowInput,
+    request: BenchmarkInput,
     *,
     k_values: list[int],
     include_dependencies: bool,
@@ -269,15 +328,13 @@ def _report_metadata(
             },
             "include_dependencies": include_dependencies,
             "max_iterations_by_task": dict(request.max_iterations_by_task),
-            "task_queue_by_task": dict(request.task_queue_by_task),
             "max_parallel": request.max_parallel,
             "max_parallel_per_task": request.max_parallel_per_task,
             "max_parallel_by_model": dict(request.max_parallel_by_model),
             "max_parallel_by_environment": dict(request.max_parallel_by_environment),
             "enable_surrender": request.enable_surrender,
             "evaluate": request.evaluate,
-            "activity_policy": asdict(request.activity_policy),
-            "rounds_per_run": request.rounds_per_run,
+            "retry_policy": asdict(request.retry_policy),
             "sandbox": asdict(request.sandbox),
             "verbose": verbose,
         },
@@ -285,23 +342,20 @@ def _report_metadata(
 
 
 class CorralRunner:
-    """Build one Temporal benchmark request and project its durable result.
-
-    This class intentionally has no synchronous execution path. Callers await
-    :meth:`run`; Temporal handles retries, concurrency, task-DAG
-    readiness, evaluation, and progress tracking.
-    """
+    """Run dependency-ordered trials with bounded concurrency and reporting."""
 
     def __init__(
         self,
-        executor: BenchmarkExecutor,
+        registry: RuntimeRegistry,
         tasks: Mapping[str, BenchmarkTaskMetadata] | None = None,
         *,
         environments: Mapping[str, Environment] | None = None,
         agent_id: str = "agent",
         model: str | None = None,
         max_iterations: int = 10,
-        state_store: CommitStore | None = None,
+        state_store: CommitStore,
+        observer: Observer | None = None,
+        docker_launcher: DockerTaskLauncher | None = None,
         metrics: Iterable[Metric] | None = None,
         sandbox: SandboxProfile | None = None,
         agent_runtime: AgentRuntimeDefinition | None = None,
@@ -312,7 +366,7 @@ class CorralRunner:
         Passing `environments` is the convenience path: task dependencies,
         environment IDs, model metadata, and iteration budgets are inferred.
         Passing `tasks` preserves complete per-task control for deployments
-        that use custom worker IDs, queues, or budgets.
+        that use custom agents, environments, or budgets.
         """
         if (tasks is None) == (environments is None):
             raise ValueError("pass exactly one of tasks or environments")
@@ -327,12 +381,14 @@ class CorralRunner:
                 environment_runtime=environment_runtime,
             )
         assert tasks is not None
-        self.executor = executor
+        self.registry = registry
+        self.observer = _task_observer(observer)
+        self.docker_launcher = docker_launcher
         self.tasks = MappingProxyType(_normalise_task_metadata(tasks))
         self.state_store = state_store
         self.metrics = tuple(metrics) if metrics is not None else None
 
-    def build_workflow_input(
+    def build_input(
         self,
         benchmark_run_id: str,
         *,
@@ -344,11 +400,10 @@ class CorralRunner:
         max_parallel_by_environment: Mapping[str, int] | None = None,
         enable_surrender: bool = False,
         evaluate: bool = True,
-        activity_policy: ActivityPolicy | None = None,
-        rounds_per_run: int = 0,
+        retry_policy: RetryPolicy | None = None,
         include_dependencies: bool = True,
-    ) -> BenchmarkWorkflowInput:
-        """Build the complete serializable benchmark plan for Temporal."""
+    ) -> BenchmarkInput:
+        """Build and validate the complete benchmark plan."""
         selected = _selected_task_ids(
             self.tasks,
             task_ids,
@@ -359,9 +414,9 @@ class CorralRunner:
         sandbox = profiles[0]
         if any(profile != sandbox for profile in profiles[1:]):
             raise ValueError(
-                "one benchmark Workflow cannot mix local and Docker sandbox profiles"
+                "one benchmark cannot mix local and Docker sandbox profiles"
             )
-        return BenchmarkWorkflowInput(
+        return BenchmarkInput(
             benchmark_run_id=benchmark_run_id,
             task_ids=selected,
             trials_per_task=trials_per_task,
@@ -382,19 +437,13 @@ class CorralRunner:
                 for task_id, task in metadata.items()
                 if task.model is not None
             },
-            task_queue_by_task={
-                task_id: task.task_queue
-                for task_id, task in metadata.items()
-                if task.task_queue is not None
-            },
             max_parallel=max_parallel,
             max_parallel_per_task=max_parallel_per_task,
             max_parallel_by_model=dict(max_parallel_by_model or {}),
             max_parallel_by_environment=dict(max_parallel_by_environment or {}),
             enable_surrender=enable_surrender,
             evaluate=evaluate,
-            activity_policy=activity_policy or ActivityPolicy(),
-            rounds_per_run=rounds_per_run,
+            retry_policy=retry_policy or RetryPolicy(),
             sandbox=sandbox,
             agent_runtime_by_task={
                 task_id: task.agent_runtime
@@ -406,6 +455,156 @@ class CorralRunner:
                 for task_id, task in metadata.items()
                 if task.environment_runtime is not None
             },
+        )
+
+    async def _execute_benchmark(
+        self, request: BenchmarkInput
+    ) -> BenchmarkExecutionResult:
+        global_gate = asyncio.Semaphore(request.max_parallel)
+        task_gates = {
+            task_id: asyncio.Semaphore(request.max_parallel_per_task)
+            for task_id in request.task_ids
+        }
+        model_gates = {
+            model: asyncio.Semaphore(limit)
+            for model, limit in request.max_parallel_by_model.items()
+        }
+        environment_gates = {
+            environment: asyncio.Semaphore(limit)
+            for environment, limit in request.max_parallel_by_environment.items()
+        }
+        handles: dict[tuple[int, str], asyncio.Task[TaskExecutionResult]] = {}
+
+        async def run_one(trial_index: int, task_id: str) -> TaskExecutionResult:
+            execution_id = f"{request.benchmark_run_id}:{task_id}:{trial_index}"
+            dependencies: dict[str, dict[str, Any]] = {}
+            for dependency in request.dependency_graph.get(task_id, ()):
+                result = await handles[(trial_index, dependency)]
+                if not result.output_ready:
+                    return TaskExecutionResult(
+                        task_id=task_id,
+                        trial_index=trial_index,
+                        execution_id=execution_id,
+                        state=None,
+                        unreachable_dependency=dependency,
+                    )
+                assert result.state is not None
+                assert result.state.output is not None
+                dependencies[dependency] = result.state.output
+
+            model = request.model_by_task.get(task_id)
+            environment_id = request.environment_by_task[task_id]
+            try:
+                async with AsyncExitStack() as gates:
+                    for gate in (
+                        model_gates.get(model),
+                        environment_gates.get(environment_id),
+                        task_gates[task_id],
+                        global_gate,
+                    ):
+                        if gate is not None:
+                            await gates.enter_async_context(gate)
+                    current = await execute_task(
+                        task=RunTaskInput(
+                            execution_id=execution_id,
+                            task_id=task_id,
+                            environment_id=environment_id,
+                            agent_id=request.agent_by_task[task_id],
+                            benchmark_run_id=request.benchmark_run_id,
+                            trial_index=trial_index,
+                            dependency_outputs=dependencies,
+                            max_iterations=request.max_iterations_by_task.get(
+                                task_id, 10
+                            ),
+                            model=model,
+                            enable_surrender=request.enable_surrender,
+                            sandbox=request.sandbox,
+                            agent_runtime=request.agent_runtime_by_task.get(task_id),
+                            environment_runtime=request.environment_runtime_by_task.get(
+                                task_id
+                            ),
+                        ),
+                        state_store=self.state_store,
+                        registry=self.registry,
+                        observer=self.observer,
+                        docker_launcher=self.docker_launcher,
+                        retry_policy=request.retry_policy,
+                    )
+                    evaluation = None
+                    evaluation_error = None
+                    if request.evaluate and current.output is not None:
+                        try:
+                            evaluation = await _with_retries(
+                                lambda: evaluate_task(
+                                    EvaluateTaskInput(
+                                        execution_id=execution_id,
+                                        environment_id=environment_id,
+                                        commit_hash=current.commit_hash,
+                                        branch_id=current.branch_id,
+                                        task_id=task_id,
+                                        benchmark_run_id=request.benchmark_run_id,
+                                    ),
+                                    state_store=self.state_store,
+                                    registry=self.registry,
+                                    observer=self.observer,
+                                ),
+                                request.retry_policy,
+                            )
+                        except Exception as exc:
+                            evaluation_error = str(exc) or type(exc).__name__
+                            event(
+                                "WARNING",
+                                "evaluation.degraded",
+                                subsystem="runtime",
+                                execution_id=execution_id,
+                                task_id=task_id,
+                                **exception_fields(exc),
+                            )
+                    return TaskExecutionResult(
+                        task_id=task_id,
+                        trial_index=trial_index,
+                        execution_id=execution_id,
+                        state=current,
+                        evaluation=evaluation,
+                        evaluation_error=evaluation_error,
+                        error=current.error if current.status == "failed" else None,
+                    )
+            except Exception as exc:
+                event(
+                    "ERROR",
+                    "benchmark.task_failed",
+                    subsystem="runtime",
+                    execution_id=execution_id,
+                    task_id=task_id,
+                    **exception_fields(exc),
+                )
+                return TaskExecutionResult(
+                    task_id=task_id,
+                    trial_index=trial_index,
+                    execution_id=execution_id,
+                    state=None,
+                    error=str(exc) or type(exc).__name__,
+                )
+
+        # Register every handle before a task can await its same-trial dependencies.
+        for trial_index in range(request.trials_per_task):
+            for task_id in request.task_ids:
+                handles[(trial_index, task_id)] = asyncio.create_task(
+                    run_one(trial_index, task_id)
+                )
+        try:
+            trials = await asyncio.gather(*handles.values())
+        finally:
+            # Finish cancellation before callers close stores and environments.
+            for handle in handles.values():
+                if not handle.done():
+                    handle.cancel()
+            await asyncio.gather(*handles.values(), return_exceptions=True)
+        return BenchmarkExecutionResult(
+            benchmark_run_id=request.benchmark_run_id,
+            task_ids=request.task_ids,
+            trials_per_task=request.trials_per_task,
+            trials=tuple(trials),
         )
 
     async def run(
@@ -421,16 +620,15 @@ class CorralRunner:
         max_parallel_by_environment: Mapping[str, int] | None = None,
         enable_surrender: bool = False,
         evaluate: bool = True,
-        activity_policy: ActivityPolicy | None = None,
-        rounds_per_run: int = 0,
+        retry_policy: RetryPolicy | None = None,
         include_dependencies: bool = True,
         verbose: bool = False,
     ) -> BenchmarkResult:
-        """Execute the Temporal benchmark and return its reporting projection."""
-        # Invalid reporting metadata must fail before an expensive Workflow is
+        """Execute the benchmark and return its reporting projection."""
+        # Invalid reporting metadata must fail before an expensive benchmark is
         # started, not after the benchmark has completed.
         normalised_k = normalise_k_values(k_values, trials_per_task)
-        request = self.build_workflow_input(
+        request = self.build_input(
             benchmark_run_id,
             task_ids=task_ids,
             trials_per_task=trials_per_task,
@@ -440,8 +638,7 @@ class CorralRunner:
             max_parallel_by_environment=max_parallel_by_environment,
             enable_surrender=enable_surrender,
             evaluate=evaluate,
-            activity_policy=activity_policy,
-            rounds_per_run=rounds_per_run,
+            retry_policy=retry_policy,
             include_dependencies=include_dependencies,
         )
 
@@ -455,25 +652,10 @@ class CorralRunner:
                 trials_per_task=request.trials_per_task,
             )
             try:
-                workflow_result = await self.executor.execute(request)
+                result = await self._execute_benchmark(request)
                 duration = perf_counter() - started
-                if workflow_result.benchmark_run_id != benchmark_run_id:
-                    raise RuntimeError(
-                        "Temporal returned a result for benchmark "
-                        f"{workflow_result.benchmark_run_id!r}, expected {benchmark_run_id!r}"
-                    )
-                if workflow_result.task_ids != request.task_ids:
-                    raise RuntimeError(
-                        "Temporal returned different task metadata: "
-                        f"{workflow_result.task_ids!r} != {request.task_ids!r}"
-                    )
-                if workflow_result.trials_per_task != request.trials_per_task:
-                    raise RuntimeError(
-                        "Temporal returned a different trials_per_task value: "
-                        f"{workflow_result.trials_per_task} != {request.trials_per_task}"
-                    )
                 report = await project_benchmark_result(
-                    workflow_result,
+                    result,
                     state_store=self.state_store,
                     k_values=normalised_k,
                     total_duration=duration,
@@ -502,14 +684,14 @@ class CorralRunner:
                 subsystem="runtime",
                 status="completed",
                 duration_ms=round(duration * 1000, 3),
-                trial_count=len(workflow_result.trials),
+                trial_count=len(result.trials),
             )
             return report
 
 
 __all__ = [
-    "BenchmarkExecutor",
     "BenchmarkTaskMetadata",
     "CorralRunner",
+    "execute_task",
     "project_benchmark_result",
 ]

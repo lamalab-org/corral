@@ -1,8 +1,7 @@
 # How to Run Benchmarks Concurrently
 
-Concurrency is part of the Temporal benchmark plan. `CorralRunner` does not
-start tasks, create threads, or run an AnyIO scheduler; it builds a
-`BenchmarkWorkflowInput` and delegates it to `TemporalBenchmarkExecutor`.
+`CorralRunner` schedules trials with `asyncio` and bounds task execution and
+evaluation with the configured concurrency limits.
 
 ```python
 result = await runner.run(
@@ -17,7 +16,7 @@ result = await runner.run(
 )
 ```
 
-The limits are serialized into Temporal Workflow history:
+The following limits apply throughout the benchmark:
 
 | Argument | What it bounds |
 |---|---|
@@ -26,13 +25,12 @@ The limits are serialized into Temporal Workflow history:
 | `max_parallel_by_model` | Attempts using each model ID. |
 | `max_parallel_by_environment` | Attempts using each environment ID. |
 
-These benchmark limits and the worker's optional
-`max_concurrent_activities` setting are the concurrency controls. Corral does
+These benchmark limits are the concurrency controls. Corral does
 not serialize requests that share an `agent_id`; a registered agent instance
 must be reentrant and keep task-specific scratch in `AgentSession` or local
 variables.
 
-Per-task queue routing belongs to task metadata:
+Per-task model and environment IDs belong to task metadata:
 
 ```python
 from corral import BenchmarkTaskMetadata
@@ -42,14 +40,13 @@ tasks = {
         agent_id="react-gpt5",
         environment_id="wetlab",
         model="gpt-5",
-        task_queue="wetlab-workers",
         max_iterations=20,
     )
 }
 ```
 
 Dependencies are metadata too. The runner makes a selected task set
-dependency-closed automatically before starting the Workflow. Temporal waits
+dependency-closed automatically before starting trials. The runner waits
 for same-round parents, propagates their runtime outputs, and marks descendants
 unreachable when a parent produces no valid output. Pass
 `include_dependencies=False` to request strict validation instead.
@@ -68,10 +65,9 @@ tasks = {
 }
 ```
 
-Retries, cancellation, progress tracking, and benchmark-batch Continue-As-New
-are handled by Temporal. Each task is one Activity, while its commit history
-contains typed setup, action, tool-effect, and terminal commits. The execution
-head advances atomically, so a retry replays the latest projection and finishes
-an already-proposed Action before asking the agent for a new decision. There is
-no local checkpoint directory or synchronous
-`bench()`/asynchronous `abench()` split.
+Task retries and cancellation are handled in the runner. Each task's commit
+history contains typed setup, action, tool-effect, and terminal commits. The
+execution head advances atomically, so a retry restores the latest projection
+and finishes an already-proposed Action before asking the agent for a new
+decision. Benchmark scheduling lives in the invoking process; task state is
+persisted in the commit store.

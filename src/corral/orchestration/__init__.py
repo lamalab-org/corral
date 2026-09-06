@@ -1,4 +1,4 @@
-"""Temporal-backed task and benchmark orchestration, lazily exported."""
+"""Task and benchmark execution resources, lazily exported."""
 
 from __future__ import annotations
 
@@ -6,22 +6,19 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
-    "ActivityPolicy": ("corral.orchestration.models", "ActivityPolicy"),
+    "RetryPolicy": ("corral.orchestration.models", "RetryPolicy"),
     "AgentRuntimeDefinition": (
         "corral.orchestration.models",
         "AgentRuntimeDefinition",
     ),
-    "BenchmarkProgress": ("corral.orchestration.models", "BenchmarkProgress"),
-    "BenchmarkWorkflow": ("corral.orchestration.workflows", "BenchmarkWorkflow"),
-    "BenchmarkWorkflowInput": (
+    "BenchmarkInput": (
         "corral.orchestration.models",
-        "BenchmarkWorkflowInput",
+        "BenchmarkInput",
     ),
-    "BenchmarkWorkflowResult": (
+    "BenchmarkExecutionResult": (
         "corral.orchestration.models",
-        "BenchmarkWorkflowResult",
+        "BenchmarkExecutionResult",
     ),
-    "CorralActivities": ("corral.orchestration.activities", "CorralActivities"),
     "DockerInfrastructureError": (
         "corral.orchestration.launchers",
         "DockerInfrastructureError",
@@ -36,68 +33,34 @@ _EXPORTS = {
         "EnvironmentRuntimeDefinition",
     ),
     "EvaluationRef": ("corral.orchestration.models", "EvaluationRef"),
-    "RuntimeRegistry": ("corral.orchestration.activities", "RuntimeRegistry"),
+    "RuntimeRegistry": ("corral.orchestration.registry", "RuntimeRegistry"),
     "SandboxMode": ("corral.orchestration.models", "SandboxMode"),
     "SandboxProfile": ("corral.orchestration.models", "SandboxProfile"),
     "SandboxRetention": ("corral.orchestration.models", "SandboxRetention"),
     "StateRef": ("corral.orchestration.models", "StateRef"),
-    "TaskExecutionError": (
-        "corral.orchestration.executor",
-        "TaskExecutionError",
-    ),
-    "TaskWorkflow": ("corral.orchestration.workflows", "TaskWorkflow"),
-    "TaskWorkflowInput": ("corral.orchestration.models", "TaskWorkflowInput"),
-    "TaskWorkflowResult": ("corral.orchestration.models", "TaskWorkflowResult"),
-    "TemporalBenchmarkExecutor": (
-        "corral.orchestration.executor",
-        "TemporalBenchmarkExecutor",
-    ),
-    "TemporalTaskExecutor": (
-        "corral.orchestration.executor",
-        "TemporalTaskExecutor",
-    ),
-    "benchmark_workflow_id": (
-        "corral.orchestration.executor",
-        "benchmark_workflow_id",
-    ),
-    "create_worker": ("corral.orchestration.worker", "create_worker"),
-    "create_workflow_runner": (
-        "corral.orchestration.worker",
-        "create_workflow_runner",
-    ),
-    "execute_task": ("corral.orchestration.executor", "execute_task"),
-    "task_workflow_id": ("corral.orchestration.executor", "task_workflow_id"),
+    "RunTaskInput": ("corral.orchestration.models", "RunTaskInput"),
+    "TaskExecutionResult": ("corral.orchestration.models", "TaskExecutionResult"),
+    "execute_task": ("corral.run", "execute_task"),
 }
 
 __all__ = [
-    "ActivityPolicy",
     "AgentRuntimeDefinition",
-    "BenchmarkProgress",
-    "BenchmarkWorkflow",
-    "BenchmarkWorkflowInput",
-    "BenchmarkWorkflowResult",
-    "CorralActivities",
+    "BenchmarkExecutionResult",
+    "BenchmarkInput",
     "DockerInfrastructureError",
     "DockerSandboxSpec",
     "DockerTaskLauncher",
     "EnvironmentRuntimeDefinition",
     "EvaluationRef",
+    "RetryPolicy",
+    "RunTaskInput",
     "RuntimeRegistry",
     "SandboxMode",
     "SandboxProfile",
     "SandboxRetention",
     "StateRef",
-    "TaskExecutionError",
-    "TaskWorkflow",
-    "TaskWorkflowInput",
-    "TaskWorkflowResult",
-    "TemporalBenchmarkExecutor",
-    "TemporalTaskExecutor",
-    "benchmark_workflow_id",
-    "create_worker",
-    "create_workflow_runner",
+    "TaskExecutionResult",
     "execute_task",
-    "task_workflow_id",
 ]
 
 

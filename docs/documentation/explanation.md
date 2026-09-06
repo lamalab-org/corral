@@ -196,13 +196,12 @@ usage metadata; it never receives a complete `ExecutionState`. Event payloads
 are redacted before export, idempotent commit hashes are emitted once, and an
 observer failure cannot roll back persistence.
 
-## Why Temporal owns orchestration
+## Task and benchmark execution
 
-Temporal handles task attempts, retries, cancellation, task-DAG readiness,
-bounded parallelism, and benchmark Continue-As-New. Workflow history contains
-only serializable specifications and commit-backed projection references. Live
-agent objects, environment resources, stores, clients, and secrets remain
-worker-side.
+`execute_task` in `run.py` launches one task. `CorralRunner` schedules trials
+with asyncio, applies retries and concurrency limits, and waits for dependency
+outputs. Scheduling runs in the invoking process, while authored commits keep
+task state persisted independently.
 
 ## Why evaluation is separate
 

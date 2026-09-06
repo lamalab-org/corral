@@ -26,8 +26,6 @@ class ObservationContext:
     execution_id: str
     benchmark_run_id: str | None = None
     task_id: str | None = None
-    temporal_workflow_id: str | None = None
-    temporal_run_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

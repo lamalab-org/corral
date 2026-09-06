@@ -1,7 +1,7 @@
 # Custom metrics
 
-Metrics operate on the reporting projection produced after a Temporal benchmark
-workflow completes. They do not participate in task execution or scheduling.
+Metrics operate on the reporting projection produced after a benchmark
+completes. They do not participate in task execution or scheduling.
 
 Implement `Metric` for one benchmark-wide value:
 
@@ -46,11 +46,11 @@ class SubmittedPerTask(TaskMetric):
         return sum(trial.output_ready for trial in trials.trials)
 ```
 
-Pass metric instances when constructing the thin runner:
+Pass metric instances when constructing the runner:
 
 ```python
 runner = CorralRunner(
-    executor,
+    registry,
     task_metadata,
     state_store=state_store,
     metrics=[CompletedTrials(), SubmittedPerTask()],

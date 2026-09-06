@@ -1,4 +1,4 @@
-"""Public Corral API, loaded lazily for Temporal Workflow sandbox safety."""
+"""Public Corral API, loaded lazily."""
 
 from __future__ import annotations
 
@@ -6,14 +6,13 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
-    "ActivityPolicy": ("corral.orchestration", "ActivityPolicy"),
+    "RetryPolicy": ("corral.orchestration", "RetryPolicy"),
     "AgentRuntimeDefinition": ("corral.orchestration", "AgentRuntimeDefinition"),
     "BenchmarkTaskMetadata": ("corral.run", "BenchmarkTaskMetadata"),
-    "BenchmarkWorkflowInput": (
+    "BenchmarkInput": (
         "corral.orchestration",
-        "BenchmarkWorkflowInput",
+        "BenchmarkInput",
     ),
-    "CorralActivities": ("corral.orchestration", "CorralActivities"),
     "CorralRunner": ("corral.run", "CorralRunner"),
     "DockerSandboxSpec": ("corral.orchestration", "DockerSandboxSpec"),
     "EvaluationResult": ("corral.evaluation", "EvaluationResult"),
@@ -46,17 +45,8 @@ _EXPORTS = {
     "Scorer": ("corral.evaluation", "Scorer"),
     "TaskMetric": ("corral.report.metrics", "TaskMetric"),
     "TaskScorer": ("corral.evaluation", "TaskScorer"),
-    "TaskWorkflowInput": ("corral.orchestration", "TaskWorkflowInput"),
-    "TemporalBenchmarkExecutor": (
-        "corral.orchestration",
-        "TemporalBenchmarkExecutor",
-    ),
-    "TemporalTaskExecutor": (
-        "corral.orchestration",
-        "TemporalTaskExecutor",
-    ),
-    "create_worker": ("corral.orchestration", "create_worker"),
-    "execute_task": ("corral.orchestration", "execute_task"),
+    "RunTaskInput": ("corral.orchestration", "RunTaskInput"),
+    "execute_task": ("corral.run", "execute_task"),
     "get_default_metrics": ("corral.report.metrics", "get_default_metrics"),
     "load_environment_group": (
         "corral.runtime.environment_loader",
@@ -72,11 +62,9 @@ _EXPORTS = {
 __all__ = [
     "ENVIRONMENT_NAMES",
     "ENVIRONMENT_PRESETS",
-    "ActivityPolicy",
     "AgentRuntimeDefinition",
+    "BenchmarkInput",
     "BenchmarkTaskMetadata",
-    "BenchmarkWorkflowInput",
-    "CorralActivities",
     "CorralRunner",
     "DockerSandboxSpec",
     "EnvironmentName",
@@ -88,6 +76,8 @@ __all__ = [
     "MetricMetadata",
     "NoOpObserver",
     "Observer",
+    "RetryPolicy",
+    "RunTaskInput",
     "RuntimeRegistry",
     "SandboxMode",
     "SandboxProfile",
@@ -95,10 +85,6 @@ __all__ = [
     "Scorer",
     "TaskMetric",
     "TaskScorer",
-    "TaskWorkflowInput",
-    "TemporalBenchmarkExecutor",
-    "TemporalTaskExecutor",
-    "create_worker",
     "execute_task",
     "get_default_metrics",
     "load_environment_group",
