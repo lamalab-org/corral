@@ -109,7 +109,7 @@ async def main():
         )
     finally:
         registry.close()
-        store.close()
+        await store.aclose()
 
     print(f"status: {state.status}")
     print(f"answer: {state.submission}")

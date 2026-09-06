@@ -123,7 +123,7 @@ async def test_parallel_results_keep_chronology_and_decision_order(tmp_path):
     ]
     assert state.runtime.status == "submitted"
     assert state.runtime.metadata["execution_completed"] is True
-    store.close()
+    await store.aclose()
 
 
 class ChildAgent:
@@ -250,7 +250,7 @@ async def test_subagent_trace_is_private_until_imported(tmp_path):
     assert INSPECT_SUBAGENT_TOOL_NAME in {
         tool["function"]["name"] for tool in recovered_session.tools
     }
-    store.close()
+    await store.aclose()
 
 
 class RecoveryAgent:
@@ -304,7 +304,7 @@ async def test_accepted_submission_survives_cleanup_failure_and_retry(tmp_path):
         max_iterations=2,
     )
     assert retried.through_commit_hash == state.through_commit_hash
-    store.close()
+    await store.aclose()
 
 
 @pytest.mark.anyio()
@@ -408,7 +408,7 @@ async def test_running_tool_resumes_with_stable_invocation_id(tmp_path):
         )
         == 1
     )
-    store.close()
+    await store.aclose()
 
 
 class FailingObserver:
@@ -439,4 +439,4 @@ async def test_observer_failure_never_rolls_back_commits(tmp_path):
     assert (await store.for_execution("observer").head("main")).hash == (
         state.through_commit_hash
     )
-    store.close()
+    await store.aclose()

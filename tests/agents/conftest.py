@@ -1,9 +1,13 @@
 """Shared test fixtures and mock classes for agent tests."""
 
 import json
+from contextlib import AsyncExitStack
 from typing import Any
 
 import pytest
+from tests.agents import commit_session
+
+from corral.persistence import SQLiteCommitStore
 
 
 class MockPrompt:
@@ -202,3 +206,17 @@ class MockFunction:
             assert (
                 self.call_args_list[i] == expected
             ), f"Call {i}: expected {expected}, got {self.call_args_list[i]}"
+
+
+@pytest.fixture()
+async def session_stores(anyio_backend, monkeypatch):
+    """Close stores created by the session helper before the test loop exits."""
+    async with AsyncExitStack() as stack:
+
+        def create_store(*args, **kwargs):
+            store = SQLiteCommitStore(*args, **kwargs)
+            stack.push_async_callback(store.aclose)
+            return store
+
+        monkeypatch.setattr(commit_session, "SQLiteCommitStore", create_store)
+        yield

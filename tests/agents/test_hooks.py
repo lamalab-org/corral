@@ -15,6 +15,8 @@ from corral.core.action import Action
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
 
+pytestmark = pytest.mark.usefixtures("session_stores")
+
 
 @pytest.fixture()
 def anyio_backend():

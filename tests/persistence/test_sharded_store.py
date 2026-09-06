@@ -1,4 +1,3 @@
-import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -19,7 +18,8 @@ def anyio_backend():
     return "asyncio"
 
 
-def test_execution_shards_keep_state_and_snapshot_manifests_separate(tmp_path):
+@pytest.mark.anyio()
+async def test_execution_shards_keep_state_and_snapshot_manifests_separate(tmp_path):
     store = ShardedCommitStore(tmp_path / ".corral")
     first_dir = store.execution_dir("benchmark:task:0")
     second_dir = store.execution_dir("benchmark:task:1")
@@ -39,8 +39,8 @@ def test_execution_shards_keep_state_and_snapshot_manifests_separate(tmp_path):
 
     first_manager = store.workspace_manager("benchmark:task:0")
     second_manager = store.workspace_manager("benchmark:task:1")
-    first = asyncio.run(first_manager.snapshot(first_source))
-    second = asyncio.run(second_manager.snapshot(second_source))
+    first = await first_manager.snapshot(first_source)
+    second = await second_manager.snapshot(second_source)
 
     assert first.files["result.txt"].sha256 != second.files["result.txt"].sha256
     assert (
@@ -56,10 +56,11 @@ def test_execution_shards_keep_state_and_snapshot_manifests_separate(tmp_path):
         == second.files["result.txt"].sha256
     )
 
-    store.close()
+    await store.aclose()
 
 
-def test_snapshot_manifest_is_published_only_after_blob_storage(tmp_path):
+@pytest.mark.anyio()
+async def test_snapshot_manifest_is_published_only_after_blob_storage(tmp_path):
     store = ShardedCommitStore(tmp_path / ".corral")
     execution_id = "benchmark:task:0"
     source = tmp_path / "workspace"
@@ -67,22 +68,21 @@ def test_snapshot_manifest_is_published_only_after_blob_storage(tmp_path):
     (source / "data.txt").write_text("first")
     manager = store.workspace_manager(execution_id)
 
-    first = asyncio.run(manager.snapshot(source))
+    first = await manager.snapshot(source)
     (source / "data.txt").write_text("second")
-    second = asyncio.run(manager.snapshot(source, previous=first))
+    second = await manager.snapshot(source, previous=first)
 
     snapshots = store.execution_dir(execution_id) / "snapshots"
     assert (snapshots / "00000000.json").is_file()
     assert (snapshots / "00000001.json").is_file()
     latest = json.loads((snapshots / "latest.json").read_text())
     assert latest["revision"] == second.revision == 1
-    assert asyncio.run(
-        manager.artifact_store.contains(second.files["data.txt"].blob_ref)
-    )
-    store.close()
+    assert await manager.artifact_store.contains(second.files["data.txt"].blob_ref)
+    await store.aclose()
 
 
-def test_benchmark_run_uses_descriptive_task_and_k_directories(tmp_path):
+@pytest.mark.anyio()
+async def test_benchmark_run_uses_descriptive_task_and_k_directories(tmp_path):
     run_id = "agent-tool-calling__model-gpt-5.6__env-wetlab__k-2"
     run_dir = tmp_path / "runs" / run_id
     store = ShardedCommitStore(run_dir, benchmark_run_id=run_id)
@@ -96,7 +96,7 @@ def test_benchmark_run_uses_descriptive_task_and_k_directories(tmp_path):
     assert metadata["task_id"] == "qualysis_task_01"
     assert metadata["trial_index"] == 1
     assert metadata["k"] == 2
-    store.close()
+    await store.aclose()
 
 
 @pytest.mark.anyio()
@@ -148,4 +148,4 @@ async def test_benchmark_shard_exports_periodic_and_final_state_snapshots(tmp_pa
     final = json.loads((state_snapshots / "final.json").read_text())
     assert final["through_commit_hash"] == completed.hash
     assert final["runtime"]["status"] == "terminal"
-    store.close()
+    await store.aclose()

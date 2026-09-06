@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
-import sqlite3
 import tempfile
-import threading
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import aiosqlite
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import create_async_engine
+from tenacity import retry, retry_if_exception, stop_after_delay, wait_fixed
 
 from corral.core.commit import Commit, CommitRequest, canonical_json
 from corral.core.events import (
@@ -29,8 +34,15 @@ from corral.core.events import (
     ToolFailed,
     ToolStarted,
 )
-from corral.core.reducer import EventReducer, ReducerError, SharedStateConflictError
+from corral.core.reducer import EventReducer, ReducerError
 from corral.core.state import ExecutionState
+from corral.persistence._sqlite_schema import (
+    branch_heads,
+    commits,
+    idempotency_keys,
+    metadata,
+    snapshots,
+)
 from corral.persistence.base import (
     AuthorPermissionError,
     CommitConflictError,
@@ -41,7 +53,54 @@ from corral.persistence.base import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from sqlalchemy.engine import Connection, RowMapping
+    from sqlalchemy.ext.asyncio import AsyncConnection
+    from sqlalchemy.sql.elements import ColumnElement
+
     from corral.core.actors import ActorRef
+
+
+def _configure_connection(connection: Any, _record: Any) -> None:
+    # Let SQLAlchemy control BEGIN on every supported Python version.
+    connection.isolation_level = None
+    cursor = connection.cursor()
+    cursor.execute("PRAGMA foreign_keys = ON")
+    cursor.execute("PRAGMA synchronous = FULL")
+    cursor.close()
+    connection.run_async(_enable_wal)
+
+
+@retry(
+    retry=retry_if_exception(
+        lambda exc: isinstance(exc, aiosqlite.OperationalError)
+        and str(exc) == "database is locked"
+    ),
+    wait=wait_fixed(0.05),
+    stop=stop_after_delay(5),
+    reraise=True,
+)
+async def _enable_wal(connection: aiosqlite.Connection) -> None:
+    # Concurrent first connections can race the journal-mode change before
+    # BEGIN IMMEDIATE can serialize them. Retry without blocking the event loop.
+    async with connection.execute("PRAGMA journal_mode = WAL") as cursor:
+        await cursor.fetchone()
+
+
+def _begin_transaction(connection: Connection) -> None:
+    connection.exec_driver_sql(
+        "BEGIN IMMEDIATE"
+        if connection.get_execution_options().get("sqlite_write")
+        else "BEGIN"
+    )
+
+
+def _trace_filter(run_id: str) -> ColumnElement[bool]:
+    return sa.or_(
+        commits.c.author_run_id == run_id,
+        commits.c.requested_by_run_id == run_id,
+        sa.func.json_extract(commits.c.event_json, "$.agent_run_id") == run_id,
+        sa.func.json_extract(commits.c.event_json, "$.child_run_id") == run_id,
+    )
 
 
 def _utc_now() -> datetime:
@@ -231,20 +290,16 @@ class SQLiteCommitStore:
         )
         if self.state_snapshot_root is not None:
             self.state_snapshot_root.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
+        self._lock = asyncio.Lock()
         self._closed = False
-        self._connection = sqlite3.connect(
-            self.path,
-            isolation_level=None,
-            check_same_thread=False,
+        self._initialized = False
+        self._engine = create_async_engine(
+            sa.URL.create("sqlite+aiosqlite", database=str(self.path))
         )
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute("PRAGMA foreign_keys = ON")
-        self._connection.execute("PRAGMA journal_mode = WAL")
-        self._connection.execute("PRAGMA synchronous = FULL")
+        sa.event.listen(self._engine.sync_engine, "connect", _configure_connection)
+        sa.event.listen(self._engine.sync_engine, "begin", _begin_transaction)
         self._reducer = EventReducer()
         self._projection_cache: dict[tuple[str, str], ExecutionState] = {}
-        self._create_schema()
 
     def _publish_state_snapshot(
         self,
@@ -263,91 +318,42 @@ class SQLiteCommitStore:
         if terminal:
             _atomic_json(self.state_snapshot_root / "final.json", state_data)
 
-    def _create_schema(self) -> None:
-        self._connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS commits (
-                hash TEXT PRIMARY KEY,
-                schema_version INTEGER NOT NULL,
-                execution_id TEXT NOT NULL,
-                branch_id TEXT NOT NULL,
-                sequence INTEGER NOT NULL,
-                branch_sequence INTEGER NOT NULL,
-                parent_hash TEXT REFERENCES commits(hash),
-                based_on_hash TEXT REFERENCES commits(hash),
-                author_json TEXT NOT NULL,
-                author_kind TEXT NOT NULL,
-                author_id TEXT NOT NULL,
-                author_run_id TEXT NOT NULL,
-                parent_run_id TEXT,
-                event_type TEXT NOT NULL,
-                event_json TEXT NOT NULL,
-                action_id TEXT,
-                invocation_id TEXT,
-                requested_by_run_id TEXT,
-                occurred_at TEXT NOT NULL,
-                recorded_at TEXT NOT NULL,
-                UNIQUE (execution_id, sequence),
-                UNIQUE (execution_id, branch_id, branch_sequence)
-            );
-
-            CREATE TABLE IF NOT EXISTS branch_heads (
-                execution_id TEXT NOT NULL,
-                branch_id TEXT NOT NULL,
-                origin_hash TEXT REFERENCES commits(hash),
-                head_hash TEXT REFERENCES commits(hash),
-                PRIMARY KEY (execution_id, branch_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS idempotency_keys (
-                execution_id TEXT NOT NULL,
-                request_id TEXT NOT NULL,
-                commit_hash TEXT NOT NULL REFERENCES commits(hash),
-                PRIMARY KEY (execution_id, request_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS snapshots (
-                execution_id TEXT NOT NULL,
-                commit_hash TEXT PRIMARY KEY REFERENCES commits(hash),
-                state_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS commits_parent_idx ON commits(parent_hash);
-            CREATE INDEX IF NOT EXISTS commits_author_run_idx
-                ON commits(execution_id, author_run_id, sequence);
-            CREATE INDEX IF NOT EXISTS commits_action_idx
-                ON commits(execution_id, action_id, sequence);
-            CREATE INDEX IF NOT EXISTS commits_invocation_idx
-                ON commits(execution_id, invocation_id, sequence);
-            CREATE INDEX IF NOT EXISTS commits_requested_run_idx
-                ON commits(execution_id, requested_by_run_id, sequence);
-            """
-        )
+    @asynccontextmanager
+    async def _transaction(
+        self, *, write: bool = False
+    ) -> AsyncIterator[AsyncConnection]:
+        # Serialize this store's transactions and projection cache access. SQLite
+        # also serializes independent writers via BEGIN IMMEDIATE below.
+        async with self._lock:
+            self._ensure_open()
+            async with self._engine.connect() as connection:
+                if not self._initialized:
+                    await connection.execution_options(sqlite_write=True)
+                    async with connection.begin():
+                        await connection.run_sync(metadata.create_all)
+                    self._initialized = True
+                await connection.execution_options(sqlite_write=write)
+                async with connection.begin():
+                    yield connection
 
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("SQLiteCommitStore is closed")
 
-    def close(self) -> None:
-        with self._lock:
-            if not self._closed:
-                self._connection.close()
-                self._closed = True
-
-    def __enter__(self) -> SQLiteCommitStore:  # noqa: PYI034
-        self._ensure_open()
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        del args
-        self.close()
+    async def aclose(self) -> None:
+        async with self._lock:
+            await self._engine.dispose()
+            self._projection_cache.clear()
+            self._closed = True
 
     async def __aenter__(self) -> SQLiteCommitStore:  # noqa: PYI034
-        return self.__enter__()
+        async with self._transaction():
+            pass
+        return self
 
     async def __aexit__(self, *args: object) -> None:
-        self.__exit__(*args)
+        del args
+        await self.aclose()
 
     def bind(
         self,
@@ -450,22 +456,17 @@ class SQLiteCommitStore:
                 raise AuthorPermissionError("tool author does not match the action")
 
     @staticmethod
-    def _row_to_commit(row: sqlite3.Row) -> Commit:
+    def _row_to_commit(row: RowMapping) -> Commit:
         try:
             return Commit.model_validate(
                 {
-                    "schema_version": row["schema_version"],
-                    "hash": row["hash"],
-                    "execution_id": row["execution_id"],
-                    "branch_id": row["branch_id"],
-                    "sequence": row["sequence"],
-                    "branch_sequence": row["branch_sequence"],
-                    "parent_hash": row["parent_hash"],
-                    "based_on_hash": row["based_on_hash"],
+                    **{
+                        name: row[name]
+                        for name in Commit.model_fields
+                        if name not in {"author", "event"}
+                    },
                     "author": json.loads(row["author_json"]),
                     "event": json.loads(row["event_json"]),
-                    "occurred_at": row["occurred_at"],
-                    "recorded_at": row["recorded_at"],
                 }
             )
         except Exception as exc:
@@ -474,8 +475,8 @@ class SQLiteCommitStore:
             ) from exc
 
     @staticmethod
-    def _history_hashes(
-        connection: sqlite3.Connection, head_hash: str | None
+    async def _history_hashes(
+        connection: AsyncConnection, head_hash: str | None
     ) -> list[str]:
         hashes: list[str] = []
         current = head_hash
@@ -484,9 +485,12 @@ class SQLiteCommitStore:
             if current in seen:
                 raise CommitIntegrityError("commit parent history contains a cycle")
             seen.add(current)
-            row = connection.execute(
-                "SELECT hash, parent_hash FROM commits WHERE hash = ?", (current,)
-            ).fetchone()
+            result = await connection.execute(
+                sa.select(commits.c.hash, commits.c.parent_hash).where(
+                    commits.c.hash == current
+                )
+            )
+            row = result.mappings().first()
             if row is None:
                 raise CommitIntegrityError(
                     f"history references missing commit {current!r}"
@@ -495,22 +499,26 @@ class SQLiteCommitStore:
             current = row["parent_hash"]
         return hashes
 
-    def _materialize_locked(
+    async def _materialize(
         self,
+        connection: AsyncConnection,
         execution_id: str,
         branch_id: str,
         at_hash: str | None,
     ) -> ExecutionState:
-        branch = self._connection.execute(
-            "SELECT head_hash FROM branch_heads WHERE execution_id = ? AND branch_id = ?",
-            (execution_id, branch_id),
-        ).fetchone()
+        result = await connection.execute(
+            sa.select(branch_heads.c.head_hash).where(
+                branch_heads.c.execution_id == execution_id,
+                branch_heads.c.branch_id == branch_id,
+            )
+        )
+        branch = result.mappings().first()
         if branch is None:
             raise CommitNotFoundError(f"branch {branch_id!r} was not found")
         selected = at_hash or branch["head_hash"]
         if selected is None:
             raise CommitNotFoundError(f"branch {branch_id!r} has no commits")
-        history = self._history_hashes(self._connection, branch["head_hash"])
+        history = await self._history_hashes(connection, branch["head_hash"])
         if selected not in history:
             raise CommitNotFoundError(
                 f"commit {selected!r} does not belong to branch {branch_id!r}"
@@ -520,13 +528,15 @@ class SQLiteCommitStore:
         state: ExecutionState | None = None
         current: str | None = selected
         while current is not None:
-            snapshot = self._connection.execute(
-                "SELECT state_json FROM snapshots WHERE execution_id = ? AND commit_hash = ?",
-                (execution_id, current),
-            ).fetchone()
+            snapshot = await connection.scalar(
+                sa.select(snapshots.c.state_json).where(
+                    snapshots.c.execution_id == execution_id,
+                    snapshots.c.commit_hash == current,
+                )
+            )
             if snapshot is not None:
                 try:
-                    state = ExecutionState.model_validate_json(snapshot["state_json"])
+                    state = ExecutionState.model_validate_json(snapshot)
                 except Exception as exc:
                     raise CommitIntegrityError(
                         f"snapshot at {current!r} is invalid"
@@ -536,9 +546,10 @@ class SQLiteCommitStore:
                         "snapshot cutoff hash does not match its key"
                     )
                 break
-            row = self._connection.execute(
-                "SELECT * FROM commits WHERE hash = ?", (current,)
-            ).fetchone()
+            result = await connection.execute(
+                sa.select(commits).where(commits.c.hash == current)
+            )
+            row = result.mappings().first()
             if row is None:
                 raise CommitIntegrityError(f"commit {current!r} was not found")
             commit = self._row_to_commit(row)
@@ -579,263 +590,239 @@ class SQLiteCommitStore:
                 "request author does not match authenticated actor"
             )
         execution_id = self._execution(request.execution_id, bound_execution_id)
-        with self._lock:
-            connection = self._connection
-            connection.execute("BEGIN IMMEDIATE")
-            try:
-                existing = connection.execute(
-                    """SELECT c.* FROM idempotency_keys i
-                       JOIN commits c ON c.hash = i.commit_hash
-                       WHERE i.execution_id = ? AND i.request_id = ?""",
-                    (execution_id, request.request_id),
-                ).fetchone()
-                if existing is not None:
-                    persisted = self._row_to_commit(existing)
-                    if persisted.author != authenticated_author:
-                        raise AuthorPermissionError(
-                            "idempotency key belongs to another authenticated author"
-                        )
-                    if persisted.branch_id != request.branch_id:
-                        raise CommitConflictError(
-                            "idempotency key belongs to another branch"
-                        )
-                    stored_snapshot = connection.execute(
-                        "SELECT state_json FROM snapshots WHERE execution_id = ? AND commit_hash = ?",
-                        (execution_id, persisted.hash),
-                    ).fetchone()
-                    connection.commit()
-                    if stored_snapshot is not None:
-                        self._publish_state_snapshot(
-                            persisted,
-                            stored_snapshot["state_json"],
-                            terminal=isinstance(
-                                persisted.event, ExecutionCompleted | ExecutionFailed
-                            ),
-                        )
-                    return persisted
+        async with self._transaction(write=True) as connection:
+            commit, projected, state_json = await self._append_commit(
+                connection, request, execution_id
+            )
+        # Publish only after the transaction has committed successfully.
+        if state_json is not None:
+            self._publish_state_snapshot(
+                commit,
+                state_json,
+                terminal=isinstance(commit.event, ExecutionCompleted | ExecutionFailed),
+            )
+        if projected is not None:
+            self._projection_cache[(execution_id, request.branch_id)] = projected
+        return commit
 
-                branch = connection.execute(
-                    "SELECT head_hash FROM branch_heads WHERE execution_id = ? AND branch_id = ?",
-                    (execution_id, request.branch_id),
-                ).fetchone()
-                if branch is None:
-                    any_commit = connection.execute(
-                        "SELECT 1 FROM commits WHERE execution_id = ? LIMIT 1",
-                        (execution_id,),
-                    ).fetchone()
-                    if any_commit is not None or not isinstance(
-                        request.event, ExecutionStarted
-                    ):
-                        raise CommitNotFoundError(
-                            f"branch {request.branch_id!r} was not explicitly created"
-                        )
-                    connection.execute(
-                        "INSERT INTO branch_heads(execution_id, branch_id, origin_hash, head_hash) VALUES (?, ?, NULL, NULL)",
-                        (execution_id, request.branch_id),
-                    )
-                    head_hash = None
-                else:
-                    head_hash = branch["head_hash"]
+    async def _append_commit(
+        self,
+        connection: AsyncConnection,
+        request: CommitRequest,
+        execution_id: str,
+    ) -> tuple[Commit, ExecutionState | None, str | None]:
+        result = await connection.execute(
+            sa.select(commits)
+            .join(idempotency_keys)
+            .where(
+                idempotency_keys.c.execution_id == execution_id,
+                idempotency_keys.c.request_id == request.request_id,
+            )
+        )
+        existing = result.mappings().first()
+        if existing is not None:
+            persisted = self._row_to_commit(existing)
+            if persisted.author != request.author:
+                raise AuthorPermissionError(
+                    "idempotency key belongs to another authenticated author"
+                )
+            if persisted.branch_id != request.branch_id:
+                raise CommitConflictError("idempotency key belongs to another branch")
+            state_json = await connection.scalar(
+                sa.select(snapshots.c.state_json).where(
+                    snapshots.c.execution_id == execution_id,
+                    snapshots.c.commit_hash == persisted.hash,
+                )
+            )
+            return persisted, None, state_json
 
-                history = set(self._history_hashes(connection, head_hash))
-                if (
-                    request.based_on_hash is not None
-                    and request.based_on_hash not in history
-                ):
-                    raise CommitConflictError(
-                        "based_on_hash is not part of the selected branch history"
-                    )
-                if head_hash is None and request.based_on_hash is not None:
-                    raise CommitConflictError(
-                        "the first commit cannot be based on a hash"
-                    )
-                if head_hash is not None and request.based_on_hash is None:
-                    raise CommitConflictError(
-                        "non-initial commits must record based_on_hash"
-                    )
-                if isinstance(request.event, ContextImported) and any(
-                    commit_hash not in history
-                    for commit_hash in request.event.source_commit_ids
-                ):
-                    raise CommitConflictError(
-                        "imported source commits must belong to branch history"
-                    )
-                if isinstance(request.event, ContextImported):
-                    source_rows = connection.execute(
-                        """SELECT hash FROM commits
-                           WHERE execution_id = ? AND (
-                               author_run_id = ? OR requested_by_run_id = ? OR
-                               json_extract(event_json, '$.agent_run_id') = ? OR
-                               json_extract(event_json, '$.child_run_id') = ?
-                           )""",
-                        (
-                            execution_id,
-                            request.event.source_run_id,
-                            request.event.source_run_id,
-                            request.event.source_run_id,
-                            request.event.source_run_id,
-                        ),
-                    ).fetchall()
-                    source_hashes = {row["hash"] for row in source_rows}
-                    if any(
-                        commit_hash not in source_hashes
-                        for commit_hash in request.event.source_commit_ids
-                    ):
-                        raise CommitConflictError(
-                            "imported commits must belong to the selected source trace"
-                        )
-                if (
-                    isinstance(request.event, AgentCompleted)
-                    and request.event.trace_head is not None
-                    and request.event.trace_head not in history
-                ):
-                    raise CommitConflictError(
-                        "an agent trace head must belong to branch history"
-                    )
+        result = await connection.execute(
+            sa.select(branch_heads.c.head_hash).where(
+                branch_heads.c.execution_id == execution_id,
+                branch_heads.c.branch_id == request.branch_id,
+            )
+        )
+        branch = result.mappings().first()
+        if branch is None:
+            any_commit = await connection.scalar(
+                sa.select(commits.c.hash)
+                .where(commits.c.execution_id == execution_id)
+                .limit(1)
+            )
+            if any_commit is not None or not isinstance(
+                request.event, ExecutionStarted
+            ):
+                raise CommitNotFoundError(
+                    f"branch {request.branch_id!r} was not explicitly created"
+                )
+            await connection.execute(
+                branch_heads.insert().values(
+                    execution_id=execution_id, branch_id=request.branch_id
+                )
+            )
+            head_hash = None
+        else:
+            head_hash = branch["head_hash"]
 
-                state = (
-                    None
-                    if head_hash is None
-                    else self._materialize_locked(
-                        execution_id, request.branch_id, head_hash
+        history = set(await self._history_hashes(connection, head_hash))
+        if request.based_on_hash is not None and request.based_on_hash not in history:
+            raise CommitConflictError(
+                "based_on_hash is not part of the selected branch history"
+            )
+        if head_hash is None and request.based_on_hash is not None:
+            raise CommitConflictError("the first commit cannot be based on a hash")
+        if head_hash is not None and request.based_on_hash is None:
+            raise CommitConflictError("non-initial commits must record based_on_hash")
+        if isinstance(request.event, ContextImported) and any(
+            commit_hash not in history
+            for commit_hash in request.event.source_commit_ids
+        ):
+            raise CommitConflictError(
+                "imported source commits must belong to branch history"
+            )
+        if isinstance(request.event, ContextImported):
+            source_hashes = set(
+                await connection.scalars(
+                    sa.select(commits.c.hash).where(
+                        commits.c.execution_id == execution_id,
+                        _trace_filter(request.event.source_run_id),
                     )
                 )
-                self._validate_author(request, state)
-                sequence_row = connection.execute(
-                    "SELECT MAX(sequence) AS value FROM commits WHERE execution_id = ?",
-                    (execution_id,),
-                ).fetchone()
-                branch_sequence_row = connection.execute(
-                    "SELECT MAX(branch_sequence) AS value FROM commits WHERE execution_id = ? AND branch_id = ?",
-                    (execution_id, request.branch_id),
-                ).fetchone()
-                sequence = (
-                    0
-                    if sequence_row["value"] is None
-                    else int(sequence_row["value"]) + 1
+            )
+            if any(
+                commit_hash not in source_hashes
+                for commit_hash in request.event.source_commit_ids
+            ):
+                raise CommitConflictError(
+                    "imported commits must belong to the selected source trace"
                 )
-                branch_sequence = (
-                    0
-                    if branch_sequence_row["value"] is None
-                    else int(branch_sequence_row["value"]) + 1
-                )
-                recorded_at = _utc_now()
-                occurred_at = request.occurred_at or recorded_at
-                commit = Commit.create(
+        if (
+            isinstance(request.event, AgentCompleted)
+            and request.event.trace_head is not None
+            and request.event.trace_head not in history
+        ):
+            raise CommitConflictError(
+                "an agent trace head must belong to branch history"
+            )
+
+        state = (
+            None
+            if head_hash is None
+            else await self._materialize(
+                connection, execution_id, request.branch_id, head_hash
+            )
+        )
+        self._validate_author(request, state)
+        sequence = await connection.scalar(
+            sa.select(sa.func.coalesce(sa.func.max(commits.c.sequence), -1) + 1).where(
+                commits.c.execution_id == execution_id
+            )
+        )
+        branch_sequence = await connection.scalar(
+            sa.select(
+                sa.func.coalesce(sa.func.max(commits.c.branch_sequence), -1) + 1
+            ).where(
+                commits.c.execution_id == execution_id,
+                commits.c.branch_id == request.branch_id,
+            )
+        )
+        recorded_at = _utc_now()
+        occurred_at = request.occurred_at or recorded_at
+        commit = Commit.create(
+            execution_id=execution_id,
+            branch_id=request.branch_id,
+            sequence=sequence,
+            branch_sequence=branch_sequence,
+            parent_hash=head_hash,
+            based_on_hash=request.based_on_hash,
+            author=request.author,
+            event=request.event,
+            occurred_at=occurred_at,
+            recorded_at=recorded_at,
+        )
+        try:
+            projected = self._reducer.apply(state, commit)
+        except ReducerError as exc:
+            raise CommitConflictError(str(exc)) from exc
+
+        action_id, invocation_id, requested_by_run_id = self._correlation(request.event)
+        await connection.execute(
+            commits.insert().values(
+                **commit.model_dump(
+                    exclude={"author", "event", "occurred_at", "recorded_at"}
+                ),
+                author_json=canonical_json(commit.author.model_dump(mode="json")),
+                author_kind=commit.author.kind,
+                author_id=commit.author.actor_id,
+                author_run_id=commit.author.run_id,
+                parent_run_id=commit.author.parent_run_id,
+                event_type=commit.event.type,
+                event_json=canonical_json(commit.event.model_dump(mode="json")),
+                action_id=action_id,
+                invocation_id=invocation_id,
+                requested_by_run_id=requested_by_run_id,
+                occurred_at=commit.occurred_at.isoformat(),
+                recorded_at=commit.recorded_at.isoformat(),
+            )
+        )
+        await connection.execute(
+            idempotency_keys.insert().values(
+                execution_id=execution_id,
+                request_id=request.request_id,
+                commit_hash=commit.hash,
+            )
+        )
+        await connection.execute(
+            branch_heads.update()
+            .where(
+                branch_heads.c.execution_id == execution_id,
+                branch_heads.c.branch_id == request.branch_id,
+            )
+            .values(head_hash=commit.hash)
+        )
+        terminal = isinstance(request.event, ExecutionCompleted | ExecutionFailed)
+        state_json = None
+        if commit.sequence % self.snapshot_interval == 0 or terminal:
+            state_json = projected.model_dump_json()
+            # A new commit has a new hash; idempotent appends returned above.
+            await connection.execute(
+                snapshots.insert().values(
                     execution_id=execution_id,
-                    branch_id=request.branch_id,
-                    sequence=sequence,
-                    branch_sequence=branch_sequence,
-                    parent_hash=head_hash,
-                    based_on_hash=request.based_on_hash,
-                    author=request.author,
-                    event=request.event,
-                    occurred_at=occurred_at,
-                    recorded_at=recorded_at,
+                    commit_hash=commit.hash,
+                    state_json=state_json,
+                    created_at=recorded_at.isoformat(),
                 )
-                try:
-                    projected = self._reducer.apply(state, commit)
-                except SharedStateConflictError as exc:
-                    raise CommitConflictError(str(exc)) from exc
-                except ReducerError as exc:
-                    raise CommitConflictError(str(exc)) from exc
-
-                action_id, invocation_id, requested_by_run_id = self._correlation(
-                    request.event
-                )
-                connection.execute(
-                    """INSERT INTO commits(
-                           hash, schema_version, execution_id, branch_id, sequence,
-                           branch_sequence, parent_hash, based_on_hash, author_json,
-                           author_kind, author_id, author_run_id, parent_run_id,
-                           event_type, event_json, action_id, invocation_id,
-                           requested_by_run_id, occurred_at, recorded_at
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        commit.hash,
-                        commit.schema_version,
-                        commit.execution_id,
-                        commit.branch_id,
-                        commit.sequence,
-                        commit.branch_sequence,
-                        commit.parent_hash,
-                        commit.based_on_hash,
-                        canonical_json(commit.author.model_dump(mode="json")),
-                        commit.author.kind,
-                        commit.author.actor_id,
-                        commit.author.run_id,
-                        commit.author.parent_run_id,
-                        commit.event.type,
-                        canonical_json(commit.event.model_dump(mode="json")),
-                        action_id,
-                        invocation_id,
-                        requested_by_run_id,
-                        commit.occurred_at.isoformat(),
-                        commit.recorded_at.isoformat(),
-                    ),
-                )
-                connection.execute(
-                    "INSERT INTO idempotency_keys(execution_id, request_id, commit_hash) VALUES (?, ?, ?)",
-                    (execution_id, request.request_id, commit.hash),
-                )
-                connection.execute(
-                    "UPDATE branch_heads SET head_hash = ? WHERE execution_id = ? AND branch_id = ?",
-                    (commit.hash, execution_id, request.branch_id),
-                )
-                terminal_snapshot = isinstance(
-                    request.event, ExecutionCompleted | ExecutionFailed
-                )
-                state_json: str | None = None
-                if commit.sequence % self.snapshot_interval == 0 or terminal_snapshot:
-                    state_json = projected.model_dump_json()
-                    connection.execute(
-                        "INSERT OR REPLACE INTO snapshots(execution_id, commit_hash, state_json, created_at) VALUES (?, ?, ?, ?)",
-                        (
-                            execution_id,
-                            commit.hash,
-                            state_json,
-                            recorded_at.isoformat(),
-                        ),
-                    )
-                connection.commit()
-                if state_json is not None:
-                    self._publish_state_snapshot(
-                        commit,
-                        state_json,
-                        terminal=terminal_snapshot,
-                    )
-                self._projection_cache[(execution_id, request.branch_id)] = projected
-                return commit
-            except Exception:
-                if connection.in_transaction:
-                    connection.rollback()
-                raise
+            )
+        return commit, projected, state_json
 
     async def head(
         self, branch_id: str, *, execution_id: str | None = None
     ) -> Commit | None:
-        self._ensure_open()
         execution_id = self._execution(execution_id)
-        with self._lock:
-            row = self._connection.execute(
-                """SELECT c.* FROM branch_heads b LEFT JOIN commits c ON c.hash = b.head_hash
-                   WHERE b.execution_id = ? AND b.branch_id = ?""",
-                (execution_id, branch_id),
-            ).fetchone()
-        if row is None or row["hash"] is None:
-            return None
-        return self._row_to_commit(row)
+        async with self._transaction() as connection:
+            result = await connection.execute(
+                sa.select(commits)
+                .join(branch_heads, commits.c.hash == branch_heads.c.head_hash)
+                .where(
+                    branch_heads.c.execution_id == execution_id,
+                    branch_heads.c.branch_id == branch_id,
+                )
+            )
+            row = result.mappings().first()
+        return None if row is None else self._row_to_commit(row)
 
     async def get_commit(
         self, commit_hash: str, *, execution_id: str | None = None
     ) -> Commit:
-        self._ensure_open()
         execution_id = self._execution(execution_id)
-        with self._lock:
-            row = self._connection.execute(
-                "SELECT * FROM commits WHERE execution_id = ? AND hash = ?",
-                (execution_id, commit_hash),
-            ).fetchone()
+        async with self._transaction() as connection:
+            result = await connection.execute(
+                sa.select(commits).where(
+                    commits.c.execution_id == execution_id,
+                    commits.c.hash == commit_hash,
+                )
+            )
+            row = result.mappings().first()
         if row is None:
             raise CommitNotFoundError(f"commit {commit_hash!r} was not found")
         return self._row_to_commit(row)
@@ -847,22 +834,21 @@ class SQLiteCommitStore:
         *,
         execution_id: str | None = None,
     ) -> ExecutionState:
-        self._ensure_open()
         execution_id = self._execution(execution_id)
-        with self._lock:
+        async with self._transaction() as connection:
             if at_hash is None:
                 cached = self._projection_cache.get((execution_id, branch_id))
-                head = self._connection.execute(
-                    "SELECT head_hash FROM branch_heads WHERE execution_id = ? AND branch_id = ?",
-                    (execution_id, branch_id),
-                ).fetchone()
-                if (
-                    cached is not None
-                    and head is not None
-                    and cached.through_commit_hash == head["head_hash"]
-                ):
+                head_hash = await connection.scalar(
+                    sa.select(branch_heads.c.head_hash).where(
+                        branch_heads.c.execution_id == execution_id,
+                        branch_heads.c.branch_id == branch_id,
+                    )
+                )
+                if cached is not None and cached.through_commit_hash == head_hash:
                     return cached
-            state = self._materialize_locked(execution_id, branch_id, at_hash)
+            state = await self._materialize(
+                connection, execution_id, branch_id, at_hash
+            )
             if at_hash is None:
                 self._projection_cache[(execution_id, branch_id)] = state
             return state
@@ -874,38 +860,33 @@ class SQLiteCommitStore:
         from_hash: str,
         execution_id: str | None = None,
     ) -> None:
-        self._ensure_open()
         selected_execution = self._execution(execution_id)
         if not branch_id:
             raise ValueError("branch_id cannot be empty")
-        with self._lock:
-            connection = self._connection
-            connection.execute("BEGIN IMMEDIATE")
-            try:
-                source = connection.execute(
-                    "SELECT execution_id FROM commits WHERE hash = ?", (from_hash,)
-                ).fetchone()
-                if source is None:
-                    raise CommitNotFoundError(f"commit {from_hash!r} was not found")
-                if source["execution_id"] != selected_execution:
-                    raise CommitConflictError(
-                        "branch source belongs to another execution"
-                    )
-                existing = connection.execute(
-                    "SELECT 1 FROM branch_heads WHERE execution_id = ? AND branch_id = ?",
-                    (selected_execution, branch_id),
-                ).fetchone()
-                if existing is not None:
-                    raise CommitConflictError(f"branch {branch_id!r} already exists")
-                connection.execute(
-                    "INSERT INTO branch_heads(execution_id, branch_id, origin_hash, head_hash) VALUES (?, ?, ?, ?)",
-                    (selected_execution, branch_id, from_hash, from_hash),
+        async with self._transaction(write=True) as connection:
+            source = await connection.scalar(
+                sa.select(commits.c.execution_id).where(commits.c.hash == from_hash)
+            )
+            if source is None:
+                raise CommitNotFoundError(f"commit {from_hash!r} was not found")
+            if source != selected_execution:
+                raise CommitConflictError("branch source belongs to another execution")
+            existing = await connection.scalar(
+                sa.select(branch_heads.c.branch_id).where(
+                    branch_heads.c.execution_id == selected_execution,
+                    branch_heads.c.branch_id == branch_id,
                 )
-                connection.commit()
-            except Exception:
-                if connection.in_transaction:
-                    connection.rollback()
-                raise
+            )
+            if existing is not None:
+                raise CommitConflictError(f"branch {branch_id!r} already exists")
+            await connection.execute(
+                branch_heads.insert().values(
+                    execution_id=selected_execution,
+                    branch_id=branch_id,
+                    origin_hash=from_hash,
+                    head_hash=from_hash,
+                )
+            )
 
     async def iter_commits(
         self,
@@ -915,50 +896,51 @@ class SQLiteCommitStore:
         through_hash: str | None = None,
         execution_id: str | None = None,
     ) -> AsyncIterator[Commit]:
-        self._ensure_open()
         execution_id = self._execution(execution_id)
-        with self._lock:
+        query = (
+            sa.select(commits)
+            .where(
+                commits.c.execution_id == execution_id,
+                commits.c.sequence > after_sequence,
+            )
+            .order_by(commits.c.sequence)
+        )
+        async with self._transaction() as connection:
             if branch_id is None:
                 if through_hash is not None:
-                    row = self._connection.execute(
-                        "SELECT sequence FROM commits WHERE execution_id = ? AND hash = ?",
-                        (execution_id, through_hash),
-                    ).fetchone()
-                    if row is None:
+                    maximum = await connection.scalar(
+                        sa.select(commits.c.sequence).where(
+                            commits.c.execution_id == execution_id,
+                            commits.c.hash == through_hash,
+                        )
+                    )
+                    if maximum is None:
                         raise CommitNotFoundError(
                             f"commit {through_hash!r} was not found"
                         )
-                    maximum = row["sequence"]
-                else:
-                    maximum = 2**63 - 1
-                rows = self._connection.execute(
-                    "SELECT * FROM commits WHERE execution_id = ? AND sequence > ? AND sequence <= ? ORDER BY sequence",
-                    (execution_id, after_sequence, maximum),
-                ).fetchall()
+                    query = query.where(commits.c.sequence <= maximum)
             else:
-                branch = self._connection.execute(
-                    "SELECT head_hash FROM branch_heads WHERE execution_id = ? AND branch_id = ?",
-                    (execution_id, branch_id),
-                ).fetchone()
+                result = await connection.execute(
+                    sa.select(branch_heads.c.head_hash).where(
+                        branch_heads.c.execution_id == execution_id,
+                        branch_heads.c.branch_id == branch_id,
+                    )
+                )
+                branch = result.mappings().first()
                 if branch is None:
                     raise CommitNotFoundError(f"branch {branch_id!r} was not found")
                 head_hash = through_hash or branch["head_hash"]
-                branch_history = self._history_hashes(
-                    self._connection, branch["head_hash"]
-                )
-                if head_hash not in branch_history:
+                history = await self._history_hashes(connection, branch["head_hash"])
+                if head_hash not in history:
                     raise CommitNotFoundError(
                         f"commit {head_hash!r} does not belong to branch {branch_id!r}"
                     )
-                hashes = self._history_hashes(self._connection, head_hash)
-                if not hashes:
-                    rows = []
-                else:
-                    placeholders = ",".join("?" for _ in hashes)
-                    rows = self._connection.execute(
-                        f"SELECT * FROM commits WHERE hash IN ({placeholders}) AND sequence > ? ORDER BY sequence",
-                        (*hashes, after_sequence),
-                    ).fetchall()
+                # History is newest first, so the suffix includes the selected
+                # commit and its ancestors without a second database traversal.
+                query = query.where(
+                    commits.c.hash.in_(history[history.index(head_hash) :])
+                )
+            rows = (await connection.execute(query)).mappings().all()
         for row in rows:
             yield self._row_to_commit(row)
 
@@ -986,27 +968,27 @@ class SQLiteCommitStore:
                 or getattr(commit.event, "agent_run_id", None) == run_id
                 or getattr(commit.event, "child_run_id", None) == run_id
             )
-        with self._lock:
-            rows = self._connection.execute(
-                """SELECT * FROM commits
-                   WHERE execution_id = ? AND (
-                       author_run_id = ? OR requested_by_run_id = ? OR
-                       json_extract(event_json, '$.agent_run_id') = ? OR
-                       json_extract(event_json, '$.child_run_id') = ?
-                   ) ORDER BY sequence""",
-                (execution_id, run_id, run_id, run_id, run_id),
-            ).fetchall()
+        async with self._transaction() as connection:
+            result = await connection.execute(
+                sa.select(commits)
+                .where(
+                    commits.c.execution_id == execution_id,
+                    _trace_filter(run_id),
+                )
+                .order_by(commits.c.sequence)
+            )
+            rows = result.mappings().all()
         return tuple(self._row_to_commit(row) for row in rows)
 
-    def snapshot_count(self) -> int:
+    async def snapshot_count(self) -> int:
         """Return the number of projections persisted as replay accelerators."""
         execution_id = self._execution(None)
-        with self._lock:
-            row = self._connection.execute(
-                "SELECT COUNT(*) AS value FROM snapshots WHERE execution_id = ?",
-                (execution_id,),
-            ).fetchone()
-        return int(row["value"])
+        async with self._transaction() as connection:
+            return await connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(snapshots)
+                .where(snapshots.c.execution_id == execution_id)
+            )
 
 
 __all__ = ["SQLiteCommitStore"]

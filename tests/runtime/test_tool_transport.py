@@ -42,8 +42,8 @@ def echo(text: str) -> str:
 
 
 @pytest.fixture()
-def runtime(tmp_path):
-    with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
+async def runtime(tmp_path):
+    async with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
         yield TaskRuntime(store, NoOpObserver())
 
 
@@ -141,7 +141,7 @@ async def test_python_agent_runs_without_a_listener(runtime, monkeypatch, standa
             )
             state = result.state
         finally:
-            session.state_store.close()
+            await session.state_store.aclose()
     else:
         state = await run(runtime, LocalAgent())
     assert state.submission == "done", state.runtime.metadata
@@ -518,7 +518,7 @@ async def test_standalone_session_owns_one_host_shared_with_delegates(monkeypatc
         assert len(hosts) == 1
         assert hosts[0]._closed
     finally:
-        session.state_store.close()
+        await session.state_store.aclose()
 
 
 @pytest.mark.anyio()
@@ -571,7 +571,7 @@ async def test_handled_child_failure_preserves_parent_completion(
         assert result.final_commit.event.metadata == {"recovered": True}
         assert result.final_commit.event.result_summary["answer"] == "fallback"
     finally:
-        session.state_store.close()
+        await session.state_store.aclose()
 
 
 @pytest.mark.anyio()
@@ -597,7 +597,7 @@ async def test_unobserved_child_failure_still_propagates_at_completion():
                 max_iterations=10,
             )
     finally:
-        session.state_store.close()
+        await session.state_store.aclose()
 
 
 @pytest.mark.anyio()

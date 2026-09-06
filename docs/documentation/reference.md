@@ -81,6 +81,9 @@ invocation before the agent loop continues.
 API is `append`, `head`, `iter_commits`, `materialize`, `get_commit`, and
 `create_branch`. Agent and tool code obtains a trusted append capability with
 `bind(actor, branch_id=...)`; runtime code cannot supply ordering or hash fields.
+The store uses SQLAlchemy Core with aiosqlite. Database initialization happens
+on first use; use `async with SQLiteCommitStore(...)` or `await store.aclose()`
+to release its connections. `ShardedCommitStore` uses the same async cleanup API.
 
 ## Task execution
 

@@ -461,7 +461,7 @@ async def test_claude_submits_through_the_session_mcp_tool(monkeypatch, tmp_path
         toolset=Toolset(pool={}, workspace_factory=None),
     )
 
-    with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
+    async with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
         final = await TaskRuntime(store).run(
             ClaudeCodeAgent(),
             environment,

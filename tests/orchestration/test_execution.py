@@ -196,7 +196,7 @@ async def test_execution_restores_prior_projection_for_reflective_agents(tmp_pat
         )
     finally:
         registry.close()
-        store.close()
+        await store.aclose()
 
     assert result.submission == "42"
     assert agent.seen_previous_hash == prior.through_commit_hash
@@ -236,7 +236,7 @@ async def test_executions_do_not_serialize_requests_by_agent_id(tmp_path):
         )
     finally:
         registry.close()
-        store.close()
+        await store.aclose()
 
     assert first.submission == "42"
     assert second.submission == "42"
@@ -296,7 +296,7 @@ async def test_evaluation_uses_durable_snapshot_after_live_workspace_is_deleted(
         )
     finally:
         registry.close()
-        store.close()
+        await store.aclose()
 
     assert not live_workspace.exists()
     assert evaluation.score == 1.0
@@ -366,7 +366,7 @@ async def test_direct_task_and_benchmark_lifecycle(tmp_path):
         assert all(o.context.benchmark_run_id == "benchmark-1" for o in evaluations)
     finally:
         registry.close()
-        store.close()
+        await store.aclose()
 
 
 @pytest.mark.anyio()
@@ -401,7 +401,7 @@ async def test_execution_forwards_docker_runtime_definitions(tmp_path):
         )
     finally:
         registry.close()
-        store.close()
+        await store.aclose()
     assert result.submission == "42"
     request, context = docker_launcher.requests[0]
     assert request.sandbox.mode == "docker"

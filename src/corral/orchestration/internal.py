@@ -180,7 +180,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
     finally:
         if registry is not None:
             registry.close()
-        store.close()
+        await store.aclose()
         _restore_host_ownership(checkpoint_root)
     return 0
 

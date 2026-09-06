@@ -144,4 +144,4 @@ async def test_docker_launcher_uses_one_hardened_container_and_host_shard(
     assert any("dst=/corral-state" in value for value in create)
     assert any(command[1:3] == ("rm", "--force") for command in commands)
     assert any(command[1:3] == ("volume", "rm") for command in commands)
-    store.close()
+    await store.aclose()

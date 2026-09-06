@@ -272,7 +272,7 @@ async def test_openhands_run_data_is_folded_into_final_state(monkeypatch, tmp_pa
     )
     agent = OpenHandsAgent(model="openai/test", api_key="key", system_prompt="system")
 
-    with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
+    async with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
         final = await TaskRuntime(store).run(
             agent,
             environment,

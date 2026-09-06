@@ -124,8 +124,8 @@ class ExecutionShard:
         )
         self._view = self._store.for_execution(execution_id)
 
-    def close(self) -> None:
-        self._store.close()
+    async def aclose(self) -> None:
+        await self._store.aclose()
 
     def bind(
         self,
@@ -307,27 +307,27 @@ class ShardedCommitStore:
     def workspace_manager(self, execution_id: str) -> WorkspaceManager:
         return self.for_execution(execution_id).workspace_manager
 
-    def close_execution(self, execution_id: str) -> None:
+    async def close_execution(self, execution_id: str) -> None:
         """Close a host connection before a container opens the same shard."""
         with self._lock:
             shard = self._shards.pop(execution_id, None)
         if shard is not None:
-            shard.close()
+            await shard.aclose()
 
-    def close(self) -> None:
+    async def aclose(self) -> None:
         with self._lock:
             shards = tuple(self._shards.values())
             self._shards.clear()
             self._closed = True
         for shard in shards:
-            shard.close()
+            await shard.aclose()
 
-    def __enter__(self) -> Self:
+    async def __aenter__(self) -> Self:
         return self
 
-    def __exit__(self, *args: object) -> None:
+    async def __aexit__(self, *args: object) -> None:
         del args
-        self.close()
+        await self.aclose()
 
 
 __all__ = ["ExecutionShard", "ShardedCommitStore", "execution_shard_name"]

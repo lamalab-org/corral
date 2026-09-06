@@ -370,7 +370,7 @@ class DockerTaskLauncher:
         shard = Path(self.state_store.execution_dir(request.execution_id)).resolve()
         close_execution = getattr(self.state_store, "close_execution", None)
         if close_execution is not None:
-            close_execution(request.execution_id)
+            await close_execution(request.execution_id)
         request_path = shard / "request.json"
         result_path = shard / "result.json"
         result_path.unlink(missing_ok=True)

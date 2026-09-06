@@ -108,20 +108,20 @@ async def test_linear_stale_appends_and_replay_use_small_events(tmp_path):
     assert commits[-1].based_on_hash == started.hash
     replayed = await store.materialize("main")
     assert len(replayed.conversations["main-run"]) == 100
-    assert 0 < store.snapshot_count() < len(commits)
+    assert 0 < await store.snapshot_count() < len(commits)
 
     connection = sqlite3.connect(store.path)
     payloads = [row[0] for row in connection.execute("SELECT event_json FROM commits")]
     assert all('"conversations"' not in payload for payload in payloads)
     assert all('"agent_runs"' not in payload for payload in payloads)
     connection.close()
-    store.close()
+    await store.aclose()
 
     reopened = SQLiteCommitStore(
         tmp_path / "execution.sqlite3", "execution", snapshot_interval=50
     )
     assert await reopened.materialize("main") == replayed
-    reopened.close()
+    await reopened.aclose()
 
 
 @pytest.mark.anyio()
@@ -174,7 +174,7 @@ async def test_idempotency_explicit_branching_and_author_binding(tmp_path):
     assert experiment.parent_hash == main_started.hash
     assert (await store.head("main")).hash == first.hash
     assert (await store.head("experiment")).hash == experiment.hash
-    store.close()
+    await store.aclose()
 
 
 @pytest.mark.anyio()
@@ -276,7 +276,7 @@ async def test_shared_preconditions_reject_stale_tool_effects(tmp_path):
                 ),
             )
         )
-    store.close()
+    await store.aclose()
 
 
 @pytest.mark.anyio()
@@ -405,7 +405,7 @@ async def test_submission_allows_only_cleanup_turns_until_execution_completion(
                 ),
             )
         )
-    store.close()
+    await store.aclose()
 
 
 @pytest.mark.anyio()
@@ -527,4 +527,4 @@ async def test_agent_contexts_are_private_until_explicit_import(tmp_path):
     )
     state = await store.materialize("main", imported.hash)
     assert "selected summary" in str(resolver.for_agent(state, "parent").messages)
-    store.close()
+    await store.aclose()

@@ -549,7 +549,7 @@ async def run_benchmark(
         raise
     finally:
         registry.close()
-        store.close()
+        await store.aclose()
 
     _print_results(run_id, result)
     sys.stdout.write(f"Outputs: {run_dir}\n")
@@ -607,7 +607,7 @@ async def run_task(args: argparse.Namespace) -> int:
         )
     finally:
         registry.close()
-        store.close()
+        await store.aclose()
 
     answer = json.dumps(state.submission, ensure_ascii=False)
     sys.stdout.write(

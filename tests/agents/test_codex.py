@@ -236,7 +236,7 @@ async def test_codex_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
     )
     agent = CodexAgent(model="gpt-test", system_prompt="system")
 
-    with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
+    async with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
         final = await TaskRuntime(store).run(
             agent,
             environment,
