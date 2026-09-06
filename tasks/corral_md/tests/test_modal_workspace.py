@@ -205,8 +205,8 @@ def test_md_prompt_requires_workspace_relative_paths(tmp_path: Path) -> None:
         toolset=Toolset(workspace_factory=None),
     )
 
-    state = environment.initial_state(state_id="state")
-    prompt = state.metadata.task["prompt"]
+    started = environment.initial_event(execution_id="execution")
+    prompt = started.task["prompt"]
 
     assert "Always pass workspace-relative POSIX paths" in prompt
     assert str(environment.workspace_path) not in prompt

@@ -106,7 +106,6 @@ def track_hosts(monkeypatch):
             yield host
 
     monkeypatch.setattr("corral.runtime.task_runner.open_mcp_host", open_host)
-    monkeypatch.setattr("corral.agents.session.open_mcp_host", open_host)
     return hosts
 
 
@@ -122,6 +121,8 @@ async def test_python_agent_runs_without_a_listener(runtime, monkeypatch, standa
 
     class LocalAgent:
         async def run_session(self, session):
+            if standalone:
+                assert session.mcp_host is None
             assert session.tool_connection.transport == "python"
             assert session.tool_connection.url is None
             assert await call_tool(session, "echo", {"text": "local"}) == "local"
@@ -146,10 +147,11 @@ async def test_python_agent_runs_without_a_listener(runtime, monkeypatch, standa
         state = await run(runtime, LocalAgent())
     assert state.submission == "done", state.runtime.metadata
     assert state.tool_statistics == {"echo": 1, "submit_answer": 1}
-    assert len(hosts) == 1
-    assert hosts[0].port is None
-    assert hosts[0]._closed
-    assert not hosts[0]._bindings
+    assert len(hosts) == (0 if standalone else 1)
+    for host in hosts:
+        assert host.port is None
+        assert host._closed
+        assert not host._bindings
 
 
 @pytest.mark.anyio()
@@ -486,37 +488,78 @@ async def test_recovery_uses_fresh_binding_and_completed_state_starts_no_host(
 
 
 @pytest.mark.anyio()
-async def test_standalone_session_owns_one_host_shared_with_delegates(monkeypatch):
-    hosts = track_hosts(monkeypatch)
+@pytest.mark.parametrize("invocation", ["direct", "delegate", "subagent"])
+async def test_standalone_mcp_requires_a_caller_owned_host(monkeypatch, invocation):
+    def unexpected_socket(*args, **kwargs):
+        pytest.fail("a session without a host must not create a listener")
 
+    monkeypatch.setattr("corral.backend.mcp.socket.socket", unexpected_socket)
+
+    class MCPAgent:
+        tool_transport = "mcp"
+
+        async def run_session(self, session):
+            pytest.fail("an MCP agent must not run without a host")
+
+    class Parent:
+        async def run_session(self, session):
+            if invocation == "delegate":
+                return await session.run_delegate(MCPAgent())
+            child_id = await session.spawn_subagent(MCPAgent(), handoff="use MCP")
+            return await session.wait_for_subagent(child_id)
+
+    session = await start_session(make_environment())
+    try:
+        with pytest.raises(RuntimeError, match="MCP agents require.*pass mcp_host"):
+            await run_agent_session(
+                MCPAgent() if invocation == "direct" else Parent(),
+                session.environment,
+                session.state,
+                actor=session.actor,
+                state_store=session.state_store,
+                max_iterations=10,
+            )
+    finally:
+        await session.state_store.aclose()
+
+
+@pytest.mark.anyio()
+@pytest.mark.parametrize("parent_transport", ["python", "mcp"])
+async def test_standalone_session_borrows_host_shared_with_delegates(parent_transport):
     class Delegate:
         tool_transport = "mcp"
 
         async def run_session(self, session):
-            assert session.mcp_host is hosts[0]
+            assert session.mcp_host is host
             await call_tool(session, "echo", {"text": "standalone delegate"})
             return AgentOutcome(status="iteration_limit", error="budget ended")
 
     class Parent:
+        tool_transport = parent_transport
+
         async def run_session(self, session):
-            assert session.mcp_host is hosts[0]
+            assert session.mcp_host is host
             await session.run_delegate(Delegate())
             await call_tool(session, "submit_answer", {"answer": "done"})
             return AgentOutcome(status="completed", answer="done")
 
     session = await start_session(make_environment())
     try:
-        result = await run_agent_session(
-            Parent(),
-            session.environment,
-            session.state,
-            actor=session.actor,
-            state_store=session.state_store,
-            max_iterations=10,
-        )
-        assert result.state.submission == "done"
-        assert len(hosts) == 1
-        assert hosts[0]._closed
+        async with open_mcp_host() as host:
+            result = await run_agent_session(
+                Parent(),
+                session.environment,
+                session.state,
+                actor=session.actor,
+                state_store=session.state_store,
+                max_iterations=10,
+                mcp_host=host,
+            )
+            assert result.state.submission == "done"
+            assert host.port is not None
+            assert not host._closed
+            assert not host._bindings
+        assert host._closed
     finally:
         await session.state_store.aclose()
 
@@ -558,14 +601,16 @@ async def test_handled_child_failure_preserves_parent_completion(
 
     session = await start_session(make_environment())
     try:
-        result = await run_agent_session(
-            Parent() if nested else RecoveringAgent(),
-            session.environment,
-            session.state,
-            actor=session.actor,
-            state_store=session.state_store,
-            max_iterations=10,
-        )
+        async with open_mcp_host() as host:
+            result = await run_agent_session(
+                Parent() if nested else RecoveringAgent(),
+                session.environment,
+                session.state,
+                actor=session.actor,
+                state_store=session.state_store,
+                max_iterations=10,
+                mcp_host=host,
+            )
         assert result.state.submission == "fallback"
         assert result.outcome.status == "completed"
         assert result.final_commit.event.metadata == {"recovered": True}

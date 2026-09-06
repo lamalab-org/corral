@@ -100,7 +100,7 @@ def normalise_environment_name(name: str) -> str:
 
 
 def _repository_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def _load_factory(specification: str) -> Callable[..., Any]:

@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -177,15 +180,48 @@ def _run_cloudpickled(blob: bytes) -> str:
     return render_result(tool.execute(**call_arguments))
 
 
-def _terminate_process(proc: subprocess.Popen) -> None:
-    """Terminate a child process, escalating to kill after a short grace."""
+def _terminate_process_group(proc: subprocess.Popen) -> None:
+    """Terminate a POSIX group created by `start_new_session=True`."""
+    # The child's PID is also its original PGID, even after the leader exits.
+    # Waiting only for the leader would leave SIGTERM-resistant descendants
+    # running, including descendants that closed their inherited output pipes.
+    with suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGTERM)
+        deadline = time.monotonic() + _TERMINATE_GRACE_SECONDS
+        while True:
+            proc.poll()  # Reap the leader so its zombie cannot keep the group alive.
+            # EPERM still means the group exists; macOS can also return it
+            # while the group's last member is exiting. Keep waiting, but let
+            # permission failures from actual TERM/KILL delivery propagate.
+            with suppress(PermissionError):
+                os.killpg(proc.pid, 0)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                os.killpg(proc.pid, signal.SIGKILL)
+                break
+            time.sleep(min(_DEFAULT_POLL_INTERVAL, remaining))
+    proc.wait()
+
+
+def _terminate_process(
+    proc: subprocess.Popen, *, start_new_session: bool = False
+) -> None:
+    """Terminate and reap a child, including its own POSIX group when enabled."""
+    if os.name == "posix" and start_new_session:
+        _terminate_process_group(proc)
+        return
+    # Windows has no killpg; without a new POSIX session the child shares a
+    # process group with its caller, which must never be signalled as a group.
     if proc.poll() is not None:
         return
-    proc.terminate()
+    with suppress(ProcessLookupError):
+        proc.terminate()
     try:
         proc.wait(timeout=_TERMINATE_GRACE_SECONDS)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        with suppress(ProcessLookupError):
+            proc.kill()
+        proc.wait()
 
 
 class ProcessExecutor(_PooledExecutor):
@@ -243,13 +279,17 @@ class SubprocessExecutor(_PooledExecutor):
     command-line programs, because a dedicated child process gives:
 
     * **process isolation** — a crash can't take the benchmark worker down;
-    * **true cancellation** — the child (and its whole process group) is killed;
+    * **true cancellation** — the child is killed, along with its process group
+      on POSIX when `start_new_session=True` (the default);
     * **stdout/stderr capture** — surfaced on failure for provenance;
     * **a clean working directory** — the job's resolved workspace is its cwd.
 
     `extra_env` is merged into the child's environment (e.g. `OMP_NUM_THREADS`
-    or a scheduler's variables); `start_new_session` puts the child in its own
-    process group so cancellation reaches any grandchildren it spawns.
+    or a scheduler's variables). On POSIX, `start_new_session=True` puts the
+    child in its own process group so cancellation reaches grandchildren that
+    remain in that group. SIGTERM is followed by SIGKILL after a grace period
+    if the group still exists, even if the child has already exited. On Windows,
+    or with `start_new_session=False`, cancellation stops only the direct child.
     """
 
     def __init__(
@@ -310,7 +350,7 @@ class SubprocessExecutor(_PooledExecutor):
                 return stderr or b""
             except subprocess.TimeoutExpired:
                 if cancel.is_set():
-                    _terminate_process(proc)
+                    _terminate_process(proc, start_new_session=self._start_new_session)
                     raise JobCancelled(proc.pid) from None
 
     def _collect_result(

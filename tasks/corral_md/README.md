@@ -29,7 +29,7 @@ To run subtask mode:
 python src/corral_md/env.py --level 1 --subtask_level True
 ```
 
-The command constructs and lists the selected environment definitions; execution is handled by registered Temporal workers.
+The command constructs and lists the selected environment definitions.
 
 ## Local workspaces and Modal
 

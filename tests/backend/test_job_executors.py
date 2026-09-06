@@ -95,8 +95,11 @@ def test_subprocess_executor_reports_tool_failure():
         executor.shutdown(wait=True)
 
 
-def test_subprocess_executor_cancellation_kills_the_process():
-    executor = SubprocessExecutor(max_workers=2, poll_interval=0.05)
+@pytest.mark.parametrize("start_new_session", [False, True])
+def test_subprocess_executor_cancellation_kills_the_process(start_new_session):
+    executor = SubprocessExecutor(
+        max_workers=2, poll_interval=0.05, start_new_session=start_new_session
+    )
     cancel = threading.Event()
     outcome: dict[str, str] = {}
 

@@ -23,7 +23,7 @@ from spectra_elucidation.tools import (
 )
 
 from corral.core.environment import Environment, Toolset, build_environments
-from corral.core.state import State
+from corral.core.state import ExecutionState
 from corral.core.task import (
     EnvironmentSetup,
     InputRef,
@@ -89,7 +89,7 @@ def load_tasks_from_json(
     return tasks
 
 
-def _spectra_prompt(env: Environment, state: State) -> str:
+def _spectra_prompt(env: Environment, state: ExecutionState) -> str:
     """Task prompt that echoes each dependency's question and answer."""
     task = env.current_task
     prompt = (
@@ -124,7 +124,7 @@ def _spectra_prompt(env: Environment, state: State) -> str:
     return prompt
 
 
-def _expose_ground_truth(env: Environment, state: State) -> EnvironmentSetup:
+def _expose_ground_truth(env: Environment, state: ExecutionState) -> EnvironmentSetup:
     """Expose the target molecule to tools as a hidden `h_smiles` argument."""
     del state
     return EnvironmentSetup(

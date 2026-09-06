@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping, Sequence
-from contextlib import AsyncExitStack, contextmanager
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -16,7 +16,6 @@ import anyio
 from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.usage import usage_from_mapping
-from corral.backend.mcp import open_mcp_host
 from corral.core.actors import ActorRef
 from corral.core.commit import Commit, CommitRequest
 from corral.core.context import AgentContext, AgentContextResolver
@@ -1230,7 +1229,10 @@ async def _run_agent_with_tools(agent: Agent, session: AgentSession) -> AgentOut
             return await agent.run_session(session)
     if transport == "mcp":
         if session.mcp_host is None:
-            raise RuntimeError("MCP agents require an execution host")
+            raise RuntimeError(
+                "MCP agents require an execution-owned host; run through TaskRuntime "
+                "or pass mcp_host from a caller-owned open_mcp_host() context"
+            )
 
         async def execute(action: Action) -> ToolResponse:
             # The URL is available after registration. Include it in callback
@@ -1319,51 +1321,49 @@ async def run_agent_session(
     observation_context: ObservationContext | None = None,
     mcp_host: MCPHost | None = None,
 ) -> AgentSessionOutcome:
+    """Run an agent, borrowing a caller-owned host if it or its children use MCP."""
     environment.prepare_workspace(state.workspace)
-    async with AsyncExitStack() as stack:
-        if mcp_host is None:
-            mcp_host = await stack.enter_async_context(open_mcp_host())
-        interface = AgentSession(
-            environment,
-            state,
-            actor=actor,
-            state_store=state_store,
-            branch_id=branch_id,
-            runtime_actor=runtime_actor,
-            last_score=last_score,
-            previous_state=previous_state,
-            max_iterations=max_iterations,
-            observer=observer,
-            observation_context=observation_context,
-            hooks=getattr(agent, "hooks", None),
-            agent=agent,
-            mcp_host=mcp_host,
-        )
-        try:
-            result = await _run_bound_agent(agent, interface)
-            await interface._finish_subagents()
-            completed = await interface._append_agent(
-                AgentCompleted(
-                    agent_run_id=actor.run_id,
-                    status=result.status,
-                    result_summary={"answer": result.answer, "error": result.error},
-                    trace_head=interface._last_observed_hash,
-                    usage_delta=_agent_usage_delta(
-                        result,
-                        interface.state.usage_by_run.get(actor.run_id),
-                    ),
-                    metadata=result.metadata,
+    interface = AgentSession(
+        environment,
+        state,
+        actor=actor,
+        state_store=state_store,
+        branch_id=branch_id,
+        runtime_actor=runtime_actor,
+        last_score=last_score,
+        previous_state=previous_state,
+        max_iterations=max_iterations,
+        observer=observer,
+        observation_context=observation_context,
+        hooks=getattr(agent, "hooks", None),
+        agent=agent,
+        mcp_host=mcp_host,
+    )
+    try:
+        result = await _run_bound_agent(agent, interface)
+        await interface._finish_subagents()
+        completed = await interface._append_agent(
+            AgentCompleted(
+                agent_run_id=actor.run_id,
+                status=result.status,
+                result_summary={"answer": result.answer, "error": result.error},
+                trace_head=interface._last_observed_hash,
+                usage_delta=_agent_usage_delta(
+                    result,
+                    interface.state.usage_by_run.get(actor.run_id),
                 ),
-                f"agent:{actor.run_id}:completed",
-            )
-            return AgentSessionOutcome(
-                outcome=result,
-                state=interface.state,
-                final_commit=completed,
-                messages=interface.final_messages(),
-            )
-        finally:
-            await interface._finish_subagents(cancel=True)
+                metadata=result.metadata,
+            ),
+            f"agent:{actor.run_id}:completed",
+        )
+        return AgentSessionOutcome(
+            outcome=result,
+            state=interface.state,
+            final_commit=completed,
+            messages=interface.final_messages(),
+        )
+    finally:
+        await interface._finish_subagents(cancel=True)
 
 
 __all__ = [

@@ -80,7 +80,8 @@ mcp_url = session.tool_connection.mcp_url
 ```
 
 The adapter owns no listener or server lifecycle. Run adapters through
-`TaskRuntime` or `run_agent_session()` so the runtime can supply their connection.
+`TaskRuntime` or pass a caller-owned `mcp_host` to `run_agent_session()` so the
+session runner can supply their connection.
 Reading `mcp_url` without a provisioned MCP connection raises an explanatory error.
 
 Each active `TaskRuntime.run()` attempt owns a host that starts one localhost
@@ -112,10 +113,13 @@ Transport selection also runs for `run_delegate()` and `spawn_subagent()`.
 Delegates sharing a session receive context-local connection details, and their
 caller's connection is restored when they return or raise. Subagents and forked
 sessions borrow the same host while retaining their own catalogs, identities,
-branches and dispatchers. Standalone `run_agent_session()` creates a host when
-none is supplied, and nested agents borrow it. Host and connection details are
-ephemeral; recovery provisions fresh resources against the saved execution
-history, and state snapshots contain only data.
+branches and dispatchers. Standalone callers using MCP must own an
+`open_mcp_host()` context and pass its host to `run_agent_session(mcp_host=host, ...)`,
+including when a Python parent delegates to an MCP agent. The session runner
+borrows that host without creating or closing it. An MCP invocation without a
+host raises `RuntimeError`; Python-only standalone runs may omit it. Host and
+connection details are ephemeral; recovery provisions fresh resources against
+the saved execution history, and state snapshots contain only data.
 
 The server runs on the execution's event loop and preserves the application's
 signal handlers. Requests inherit the context captured when their binding was

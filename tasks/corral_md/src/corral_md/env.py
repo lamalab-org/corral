@@ -26,7 +26,7 @@ from corral_md.tools import (
 )
 
 from corral.core.environment import Environment, Toolset, build_environments
-from corral.core.state import State
+from corral.core.state import ExecutionState
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
 from corral.report.logging import event, exception_fields
@@ -179,7 +179,7 @@ class MolecularDynamicsEnvironment(Environment):
         return parsed
 
 
-def _md_task_prompt(env: Environment, state: State) -> str:
+def _md_task_prompt(env: Environment, state: ExecutionState) -> str:
     """Generate the MD task prompt with resource and logging guidance."""
     prompt = f"""\nTask: {env.current_task.name}
 Description: {env.current_task.description}

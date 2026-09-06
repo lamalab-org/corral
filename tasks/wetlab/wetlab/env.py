@@ -289,7 +289,7 @@ def load_tasks_from_json(
 class QualitativeAnalysisEnvironment(Environment):
     """Environment for one QualitativeAnalysisTask.
 
-    The active inventory is serialized in `State.environment`. Reaktoro
+    The active inventory is serialized in `ExecutionState.environment.values`. Reaktoro
     objects are materialized only for the duration of a tool call and are never
     retained by the Environment.
 
@@ -301,7 +301,7 @@ class QualitativeAnalysisEnvironment(Environment):
     """
 
     def _state_for_configuration(self, state: ExecutionState) -> WetlabState:
-        """Resolve the initial or latest upstream inventory from durable State."""
+        """Resolve the initial or latest upstream inventory from ExecutionState."""
         task_spec = self.current_task.chemical_system_spec
         if task_spec is None:
             raise RuntimeError("Wetlab task has no ChemicalSystemSpec")
@@ -334,7 +334,7 @@ class QualitativeAnalysisEnvironment(Environment):
         return wetlab_state
 
     def configure(self, state: ExecutionState) -> TaskConfigured:
-        """Commit the task's structured chemistry snapshot to runtime State."""
+        """Build configuration effects for the task's structured chemistry snapshot."""
         wetlab_state = self._state_for_configuration(state)
         event(
             "DEBUG",
@@ -415,7 +415,7 @@ class QualitativeAnalysisEnvironment(Environment):
 
         serialized = arguments.get("wetlab")
         if not isinstance(serialized, Mapping):
-            raise TypeError("State hidden argument 'wetlab' must be an object")
+            raise TypeError("ExecutionState hidden argument 'wetlab' must be an object")
         wetlab_state = WetlabState.from_dict(serialized)
         engine = WetlabEngine(wetlab_state.chemical_system)
         inventory = engine.restore(wetlab_state)
@@ -435,7 +435,7 @@ class QualitativeAnalysisEnvironment(Environment):
     def _wetlab_from_state(state: ExecutionState) -> WetlabState:
         hidden = state.environment.values.get("hidden_arguments", {})
         if not isinstance(hidden, Mapping):
-            raise TypeError("State hidden_arguments must be an object")
+            raise TypeError("ExecutionState hidden_arguments must be an object")
         raw_wetlab = hidden.get("wetlab")
         if not isinstance(raw_wetlab, Mapping):
             raise TypeError("WetlabState is not configured")

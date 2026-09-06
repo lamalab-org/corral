@@ -17,7 +17,7 @@ from ml.score import (
 from ml.tools import create_ml_tools
 
 from corral.core.environment import Environment, Toolset, build_environments
-from corral.core.state import State
+from corral.core.state import ExecutionState
 from corral.core.task import EnvironmentSetup, InputRef, TaskDefinition
 from corral.core.tool import Tool
 from corral.report.logging import event, exception_fields
@@ -116,7 +116,7 @@ def load_tasks_from_json(
     return tasks
 
 
-def _ml_task_prompt(env: Environment, state: State) -> str:
+def _ml_task_prompt(env: Environment, state: ExecutionState) -> str:
     """Task prompt that names the isolated workspace path explicitly."""
     task = env.current_task
     prompt = f"""Task: {task.name}
@@ -146,7 +146,7 @@ Required submission format:
     return prompt
 
 
-def _expose_workspace(env: Environment, state: State) -> EnvironmentSetup:
+def _expose_workspace(env: Environment, state: ExecutionState) -> EnvironmentSetup:
     """Expose the task workspace to tools as a hidden `work_dir` argument."""
     del state
     return EnvironmentSetup(

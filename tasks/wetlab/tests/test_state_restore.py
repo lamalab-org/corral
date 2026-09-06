@@ -8,9 +8,54 @@ from wetlab.engine import ChemicalSystemSpec, WetlabEngine, WetlabState
 from wetlab.env import QualitativeAnalysisEnvironment, QualitativeAnalysisTask
 from wetlab.tools import create_tools
 
-from corral.core import Action, State, execute_action, propose_action
+from corral.agents.session import AgentSession
+from corral.core import Action, ActorRef, AgentStarted, CommitRequest, ExecutionState
 from corral.core.environment import Toolset
 from corral.core.task import InputRef
+from corral.persistence import SQLiteCommitStore
+
+
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
+
+
+async def _start_session(environment, store, *, dependency_outputs=None):
+    execution_id = store.execution_id
+    runtime = ActorRef(kind="runtime", actor_id="corral", run_id="runtime")
+    actor = ActorRef(kind="agent", actor_id="agent_0", run_id="agent")
+
+    async def append(request_id, event):
+        head = await store.head("main")
+        await store.append(
+            CommitRequest(
+                request_id=request_id,
+                branch_id="main",
+                based_on_hash=head.hash if head else None,
+                author=runtime,
+                event=event,
+            )
+        )
+
+    await append(
+        "started",
+        environment.initial_event(
+            execution_id=execution_id, dependency_outputs=dependency_outputs
+        ),
+    )
+    await append("configured", environment.configure(await store.materialize("main")))
+    await append(
+        "agent-started",
+        AgentStarted(agent_run_id=actor.run_id, agent_id=actor.actor_id),
+    )
+    return AgentSession(
+        environment,
+        await store.materialize("main"),
+        actor=actor,
+        runtime_actor=runtime,
+        state_store=store,
+        max_iterations=10,
+    )
 
 
 def _environment() -> QualitativeAnalysisEnvironment:
@@ -42,8 +87,8 @@ def _environment() -> QualitativeAnalysisEnvironment:
     )
 
 
-def _wetlab_payload(state: State) -> dict:
-    return dict(state.environment["hidden_arguments"]["wetlab"])
+def _wetlab_payload(state: ExecutionState) -> dict:
+    return dict(state.environment.values["hidden_arguments"]["wetlab"])
 
 
 def test_structured_inventory_round_trip_is_exact() -> None:
@@ -86,9 +131,9 @@ def test_incompatible_chemistry_checkpoint_fails_loudly() -> None:
         WetlabEngine(incompatible)
 
 
-def test_action_replay_and_checkpoint_restore_are_deterministic() -> None:
+@pytest.mark.anyio()
+async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) -> None:
     environment = _environment()
-    initial, _ = environment.configure(environment.initial_state())
     action = Action(
         id="mix-1",
         name="mix_two_solutions",
@@ -102,43 +147,61 @@ def test_action_replay_and_checkpoint_restore_are_deterministic() -> None:
         actor_id="agent_0",
     )
 
-    first = execute_action(environment, propose_action(initial, action), action)
-    replay = execute_action(environment, propose_action(initial, action), action)
+    database = tmp_path / "replay.sqlite3"
+    async with SQLiteCommitStore(database, "wetlab-replay") as store:
+        session = await _start_session(environment, store)
+        replay_session = await session.fork_branch(branch_id="replay")
+        first_result = await session.execute(action)
+        replay_result = await replay_session.execute(
+            Action(**{**action.model_dump(), "id": "mix-replay"})
+        )
+        assert first_result.success and replay_result.success
+        assert first_result.result == replay_result.result
+        first = await store.materialize("main")
+        replay = await store.materialize("replay")
+        assert _wetlab_payload(first) == _wetlab_payload(replay)
 
-    assert first.messages[-1]["content"] == replay.messages[-1]["content"]
-    assert _wetlab_payload(first) == _wetlab_payload(replay)
-
-    checkpoint = State.from_json(first.to_json())
+    # Reopen the durable commit store and reconstruct a fresh environment/session.
+    # Continuation must use the inventory produced by the committed mix.
     continuation = Action(
         id="measure-2",
         name="measure_pH",
         arguments={"label": "sample_koh"},
         actor_id="agent_0",
     )
-    continued = execute_action(
-        environment,
-        propose_action(checkpoint, continuation),
-        continuation,
-    )
+    async with SQLiteCommitStore(database, "wetlab-replay") as restored_store:
+        checkpoint = await restored_store.materialize("main")
+        assert checkpoint == first
+        restored_session = AgentSession(
+            _environment(),
+            checkpoint,
+            actor=session.actor,
+            runtime_actor=session.runtime_actor,
+            state_store=restored_store,
+            max_iterations=10,
+        )
+        result = await restored_session.execute(continuation)
+        assert result.success
+        continued = await restored_store.materialize("main")
+        assert _wetlab_payload(continued) == _wetlab_payload(checkpoint)
 
-    assert continued.messages[-1]["metadata"]["status"] == "success"
-    assert _wetlab_payload(continued) == _wetlab_payload(checkpoint)
 
-
-def test_chained_task_receives_inventory_through_dependency_output() -> None:
+@pytest.mark.anyio()
+async def test_chained_task_receives_inventory_through_dependency_output(
+    tmp_path,
+) -> None:
     upstream_environment = _environment()
-    upstream, _ = upstream_environment.configure(upstream_environment.initial_state())
     submit = Action(
         id="submit-1",
         name="submit_answer",
         arguments={"answer": "K+"},
         actor_id="agent_0",
     )
-    submitted = execute_action(
-        upstream_environment,
-        propose_action(upstream, submit),
-        submit,
-    )
+    async with SQLiteCommitStore(tmp_path / "upstream.sqlite3", "upstream") as store:
+        session = await _start_session(upstream_environment, store)
+        result = await session.execute(submit)
+        assert result.success
+        submitted = await store.materialize("main")
     output = upstream_environment.get_task_output(submitted)
     assert output is not None
 
@@ -171,9 +234,14 @@ def test_chained_task_receives_inventory_through_dependency_output() -> None:
             "wetlab-state-test-next": downstream_task,
         },
     )
-    downstream = downstream_environment.initial_state(
-        dependency_outputs={"wetlab-state-test": output}
-    )
-    configured, _ = downstream_environment.configure(downstream)
+    async with SQLiteCommitStore(
+        tmp_path / "downstream.sqlite3", "downstream"
+    ) as store:
+        await _start_session(
+            downstream_environment,
+            store,
+            dependency_outputs={"wetlab-state-test": output},
+        )
+        configured = await store.materialize("main")
 
     assert _wetlab_payload(configured) == output.metadata["wetlab"]

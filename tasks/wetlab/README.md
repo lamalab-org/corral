@@ -45,5 +45,5 @@ python -m wetlab.env --level 2 --subtask True
 > ```
 
 - The Conda environment depends on `reaktoro`, so using Conda or Mamba is the intended installation path.
-- The package constructs one definition per task for registration on a Temporal worker.
+- The package constructs one environment definition per task.
 - Inventory state is captured in Corral State; scoring is performed separately by the evaluation layer.

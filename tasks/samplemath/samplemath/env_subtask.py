@@ -8,7 +8,7 @@ from time import perf_counter
 from samplemath.tools import calculator, percentage_calculator
 
 from corral.core.environment import Environment, Toolset, build_environments
-from corral.core.state import State
+from corral.core.state import ExecutionState
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
 from corral.report.logging import event, exception_fields
@@ -191,7 +191,7 @@ def load_tasks_from_json(
     return tasks
 
 
-def _samplemath_prompt(env: Environment, state: State) -> str:
+def _samplemath_prompt(env: Environment, state: ExecutionState) -> str:
     """Task prompt rendering the resolved dependency outputs.
 
     Inputs are resolved strictly: by the time the prompt is requested every

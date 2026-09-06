@@ -18,7 +18,8 @@ else:
     pythoncom = None
 
 from corral.core.environment import Environment, Toolset, build_environments
-from corral.core.state import State
+from corral.core.events import TaskConfigured
+from corral.core.state import ExecutionState
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
 from corral.report.logging import event, exception_fields
@@ -102,8 +103,15 @@ def load_tasks_from_json(
     if not Path(json_path).exists():
         raise FileNotFoundError(f"Task definition file not found: {json_path}")
 
-    with Path(json_path).open() as f:
-        task_data = json.load(f)
+    json_path = Path(json_path)
+    task_files = sorted(json_path.glob("*.json")) if json_path.is_dir() else [json_path]
+    task_data = {}
+    for task_file in task_files:
+        with task_file.open() as f:
+            entries = json.load(f)
+        if isinstance(entries, list):
+            entries = {entry["id"]: entry for entry in entries}
+        task_data.update(entries)
 
     tasks = {}
     for task_id, task_info in task_data.items():
@@ -210,7 +218,7 @@ class AFMEnvironment(Environment):
         if pythoncom:
             pythoncom.CoUninitialize()
 
-    def get_task_prompt(self, state: State) -> str:
+    def get_task_prompt(self, state: ExecutionState) -> str:
         prompt = "You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API."
         prompt += f"""\nTask: {self.current_task.name}
         Description: {self.current_task.description}
@@ -237,7 +245,7 @@ class AFMEnvironment(Environment):
 
         return prompt
 
-    def configure(self, state: State) -> tuple[State, str]:
+    def configure(self, state: ExecutionState) -> TaskConfigured:
         event(
             "DEBUG",
             "environment.configuration_started",
@@ -246,7 +254,13 @@ class AFMEnvironment(Environment):
             task_id=self.task_id,
         )
         self.reset_params()
-        return state, "No external object configuration needed for this task."
+        configured = super().configure(state)
+        return TaskConfigured(
+            **{
+                **configured.model_dump(),
+                "status": "AFM instrument parameters configured.",
+            }
+        )
 
 
 def create_environments(

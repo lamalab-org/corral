@@ -18,7 +18,7 @@ from retrosynthesis.score import (
 from retrosynthesis.tools import create_tools
 
 from corral.core.environment import Environment, Toolset, build_environments
-from corral.core.state import State
+from corral.core.state import ExecutionState
 from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
 from corral.report.logging import event, exception_fields
 
@@ -77,7 +77,7 @@ def load_tasks_from_json(
     return tasks
 
 
-def _retro_prompt(env: Environment, state: State) -> str:
+def _retro_prompt(env: Environment, state: ExecutionState) -> str:
     """Task prompt that echoes each dependency's question and answer."""
     task = env.current_task
     prompt = (

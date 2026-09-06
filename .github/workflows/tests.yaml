@@ -140,6 +140,12 @@ jobs:
           uv run python -m pytest tests -v --rootdir=.
         working-directory: ./tasks/${{ matrix.task }}
 
+      - name: Check task runtime API
+        run: uv run python -m pytest ../../tests/task_contracts -q --rootdir=../..
+        env:
+          CORRAL_TEST_ENVIRONMENT: ${{ matrix.task }}
+        working-directory: ./tasks/${{ matrix.task }}
+
   # Wetlab requires Reaktoro, which is available from Conda but not from PyPI
   test-wetlab:
     needs: [code-quality, test-main]
@@ -165,6 +171,12 @@ jobs:
         run: conda run --no-capture-output -n wetlab python -m pytest tests -v --rootdir=.
         working-directory: ./tasks/wetlab
 
+      - name: Check wetlab runtime API
+        run: conda run --no-capture-output -n wetlab python -m pytest ../../tests/task_contracts -q --rootdir=../..
+        env:
+          CORRAL_TEST_ENVIRONMENT: wetlab
+        working-directory: ./tasks/wetlab
+
   # Discover tasks with env.py files for server setup checking
   discover-env-tasks:
     needs: code-quality
@@ -178,17 +190,15 @@ jobs:
         id: discover
         run: |
           # Excluded tasks:
-          #   retrosynthesis - requires a running database
           #   afm            - requires nanosurf (Windows-only hardware library)
           #   wetlab         - requires reaktoro (conda-only, not on PyPI)
-          #   samplemath     - uses bare imports incompatible with package-level import
-          EXCLUDED="retrosynthesis afm wetlab samplemath"
+          EXCLUDED="afm wetlab"
           tasks=$(find tasks -maxdepth 1 -type d | while read task_dir; do
             task_name=$(basename "$task_dir")
             if [[ "$task_name" == "tasks" ]]; then continue; fi
             if echo "$EXCLUDED" | grep -qw "$task_name"; then continue; fi
             if [[ ! -f "$task_dir/pyproject.toml" ]]; then continue; fi
-            if find "$task_dir" -name "env.py" -maxdepth 4 -type f | grep -q .; then
+            if find "$task_dir" -maxdepth 4 -type f \( -name "env.py" -o -name "env_subtask.py" \) | grep -q .; then
               echo "$task_name"
             fi
           done | sort | jq -R -s -c 'split("\n")[:-1]')
@@ -228,7 +238,9 @@ jobs:
 
       - name: Check env server setup
         run: |
-          uv run python -c "from ${{ matrix.task }} import env; print('Server setup OK')"
+          uv run python -c "from importlib import import_module; from corral.runtime.environment_loader import ENVIRONMENT_PRESETS; import_module(ENVIRONMENT_PRESETS['${{ matrix.task }}'].factory.split(':')[0]); print('Environment import OK')"
+        env:
+          CORRAL_WORK_DIR: ${{ runner.temp }}/corral-env-check
         working-directory: ./tasks/${{ matrix.task }}
 
   # Summary job to check all results
