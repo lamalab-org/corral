@@ -153,7 +153,7 @@ if __name__ == "__main__":
         "tasks_json_path",
         nargs="?",
         default=None,
-        help="Path to tasks JSON file (optional if --mode is provided)",
+        help="Path to a tasks JSON file or directory (optional if --level is provided)",
     )
     parser.add_argument(
         "--host",
@@ -168,43 +168,23 @@ if __name__ == "__main__":
         help="Port to run the server on",
     )
     parser.add_argument(
-        "--mode",
-        type=str,
-        choices=["single", "chained"],
+        "--level",
+        type=int,
+        choices=[1, 2],
         default=None,
-        help="Task mode (auto-discovers config/{mode}/{mode}.json)",
+        help="Load environments/level_{level}/tasks_json (defaults to level 1)",
     )
     args = parser.parse_args()
 
     # Resolve tasks JSON path
     if args.tasks_json_path:
         tasks_json_path = args.tasks_json_path
-    elif args.mode:
-        if args.mode == "single":
-            tasks_json_path = (
-                Path(__file__).resolve().parents[2]
-                / "environments"
-                / "level_1"
-                / "tasks_json"
-            )
-        elif args.mode == "chained":
-            tasks_json_path = (
-                Path(__file__).resolve().parents[2]
-                / "environments"
-                / "level_1"
-                / "subtasks_json"
-            )
-        else:
-            raise ValueError(f"Unsupported mode: {args.mode}")
-
-        if not Path(tasks_json_path).exists():
-            logger.error(f"Task config not found: {tasks_json_path}")
-            sys.exit(1)
     else:
+        level = args.level or 1
         tasks_json_path = (
             Path(__file__).resolve().parents[2]
             / "environments"
-            / "level_1"
+            / f"level_{level}"
             / "tasks_json"
         )
         if not Path(tasks_json_path).exists():
