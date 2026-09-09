@@ -38,10 +38,10 @@ def rehydrate_docs(docs_as_dicts):
 
     Copies each source dict so the cached pickle payload is never mutated
     (fixtures are reused across tests). Fields are normalised to what the tools
-    expect: ``structure`` is a pymatgen ``Structure`` (already hydrated in the
-    fixtures, so only converted when still a dict), ``symmetry`` is exposed as
-    an object with a ``.symbol`` attribute, and ``decomposes_to`` entries as
-    objects with ``.material_id`` / ``.formula`` / ``.amount``.
+    expect: `structure` is a pymatgen `Structure` (already hydrated in the
+    fixtures, so only converted when still a dict), `symmetry` is exposed as
+    an object with a `.symbol` attribute, and `decomposes_to` entries as
+    objects with `.material_id` / `.formula` / `.amount`.
     """
     rehydrated = []
     for source in docs_as_dicts:
@@ -71,7 +71,7 @@ def rehydrate_docs(docs_as_dicts):
 def mock_mp_rester(mocker):
     """Mocks the MPRester class to return rehydrated mock data.
 
-    Also guarantees an ``MP_API_KEY`` is present so the tools' key check passes;
+    Also guarantees an `MP_API_KEY` is present so the tools' key check passes;
     the Rester itself is mocked, so no live request is made and the value is
     irrelevant.
     """

@@ -25,10 +25,11 @@ Think about what to do next and respond in the following format:
 <action>[tool name]</action>
 <action_input>[tool arguments as JSON]</action_input>. For tool calls without arguments, use `<action_input>{}</action_input>`
 
-If you have the final answer, respond with:
-<thought>[your reasoning]</thought>
-<final_answer>[answer]</final_answer>
+When the task is complete, call the `submit_answer` tool using the same action
+format and pass the complete answer in its `answer` argument. Do not return a
+final answer as plain text or with final-answer tags.
 
 **`{{surrender_instructions}}`**
 
-The code expects the XML tags to be used exactly as shown. If this format is not followed, the regex parsing will not work.
+The code expects the action XML tags to be used exactly as shown. If this
+format is not followed, the action parser will not work.

@@ -32,7 +32,7 @@ npm pkg set type=module
 npm i --omit=dev isotopic-distribution nmr-processing openchemlib
 ```
 
-Point the spectra environment at that npm project before running the server:
+Point the spectra environment at that npm project before running tasks:
 
 ```bash
 cd tasks/spectra_elucidation
@@ -41,9 +41,9 @@ export CORRAL_SPECTRA_JS_DIR="$PWD/CORRAL_WORK_DIR/js"
 
 If `CORRAL_SPECTRA_JS_DIR` is not set, the code falls back to `/srv/js`. The unit tests mock these predictors, so passing tests do not prove the runtime Node.js setup is available.
 
-## Run The Server
+## Inspect The Environment Definitions
 
-Start the spectra elucidation environment server from this directory:
+Build and list the spectra-elucidation environment definitions from this directory:
 
 ```bash
 cd tasks/spectra_elucidation
@@ -65,10 +65,8 @@ To run the chained subtask benchmark instead:
 python -m spectra_elucidation.env --level 1 --subtask_level True
 ```
 
-The server accepts these options:
+The inspection command accepts these options:
 
-- `--host`: Bind host. Defaults to `CORRAL_HOST` or `0.0.0.0`.
-- `--port`: Bind port. Defaults to `CORRAL_PORT` or `8000`.
 - `--level`: Benchmark level to load. Levels are stored under `environments/level_1` and `environments/level_2`.
 - `--subtask_level`: Set to `True` to load `subtasks_json/` instead of `tasks_json/` for the selected level.
 
@@ -76,14 +74,6 @@ The environment also reads these variables:
 
 - `CORRAL_WORK_DIR`: Base directory for task workspaces and generated files. Setting it explicitly to `tasks/spectra_elucidation/CORRAL_WORK_DIR` keeps task output inside this task directory.
 - `CORRAL_SPECTRA_JS_DIR`: Directory containing the npm project with `isotopic-distribution`, `nmr-processing`, and `openchemlib`.
-
-## See The Tasks
-
-With the server running:
-
-```bash
-curl http://localhost:8000/tasks/
-```
 
 ## Task Layout
 
@@ -129,22 +119,6 @@ Subtasks 1 through 8 can be solved independently. Subtask 9 consumes the earlier
 ## Notes
 
 - IR simulation uses the code in [cheminfo-py/xtbservice](https://github.com/cheminfo-py/xtbservice); deploy that service yourself if the public API is unavailable.
-
-## Run With Corral
-
-After starting the server, point a Corral runner at the local endpoint:
-
-```python
-from corral import CorralRouter, CorralRunner
-from corral.agents import ReActAgent
-
-interface = CorralRouter("http://localhost:8000")
-agent = ReActAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
-
-runner = CorralRunner(interface, agent)
-result = runner.bench()
-print(result.total_score)
-```
 
 ## Testing
 

@@ -21,11 +21,10 @@ HF_REPO_TRACES = "jablonkagroup/corral-traces"
 HF_REPO_INTERVENTION_REPORTS = "jablonkagroup/corral-intervention-reports"
 HF_REPO_INTERVENTION_TRACES = "jablonkagroup/corral-intervention-traces"
 
-# Prevents accidentally ingesting agent logs, W&B artefacts, or cache files
-# that share the .json extension.
+# Prevents accidentally ingesting agent logs or cache files that share the
+# .json extension.
 SKIP_DIR_PREFIXES: tuple[str, ...] = (
     "agent_logs",
-    "wandb",
     "checkpoints",
     "__pycache__",
     ".ipynb_checkpoints",

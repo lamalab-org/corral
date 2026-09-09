@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -11,25 +11,25 @@ import threading
 import time
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import cloudpickle
-from loguru import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from corral.backend.tool import Tool
+    from corral.core.tool import Tool
 
-# Default per-trial background-job concurrency. Bounds how many jobs actually
-# execute at once inside one trial runtime; jobs beyond it queue. Kept modest
+# Default per-execution background-job concurrency. Bounds how many jobs actually
+# execute at once inside one execution runtime; jobs beyond it queue. Kept modest
 # because background tools are typically expensive (simulations, solvers). This
 # is the single source of truth; :mod:`corral.backend.jobs` re-exports it.
 DEFAULT_JOB_CONCURRENCY = 4
 
-# How often the polling executors (process / subprocess / slurm / modal) wake to
+# How often the polling executors (process / subprocess) wake to
 # check whether their out-of-process work has finished or the job was cancelled.
 _DEFAULT_POLL_INTERVAL = 0.2
 
@@ -53,10 +53,9 @@ def render_result(result: Any) -> str:
 class JobCancelled(Exception):
     """Raised by an executor's `run_tool` when a job is cancelled mid-flight.
 
-    Only the executors that can *actually* stop running work (subprocess, Slurm,
-    Modal) raise this; the manager treats it as "the record is already
-    `CANCELLED`, leave it alone." Thread/Process execution cannot interrupt a
-    running call, so they never raise it (cancellation stays best-effort there).
+    The manager treats this as "the record is already `CANCELLED`, leave it
+    alone." Subprocess execution can stop running work; thread and process-pool
+    execution can only prevent queued work or discard a running call's result.
     """
 
 
@@ -86,11 +85,12 @@ class JobExecutor(Protocol):
     returns its :class:`~concurrent.futures.Future` (so a waiter can block on
     completion). `run_tool` runs one job's tool to completion and returns the
     rendered result string — this is the seam an out-of-process executor
-    overrides. `shutdown` releases the executor's resources.
+    overrides. A threading event requests cancellation of synchronous work.
+    `shutdown` releases the executor's resources.
 
     All provenance, status tracking, and `concurrency_key` serialisation live
-    in the manager, so this protocol stays tiny enough for a process, subprocess,
-    Slurm, or Modal backend to implement without re-deriving any bookkeeping.
+    in the manager, so thread, process, and subprocess backends share the
+    same bookkeeping.
     """
 
     def submit(self, fn: Callable[[], Any]) -> Future: ...
@@ -107,8 +107,8 @@ class _PooledExecutor:
     orchestrator (which handles status transitions, `concurrency_key` locking,
     and recording). For :class:`ThreadExecutor` the tool itself also runs on that
     thread; for the out-of-process executors the thread simply blocks in
-    `run_tool` while the real work happens in a child process / on a cluster /
-    on Modal. The pool is created on first :meth:`submit`, so merely *having* a
+    `run_tool` while the real work happens in a child process.
+    The pool is created on first :meth:`submit`, so merely *having* a
     background-capable tool (e.g. on a per-task template environment that never
     runs a job) costs nothing.
     """
@@ -180,15 +180,48 @@ def _run_cloudpickled(blob: bytes) -> str:
     return render_result(tool.execute(**call_arguments))
 
 
-def _terminate_process(proc: subprocess.Popen) -> None:
-    """Terminate a child process, escalating to kill after a short grace."""
+def _terminate_process_group(proc: subprocess.Popen) -> None:
+    """Terminate a POSIX group created by `start_new_session=True`."""
+    # The child's PID is also its original PGID, even after the leader exits.
+    # Waiting only for the leader would leave SIGTERM-resistant descendants
+    # running, including descendants that closed their inherited output pipes.
+    with suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGTERM)
+        deadline = time.monotonic() + _TERMINATE_GRACE_SECONDS
+        while True:
+            proc.poll()  # Reap the leader so its zombie cannot keep the group alive.
+            # EPERM still means the group exists; macOS can also return it
+            # while the group's last member is exiting. Keep waiting, but let
+            # permission failures from actual TERM/KILL delivery propagate.
+            with suppress(PermissionError):
+                os.killpg(proc.pid, 0)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                os.killpg(proc.pid, signal.SIGKILL)
+                break
+            time.sleep(min(_DEFAULT_POLL_INTERVAL, remaining))
+    proc.wait()
+
+
+def _terminate_process(
+    proc: subprocess.Popen, *, start_new_session: bool = False
+) -> None:
+    """Terminate and reap a child, including its own POSIX group when enabled."""
+    if os.name == "posix" and start_new_session:
+        _terminate_process_group(proc)
+        return
+    # Windows has no killpg; without a new POSIX session the child shares a
+    # process group with its caller, which must never be signalled as a group.
     if proc.poll() is not None:
         return
-    proc.terminate()
+    with suppress(ProcessLookupError):
+        proc.terminate()
     try:
         proc.wait(timeout=_TERMINATE_GRACE_SECONDS)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        with suppress(ProcessLookupError):
+            proc.kill()
+        proc.wait()
 
 
 class ProcessExecutor(_PooledExecutor):
@@ -245,14 +278,18 @@ class SubprocessExecutor(_PooledExecutor):
     `make_efficiency.md` §8 recommends for LAMMPS / Gaussian / xTB and other
     command-line programs, because a dedicated child process gives:
 
-    * **process isolation** — a crash can't take the benchmark server down;
-    * **true cancellation** — the child (and its whole process group) is killed;
+    * **process isolation** — a crash can't take the benchmark worker down;
+    * **true cancellation** — the child is killed, along with its process group
+      on POSIX when `start_new_session=True` (the default);
     * **stdout/stderr capture** — surfaced on failure for provenance;
     * **a clean working directory** — the job's resolved workspace is its cwd.
 
     `extra_env` is merged into the child's environment (e.g. `OMP_NUM_THREADS`
-    or a scheduler's variables); `start_new_session` puts the child in its own
-    process group so cancellation reaches any grandchildren it spawns.
+    or a scheduler's variables). On POSIX, `start_new_session=True` puts the
+    child in its own process group so cancellation reaches grandchildren that
+    remain in that group. SIGTERM is followed by SIGKILL after a grace period
+    if the group still exists, even if the child has already exited. On Windows,
+    or with `start_new_session=False`, cancellation stops only the direct child.
     """
 
     def __init__(
@@ -313,7 +350,7 @@ class SubprocessExecutor(_PooledExecutor):
                 return stderr or b""
             except subprocess.TimeoutExpired:
                 if cancel.is_set():
-                    _terminate_process(proc)
+                    _terminate_process(proc, start_new_session=self._start_new_session)
                     raise JobCancelled(proc.pid) from None
 
     def _collect_result(
@@ -339,274 +376,11 @@ class SubprocessExecutor(_PooledExecutor):
         )
 
 
-# Slurm job states we treat as "still going" vs. terminal. Anything terminal and
-# not COMPLETED is a failure (FAILED, TIMEOUT, OUT_OF_MEMORY, NODE_FAIL, …).
-_SLURM_ACTIVE_STATES = frozenset(
-    {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "RESIZING", "SUSPENDED"}
-)
-_SLURM_SUCCESS_STATE = "COMPLETED"
-
-
-@runtime_checkable
-class SlurmRunner(Protocol):
-    """Seam over the `sbatch` / `sacct` / `scancel` commands.
-
-    Injecting this keeps :class:`SlurmExecutor` testable without a real cluster
-    and lets deployments swap in a bespoke submission wrapper (accounting flags,
-    partitions, container images).
-    """
-
-    def submit(self, script_path: str, *, job_name: str, workspace: str | None) -> str:
-        """Submit `script_path` and return the Slurm job id."""
-
-    def poll(self, slurm_job_id: str) -> str:
-        """Return the job's current Slurm state (e.g. `RUNNING`, `COMPLETED`)."""
-
-    def cancel(self, slurm_job_id: str) -> None:
-        """Cancel the Slurm job."""
-
-
-class SubprocessSlurmRunner:
-    """Default :class:`SlurmRunner` shelling out to the real Slurm CLIs."""
-
-    def __init__(
-        self, sbatch: str = "sbatch", sacct: str = "sacct", scancel: str = "scancel"
-    ) -> None:
-        self._sbatch = sbatch
-        self._sacct = sacct
-        self._scancel = scancel
-
-    def submit(self, script_path: str, *, job_name: str, workspace: str | None) -> str:
-        result = subprocess.run(
-            [self._sbatch, "--parsable", "--job-name", job_name, script_path],
-            cwd=workspace or None,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        # `--parsable` prints "<jobid>" or "<jobid>;<cluster>".
-        return result.stdout.strip().split(";")[0]
-
-    def poll(self, slurm_job_id: str) -> str:
-        result = subprocess.run(
-            [
-                self._sacct,
-                "-j",
-                slurm_job_id,
-                "--format=State",
-                "--noheader",
-                "--parsable2",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        # sacct lists the job step(s); the first line is the primary job state.
-        for line in result.stdout.splitlines():
-            state = line.strip().split()[0] if line.strip() else ""
-            if state:
-                return state
-        return "PENDING"  # not yet visible in the accounting DB
-
-    def cancel(self, slurm_job_id: str) -> None:
-        subprocess.run([self._scancel, slurm_job_id], check=False)
-
-
-class SlurmExecutor(_PooledExecutor):
-    """Run a job's tool as a Slurm batch job on an HPC scheduler.
-
-    Writes the same cloudpickled payload as :class:`SubprocessExecutor`, wraps it
-    in an `sbatch` script that runs :mod:`corral.backend._job_worker` on a
-    compute node, submits it, and polls `sacct` until the job reaches a
-    terminal state — then reads the result back from the shared filesystem.
-    Cancellation issues `scancel`.
-
-    The scheduler interaction goes through an injectable :class:`SlurmRunner`
-    (default :class:`SubprocessSlurmRunner`), so the orchestration is unit-testable
-    without a live cluster and deployments can customise submission. `sbatch_options`
-    are extra `#SBATCH` directives (partition, time limit, gpus); the payload
-    directory must live on a filesystem the compute nodes can read.
-    """
-
-    def __init__(
-        self,
-        max_workers: int = DEFAULT_JOB_CONCURRENCY,
-        *,
-        runner: SlurmRunner | None = None,
-        payload_dir: str | None = None,
-        sbatch_options: list[str] | None = None,
-        python_executable: str | None = None,
-        poll_interval: float = 5.0,
-    ) -> None:
-        super().__init__(max_workers)
-        self._runner = runner or SubprocessSlurmRunner()
-        self._payload_dir = payload_dir
-        self._sbatch_options = list(sbatch_options or [])
-        self._python = python_executable or sys.executable
-        self._poll_interval = poll_interval
-
-    def run_tool(self, work: JobWork, cancel: threading.Event) -> str:
-        tmpdir = Path(tempfile.mkdtemp(prefix="corral-slurm-", dir=self._payload_dir))
-        in_path = tmpdir / "in.pkl"
-        out_path = tmpdir / "out.pkl"
-        script_path = tmpdir / "job.sbatch"
-        try:
-            with in_path.open("wb") as fh:
-                cloudpickle.dump((work.tool, work.call_arguments), fh)
-            self._write_script(script_path, in_path, out_path, work)
-
-            slurm_id = self._runner.submit(
-                str(script_path),
-                job_name=f"corral-{work.job_id}",
-                workspace=work.workspace,
-            )
-            logger.debug(
-                f"Submitted Slurm job {slurm_id} for {work.tool_name!r} (job {work.job_id})"
-            )
-            self._await_completion(slurm_id, cancel)
-            return self._collect_result(work, out_path)
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
-    def _write_script(
-        self, script_path: Path, in_path: Path, out_path: Path, work: JobWork
-    ) -> None:
-        directives = "\n".join(f"#SBATCH {opt}" for opt in self._sbatch_options)
-        worker = (
-            f'"{self._python}" -m corral.backend._job_worker "{in_path}" "{out_path}"'
-        )
-        cd = f'cd "{work.workspace}"\n' if work.workspace else ""
-        script_path.write_text(f"#!/bin/bash\n{directives}\n{cd}{worker}\n")
-        script_path.chmod(0o755)
-
-    def _await_completion(self, slurm_id: str, cancel: threading.Event) -> None:
-        while True:
-            if cancel.is_set():
-                self._runner.cancel(slurm_id)
-                raise JobCancelled(slurm_id)
-            state = self._runner.poll(slurm_id).upper()
-            if state in _SLURM_ACTIVE_STATES:
-                time.sleep(self._poll_interval)
-                continue
-            if state == _SLURM_SUCCESS_STATE:
-                return
-            if state.startswith("CANCELLED"):
-                raise JobCancelled(slurm_id)
-            raise RuntimeError(f"Slurm job {slurm_id} ended in state {state!r}")
-
-    def _collect_result(self, work: JobWork, out_path: Path) -> str:
-        if not out_path.exists():
-            raise RuntimeError(
-                f"Slurm job for {work.tool_name!r} completed but produced no result "
-                f"at {str(out_path)!r} (payload dir not shared with the compute node?)"
-            )
-        with out_path.open("rb") as fh:
-            payload = cloudpickle.load(fh)
-        if payload.get("ok"):
-            return payload["result"]
-        raise RuntimeError(
-            payload.get("error") or f"Slurm job for {work.tool_name!r} failed"
-        )
-
-
-@runtime_checkable
-class ModalCaller(Protocol):
-    """Seam over a Modal function invocation (spawn → poll → cancel).
-
-    Injecting this keeps :class:`ModalExecutor` runnable and testable without a
-    deployed Modal app, and lets a deployment point the executor at whatever
-    remote function actually runs its tools.
-    """
-
-    def spawn(self, tool: Tool, call_arguments: dict[str, Any]) -> Any:
-        """Start the remote call and return an opaque handle."""
-
-    def poll(self, handle: Any) -> tuple[bool, str | None]:
-        """Return `(done, rendered_result)`; raise if the remote call failed."""
-
-    def cancel(self, handle: Any) -> None:
-        """Cancel the remote call."""
-
-
-class _ModalFunctionCaller:
-    """Default :class:`ModalCaller` wrapping a deployed `modal.Function`.
-
-    The wrapped function must accept a single `bytes` argument — a cloudpickled
-    `(tool, call_arguments)` pair — and return the rendered result string
-    (`render_result` applied on the remote side). We drive it asynchronously:
-    `spawn` starts the call, `poll` does a non-blocking `get`.
-    """
-
-    def __init__(self, modal_function: Any) -> None:
-        self._fn = modal_function
-
-    def spawn(self, tool: Tool, call_arguments: dict[str, Any]) -> Any:
-        blob = cloudpickle.dumps((tool, call_arguments))
-        return self._fn.spawn(blob)
-
-    def poll(self, handle: Any) -> tuple[bool, str | None]:
-        try:
-            result = handle.get(timeout=0)
-        except TimeoutError:
-            return False, None
-        return True, render_result(result)
-
-    def cancel(self, handle: Any) -> None:
-        with contextlib.suppress(Exception):
-            handle.cancel()
-
-
-class ModalExecutor(_PooledExecutor):
-    """Run a job's tool on Modal via a deployed function.
-
-    Corral already runs some tools on Modal; this executor lets a
-    `background_capable` tool declare `executor="modal"` and be dispatched
-    there. Provide either a `caller` (any :class:`ModalCaller`) or a
-    `modal_function` (a deployed `modal.Function` taking a cloudpickled
-    `(tool, arguments)` blob and returning the rendered string). Without one,
-    :meth:`run_tool` raises with guidance rather than guessing at an app — there
-    is no universal remote entry point to fall back to.
-    """
-
-    def __init__(
-        self,
-        max_workers: int = DEFAULT_JOB_CONCURRENCY,
-        *,
-        caller: ModalCaller | None = None,
-        modal_function: Any = None,
-        poll_interval: float = 1.0,
-    ) -> None:
-        super().__init__(max_workers)
-        if caller is None and modal_function is not None:
-            caller = _ModalFunctionCaller(modal_function)
-        self._caller = caller
-        self._poll_interval = poll_interval
-
-    def run_tool(self, work: JobWork, cancel: threading.Event) -> str:
-        if self._caller is None:
-            raise RuntimeError(
-                "ModalExecutor needs a `modal_function=` (a deployed modal.Function "
-                "taking a cloudpickled (tool, arguments) blob) or a custom `caller=`; "
-                f"tool {work.tool_name!r} declared executor='modal' but none was configured."
-            )
-        handle = self._caller.spawn(work.tool, work.call_arguments)
-        while True:
-            if cancel.is_set():
-                self._caller.cancel(handle)
-                raise JobCancelled(work.job_id)
-            done, result = self._caller.poll(handle)
-            if done:
-                return result if result is not None else ""
-            time.sleep(self._poll_interval)
-
-
 # Built-in executor names a tool may request via `@tool(executor="...")`.
 _BUILTIN_EXECUTORS: dict[str, Callable[[int], JobExecutor]] = {
     "thread": ThreadExecutor,
     "process": ProcessExecutor,
     "subprocess": SubprocessExecutor,
-    "slurm": SlurmExecutor,
-    "modal": ModalExecutor,
 }
 
 DEFAULT_EXECUTOR = "thread"
@@ -615,13 +389,7 @@ DEFAULT_EXECUTOR = "thread"
 def build_executor(
     name: str, max_workers: int = DEFAULT_JOB_CONCURRENCY
 ) -> JobExecutor:
-    """Construct a built-in executor by name (`thread`/`process`/…).
-
-    Slurm and Modal are built with their defaults (real `sbatch`; no Modal
-    function): a tool asking for them expects that backend to be present, and a
-    deployment that needs custom wiring injects a configured instance through
-    :class:`~corral.backend.jobs.JobManager`'s `executors` map instead.
-    """
+    """Construct a local executor by name (`thread`/`process`/`subprocess`)."""
     factory = _BUILTIN_EXECUTORS.get(name)
     if factory is None:
         raise ValueError(

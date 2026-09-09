@@ -1,54 +1,54 @@
-from corral.backend.tool import Tool, tool
+from wetlab.colors import PALETTE, PRECIPITATE_COLORS, closest_color_names, mix_colors
+from wetlab.engine import Precipitate, Solution, StockSolution, VolumeError
 
-from wetlab.engine import StockSolution, Solution, Precipitate, VolumeError
-from wetlab.colors import PRECIPITATE_COLORS, PALETTE, mix_colors, closest_color_names
+from corral.core.tool import Tool, tool
 
 CATIONS = [
-    'Ag+',
-    'Al+3',
-    'Ba+2',
-    'Ca+2',
-    'Cd+2',
-    'Co+2',
-    'Cs+',
-    'Cu+2',
-    'Fe+2',
-    'Fe+3',
-    'Hg+2',
-    'Hg2+2',
-    'K+',
-    'Li+',
-    'Mg+2',
-    'Mn+2',
-    'Na+',
-    'NH4+',
-    'Ni+2',
-    'Pb+2',
-    'Rb+',
-    'Sr+2',
-    'Zn+2',
+    "Ag+",
+    "Al+3",
+    "Ba+2",
+    "Ca+2",
+    "Cd+2",
+    "Co+2",
+    "Cs+",
+    "Cu+2",
+    "Fe+2",
+    "Fe+3",
+    "Hg+2",
+    "Hg2+2",
+    "K+",
+    "Li+",
+    "Mg+2",
+    "Mn+2",
+    "Na+",
+    "NH4+",
+    "Ni+2",
+    "Pb+2",
+    "Rb+",
+    "Sr+2",
+    "Zn+2",
 ]
 
 ANIONS = [
-    'Br-',
-    'Cl-',
-    'CO3-2',
-    'HCO3-',
-    'CrO4-2',
-    'HCrO4-',
-    'Cr2O7-2',
-    'F-',
-    'I-',
-    'NO3-',
-    'OH-',
-    'PO4-3',
-    'HPO4-2',
-    'H2PO4-',
-    'S-2',
-    'HS-',
-    'SCN-',
-    'SO4-2',
-    'HSO4-',
+    "Br-",
+    "Cl-",
+    "CO3-2",
+    "HCO3-",
+    "CrO4-2",
+    "HCrO4-",
+    "Cr2O7-2",
+    "F-",
+    "I-",
+    "NO3-",
+    "OH-",
+    "PO4-3",
+    "HPO4-2",
+    "H2PO4-",
+    "S-2",
+    "HS-",
+    "SCN-",
+    "SO4-2",
+    "HSO4-",
 ]
 
 FLAME_COLORS = {
@@ -63,10 +63,11 @@ FLAME_COLORS = {
     "Sr+2": "red",
 }
 
+
 @tool
 def possible_cations() -> str:
     """[BRIEF] Returns the list of possible cations. [/BRIEF]
-    
+
     [DETAILED] This functions returns a space-separated string of all the possible cations that can be present in an unknown sample. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -113,12 +114,13 @@ def possible_cations() -> str:
         - This tool is only useful when the task involves identifying unknown cations. If the task is about identifying solutions from a possible list of solutions with known compositions, there is no need for this tool.
     [/LIMITATIONS]
     """
-    return ' '.join(CATIONS)
+    return " ".join(CATIONS)
+
 
 @tool
 def possible_anions() -> str:
     """[BRIEF] Returns the list of possible anions. [/BRIEF]
-    
+
     [DETAILED] This functions returns a space-separated string of all the possible anions that can be present in an unknown sample. One or more of these anions could be present in the unknown sample(s). [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -165,13 +167,13 @@ def possible_anions() -> str:
         - This tool is only useful when the task involves identifying unknown anions. If the task is about identifying solutions from a possible list of solutions with known compositions, there is no need for this tool.
     [/LIMITATIONS]
     """
-    return ' '.join(ANIONS)
+    return " ".join(ANIONS)
 
-    
-@tool(hidden_args=['compositions'])
-def measure_pH(compositions, label: str) -> str:
+
+@tool(hidden_args=["wetlab"])
+def measure_pH(wetlab, label: str) -> str:
     """[BRIEF] Measures the pH of the solution using a pH paper.[/BRIEF]
-    
+
     [DETAILED] This tool measure the pH of a solution using a universal pH-indicator paper and reports the pH as the closest integer. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -217,7 +219,7 @@ def measure_pH(compositions, label: str) -> str:
         KeyError: [ERROR_WHEN] When the given `label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `label` is not found in the Inventory [/ERROR_DETAILS]
                   [ERROR_RECOVERY] Check the Inventory and ensure you are using a correct `label` [/ERROR_RECOVERY]
-        
+
         ValueError: [ERROR_WHEN] When the given `label` is not a solution [/ERROR_WHEN]
                     [ERROR_DETAILS] The given `label` exists in the Inventory but the object it points to is not a solution (for example it could be a precipitate) [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Check the Inventory and make sure the `label` you use points to a solution [/ERROR_RECOVERY]
@@ -229,16 +231,16 @@ def measure_pH(compositions, label: str) -> str:
     [/LIMITATIONS]
     """
     try:
-        target = compositions[label]
+        target = wetlab[label]
     except KeyError as e:
         raise KeyError(f"Invalid label: {e}")
-    
+
     if isinstance(target, StockSolution):
         if type(target) == StockSolution:
             target = 1 * target  # converting StockSolution --> Solution
             target.equilibrate()
         pH = target.pH
-    
+
     else:
         raise ValueError(f"{label} is not a solution!")
 
@@ -246,10 +248,10 @@ def measure_pH(compositions, label: str) -> str:
     return round(pH)
 
 
-@tool(hidden_args=['compositions'])
-def perform_flame_test(compositions, label: str) -> str:
+@tool(hidden_args=["wetlab"])
+def perform_flame_test(wetlab, label: str) -> str:
     """[BRIEF] Performs a flame test on the solution. Cost = 1 mL [/BRIEF]
-    
+
     [DETAILED] This test consumes 1 mL of the solution to perform a flame-color test. It returns the observed color of the flame (if any). [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -295,43 +297,45 @@ def perform_flame_test(compositions, label: str) -> str:
         KeyError: [ERROR_WHEN] When the given `label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `label` is not found in the Inventory [/ERROR_DETAILS]
                   [ERROR_RECOVERY] Check the Inventory and ensure you are using a correct `label` [/ERROR_RECOVERY]
-        
+
         ValueError: [ERROR_WHEN] When the given `label` is not a solution [/ERROR_WHEN]
                     [ERROR_DETAILS] The given `label` exists in the Inventory but the object it points to is not a solution (for example it could be a precipitate) [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Check the Inventory and make sure the `label` you use points to a solution [/ERROR_RECOVERY]
 
         VolumeError: [ERROR_WHEN] When the solution contains a precipitate or less than 1 mL of it is remaining [/ERROR_WHEN]
                      [ERROR_DETAILS] The given `label` exists in the Inventory as a solution, but it either contains a precipitate or the remaining volume is less than 1 mL [/ERROR_DETAILS]
-                     [ERROR_RECOVERY] If the solution contains a precipitate, filter it first and then perform the flame test again. If there is not enough solution to perform the test, you may be able to make more of it by repeating the steps that lead to it [/ERROR_RECOVERY]   
+                     [ERROR_RECOVERY] If the solution contains a precipitate, filter it first and then perform the flame test again. If there is not enough solution to perform the test, you may be able to make more of it by repeating the steps that lead to it [/ERROR_RECOVERY]
     [/RAISES]
 
     [LIMITATIONS] Known Limitations:
         - The flame test's result depends on the concentration of cations; only species with a concentration higher than 5e-4 molar will give a positive result.
         - If you have introduced known interfering cations to the solution in previous steps, they will affect the results.
         - Some flame colors can be interpreted as more than one cation. Additional tests may be required to indicate the exact identity of the species.
-        - A "multi-colored" flame means that there are at least two cations present with different flame colors. 
+        - A "multi-colored" flame means that there are at least two cations present with different flame colors.
     [/LIMITATIONS]
     """
     try:
-        target = compositions[label]
+        target = wetlab[label]
     except KeyError as e:
         raise KeyError(f"Invalid label: {e}")
-    
+
     if not isinstance(target, StockSolution):
         raise ValueError(f"{label} is not a solution")
-    
-    test = 1 * target # drawing 1 mL from the target solution
+
+    test = 1 * target  # drawing 1 mL from the target solution
 
     colors = []
     total_copper = 0
     for sp, conc in test.composition.items():
-        if 'Cu' in sp:  # copper is the only flame-active element that exists as multiple species and not just "Cu+2", therefore, all copper-containing species are summed
+        if (
+            "Cu" in sp
+        ):  # copper is the only flame-active element that exists as multiple species and not just "Cu+2", therefore, all copper-containing species are summed
             total_copper += conc
         elif (sp in FLAME_COLORS) and (conc > 5e-4):
             colors.append(FLAME_COLORS[sp])
-    
+
     if total_copper > 5e-4:
-        colors.append(FLAME_COLORS['Cu+2'])
+        colors.append(FLAME_COLORS["Cu+2"])
 
     colors = list(set(colors))
 
@@ -346,7 +350,7 @@ def perform_flame_test(compositions, label: str) -> str:
 @tool
 def lookup_flame_colors() -> str:
     """[BRIEF] Returns the characteristic flame colors of cations. [/BRIEF]
-    
+
     [DETAILED] This tool returns a pre-defined list of ideal flame colors for each cation with a characteristic flame color. The mentioned colors are the color of the flame when no other cation with a positive flame test is present.  [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -388,14 +392,14 @@ def lookup_flame_colors() -> str:
         - If the concentration of a cation is below 5e-4, it will not give a colored flame.
     [/LIMITATIONS]
     """
-    flame_colors = [f"{ion}     {color}" for ion,color in FLAME_COLORS.items()]
-    return '\n'.join(flame_colors)
+    flame_colors = [f"{ion}     {color}" for ion, color in FLAME_COLORS.items()]
+    return "\n".join(flame_colors)
 
 
-@tool(hidden_args=['compositions'])
-def checkout_color(compositions, label: str) -> str:
+@tool(hidden_args=["wetlab"])
+def checkout_color(wetlab, label: str) -> str:
     """[BRIEF] Observe the color of a solution or precipitate. [/BRIEF]
-    
+
     [DETAILED] Observe the color of a solution or precipitate from the Inventory. This can be the color of a sample solution, a reagent or a precipitate from previous tests. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -450,17 +454,17 @@ def checkout_color(compositions, label: str) -> str:
     [/LIMITATIONS]
     """
     try:
-        target = compositions[label]
+        target = wetlab[label]
     except KeyError as e:
         raise KeyError(f"Invalid label: {e}")
-    
+
     if type(target) == StockSolution:
-        sample = 1 * target # converting StockSolution --> Solution
+        sample = 1 * target  # converting StockSolution --> Solution
         return f"{label} is a reagent solution with the following color: {sample.color_name}"
-    
+
     elif type(target) == Precipitate:
         return f"{label} is a precipitate with the following color: {target.color_name}"
-    
+
     elif type(target) == Solution:
         if target.has_precipitate:
             prec_color = target.precipitate.color_name
@@ -468,12 +472,12 @@ def checkout_color(compositions, label: str) -> str:
             return f"{label} is a solution that also contains a precipitate.\n Color of the precipitate: {prec_color}\n Color of the supernatant solution: {sol_color}"
         else:
             return f"{label} is a clear solution with the following color: {target.color_name}"
-        
+
 
 @tool
 def lookup_precipitate_colors() -> str:
     """[BRIEF] Returns the list of colored precipitates and their color. [/BRIEF]
-    
+
     [DETAILED] This tool returns a pre-defined list of non-white precipitates and their corresponding color in their pure, freshly precipitated form. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -487,7 +491,7 @@ def lookup_precipitate_colors() -> str:
 
     [CONTEXTUAL] How this tool works:
     - The tool does not perform any tests; it simply returns the full pre-defined list of non-white precipitates and their colors in their pure form.
-    - Since there is a large number of white precipitates, only colored (non-white) precipitates are listed; precipitates that are not listed are white. 
+    - Since there is a large number of white precipitates, only colored (non-white) precipitates are listed; precipitates that are not listed are white.
     - The observed color of precipitates reported by other tools will only match these listed colors if there is only one compound in the precipitate. If multiple compounds co-precipitate at the same time, it can affect the perceived color of the precipitate. [/CONTEXTUAL]
 
     [SYNTACTICAL] Usage examples:
@@ -519,14 +523,17 @@ def lookup_precipitate_colors() -> str:
     [/LIMITATIONS]
     """
     note = "NOTE: This list only describes colored (non-white) precipitates. White precipitates are omitted; if a precipitate is not listed below, it means that it's white.\n"
-    precipitate_colors = [f"{prec} :    {color}" for prec,color in PRECIPITATE_COLORS.items()]
+    precipitate_colors = [
+        f"{prec} :    {color}" for prec, color in PRECIPITATE_COLORS.items()
+    ]
 
-    return note + '\n'.join(precipitate_colors)
+    return note + "\n".join(precipitate_colors)
+
 
 @tool
 def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
     """[BRIEF] Given a mixture of precipitate colors, it mixes them with the given fractions and returns the name of the resulting precipitate color. [/BRIEF]
-    
+
     [DETAILED] This tool simulates the mixing of precipitate colors with the given fractions and returns the name of the closest matching color of the resulting precipitate mixture. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -552,7 +559,7 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
         `simulate_color_mixture([("cyan", 0.2), ("white", 0.2), ("pink", 0.6)])`,
         `simulate_color_mixture([("white", 0.1), ("reddish brown", 0.1), ("crimson", 0.8)])`,
         `simulate_color_mixture([("yellow", 0.6), ("brick red", 0.4)])`,
-        
+
     ]
     [/SYNTACTICAL]
 
@@ -573,7 +580,7 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
         ValueError: [ERROR_WHEN] When a given color name is invalid [/ERROR_WHEN]
                     [ERROR_DETAILS] The first element of one of the tuples is not a valid color name [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Make sure you only use color names that correspond to pure precipitates as listed by the `lookup_precipitate_colors` tool [/ERROR_RECOVERY]
-        
+
         ValueError: [ERROR_WHEN] When the mixture has more than 3 components [/ERROR_WHEN]
                     [ERROR_DETAILS] The list of color mixtures has 4 or more tuples [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Ensure that you are mixing at most 3 colors [/ERROR_RECOVERY]
@@ -591,8 +598,10 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
     [/LIMITATIONS]
     """
     if len(mixture) > 3:
-        raise ValueError(f"Attempted to mix {len(mixture)} colors. Up to 3 colors can be mixed.")
-    
+        raise ValueError(
+            f"Attempted to mix {len(mixture)} colors. Up to 3 colors can be mixed."
+        )
+
     try:
         hex_mixture = []
         for name, frac in mixture:
@@ -600,14 +609,15 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
             hex_mixture.append((hex, round(frac, 2)))
     except KeyError:
         raise ValueError(f"Undefined color name: {name}")
-    
-    result_hex = mix_colors(hex_mixture)
-    return closest_color_names(result_hex, mode='precipitate', max_names=1)
 
-@tool(hidden_args=['compositions'])
-def get_available_reagents(compositions) -> str:
+    result_hex = mix_colors(hex_mixture)
+    return closest_color_names(result_hex, mode="precipitate", max_names=1)
+
+
+@tool(hidden_args=["wetlab"])
+def get_available_reagents(wetlab) -> str:
     """[BRIEF] Returns the list of available reagent solutions. [/BRIEF]
-    
+
     [DETAILED] Returns a string where each reagent appears on a separate line. Each line contains the reagent's label as well as its composition. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -654,17 +664,29 @@ def get_available_reagents(compositions) -> str:
     - All reagent solutions are at room temperature; there are no ways to heat up or cool down the reagents.
     [/LIMITATIONS]
     """
-    reagent_descriptions = [f"reagent label: {k}     composition: {v.description}" for k,v in compositions.items() if type(v)==StockSolution]
-    if len(reagent_descriptions)==0:
+    reagent_descriptions = [
+        f"reagent label: {k}     composition: {v.description}"
+        for k, v in wetlab.items()
+        if type(v) == StockSolution
+    ]
+    if len(reagent_descriptions) == 0:
         return "There are no external reagents available."
     else:
         note = "NOTE: All reagent solutions are made with distilled water.\n"
-        return note + '\n'.join(reagent_descriptions)
+        return note + "\n".join(reagent_descriptions)
 
-@tool(hidden_args=['compositions'])
-def mix_two_solutions(compositions, test_label: str, sol1_label: str, sol1_vol: int, sol2_label: str,  sol2_vol: int) -> str:
+
+@tool(hidden_args=["wetlab"])
+def mix_two_solutions(
+    wetlab,
+    test_label: str,
+    sol1_label: str,
+    sol1_vol: int,
+    sol2_label: str,
+    sol2_vol: int,
+) -> str:
     """[BRIEF] Mixes two solutions with the given volumes an returns observations about precipitation and color of the resulting solution [/BRIEF]
-    
+
     [DETAILED] Mixes the two solutions (which must not contain any precipitates) with the given volumes (in mL) and reports observations about color change or precipitate formation. It also adds the resulting solution to the Inventory and labels it `test_label` [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -737,15 +759,15 @@ def mix_two_solutions(compositions, test_label: str, sol1_label: str, sol1_vol: 
         KeyError: [ERROR_WHEN] When `sol1_label` or `sol2_label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `sol1_label` or `sol2_label` was not found in the Inventory [/ERROR_DETAILS]
                   [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
-        
+
         RuntimeError: [ERROR_WHEN] When `sol1_label` or `sol2_label` is not a solution [/ERROR_WHEN]
                       [ERROR_DETAILS] The given `sol1_label` or `sol2_label` was found in the Inventory but the object it points to is not a solution. [/ERROR_DETAILS]
                       [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
-        
+
         ValueError: [ERROR_WHEN] When `sol1_vol` or `sol2_vol` is not a positive integer greater than or equal to 1 [/ERROR_WHEN]
                     [ERROR_DETAILS] The given `sol1_vol` or `sol2_vol` is not an integer or it is less than 1 mL [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Make sure you use at least 1 mL of each solution [/ERROR_RECOVERY]
-        
+
         VolumeError: [ERROR_WHEN] When `sol1_label` or `sol2_label` contain precipitates or the remaining volume is less than the requested amount [/ERROR_WHEN]
                      [ERROR_DETAILS] The given `sol1_label` or `sol2_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining [/ERROR_DETAILS]
                      [ERROR_RECOVERY] If the solution contains a precipitate, either filter it using the `filter_solution` tool, or use the `add_a_solution` tool if the presence of the precipitate is necessary for the test. If the remaining amount of solution is less that the requested amount, try doing the test will a smaller volume if possible, or make more of that solution by repeating the steps that lead to it. [/ERROR_RECOVERY]
@@ -762,12 +784,12 @@ def mix_two_solutions(compositions, test_label: str, sol1_label: str, sol1_vol: 
     [/LIMITATIONS]
     """
     try:
-        sol1 = compositions[sol1_label]
+        sol1 = wetlab[sol1_label]
     except KeyError as e:
         raise KeyError(f"Invalid sol1_label: {e}")
-    
+
     try:
-        sol2 = compositions[sol2_label]
+        sol2 = wetlab[sol2_label]
     except KeyError as e:
         raise KeyError(f"Invalid sol2_label: {e}")
 
@@ -775,42 +797,52 @@ def mix_two_solutions(compositions, test_label: str, sol1_label: str, sol1_vol: 
         raise RuntimeError(f"{sol1_label} is not a solution!")
     if not isinstance(sol2, StockSolution):
         raise RuntimeError(f"{sol2_label} is not a solution!")
-    
-    if type(sol1_vol) != int or sol1_vol<1:
-        raise ValueError("sol1_vol must be a positive integer greater than or equal to 1")
-    if type(sol2_vol) != int or sol2_vol<1:
-        raise ValueError("sol2_vol must be a positive integer greater than or equal to 1")
-    
+
+    if type(sol1_vol) != int or sol1_vol < 1:
+        raise ValueError(
+            "sol1_vol must be a positive integer greater than or equal to 1"
+        )
+    if type(sol2_vol) != int or sol2_vol < 1:
+        raise ValueError(
+            "sol2_vol must be a positive integer greater than or equal to 1"
+        )
+
     test = sol1_vol * sol1 + sol2_vol * sol2
     description = f"{int(sol1_vol)} mL {sol1_label} + {int(sol2_vol)} mL {sol2_label}"
     test.description = description
     test.equilibrate()
-    compositions[test_label] = test
+    wetlab[test_label] = test
 
     observations = []
 
-    #precipitate observation
+    # precipitate observation
     if test.has_precipitate:
         prec_colors = test.precipitate.color_name
-        tiny = "tiny amount of " if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
+        tiny = (
+            "tiny amount of "
+            if (1000 * test.precipitate.total_mol / test.volume < 5e-4)
+            else ""
+        )  # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
         observations.append(f"A {tiny}precipitate forms. Color: {prec_colors}")
     else:
         observations.append("No precipitate forms.")
-    
-    #solution observation
+
+    # solution observation
     sol_color = test.color_name
     if test.has_precipitate:
         observations.append(f"The supernatant solution is {sol_color}.")
     else:
         observations.append(f"The resulting solution is {sol_color}.")
 
-    return '\n'.join(observations)
+    return "\n".join(observations)
 
 
-@tool(hidden_args=['compositions'])
-def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: str,  sol2_vol: int) -> str:
+@tool(hidden_args=["wetlab"])
+def add_a_solution(
+    wetlab, test_label: str, sol1_label: str, sol2_label: str, sol2_vol: int
+) -> str:
     """[BRIEF] Adds a specific volume of `sol2_label` to all of `sol1_label` and returns observations about the changes of solution color and precipitation amount and color. [/BRIEF]
-    
+
     [DETAILED] Add the given volumes (in mL) of `sol2_label` (which must not contain any precipitates) to the remaining volume of `sol1_label` (which can have precipitates) and reports observations about color change or precipitate formation/dissolution. It also adds the resulting solution to the Inventory and labels it `test_label`. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -870,7 +902,7 @@ def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: s
             [ARGS_DETAILED] the volume (in mL) of the second solution, labeled `sol2_label`, to draw and mix with the first solution. The minimum allowed volume is 1 mL [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] integer value [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
-  
+
     Returns:
         str:
             [RETURNS_BRIEF] a string containing the observations from the test [/RETURNS_BRIEF]
@@ -881,15 +913,15 @@ def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: s
         KeyError: [ERROR_WHEN] When `sol1_label` or `sol2_label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `sol1_label` or `sol2_label` was not found in the Inventory [/ERROR_DETAILS]
                   [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
-        
+
         RuntimeError: [ERROR_WHEN] When `sol1_label` or `sol2_label` is not a solution [/ERROR_WHEN]
                       [ERROR_DETAILS] The given `sol1_label` or `sol2_label` was found in the Inventory but the object it points to is not a solution. [/ERROR_DETAILS]
                       [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
-        
+
         ValueError: [ERROR_WHEN] When `sol2_vol` is not a positive integer greater than or equal to 1 [/ERROR_WHEN]
                     [ERROR_DETAILS] The given `sol2_vol` is not an integer or it is less than 1 mL [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Make sure you are adding at least 1 mL of the second solution [/ERROR_RECOVERY]
-        
+
         VolumeError: [ERROR_WHEN] When `sol2_label` contains a precipitate or its remaining volume is less than the requested amount [/ERROR_WHEN]
                      [ERROR_DETAILS] The given `sol2_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining [/ERROR_DETAILS]
                      [ERROR_RECOVERY] If the second solution contains a precipitate, filter it using the `filter_solution` tool. If the remaining amount of it is less that the requested amount, try doing the test will a smaller `sol2_vol` if possible, or make more of that solution by repeating the steps that lead to it. [/ERROR_RECOVERY]
@@ -906,28 +938,32 @@ def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: s
     [/LIMITATIONS]
     """
     try:
-        sol1 = compositions[sol1_label]
+        sol1 = wetlab[sol1_label]
     except KeyError as e:
         raise KeyError(f"Invalid sol1_label: {e}")
 
     if type(sol1) != Solution:
         raise RuntimeError(f"{sol1_label} is not a valid solution!")
-    
+
     if sol1.volume == 0:
         raise VolumeError(f"The remaining volume of {sol1_label} is zero!")
-    
+
     try:
-        sol2 = compositions[sol2_label]
+        sol2 = wetlab[sol2_label]
     except KeyError as e:
         raise KeyError(f"Invalid sol2_label: {e}")
-    
+
     if not isinstance(sol2, StockSolution):
         raise RuntimeError(f"{sol2_label} is not a solution!")
-    
-    if type(sol2_vol) != int or sol2_vol<1:
-        raise ValueError("sol2_vol must be a positive integer greater than or equal to 1")
-    
-    description = f"{int(sol1.volume)} mL {sol1_label} + {int(sol2_vol)} mL {sol2_label}"
+
+    if type(sol2_vol) != int or sol2_vol < 1:
+        raise ValueError(
+            "sol2_vol must be a positive integer greater than or equal to 1"
+        )
+
+    description = (
+        f"{int(sol1.volume)} mL {sol1_label} + {int(sol2_vol)} mL {sol2_label}"
+    )
 
     old_supernatant, old_precipitate = sol1.filter()
     old_sol_color = sol1.color_name
@@ -935,19 +971,23 @@ def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: s
     test = sol1 + sol2_vol * sol2
     test.description = description
     test.equilibrate()
-    compositions[test_label] = test
+    wetlab[test_label] = test
 
     observations = []
 
-    #precipitate observation
+    # precipitate observation
     if old_precipitate is None:
         if test.has_precipitate:
             prec_colors = test.precipitate.color_name
-            tiny = "tiny amount of "  if (1000 * test.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
+            tiny = (
+                "tiny amount of "
+                if (1000 * test.precipitate.total_mol / test.volume < 5e-4)
+                else ""
+            )  # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
             observations.append(f"A {tiny}precipitate forms. Color: {prec_colors}")
         else:
             observations.append("No precipitate forms.")
-    
+
     else:
         old_amount = old_precipitate.total_mol
         old_color = old_precipitate.color_name
@@ -955,77 +995,106 @@ def add_a_solution(compositions, test_label: str, sol1_label: str, sol2_label: s
         if test.has_precipitate:
             new_amount = test.precipitate.total_mol
             new_color = test.precipitate.color_name
-            # if there is at least one shared color name between the old and new color, we add a "slightly" modifier 
-            old_color_set = set(old_color.split(' / '))
-            new_color_set = set(new_color.split(' / '))
+            # if there is at least one shared color name between the old and new color, we add a "slightly" modifier
+            old_color_set = set(old_color.split(" / "))
+            new_color_set = set(new_color.split(" / "))
             shared_colors = old_color_set.intersection(new_color_set)
-            slightly = "slightly " if len(shared_colors)>0 else ""
-            
-            precipitate_ratio = new_amount / old_amount 
+            slightly = "slightly " if len(shared_colors) > 0 else ""
+
+            precipitate_ratio = new_amount / old_amount
 
             # checking if a new precipitate was formed
-            test_no_prec = old_supernatant + sol2_vol * sol2.clone() # .clone() is used to prevent the volume of sol2 from decreasing twice
+            test_no_prec = (
+                old_supernatant + sol2_vol * sol2.clone()
+            )  # .clone() is used to prevent the volume of sol2 from decreasing twice
             test_no_prec.equilibrate()
 
             if test_no_prec.has_precipitate:
                 additional_color = test_no_prec.precipitate.color_name
-                tiny = "tiny amount of "  if (1000 * test_no_prec.precipitate.total_mol / test.volume < 5e-4) else "" # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
+                tiny = (
+                    "tiny amount of "
+                    if (1000 * test_no_prec.precipitate.total_mol / test.volume < 5e-4)
+                    else ""
+                )  # precipitates with an amount lower than 0.5 mmol/L are described as 'tiny'.
                 if additional_color == old_color:
-                    observations.append(f"A {tiny}precipitate with the same color as the existing precipitate forms.")
-                elif new_color == old_color: 
-                    observations.append(f"A {tiny}new precipitate (color: {additional_color}) forms, but does not cause the color of the existing precipitate to noticeably change.")
+                    observations.append(
+                        f"A {tiny}precipitate with the same color as the existing precipitate forms."
+                    )
+                elif new_color == old_color:
+                    observations.append(
+                        f"A {tiny}new precipitate (color: {additional_color}) forms, but does not cause the color of the existing precipitate to noticeably change."
+                    )
                 else:
-                    observations.append(f"A {tiny}new precipitate (color: {additional_color}) forms, mixing with the existing precipitate causing it to {slightly}change color. New color: {new_color}.")
-            
-            elif 0.85 < precipitate_ratio : # we assume that a change of less than 15% will not be noticeable
-                if new_color == old_color:
-                    observations.append("The amount and color of the existing precipitate does not noticeably change.")
-                else:
-                    observations.append(f"The amount of the existing precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}.")
+                    observations.append(
+                        f"A {tiny}new precipitate (color: {additional_color}) forms, mixing with the existing precipitate causing it to {slightly}change color. New color: {new_color}."
+                    )
 
-            elif 0.5 <= precipitate_ratio <= 0.85 : # we will call a change of 15 to 50% 'partial dissolution'
+            elif (
+                0.85 < precipitate_ratio
+            ):  # we assume that a change of less than 15% will not be noticeable
                 if new_color == old_color:
-                    observations.append("The existing precipitate partially dissolves. Its color does not noticeably change.")
+                    observations.append(
+                        "The amount and color of the existing precipitate does not noticeably change."
+                    )
                 else:
-                    observations.append(f"The existing precipitate partially dissolves and {slightly}changes color. New color: {new_color}.")
-            
-            else: # meaning precipitate_ratio < 0.5
+                    observations.append(
+                        f"The amount of the existing precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}."
+                    )
+
+            elif (
+                0.5 <= precipitate_ratio <= 0.85
+            ):  # we will call a change of 15 to 50% 'partial dissolution'
                 if new_color == old_color:
-                    observations.append("The existing precipitate mostly (but not fully) dissolves. Its color does not noticeably change.")
+                    observations.append(
+                        "The existing precipitate partially dissolves. Its color does not noticeably change."
+                    )
                 else:
-                    observations.append(f"The existing precipitate mostly (but not fully) dissolves and {slightly}changes color. New color: {new_color}.")
+                    observations.append(
+                        f"The existing precipitate partially dissolves and {slightly}changes color. New color: {new_color}."
+                    )
+
+            else:  # meaning precipitate_ratio < 0.5
+                if new_color == old_color:
+                    observations.append(
+                        "The existing precipitate mostly (but not fully) dissolves. Its color does not noticeably change."
+                    )
+                else:
+                    observations.append(
+                        f"The existing precipitate mostly (but not fully) dissolves and {slightly}changes color. New color: {new_color}."
+                    )
 
         else:
-            observations.append(f"The existing precipitate fully dissolves.")
+            observations.append("The existing precipitate fully dissolves.")
 
-
-    #solution observation
+    # solution observation
     new_sol_color = test.color_name
     if new_sol_color == old_sol_color:
         if test.has_precipitate:
-            observations.append("Color of the supernatant solution does not noticeably change.")
+            observations.append(
+                "Color of the supernatant solution does not noticeably change."
+            )
         else:
             observations.append("Color of the solution does not noticeably change.")
-    
+
     else:
         if test.has_precipitate:
-            observations.append(f"Color of the supernatant solution changes to {new_sol_color}.")
+            observations.append(
+                f"Color of the supernatant solution changes to {new_sol_color}."
+            )
         else:
             observations.append(f"Color of the solution changes to {new_sol_color}.")
 
-    return '\n'.join(observations)
+    return "\n".join(observations)
 
 
-
-
-@tool(hidden_args=['compositions'])
-def filter_solution(compositions, label: str) -> str:
+@tool(hidden_args=["wetlab"])
+def filter_solution(wetlab, label: str) -> str:
     """[BRIEF] Separates the precipitate from the supernatant solution. [/BRIEF]
-    
+
     [DETAILED] Filters a solution, separating the precipitate from the supernatant solution, and adds the resulting filtrate and the precipitate to the Inventory. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
-    - Use this tool when you want to remove the existing precipitate from a solution to perform further tests on only the supernatant 
+    - Use this tool when you want to remove the existing precipitate from a solution to perform further tests on only the supernatant
     - Use this tool to collect the newly formed precipitate in a test if you want to perform further tests on the precipitate only [/PROCEDURAL]
 
     [WORKFLOW_INTEGRATION] Typical workflow integration:
@@ -1054,7 +1123,7 @@ def filter_solution(compositions, label: str) -> str:
             [ARGS_DETAILED] the label given to the solution being filtered. This label is appended by '_filtrate' or '_precipitate' to refer to the separated phases. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] label of unfiltered solutions does not end with "_filtrate" [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "test1_HCl", "test_NH3_filt_iodide" [/ARGS_EXAMPLES]
-  
+
     Returns:
         str:
             [RETURNS_BRIEF] a string with a message about the success/failure of the filtration [/RETURNS_BRIEF]
@@ -1065,7 +1134,7 @@ def filter_solution(compositions, label: str) -> str:
         KeyError: [ERROR_WHEN] When `label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `label` was not found in the Inventory [/ERROR_DETAILS]
                   [ERROR_RECOVERY] Make sure you are passing the correct label. You can use the `check_inventory` tool. [/ERROR_RECOVERY]
-        
+
         RuntimeError: [ERROR_WHEN] When `label` is a reagent solution or a precipitate [/ERROR_WHEN]
                       [ERROR_DETAILS] The given `label` was found in the Inventory but the object it points to is either a precipitate or a reagent solution [/ERROR_DETAILS]
                       [ERROR_RECOVERY] Make sure you are passing the correct label. You can use the `check_inventory` tool. [/ERROR_RECOVERY]
@@ -1076,36 +1145,40 @@ def filter_solution(compositions, label: str) -> str:
     [/LIMITATIONS]
     """
     try:
-        target = compositions[label]
+        target = wetlab[label]
     except KeyError as e:
         raise KeyError(f"Invalid label: {e}")
-    
+
     if type(target) == StockSolution:
         raise RuntimeError("The target solution is a reagent and cannot be filtered.")
     elif type(target) == Precipitate:
-        raise RuntimeError(f"The object with label {label} is not a solution, it's a precipitate!")
+        raise RuntimeError(
+            f"The object with label {label} is not a solution, it's a precipitate!"
+        )
     else:
         assert type(target) == Solution
         if target.has_precipitate:
             filtrate, precipitate = target.filter()
             filtrate.description = target.description + " --> filtered"
             precipitate.description = target.description + " --> precipitate collected"
-            
+
             filt_label = label + "_filtrate"
             prec_label = label + "_precipitate"
-            compositions[filt_label] = filtrate
-            compositions[prec_label] = precipitate
-            compositions.pop(label)
+            wetlab[filt_label] = filtrate
+            wetlab[prec_label] = precipitate
+            wetlab.pop(label)
             return "The solution was successfully filtered! The filtrate and precipitate are added to the Inventory."
-        
+
         else:
             return "The target solution has no visible precipitate to filter! No change was made to the Inventory."
 
 
-@tool(hidden_args=['compositions'])
-def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, sol_label: str,  sol_vol: int) -> str:
+@tool(hidden_args=["wetlab"])
+def add_precipitate_to_solution(
+    wetlab, test_label: str, prec_label: str, sol_label: str, sol_vol: int
+) -> str:
     """[BRIEF] Adds a precipitate to a specific volume of a solution and returns observations about the changes in the amount/color of the added precipitate or the solution color. [/BRIEF]
-    
+
     [DETAILED] Draws `sol_vol` mL of `sol_label` (which must not contain any precipitates), adds to it all of the precipitate `prec_label` and reports observations about any changes in the color or the amount of the added precipitate and any color changes in the solution. It also adds the resulting solution to the Inventory and labels it `test_label`. [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
@@ -1121,7 +1194,7 @@ def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, 
     [CONTEXTUAL] How this tool works:
     - It draws `sol_vol` mL from `sol_label`.
     - Adds it to a new empty container labeled `test_label`.
-    - Adds all of the precipitate labeled `prec_label` to the container and stirs the mixture until equilibrium is reached, at room temperature. 
+    - Adds all of the precipitate labeled `prec_label` to the container and stirs the mixture until equilibrium is reached, at room temperature.
     - The resulting mixture is added to the Inventory with the label `test_label`.
     - It returns two observations on two separate lines: one about the change in the color and the amount of the added precipitate, and one about the change in the color of the supernatant solution.
     - The reference for observations about the change in solution color is `sol_label`.
@@ -1158,13 +1231,13 @@ def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, 
             [ARGS_DETAILED] the label of the solution (or reagent) that will receive the precipitate. This is how the solution (or reagent) is referred to in the Inventory (or reagent list). It must not contain any pre-existing precipitates [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] label string matching a clear solution in the Inventory or reagent list [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "test_1", "test2_filtrate", "NH4I", "HCl(1M)" [/ARGS_EXAMPLES]
-        
+
         sol_vol (int):
             [ARGS_BRIEF] volume of the solution [/ARGS_BRIEF]
             [ARGS_DETAILED] the volume (in mL) of the host solution, labeled `sol_label`. This volume will be drawn from the solution and the precipitate is then added to the drawn volume. The minimum allowed volume is 4 mL [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] integer value [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] `1`, `2`, `4` [/ARGS_EXAMPLES]
-  
+
     Returns:
         str:
             [RETURNS_BRIEF] a string containing the observations from the test [/RETURNS_BRIEF]
@@ -1175,15 +1248,15 @@ def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, 
         KeyError: [ERROR_WHEN] When `sol_label` or `prec_label` is invalid [/ERROR_WHEN]
                   [ERROR_DETAILS] The given `sol_label` or `prec_label` was not found in the Inventory [/ERROR_DETAILS]
                   [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
-        
+
         RuntimeError: [ERROR_WHEN] When `sol_label` is not a solution or `prec_label` is not a precipitate [/ERROR_WHEN]
                       [ERROR_DETAILS] The given `sol_label` and `prec_label` were found in the Inventory but the do not point to the correct type of object [/ERROR_DETAILS]
                       [ERROR_RECOVERY] Make sure you are passing the correct labels. You can use the `get_available_reagents` and `check_inventory` tools. [/ERROR_RECOVERY]
-        
+
         ValueError: [ERROR_WHEN] When `sol_vol` is invalid [/ERROR_WHEN]
                     [ERROR_DETAILS] The given `sol_vol` is not an integer greater than or equal to 4 mL [/ERROR_DETAILS]
                     [ERROR_RECOVERY] Make sure you are using at least 4 mL of the solution and passing it as an integer value [/ERROR_RECOVERY]
-        
+
         VolumeError: [ERROR_WHEN] When `sol_label` contains a precipitate or its remaining volume is less than the requested amount [/ERROR_WHEN]
                      [ERROR_DETAILS] The given `sol_label` was found in the Inventory and it is a solution but it either contains a precipitate or there is not enough of it remaining [/ERROR_DETAILS]
                      [ERROR_RECOVERY] If the solution contains a precipitate, filter it using the `filter_solution` tool. If the remaining amount of it is less that the requested amount, try doing the test will a smaller `sol_vol` if possible, or make more of that solution by repeating the steps that lead to it. [/ERROR_RECOVERY]
@@ -1201,26 +1274,28 @@ def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, 
     [/LIMITATIONS]
     """
     try:
-        prec = compositions[prec_label]
+        prec = wetlab[prec_label]
     except KeyError as e:
         raise KeyError(f"Invalid prec_label: {e}")
-    
+
     try:
-        sol = compositions[sol_label]
+        sol = wetlab[sol_label]
     except KeyError as e:
         raise KeyError(f"Invalid sol_label: {e}")
-    
+
     if type(prec) != Precipitate:
         raise RuntimeError(f"{prec_label} is not a precipitate!")
     if type(sol) not in [Solution, StockSolution]:
         raise RuntimeError(f"{sol_label} is not a solution!")
     if type(sol) == Solution:
-        if sol.has_precipitate: 
-            raise VolumeError(f"{sol_label} already has a precipitate. If you want to add a different precipitate, you must filter it first!")
+        if sol.has_precipitate:
+            raise VolumeError(
+                f"{sol_label} already has a precipitate. If you want to add a different precipitate, you must filter it first!"
+            )
 
     if type(sol_vol) != int or sol_vol < 4:
-        raise ValueError(f"`sol_vol` must be an integer greater than or equal to 4")
-    
+        raise ValueError("`sol_vol` must be an integer greater than or equal to 4")
+
     old_amount = prec.total_mol
     old_color = prec.color_name
 
@@ -1232,70 +1307,90 @@ def add_precipitate_to_solution(compositions, test_label: str, prec_label: str, 
     test.equilibrate()
     test.description = f"{int(sol_vol)} mL {sol_label} + {prec_label}"
 
-    compositions[test_label] = test
-    compositions.pop(prec_label)
+    wetlab[test_label] = test
+    wetlab.pop(prec_label)
 
     observations = []
 
-    #precipitate observation
+    # precipitate observation
     if test.has_precipitate:
         new_amount = test.precipitate.total_mol
         new_color = test.precipitate.color_name
-        # if there is at least one shared color name between the old and new color, we add a "slightly" modifier 
-        old_color_set = set(old_color.split(' / '))
-        new_color_set = set(new_color.split(' / '))
+        # if there is at least one shared color name between the old and new color, we add a "slightly" modifier
+        old_color_set = set(old_color.split(" / "))
+        new_color_set = set(new_color.split(" / "))
         shared_colors = old_color_set.intersection(new_color_set)
-        slightly = "slightly " if len(shared_colors)>0 else ""
-        
-        precipitate_ratio = new_amount / old_amount 
+        slightly = "slightly " if len(shared_colors) > 0 else ""
 
-        if 0.85 <=  precipitate_ratio : # we assume that a change of less than 15% will not be noticeable
-            if new_color == old_color:
-                observations.append("The amount and color of the added precipitate does not noticeably change.")
-            else:
-                observations.append(f"The amount of the added precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}")
+        precipitate_ratio = new_amount / old_amount
 
-        elif 0.50 <= precipitate_ratio < 0.85 : # we will call a change of 15 to 50% 'partial dissolution'
+        if (
+            0.85 <= precipitate_ratio
+        ):  # we assume that a change of less than 15% will not be noticeable
             if new_color == old_color:
-                observations.append("The added precipitate partially dissolves. Its color does not noticeably change.")
+                observations.append(
+                    "The amount and color of the added precipitate does not noticeably change."
+                )
             else:
-                observations.append(f"The added precipitate partially dissolves and its color {slightly}changes. New color: {new_color}")
-        
+                observations.append(
+                    f"The amount of the added precipitate does not noticeably change, but its color {slightly}changes. New color: {new_color}"
+                )
+
+        elif (
+            0.50 <= precipitate_ratio < 0.85
+        ):  # we will call a change of 15 to 50% 'partial dissolution'
+            if new_color == old_color:
+                observations.append(
+                    "The added precipitate partially dissolves. Its color does not noticeably change."
+                )
+            else:
+                observations.append(
+                    f"The added precipitate partially dissolves and its color {slightly}changes. New color: {new_color}"
+                )
+
         else:
             if new_color == old_color:
-                observations.append("The added precipitate mostly (but not fully) dissolves. Its color does not noticeably change.")
+                observations.append(
+                    "The added precipitate mostly (but not fully) dissolves. Its color does not noticeably change."
+                )
             else:
-                observations.append(f"The added precipitate mostly (but not fully) dissolves and its color {slightly}changes. New color: {new_color}")
+                observations.append(
+                    f"The added precipitate mostly (but not fully) dissolves and its color {slightly}changes. New color: {new_color}"
+                )
 
     else:
-        observations.append(f"The added precipitate fully dissolves.")
-    
-    #solution observation
+        observations.append("The added precipitate fully dissolves.")
+
+    # solution observation
     new_sol_color = test.color_name
     if new_sol_color == old_sol_color:
         if test.has_precipitate:
-            observations.append("Color of the supernatant solution does not noticeably change.")
+            observations.append(
+                "Color of the supernatant solution does not noticeably change."
+            )
         else:
             observations.append("Color of the solution does not noticeably change.")
-    
+
     else:
         if test.has_precipitate:
-            observations.append(f"Color of the supernatant solution changes to {new_sol_color}.")
+            observations.append(
+                f"Color of the supernatant solution changes to {new_sol_color}."
+            )
         else:
             observations.append(f"Color of the solution changes to {new_sol_color}.")
-    
-    return '\n'.join(observations)
+
+    return "\n".join(observations)
 
 
-@tool(hidden_args=['compositions'])
-def check_inventory(compositions) -> str:
+@tool(hidden_args=["wetlab"])
+def check_inventory(wetlab) -> str:
     """[BRIEF] Returns the current contents of the Inventory [/BRIEF]
-    
+
     [DETAILED] Returns a string containing the details of the solutions and precipitates in the Inventory, including their remaining volumes in mL [/DETAILED]
 
     [PROCEDURAL] When to use this tool:
     - Typically used in the beginning of a task to check the unknown samples.
-    - You can use this tool to check the Inventory, which is effectively a summary of the experiments performed so far. 
+    - You can use this tool to check the Inventory, which is effectively a summary of the experiments performed so far.
     - Use this tool to check the remaining volumes of the samples and test solutions.
     - Use this tool to check the correct label of solutions and precipitates to use in other tools. [/PROCEDURAL]
 
@@ -1343,25 +1438,34 @@ def check_inventory(compositions) -> str:
     """
 
     solution_descriptions = [
-        str({
-            "label": k, 
-            "type": "solution with precipitate" if v.has_precipitate else "clear solution",
-            "description": v.description,
-            "remaining_volume": f"{int(v.volume)} mL",
-        })
-        for k,v in compositions.items() if isinstance(v, Solution)
-    ]
-    
-    precipitate_descriptions = [
-        str({
-            "label": k,
-            "type": "precipitate",
-            "description": v.description,
-        })
-        for k,v in compositions.items() if isinstance(v, Precipitate)
+        str(
+            {
+                "label": k,
+                "type": "solution with precipitate"
+                if v.has_precipitate
+                else "clear solution",
+                "description": v.description,
+                "remaining_volume": f"{int(v.volume)} mL",
+            }
+        )
+        for k, v in wetlab.items()
+        if isinstance(v, Solution)
     ]
 
-    return '\n'.join(solution_descriptions + precipitate_descriptions)
+    precipitate_descriptions = [
+        str(
+            {
+                "label": k,
+                "type": "precipitate",
+                "description": v.description,
+            }
+        )
+        for k, v in wetlab.items()
+        if isinstance(v, Precipitate)
+    ]
+
+    return "\n".join(solution_descriptions + precipitate_descriptions)
+
 
 def create_tools() -> dict[str, Tool]:
     """Create a dictionary of all available tools for the agent environment"""

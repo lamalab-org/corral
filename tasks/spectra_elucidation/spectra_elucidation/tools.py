@@ -16,7 +16,7 @@ from spectra_elucidation.spectra_utils import (
     predict_nmr_spectra,
 )
 
-from corral.backend.tool import Tool, tool
+from corral.core.tool import Tool, tool
 from corral.utils.rag import vector_database_search
 
 

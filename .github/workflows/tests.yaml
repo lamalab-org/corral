@@ -88,8 +88,9 @@ jobs:
       - name: Discover tasks with tests
         id: discover
         run: |
-          # Find all directories in tasks/ that have both pyproject.toml and tests/
+          # Wetlab is tested separately because it requires a Conda-only dependency.
           tasks=$(find tasks -maxdepth 1 -type d -name "*" | while read task_dir; do
+            if [[ "$(basename "$task_dir")" == "wetlab" ]]; then continue; fi
             if [[ -f "$task_dir/pyproject.toml" ]] && [[ -d "$task_dir/tests" ]]; then
               echo "$(basename "$task_dir")"
             fi
@@ -139,6 +140,43 @@ jobs:
           uv run python -m pytest tests -v --rootdir=.
         working-directory: ./tasks/${{ matrix.task }}
 
+      - name: Check task runtime API
+        run: uv run python -m pytest ../../tests/task_contracts -q --rootdir=../..
+        env:
+          CORRAL_TEST_ENVIRONMENT: ${{ matrix.task }}
+        working-directory: ./tasks/${{ matrix.task }}
+
+  # Wetlab requires Reaktoro, which is available from Conda but not from PyPI
+  test-wetlab:
+    needs: [code-quality, test-main]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Install Conda
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          activate-environment: ""
+          auto-activate: false
+          conda-remove-defaults: true
+          miniforge-version: latest
+
+      - name: Create wetlab environment
+        run: conda env create --file environment.yml
+        working-directory: ./tasks/wetlab
+
+      - name: Run wetlab tests
+        run: conda run --no-capture-output -n wetlab python -m pytest tests -v --rootdir=.
+        working-directory: ./tasks/wetlab
+
+      - name: Check wetlab runtime API
+        run: conda run --no-capture-output -n wetlab python -m pytest ../../tests/task_contracts -q --rootdir=../..
+        env:
+          CORRAL_TEST_ENVIRONMENT: wetlab
+        working-directory: ./tasks/wetlab
+
   # Discover tasks with env.py files for server setup checking
   discover-env-tasks:
     needs: code-quality
@@ -152,17 +190,15 @@ jobs:
         id: discover
         run: |
           # Excluded tasks:
-          #   retrosynthesis - requires a running database
           #   afm            - requires nanosurf (Windows-only hardware library)
           #   wetlab         - requires reaktoro (conda-only, not on PyPI)
-          #   samplemath     - uses bare imports incompatible with package-level import
-          EXCLUDED="retrosynthesis afm wetlab samplemath"
+          EXCLUDED="afm wetlab"
           tasks=$(find tasks -maxdepth 1 -type d | while read task_dir; do
             task_name=$(basename "$task_dir")
             if [[ "$task_name" == "tasks" ]]; then continue; fi
             if echo "$EXCLUDED" | grep -qw "$task_name"; then continue; fi
             if [[ ! -f "$task_dir/pyproject.toml" ]]; then continue; fi
-            if find "$task_dir" -name "env.py" -maxdepth 4 -type f | grep -q .; then
+            if find "$task_dir" -maxdepth 4 -type f \( -name "env.py" -o -name "env_subtask.py" \) | grep -q .; then
               echo "$task_name"
             fi
           done | sort | jq -R -s -c 'split("\n")[:-1]')
@@ -202,12 +238,14 @@ jobs:
 
       - name: Check env server setup
         run: |
-          uv run python -c "from ${{ matrix.task }} import env; print('Server setup OK')"
+          uv run python -c "from importlib import import_module; from corral.runtime.environment_loader import ENVIRONMENT_PRESETS; import_module(ENVIRONMENT_PRESETS['${{ matrix.task }}'].factory.split(':')[0]); print('Environment import OK')"
+        env:
+          CORRAL_WORK_DIR: ${{ runner.temp }}/corral-env-check
         working-directory: ./tasks/${{ matrix.task }}
 
   # Summary job to check all results
   test-summary:
-    needs: [test-main, test-tasks, check-env-servers]
+    needs: [test-main, test-tasks, test-wetlab, check-env-servers]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -216,12 +254,14 @@ jobs:
           env_result="${{ needs.check-env-servers.result }}"
           if [[ "${{ needs.test-main.result }}" == "success" ]] && \
              [[ "${{ needs.test-tasks.result }}" == "success" ]] && \
+             [[ "${{ needs.test-wetlab.result }}" == "success" ]] && \
              [[ "$env_result" == "success" || "$env_result" == "skipped" ]]; then
             echo "✅ All tests passed!"
           else
             echo "❌ Some tests failed:"
             echo "Main tests: ${{ needs.test-main.result }}"
             echo "Task tests: ${{ needs.test-tasks.result }}"
+            echo "Wetlab tests: ${{ needs.test-wetlab.result }}"
             echo "Env server checks: $env_result"
             exit 1
           fi

@@ -58,7 +58,7 @@ MANUAL_PRICES = {
 
 
 def canonicalize_smiles(smiles: Any) -> str | None:
-    """Return an atom-map-free canonical SMILES, or ``None`` if invalid."""
+    """Return an atom-map-free canonical SMILES, or `None` if invalid."""
     if not isinstance(smiles, str):
         return None
 

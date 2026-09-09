@@ -64,7 +64,7 @@ class Experimenter:
         if len(tool_text) > self.max_tool_schema_chars:
             tool_text = tool_text[: self.max_tool_schema_chars] + "\n... truncated ..."
 
-        # ``limit`` bounds physical actions, not worker decisions. Once the
+        # `limit` bounds physical actions, not worker decisions. Once the
         # last permitted action has been observed, give the worker one final
         # zero-action decision in which it must explicitly finish. Without
         # that acknowledgement, a budget-truncated prefix must remain PARTIAL.

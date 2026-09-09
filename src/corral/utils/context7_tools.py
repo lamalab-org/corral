@@ -6,11 +6,11 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
 from mcp import ClientSession, types
 from mcp.client.streamable_http import streamablehttp_client
 
-from corral.backend.tool import tool
+from corral.core.tool import tool
+from corral.report.logging import logger
 
 # Context7 remote MCP server URL
 CONTEXT7_URL = "https://mcp.context7.com/mcp"
@@ -125,7 +125,7 @@ async def _resolve_library_id(session: ClientSession, package_name: str) -> dict
     Raises:
         RuntimeError: If no libraries found or resolution fails
     """
-    logger.info(f"Resolving library ID for package: {package_name}")
+    logger.debug(f"Resolving library ID for package: {package_name}")
 
     result = await session.call_tool(
         "resolve-library-id", {"libraryName": package_name}
@@ -158,7 +158,7 @@ async def _resolve_library_id(session: ClientSession, package_name: str) -> dict
 
     chosen = sorted(candidates, key=score, reverse=True)[0]
 
-    logger.info(
+    logger.debug(
         f"Selected library: {chosen.get('name')} (ID: {chosen.get('libraryId')})"
     )
     return chosen
@@ -182,9 +182,15 @@ async def _get_docs_text(
     Raises:
         RuntimeError: If no documentation content returned
     """
-    logger.info(
-        f"Fetching docs for {library_id} (topic: {topic or 'general'}, tokens: {tokens})"
-    )
+    logger.bind(
+        event="rag.fetch_started",
+        subsystem="rag",
+        arguments={
+            "library_id": library_id,
+            "topic": topic or "general",
+            "tokens": tokens,
+        },
+    ).debug("Fetching documentation")
 
     args = {
         "context7CompatibleLibraryID": library_id,
@@ -327,9 +333,15 @@ def get_library_documentation(
     - Specific version selection requires knowing the exact library ID format
     [/LIMITATIONS]
     """
-    logger.info(
-        f"Getting documentation for package: {package_name}, topic: {topic}, tokens: {tokens}"
-    )
+    logger.bind(
+        event="rag.query",
+        subsystem="rag",
+        arguments={
+            "package_name": package_name,
+            "topic": topic,
+            "tokens": tokens,
+        },
+    ).debug("Getting documentation")
 
     try:
         # Generate cache key based on inputs
@@ -340,7 +352,7 @@ def get_library_documentation(
         # Check cache first
         cached = _load_cache(cache_key)
         if cached and "text" in cached:
-            logger.info(f"Documentation found in cache (key: {cache_key})")
+            logger.debug(f"Documentation found in cache (key: {cache_key})")
             return json.dumps(
                 {
                     "success": True,
@@ -394,19 +406,13 @@ def get_library_documentation(
         # text, resolved_lib_id = asyncio.run(_fetch())
         try:
             text, resolved_lib_id = asyncio.run(_fetch())
-        except Exception as e:
-            # Handle both ExceptionGroup (Python 3.11+) and regular exceptions
-            if hasattr(e, "exceptions"):
-                for sub in e.exceptions:
-                    logger.exception(f"Sub-exception in TaskGroup: {sub}")
-            else:
-                logger.exception(f"Regular exception: {e}")
+        except Exception:
             raise
 
         # Cache the result
         _save_cache(cache_key, {"text": text, "library_id": resolved_lib_id})
 
-        logger.info(
+        logger.debug(
             f"Successfully fetched documentation (length: {len(text)} chars, cached with key: {cache_key})"
         )
 

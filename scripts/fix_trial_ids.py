@@ -53,7 +53,7 @@ def main():
 
     for root in roots:
         for report in sorted(root.rglob("*.json")):
-            if any(x in str(report) for x in ("wandb", "agent_logs")):
+            if "agent_logs" in str(report):
                 continue
             try:
                 data = json.loads(report.read_text())

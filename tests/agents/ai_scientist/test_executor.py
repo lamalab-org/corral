@@ -6,6 +6,7 @@ from corral.agents.ai_scientist.search.nodes import (
     PlannedAction,
 )
 from corral.agents.ai_scientist.tools import CorralExecutor
+from corral.core.action import Action
 
 
 @dataclass
@@ -15,13 +16,13 @@ class Response:
     error: str | None = None
 
 
-class FakeInterface:
+class FakeActionExecutor:
     def __init__(self):
         self.calls = []
 
-    def execute_tool(self, task_id, tool_name, arguments):
-        self.calls.append((task_id, tool_name, arguments))
-        return Response(success=True, result=f"measured:{arguments['value']}")
+    def __call__(self, action: Action):
+        self.calls.append(action)
+        return Response(success=True, result=f"measured:{action.arguments['value']}")
 
 
 TOOLS = {
@@ -50,11 +51,10 @@ def action(name="measure", arguments=None):
 
 
 def test_executor_validates_before_calling_and_executes_sequentially():
-    interface = FakeInterface()
+    execute_action = FakeActionExecutor()
     tool_calls = []
     executor = CorralExecutor(
-        interface=interface,
-        task_id="task",
+        execute_action=execute_action,
         tools=TOOLS,
         max_tool_calls=3,
         stop_on_error=False,
@@ -70,7 +70,9 @@ def test_executor_validates_before_calling_and_executes_sequentially():
 
     assert [item.success for item in observations] == [False, True]
     assert "Invalid tool arguments" in observations[0].error
-    assert interface.calls == [("task", "measure", {"value": 4})]
+    assert len(execute_action.calls) == 1
+    assert execute_action.calls[0].name == "measure"
+    assert execute_action.calls[0].arguments == {"value": 4}
     assert executor.call_count == 1
     assert len(tool_calls) == 1
     assert tool_calls[0]["tool_name"] == "measure"
@@ -79,26 +81,17 @@ def test_executor_validates_before_calling_and_executes_sequentially():
     assert tool_calls[0]["duration"] >= 0
 
 
-def test_executor_unwraps_environment_tool_call_failures():
-    class FailedInterface:
-        def execute_tool(self, task_id, tool_name, arguments):
+def test_executor_preserves_canonical_action_failures():
+    class FailedActionExecutor:
+        def __call__(self, _action: Action):
             return Response(
-                success=True,
-                result={
-                    "tool_name": tool_name,
-                    "arguments": arguments,
-                    "result": None,
-                    "status": "execution_error",
-                    "error_message": "instrument unavailable",
-                    "duration": 0.25,
-                    "timestamp": "2026-08-10T12:00:00+00:00",
-                },
+                success=False,
+                error="instrument unavailable",
             )
 
     tool_calls = []
     executor = CorralExecutor(
-        interface=FailedInterface(),
-        task_id="task",
+        execute_action=FailedActionExecutor(),
         tools=TOOLS,
         max_tool_calls=1,
         on_tool_call=tool_calls.append,
@@ -108,24 +101,20 @@ def test_executor_unwraps_environment_tool_call_failures():
 
     assert observation.success is False
     assert observation.error == "instrument unavailable"
-    assert tool_calls == [
-        {
-            "tool_name": "measure",
-            "arguments": {"value": 2},
-            "result": None,
-            "status": "execution_error",
-            "error_message": "instrument unavailable",
-            "duration": 0.25,
-            "timestamp": "2026-08-10T12:00:00+00:00",
-        }
-    ]
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["tool_name"] == "measure"
+    assert tool_calls[0]["arguments"] == {"value": 2}
+    assert tool_calls[0]["result"] is None
+    assert tool_calls[0]["status"] == "execution_error"
+    assert tool_calls[0]["error_message"] == "instrument unavailable"
+    assert tool_calls[0]["duration"] >= 0
+    assert tool_calls[0]["timestamp"]
 
 
 def test_executor_rejects_unknown_tools_without_spending_budget():
-    interface = FakeInterface()
+    execute_action = FakeActionExecutor()
     executor = CorralExecutor(
-        interface=interface,
-        task_id="task",
+        execute_action=execute_action,
         tools=TOOLS,
         max_tool_calls=1,
     )
@@ -134,15 +123,14 @@ def test_executor_rejects_unknown_tools_without_spending_budget():
 
     assert not observation.success
     assert "Unknown Corral tool" in observation.error
-    assert interface.calls == []
+    assert execute_action.calls == []
     assert executor.call_count == 0
 
 
 def test_executor_reports_local_budget_exhaustion_as_an_observation():
-    interface = FakeInterface()
+    execute_action = FakeActionExecutor()
     executor = CorralExecutor(
-        interface=interface,
-        task_id="task",
+        execute_action=execute_action,
         tools=TOOLS,
         max_tool_calls=1,
         stop_on_error=False,
@@ -152,13 +140,12 @@ def test_executor_reports_local_budget_exhaustion_as_an_observation():
 
     assert [item.success for item in observations] == [True, False]
     assert "budget exhausted" in observations[1].error
-    assert len(interface.calls) == 1
+    assert len(execute_action.calls) == 1
 
 
 def test_replication_plan_overrides_only_schema_declared_random_state():
     executor = CorralExecutor(
-        interface=FakeInterface(),
-        task_id="task",
+        execute_action=FakeActionExecutor(),
         tools={
             "tools": [
                 {

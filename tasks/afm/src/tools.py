@@ -22,7 +22,7 @@ from pymoo.optimize import minimize
 from pymoo.termination import get_termination
 
 from aila_image_process import *  # noqa: F403
-from corral.backend.tool import tool
+from corral.core.tool import tool
 from tool_utils import Document_Retriever, MyProblem
 
 # ----------------------------------------------------------

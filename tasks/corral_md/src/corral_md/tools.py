@@ -6,13 +6,16 @@ using LAMMPS. It includes functionality for structure preparation, simulation ex
 and results analysis in materials science workflows.
 """
 
+import base64
+import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
-import modal
-from loguru import logger
+from corral_md.modal_workspace import run_lammps_in_modal
 
-from corral.backend.tool import tool
+from corral.core.tool import tool
 
 
 @tool
@@ -83,14 +86,26 @@ def get_nth_run_log(
 
     """
 
+    import log_lammps_reader
+
     try:
-        func = modal.Function.from_name("simagent", "get_nth_run_log")
-        return func.remote(path=path, n=n, save=save, index=index)
+        log_data = log_lammps_reader.parse(path, n)
+        result = f"{log_data.head()}\n"
+        if save:
+            Path(save).parent.mkdir(parents=True, exist_ok=True)
+            log_data.write_csv(save)
+            result += f"Thermo data for run {n} saved to {save}.\n"
+        if index is not None:
+            if 0 <= index < log_data.height:
+                result += f"Data at index {index}: {log_data.row(index)}\n"
+            else:
+                result += (
+                    f"Index {index} is out of bounds for data with "
+                    f"{log_data.height} rows.\n"
+                )
+        return result
     except Exception as e:
-        # Handle unexpected errors
-        raise Exception(
-            f"An unexpected error occurred while parsing the log: {e!s}"
-        ) from e
+        return f"Failed to parse thermo data for run {n}: {e}"
 
 
 @tool
@@ -144,14 +159,15 @@ def keyword_log_extractor(path: str, keyword: str) -> str:
     - May not handle corrupted or non-standard log files gracefully.
     [/LIMITATIONS]
     """
+    import log_lammps_reader
+
     try:
-        func = modal.Function.from_name("simagent", "keyword_log_extractor")
-        return func.remote(path=path, keyword=keyword)
+        matches = log_lammps_reader.log_starts_with(path, keyword)
+        if not matches:
+            raise ValueError(f"Keyword {keyword!r} not found in log.")
+        return json.dumps({keyword: matches}, ensure_ascii=False, default=str)
     except Exception as e:
-        # Handle unexpected errors
-        raise Exception(
-            f"An unexpected error occurred while extracting keyword from log: {e!s}"
-        ) from e
+        return json.dumps({"error": f"Error processing keyword {keyword!r}: {e}"})
 
 
 @tool
@@ -251,19 +267,41 @@ def execute_python_script(
     - Cannot interact with scripts requiring user input
     [/LIMITATIONS]
     """
-    try:
-        logger.info(f"script path {script_path}")
-        execute_code_script = modal.Function.from_name(
-            "simagent", "execute_python_script"
+    script = Path(script_path)
+    if not script.is_file():
+        return json.dumps(
+            {"success": False, "error": f"Script file not found: {script_path}"}
         )
-        return execute_code_script.remote(
-            script_path=script_path, args=args, timeout=timeout, working_dir=working_dir
+
+    command = [sys.executable, str(script), *(str(arg) for arg in (args or []))]
+    try:
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=working_dir or str(script.parent),
+            check=False,
+        )
+        return json.dumps(
+            {
+                "success": process.returncode == 0,
+                "stdout": process.stdout,
+                "stderr": process.stderr,
+                "return_code": process.returncode,
+                "command": command,
+            },
+            indent=2,
+        )
+    except subprocess.TimeoutExpired:
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Script execution timed out after {timeout} seconds",
+            }
         )
     except Exception as e:
-        # Handle unexpected errors
-        raise Exception(
-            f"An unexpected error occurred while executing the code: {e!s}"
-        ) from e
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @tool
@@ -271,8 +309,8 @@ def get_potential_metadata(file_path: str) -> str:
     """
     [BRIEF] Returns metadata from a known LAMMPS potential file given the file path. The metadata includes potential type, elements supported, and the LAMMPS-compatible pair style keyword. Raises an exception if the path is invalid or the potential file is not recognized. [/BRIEF]
 
-    [DETAILED] This tool provides a quick and reliable way to identify the type and supported elements of a LAMMPS potential file based on its filename, after first verifying that the file path is accessible.
-    It eliminates the need to parse the often large and complex contents of potential files, which can exceed processing limits in many systems. The tool first validates that the provided file path is non-empty and then checks file accessibility using a remote file inspection call. If the file path is invalid or inaccessible, a FileNotFoundError is raised. If the file is accessible, the tool extracts the filename using pathlib and matches it against a predefined set of known potential files. For recognized files, it returns a structured metadata string describing the potential type, supported elements, and the LAMMPS pair style.
+    [DETAILED] This tool provides a quick and reliable way to identify the type and supported elements of a LAMMPS potential file based on its path in the local catalog.
+    It eliminates the need to parse the often large and complex contents of potential files, which can exceed processing limits in many systems. The tool validates the provided path against the known files mounted into the LAMMPS runtime. For recognized files, it returns a structured metadata string describing the potential type, supported elements, and the LAMMPS pair style.
     If the filename does not match any known potential, a ValueError is raised.
     [/DETAILED]
 
@@ -291,7 +329,7 @@ def get_potential_metadata(file_path: str) -> str:
 
     [CONTEXTUAL] How this tool works:
         - Validates that the input file path is non-empty
-        - Checks file accessibility using a remote file inspection call
+        - Validates remote mount paths against the local potential catalog
         - Extracts the filename from the provided path using pathlib
         - Matches it against a set of known potential filenames
         - Returns a structured metadata string for recognized files
@@ -301,10 +339,10 @@ def get_potential_metadata(file_path: str) -> str:
 
     [SYNTACTICAL] Usage examples:
     [
-        `get_potential_metadata("sim_data/Al99.eam.alloy")`,
-        `get_potential_metadata("/path/to/potentials/Mg_Zhou04.eam.alloy")`,
-        `get_potential_metadata("/data/Fe-C_Hepburn_Ackland.eam.fs")`,
-        `get_potential_metadata("Cu_Zhou04.eam.alloy")`
+        `get_potential_metadata("/potentials/EAM/Al99.eam.alloy")`,
+        `get_potential_metadata("/potentials/EAM/Mg_Zhou04.eam.alloy")`,
+        `get_potential_metadata("/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs")`,
+        `get_potential_metadata("/potentials/SW/Si.sw")`
     ]
     [/SYNTACTICAL]
 
@@ -329,7 +367,7 @@ def get_potential_metadata(file_path: str) -> str:
 
         FileNotFoundError:
             [ERROR_WHEN] If the file path is invalid or the file is not accessible. [/ERROR_WHEN]
-            [ERROR_DETAILS] Raised when the remote file accessibility check fails for the given path. [/ERROR_DETAILS]
+            [ERROR_DETAILS] Raised when the path is neither a local file nor an entry in the mounted potential catalog. [/ERROR_DETAILS]
             [ERROR_RECOVERY] Verify that the file exists at the given path and that it is accessible in the execution environment. [/ERROR_RECOVERY]
     [/RAISES]
 
@@ -353,24 +391,31 @@ def get_potential_metadata(file_path: str) -> str:
             "pair_style : hybrid/overlay buck/coul/long + kspace_style pppm}"
         ),
     }
-    # 1) Validate input
+    POTENTIAL_PATHS = {
+        "Si.sw": "/potentials/SW/Si.sw",
+        "2007_SiO.tersoff": "/potentials/TERSOFF/2007_SiO.tersoff",
+        "Al99.eam.alloy": "/potentials/EAM/Al99.eam.alloy",
+        "Cu_Zhou04.eam.alloy": "/potentials/EAM/Cu_Zhou04.eam.alloy",
+        "Mg_Zhou04.eam.alloy": "/potentials/EAM/Mg_Zhou04.eam.alloy",
+        "Fe-C_Hepburn_Ackland.eam.fs": ("/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs"),
+        "pot.mod": "/potentials/BKS/pot.mod",
+    }
+
     if not file_path or not file_path.strip():
         raise ValueError("File path must not be None or empty.")
 
-    # 2) Check existence / accessibility via modal
-    try:
-        info = modal.Function.from_name("simagent", "file_info").remote(file_path)
-        logger.info(f"Potential file info: {info}")
-    except Exception as e:
-        logger.warning(f"Potential file existence check failed for '{file_path}': {e}")
-        raise FileNotFoundError(f"Incorrect potential file path: {file_path}") from e
-
-    # 3) Identify potential by filename
-    potential_name = Path(file_path).name
-
+    potential_path = Path(file_path.strip())
+    potential_name = potential_path.name
     metadata = POTENTIALS.get(potential_name)
     if metadata is None:
         raise ValueError(f"Unrecognized potential file: {potential_name}")
+
+    expected_remote_path = POTENTIAL_PATHS[potential_name]
+    if (
+        not potential_path.is_file()
+        and potential_path.as_posix() != expected_remote_path
+    ):
+        raise FileNotFoundError(f"Incorrect potential file path: {file_path}")
 
     return metadata
 
@@ -460,8 +505,9 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
         structure = sga.get_conventional_standard_structure()
         structure_cif = structure.to(fmt="cif")
 
-        write_file_sim = modal.Function.from_name("simagent", "write_file")
-        write_file_sim.remote(file_path, structure_cif)
+        destination = Path(file_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(structure_cif, encoding="utf-8")
 
         return f"Structure saved successfully at {file_path}"
 
@@ -564,15 +610,30 @@ def convert_structure_to_lammps_data(
     [/LIMITATIONS]
     """
     try:
-        convert_structure_to_lammps_data_sim = modal.Function.from_name(
-            "simagent", "convert_structure_to_lammps_data"
+        from pymatgen.core import Structure
+        from pymatgen.io.lammps.data import LammpsData
+
+        structure = Structure.from_file(structure_path)
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        LammpsData.from_structure(structure, atom_style=atom_style).write_file(
+            output_path
         )
-        convert_structure_to_lammps_data_sim.remote(
-            structure_path, output_file, atom_style
-        )
+
+        # LAMMPS expects an explicit zero-tilt line for the elemental structures
+        # used by these tasks.
+        elements = {str(element) for element in structure.composition.elements}
+        if elements in ({"Si"}, {"Cu"}, {"Al"}):
+            lines = output_path.read_text(encoding="utf-8").splitlines(keepends=True)
+            if not any("xy xz yz" in line for line in lines):
+                for index, line in enumerate(lines):
+                    if "zlo zhi" in line:
+                        lines.insert(index + 1, "0.0 0.0 0.0 xy xz yz\n")
+                        break
+                output_path.write_text("".join(lines), encoding="utf-8")
+
         return f"LAMMPS data file successfully written to: {output_file}"
     except Exception as e:
-        # Handle unexpected errors
         raise Exception(
             f"An unexpected error occurred while converting structure to LAMMPS data: {e!s}"
         ) from e
@@ -659,23 +720,39 @@ def run_lammps(input_file: str) -> str:
     if not input_file:
         raise ValueError("Input file path must not be None or empty.")
 
-    try:
-        file_name_without_extension = Path(input_file).stem
-        log_file = f"{file_name_without_extension}.log"
-        run_lammps_sim = modal.Function.from_name("simagent", "run_lammps")
-        run_lammps_sim.remote(input_file, log_file)
-        return f"Simulation ran successfully using input: {input_file}, log saved at: {log_file}"
+    input_path = Path(input_file).resolve()
+    return _run_lammps_for_workspace(input_path.parent, str(input_path))
 
+
+def _run_lammps_for_workspace(workspace: str | Path, input_file: str) -> str:
+    try:
+        log_file, downloaded = run_lammps_in_modal(workspace, input_file)
+        return (
+            f"Simulation ran successfully using input: {input_file}. "
+            f"Downloaded {downloaded} workspace file(s); local log: {log_file}"
+        )
     except ValueError as e:
-        # Raise a ValueError with more context about the failure
-        raise ValueError(
-            f"The LAMMPS simulation failed with a ValueError: {e!s}"
-        ) from None
+        raise ValueError(f"The LAMMPS simulation failed: {e!s}") from None
     except Exception as e:
-        # Handle unexpected errors
         raise Exception(
             f"An unexpected error occurred while running the LAMMPS simulation: {e!s}"
         ) from None
+
+
+def build_run_lammps_tool(workspace: str | Path):
+    """Build the LAMMPS tool bound to one local Corral workspace."""
+
+    @tool
+    def run_lammps(input_file: str) -> str:
+        """Run a workspace LAMMPS input on Modal and copy every output back locally.
+
+        Args:
+            input_file: Workspace-relative or absolute path to the LAMMPS input file.
+        """
+
+        return _run_lammps_for_workspace(workspace, input_file)
+
+    return run_lammps
 
 
 @tool
@@ -769,10 +846,9 @@ def visualisation_tool(path: str, query: str) -> str:
     load_dotenv("../../../../.env")
     try:
         client = OpenAI()
-        read_file_mode = modal.Function.from_name("simagent", "read_file_mode")
-        base64_encoded = read_file_mode.remote(path, "rb")
+        base64_encoded = base64.b64encode(Path(path).read_bytes()).decode("ascii")
 
-        response = client.responses.create(
+        with client.responses.stream(
             model="gpt-4.1",
             temperature=0.0,
             input=[
@@ -820,8 +896,8 @@ def visualisation_tool(path: str, query: str) -> str:
                     ],
                 },
             ],
-        )
-        return response.output_text
+        ) as stream:
+            return stream.get_final_response().output_text
 
     except Exception as e:
         raise Exception(

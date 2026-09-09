@@ -1,11 +1,18 @@
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
+from rich.console import Console
 
+from corral.evaluation import EvaluationResult
+from corral.report.logging import event, logger
 from corral.report.metrics.base import Metric, TaskMetric
+
+DEFAULT_TOOL_VERBOSITY = "brief"
 
 
 @dataclass
@@ -17,6 +24,9 @@ class TaskTrialResult:
     score: float
     state: dict[str, Any]  # TODO replace Any with specific types
     tool_statistics: dict[str, Any]  # TODO replace Any with specific types
+    output: dict[str, Any] | None = None
+    evaluation: EvaluationResult | None = None
+    evaluation_error: str | None = None
     messages: list[dict[str, Any]] | None = None  # Agent messages (verbose only)
     duration: float | None = None
     token_usage: dict[str, int] | None = None
@@ -25,8 +35,17 @@ class TaskTrialResult:
 
     @property
     def success(self) -> bool:
-        """Whether the trial was successful"""
+        """Whether the external evaluation passed for reporting purposes."""
         return self.score > 0 and self.error_message is None and not self.surrendered
+
+    @property
+    def output_ready(self) -> bool:
+        """Whether downstream execution may consume this runtime output."""
+        return (
+            self.output is not None
+            and self.error_message is None
+            and not self.surrendered
+        )
 
     @property
     def tool_execution_duration(self) -> float:
@@ -68,9 +87,10 @@ class BenchmarkResult:
     task_results: dict[str, TaskTrialResults]
     k: list[int] = field(default_factory=lambda: [5])
     total_duration: float | None = None
-    verbosity: str | None = None
+    verbosity: str = DEFAULT_TOOL_VERBOSITY
     verbose: bool = False  # Whether to include messages and tool_calls in report
     metrics: list[Metric] | None = None  # Explicit metrics list
+    metadata: dict[str, Any] = field(default_factory=dict)
     metric_registry: Any = (
         None  # Instance-level by default, Any to avoid circular import
     )
@@ -182,10 +202,13 @@ class BenchmarkResult:
         Returns:
             Dictionary containing all report data ready for JSON export
         """
-        from corral.agents.utils import serialize_messages
-
         # Map registry metric results to report format
-        report_data = {"metrics": {}}
+        report_data = {
+            "schema_version": 1,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": dict(self.metadata),
+            "metrics": {},
+        }
 
         # Add all metrics to the report (sorted alphabetically by display name)
         sorted_metrics = []
@@ -227,9 +250,14 @@ class BenchmarkResult:
                 trial_data = {
                     "trial_id": trial.trial_id,
                     "score": trial.score,
-                    "submitted_answer": trial.state.get("submitted_answer")
-                    if trial.state and isinstance(trial.state, dict)
-                    else None,
+                    "output": trial.output,
+                    "evaluation": (
+                        trial.evaluation.model_dump(mode="json")
+                        if trial.evaluation is not None
+                        else None
+                    ),
+                    "evaluation_error": trial.evaluation_error,
+                    "error_message": trial.error_message,
                     "success": trial.success,
                     "surrendered": trial.surrendered,
                     "tool_execution_duration": trial.tool_execution_duration,
@@ -245,7 +273,9 @@ class BenchmarkResult:
 
                 # Add messages if available (verbose mode only)
                 if self.verbose and trial.messages is not None:
-                    trial_data["messages"] = serialize_messages(trial.messages)
+                    trial_data["messages"] = [
+                        dict(message) for message in trial.messages
+                    ]
 
                 # Add tool calls data if available (verbose mode only)
                 if self.verbose and "tool_calls" in trial.tool_statistics:
@@ -377,7 +407,7 @@ class BenchmarkResult:
             calculated_metrics: Pre-calculated metrics dictionary
         """
         summary_string = self._build_summary_string(calculated_metrics)
-        logger.info(f"\n{summary_string}")
+        Console().print(summary_string)
 
     def generate_report(self, report_path: str | None = None) -> None:
         """
@@ -392,14 +422,30 @@ class BenchmarkResult:
 
         # Save JSON report if path is provided
         if report_path:
+            report_data = self._prepare_report_data(calculated_metrics)
+            path = Path(report_path).expanduser()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+            )
+            temporary = Path(temporary_name)
             try:
-                report_data = self._prepare_report_data(calculated_metrics)
-                with Path(report_path).open("w") as f:
-                    json.dump(report_data, f, indent=2)
-                logger.info(f"Saved detailed report to: {report_path}")
-            except Exception as e:
-                logger.error(f"Error saving report file: {e}")
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    json.dump(report_data, stream, indent=2, sort_keys=True)
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                temporary.replace(path)
+            except Exception:
+                temporary.unlink(missing_ok=True)
                 raise
+            event(
+                "INFO",
+                "report.saved",
+                subsystem="evaluation",
+                path=str(path),
+            )
 
         # Display report to console
         self._display_console_report(calculated_metrics)
+        event("INFO", "report.generated", subsystem="evaluation")

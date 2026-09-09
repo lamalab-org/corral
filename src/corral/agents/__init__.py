@@ -9,9 +9,22 @@ from corral.agents.base_agent import BaseAgent
 from corral.agents.llm_planner import LLMPlanner
 from corral.agents.react import ReActAgent
 from corral.agents.reflexion_agent import ReflexionAgent
-from corral.agents.schema import SURRENDER_SENTINEL, Action, AgentRunResult, Thought
+from corral.agents.schema import (
+    SURRENDER_SENTINEL,
+    AgentOutcome,
+    AgentStatus,
+    AgentUsage,
+    Thought,
+)
+from corral.agents.session import (
+    INSPECT_SUBAGENT_TOOL_NAME,
+    Agent,
+    AgentSessionCapabilities,
+    inspect_subagent_tool,
+)
 from corral.agents.terminus import TerminusAgent
 from corral.agents.tool_calling import ToolCallingAgent
+from corral.core.action import Action
 
 # ClaudeCodeAgent, CodexAgent and OpenHandsAgent drive black-box harnesses whose
 # SDKs ship only as optional extras (`corral[claude]` / `corral[codex]` /
@@ -42,11 +55,16 @@ def __dir__():
 
 
 __all__ = [
+    "INSPECT_SUBAGENT_TOOL_NAME",
     "SURRENDER_SENTINEL",
     "AIScientistAgent",
     "AIScientistConfig",
     "Action",
-    "AgentRunResult",
+    "Agent",
+    "AgentOutcome",
+    "AgentSessionCapabilities",
+    "AgentStatus",
+    "AgentUsage",
     "BaseAgent",
     "ClaudeCodeAgent",
     "CodexAgent",
@@ -58,4 +76,5 @@ __all__ = [
     "TerminusAgent",
     "Thought",
     "ToolCallingAgent",
+    "inspect_subagent_tool",
 ]

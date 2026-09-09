@@ -1,4 +1,4 @@
-from corral.backend.tool import tool
+from corral.core.tool import tool
 
 
 @tool

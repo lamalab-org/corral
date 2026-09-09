@@ -5,23 +5,27 @@ from corral.agents.ai_scientist.tools.corral_executor import (
     ResearchBudget,
     ToolCallBudgetExceeded,
 )
-from corral.agents.ai_scientist.tools.trial_pool import (
+from corral.agents.ai_scientist.tools.execution_pool import (
     ArtifactPromotion,
-    BranchRuntime,
+    BranchExecution,
+    BranchSessionHandle,
+    BranchSessionProvider,
+    ExecutionPool,
     ReplayDiverged,
     ReplayEquivalence,
     ReplayResult,
-    TrialPool,
 )
 
 __all__ = [
     "ArtifactPromotion",
-    "BranchRuntime",
+    "BranchExecution",
+    "BranchSessionHandle",
+    "BranchSessionProvider",
     "CorralExecutor",
+    "ExecutionPool",
     "ReplayDiverged",
     "ReplayEquivalence",
     "ReplayResult",
     "ResearchBudget",
     "ToolCallBudgetExceeded",
-    "TrialPool",
 ]

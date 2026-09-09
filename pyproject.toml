@@ -29,6 +29,8 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+  "sqlalchemy[asyncio]>=2.0.38,<3",
+  "aiosqlite>=0.20,<1",
   "numpy",
   # Ceiling raised from <1.82 to admit the OpenHands SDK's litellm>=1.84.1
   # requirement (corral[openhands]); bounded to the 1.84.x line so the bump
@@ -36,38 +38,23 @@ dependencies = [
   "litellm>=1.56.4,<1.85",
   "chromadb",
   "tenacity",
-  "fastapi",
   "pydantic",
   "scikit-learn",
   "requests>=2.32.3",
-  # Async HTTP transport for corral.router.AsyncCorralRouter (one shared
-  # AsyncClient the concurrent scheduler can await without blocking the loop).
-  # Already present transitively via fastapi/openai/anthropic/mcp; pinned here
-  # because it is now imported directly by library code.
-  "httpx>=0.27",
-  # Cross-process/-host tool execution: corral.backend.executors and the
-  # _job_worker subprocess cloudpickle the (tool, arguments) pair so that
-  # @tool-decorated closures survive shipping to a ProcessPool / Modal function.
-  # Imported at module load on the `import corral` path (backend/__init__ ->
-  # env -> jobs -> executors), so it must be a hard dependency. It used to be
-  # pulled in transitively via modal, but modal>=1.x no longer requires it.
+  # Process-pool and subprocess executors cloudpickle (tool, arguments)
+  # so @tool-decorated closures survive the process boundary. Imported by
+  # the backend at module load, so this must be a direct dependency.
   "cloudpickle>=3.0",
   "urllib3",
   "openai",
-  "uvicorn>=0.34.0",
   "python-dotenv>=1.0.1",
   "anthropic>=0.42.0",
   "loguru>=0.7.3",
-  "modal>=1.1.4",
   "rich>=13.9.4",
   "promptstore @ git+https://github.com/lamalab-org/promptstore.git@main",
-  "wandb>=0.21.0",
   "more-itertools>=10.7.0",
-  # corral.backend.tool imports `TASK_OPTIONAL` from mcp.types (added with the
-  # MCP task-support constants); the floor must stay high enough to include it
-  # or `import corral` fails at load with an ImportError.
+  # Context7 tools use the MCP streamable-HTTP client directly.
   "mcp>=1.24.0",
-  "fastmcp>=2.0.0",
   "pre-commit>=4.3.0",
   "pygments-styles>=0.3.0",
   "fire>=0.7.1",
@@ -80,6 +67,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4.0", "pytest-cov>=3.0.0", "ruff>=0.0.285", "commitizen", "pytest-mock>=3.14.0", "ipython>=8.18.1", "fire>=0.6.0", "pandas>=2.0.0", "datasets>=2.14.0", "pyarrow>=14.0.0", "huggingface-hub>=0.20.0"]
+# Passive task tracing. Corral remains correct when this extra, its client, or
+# its network is unavailable; Langfuse never participates in commit persistence.
+langfuse = ["langfuse>=4.0.0,<5"]
 docs = [
     "mkdocs-material>=9.4.0",
     "mkdocstrings[python]>=0.22.0",
@@ -117,9 +107,13 @@ claude = ["claude-agent-sdk==0.2.115"]
 # was raised to <1.85. It also requires Python>=3.12, so the dependency is
 # gated behind a marker: on corral's lower supported Pythons (3.10/3.11) the
 # extra is empty and `OpenHandsAgent` raises a clear install hint at import.
-# `openhands-tools` is intentionally *not* required: the harness receives no
-# terminal/file-editor/browser tools, only the corral MCP endpoint.
-openhands = ["openhands-sdk==1.35.0; python_version >= '3.12'"]
+# Keep the SDK and its native tool package on the same release. The adapter uses
+# OpenHands' default terminal/file-editor/task-tracker/browser preset in addition
+# to the task-scoped Corral MCP endpoint.
+openhands = [
+  "openhands-sdk==1.35.0; python_version >= '3.12'",
+  "openhands-tools==1.35.0; python_version >= '3.12'",
+]
 irt = [
     "pymc>=5.0.0",
     "arviz>=0.18.0",
@@ -132,6 +126,9 @@ irt = [
 repository = "https://github.com/lamalab-org/corral"
 documentation = "https://lamalab-org.github.io/corral/"
 changelog = "https://github.com/lamalab-org/corral/blob/main/CHANGELOG.md"
+
+[project.scripts]
+corral = "corral.cli:main"
 
 [tool.setuptools.package-data]
 corral = ["agents/ai_scientist/prompts/*.md"]
@@ -230,8 +227,13 @@ lint.isort.known-first-party = ["corral"]
 src = ["src"]
 extend-include = ["*.ipynb"]
 
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["corral.core._immutable.FrozenModel"]
+
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+"src/corral/core/transition.py" = ["PD011"]
+"src/corral/core/workspace.py" = ["TCH004"]
 "tests/**" = ["ANN", "ARG", "B008", "D", "E402", "PTH", "S101"]
 
 [tool.docformatter]

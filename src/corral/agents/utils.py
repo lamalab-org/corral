@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
@@ -7,7 +8,6 @@ import litellm
 import openai
 from litellm.exceptions import BudgetExceededError, RateLimitError
 from litellm.types.utils import Message
-from loguru import logger
 from tenacity import (
     retry,
     retry_if_exception,
@@ -16,7 +16,8 @@ from tenacity import (
     wait_fixed,
 )
 
-from corral.types import BudgetExhaustedError
+from corral.agents.schema import BudgetExhaustedError
+from corral.report.logging import logger
 
 RETRY_EXCEPTIONS = (
     openai.APITimeoutError,
@@ -70,9 +71,15 @@ def before_sleep_loguru(retry_state):
     cause = f"{type(exc).__name__}: {exc}" if exc is not None else "unknown error"
     next_action = retry_state.next_action
     wait = f"{next_action.sleep:.0f}s" if next_action is not None else "unknown"
-    logger.warning(
-        f"LLM call retry {retry_state.attempt_number}/3 after {cause}; waiting {wait}"
+    retry_object = getattr(retry_state, "retry_object", None)
+    stop = getattr(retry_object, "stop", None)
+    maximum_attempts = getattr(stop, "max_attempt_number", 3)
+    attempt_label = (
+        f"{retry_state.attempt_number}/{maximum_attempts}"
+        if maximum_attempts is not None
+        else str(retry_state.attempt_number)
     )
+    logger.warning(f"LLM call retry {attempt_label} after {cause}; waiting {wait}")
 
 
 class LLMResponseMetadata(TypedDict, total=False):
@@ -149,6 +156,28 @@ class LiteLLMMessage(TypedDict, total=False):
     id: str | None
 
 
+def _usage_member(value: Any, key: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _reasoning_tokens(usage: Any) -> int | None:
+    """Read reasoning-token details from Chat Completions or Responses usage."""
+    direct = _usage_member(usage, "reasoning_tokens")
+    if direct is not None:
+        return int(direct or 0)
+    for details_key in (
+        "completion_tokens_details",
+        "output_tokens_details",
+    ):
+        details = _usage_member(usage, details_key)
+        reported = _usage_member(details, "reasoning_tokens")
+        if reported is not None:
+            return int(reported or 0)
+    return None
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90)),
@@ -156,7 +185,7 @@ class LiteLLMMessage(TypedDict, total=False):
     before_sleep=before_sleep_loguru,
     reraise=True,
 )
-def llm_call(
+async def llm_call(
     model: str,
     messages: list[LiteLLMMessage],
     temperature: float,
@@ -166,7 +195,7 @@ def llm_call(
     **kwargs,
 ) -> LLMResponse:
     """
-    Call LiteLLM API with or without tools based on parameters
+    Call LiteLLM with a streaming transport and reconstruct its final response.
 
     Args:
         model (str): The model to use.
@@ -176,6 +205,7 @@ def llm_call(
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
         return_usage (bool, optional): If True, includes token usage in metadata. Defaults to True.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
+            Streaming is always enabled, even if `stream=False` is supplied.
             If 'logprobs' is True in kwargs, logprobs will be included in response metadata.
 
     Returns:
@@ -190,27 +220,46 @@ def llm_call(
             **kwargs,
         }
 
+        # GPT-5.6 rejects chat-completions requests that combine function tools
+        # with reasoning controls. The explicit LiteLLM `responses/` route
+        # keeps the configured provider model unchanged while selecting the
+        # endpoint that supports both features. This is also stable across the
+        # range of LiteLLM versions used by the task-specific environments.
+        use_gpt_5_6_responses = (
+            tools is not None
+            and kwargs.get("reasoning_effort") is not None
+            and model.startswith("openai/gpt-5.6")
+        )
+        if use_gpt_5_6_responses:
+            params["model"] = model.replace("openai/", "openai/responses/", 1)
+
         if "anthropic" in model:
             params["max_tokens"] = 8192
 
         # When extended thinking is on (LiteLLM turns `reasoning_effort` into an
         # Anthropic `thinking` block), Anthropic rejects any `temperature` other
         # than 1 with a 400. Force it so a reasoning run is not aborted; this also
-        # covers the base-class answer extractor, which reuses these kwargs.
+        # covers reasoning calls made through this shared LiteLLM helper.
         if kwargs.get("reasoning_effort") or kwargs.get("thinking"):
             params["temperature"] = 1
 
         if tools is not None:
-            params.update(
-                {
-                    "tools": tools,
-                    "tool_choice": "auto",
-                }
-            )
-            response = litellm.completion(**params)
-
-        else:
-            response = litellm.completion(**params)
+            params["tools"] = tools
+            # Responses defaults to automatic tool selection. Older LiteLLM
+            # bridges reject the otherwise redundant chat-completions value.
+            if not use_gpt_5_6_responses:
+                params["tool_choice"] = "auto"
+        # Always consume the provider response as a stream. Besides making long
+        # generations observable at the transport layer, this keeps an active
+        # response from looking idle to gateways with read/idle timeouts. Build
+        # the chunks back into LiteLLM's ordinary ModelResponse so callers keep
+        # the same message, tool-call, logprob, and usage interface.
+        params["stream"] = True
+        response_stream = await litellm.acompletion(**params)
+        chunks = [chunk async for chunk in response_stream]
+        response = litellm.stream_chunk_builder(chunks, messages=messages)
+        if response is None:
+            raise ValueError("LLM stream returned no response chunks")
 
         message = response.choices[0].message
 
@@ -230,23 +279,41 @@ def llm_call(
 
         # Include usage info if requested
         if return_usage:
-            metadata["usage"] = {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0)
-                if response.usage
-                else 0,
-                "completion_tokens": getattr(response.usage, "completion_tokens", 0)
-                if response.usage
-                else 0,
-                "total_tokens": getattr(response.usage, "total_tokens", 0)
-                if response.usage
-                else 0,
+            response_usage = response.usage
+            usage = {
+                "prompt_tokens": int(
+                    (
+                        _usage_member(response_usage, "prompt_tokens")
+                        or _usage_member(response_usage, "input_tokens")
+                        or 0
+                    )
+                    if response_usage
+                    else 0
+                ),
+                "completion_tokens": int(
+                    (
+                        _usage_member(response_usage, "completion_tokens")
+                        or _usage_member(response_usage, "output_tokens")
+                        or 0
+                    )
+                    if response_usage
+                    else 0
+                ),
+                "total_tokens": int(
+                    (_usage_member(response_usage, "total_tokens") or 0)
+                    if response_usage
+                    else 0
+                ),
             }
+            reasoning_tokens = _reasoning_tokens(response_usage)
+            if reasoning_tokens is not None:
+                usage["reasoning_tokens"] = reasoning_tokens
+            metadata["usage"] = usage
 
         return LLMResponse(message, metadata)
 
     except STOP_BENCHMARK_EXCEPTIONS as e:
         # Re-raise as BudgetExhaustedError to stop benchmark immediately
-        logger.error(f"Budget/credits exhausted or authentication failed: {e}")
         raise BudgetExhaustedError(
             f"Benchmark stopped: {type(e).__name__} - {e}"
         ) from e
@@ -255,7 +322,6 @@ def llm_call(
         # Check if this is a quota exhaustion (not a temporary rate limit)
         error_str = str(e).lower()
         if any(keyword in error_str for keyword in QUOTA_EXHAUSTED_KEYWORDS):
-            logger.error(f"API quota/credits exhausted: {e}")
             raise BudgetExhaustedError(
                 f"Benchmark stopped - quota exhausted: {e}"
             ) from e
@@ -356,7 +422,7 @@ def save_agent_messages(
         tools (list[dict], optional): List of available tools used by the agent. Defaults to None.
         tool_verbosity (str, optional): Verbosity level for tool descriptions. Defaults to "brief".
         trace_metadata (dict, optional): Agent-specific trace information saved
-            beside ``messages``. It is deliberately not merged into individual
+            beside `messages`. It is deliberately not merged into individual
             messages, which keeps replayed/API-bound messages schema-compatible.
 
     Returns:

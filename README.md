@@ -27,110 +27,299 @@
 
 A comprehensive benchmarking framework for evaluating AI agents on science tasks. The system provides standardized environments, tools, and evaluation metrics to test agent performance across diverse materials science challenges.
 
-## 🚀 Getting Started
+## 🚀 Quick Start: Run One Task from One Environment
 
-### Prerequisites
+The shortest useful Corral run does not need `CorralRunner`, trials, scoring,
+or report generation. `corral run` executes one independent task using
+the `execute_task` function in `run.py`.
 
-- Python 3.10 or higher
-- `uv` (recommended) or `pip` for package management
+You need Python 3.11 or newer for SampleMath, [`uv`](https://docs.astral.sh/uv/),
+and a model API key such as `OPENAI_API_KEY`. Clone the
+repository and install SampleMath together with the framework:
 
-### Installation
+```bash
+git clone https://github.com/lamalab-org/corral.git
+cd corral/tasks/samplemath
+uv sync
+```
 
-1. **Clone the repository**
+Run one task with one agent and model:
 
-   ```bash
-   git clone https://github.com/lamalab-org/corral.git
-   cd corral
-   ```
+```bash
+uv run corral run \
+  --agent tool-calling \
+  --environment samplemath \
+  --task task1 \
+  --model openai/gpt-5.6
+```
 
-2. **Install the framework**
+This path skips evaluation: it prints the final status, submitted
+answer, and commit hash, and writes the authored commit ledger to
+`.corral/run-commits.sqlite3`. It does not create trials, invoke a scorer, or
+generate a benchmark report. Because it executes exactly one task, it rejects a
+task with upstream dependencies and points to `corral bench` instead.
 
-   ```bash
-   uv pip install -e .
-   ```
+Re-running with the same `--execution-id` and commit database restores the
+latest persisted task state.
 
-3. **Install specific environment dependencies**
+The equivalent Python API is below. Save this as `quickstart.py` in the current
+`tasks/samplemath` directory:
 
-   ```bash
-   # create task environments
-   cd tasks/samplemath && uv venv && uv pip install -e .  # create an env for running sample math
-   # ... repeat for other tasks as needed
-   ```
+```python
+import asyncio
+from uuid import uuid4
 
-### Quick Start
+from dotenv import load_dotenv
 
-1. **Start a task environment server**
+from corral import (
+    RuntimeRegistry,
+    RunTaskInput,
+    execute_task,
+    load_environment_group,
+)
+from corral.agents import ToolCallingAgent
+from corral.persistence import SQLiteCommitStore
 
-   ```bash
-   cd tasks/samplemath/samplemath
-   python env.py  # Starts server on http://localhost:8000
-   ```
+AGENT_ID = "tool-calling"
+TASK_ID = "task1"
+MODEL = "openai/gpt-5.6"
 
-2. **Run benchmark in another terminal**
 
-   ```python
-   from corral import CorralRunner, CorralRouter
-   from corral.agents import ReActAgent
-   from corral.report import CorralWandbLogger
+async def main():
+    load_dotenv()
+    environment = load_environment_group("samplemath")[TASK_ID]
+    store = SQLiteCommitStore(".corral/quickstart-commits.sqlite3")
+    registry = RuntimeRegistry(
+        agents={AGENT_ID: ToolCallingAgent(model=MODEL)},
+        environments={TASK_ID: environment},
+    )
 
-   # Setup interface
-   interface = CorralRouter("http://localhost:8000")
-   # Setup the WandB logger
-   wandblogger = CorralWandbLogger(
-       project="corral",
-       group="experiment_group",
-       name="run_name",
-   )
-   # Setup the agent
-   agent = ReActAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
+    try:
+        state = await execute_task(
+            state_store=store,
+            registry=registry,
+            task=RunTaskInput(
+                execution_id=f"samplemath-task1-{uuid4().hex}",
+                task_id=TASK_ID,
+                environment_id=TASK_ID,
+                agent_id=AGENT_ID,
+                model=MODEL,
+                max_iterations=10,
+            ),
+        )
+    finally:
+        registry.close()
+        await store.aclose()
 
-   # Run benchmark
-   runner = CorralRunner(interface, agent, logger=wandblogger)
-   result = runner.bench()
+    print(f"status: {state.status}")
+    print(f"answer: {state.submission}")
 
-   print(f"Overall score: {result.total_score:.2f}")
-   ```
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Run it with the current SampleMath virtual environment:
+
+```bash
+uv run python quickstart.py
+```
+
+The result is a `StateRef` pointing to the persisted final state, and the
+example prints its status and submitted answer. No scorer,
+aggregate metric, or benchmark report runs. `task1` is independent; use
+`corral bench` for a task such as `task4` whose inputs come from earlier tasks.
 
 ## 📊 Running Benchmarks
 
-### Single Task Execution
+### Run any agent with the `corral` CLI
 
-```python
-from corral import CorralRunner, CorralRouter
-from corral.agents import ReActAgent
+The installed `corral` command can run every public concrete agent against a
+registered environment.
 
-interface = CorralRouter("http://localhost:8000")
-agent = ReActAgent(model="gpt-4o")
-runner = CorralRunner(interface, agent)
+Each task environment is a separate Python project because it has its own
+dependencies. Change into that project once, then `uv` automatically uses its
+environment and no `--project` option is needed:
 
-# Run specific task
-result = runner.bench(task_ids=["math_1"])
+```bash
+cd tasks/samplemath
+uv sync
+uv run corral bench \
+  --agent react \
+  --environment samplemath \
+  --model openai/gpt-4o \
+  --task task4 \
+  --trials 3
 ```
 
-### Multiple Tasks
+`corral bench` calls the same `CorralRunner` used by Python callers. The runner
+schedules trials in the CLI process using `asyncio`.
 
-```python
-# Run specific tasks
-result = runner.bench(task_ids=["math_1", "math_2", "math_3"])
+Benchmarks run one Docker container per `(run, task, trial)` by default. Corral
+builds `corral-benchmark:latest` from `docker/benchmark.Dockerfile` when that
+image is missing, resolves it to an immutable image ID before scheduling any
+trial, and applies these defaults: 2 CPUs, 4 GiB memory, 256 PIDs, a read-only
+root filesystem, and Docker's `bridge` network so the container has outbound
+network access. Pass `--sandbox-network none` for fully network-isolated trials.
+Use `--sandbox local` only for local debugging; `corral run` remains
+local and never contacts Docker.
 
-# Run all available tasks
-result = runner.bench()  # Uses all tasks in the environment
+By default, each invocation creates one descriptive, self-contained directory
+below `.corral/runs/`. Its name records the UTC start time, agent, model,
+environment, requested tasks, k/trial count, and sandbox mode. The exact task
+and trial checkpoint layout is:
+
+```text
+.corral/runs/<descriptive-run-name>/
+├── report.json
+├── run-metadata.json
+└── task-<task-id>/
+    └── k-<1-based-trial>/
+        ├── metadata.json
+        ├── commits.sqlite3
+        ├── artifacts/
+        ├── workspace-snapshots/
+        │   ├── <revision>.json
+        │   └── latest.json
+        ├── state-snapshots/
+        │   ├── <sequence>-<commit>.json
+        │   ├── latest.json
+        │   └── final.json
+        └── recovery/
 ```
 
-### Multiple Trials with Different Parameters
+Workspace snapshot manifests reference the content-addressed files in
+`artifacts/`, so the combination is a complete, restorable workspace snapshot.
+State projections are exported at the ledger interval and again at terminal
+completion; `commits.sqlite3` remains the authoritative, replayable history.
+Docker runs also place `request.json`, `result.json`, and `sandbox.json` in the
+trial directory.
+
+The final `report.json` includes the resolved agent, model, environment, task
+mapping, benchmark settings, concurrency, retry policy, sandbox configuration,
+and output paths. Credential-like values in runtime option dictionaries are
+redacted. `--output-dir` (also accepted as `--state-dir`) moves the runs root,
+and `--report` overrides the default report location. If a task launch
+fails, its retry discards the old container and volume, creates a clean
+workspace, and restores the last committed workspace revision. Completed
+actions are not repeated; filesystem changes from an action interrupted before
+its completion commit are deliberately excluded. `--keep-sandboxes on-failure`
+or `always` retains Docker resources for inspection without making them the
+recovery source of truth.
+
+The main isolation controls all have CLI defaults and can be overridden with
+`--sandbox-image`, `--sandbox-cpus`, `--sandbox-memory`,
+`--sandbox-pids-limit`, `--sandbox-network`, `--keep-sandboxes`, and repeated
+`--sandbox-env NAME` arguments. Only allowlisted host variables are forwarded;
+the built-in list covers common model-provider credentials. Environment stacks
+that need dependencies beyond the base image should provide their own image
+with `--sandbox-image`, optionally paired with an image-specific registry via
+`--sandbox-registry-module module:create_registry`.
+
+If that environment is already activated, `uv run` is optional and the command
+is simply `corral bench ...`. The `--project` form is only needed when invoking
+`uv` from elsewhere in the monorepo.
+
+The available agent names are `ai-scientist`, `claude-code`, `codex`,
+`llm-planner`, `openhands`, `react`, `reflexion`, `terminus`, and
+`tool-calling`. Class names and underscore spellings such as `ReActAgent` and
+`tool_calling` are accepted as aliases. Claude Code, Codex, and OpenHands need
+their corresponding optional package extra and report an installation hint if
+it is missing.
+
+Use `--agent-kwargs` for constructor-specific settings. Where the agent supports
+them, explicit `--model`, `--api-endpoint`, and `--temperature` options take
+precedence over the same keys in that JSON object:
+
+```bash
+uv run corral bench \
+  --agent codex --environment samplemath --task task1 \
+  --model gpt-5.4 \
+  --agent-kwargs '{"reasoning_effort": "high"}'
+```
+
+`ReflexionAgent` wraps `ToolCallingAgent` by default. Select another actor with
+`{"actor": "react", "actor_kwargs": {...}}`. For `AIScientistAgent`, a JSON
+`config` object is validated as `AIScientistConfig`; add
+`"config_profile": "sakana"` to use `SakanaAIScientistConfig`.
+
+### Compatibility `ToolCallingAgent` script
+
+[`run_scripts/run_tool_calling.py`](run_scripts/run_tool_calling.py) delegates to
+the same local benchmark execution function as `corral bench`; it does not maintain
+a separate runner implementation. The runner infers `BenchmarkTaskMetadata`
+and includes the selected task's dependencies automatically. Its existing
+options, defaults, and invocation remain supported:
+
+From the repository root:
+
+```bash
+uv sync --project tasks/samplemath
+uv run --project tasks/samplemath python run_scripts/run_tool_calling.py \
+  --environment samplemath --list-tasks
+
+uv run --project tasks/samplemath python run_scripts/run_tool_calling.py \
+  --environment samplemath --task task4 --model openai/gpt-4o \
+  --report .corral/samplemath-report.json
+```
+
+The built-in presets are `afm`, `catalyst`, `corral_md`, `ml`,
+`resistor_network`, `retrosynthesis`, `samplemath`, `spectra_elucidation`, and
+`wetlab`. These are fixed choices for `--environment`. Use `--env-kwargs` for
+environment-specific configuration, including the common `level`, `subtasks`,
+`task_config`, and `work_dir` keys. Environment dependencies and credentials
+still need to be configured as described in each task package's README.
+
+Omit `--task` to run every task returned by the environment. Pass `--task`
+multiple times to select specific tasks; their required dependencies are
+included automatically.
+
+The runner applies no time limit to task execution or evaluation. Failed attempts
+are retried up to `--max-attempts` times (default: 3).
+
+For example, select SampleMath's subtask set with one environment argument:
+
+```bash
+python run_scripts/run_tool_calling.py --environment samplemath \
+  --env-kwargs '{"subtasks": true}'
+```
+
+### Scored, Multi-Trial Benchmarks
+
+`CorralRunner` is the higher-level convenience layer for repeated trials,
+evaluation, metric calculation, and reports. Use it after the direct execution
+path above when those benchmark features are actually needed. Given the
+`store` and model settings from the example above (keep the store open
+until the benchmark finishes):
 
 ```python
-# Run multiple trials per task
-result = runner.bench(
-    task_ids=["math_1", "math_2"],
-    trials_per_task=3,
-    k_values=[1, 2, 3],  # Evaluate with different k values for pass@k metrics
-    tool_verbosity="MINIMAL",  # Options: FULL, MINIMAL, NONE
+from corral import CorralRunner
+
+environments = load_environment_group("samplemath")
+registry = RuntimeRegistry(
+    agents={AGENT_ID: ToolCallingAgent(model=MODEL)},
+    environments=environments,
 )
-
-# Evaluate with different k values for pass@k metrics
-result = runner.bench(trials_per_task=5, k_values=[1, 2, 3, 4, 5])
+runner = CorralRunner(
+    registry,
+    environments=environments,
+    agent_id=AGENT_ID,
+    model=MODEL,
+    max_iterations=10,
+    state_store=store,
+)
+result = await runner.run(
+    "samplemath-run-2",
+    task_ids=["task1", "task2"],
+    trials_per_task=3,
+    k_values=[1, 2, 3],
+    max_parallel=4,
+    max_parallel_per_task=2,
+)
 ```
+
+`CorralRunner` handles concurrency, task retries, and dependency readiness.
+Task state remains persisted in the commit store. Tool verbosity is fixed to Corral's default (`brief`) on this path.
 
 ## 🏗️ Available Environments
 
@@ -151,82 +340,18 @@ The framework includes several built-in agent types:
 
 ### AIScientistAgent
 
-Uses progressive tree search over Corral tool experiments. It formulates
-hypotheses, runs preliminary and discriminating investigations, optionally tunes
-experimental parameters, verifies conclusions, and synthesizes a submit-ready
-answer from a global evidence journal. Each tree node is one bounded scientific
-experiment: an experiment worker chooses one tool action, observes its result,
-and then chooses the next action without branching the tree between tool calls.
+Uses progressive tree search to formulate hypotheses, run experiments, refine
+results, and verify conclusions. It is based on Sakana AI's original
+[AI Scientist v2 implementation](https://github.com/SakanaAI/AI-Scientist-v2).
 
 ```python
-from corral.agents import AIScientistAgent, AIScientistConfig
+from corral.agents import AIScientistAgent
 
 agent = AIScientistAgent(
     model="gpt-4o",
     evaluator_model="gpt-4o",
-    config=AIScientistConfig(
-        max_tool_calls=24,
-        max_actions_per_node=3,
-        max_children_per_node=3,
-        tree_exploration_weight=0.1,
-        max_llm_tokens=200_000,
-    ),
 )
 ```
-
-The default configuration now relies on its per-stage search budgets (18
-ordinary nodes in total) instead of a three-node global cap. Search nodes and
-stage-boundary validation nodes have independent optional caps via
-`max_search_nodes` and `max_validation_nodes`; legacy `max_nodes` limits search
-nodes only. A failed preliminary stage is a hard gate, so later research never
-builds on a non-working baseline.
-
-Successful internal checkpoints remain expandable until their child cap is
-reached, allowing several alternative refinements instead of only one chain.
-Each main stage has its own search scope and is seeded explicitly by the
-previous stage's listwise-selected winner. Tuning and research continue until a
-new checkpoint beats that seed or their budget is exhausted; the manager can
-create a new evidence-dependent substage only after the critic confirms that
-the current agenda's observable criteria have been met. Tuning experiments all
-derive from the Stage-1 winner and verification experiments all derive from the
-Stage-3 winner, except continuations/debugs that repair one experiment. Winning
-checkpoints are independently replicated and aggregated at stage boundaries,
-while Stage 4 remains focused on ablations and optional counterfactual tests.
-
-When tools expose a declared task-internal scalar, the manager parses its value
-and provenance from actual observations and uses it as the objective ranking
-anchor; it never reads the benchmark score. Non-continuation children use the
-`auto` trial-state strategy by default: clone-capable environments inherit a
-checkpoint, while other environments start clean. Set
-`trial_state_inheritance="replay"` only when a stateful environment requires
-inheritance but cannot clone trials. If a local trial produces plot/image artifacts,
-the evaluator sends them to a multimodal-capable model gateway and records its
-visual feedback in the research journal. Boundary repetitions can be disabled
-for deterministic or especially costly tasks with
-`stage_boundary_replications=0`.
-
-For comparison with AI Scientist v2 rather than the cheaper Corral defaults,
-use `SakanaAIScientistConfig`. It supplies the 20/12/12/18 stage budgets,
-0.5 debug probability, debug depth 3, and four experiment workers. Stage 1/3
-fill each worker batch by selecting parents independently, prefer distinct root
-trees before reuse, and use listwise LLM selection with deterministic metric
-fallback. The profile also uses fixed-baseline tuning/ablation, runs Stage 3/4
-to their full budgets, validates the best result when a non-initial stage
-exhausts its budget, allows up to 16 children and 16 adaptive actions per node,
-debugs failed leaves as a chain instead of repeatedly branching from an
-already-expanded failure, always attempts Stage 2 (including procedural or
-experimental tuning), and treats any tool-successful working Stage-1 node as
-sufficient to advance without an extra critic-validity gate.
-
-Sakana-profile boundary replication replays the winner's exact realized action
-sequence in clean trials rather than asking an LLM to reconstruct it. A
-schema-declared `seed` or `random_state` argument is changed to seeds 0, 1, and
-2; tools without either field receive independent byte-for-byte logical
-replays. Aggregation records deterministic run/success counts and, when all
-replications expose the declared scalar objective, its values, mean, sample
-standard deviation, standard error, and seeds before the critic interprets the
-evidence. The profile does not include AI Scientist's manuscript, citation, or
-review pipeline.
 
 ### ReActAgent
 
@@ -238,7 +363,6 @@ from corral.agents import ReActAgent
 agent = ReActAgent(
     model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model litellm supports
     temperature=0.1,
-    max_iterations=10,
 )
 ```
 
@@ -252,7 +376,6 @@ from corral.agents import ToolCallingAgent
 agent = ToolCallingAgent(
     model="gpt-4o",  # or "claude-3-5-sonnet-20241022" or any other model LiteLLM supports
     temperature=0.0,
-    max_iterations=10,
 )
 ```
 
@@ -263,7 +386,7 @@ Uses hierarchical planning with high-level planning and low-level execution dele
 ```python
 from corral.agents import LLMPlanner
 
-agent = LLMPlanner(model="gpt-4o", temperature=0.1, max_iterations=5)
+agent = LLMPlanner(model="gpt-4o", temperature=0.1)
 ```
 
 ### ReflexionAgent
@@ -274,7 +397,7 @@ Implements the Reflexion architecture ([paper](https://arxiv.org/abs/2303.11366)
 from corral.agents import ReActAgent, ReflexionAgent, ToolCallingAgent
 
 # Create base agent (the "Actor")
-base_agent = ToolCallingAgent(model="gpt-4o", max_iterations=10, temperature=0.1)
+base_agent = ToolCallingAgent(model="gpt-4o", temperature=0.1)
 
 # Wrap with Reflexion capabilities
 reflexion_agent = ReflexionAgent(
@@ -282,17 +405,31 @@ reflexion_agent = ReflexionAgent(
     reflection_model="gpt-4o",  # Model for generating reflections
     reflection_temperature=0.0,  # Deterministic reflections
 )
-
-# Use like any other agent
-runner = CorralRunner(interface, reflexion_agent)
-result = runner.bench(task_ids=["task_1"], trials_per_task=5)
 ```
 
-## 💾 Checkpoint System
+## 💾 Commit Ledger
 
-The framework automatically saves checkpoints during benchmark runs.
+Corral persists one small, immutable, typed commit for every durable event in a
+SQLite ledger. `parent_hash` links each ordinary commit to the current branch
+head, while `based_on_hash` records the projection the author actually saw.
+`ExecutionState` is rebuilt from the ledger plus occasional replay snapshots;
+agents receive an authorized `AgentContext`, not the complete execution trace.
 
-Checkpoints are automatically searched and loaded when resuming interrupted runs.
+Agent and tool authors are bound capabilities. Subagents share the same linear
+branch and appear in the parent conversation as ordinary tool calls with
+automatic result summaries. Their full conversations and state remain private
+unless the parent chooses to inspect and import selected details. Parallel tool
+completions are stored in real completion order and presented to the model in
+declared action order. Shared environment and workspace effects carry revision
+preconditions, so overlapping writes conflict instead of silently rebasing.
+Explicit experiments use `SQLiteCommitStore.create_branch()`; spawning a
+subagent never creates a branch.
+
+Subagent inspection is opt-in per agent. Agents declaring
+`AgentSessionCapabilities(inspect_subagents=True)` receive an
+`inspect_subagent` tool that returns a bounded authorized child context through
+the normal tool-call ledger path. AI Scientist enables it; other built-in
+agents do not expose it.
 
 ## 🔧 Contributing
 
@@ -321,7 +458,7 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 
    ```python
    # tasks/my_new_env/my_new_env/tools.py
-   from corral.backend.tool import tool
+   from corral.core.tool import tool
 
 
    @tool
@@ -340,44 +477,28 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 
    Note that the docstring has to be formatted correctly for the tool to be registered properly. This means it has to include a description of the parameters and return values as in the example above.
 
-4. **Implement environment class**
+4. **Define the task and environment**
 
    ```python
    # tasks/my_new_env/my_new_env/env.py
-   from corral.backend import Environment
-   from corral.backend.server import create_benchmark_server
+   from corral.core.environment import Environment, Toolset
+   from corral.core.task import TaskDefinition
 
+   from .tools import my_custom_tool
 
-   class MyEnvironment(Environment):
-       def __init__(self, task_id: str, problem: str, answer: str):
-           self.problem = problem
-           self.correct_answer = answer
-           super().__init__(task_id)
-
-           # Add your tools
-           self.add_tool(my_custom_tool)
-
-       def get_task_prompt(self) -> str:
-           return f"Solve this problem: {self.problem}"
-
-       def score(self) -> float:
-           if self.state.submitted_answer is None:
-               return 0.0
-           return 1.0 if self.state.submitted_answer == self.correct_answer else 0.0
-
-
-   # Define your tasks
-   environments = {
-       "task_1": MyEnvironment("task_1", "Problem 1", "Answer 1"),
-       "task_2": MyEnvironment("task_2", "Problem 2", "Answer 2"),
-   }
-
-   # Create server
-   if __name__ == "__main__":
-       app = create_benchmark_server(environments)
-       import uvicorn
-
-       uvicorn.run(app, host="0.0.0.0", port=8000)
+   task = TaskDefinition(
+       name="task_1",
+       description="Solve this problem: Problem 1",
+       tools=["my_custom_tool"],
+       scoring_fn=lambda answer: float(answer == "Answer 1"),
+       submission_format={"answer": "string"},
+       resolve_answer=False,
+   )
+   environment = Environment(
+       "task_1",
+       task,
+       toolset=Toolset(pool={"my_custom_tool": my_custom_tool}),
+   )
    ```
 
 ### Adding a New Agent
@@ -386,23 +507,21 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 
    ```python
    # src/corral/agents/my_agent.py
-   from corral.agents import BaseAgent
-   from corral import CorralRunner
+   from corral.agents import AgentOutcome
+   from corral.core import submit_answer_action
 
 
-   class MyAgent(BaseAgent):
-       def __init__(self, model: str, **kwargs):
-           super().__init__(model, **kwargs)
-           # Add your agent-specific initialization
+   class MyAgent:
+       model = "gpt-4o"
 
-       def run(self, interface: CorralRouter, task_id: str) -> str:
-           # Get task information
-           guide = interface.get_task_guide(task_id)
-
-           # Your agent logic here
-           # Use interface.execute_tool() to call tools
-
-           return "Your final answer"
+       async def run_session(self, session):
+           result = await session.execute(submit_answer_action("Your final answer"))
+           if not result.success:
+               return AgentOutcome(
+                   status="protocol_failure",
+                   error=f"submit_answer failed: {result.error}",
+               )
+           return AgentOutcome(status="completed", answer="Your final answer")
    ```
 
 2. **Add to agent registry**
@@ -414,17 +533,16 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
    __all__ = ["MyAgent", ...]
    ```
 
-3. **Test your agent**
+3. **Register your agent for execution**
 
    ```python
    from corral.agents.my_agent import MyAgent
-   from corral import CorralRunner, CorralRouter
+   from corral import RuntimeRegistry
 
-   agent = MyAgent(model="gpt-4o")
-   interface = CorralRouter("http://localhost:8000")
-   runner = CorralRunner(interface, agent)
-
-   result = runner.bench()
+   registry = RuntimeRegistry(
+       agents={"my-agent": MyAgent()},
+       environments={"my-environment": environment},
+   )
    ```
 
 ### Development Setup
@@ -448,7 +566,7 @@ Checkpoints are automatically searched and loaded when resuming interrupted runs
 #### Standard Tools
 
 ```python
-from corral.backend.tool import tool
+from corral.core.tool import tool
 
 
 @tool
@@ -465,117 +583,24 @@ def calculate_molecular_weight(formula: str) -> float:
     pass
 ```
 
-#### [Modal](https://modal.com) Tools (Cloud Execution)
-
-Modal allows you to run computationally intensive tasks in the cloud. See [Modal docs](https://modal.com/docs) for setup.
-
-```python
-from corral.utils.modal import modal_tool, MODAL_TOOL_REGISTRY
-from modal import App, Image
-
-app = App("my-corral-tools")
-
-
-@modal_tool(app=app, image=Image.debian_slim().pip_install("rdkit"), memory=1024)
-def complex_calculation(data: str) -> str:
-    """Run computationally intensive task in the cloud."""
-    from rdkit import Chem
-
-    mol = Chem.MolFromSmiles(data)
-    return f"Molecule has {mol.GetNumAtoms()} atoms"
-
-
-# Access the tool
-tool_instance = MODAL_TOOL_REGISTRY["complex_calculation"]
-```
-
-For Corral-specific usage, see the [Modal App Documentation](tasks/corral_md/modal_app/README.md).
-
-### MCP (Model Context Protocol) Integration
-
-Corral tools can be easily converted to MCP format for use with MCP-compatible clients like Claude Desktop:
-
-```python
-from corral.backend.tool import tool
-from corral.router.verbosity import ToolVerbosity
-
-
-@tool
-def my_scientific_tool(param: str) -> str:
-    """Scientific tool description.
-
-    Args:
-        param: Parameter description
-
-    Returns:
-        Result description
-    """
-    return f"Result: {param}"
-
-
-# Convert to MCP format
-mcp_definition = my_scientific_tool.to_mcp()
-
-# With specific verbosity level
-mcp_brief = my_scientific_tool.to_mcp(verbosity=ToolVerbosity.BRIEF)
-```
-
-Create a custom MCP server:
-
-```python
-from mcp.server import Server
-from mcp.types import Tool as MCPTool
-import importlib
-import inspect
-from corral.backend.tool import Tool
-
-# Load tools from a module
-module = importlib.import_module("my_domain.tools")
-tools = {name: obj for name, obj in inspect.getmembers(module) if isinstance(obj, Tool)}
-
-# Create MCP server
-server = Server("my-corral-tools")
-
-
-@server.list_tools()
-async def list_tools():
-    return [MCPTool(**tool.to_mcp()) for tool in tools.values()]
-
-
-@server.call_tool()
-async def call_tool(name: str, arguments: dict):
-    tool = tools[name]
-    # Execute and return results
-    ...
-```
-
-For more details on creating tools and MCP integration, see the [Tools Documentation](docs/TOOLS_README.md).
-
-### Environment Configuration
-
-For environments requiring file I/O:
-
-```bash
-export CORRAL_FS_PROTOCOL=local
-export BASE_IO_PATH=/path/to/work/directory
-```
-
 ### Evaluation Metrics
 
 The framework provides comprehensive evaluation metrics:
 
 ```python
-result = runner.bench(trials_per_task=10, k_values=[1, 3, 5])
+result = await runner.run(
+    "metrics-run-1",
+    trials_per_task=10,
+    k_values=[1, 3, 5],
+)
 
-# Access detailed results
-print(f"Total score: {result.total_score}")
-print(f"Pass@1: {result.pass_at_k[1]}")
-print(f"Pass@3: {result.pass_at_k[3]}")
-print(f"Average trials: {result.average_trials}")
+metrics = result.calculate_metrics()
+print(metrics["average_score"])
+print(metrics["pass_at_1"])
 
 # Per-task analysis
 for task_id, task_result in result.task_results.items():
-    print(f"Task {task_id}: {task_result.success_rate:.2f} success rate")
+    print(task_id, [trial.score for trial in task_result.trials])
 ```
 
 ## 🤝 Community

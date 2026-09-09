@@ -1,245 +1,163 @@
-"""Core hook system for agent lifecycle events.
-This module provides a flexible callback-based hook system that allows updating context at various points in an agent's execution lifecycle.
+"""Async lifecycle hooks for first-class :class:`AgentSession` agents."""
 
-Example:
-        >>> hooks = AgentHooks()
-        >>> def my_hook(context: HookContext) -> None:
-        ...     print(f"Task: {context.task_id}")
-        >>> hooks.register(HookPoint.BEFORE_TASK, my_hook, priority=10)
-        >>> # Later we can in agent code:
-        >>> context = HookContext(task_id="task1", ...)
-        >>> hooks.execute(HookPoint.BEFORE_TASK, context)
-"""
+from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from threading import RLock
+from typing import TYPE_CHECKING, Any, Protocol
 
-from loguru import logger
+from corral.report.logging import logger
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Mapping
+
+    from pydantic import JsonValue
+
+    from corral.agents.session import Agent, AgentSession
+    from corral.core.state import ExecutionState
 
 
-class CriticalHookError(Exception):
-    """Raised by hooks when an error should halt agent execution.
-
-    Hooks should raise this exception for critical failures that should
-    stop the agent execution entirely. Non-critical errors should be
-    handled within the hook or allowed to be caught and logged by the
-    hook execution system.
-
-    Example:
-        >>> def my_hook(context: HookContext) -> None:
-        ...     if not validate_critical_condition():
-        ...         raise CriticalHookError("Critical validation failed")
-    """
+class CriticalHookError(RuntimeError):
+    """A hook failure that must abort the current agent session."""
 
 
 class HookPoint(str, Enum):
-    """Available hook points in agent lifecycle.
+    """Lifecycle points exposed by the current session-agent API."""
 
-    Hook points represent specific moments in the agent execution where
-    custom callbacks can be injected to modify behavior or observe state.
-
-    Minimal hook points design:
-    - BEFORE_TASK: For intervention injection after task guide is created
-    - BEFORE_ITERATION: Before each LLM call
-    - AFTER_ITERATION: After tools execute with full iteration context
-    - AFTER_TASK: Cleanup after task completion
-    """
-
-    # Task lifecycle
     BEFORE_TASK = "before_task"
-    """Called once at the start of a task, after prompt/task guide initialization.
-    Perfect for intervention injection."""
-
     AFTER_TASK = "after_task"
-    """Called once at the end of a task, regardless of success/failure"""
-
-    # Iteration lifecycle
-    BEFORE_ITERATION = "before_iteration"
-    """Called at the start of each agent iteration, before LLM call"""
-
-    AFTER_ITERATION = "after_iteration"
-    """Called at the end of each agent iteration, after all tools execute.
-    Context includes: llm_response, parsed_actions, tool_results in iteration_data"""
-
-    ## WE CAN ADD MORE LATER IF NEEDED for example tool execution hooks, LLM parsing hooks, etc.
 
 
-@dataclass
+@dataclass(slots=True)
 class HookContext:
-    """Context passed to hooks - mutable state that hooks can inspect/modify.
+    """One hook invocation backed exclusively by an :class:`AgentSession`.
 
-    The context object provides access to the agent's current state and allows
-    hooks to modify behavior by setting control flags or updating metadata.
-
-    Attributes:
-        task_id: The current task identifier
-        agent: Reference to the agent instance (BaseAgent)
-        interface: Router interface for tool execution (CorralRouter)
-        messages: The agent's conversation history (list[LiteLLMMessage])
-        iteration: Current iteration number (0-indexed)
-        should_continue: Flag to control execution flow (set to False to stop)
-        skip_current_step: Flag to skip the current step without stopping
-        metadata: Dictionary for storing arbitrary hook-specific data
-        iteration_data: Rich data from current iteration (populated in AFTER_ITERATION)
-            Contains: llm_response, parsed_actions, tool_results, final_answer, etc.
+    The canonical transcript is deliberately read-only through `messages`.
+    Hooks that need to add context must call `await session.record_message(...)`;
+    hooks that need to act must call `await session.execute(Action(...))`. This
+    prevents an intervention from maintaining a second mutable conversation or
+    bypassing commit creation.
     """
 
-    task_id: str
-    agent: Any  # BaseAgent
-    interface: (
-        Any  # CorralRouter, good for taking other information from environment state
-    )
-    messages: list[Any]  # list[LiteLLMMessage]
-    iteration: int
-
-    # Control flags
+    session: AgentSession
+    agent: Agent
+    hook_point: HookPoint
+    data: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, JsonValue] = field(default_factory=dict)
     should_continue: bool = True
-    skip_current_step: bool = False
 
-    # Optional data
-    metadata: dict[str, Any] = field(default_factory=dict)
+    @property
+    def task_id(self) -> str:
+        """Return the projected task ID, falling back to execution ID."""
+        value = self.session.state.task.metadata.get("id")
+        return str(value or self.session.execution_id)
 
-    # (primarily for AFTER_ITERATION hook)
-    # Example contents:
-    # {
-    #   "llm_response": "...",
-    #   "parsed_actions": [Action(...)],
-    #   "tool_results": [{"tool_name": "...", "arguments": {...}, "result": ...}],
-    #   "final_answer": "..." (if detected),
-    #   "surrender_reason": "..." (if surrendered)
-    # }
-    iteration_data: dict[str, Any] = field(default_factory=dict)
+    @property
+    def state(self) -> ExecutionState:
+        """Return the session's current immutable projection."""
+        return self.session.state
+
+    @property
+    def messages(self) -> tuple[Mapping[str, JsonValue], ...]:
+        """Return the canonical, immutable transcript view."""
+        return self.session.messages
 
 
 class HookCallback(Protocol):
-    """Protocol for hook callbacks.
+    """A synchronous or asynchronous callback over one session context."""
 
-    Hook callbacks receive a HookContext and can modify it to change
-    agent behavior. They should not return values( all communication
-    happens through the context object)
-    """
-
-    def __call__(self, context: HookContext) -> None:
-        """Execute hook with given context.
-
-        Args:
-            context: The hook context containing agent state and control flags
-        """
+    def __call__(self, context: HookContext) -> Awaitable[None] | None:
+        """Inspect or modify the session using its public async API."""
         ...
 
 
 class AgentHooks:
-    """Manager for agent lifecycle hooks.
+    """Thread-safe hook registration with asynchronous ordered execution."""
 
-    This class manages registration and execution of hooks at various points
-    in the agent lifecycle. Hooks are executed in priority order (higher first).
-    """
+    def __init__(self) -> None:
+        self._hooks: dict[HookPoint, list[tuple[HookCallback, int]]] = {}
+        self._lock = RLock()
 
-    def __init__(self):
-        self._hooks: dict[str, list[tuple[HookCallback, int]]] = {}
+    @staticmethod
+    def _point(value: HookPoint | str) -> HookPoint:
+        try:
+            return value if isinstance(value, HookPoint) else HookPoint(value)
+        except ValueError as exc:
+            raise ValueError(f"unknown agent hook point: {value!r}") from exc
 
     def register(
-        self, hook_point: HookPoint | str, callback: HookCallback, priority: int = 0
+        self,
+        hook_point: HookPoint | str,
+        callback: HookCallback,
+        priority: int = 0,
     ) -> None:
-        """Register a hook callback for a specific hook point.
+        """Register `callback` in descending priority order."""
+        point = self._point(hook_point)
+        with self._lock:
+            callbacks = self._hooks.setdefault(point, [])
+            callbacks.append((callback, priority))
+            callbacks.sort(key=lambda item: item[1], reverse=True)
 
-        Multiple hooks can be registered for the same hook point.
-        They will be executed in priority order (higher priority first).
+    async def run(
+        self,
+        hook_point: HookPoint | str,
+        context: HookContext,
+    ) -> HookContext:
+        """Run registered callbacks, awaiting asynchronous hooks when needed."""
+        point = self._point(hook_point)
+        if context.hook_point is not point:
+            raise ValueError(
+                f"hook context is for {context.hook_point.value!r}, not {point.value!r}"
+            )
+        with self._lock:
+            callbacks = tuple(self._hooks.get(point, ()))
 
-        Args:
-            hook_point: The lifecycle point to hook into
-            callback: Function to call at this hook point
-            priority: Execution priority (higher = earlier). Default 0.
-        """
-        point = hook_point.value if isinstance(hook_point, HookPoint) else hook_point
-
-        if point not in self._hooks:
-            self._hooks[point] = []
-
-        self._hooks[point].append((callback, priority))
-        # Sort by priority (descending)
-        self._hooks[point].sort(key=lambda x: x[1], reverse=True)
-
-    def execute(self, hook_point: HookPoint | str, context: HookContext) -> HookContext:
-        """Execute all hooks registered for a hook point.
-
-        Hooks are executed in priority order. If a hook sets
-        context.should_continue = False, execution stops early.
-
-        Non-critical errors in hooks are logged but don't stop execution.
-        Critical errors (CriticalHookError) are re-raised to halt agent execution.
-
-        Args:
-            hook_point: The hook point to execute
-            context: The context to pass to hooks
-
-        Returns:
-            The context (potentially modified)
-
-        Raises:
-            CriticalHookError: If a hook raises a critical error that should halt execution
-        """
-        point = hook_point.value if isinstance(hook_point, HookPoint) else hook_point
-
-        if point not in self._hooks:
-            return context
-
-        for callback, _ in self._hooks[point]:
+        for callback, _priority in callbacks:
             try:
-                callback(context)
-
-                # Check if hook requested to stop
+                result = callback(context)
+                if inspect.isawaitable(result):
+                    await result
                 if not context.should_continue:
                     break
-
             except CriticalHookError:
-                logger.critical(f"Critical error in hook at {point}, halting execution")
-                raise  # Re-raise to stop agent execution
-            except Exception as e:
-                logger.error(f"Error executing hook at {point}: {e}")
-
+                raise
+            except Exception as exc:
+                logger.warning(f"Hook at {point.value} failed and was skipped: {exc}")
         return context
 
     def remove(self, hook_point: HookPoint | str, callback: HookCallback) -> None:
-        """Remove a specific hook callback.
-
-        Args:
-            hook_point: The hook point to remove the callback from
-            callback: The callback to remove
-        """
-        point = hook_point.value if isinstance(hook_point, HookPoint) else hook_point
-
-        if point in self._hooks:
-            self._hooks[point] = [
-                (cb, pri) for cb, pri in self._hooks[point] if cb != callback
-            ]
+        """Remove one callback from one lifecycle point."""
+        point = self._point(hook_point)
+        with self._lock:
+            callbacks = self._hooks.get(point)
+            if callbacks is not None:
+                self._hooks[point] = [
+                    (registered, priority)
+                    for registered, priority in callbacks
+                    if registered != callback
+                ]
 
     def clear(self, hook_point: HookPoint | str | None = None) -> None:
-        """Clear all hooks, or hooks for a specific point.
-
-        Args:
-            hook_point: The hook point to clear, or None to clear all hooks
-        """
-        if hook_point is None:
-            self._hooks.clear()
-        else:
-            point = (
-                hook_point.value if isinstance(hook_point, HookPoint) else hook_point
-            )
-            if point in self._hooks:
-                del self._hooks[point]
+        """Clear callbacks for one point, or all callbacks when omitted."""
+        with self._lock:
+            if hook_point is None:
+                self._hooks.clear()
+            else:
+                self._hooks.pop(self._point(hook_point), None)
 
     def has_hooks(self, hook_point: HookPoint | str) -> bool:
-        """Check if any hooks are registered for a hook point.
+        """Return whether at least one callback is registered for `hook_point`."""
+        point = self._point(hook_point)
+        with self._lock:
+            return bool(self._hooks.get(point))
 
-        Args:
-            hook_point: The hook point to check
 
-        Returns:
-            True if at least one hook is registered for this point
-        """
-        point = hook_point.value if isinstance(hook_point, HookPoint) else hook_point
-        return point in self._hooks and len(self._hooks[point]) > 0
-
-    # TODO: Add method to list all registered hooks before agent execution
+__all__ = [
+    "AgentHooks",
+    "CriticalHookError",
+    "HookCallback",
+    "HookContext",
+    "HookPoint",
+]

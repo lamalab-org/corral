@@ -5,9 +5,9 @@ import os
 import platform
 from collections.abc import Callable
 from pathlib import Path
+from time import perf_counter
 
 import nanosurf
-from loguru import logger
 
 # ----------------------------------------------------------
 # Safe pythoncom import (Windows only)
@@ -17,10 +17,12 @@ if platform.system() == "Windows":
 else:
     pythoncom = None
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition
-from corral.backend.tool import Tool
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.events import TaskConfigured
+from corral.core.state import ExecutionState
+from corral.core.task import InputRef, TaskDefinition
+from corral.core.tool import Tool
+from corral.report.logging import event, exception_fields
 from corral.utils.code_tools import execute_python_code
 from score import (
     check_file_exists,
@@ -40,7 +42,13 @@ from tools import (
 )
 
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt_4o").strip()
-logger.info(f"[SERVER] Using LLM_MODEL={LLM_MODEL}")
+event(
+    "DEBUG",
+    "environment.configuration",
+    subsystem="runtime",
+    benchmark="afm",
+    llm_model=LLM_MODEL,
+)
 ENVIRONMENT = "enviroment"
 TASK_TYPE = "subtasks_1"  # "single_task" or "subtasks"
 BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\{TASK_TYPE}"
@@ -85,12 +93,25 @@ def load_tasks_from_json(
     Returns:
         dictionary of task definitions keyed by task ID
     """
-    logger.info(f"Loading task definitions from {json_path}")
+    event(
+        "DEBUG",
+        "environment.tasks_loading",
+        subsystem="runtime",
+        benchmark="afm",
+        task_source=str(json_path),
+    )
     if not Path(json_path).exists():
         raise FileNotFoundError(f"Task definition file not found: {json_path}")
 
-    with Path(json_path).open() as f:
-        task_data = json.load(f)
+    json_path = Path(json_path)
+    task_files = sorted(json_path.glob("*.json")) if json_path.is_dir() else [json_path]
+    task_data = {}
+    for task_file in task_files:
+        with task_file.open() as f:
+            entries = json.load(f)
+        if isinstance(entries, list):
+            entries = {entry["id"]: entry for entry in entries}
+        task_data.update(entries)
 
     tasks = {}
     for task_id, task_info in task_data.items():
@@ -115,6 +136,7 @@ def load_tasks_from_json(
                 dep: InputRef(dep) for dep in task_info.get("input_from_tasks", [])
             },
             initial_input=initial_input,
+            resolve_answer=False,
         )
 
     return tasks
@@ -124,8 +146,8 @@ class AFMEnvironment(Environment):
     """Environment for AFM tasks (escape hatch: drives the Nanosurf API).
 
     Behaviour beyond the stateful hardware reset is shared with the generic
-    `Environment`; only the prompt, the per-trial instrument reset and the
-    raw-answer scoring are specialised here.
+    `Environment`; only the prompt and per-task instrument reset are
+    specialised here. Evaluation uses the task's scoring callable directly.
     """
 
     @property
@@ -133,15 +155,15 @@ class AFMEnvironment(Environment):
         return self.current_task.initial_input["params"]
 
     @property
-    def afm_dir(self) -> str:
-        return self.base_work_dir
+    def afm_dir(self) -> str | None:
+        return self.workspace_path
 
     def reset_params(self) -> None:
         if pythoncom:
             pythoncom.CoInitialize()
         spm = nanosurf.SPM()
         application = spm.application
-        application.SetGalleryHistoryDirectoryPath(self.current_work_dir)
+        application.SetGalleryHistoryDirectoryPath(self.workspace_path)
         scan = application.Scan
         zcontrol = application.ZController
         head = application.ScanHead
@@ -177,10 +199,14 @@ class AFMEnvironment(Environment):
         # if "mode" in params:
         #     opmode.OperatingMode = getattr(spm.OperatingMode, params["mode"])
 
-        logger.info(
-            f"AFM parameters have been reset to initial values. "
-            f"AFM images will be saved at {application.GetGalleryHistoryDirectoryPath}. "
-            f"Corral's current working directory is {self.afm_dir}."
+        event(
+            "DEBUG",
+            "environment.configuration_completed",
+            subsystem="runtime",
+            benchmark="afm",
+            task_id=self.task_id,
+            workspace=self.afm_dir,
+            image_directory=application.GetGalleryHistoryDirectoryPath,
         )
 
         # Cleanup
@@ -192,7 +218,7 @@ class AFMEnvironment(Environment):
         if pythoncom:
             pythoncom.CoUninitialize()
 
-    def get_task_prompt(self) -> str:
+    def get_task_prompt(self, state: ExecutionState) -> str:
         prompt = "You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API."
         prompt += f"""\nTask: {self.current_task.name}
         Description: {self.current_task.description}
@@ -204,10 +230,9 @@ class AFMEnvironment(Environment):
         prompt += "\nAvailable input data:\n"
 
         # Display resolved inputs from dependencies
+        resolved = self.resolve_inputs(state)
         for input_name, ref in self.current_task.input_map.items():
-            if self.state.is_completed(ref.task_id):
-                value = self.state.get_output(ref.task_id, ref.key)
-                prompt += f"- {input_name} (from {ref.task_id}): {value}\n"
+            prompt += f"- {input_name} (from {ref.task_id}): {resolved[input_name]}\n"
 
         # Display initial input data
         for key, value in self.current_task.initial_input.items():
@@ -218,41 +243,24 @@ class AFMEnvironment(Environment):
         if self.afm_dir:
             prompt += f"\nIMPORTANT: You have access to filesystem tools. All image scans will automatically be saved in your isolated workspace which is {self.afm_dir}."
 
-        # logger.info(f"PROMPT : {prompt}")
         return prompt
 
-    def configure_additional_apps(self):
-        logger.info("configuration taking place!!!!!!!")
+    def configure(self, state: ExecutionState) -> TaskConfigured:
+        event(
+            "DEBUG",
+            "environment.configuration_started",
+            subsystem="runtime",
+            benchmark="afm",
+            task_id=self.task_id,
+        )
         self.reset_params()
-        return "No external object configuration needed for this trial."
-
-    def score(self) -> float:
-        """Score the submitted answer"""
-        if not self.state.submitted_answer:
-            logger.warning(f"No submission found for task {self.task_id}")
-            return 0.0
-
-        try:
-            # Get and log the raw submission
-            answer_value = self.state.submitted_answer.strip()
-            logger.info(f"Raw submission for {self.task_id}: {answer_value!r}")
-
-            # Call the scoring function with the raw answer
-            score = self.current_task.scoring_fn(answer_value)
-
-            # Store the output in the shared state so dependent tasks can use it
-            self.state.store_task_output(self.task_id, answer_value, score)
-            logger.info(f"Task {self.task_id} scored: {score}")
-
-            return score
-
-        except Exception as e:
-            logger.error(
-                f"Error scoring submission for task {self.task_id}: {e!s}",
-                exc_info=True,
-            )
-            logger.error(f"Submission was: {self.state.submitted_answer!r}")
-            return 0.0
+        configured = super().configure(state)
+        return TaskConfigured(
+            **{
+                **configured.model_dump(),
+                "status": "AFM instrument parameters configured.",
+            }
+        )
 
 
 def create_environments(
@@ -271,12 +279,22 @@ def create_environments(
         dictionary of environments keyed by task ID
     """
 
-    logger.info(f"Creating environments from {task_json_path} with work_dir {work_dir}")
-
-    # Load tasks from JSON
-    tasks = load_tasks_from_json(task_json_path, work_dir)
-
-    logger.info(f"Creating linked task environments with ID: {ENVIRONMENT}")
+    started = perf_counter()
+    event(
+        "INFO",
+        "environment.started",
+        subsystem="runtime",
+        benchmark="afm",
+        operation="create",
+    )
+    event(
+        "DEBUG",
+        "environment.creation_details",
+        subsystem="runtime",
+        benchmark="afm",
+        task_source=str(task_json_path),
+        work_dir=work_dir,
+    )
 
     subtask_specific_tools = {
         "visualize_grain_boxes": visualize_grain_boxes,
@@ -288,17 +306,42 @@ def create_environments(
         "execute_python_code": execute_python_code,
     }
 
-    # Create environments for all tasks; grouping is derived from the graph
-    return build_environments(
-        tasks,
-        base_work_dir=work_dir,
-        name=ENVIRONMENT,
-        toolset=Toolset(
-            pool=subtask_specific_tools,
-            common=taskgroup_common_tools or {},
-        ),
-        env_cls=AFMEnvironment,
+    try:
+        tasks = load_tasks_from_json(task_json_path, work_dir)
+        environments = build_environments(
+            tasks,
+            base_work_dir=work_dir,
+            name=ENVIRONMENT,
+            toolset=Toolset(
+                pool=subtask_specific_tools,
+                common=taskgroup_common_tools or {},
+            ),
+            env_cls=AFMEnvironment,
+        )
+    except Exception as exc:
+        event(
+            "ERROR",
+            "environment.failed",
+            subsystem="runtime",
+            benchmark="afm",
+            operation="create",
+            status="failed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            **exception_fields(exc),
+        )
+        raise
+
+    event(
+        "INFO",
+        "environment.completed",
+        subsystem="runtime",
+        benchmark="afm",
+        operation="create",
+        status="completed",
+        duration_ms=round((perf_counter() - started) * 1000, 3),
+        environment_count=len(environments),
     )
+    return environments
 
 
 if __name__ == "__main__":
@@ -309,20 +352,25 @@ if __name__ == "__main__":
         / ENVIRONMENT
         / f"{TASK_TYPE}.json"
     )
-    logger.info(f"task directory {tasks_json_path}")
+    event(
+        "DEBUG",
+        "environment.task_source_resolved",
+        subsystem="runtime",
+        benchmark="afm",
+        task_source=str(tasks_json_path),
+    )
     work_dir = BASE_WORK_DIR
-    host = os.environ.get("CORRAL_HOST", "0.0.0.0")
-    port = int(os.environ.get("CORRAL_PORT", "8000"))
     environments = create_environments(
         task_json_path=tasks_json_path,
         work_dir=work_dir,
     )
-    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        logger.info(f"- {env_id}")
-        logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_map:
-            logger.info(f"Depends on: {sorted(env.current_task.dependencies())}")
-
-    # Run server
-    run_server(environments, host, port)
+        event(
+            "DEBUG",
+            "environment.created",
+            subsystem="runtime",
+            benchmark="afm",
+            task_id=env_id,
+            task_name=env.current_task.name,
+            dependencies=sorted(env.current_task.dependencies()),
+        )

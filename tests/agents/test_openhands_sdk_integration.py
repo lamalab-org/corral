@@ -78,6 +78,7 @@ def test_reasoning_effort_is_applied_to_real_llm():
         model="openai/gpt-5.6", api_key="x", reasoning_effort="low"
     )._make_llm()
     assert llm.reasoning_effort == "low"
+    assert llm.stream is True
 
     # Unset defers to the SDK's own default rather than pinning a value here.
     default_llm = OpenHandsAgent(model="openai/gpt-5.6", api_key="x")._make_llm()
@@ -90,3 +91,21 @@ def test_invalid_reasoning_effort_is_rejected_by_sdk():
         OpenHandsAgent(
             model="openai/gpt-5.6", api_key="x", reasoning_effort="bogus"
         )._make_llm()
+
+
+def test_agent_uses_openhands_native_default_tools():
+    """The adapter follows the OpenHands-owned preset instead of an empty list."""
+    agent_adapter = OpenHandsAgent(model="openai/gpt-5.6", api_key="x")
+    agent = agent_adapter._build_agent(
+        agent_adapter._make_llm(),
+        "http://127.0.0.1:1234/mcp",
+        enable_surrender=False,
+    )
+
+    assert [tool.name for tool in agent.tools] == [
+        "terminal",
+        "file_editor",
+        "task_tracker",
+        "browser_tool_set",
+    ]
+    assert agent.include_default_tools == ["FinishTool", "ThinkTool"]

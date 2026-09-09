@@ -15,6 +15,7 @@ updated_at: '2025-11-13T15:41:27.536794+00:00'
 ---
 
 If you cannot solve the task or determine it is unsolvable, you can surrender from it.
-To surrender, respond with:
+To surrender, submit the sentinel as an action:
 <thought>[your reasoning why the task cannot be solved]</thought>
-<surrender>[brief explanation]</surrender>
+<action>submit_answer</action>
+<action_input>{"answer": "SURRENDER"}</action_input>

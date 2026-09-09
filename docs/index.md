@@ -158,13 +158,15 @@ Through this formalism, `Corral` provides a flexible and robust framework for de
 
 # `Corral` architecture TL;DR 🏗️
 
-`Corral` is built upon a microservice architecture to ensure flexibility, scalability, and robust isolation of components. At its core, the platform follows a client-server design and comprises two primary services:
+`TaskRuntime` appends authored commits for setup, agent turns, tool effects,
+and lifecycle events, then materializes the current projection.
 
-`CorralServer`: This dedicated microservice is responsible for hosting and managing environments and providing the interface for interaction (`CorralRouter`).
+`execute_task` in `run.py` invokes the task runtime locally or through a Docker
+launcher. Task state is persisted in the commit store.
 
-`CorralRunner`: This service is tasked with executing agents. It orchestrates the agent's lifecycle, feeding it observations, and relaying its chosen actions.
-
-The interaction between an agent (running within `CorralRunner`) and its environment (hosted by `CorralServer`) occurs through REST API communication.
+`CorralRunner` schedules repeated trials with `asyncio`, including retries,
+concurrency limits, dependency readiness, and evaluation. It projects the
+results into reports and metrics.
 
 /// info
     open: True

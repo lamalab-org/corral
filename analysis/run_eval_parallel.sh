@@ -1,12 +1,10 @@
 #!/bin/bash
-# Parallel evaluation using GNU parallel or SLURM array jobs
+# Parallel evaluation using GNU parallel or background jobs
 #
 # Usage:
 #   # GNU parallel (for workstations)
 #   bash run_eval_parallel.sh kfold 8
 #   bash run_eval_parallel.sh group 8
-#
-#   # For SLURM clusters, see slurm_eval.sh
 
 set -e
 

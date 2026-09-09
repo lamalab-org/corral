@@ -11,6 +11,7 @@ from corral.agents.ai_scientist.search.nodes import (
 from corral.agents.ai_scientist.state import TaskFormulation
 from corral.agents.ai_scientist.tools import CorralExecutor
 from corral.agents.ai_scientist.workers.experimenter import Experimenter
+from corral.core.action import Action
 
 
 @dataclass
@@ -19,13 +20,13 @@ class Response:
     result: str
 
 
-class AdaptiveInterface:
+class AdaptiveActionExecutor:
     def __init__(self):
         self.calls = []
 
-    def execute_tool(self, task_id, tool_name, arguments):
-        self.calls.append(arguments)
-        return Response(success=True, result=f"measured:{arguments['value']}")
+    def __call__(self, action: Action):
+        self.calls.append(dict(action.arguments))
+        return Response(success=True, result=f"measured:{action.arguments['value']}")
 
 
 class AdaptiveModel:
@@ -74,10 +75,9 @@ TOOLS = [
 
 def test_experiment_worker_chooses_each_action_after_observing_the_previous_one():
     model = AdaptiveModel()
-    interface = AdaptiveInterface()
+    execute_action = AdaptiveActionExecutor()
     executor = CorralExecutor(
-        interface=interface,
-        task_id="task",
+        execute_action=execute_action,
         tools=TOOLS,
         max_tool_calls=2,
     )
@@ -110,7 +110,7 @@ def test_experiment_worker_chooses_each_action_after_observing_the_previous_one(
     )
 
     assert result.status == NodeStatus.SUCCESSFUL
-    assert interface.calls == [{"value": 1}, {"value": 2}]
+    assert execute_action.calls == [{"value": 1}, {"value": 2}]
     assert [
         step.observation.result
         for step in result.trajectory
@@ -128,7 +128,7 @@ def test_experiment_worker_chooses_each_action_after_observing_the_previous_one(
 
 def test_budget_exhausted_action_prefix_is_partial_not_successful():
     model = AdaptiveModel()
-    interface = AdaptiveInterface()
+    execute_action = AdaptiveActionExecutor()
     node = ExperimentNode(
         id="node_0001",
         stage=ResearchStage.RESEARCH,
@@ -147,8 +147,7 @@ def test_budget_exhausted_action_prefix_is_partial_not_successful():
     ).execute(
         node,
         CorralExecutor(
-            interface=interface,
-            task_id="task",
+            execute_action=execute_action,
             tools=TOOLS,
             max_tool_calls=1,
         ),
@@ -170,7 +169,7 @@ def test_budget_exhausted_action_prefix_is_partial_not_successful():
     # part of the realized plan.
     assert len(result.trajectory) == 2
     assert result.trajectory[-1].observation is None
-    assert interface.calls == [{"value": 1}]
+    assert execute_action.calls == [{"value": 1}]
 
 
 class FinishingModel:
@@ -186,7 +185,7 @@ class FinishingModel:
 
 
 def test_non_aggregation_node_that_finishes_without_evidence_is_invalid():
-    interface = AdaptiveInterface()
+    execute_action = AdaptiveActionExecutor()
     node = ExperimentNode(
         id="node_0001",
         stage=ResearchStage.RESEARCH,
@@ -204,8 +203,7 @@ def test_non_aggregation_node_that_finishes_without_evidence_is_invalid():
     ).execute(
         node,
         CorralExecutor(
-            interface=interface,
-            task_id="task",
+            execute_action=execute_action,
             tools=TOOLS,
             max_tool_calls=2,
         ),
@@ -217,7 +215,7 @@ def test_non_aggregation_node_that_finishes_without_evidence_is_invalid():
 
     assert result.status == NodeStatus.INVALID
     assert result.worker_conclusion == "No further measurement is useful."
-    assert interface.calls == []
+    assert execute_action.calls == []
 
 
 class RecoveringModel:
@@ -248,7 +246,7 @@ class RecoveringModel:
 
 
 def test_experiment_worker_can_recover_from_a_failed_action_within_the_node():
-    interface = AdaptiveInterface()
+    execute_action = AdaptiveActionExecutor()
     node = ExperimentNode(
         id="node_0001",
         stage=ResearchStage.RESEARCH,
@@ -258,8 +256,7 @@ def test_experiment_worker_can_recover_from_a_failed_action_within_the_node():
         experiment_goal="obtain one valid measurement",
     )
     executor = CorralExecutor(
-        interface=interface,
-        task_id="task",
+        execute_action=execute_action,
         tools=TOOLS,
         max_tool_calls=2,
         stop_on_error=False,
@@ -284,4 +281,4 @@ def test_experiment_worker_can_recover_from_a_failed_action_within_the_node():
         False,
         True,
     ]
-    assert interface.calls == [{"value": 3}]
+    assert execute_action.calls == [{"value": 3}]

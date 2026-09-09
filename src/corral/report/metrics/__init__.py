@@ -1,7 +1,6 @@
 """Metrics system for benchmark results."""
 
-from loguru import logger
-
+from corral.report.logging import logger
 from corral.report.metrics.base import Metric, MetricContext, MetricMetadata, TaskMetric
 
 # Import core metrics for easy access

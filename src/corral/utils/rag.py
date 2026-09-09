@@ -1,12 +1,13 @@
 import gc
+import time
 from pathlib import Path
 from typing import Any
 
 import chromadb
 import more_itertools
 import tiktoken
-from loguru import logger
 
+from corral.report.logging import event, logger
 from corral.utils.tool_helpers import embed_text
 
 
@@ -104,7 +105,7 @@ def _tokenize_and_split_chunks(
         ValueError: If chunk_size is less than 1
     """
 
-    logger.info(
+    logger.debug(
         f"Tokenizing and splitting {len(chunks)} chunks with max size {chunk_size} tokens"
     )
     chunks = [str(chunk) for chunk in chunks]
@@ -164,10 +165,10 @@ def _tokenize_and_split_chunks(
                     )
 
                     if start_idx <= old_start_idx:
-                        logger.error(
+                        logger.warning(
                             f"Loop not progressing! start_idx={start_idx}, old_start_idx={old_start_idx}, end_idx={end_idx}"
                         )
-                        logger.error(
+                        logger.warning(
                             "Breaking infinite loop, please check the algorithm logic"
                         )
                         break
@@ -180,13 +181,12 @@ def _tokenize_and_split_chunks(
             del batch_results
             del batch
             gc.collect()
-    except Exception as e:
-        logger.error(f"Error during tokenization and splitting: {e}")
+    except Exception:
         raise
     finally:
         gc.collect()
 
-    logger.info(
+    logger.debug(
         f"Completed tokenization and splitting: {len(chunks)} input chunks → {len(processed_chunks)} output chunks"
     )
     return processed_chunks
@@ -208,24 +208,22 @@ def _setup_collection(
 
     try:
         if update_mode == "recreate" and collection_exists:
-            logger.info(
+            logger.debug(
                 f"Collection '{collection_name}' already exists, deleting before recreation"
             )
             client.delete_collection(name=collection_name)
             # Create a small delay to ensure deletion completes
-            import time
-
             time.sleep(0.5)
             collection = client.create_collection(name=collection_name)
-            logger.info(f"Recreated collection '{collection_name}'")
+            logger.debug(f"Recreated collection '{collection_name}'")
         elif not collection_exists:
-            logger.info(
+            logger.debug(
                 f"Collection '{collection_name}' does not exist, creating new collection"
             )
             collection = client.create_collection(name=collection_name)
-            logger.info(f"Created new collection '{collection_name}'")
+            logger.debug(f"Created new collection '{collection_name}'")
         else:
-            logger.info(
+            logger.debug(
                 f"Using existing collection '{collection_name}' for {update_mode} operation"
             )
             collection = client.get_collection(name=collection_name)
@@ -234,7 +232,6 @@ def _setup_collection(
             elif update_mode == "upsert":
                 operation = "updated (upserted)"
     except Exception as e:
-        logger.error(f"Error setting up collection: {e!s}")
         raise RuntimeError(
             f"Error setting up collection '{collection_name}': {e!s}"
         ) from e
@@ -249,7 +246,7 @@ def _validate_inputs(
     chemical: list[str] | None,
 ) -> None:
     """Validate inputs for the create_vector_database function."""
-    logger.info(f"Creating vector database with {len(chunks)} chunks")
+    logger.debug(f"Validating {len(chunks)} vector database chunks")
 
     if metadatas is not None and len(metadatas) != len(chunks):
         raise ValueError(
@@ -271,7 +268,7 @@ def _setup_database_environment(
     """Setup the vector database environment and return the directory and client."""
     persist_directory = Path(Path.cwd()) / "vector_db" if path is None else Path(path)
     persist_directory.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Using persist directory: {persist_directory}")
+    logger.debug(f"Using persist directory: {persist_directory}")
 
     return persist_directory, chromadb.PersistentClient(path=str(persist_directory))
 
@@ -301,7 +298,6 @@ def _add_documents_to_collection(
                 metadatas=batch_metadatas,
             )
     except Exception as e:
-        logger.error(f"Error during {update_mode} operation: {e!s}")
         raise RuntimeError(f"Error during {update_mode} operation: {e!s}") from e
 
 
@@ -317,7 +313,7 @@ def _process_chunks_in_batches(
     BATCH_SIZE = 1000
     total_processed = 0
 
-    logger.info(
+    logger.debug(
         f"Processing {len(processed_chunks)} documents with embeddings in batches of {BATCH_SIZE}"
     )
 
@@ -340,7 +336,7 @@ def _process_chunks_in_batches(
             f"id_{start_id + total_processed + i}" for i in range(len(chunk_batch))
         ]
 
-        logger.info(
+        logger.debug(
             f"Processing batch {batch_idx + 1}/{total_batches} "
             f"({len(chunk_batch)} documents)"
         )
@@ -355,7 +351,7 @@ def _process_chunks_in_batches(
         )
 
         total_processed += len(chunk_batch)
-        logger.info(f"Processed {total_processed}/{len(processed_chunks)} documents")
+        logger.debug(f"Processed {total_processed}/{len(processed_chunks)} documents")
 
         # Force garbage collection between batches
         gc.collect()
@@ -394,6 +390,14 @@ def create_vector_database(
     Returns:
         str: A message indicating the success of the operation
     """
+    event(
+        "INFO",
+        "rag.database_started",
+        subsystem="rag",
+        collection=collection_name,
+        chunk_count=len(chunks),
+        update_mode=update_mode,
+    )
     try:
         # Validate inputs
         _validate_inputs(chunks, update_mode, metadatas, chemical)
@@ -414,7 +418,7 @@ def create_vector_database(
         if chemical is not None:
             processed_chunks = chunks
             # Generate chemical embeddings as the primary vectors
-            logger.info(f"Generating chemical embeddings for {len(chemical)} items")
+            logger.debug(f"Generating chemical embeddings for {len(chemical)} items")
             primary_embeddings = embed_text(
                 chunks=chemical, model=chemical_model, chemical=True
             )
@@ -424,18 +428,18 @@ def create_vector_database(
                 if i < len(metadatas):
                     metadatas[i]["text"] = chunk
 
-            logger.info(
+            logger.debug(
                 "Added original text to metadata, using chemical embeddings as primary"
             )
         else:
             # Process chunks for embedding
             processed_chunks = _tokenize_and_split_chunks(chunks, chunk_size)
-            logger.info(
+            logger.debug(
                 f"Processed {len(chunks)} chunks into {len(processed_chunks)} chunks after tokenization and splitting"
             )
 
             # Standard approach - text embeddings are primary
-            logger.info(
+            logger.debug(
                 f"Generating text embeddings for {len(processed_chunks)} chunks"
             )
             primary_embeddings = embed_text(chunks=processed_chunks, model=model)
@@ -460,8 +464,15 @@ def create_vector_database(
         # Log which embeddings are primary
         embedded_type = "text" if chemical is None else "chemical"
 
+        event(
+            "INFO",
+            "rag.database_completed",
+            subsystem="rag",
+            collection=collection_name,
+            chunk_count=len(processed_chunks),
+            status="completed",
+        )
         return f"Successfully {operation} vector database with {len(processed_chunks)} instructions in collection '{collection_name}' using {embedded_type} as primary embeddings."
 
     except Exception as e:
-        logger.error(f"Error creating/updating vector database: {e!s}", exc_info=True)
         raise RuntimeError(f"Error creating/updating vector database: {e!s}") from e

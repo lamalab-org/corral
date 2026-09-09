@@ -1,9 +1,10 @@
 import argparse
 import json
 import os
-import sys
 from collections.abc import Callable
 from pathlib import Path
+from time import perf_counter
+from typing import ClassVar
 
 from corral_md.score import (
     check_log,
@@ -13,6 +14,7 @@ from corral_md.score import (
     check_structure,
 )
 from corral_md.tools import (
+    build_run_lammps_tool,
     convert_structure_to_lammps_data,
     execute_python_script,
     get_nth_run_log,
@@ -22,14 +24,18 @@ from corral_md.tools import (
     run_lammps,
     visualisation_tool,
 )
-from loguru import logger
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition
-from corral.backend.tool import Tool
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.state import ExecutionState
+from corral.core.task import InputRef, TaskDefinition
+from corral.core.tool import Tool
+from corral.report.logging import event, exception_fields
 from corral.utils.context7_tools import get_library_documentation
-from corral.utils.io_tools import FSManager, build_file_tools
+from corral.workspace import (
+    WorkspaceFilesystem,
+    build_workspace_tools,
+    confine_workspace_path,
+)
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/corral_md")
 
@@ -70,7 +76,14 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
     if not task_files:
         raise FileNotFoundError(f"No task definition files found in: {json_path}")
 
-    logger.info(f"Loading tasks from JSON files in {json_path}")
+    event(
+        "DEBUG",
+        "environment.tasks_loading",
+        subsystem="runtime",
+        benchmark="corral_md",
+        task_source=str(json_path),
+        task_file_count=len(task_files),
+    )
     tasks = {}
     for task_file in task_files:
         with task_file.open() as f:
@@ -85,16 +98,6 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
 
             # Resolve 'target' if it looks like a relative path
             target = scoring_params.get("target")
-            # if isinstance(target, str) and (target.endswith(".data")):
-            # json_dir = Path(task_file).resolve().parent.parent
-            # abs_target_path = Path(json_dir, target).resolve()
-            # logger.info(f"Resolving target path: {abs_target_path}")
-
-            # if not abs_target_path.is_file():
-            #     raise FileNotFoundError(
-            #         f"[{task_id}] Target path does not exist: {abs_target_path}"
-            #     )
-
             scoring_params["target"] = target
 
             # Optionally reassign if task_info is reused later
@@ -123,9 +126,8 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
 
 
 def _md_file_tools(workspace: str) -> dict[str, Tool]:
-    """MD-specific filesystem tools backed by the simagent FSManager."""
-    fs_manager = FSManager("file", base_path=workspace, app="simagent")
-    tools = build_file_tools(fs_manager)
+    """MD filesystem and LAMMPS tools bound to one local workspace."""
+    tools = build_workspace_tools(WorkspaceFilesystem(workspace))
     return {
         **{
             name: tools[name]
@@ -141,12 +143,44 @@ def _md_file_tools(workspace: str) -> dict[str, Tool]:
         },
         "library_docs": get_library_documentation,
         "execute_python_script": execute_python_script,
+        # Overrides the statically selected tool with a workspace-aware variant
+        # that handles Modal upload and download internally.
+        "run_lammps": build_run_lammps_tool(workspace),
     }
 
 
-def _md_task_prompt(env: Environment) -> str:
-    """Generate the MD task prompt with resource and logging guidance."""
+class MolecularDynamicsEnvironment(Environment):
+    """Confine every agent-controlled domain-tool path to this task workspace."""
 
+    _PATH_ARGUMENTS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "get_structure_from_mp_text": ("file_path",),
+        "convert_structure_to_lammps_data": ("structure_path", "output_file"),
+        "run_lammps": ("input_file",),
+        "get_nth_run_log": ("path", "save"),
+        "keyword_log_extractor": ("path",),
+        "execute_python_script": ("script_path", "working_dir"),
+        "visualisation_tool": ("path",),
+    }
+
+    def preprocess_arguments(self, tool_name: str, args: dict) -> dict:
+        parsed = super().preprocess_arguments(tool_name, args)
+        if not self.workspace_path:
+            return parsed
+        for argument in self._PATH_ARGUMENTS.get(tool_name, ()):
+            value = parsed.get(argument)
+            if isinstance(value, str) and value:
+                parsed[argument] = str(
+                    confine_workspace_path(
+                        self.workspace_path,
+                        value,
+                        allow_root=argument == "working_dir",
+                    )
+                )
+        return parsed
+
+
+def _md_task_prompt(env: Environment, state: ExecutionState) -> str:
+    """Generate the MD task prompt with resource and logging guidance."""
     prompt = f"""\nTask: {env.current_task.name}
 Description: {env.current_task.description}
 
@@ -157,13 +191,21 @@ Required submission format:
 
     prompt += "\nAvailable input data:\n"
 
-    prompt += "All the potentials, can be found at /potentials/.\n\n"
+    prompt += (
+        "All potentials are mounted read-only below /potentials/. Use these exact "
+        "catalog paths in LAMMPS inputs: /potentials/SW/Si.sw, "
+        "/potentials/TERSOFF/2007_SiO.tersoff, "
+        "/potentials/EAM/Al99.eam.alloy, "
+        "/potentials/EAM/Cu_Zhou04.eam.alloy, "
+        "/potentials/EAM/Mg_Zhou04.eam.alloy, "
+        "/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs, and "
+        "/potentials/BKS/pot.mod.\n\n"
+    )
 
     # Display resolved inputs from dependencies
+    resolved = env.resolve_inputs(state)
     for input_name, ref in env.current_task.input_map.items():
-        if env.state.is_completed(ref.task_id):
-            value = env.state.get_output(ref.task_id, ref.key)
-            prompt += f"- {input_name} (from {ref.task_id}): {value}\n"
+        prompt += f"- {input_name} (from {ref.task_id}): {resolved[input_name]}\n"
 
     # Display initial input data
     for key, value in env.current_task.initial_input.items():
@@ -171,10 +213,12 @@ Required submission format:
             prompt += f"- {key}: {value}\n"
 
     # Add workspace info
-    if env.state.workspace:
+    if env.workspace_path:
         prompt += (
-            f"\nYour current workspace directory is: {env.state.workspace}\n"
-            "All files you generate should be saved in this directory.\n\n"
+            "\nYou have an isolated task workspace. Filesystem and domain tools "
+            "resolve paths against it automatically. Always pass workspace-relative "
+            "POSIX paths such as `input/run.in`; never pass an absolute host path "
+            "to a workspace tool.\n\n"
             "### Important Resource and File Access Guidelines ###\n"
             "1. **Potential Files**:\n"
             "   - These files are *fully verified and correct*.\n"
@@ -193,7 +237,14 @@ Required submission format:
             "These quantities should be written at an appropriate, user-configurable frequency (typically 1000 timesteps) suitable for monitoring equilibration and production behavior.\n"
         )
 
-    logger.info(f"PROMPT : {prompt}")
+    event(
+        "DEBUG",
+        "environment.prompt_generated",
+        subsystem="runtime",
+        benchmark="corral_md",
+        task_id=env.task_id,
+        prompt=prompt,
+    )
 
     return prompt
 
@@ -204,10 +255,27 @@ def create_environments(
     level: int = 1,
     taskgroup_common_tools: dict[str, Tool] | None = None,
 ) -> dict[str, Environment]:
-    logger.info("Creating environments for MD")
+    started = perf_counter()
+    name = f"MD-level_{level}"
+    event(
+        "INFO",
+        "environment.started",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+    )
+    # Modal path rewriting needs one stable spelling of the local workspace.
+    # Advertising an absolute path also keeps paths written into LAMMPS inputs
+    # directly mappable to the isolated /results/corral/jobs/... directory.
+    work_dir = str(Path(work_dir).expanduser().resolve())
 
     if subtask_level:
-        logger.info("Creating environments with subtask level enabled")
+        event(
+            "DEBUG",
+            "environment.subtasks_enabled",
+            subsystem="runtime",
+            benchmark=name,
+        )
         json_path = (
             Path(__file__).parent.parent.parent
             / "environments"
@@ -222,16 +290,6 @@ def create_environments(
             / "tasks_json"
         )
 
-    if not json_path.exists():
-        logger.error(f"Task config not found: {json_path}")
-        sys.exit(1)
-
-    # Load tasks from JSON
-    tasks = load_tasks_from_json(json_path, work_dir)
-
-    name = f"MD-level_{level}"
-    logger.info(f"Creating linked task environments {name} with {len(tasks)} tasks")
-
     # Create environments for all tasks
     subtask_specific_tools = {
         "convert_structure_to_lammps_data": convert_structure_to_lammps_data,
@@ -243,35 +301,49 @@ def create_environments(
         "visualisation_tool": visualisation_tool,
     }
 
-    # Create environments for all tasks; grouping is derived from the graph.
-    # MD uses a simagent-backed FSManager for workspaces and file tools.
-    return build_environments(
-        tasks,
-        base_work_dir=work_dir,
-        name=name,
-        toolset=Toolset(
-            pool=subtask_specific_tools,
-            common=taskgroup_common_tools or {},
-            workspace_factory=_md_file_tools,
-        ),
-        fs_manager=FSManager("file", base_path=work_dir, app="simagent"),
+    try:
+        if not json_path.exists():
+            raise FileNotFoundError(f"Task config not found: {json_path}")
+        tasks = load_tasks_from_json(json_path, work_dir)
+        environments = build_environments(
+            tasks,
+            base_work_dir=work_dir,
+            name=name,
+            toolset=Toolset(
+                pool=subtask_specific_tools,
+                common=taskgroup_common_tools or {},
+                workspace_factory=_md_file_tools,
+            ),
+            env_cls=MolecularDynamicsEnvironment,
+        )
+    except Exception as exc:
+        event(
+            "ERROR",
+            "environment.failed",
+            subsystem="runtime",
+            benchmark=name,
+            operation="create",
+            status="failed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            **exception_fields(exc),
+        )
+        raise
+
+    event(
+        "INFO",
+        "environment.completed",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+        status="completed",
+        duration_ms=round((perf_counter() - started) * 1000, 3),
+        environment_count=len(environments),
     )
+    return environments
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Corral MD Benchmark Server")
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
-        help="Host to run the server on",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("CORRAL_PORT", "8000")),
-        help="Port to run the server on",
-    )
+    parser = argparse.ArgumentParser(description="Inspect Corral MD environments")
     parser.add_argument(
         "--level",
         type=int,
@@ -295,15 +367,13 @@ if __name__ == "__main__":
         level=args.level,
     )
 
-    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        logger.info(f"- {env_id}")
-        logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_map:
-            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
-
-    run_server(
-        environments=environments,
-        host=args.host,
-        port=args.port,
-    )
+        event(
+            "DEBUG",
+            "environment.created",
+            subsystem="runtime",
+            benchmark="corral_md",
+            task_id=env_id,
+            task_name=env.current_task.name,
+            dependencies=sorted(env.current_task.dependencies()),
+        )

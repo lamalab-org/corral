@@ -11,6 +11,8 @@ analysis of simulation parameters.
 import json
 import re
 from collections.abc import Callable
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import modal
@@ -23,19 +25,17 @@ def check_potential_file(target: str):
     """
     Returns a scoring function score_fn(result) -> float in {0.0, 1.0}.
 
-    Behavior :This is a higher-order function that returns `score_fn`, a callable which:
+    Behavior: This is a higher-order function that returns `score_fn`, a callable which:
         - Accepts a single argument `result` (str or None).
         - Logs a warning and returns 0.0 if `result` is None.
-        - Otherwise, calls the remote Modal function "simagent/check_potential"
-        with `target` and `result`, and returns its float score.
+        - Otherwise, compares the selected catalog path with the expected path locally.
 
     Args:
         target (str): The target identifier or path to evaluate results against.
 
     Returns:
         Callable[[str | None], float]: A function that takes a result string (or None)
-        and returns a floating-point score from the remote checker, or 0.0 if the
-        result is None.
+        and returns 1.0 for the expected path or 0.0 otherwise.
     """
 
     def score_fn(result: str | None = None) -> float:
@@ -43,9 +43,11 @@ def check_potential_file(target: str):
             logger.warning("Received None as result in check_potential_file")
             return 0.0
 
-        return modal.Function.from_name("simagent", "check_potential").remote(
-            target, result
-        )
+        try:
+            return 1.0 if Path(result).resolve() == Path(target).resolve() else 0.0
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning(f"Could not validate potential path {result!r}: {exc}")
+            return 0.0
 
     return score_fn
 
@@ -140,18 +142,14 @@ def check_log(variable: str | list, target: float, tolerance: float, window: int
             log_file_path = data["log_file"]
 
             if "restart_file" in data:
-                restart_file_path = data["restart_file"]
-                try:
-                    info = modal.Function.from_name("simagent", "file_info").remote(
-                        restart_file_path
+                restart_file_path = Path(data["restart_file"])
+                if not restart_file_path.is_file():
+                    logger.warning(
+                        f"Restart file existence check failed: {restart_file_path}"
                     )
-                    logger.info(f"Restart file info: {info}")
-                except RuntimeError as e:
-                    logger.warning(f"Restart file existence check failed: {e}")
                     return 0.0
 
-            read_file = modal.Function.from_name("simagent", "read_file")
-            content = read_file.remote(log_file_path)
+            content = Path(log_file_path).read_text(encoding="utf-8")
 
             # Determine mode
             if isinstance(variable, (list | tuple)):
@@ -250,9 +248,7 @@ def check_msd(target: float):
             logger.warning("Received None as result in check_msd")
             return 0.0
         try:
-            # Read remote result file content
-            read_file = modal.Function.from_name("simagent", "read_file")
-            content = read_file.remote(result)
+            content = Path(result).read_text(encoding="utf-8")
             steps, msd_values, has_header = read_msd_from_text(content)
             # Convert to numpy arrays
             time_ps = np.asarray(steps, dtype=float)
@@ -417,16 +413,12 @@ def check_numerical(target: float, tolerance: float) -> Callable[[Any], float]:
                     )
                     return 0.0
 
-                # call the platform file existence checker (keeps original behavior)
-                try:
-                    info = modal.Function.from_name("simagent", "file_info").remote(
-                        file_path
-                    )
-                    logger.info(f"File info: {info}")
+                structure_path = Path(file_path)
+                if structure_path.is_file():
+                    logger.info(f"Relaxed structure exists: {structure_path}")
                     return 1.0
-                except RuntimeError as e:
-                    logger.warning(f"File existence check failed for {file_path}: {e}")
-                    return 0.0
+                logger.warning(f"File existence check failed for {structure_path}")
+                return 0.0
 
             # 3) If parsed_result is a plain numeric (non-string passed in)
             if isinstance(parsed_result, (int | float)):
@@ -447,23 +439,21 @@ def check_numerical(target: float, tolerance: float) -> Callable[[Any], float]:
 
 def check_structure(target, atom_style):
     """
-    Create a scoring function that evaluates a structure result against a target
-    using a remote Modal function.
+    Create a scoring function that evaluates a local structure result against a
+    reference stored in the read-only `eval_structures` Modal Volume.
 
     This is a higher-order function that returns `score_fn`, a callable which:
     - Accepts a single argument `result` (str or None).
     - Logs a warning and returns 0.0 if `result` is None.
-    - Otherwise, calls the remote Modal function "simagent/check_structure"
-      with `target`, `atom_style`, and `result`, and returns its float score.
+    - Downloads the small reference structure and compares it to the local result.
 
     Args:
         target: The target identifier or path used for structure validation.
-        atom_style: The atom style configuration passed to the remote checker.
+        atom_style: The LAMMPS atom style used to load both structures.
 
     Returns:
         Callable[[str | None], float]: A function that takes a result string (or None)
-        and returns a floating-point score from the remote checker, or 0.0 if the
-        result is None.
+        and returns a floating-point score, or 0.0 if the result is unavailable.
     """
 
     def score_fn(result: str | None = None) -> float:
@@ -471,8 +461,41 @@ def check_structure(target, atom_style):
             logger.warning("Received None as result in check_structure")
             return 0.0
 
-        return modal.Function.from_name("simagent", "check_structure").remote(
-            target, atom_style, result
+        from pymatgen.analysis.structure_matcher import (
+            StructureMatcher,
         )
+        from pymatgen.io.lammps.data import LammpsData
+
+        result_path = Path(result)
+        if not result_path.is_file():
+            logger.warning(f"Structure result was not found locally: {result_path}")
+            return 0.0
+
+        try:
+            with TemporaryDirectory(prefix="corral-md-reference-") as temporary:
+                target_path = Path(target)
+                if target_path.is_file():
+                    local_target = target_path
+                elif str(target).startswith("/eval_structures/"):
+                    local_target = Path(temporary) / target_path.name
+                    volume = modal.Volume.from_name("eval_structures")
+                    remote_path = str(target).removeprefix("/eval_structures/")
+                    with local_target.open("wb") as stream:
+                        for chunk in volume.read_file(remote_path):
+                            stream.write(chunk)
+                else:
+                    logger.warning(f"Structure target was not found: {target}")
+                    return 0.0
+
+                expected = LammpsData.from_file(local_target, atom_style=atom_style)
+                actual = LammpsData.from_file(result_path, atom_style=atom_style)
+                return (
+                    1.0
+                    if StructureMatcher().fit(expected.structure, actual.structure)
+                    else 0.0
+                )
+        except Exception as exc:
+            logger.warning(f"Error in check_structure: {exc}")
+            return 0.0
 
     return score_fn
