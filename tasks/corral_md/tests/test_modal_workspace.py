@@ -12,11 +12,12 @@ from corral_md.env import (
     _md_file_tools,
     _md_task_prompt,
 )
-from corral_md.modal_workspace import run_lammps_in_modal
+from corral_md.modal_workspace import _publish_workspace, run_lammps_in_modal
 from corral_md.score import check_log, check_numerical
 
 from corral.core.environment import Toolset
 from corral.core.task import TaskDefinition
+from corral.runtime.permissions import NODE_WORKSPACE_DIR, SCRATCH_PREFIX
 
 
 class _EntryType(Enum):
@@ -39,6 +40,9 @@ class _Upload:
 
     def __exit__(self, *_args) -> None:
         return None
+
+    def put_file(self, local_path: str, remote_path: str) -> None:
+        self.volume.files[remote_path] = Path(local_path).read_bytes()
 
     def put_directory(self, local_path: str, remote_path: str) -> None:
         root = Path(local_path)
@@ -89,6 +93,7 @@ class _RemoteFunction:
         self.volume = volume
         self.error = error
         self.calls: list[tuple[str, str, str, str]] = []
+        self.uploaded_files: dict[str, bytes] = {}
 
     def remote(
         self,
@@ -98,6 +103,7 @@ class _RemoteFunction:
         remote_workspace: str,
     ) -> None:
         self.calls.append((input_file, log_file, local_workspace, remote_workspace))
+        self.uploaded_files = dict(self.volume.files)
         volume_workspace = remote_workspace.removeprefix("/results")
         self.volume.files[f"{volume_workspace}/{log_file}"] = b"LAMMPS log\n"
         self.volume.files[f"{volume_workspace}/trajectory.dump"] = b"atoms\n"
@@ -105,22 +111,41 @@ class _RemoteFunction:
             raise self.error
 
 
-def test_modal_lammps_round_trip_replaces_local_workspace(tmp_path: Path) -> None:
+def test_modal_lammps_round_trip_preserves_workspace_boundary(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "run.in").write_text("read_data structure.data\n")
     (workspace / "structure.data").write_text("atoms\n")
+    workspace.chmod(0o2770)
+    original_stat = workspace.stat()
 
     volume = _Volume()
     function = _RemoteFunction(volume)
-    log_path, downloaded = run_lammps_in_modal(
-        workspace,
-        "run.in",
-        volume=volume,
-        remote_function=function,
-        job_id="job-1",
-    )
+    # Workers can write inside their workspace, but not to its parent.
+    tmp_path.chmod(0o500)
+    try:
+        log_path, downloaded = run_lammps_in_modal(
+            workspace,
+            "run.in",
+            volume=volume,
+            remote_function=function,
+            job_id="job-1",
+        )
+    finally:
+        tmp_path.chmod(0o700)
 
+    current_stat = workspace.stat()
+    assert current_stat.st_ino == original_stat.st_ino
+    assert current_stat.st_mode == original_stat.st_mode
+    assert current_stat.st_uid == original_stat.st_uid
+    assert current_stat.st_gid == original_stat.st_gid
+    assert list(tmp_path.iterdir()) == [workspace]
+    assert sorted(path.name for path in workspace.iterdir()) == [
+        "run.in",
+        "run.log",
+        "structure.data",
+        "trajectory.dump",
+    ]
     assert log_path == workspace / "run.log"
     assert downloaded == 4
     assert (workspace / "run.in").read_text() == "read_data structure.data\n"
@@ -136,6 +161,128 @@ def test_modal_lammps_round_trip_replaces_local_workspace(tmp_path: Path) -> Non
     ]
     assert volume.removed == ["/corral/jobs/job-1"]
     assert volume.files == {}
+
+
+def test_modal_sync_preserves_and_excludes_runtime_directories(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "inputs").mkdir()
+    (workspace / "inputs/run.in").write_text("run 1\n")
+    private_names = (f"{SCRATCH_PREFIX}worker", NODE_WORKSPACE_DIR)
+    for name in private_names:
+        private = workspace / name
+        private.mkdir()
+        (private / "secret").write_text("private runtime data")
+        (private / "alias").symlink_to("secret")
+
+    volume = _Volume()
+    function = _RemoteFunction(volume)
+    run_lammps_in_modal(
+        workspace,
+        "inputs/run.in",
+        volume=volume,
+        remote_function=function,
+        job_id="runtime",
+    )
+
+    assert function.uploaded_files == {"/corral/jobs/runtime/inputs/run.in": b"run 1\n"}
+    for name in private_names:
+        assert (workspace / name / "secret").read_text() == "private runtime data"
+        assert (workspace / name / "alias").is_symlink()
+    assert {path.name for path in workspace.iterdir()} == {
+        *private_names,
+        "inputs",
+        "run.log",
+        "trajectory.dump",
+    }
+
+
+@pytest.mark.parametrize("failure", ["download", "publish"])
+def test_modal_sync_failure_preserves_original_workspace(
+    tmp_path, monkeypatch, failure
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "run.in").write_text("run 1\n")
+    (workspace / "old").mkdir()
+    (workspace / "old/data").write_text("original")
+    volume = _Volume()
+
+    if failure == "download":
+
+        def fail_download(_path):
+            yield b"partial"
+            raise OSError("download interrupted")
+
+        monkeypatch.setattr(volume, "read_file", fail_download)
+    else:
+        replace = Path.replace
+
+        def fail_publish(source, target):
+            if source.name == "trajectory.dump" and source.parent != workspace:
+                raise OSError("publish interrupted")
+            return replace(source, target)
+
+        monkeypatch.setattr(Path, "replace", fail_publish)
+
+    with pytest.raises(RuntimeError, match=f"{failure} interrupted"):
+        run_lammps_in_modal(
+            workspace,
+            "run.in",
+            volume=volume,
+            remote_function=_RemoteFunction(volume),
+            job_id="failure",
+        )
+
+    assert (workspace / "run.in").read_text() == "run 1\n"
+    assert (workspace / "old/data").read_text() == "original"
+    assert {path.name for path in workspace.iterdir()} == {"run.in", "old"}
+    assert volume.removed == []
+
+
+def test_modal_publish_applies_remote_deletions_without_replacing_root(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "deleted").write_text("old")
+    (workspace / "changed").mkdir()
+    (workspace / "changed/old").write_text("old")
+    staging = workspace / f"{SCRATCH_PREFIX}modal-test" / "workspace"
+    staging.mkdir(parents=True)
+    (staging / "changed").write_text("now a file")
+
+    _publish_workspace(staging, workspace)
+
+    assert not (workspace / "deleted").exists()
+    assert (workspace / "changed").read_text() == "now a file"
+    assert staging.is_dir()
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    ["../outside", f"{SCRATCH_PREFIX}worker/secret", f"{NODE_WORKSPACE_DIR}/secret"],
+)
+def test_modal_sync_rejects_unsafe_download_paths(tmp_path, monkeypatch, suffix):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "run.in").write_text("run 1\n")
+    volume = _Volume()
+    monkeypatch.setattr(
+        volume,
+        "listdir",
+        lambda *_args, **_kwargs: [_Entry(f"/corral/jobs/unsafe/{suffix}", 0)],
+    )
+
+    with pytest.raises(RuntimeError, match="unsafe workspace path"):
+        run_lammps_in_modal(
+            workspace,
+            "run.in",
+            volume=volume,
+            remote_function=_RemoteFunction(volume),
+            job_id="unsafe",
+        )
+
+    assert (workspace / "run.in").read_text() == "run 1\n"
+    assert list(workspace.iterdir()) == [workspace / "run.in"]
 
 
 def test_failed_modal_run_still_downloads_diagnostics(tmp_path: Path) -> None:

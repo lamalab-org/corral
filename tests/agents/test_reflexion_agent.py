@@ -7,7 +7,7 @@ import pytest
 from corral.agents.reflection import ReflectionModule
 from corral.agents.reflexion_agent import ReflexionAgent
 from corral.agents.schema import AgentOutcome, AgentUsage
-from corral.agents.session import ToolResponse
+from corral.agents.session import AgentSession, ToolResponse
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 
 
@@ -41,6 +41,9 @@ class Actor:
 class FakeSession:
     prompt = "solve"
     execution_id = "execution-1"
+    model_name = AgentSession.model_name
+    previous_messages = AgentSession.previous_messages
+    previous_commit_hash = AgentSession.previous_commit_hash
 
     def __init__(
         self,

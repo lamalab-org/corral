@@ -379,6 +379,9 @@ class DockerTaskLauncher:
             for directory in ("workspace-snapshots", "snapshots")
         )
         _atomic_json(request_path, asdict(request))
+        # Remove the host shard's setgid mode before Docker Desktop mounts it.
+        # macOS bind mounts can reject chmod after the controller takes ownership.
+        shard.chmod(0o700)
 
         container_name, volume_name = self._names(request.execution_id)
         await self._discard_stale(container_name, volume_name)
@@ -410,8 +413,15 @@ class DockerTaskLauncher:
             "--network",
             docker.network,
             "--read-only",
+            "--init",
+            "--user",
+            "0:0",
             "--security-opt",
             "no-new-privileges",
+            # docker-default denies mounts even with SYS_ADMIN; the trusted
+            # bootstrap must construct the worker filesystem before dropping UID.
+            "--security-opt",
+            "apparmor=unconfined",
             "--cap-drop",
             "ALL",
             "--cap-add",
@@ -420,16 +430,20 @@ class DockerTaskLauncher:
             "SETGID",
             "--cap-add",
             "CHOWN",
+            "--cap-add",
+            "DAC_OVERRIDE",
+            "--cap-add",
+            "KILL",
+            "--cap-add",
+            "SYS_ADMIN",
+            "--cap-add",
+            "SYS_CHROOT",
             "--tmpfs",
-            "/tmp:rw,nosuid,nodev,noexec,size=256m",
+            "/tmp:rw,nosuid,nodev,noexec,mode=0700,size=256m",
             "--mount",
             f"type=volume,src={volume_name},dst=/workspace",
             "--mount",
             f"type=bind,src={shard},dst=/corral-state",
-            "--env",
-            f"CORRAL_TERMINAL_UID={self._terminal_identity()[0]}",
-            "--env",
-            f"CORRAL_TERMINAL_GID={self._terminal_identity()[1]}",
             "--env",
             "HOME=/tmp",
             "--env",
@@ -467,6 +481,7 @@ class DockerTaskLauncher:
                     "benchmark_run_id": request.benchmark_run_id,
                     "container_id": container_id,
                     "container_name": container_name,
+                    "permissions_policy": "workspace-root-v1",
                     "cpus": docker.cpus,
                     "execution_id": request.execution_id,
                     "image": docker.image,
@@ -562,14 +577,6 @@ class DockerTaskLauncher:
             with contextlib.suppress(Exception):
                 return int(json.loads(latest.read_text(encoding="utf-8"))["revision"])
         return None
-
-    @staticmethod
-    def _terminal_identity() -> tuple[int, int]:
-        """Choose an unprivileged identity distinct from the host checkpoint owner."""
-        candidate = 10001
-        if candidate in {os.getuid(), os.getgid()}:
-            candidate += 1
-        return candidate, candidate
 
 
 __all__ = [

@@ -17,6 +17,7 @@ from corral.orchestration.launchers import LocalTaskLauncher
 from corral.orchestration.models import RUNTIME_PROTOCOL_VERSION, RunTaskInput
 from corral.orchestration.registry import RuntimeRegistry
 from corral.persistence import SQLiteCommitStore, WorkspaceManager
+from corral.runtime import permissions
 from corral.workspace import WorkspaceFilesystem, build_terminal_tool
 
 
@@ -122,30 +123,39 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         )
 
     checkpoint_root = Path(request_file).resolve().parent
-    workspace_snapshots = checkpoint_root / "workspace-snapshots"
-    legacy_snapshots = checkpoint_root / "snapshots"
-    if (
-        not (workspace_snapshots / "latest.json").is_file()
-        and (legacy_snapshots / "latest.json").is_file()
-    ):
-        workspace_snapshots = legacy_snapshots
-    workspace_manager = WorkspaceManager(
-        artifact_root=checkpoint_root / "artifacts",
-        snapshot_root=workspace_snapshots,
-    )
-    store = SQLiteCommitStore(
-        checkpoint_root / "commits.sqlite3",
-        execution_id=request.execution_id,
-        state_snapshot_root=checkpoint_root / "state-snapshots",
-    )
+
     registry: RuntimeRegistry | None = None
+    store: SQLiteCommitStore | None = None
     try:
+        os.chown(checkpoint_root, 0, 0)
+        checkpoint_root.chmod(0o700)
+        permissions.configure(checkpoint_root)
+        workspace_snapshots = checkpoint_root / "workspace-snapshots"
+        legacy_snapshots = checkpoint_root / "snapshots"
+        if (
+            not (workspace_snapshots / "latest.json").is_file()
+            and (legacy_snapshots / "latest.json").is_file()
+        ):
+            workspace_snapshots = legacy_snapshots
+        workspace_manager = WorkspaceManager(
+            artifact_root=checkpoint_root / "artifacts",
+            snapshot_root=workspace_snapshots,
+        )
+        store = SQLiteCommitStore(
+            checkpoint_root / "commits.sqlite3",
+            execution_id=request.execution_id,
+            state_snapshot_root=checkpoint_root / "state-snapshots",
+        )
         if docker.registry_module is not None:
             registry = _registry_from_module(docker.registry_module, request)
         else:
             registry = _built_in_registry(request, workspace_manager=workspace_manager)
         environment = registry.environment(request.environment_id, request.execution_id)
         environment.workspace_manager = workspace_manager
+        if not environment.workspace_path:
+            raise RuntimeError(
+                "Docker permission enforcement requires a task workspace"
+            )
         if environment.workspace_path:
             workspace_path = Path(environment.workspace_path).resolve()
             if not workspace_path.is_relative_to(Path("/workspace")):
@@ -180,7 +190,8 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
     finally:
         if registry is not None:
             registry.close()
-        await store.aclose()
+        if store is not None:
+            await store.aclose()
         _restore_host_ownership(checkpoint_root)
     return 0
 

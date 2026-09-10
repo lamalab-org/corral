@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-RUNTIME_PROTOCOL_VERSION = "1"
+RUNTIME_PROTOCOL_VERSION = "4"
 
 
 class SandboxMode(str, Enum):
@@ -68,6 +68,11 @@ class DockerSandboxSpec:
             raise ValueError("Docker sandbox network cannot be empty")
         if not self.runtime_protocol_version.strip():
             raise ValueError("runtime_protocol_version cannot be empty")
+        if self.runtime_protocol_version != RUNTIME_PROTOCOL_VERSION:
+            raise ValueError(
+                f"Docker trials require runtime protocol {RUNTIME_PROTOCOL_VERSION}; "
+                "rebuild the image to enable the current permission policy"
+            )
         if self.registry_module == "":
             raise ValueError("registry_module cannot be empty")
         for name in self.environment_allowlist:

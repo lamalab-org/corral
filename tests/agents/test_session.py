@@ -1,13 +1,16 @@
 """Regression tests for workspace restoration in async agent sessions."""
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import anyio
 import pytest
+from anyio.from_thread import BlockingPortal
 
+from corral.agents.ai_scientist.agent import _BranchSessionRegistry
 from corral.agents.schema import AgentOutcome
 from corral.agents.session import AgentSession, run_agent_session
-from corral.core import ActorRef, AgentStarted, CommitRequest
+from corral.core import Action, ActorRef, AgentStarted, CommitRequest
 from corral.core.environment import Environment
 from corral.core.task import TaskDefinition
 from corral.persistence import SQLiteCommitStore
@@ -111,3 +114,78 @@ async def test_fork_branch_restores_nonempty_workspace(workspace_session):
         Path(fork.workspace, "notes.txt").read_text(encoding="utf-8")
         == "restored contents"
     )
+
+
+@pytest.mark.anyio()
+async def test_scientist_nodes_have_independent_files_and_promote_the_winner(
+    workspace_session, monkeypatch
+):
+    parent = workspace_session
+    Path(parent.workspace, "live.txt").write_text("live contents")
+    shutdown_jobs = Mock()
+    monkeypatch.setattr(parent.environment, "shutdown_jobs", shutdown_jobs)
+
+    async with BlockingPortal() as portal:
+        sessions = _BranchSessionRegistry(parent, portal)
+        first = await anyio.to_thread.run_sync(sessions.create_branch)
+        second = await anyio.to_thread.run_sync(sessions.create_branch)
+
+        async def write(branch, content):
+            response = await anyio.to_thread.run_sync(
+                lambda: branch.execute(
+                    Action(
+                        name="write_file",
+                        arguments={"path": "model.txt", "content": content},
+                    )
+                )
+            )
+            assert response.success, response
+
+        await write(first, "winning model")
+        await write(second, "losing model")
+        clone = await anyio.to_thread.run_sync(
+            sessions.clone_branch, first.execution_id
+        )
+        assert Path(clone.workspace, "model.txt").read_text() == "winning model"
+        await write(clone, "changed clone")
+        assert len({branch.workspace for branch in (first, second, clone)}) == 3
+        closed = []
+        for branch in (first, second, clone):
+            assert Path(branch.workspace).parent == Path(
+                parent.workspace, ".corral-nodes"
+            )
+            branch_session = sessions.session(branch.execution_id)
+            assert branch_session.environment is not parent.environment
+            assert Path(branch.workspace, "live.txt").read_text() == "live contents"
+            assert not Path(branch.workspace, ".corral-nodes").exists()
+            mocked = Mock()
+            monkeypatch.setattr(branch_session.environment, "shutdown_jobs", mocked)
+            closed.append(mocked)
+        assert Path(first.workspace, "model.txt").read_text() == "winning model"
+        assert Path(second.workspace, "model.txt").read_text() == "losing model"
+        assert not Path(parent.workspace, "model.txt").exists()
+        assert parent.state.tool_statistics == {}
+
+        response = await anyio.to_thread.run_sync(
+            lambda: first.execute(
+                Action(
+                    name="read_file",
+                    arguments={
+                        "path": "../" + Path(second.workspace).name + "/model.txt"
+                    },
+                )
+            )
+        )
+        assert not response.success
+        promoted = await anyio.to_thread.run_sync(
+            sessions.promote_branch_artifacts, first.execution_id, parent.execution_id
+        )
+        assert set(promoted["files"]) == {"notes.txt", "live.txt", "model.txt"}
+        assert Path(parent.workspace, "model.txt").read_text() == "winning model"
+        snapshot = await parent.environment.workspace_manager.snapshot(parent.workspace)
+        assert set(snapshot.files) == {"notes.txt", "live.txt", "model.txt"}
+        for branch in (first, second, clone):
+            await anyio.to_thread.run_sync(sessions.close_branch, branch.execution_id)
+        for mocked in closed:
+            mocked.assert_called_once_with()
+        shutdown_jobs.assert_not_called()

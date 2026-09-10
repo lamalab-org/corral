@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -26,12 +27,15 @@ from corral.core.events import (
     AgentStateUpdated,
     AgentTurnRecorded,
     ContextImported,
+    EnvironmentOperation,
     ParallelGroupCompleted,
     SubmissionAccepted,
+    TaskConfigured,
     ToolCompleted,
     ToolFailed,
     ToolStarted,
     UsageDelta,
+    WorkspaceDelta,
 )
 from corral.core.state import ExecutionState, UsageState
 from corral.core.tool import ToolConnection, ToolResponse
@@ -39,6 +43,7 @@ from corral.core.tool_catalog import ToolCatalogSnapshot
 from corral.core.transition import ToolEffects, execute_action, propose_action
 from corral.observability import record_commit_safely
 from corral.persistence import CommitConflictError
+from corral.runtime import permissions
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -106,7 +111,7 @@ def inspect_subagent_tool() -> dict[str, Any]:
         "function": {
             "name": INSPECT_SUBAGENT_TOOL_NAME,
             "description": (
-                "Inspect the private context and execution state of a child or "
+                "Inspect the conversation and tool activity of a child or "
                 "descendant subagent that this agent is authorized to inspect. "
                 "Use this only when the normal subagent result needs investigation."
             ),
@@ -120,7 +125,10 @@ def inspect_subagent_tool() -> dict[str, Any]:
                     "include_commits": {
                         "type": "boolean",
                         "default": False,
-                        "description": "Include recent authored commit records.",
+                        "description": (
+                            "Include recent authored commit records when permitted; "
+                            "unavailable in Docker workers."
+                        ),
                     },
                     "limit": {
                         "type": "integer",
@@ -393,6 +401,36 @@ class AgentSession:
     def previous_evaluation(self) -> Mapping[str, Any] | None:
         return dict(self._last_score) if isinstance(self._last_score, Mapping) else None
 
+    @property
+    def model_name(self) -> str | None:
+        value = self.state.task.model.get("name")
+        return value if isinstance(value, str) else None
+
+    @property
+    def previous_commit_hash(self) -> str | None:
+        return (
+            self.previous_state.through_commit_hash
+            if self.previous_state is not None
+            else None
+        )
+
+    @property
+    def previous_messages(self) -> tuple[Mapping[str, JsonValue], ...]:
+        """The same agent's prior conversation, without the prior projection."""
+        if self.previous_state is None:
+            return ()
+        run = next(
+            (
+                candidate
+                for candidate in self.previous_state.agent_runs.values()
+                if candidate.actor_id == self.actor.actor_id
+            ),
+            None,
+        )
+        if run is None:
+            return ()
+        return self.previous_state.conversations.get(run.run_id, ())
+
     def _run_state(
         self, state: ExecutionState, *, previous: bool
     ) -> Mapping[str, Mapping[str, JsonValue]] | None:
@@ -589,9 +627,15 @@ class AgentSession:
             },
         }
         if include_commits:
-            observation["commits"] = [
-                commit.model_dump(mode="json") for commit in trace.commits[-limit:]
-            ]
+            # ToolCompleted commits carry private environment operations. Keep
+            # them controller-side even when an agent asks for its child's trace.
+            observation["commits"] = (
+                []
+                if permissions.enabled()
+                else [
+                    commit.model_dump(mode="json") for commit in trace.commits[-limit:]
+                ]
+            )
         return ToolEffects(observation=observation, status="success")
 
     async def _run_tool(
@@ -1111,19 +1155,45 @@ class AgentSession:
             f"agent:{self.actor.run_id}:import:{child_run_id}:{uuid4()}",
         )
 
-    async def fork_branch(self, *, branch_id: str | None = None) -> AgentSession:
+    async def fork_branch(
+        self, *, branch_id: str | None = None, workspace_parent: str | None = None
+    ) -> AgentSession:
+        """Fork state into a separate workspace, optionally nested under its owner."""
         selected = branch_id or f"experiment-{uuid4()}"
+        node_workspace = None
+        if workspace_parent is not None:
+            if self.workspace is None:
+                raise ValueError("node branches require a workspace")
+            node_workspace = await anyio.to_thread.run_sync(
+                permissions.create_node_workspace, workspace_parent, self.workspace
+            )
         await self.state_store.create_branch(
             branch_id=selected,
             from_hash=self._last_observed_hash,
             execution_id=self.execution_id,
         )
-        environment = self.environment.for_task(f"{self.execution_id}:{selected}")
-        branch_state = await self.state_store.materialize(selected)
-        await anyio.to_thread.run_sync(
-            environment.prepare_workspace, branch_state.workspace
+        environment = self.environment.for_task(
+            f"{self.execution_id}:{selected}",
+            **({"workspace_path": node_workspace} if node_workspace else {}),
         )
-        return AgentSession(
+        if (
+            getattr(self.environment.tools.get("terminal"), "worker_operation", None)
+            == "terminal"
+        ):
+            from corral.workspace import (
+                WorkspaceFilesystem,
+                build_terminal_tool,
+            )
+
+            environment.tools["terminal"] = build_terminal_tool(
+                WorkspaceFilesystem(environment.workspace_path)
+            )
+        branch_state = await self.state_store.materialize(selected)
+        if node_workspace is None:
+            await anyio.to_thread.run_sync(
+                environment.prepare_workspace, branch_state.workspace
+            )
+        branch = AgentSession(
             environment,
             branch_state,
             actor=self.actor,
@@ -1137,6 +1207,48 @@ class AgentSession:
             hooks=self._hooks,
             agent=self._hook_agent,
             mcp_host=self.mcp_host,
+        )
+        if node_workspace is not None:
+            workspace = await environment.workspace_manager.snapshot(
+                node_workspace, previous=branch_state.workspace
+            )
+            workspace_args = {
+                name
+                for tool in environment.tools.values()
+                for name in getattr(tool, "workspace_args", ())
+            }
+            commit = await branch._append_runtime(
+                TaskConfigured(
+                    status="Node workspace prepared",
+                    workspace_delta=WorkspaceDelta.from_workspace(workspace),
+                    expected_workspace_revision=branch_state.workspace.revision,
+                    environment_operations=tuple(
+                        EnvironmentOperation(
+                            operation="set",
+                            path=("hidden_arguments", name),
+                            value=node_workspace,
+                        )
+                        for name in sorted(workspace_args)
+                    ),
+                    expected_environment_revision=branch_state.environment.revision,
+                ),
+                f"branch:{selected}:workspace",
+            )
+            await branch._refresh(observed_hash=commit.hash)
+        return branch
+
+    async def promote_artifacts(self, *, source_workspace: str) -> list[str]:
+        """Copy a selected node's files into this agent's canonical workspace."""
+        if self.workspace is None:
+            raise ValueError("artifact promotion requires a workspace")
+        source = Path(source_workspace)
+        nodes = Path(self.workspace) / permissions.NODE_WORKSPACE_DIR
+        if source.parent != nodes or ".." in source.parts:
+            raise PermissionError(
+                "only this workspace's node artifacts may be promoted"
+            )
+        return await anyio.to_thread.run_sync(
+            permissions.copy_workspace, source, self.workspace
         )
 
     def final_messages(self) -> tuple[Mapping[str, JsonValue], ...]:
@@ -1190,7 +1302,7 @@ def _enforce_tool_submission(
 ) -> AgentOutcome:
     if not interface._require_submission:
         return result
-    submission = interface.state.submission
+    submission = interface.submission
     if submission is None:
         if result.status not in {"completed", "surrendered"}:
             return result
@@ -1201,9 +1313,7 @@ def _enforce_tool_submission(
             metadata=result.metadata,
         )
     expected_status = (
-        "surrendered"
-        if interface.state.runtime.status == "surrendered"
-        else "completed"
+        "surrendered" if interface.submission_status == "surrendered" else "completed"
     )
     expected_answer = None if expected_status == "surrendered" else submission
     if result.status == expected_status and result.answer == expected_answer:
@@ -1225,10 +1335,20 @@ def _enforce_tool_submission(
 
 async def _run_agent_with_tools(agent: Agent, session: AgentSession) -> AgentOutcome:
     """Borrow the execution host for the duration of this invocation."""
+
+    async def invoke() -> AgentOutcome:
+        if permissions.enabled():
+            from corral.runtime.agent_worker import (  # - broker imports session
+                run_agent,
+            )
+
+            return await run_agent(agent, session)
+        return await agent.run_session(session)
+
     transport = getattr(agent, "tool_transport", "python")
     if transport == "python":
         with session.bind_tool_connection(ToolConnection()):
-            return await agent.run_session(session)
+            return await invoke()
     if transport == "mcp":
         if session.mcp_host is None:
             raise RuntimeError(
@@ -1248,13 +1368,25 @@ async def _run_agent_with_tools(agent: Agent, session: AgentSession) -> AgentOut
             name=f"corral-{session.execution_id}-{session.actor.run_id}",
         ) as connection:
             with session.bind_tool_connection(connection):
-                return await agent.run_session(session)
+                return await invoke()
     raise ValueError(
         f"Unsupported agent tool_transport {transport!r}; expected 'python' or 'mcp'"
     )
 
 
 async def _run_bound_agent(agent: Agent, interface: AgentSession) -> AgentOutcome:
+    if permissions.enabled():
+        result = await _run_agent_with_tools(agent, interface)
+        return _enforce_tool_submission(_normalize_outcome(result), interface)
+    return await _run_agent_lifecycle(
+        agent, interface, lambda: _run_agent_with_tools(agent, interface)
+    )
+
+
+async def _run_agent_lifecycle(
+    agent: Agent, interface: AgentSession, invoke
+) -> AgentOutcome:
+    """Run lifecycle hooks in the same identity as the agent implementation."""
     raw_hooks = getattr(agent, "hooks", None)
     hooks = AgentHooks() if raw_hooks is None else raw_hooks
     if not isinstance(hooks, AgentHooks):
@@ -1282,7 +1414,7 @@ async def _run_bound_agent(agent: Agent, interface: AgentSession) -> AgentOutcom
                 error="agent session cancelled by a before-task hook",
             )
         else:
-            result = await _run_agent_with_tools(agent, interface)
+            result = await invoke()
         if not isinstance(result, AgentOutcome):
             raise TypeError("Agent.run_session() must return AgentOutcome")
         result = _enforce_tool_submission(_normalize_outcome(result), interface)

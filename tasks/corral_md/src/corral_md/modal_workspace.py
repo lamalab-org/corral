@@ -8,9 +8,14 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import modal
+
+from corral.runtime.permissions import NODE_WORKSPACE_DIR, SCRATCH_PREFIX
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _LOGGER = logging.getLogger(__name__)
 _DEFAULT_APP_NAME = "simagent"
@@ -30,13 +35,27 @@ def _modal_app_name() -> str:
     return f"{_DEFAULT_APP_NAME}{suffix if suffix.startswith('-') else f'-{suffix}'}"
 
 
+def _is_runtime_name(name: str) -> bool:
+    return name.startswith(SCRATCH_PREFIX) or name == NODE_WORKSPACE_DIR
+
+
+def _workspace_entries(workspace: Path, *, recursive: bool = False) -> Iterator[Path]:
+    """Visit task files without entering private worker or node directories."""
+    for entry in workspace.iterdir():
+        if _is_runtime_name(entry.name):
+            continue
+        yield entry
+        if recursive and entry.is_dir() and not entry.is_symlink():
+            yield from entry.rglob("*")
+
+
 def _validate_workspace(workspace: str | Path) -> Path:
     workspace_path = Path(workspace)
     if workspace_path.is_symlink() or not workspace_path.is_dir():
         raise ValueError(f"LAMMPS workspace must be a regular directory: {workspace}")
 
     root = workspace_path.resolve()
-    for entry in root.rglob("*"):
+    for entry in _workspace_entries(root, recursive=True):
         relative = entry.relative_to(root).as_posix()
         if entry.is_symlink():
             raise ValueError(f"LAMMPS workspace cannot contain symlinks: {relative}")
@@ -55,9 +74,14 @@ def _resolve_input(workspace: Path, input_file: str) -> tuple[Path, PurePosixPat
         raise ValueError(
             f"LAMMPS input must be inside the current workspace: {input_file}"
         )
+    relative = local_input.relative_to(workspace)
+    if relative.parts and _is_runtime_name(relative.parts[0]):
+        raise ValueError(
+            f"LAMMPS input cannot name a runtime workspace path: {input_file}"
+        )
     if local_input.is_symlink() or not local_input.is_file():
         raise FileNotFoundError(f"LAMMPS input file was not found: {input_file}")
-    return local_input, PurePosixPath(local_input.relative_to(workspace).as_posix())
+    return local_input, PurePosixPath(relative.as_posix())
 
 
 def _entry_kind(entry: Any) -> str:
@@ -83,7 +107,9 @@ def _entry_relative_path(entry: Any, remote_directory: PurePosixPath) -> Path:
         ) from exc
     if str(relative) in {"", "."}:
         return Path()
-    if any(part in {"", ".", ".."} for part in relative.parts):
+    if any(part in {"", ".", ".."} for part in relative.parts) or _is_runtime_name(
+        relative.parts[0]
+    ):
         raise RuntimeError(f"Modal returned an unsafe workspace path: {entry.path!r}")
     return Path(*relative.parts)
 
@@ -126,15 +152,23 @@ def _download_workspace(
 
 
 def _publish_workspace(staged_workspace: Path, workspace: Path) -> None:
-    backup = workspace.parent / f".{workspace.name}.corral-backup-{uuid.uuid4().hex}"
-    workspace.replace(backup)
+    # The workspace may be a bind mount with a non-writable parent. Preserve its
+    # inode, ownership and mode, and leave active worker scratch in place.
+    backup = staged_workspace.parent / "backup"
+    backup.mkdir()
+    published: list[Path] = []
     try:
-        staged_workspace.replace(workspace)
+        for entry in list(_workspace_entries(workspace)):
+            entry.replace(backup / entry.name)
+        for entry in list(staged_workspace.iterdir()):
+            target = entry.replace(workspace / entry.name)
+            published.append(target)
     except Exception:
-        backup.replace(workspace)
+        for entry in reversed(published):
+            entry.replace(staged_workspace / entry.name)
+        for entry in list(backup.iterdir()):
+            entry.replace(workspace / entry.name)
         raise
-    else:
-        shutil.rmtree(backup)
 
 
 def run_lammps_in_modal(
@@ -145,12 +179,12 @@ def run_lammps_in_modal(
     remote_function: Any | None = None,
     job_id: str | None = None,
 ) -> tuple[Path, int]:
-    """Run LAMMPS on Modal and replace the local workspace with its outputs.
+    """Run LAMMPS on Modal and synchronize its outputs into the local workspace.
 
-    The complete local workspace is uploaded to a unique directory in the
+    Local task files are uploaded to a unique directory in the
     `simulations` Volume. The deployed `run_lammps` function executes there,
     commits its writes, and this function downloads the complete directory into
-    a staging area before atomically publishing it at the original local path.
+    staging inside the workspace before replacing its task files in place.
     """
 
     local_workspace = _validate_workspace(workspace)
@@ -175,7 +209,12 @@ def run_lammps_in_modal(
         remote_function = modal.Function.from_name(_modal_app_name(), "run_lammps")
 
     with volume.batch_upload(force=True) as upload:
-        upload.put_directory(str(local_workspace), str(remote_volume_directory))
+        for entry in _workspace_entries(local_workspace):
+            remote_path = str(remote_volume_directory / entry.name)
+            if entry.is_dir():
+                upload.put_directory(str(entry), remote_path)
+            else:
+                upload.put_file(str(entry), remote_path)
 
     remote_error: Exception | None = None
     try:
@@ -189,9 +228,7 @@ def run_lammps_in_modal(
         remote_error = exc
 
     temporary_root = Path(
-        tempfile.mkdtemp(
-            prefix=f".{local_workspace.name}.modal-", dir=local_workspace.parent
-        )
+        tempfile.mkdtemp(prefix=f"{SCRATCH_PREFIX}modal-", dir=local_workspace)
     )
     staged_workspace = temporary_root / "workspace"
     staged_workspace.mkdir()

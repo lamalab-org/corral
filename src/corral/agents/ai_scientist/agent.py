@@ -76,7 +76,9 @@ def _call_llm_from_harness(portal: BlockingPortal, **call_kwargs: Any) -> Any:
 
 
 class _BranchSessionRegistry:
-    """Create logical/physical AI Scientist branches from a commit projection."""
+    """Give each physical node a private directory inside the trial workspace."""
+
+    isolated_node_workspaces = True
 
     def __init__(self, parent: AgentSession, portal: BlockingPortal) -> None:
         self.parent = parent
@@ -91,7 +93,13 @@ class _BranchSessionRegistry:
         source: AgentSession,
     ) -> BranchSessionHandle:
         execution_id = f"{self.parent.execution_id}-scientist-{uuid4()}"
-        session = self.portal.call(partial(source.fork_branch, branch_id=execution_id))
+        session = self.portal.call(
+            partial(
+                source.fork_branch,
+                branch_id=execution_id,
+                workspace_parent=self.execution_workspace,
+            )
+        )
         with self._lock:
             self._sessions[execution_id] = session
         return BranchSessionHandle(
@@ -113,6 +121,17 @@ class _BranchSessionRegistry:
             session = self._sessions.pop(execution_id, None)
         if session is not None:
             session.environment.shutdown_jobs()
+
+    def promote_branch_artifacts(
+        self, source_execution_id: str, destination_execution_id: str
+    ) -> dict[str, Any]:
+        if destination_execution_id != self.execution_id:
+            raise ValueError("artifacts must be promoted to the owning execution")
+        source = self.session(source_execution_id)
+        files = self.portal.call(
+            partial(self.parent.promote_artifacts, source_workspace=source.workspace)
+        )
+        return {"files": files}
 
     def session(self, execution_id: str) -> AgentSession:
         with self._lock:

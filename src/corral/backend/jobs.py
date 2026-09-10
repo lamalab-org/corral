@@ -17,10 +17,12 @@ from corral.backend.executors import (
     JobCancelled,
     JobExecutor,
     JobWork,
+    RestrictedExecutor,
     ThreadExecutor,
     build_executor,
 )
 from corral.report.logging import event, exception_fields
+from corral.runtime import permissions
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -210,11 +212,19 @@ class JobManager:
         cached so every job of the same kind shares one pool; an injected or
         previously-built executor is reused.
         """
-        name = getattr(tool, "executor", None) or DEFAULT_EXECUTOR
+
+        name = (
+            "restricted"
+            if permissions.enabled()
+            else getattr(tool, "executor", None) or DEFAULT_EXECUTOR
+        )
         with self._executors_guard:
             executor = self._executors.get(name)
             if executor is None:
-                executor = build_executor(name, self._max_concurrency)
+                if permissions.enabled():
+                    executor = RestrictedExecutor(self._max_concurrency)
+                else:
+                    executor = build_executor(name, self._max_concurrency)
                 self._executors[name] = executor
             return executor
 

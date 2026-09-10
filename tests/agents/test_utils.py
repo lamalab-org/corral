@@ -206,6 +206,7 @@ async def test_llm_call_basic(monkeypatch):
         model="gpt-3.5-turbo",
         messages=messages,
         temperature=0.7,
+        tools=None,
         api_base=None,
         stream=True,
     )
@@ -215,15 +216,26 @@ async def test_llm_call_basic(monkeypatch):
 
 
 @pytest.mark.anyio()
-async def test_llm_call_with_tools(monkeypatch):
-    """Test llm_call with tools."""
+@pytest.mark.parametrize(
+    "tool_choice",
+    [
+        None,
+        "auto",
+        "none",
+        "required",
+        {"type": "function", "function": {"name": "test_tool"}},
+    ],
+)
+async def test_llm_call_with_tools(monkeypatch, tool_choice):
+    """Leave tool selection to LiteLLM unless the caller specifies a choice."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
     tools = [{"type": "function", "function": {"name": "test_tool"}}]
+    kwargs = {} if tool_choice is None else {"tool_choice": tool_choice}
 
     result = await llm_call(
-        model="gpt-3.5-turbo", messages=messages, temperature=0.7, tools=tools
+        model="gpt-3.5-turbo", messages=messages, temperature=0.7, tools=tools, **kwargs
     )
 
     # Check that result is LLMResponse wrapper
@@ -235,15 +247,15 @@ async def test_llm_call_with_tools(monkeypatch):
         messages=messages,
         temperature=0.7,
         tools=tools,
-        tool_choice="auto",
         api_base=None,
         stream=True,
+        **kwargs,
     )
 
 
 @pytest.mark.anyio()
 async def test_llm_call_anthropic_model(monkeypatch):
-    """Test llm_call with anthropic model adds max_tokens."""
+    """Leave the default token limit to LiteLLM's provider adapter."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
 
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
@@ -260,62 +272,63 @@ async def test_llm_call_anthropic_model(monkeypatch):
         model="anthropic/claude-3-sonnet",
         messages=messages,
         temperature=0.7,
-        max_tokens=8192,
+        tools=None,
         api_base=None,
         stream=True,
     )
 
 
 @pytest.mark.anyio()
-async def test_llm_call_reasoning_effort_forces_temperature_one(monkeypatch):
-    """Reasoning effort must override temperature to 1 (Anthropic thinking rule)."""
-    mock_litellm, _ = setup_mock_litellm(monkeypatch)
-
-    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
-
-    await llm_call(
-        model="anthropic/claude-3-sonnet",
-        messages=messages,
-        temperature=0.0,
-        reasoning_effort="medium",
-    )
-
-    # Anthropic rejects any temperature other than 1 when thinking is enabled,
-    # so the requested 0.0 is overridden to 1 while reasoning_effort passes through.
-    mock_litellm.acompletion.assert_awaited_once_with(
-        model="anthropic/claude-3-sonnet",
-        messages=messages,
-        temperature=1,
-        max_tokens=8192,
-        api_base=None,
-        reasoning_effort="medium",
-        stream=True,
-    )
-
-
-@pytest.mark.anyio()
-async def test_llm_call_routes_gpt_5_6_reasoning_tools_to_responses(monkeypatch):
-    """GPT-5.6 reasoning plus tools uses the provider's Responses endpoint."""
+@pytest.mark.parametrize(
+    ("model", "temperature", "kwargs"),
+    [
+        ("openai/gpt-5.6-terra", 0.2, {"reasoning_effort": "none"}),
+        ("openai/responses/gpt-5.6-terra", None, {"reasoning_effort": "high"}),
+        (
+            "anthropic/claude-sonnet-4-20250514",
+            None,
+            {"reasoning_effort": "high", "max_tokens": 32768},
+        ),
+        (
+            "anthropic/claude-sonnet-4-20250514",
+            1.0,
+            {
+                "thinking": {"type": "enabled", "budget_tokens": 1024},
+                "max_tokens": 4096,
+            },
+        ),
+        ("anthropic/claude-sonnet-4-20250514", 0.3, {"thinking": {"type": "disabled"}}),
+        (
+            "deepseek/deepseek-reasoner",
+            0.5,
+            {"reasoning_effort": "high", "drop_params": True},
+        ),
+    ],
+)
+async def test_llm_call_preserves_model_configuration(
+    monkeypatch, model, temperature, kwargs
+):
+    """Provider configuration must survive without model-name overrides."""
     mock_litellm, _ = setup_mock_litellm(monkeypatch)
     messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
     tools = [{"type": "function", "function": {"name": "submit_answer"}}]
 
     await llm_call(
-        model="openai/gpt-5.6-terra",
+        model=model,
         messages=messages,
         tools=tools,
-        temperature=1.0,
-        reasoning_effort="none",
+        temperature=temperature,
+        **kwargs,
     )
 
     mock_litellm.acompletion.assert_awaited_once_with(
-        model="openai/responses/gpt-5.6-terra",
+        model=model,
         messages=messages,
-        temperature=1,
         tools=tools,
+        temperature=temperature,
         api_base=None,
-        reasoning_effort="none",
         stream=True,
+        **kwargs,
     )
 
 
