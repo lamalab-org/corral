@@ -61,6 +61,14 @@ class SubmitAgent:
         return AgentOutcome(status="completed", answer="42")
 
 
+class FailingAgent:
+    model = "test-model"
+    error = "BadRequestError: unsupported reasoning_effort 'none'"
+
+    async def run_session(self, session):
+        return AgentOutcome(status="agent_failure", error=self.error)
+
+
 def _unexpected_score(_answer):
     raise AssertionError("corral run must not invoke the task scorer")
 
@@ -120,15 +128,16 @@ def test_create_agent_accepts_class_and_separator_aliases():
     assert cli.normalise_agent_name("AI_Scientist") == "ai-scientist"
 
 
-def test_tool_calling_uses_cli_safe_reasoning_default_and_allows_override():
+@pytest.mark.parametrize("reasoning_effort", ["low", "none"])
+def test_tool_calling_omits_reasoning_default_and_allows_override(reasoning_effort):
     default_agent = cli.create_agent("tool-calling")
     overridden_agent = cli.create_agent(
         "tool-calling",
-        agent_kwargs={"reasoning_effort": "low"},
+        agent_kwargs={"reasoning_effort": reasoning_effort},
     )
 
-    assert default_agent.kwargs["reasoning_effort"] == "none"
-    assert overridden_agent.kwargs["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in default_agent.kwargs
+    assert overridden_agent.kwargs["reasoning_effort"] == reasoning_effort
 
 
 def test_reflexion_builds_a_configurable_actor():
@@ -324,13 +333,16 @@ def test_run_rejects_task_dependencies(monkeypatch):
         asyncio.run(cli.run_task(args))
 
 
-def test_run_executes_one_task_without_a_benchmark(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("agent_class", [SubmitAgent, FailingAgent])
+def test_run_executes_one_task_without_a_benchmark(
+    monkeypatch, tmp_path, capsys, agent_class
+):
     monkeypatch.setattr(
         cli,
         "load_environment_group",
         lambda *args, **kwargs: {"task1": _environment("task1")},
     )
-    monkeypatch.setattr(cli, "create_agent", lambda *args, **kwargs: SubmitAgent())
+    monkeypatch.setattr(cli, "create_agent", lambda *args, **kwargs: agent_class())
     args = cli.build_parser().parse_args(
         [
             "run",
@@ -349,12 +361,18 @@ def test_run_executes_one_task_without_a_benchmark(monkeypatch, tmp_path, capsys
 
     result = asyncio.run(cli.run_task(args))
 
-    assert result == 0
+    failed = agent_class is FailingAgent
+    assert result == int(failed)
     output = capsys.readouterr().out
     assert "Run cli-direct-task completed:" in output
     assert "- task: task1" in output
-    assert "- status: submitted" in output
-    assert '- answer: "42"' in output
+    if failed:
+        assert "- status: failed" in output
+        assert f"- error: {FailingAgent.error}" in output
+    else:
+        assert "- status: submitted" in output
+        assert '- answer: "42"' in output
+        assert "- error:" not in output
 
 
 def test_unknown_agent_error_lists_available_agents():
@@ -404,13 +422,16 @@ def test_legacy_script_retains_existing_defaults():
     assert args.trials == 1
 
 
-def test_benchmark_runs_locally_and_writes_report(monkeypatch, tmp_path):
+@pytest.mark.parametrize("agent_class", [SubmitAgent, FailingAgent])
+def test_benchmark_runs_locally_and_writes_report(
+    monkeypatch, tmp_path, capsys, agent_class
+):
     monkeypatch.setattr(
         cli,
         "load_environment_group",
         lambda *args, **kwargs: {"task1": _environment("task1")},
     )
-    monkeypatch.setattr(cli, "create_agent", lambda *args, **kwargs: SubmitAgent())
+    monkeypatch.setattr(cli, "create_agent", lambda *args, **kwargs: agent_class())
     args = cli.build_parser().parse_args(
         [
             "bench",
@@ -429,11 +450,17 @@ def test_benchmark_runs_locally_and_writes_report(monkeypatch, tmp_path):
             str(tmp_path),
         ]
     )
-    assert asyncio.run(cli.run_benchmark(args)) == 0
+    failed = agent_class is FailingAgent
+    assert asyncio.run(cli.run_benchmark(args)) == int(failed)
+    output = capsys.readouterr().out
+    if failed:
+        assert output.count(f"  error: {FailingAgent.error}") == args.trials
+    else:
+        assert "  error:" not in output
     reports = list(tmp_path.rglob("report.json"))
     assert len(reports) == 1
     report = json.loads(reports[0].read_text())
     assert report["metadata"]["benchmark"]["trials_per_task"] == 2
     manifest = json.loads((reports[0].parent / "run-metadata.json").read_text())
-    assert manifest["status"] == "completed"
+    assert manifest["status"] == ("completed_with_errors" if failed else "completed")
     assert len(list(reports[0].parent.rglob("commits.sqlite3"))) == 2

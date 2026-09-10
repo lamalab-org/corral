@@ -1120,7 +1120,9 @@ class AgentSession:
         )
         environment = self.environment.for_task(f"{self.execution_id}:{selected}")
         branch_state = await self.state_store.materialize(selected)
-        environment.prepare_workspace(branch_state.workspace)
+        await anyio.to_thread.run_sync(
+            environment.prepare_workspace, branch_state.workspace
+        )
         return AgentSession(
             environment,
             branch_state,
@@ -1322,7 +1324,7 @@ async def run_agent_session(
     mcp_host: MCPHost | None = None,
 ) -> AgentSessionOutcome:
     """Run an agent, borrowing a caller-owned host if it or its children use MCP."""
-    environment.prepare_workspace(state.workspace)
+    await anyio.to_thread.run_sync(environment.prepare_workspace, state.workspace)
     interface = AgentSession(
         environment,
         state,

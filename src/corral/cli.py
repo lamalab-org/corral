@@ -75,9 +75,6 @@ AGENT_DEFINITIONS: Mapping[str, AgentDefinition] = MappingProxyType(
         "tool-calling": AgentDefinition(
             "corral.agents.tool_calling",
             "ToolCallingAgent",
-            # Provider-native function tools and the reasoning mode enabled by
-            # default for some GPT models cannot be combined reliably.
-            default_kwargs=(("reasoning_effort", "none"),),
         ),
     }
 )
@@ -325,6 +322,8 @@ def _print_results(run_id: str, result: Any) -> None:
                 f"- {task_id} [{trial.trial_id}]: {status}, "
                 f"score={score}, output={output}"
             )
+            if trial.error_message:
+                lines.append(f"  error: {trial.error_message}")
     sys.stdout.write("\n".join(lines) + "\n")
 
 
@@ -617,6 +616,8 @@ async def run_task(args: argparse.Namespace) -> int:
         f"- answer: {answer}\n"
         f"- commit: {state.commit_hash}\n"
     )
+    if state.status == "failed" and state.error:
+        sys.stdout.write(f"- error: {state.error}\n")
     return int(state.status == "failed")
 
 
