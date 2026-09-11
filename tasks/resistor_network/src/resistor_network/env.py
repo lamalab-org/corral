@@ -6,6 +6,7 @@ from time import perf_counter
 
 from resistor_network.score import (
     check_complete_circuit_solution,
+    check_conductance_topology,
     check_resistance_measurements,
     check_resistor_topology,
     check_resistor_values_only,
@@ -22,6 +23,7 @@ from corral.report.logging import event, exception_fields
 SCORING_FUNCTIONS = {
     # Resistor network scoring functions
     "resistor_topology": check_resistor_topology,
+    "resistor_conductance": check_conductance_topology,
     "resistance_measurements": check_resistance_measurements,
     "complete_circuit_solution": check_complete_circuit_solution,
     "resistor_values_only": check_resistor_values_only,

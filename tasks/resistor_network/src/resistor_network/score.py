@@ -1,4 +1,5 @@
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -106,7 +107,7 @@ def check_resistor_topology(
             # components. This also makes the complexity floor meaningful.
             referenced = set()
             for connection in proposed_connections:
-                if not isinstance(connection, (list, tuple)) or len(connection) != 3:
+                if not isinstance(connection, list | tuple) or len(connection) != 3:
                     return 0.0
                 node_a, node_b, resistor_id = connection
                 if not isinstance(node_a, str) or not isinstance(node_b, str):
@@ -575,3 +576,144 @@ def check_valid_circuit_json(json_path: str) -> float:
             f"Error validating circuit JSON file {json_path}: {e}", exc_info=True
         )
         return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Conductance-matrix scoring
+# ---------------------------------------------------------------------------
+
+
+def _parse_topology(topology_input: str) -> dict[str, Any] | None:
+    """Parse and structurally validate a submitted topology.
+
+    Returns None for anything malformed: bad JSON, missing keys, connections that
+    are not `[node_a, node_b, resistor_id]`, self-loops, resistor ids that are
+    undefined / reused across connections / declared but never connected, and
+    non-positive or non-finite resistances. Every one of these would otherwise let
+    the submission claim components the simulator silently ignores.
+    """
+    stripped = topology_input.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return None
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    resistors = data.get("resistors")
+    connections = data.get("connections")
+    if not isinstance(resistors, dict) or not resistors:
+        return None
+    if not isinstance(connections, list) or not connections:
+        return None
+
+    referenced: set[str] = set()
+    for connection in connections:
+        if not isinstance(connection, list | tuple) or len(connection) != 3:
+            return None
+        node_a, node_b, resistor_id = connection
+        if not isinstance(node_a, str) or not isinstance(node_b, str):
+            return None
+        if node_a == node_b:
+            return None  # self-loop carries no current
+        if resistor_id not in resistors or resistor_id in referenced:
+            return None
+        value = resistors[resistor_id]
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            return None
+        if not math.isfinite(value) or value <= 0:
+            return None
+        referenced.add(resistor_id)
+    if referenced != set(resistors):
+        return None
+    return data
+
+
+def conductance_map(topology: dict[str, Any]) -> dict[tuple[str, str], float]:
+    """Merged conductance (siemens) per node pair.
+
+    This is the canonical form of a resistor network: resistors sharing a node pair
+    are in parallel, and no measurement can ever separate them -- effective
+    resistance depends only on the graph Laplacian, which sees their *sum*. Two
+    circuits have the same conductance map exactly when they are electrically
+    indistinguishable on the given nodes.
+    """
+    conductances: dict[tuple[str, str], float] = {}
+    for node_a, node_b, resistor_id in topology["connections"]:
+        pair = (node_a, node_b) if node_a < node_b else (node_b, node_a)
+        conductances[pair] = (
+            conductances.get(pair, 0.0) + 1.0 / (topology["resistors"][resistor_id])
+        )
+    return conductances
+
+
+def check_conductance_topology(
+    expected_topology: dict[str, Any], tolerance: float = 0.1
+) -> Callable[[str], float]:
+    """Score a submitted topology against the expected *conductance map*.
+
+    Scoring the conductance map rather than the resistance measurements grades the
+    thing that is actually identifiable from the data, and nothing else:
+
+    - Resistor ids, ordering, and how many physical resistors sit on a node pair are
+      all free. Submitting `47 ohm || 33 ohm` or the equivalent single `19.4 ohm` both
+      score 1.0, because parallel resistors are provably indistinguishable.
+    - The node set and the set of connected node pairs must match exactly. A
+      submission cannot invent a connection (a near-open 80k-ohm resistor across a pair
+      the real circuit leaves unconnected is still a claim that a component is
+      there), nor drop the only resistor on a pair.
+    - Each pair's merged conductance must agree within `tolerance` relative error.
+
+    Comparing conductances is strictly tighter than comparing simulated
+    measurements, which accumulate slack through the solve and let materially
+    different circuits pass.
+    """
+    expected_conductances = conductance_map(expected_topology)
+    expected_nodes = {node for pair in expected_conductances for node in pair}
+
+    def score_fn(topology_input: str) -> float:
+        try:
+            proposed = _parse_topology(topology_input)
+            if proposed is None:
+                logger.info("Conductance scoring: submission failed structural checks")
+                return 0.0
+
+            proposed_conductances = conductance_map(proposed)
+            proposed_nodes = {node for pair in proposed_conductances for node in pair}
+
+            if proposed_nodes != expected_nodes:
+                logger.info(
+                    "Conductance scoring: node set mismatch "
+                    f"(missing={sorted(expected_nodes - proposed_nodes)}, "
+                    f"invented={sorted(proposed_nodes - expected_nodes)})"
+                )
+                return 0.0
+
+            if set(proposed_conductances) != set(expected_conductances):
+                logger.info(
+                    "Conductance scoring: connection set mismatch "
+                    f"(missing={sorted(set(expected_conductances) - set(proposed_conductances))}, "
+                    f"extra={sorted(set(proposed_conductances) - set(expected_conductances))})"
+                )
+                return 0.0
+
+            for pair, expected_g in expected_conductances.items():
+                proposed_g = proposed_conductances[pair]
+                relative_error = abs(proposed_g - expected_g) / expected_g
+                if relative_error > tolerance:
+                    logger.info(
+                        f"Conductance scoring: {pair} expected {expected_g:.6g} S, "
+                        f"got {proposed_g:.6g} S (rel err {relative_error:.4f})"
+                    )
+                    return 0.0
+
+            logger.info("Conductance scoring: exact match on every node pair")
+            return 1.0
+
+        except Exception as e:
+            logger.error(f"CONDUCTANCE SCORING ERROR: {e}", exc_info=True)
+            return 0.0
+
+    return score_fn

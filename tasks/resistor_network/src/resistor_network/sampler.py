@@ -360,7 +360,9 @@ def _sampled_topology_quality(topology: dict) -> tuple[int, int, int, int]:
         pairs[pair] = pairs.get(pair, 0) + 1
     cycle_rank = len(edges) - len(nodes) + 1
     parallel_groups = sum(count > 1 for count in pairs.values())
-    branch_nodes = sum(degree >= 3 for node, degree in degrees.items() if node not in {"A", "B"})
+    branch_nodes = sum(
+        degree >= 3 for node, degree in degrees.items() if node not in {"A", "B"}
+    )
     return cycle_rank, parallel_groups, branch_nodes, len(nodes)
 
 
@@ -370,7 +372,11 @@ def _validate_sampled_topology(
     """Check structural validity and minimum richness before measuring a sample."""
     resistors = topology.get("resistors")
     connections = topology.get("connections")
-    if not isinstance(resistors, dict) or not resistors or not isinstance(connections, list):
+    if (
+        not isinstance(resistors, dict)
+        or not resistors
+        or not isinstance(connections, list)
+    ):
         return False
 
     nodes: set[str] = set()
@@ -386,7 +392,9 @@ def _validate_sampled_topology(
             return False
         if rid not in resistors or rid in referenced:
             return False
-        if not isinstance(resistors[rid], (int, float)) or not math.isfinite(resistors[rid]):
+        if not isinstance(resistors[rid], (int, float)) or not math.isfinite(
+            resistors[rid]
+        ):
             return False
         if resistors[rid] <= 0:
             return False
@@ -534,7 +542,10 @@ def sample_circuit(
         measurements = compute_all_measurements(topology)
         bad_ids = find_non_load_bearing_resistors(topology, measurements)
         if bad_ids:
-            if best_loadbearing_bad_count is None or len(bad_ids) < best_loadbearing_bad_count:
+            if (
+                best_loadbearing_bad_count is None
+                or len(bad_ids) < best_loadbearing_bad_count
+            ):
                 best_loadbearing_bad_count = len(bad_ids)
             continue
 
@@ -569,24 +580,26 @@ def build_task(
             "measurements."
         ),
         "tools": list(TOOLS),
-        "scoring_function": "resistor_topology",
+        "scoring_function": "resistor_conductance",
         "scoring_params": {
             "expected_topology": topology,
-            "expected_measurements": measurements,
             "tolerance": SCORING_TOLERANCE,
-            "use_functional_scoring": True,
-            "topology_weight": 0.0,
-            "functional_weight": 1,
-            "exact_values_weight": 0.0,
         },
         "submission_format": SUBMISSION_FORMAT,
         "input_from_tasks": [],
         "initial_input": {
             "measurements": measurements,
             "notes": [
-                "Assume ideal resistors; treat measurements as exact within ±0.1 ohm.",
+                "Assume ideal resistors. Measurements are exact to 3 decimal places; a "
+                "submitted circuit is accepted when every node-to-node conductance "
+                "matches the true circuit within 10% relative error.",
                 "Resistor ids (R1, R2, ...) are not assigned in any particular spatial "
                 "order; infer both the topology and the values from the measurements.",
+                "The nodes named in the measurements are all the nodes in the circuit: "
+                "do not introduce additional internal nodes.",
+                "Resistors sharing a node pair are in parallel and cannot be told apart "
+                "from measurements, so any equivalent grouping on a pair scores the same "
+                "(e.g. 47 ohm || 33 ohm may be submitted as a single 19.4 ohm resistor).",
             ],
         },
         "uuid": str(uuid.uuid4()),

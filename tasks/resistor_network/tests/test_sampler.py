@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from resistor_network.sampler import (
+    SCORING_TOLERANCE,
     LEVELS,
     Block,
     _IdFactory,
@@ -73,7 +74,11 @@ class TestComposition:
     def test_series_of_parallel_matches_simulation(self):
         ids = _IdFactory()
         group_a = compose_parallel(
-            [leaf_resistor(random.Random(7), ids), leaf_resistor(random.Random(8), ids)], ids
+            [
+                leaf_resistor(random.Random(7), ids),
+                leaf_resistor(random.Random(8), ids),
+            ],
+            ids,
         )
         group_b = leaf_resistor(random.Random(9), ids)
         merged = compose_series([group_a, group_b])
@@ -103,7 +108,9 @@ class TestGroundTruthSimulation:
 
         topology_json = json.dumps(topology)
         for m in measurements:
-            resim = get_resistance_between_nodes(topology_json, [m["node_a"], m["node_b"]])
+            resim = get_resistance_between_nodes(
+                topology_json, [m["node_a"], m["node_b"]]
+            )
             assert resim == pytest.approx(m["resistance"], abs=1e-2)
 
 
@@ -122,7 +129,7 @@ class TestStructuralRichnessFloor:
         for level in LEVELS:
             tasks = generate_level_tasks(level=level, count=10, seed=7)
             for task in tasks:
-                assert len(task["scoring_params"]["expected_measurements"]) >= 3
+                assert len(task["initial_input"]["measurements"]) >= 3
 
 
 class TestGenerateLevelTasks:
@@ -150,17 +157,19 @@ class TestGenerateLevelTasks:
         with pytest.raises(ValueError):
             generate_level_tasks(level=99, count=1, seed=1)
 
-    def test_scoring_params_are_functional_only(self):
-        """Matches the established convention for this benchmark: functional
-        scoring against simulated measurements, not exact topology/value matching,
-        since resistor ids and node names are not semantically meaningful."""
+    def test_scoring_params_target_the_conductance_map(self):
+        """Tasks are graded on the conductance map -- the canonical form of the
+        network -- not on the simulated measurements. Measurements are input the
+        agent reasons from; grading them instead accepts circuits that merely
+        reproduce them (a complete graph with near-open branches, or a circuit
+        missing resistors), which the conductance map rejects."""
         tasks = generate_level_tasks(level=1, count=3, seed=1)
         for t in tasks:
+            assert t["scoring_function"] == "resistor_conductance"
             sp = t["scoring_params"]
-            assert sp["use_functional_scoring"] is True
-            assert sp["topology_weight"] == 0.0
-            assert sp["functional_weight"] > 0
-            assert sp["exact_values_weight"] == 0.0
+            assert set(sp) == {"expected_topology", "tolerance"}
+            assert sp["tolerance"] == SCORING_TOLERANCE
+            assert sp["expected_topology"]["connections"]
 
 
 class TestLoadBearingResistors:
@@ -197,7 +206,9 @@ class TestLoadBearingResistors:
         assert find_non_load_bearing_resistors(topology, measurements) == []
 
     @pytest.mark.parametrize("num_resistors", [2, 5, 8, 12, 15, 18])
-    def test_sample_circuit_never_returns_a_non_load_bearing_resistor(self, num_resistors):
+    def test_sample_circuit_never_returns_a_non_load_bearing_resistor(
+        self, num_resistors
+    ):
         rng = random.Random(4242)
         config = LEVELS[2] if num_resistors >= 5 else LEVELS[1]
         topology = sample_circuit(rng, config, num_resistors)
@@ -209,7 +220,7 @@ class TestLoadBearingResistors:
         for level in LEVELS:
             for task in generate_level_tasks(level=level, count=8, seed=11):
                 topo = task["scoring_params"]["expected_topology"]
-                meas = task["scoring_params"]["expected_measurements"]
+                meas = task["initial_input"]["measurements"]
                 assert find_non_load_bearing_resistors(topo, meas) == []
 
     def test_checked_in_task_json_files_have_no_non_load_bearing_resistors(self):
@@ -226,7 +237,7 @@ class TestLoadBearingResistors:
         for path in json_paths:
             task = json.loads(path.read_text())[0]
             topo = task["scoring_params"]["expected_topology"]
-            meas = task["scoring_params"]["expected_measurements"]
+            meas = task["initial_input"]["measurements"]
             bad = find_non_load_bearing_resistors(topo, meas)
             assert bad == [], f"{path.name} has non-load-bearing resistors: {bad}"
 
