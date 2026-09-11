@@ -53,6 +53,19 @@ python environments/level_2/generate_tasks.py --count 14 --seed 2
 
 `--count` controls how many tasks to produce (recommended: 6-10 for level 1, 10-18 for level 2) and resistor complexity ramps up roughly linearly across the batch, so later tasks in a level are harder than earlier ones. `--seed` controls reproducibility — the same seed always produces the same topologies (only each task's `uuid` differs run to run). Re-running a script overwrites that level's `tasks_json/` directory.
 
+## Visualizing Circuits
+
+`src/resistor_network/visualize.py` draws a sampled circuit's `expected_topology` as a graph: nodes are circuit nodes (terminals `A`/`B` highlighted), edges are resistors labeled with id and ohm value, and parallel resistors between the same node pair are drawn as separate curved edges.
+
+```bash
+cd tasks/resistor_network
+source .venv/bin/activate
+python -m resistor_network.visualize environments/level_1/tasks_json/task_0.json          # shows interactively
+python -m resistor_network.visualize environments/level_2/tasks_json --out figures/level_2 # saves one PNG per task
+```
+
+Pass either a single task JSON file or a whole `tasks_json/` directory. Omit `--out` to display each figure interactively instead of saving it.
+
 ## Run The Server
 
 Start the resistor network environment server from this directory:

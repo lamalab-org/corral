@@ -1,6 +1,7 @@
 import json
 import math
 import random
+from pathlib import Path
 
 import pytest
 from resistor_network.sampler import (
@@ -12,6 +13,7 @@ from resistor_network.sampler import (
     compose_parallel,
     compose_series,
     compute_all_measurements,
+    find_non_load_bearing_resistors,
     generate_level_tasks,
     leaf_bridge,
     leaf_resistor,
@@ -159,3 +161,85 @@ class TestGenerateLevelTasks:
             assert sp["topology_weight"] == 0.0
             assert sp["functional_weight"] > 0
             assert sp["exact_values_weight"] == 0.0
+
+
+class TestLoadBearingResistors:
+    """Regression coverage for the 'submit a simpler network and get away with
+    it' exploit: because scoring is purely functional, a resistor whose value
+    doesn't move any measurement outside tolerance is undetectable if
+    changed, or omitted entirely. `find_non_load_bearing_resistors` flags
+    such resistors so `sample_circuit` can reject circuits containing them.
+    """
+
+    def test_dominant_small_resistor_masks_large_parallel_partner(self):
+        """Regression test for the exact real-world pattern found in
+        level_1/task_10.json before this fix: a 1ohm resistor in parallel
+        with a 330ohm resistor dominates the combination so completely that
+        the 330ohm value is not recoverable from any measurement."""
+        ids = _IdFactory()
+        b1 = Block({"Rsmall": 1.0}, [("x1", "y1", "Rsmall")], "x1", "y1")
+        b2 = Block({"Rlarge": 330.0}, [("x2", "y2", "Rlarge")], "x2", "y2")
+        topology = relabel_circuit(compose_parallel([b1, b2], ids))
+        measurements = compute_all_measurements(topology)
+
+        assert find_non_load_bearing_resistors(topology, measurements) == ["R2"]
+
+    def test_series_chain_resistors_are_all_load_bearing(self):
+        """No false positives: a plain series chain's resistors are each
+        individually observable via their own endpoint measurement."""
+        ids = _IdFactory()
+        block = compose_series(
+            [leaf_resistor(random.Random(s), ids) for s in (1, 2, 3)]
+        )
+        topology = relabel_circuit(block)
+        measurements = compute_all_measurements(topology)
+
+        assert find_non_load_bearing_resistors(topology, measurements) == []
+
+    @pytest.mark.parametrize("num_resistors", [2, 5, 8, 12, 15, 18])
+    def test_sample_circuit_never_returns_a_non_load_bearing_resistor(self, num_resistors):
+        rng = random.Random(4242)
+        config = LEVELS[2] if num_resistors >= 5 else LEVELS[1]
+        topology = sample_circuit(rng, config, num_resistors)
+        measurements = compute_all_measurements(topology)
+
+        assert find_non_load_bearing_resistors(topology, measurements) == []
+
+    def test_generate_level_tasks_produce_fully_load_bearing_circuits(self):
+        for level in LEVELS:
+            for task in generate_level_tasks(level=level, count=8, seed=11):
+                topo = task["scoring_params"]["expected_topology"]
+                meas = task["scoring_params"]["expected_measurements"]
+                assert find_non_load_bearing_resistors(topo, meas) == []
+
+    def test_checked_in_task_json_files_have_no_non_load_bearing_resistors(self):
+        """Regression guard for a real coverage gap: none of the other tests in
+        this suite load the checked-in tasks_json/*.json files that the live
+        server actually serves -- only the generator functions in isolation.
+        Requires `environments/level_*/tasks_json/` to be (re)generated with
+        this fix in place.
+        """
+        repo_root = Path(__file__).resolve().parents[1]
+        json_paths = sorted(repo_root.glob("environments/level_*/tasks_json/*.json"))
+        assert json_paths, "expected checked-in task JSON files to exist"
+
+        for path in json_paths:
+            task = json.loads(path.read_text())[0]
+            topo = task["scoring_params"]["expected_topology"]
+            meas = task["scoring_params"]["expected_measurements"]
+            bad = find_non_load_bearing_resistors(topo, meas)
+            assert bad == [], f"{path.name} has non-load-bearing resistors: {bad}"
+
+    def test_bridge_motifs_remain_samplable_after_the_fix(self):
+        """Guards against over-rejection: the load-bearing check must not make
+        bridge motifs (the level-2 motif that forces real nodal analysis)
+        effectively unsamplable.
+        """
+        n_trials, n_clean = 200, 0
+        for i in range(n_trials):
+            ids = _IdFactory()
+            topology = relabel_circuit(leaf_bridge(random.Random(9000 + i), ids))
+            measurements = compute_all_measurements(topology)
+            if not find_non_load_bearing_resistors(topology, measurements):
+                n_clean += 1
+        assert n_clean / n_trials > 0.5

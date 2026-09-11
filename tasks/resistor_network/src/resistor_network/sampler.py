@@ -55,6 +55,28 @@ RESISTOR_POOL: list[float] = [
     500,
 ]
 
+# Scoring is purely functional (see `check_resistor_topology` in score.py): a submitted
+# topology is graded only on whether it reproduces every pairwise measurement within this
+# relative tolerance, never on resistor count, ids, or exact values. `build_task` pulls its
+# `scoring_params["tolerance"]` from this same constant so the sampler's own load-bearing
+# check (below) can never silently drift from the tolerance actually used to grade agents.
+SCORING_TOLERANCE: float = 0.1
+
+# Multipliers used to test whether a resistor's value is actually constrained by the
+# measurements it produces ("load-bearing"), rather than free to vary without detection.
+# By Rayleigh's monotonicity law, the effective resistance between any two nodes is a
+# monotonic function of any single resistor's value with all others held fixed -- so as a
+# resistor sweeps from near-zero to near-infinite, every measurement sweeps monotonically
+# between its values at those two extremes. Testing exactly these two extremes is therefore
+# both necessary and sufficient: if neither escapes `SCORING_TOLERANCE`, no intermediate
+# value (doubling, +/-30%, etc.) could either, so checking additional multipliers would add
+# cost without adding coverage. `RESISTOR_POOL` spans 1-500ohm, so these multipliers push any
+# pool value to >=10,000ohm or <=0.05ohm respectively -- safely outside the pool's dynamic
+# range in either direction while remaining finite (the simulator requires strictly positive
+# resistances).
+SENSITIVITY_OPEN_MULTIPLIER: float = 1e4  # proxy for "resistor removed / open circuit"
+SENSITIVITY_SHORT_MULTIPLIER: float = 1e-4  # proxy for "resistor shorted to ~0 ohms"
+
 TOOLS: list[str] = [
     "calculate_series_resistance",
     "calculate_parallel_resistance",
@@ -335,16 +357,85 @@ def _min_required_nodes(num_resistors: int) -> int:
     return min(num_resistors + 1, 4)
 
 
+def _resistor_is_load_bearing(
+    topology: dict,
+    measurements: list[dict],
+    resistor_id: str,
+    tolerance: float = SCORING_TOLERANCE,
+) -> bool:
+    """True iff `resistor_id`'s value is actually constrained by `measurements`.
+
+    Perturbs the resistor to both sensitivity extremes (`SENSITIVITY_OPEN_MULTIPLIER` and
+    `SENSITIVITY_SHORT_MULTIPLIER`) and checks whether *each* independently moves at least
+    one measurement outside `tolerance` relative error, using the exact same simulator
+    (`get_resistance_between_nodes`) and comparison `check_resistor_topology` uses to grade
+    submissions. If either extreme survives undetected, the resistor's true value is
+    functionally indistinguishable from that extreme (including, for the open-circuit
+    extreme, from a submission that omits the resistor entirely) -- it is not load-bearing.
+    """
+    topology_json = json.dumps(topology)
+    original_value = topology["resistors"][resistor_id]
+
+    def _escapes_tolerance(multiplier: float) -> bool:
+        perturbed = json.loads(topology_json)
+        perturbed["resistors"][resistor_id] = original_value * multiplier
+        perturbed_json = json.dumps(perturbed)
+        for m in measurements:
+            try:
+                predicted = get_resistance_between_nodes(
+                    perturbed_json, [m["node_a"], m["node_b"]]
+                )
+            except ValueError:
+                # Solver failure (e.g. near-singular) is itself a maximal deviation
+                # from the expected finite measurement.
+                return True
+            expected = m["resistance"]
+            if expected == 0:
+                if abs(predicted) > 1e-6:
+                    return True
+                continue
+            if abs(predicted - expected) / expected > tolerance:
+                return True
+        return False
+
+    # Check the empirically-dominant exploit direction (open circuit) first so the common
+    # "resistor is not load-bearing" case short-circuits after a single pass.
+    if not _escapes_tolerance(SENSITIVITY_OPEN_MULTIPLIER):
+        return False
+    return _escapes_tolerance(SENSITIVITY_SHORT_MULTIPLIER)
+
+
+def find_non_load_bearing_resistors(
+    topology: dict, measurements: list[dict], tolerance: float = SCORING_TOLERANCE
+) -> list[str]:
+    """Ids of every resistor in `topology` that isn't load-bearing given `measurements`
+    (see `_resistor_is_load_bearing`). An empty list means the circuit is fully load-bearing:
+    no resistor's value can be changed (including toward removing it entirely) without at
+    least one measurement moving outside `tolerance`.
+    """
+    return [
+        rid
+        for rid in topology["resistors"]
+        if not _resistor_is_load_bearing(topology, measurements, rid, tolerance)
+    ]
+
+
 def sample_circuit(
-    rng: random.Random, config: LevelConfig, num_resistors: int, max_attempts: int = 25
+    rng: random.Random, config: LevelConfig, num_resistors: int, max_attempts: int = 50
 ) -> dict:
     """Sample one relabeled circuit topology for a given level and resistor
     budget, retrying (deterministically, since `rng` keeps advancing) until it
-    clears the structural-richness floor from `_min_required_nodes`.
+    both clears the structural-richness floor from `_min_required_nodes` and
+    has every resistor load-bearing (see `find_non_load_bearing_resistors`) --
+    i.e. no resistor's value can be changed toward either extreme without
+    detection, which would otherwise let a submission omit or grossly
+    misvalue it and still score a perfect match.
     """
     min_nodes = _min_required_nodes(num_resistors)
-    best_topology: dict | None = None
-    best_num_nodes = -1
+    best_structural_topology: dict | None = None
+    best_structural_nodes = -1
+    best_loadbearing_topology: dict | None = None
+    best_loadbearing_bad_count: int | None = None
 
     for _ in range(max_attempts):
         ids = _IdFactory()
@@ -358,14 +449,23 @@ def sample_circuit(
         topology = relabel_circuit(block)
         num_nodes = len({n for conn in topology["connections"] for n in conn[:2]})
 
-        if num_nodes > best_num_nodes:
-            best_topology, best_num_nodes = topology, num_nodes
-        if num_nodes >= min_nodes:
+        if num_nodes > best_structural_nodes:
+            best_structural_topology, best_structural_nodes = topology, num_nodes
+        if num_nodes < min_nodes:
+            continue
+
+        measurements = compute_all_measurements(topology)
+        bad_ids = find_non_load_bearing_resistors(topology, measurements)
+        if not bad_ids:
             return topology
 
-    # Fell through every attempt (only possible for degenerate resistor
-    # budgets); fall back to the richest structure we found.
-    return best_topology
+        if best_loadbearing_bad_count is None or len(bad_ids) < best_loadbearing_bad_count:
+            best_loadbearing_topology, best_loadbearing_bad_count = topology, len(bad_ids)
+
+    # Fell through every attempt (only possible for degenerate resistor budgets, or very
+    # unlucky runs): prefer the floor-clearing candidate with the fewest non-load-bearing
+    # resistors, falling back to the richest structure found if none ever cleared the floor.
+    return best_loadbearing_topology or best_structural_topology
 
 
 def build_task(rng: random.Random, config: LevelConfig, index: int, num_resistors: int) -> dict:
@@ -386,7 +486,7 @@ def build_task(rng: random.Random, config: LevelConfig, index: int, num_resistor
         "scoring_params": {
             "expected_topology": topology,
             "expected_measurements": measurements,
-            "tolerance": 0.1,
+            "tolerance": SCORING_TOLERANCE,
             "use_functional_scoring": True,
             "topology_weight": 0.0,
             "functional_weight": 1,

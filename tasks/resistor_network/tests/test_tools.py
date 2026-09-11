@@ -13,6 +13,7 @@ from resistor_network.tools import (
     validate_measurements,
     wye_to_delta_transform,
 )
+from resistor_network.utils import get_resistance_between_nodes
 
 
 class TestDeltaToWyeTransform:
@@ -32,11 +33,12 @@ class TestDeltaToWyeTransform:
         result_json = delta_to_wye_transform.execute(ra=6.0, rb=3.0, rc=2.0)
         result = json.loads(result_json)
 
-        # Calculate expected values: r1 = (rb*rc)/(ra+rb+rc)
+        # Calculate expected values: r1 (at A) = (ra*rc)/total, r2 (at B) = (ra*rb)/total,
+        # r3 (at C) = (rb*rc)/total
         total = 6.0 + 3.0 + 2.0  # 11
-        expected_r1 = (3.0 * 2.0) / total  # 6/11
-        expected_r2 = (6.0 * 2.0) / total  # 12/11
-        expected_r3 = (6.0 * 3.0) / total  # 18/11
+        expected_r1 = (6.0 * 2.0) / total  # 12/11
+        expected_r2 = (6.0 * 3.0) / total  # 18/11
+        expected_r3 = (3.0 * 2.0) / total  # 6/11
 
         assert abs(result["r1"] - expected_r1) < 1e-6
         assert abs(result["r2"] - expected_r2) < 1e-6
@@ -58,9 +60,9 @@ class TestDeltaToWyeTransform:
         result = json.loads(result_json)
 
         total = 6e6
-        expected_r1 = (2e6 * 3e6) / total  # 1e6
-        expected_r2 = (1e6 * 3e6) / total  # 0.5e6
-        expected_r3 = (1e6 * 2e6) / total  # 0.333e6
+        expected_r1 = (1e6 * 3e6) / total  # 0.5e6
+        expected_r2 = (1e6 * 2e6) / total  # 0.333e6
+        expected_r3 = (2e6 * 3e6) / total  # 1e6
 
         assert abs(result["r1"] - expected_r1) < 1e-3
         assert abs(result["r2"] - expected_r2) < 1e-3
@@ -125,6 +127,115 @@ class TestWyeToDeltaTransform:
         assert abs(delta_result["ra"] - ra_orig) < 1e-6
         assert abs(delta_result["rb"] - rb_orig) < 1e-6
         assert abs(delta_result["rc"] - rc_orig) < 1e-6
+
+    def test_roundtrip_transformation_asymmetric(self):
+        """Delta->wye->delta round trip with a non-symmetric triangle.
+
+        A symmetric triangle (30/30/30, as in test_roundtrip_transformation)
+        cannot detect a corner-labeling bug: any permutation of equal values
+        is indistinguishable. This uses distinct ra/rb/rc so a mislabeling
+        (e.g. r1 actually corresponding to node C instead of A) would show up
+        as a permuted, non-matching round trip.
+        """
+        ra_orig, rb_orig, rc_orig = 47.0, 120.0, 68.0
+
+        wye_result = json.loads(
+            delta_to_wye_transform.execute(ra=ra_orig, rb=rb_orig, rc=rc_orig)
+        )
+        delta_result = json.loads(
+            wye_to_delta_transform.execute(
+                r1=wye_result["r1"], r2=wye_result["r2"], r3=wye_result["r3"]
+            )
+        )
+
+        assert abs(delta_result["ra"] - ra_orig) < 1e-6
+        assert abs(delta_result["rb"] - rb_orig) < 1e-6
+        assert abs(delta_result["rc"] - rc_orig) < 1e-6
+
+
+class TestDeltaWyeCornerCorrectness:
+    """Corner-labeling regression tests.
+
+    A bare formula-output check (as in TestDeltaToWyeTransform /
+    TestWyeToDeltaTransform above) cannot detect a bug where the *values*
+    computed are a correct wye/delta equivalent but mislabeled as to which
+    corner (A/B/C) each one attaches to -- that only manifests when the
+    transformed network is embedded in a larger circuit with asymmetric
+    external connections. These tests build such an embedding and compare
+    against `get_resistance_between_nodes`, the same ground-truth simulator
+    used elsewhere in this task.
+    """
+
+    def test_delta_to_wye_corner_labels_match_embedded_circuit(self):
+        ra, rb, rc = 47.0, 120.0, 68.0  # ra=R(A-B), rb=R(B-C), rc=R(C-A)
+        wye = json.loads(delta_to_wye_transform.execute(ra=ra, rb=rb, rc=rc))
+
+        # Distinct external probe resistors on A, B, C so a corner swap changes the answer.
+        probes = {"PA": 1000.0, "PB": 2000.0, "PC": 3000.0}
+        probe_connections = [["A", "X", "PA"], ["B", "X", "PB"], ["C", "X", "PC"]]
+
+        delta_topology = json.dumps(
+            {
+                "resistors": {"Rab": ra, "Rbc": rb, "Rca": rc, **probes},
+                "connections": [
+                    ["A", "B", "Rab"],
+                    ["B", "C", "Rbc"],
+                    ["C", "A", "Rca"],
+                    *probe_connections,
+                ],
+            }
+        )
+        # Wye substitute wired per the tool's documented correspondence: r1@A, r2@B, r3@C.
+        wye_topology = json.dumps(
+            {
+                "resistors": {"R1": wye["r1"], "R2": wye["r2"], "R3": wye["r3"], **probes},
+                "connections": [
+                    ["A", "CTR", "R1"],
+                    ["B", "CTR", "R2"],
+                    ["C", "CTR", "R3"],
+                    *probe_connections,
+                ],
+            }
+        )
+
+        r_delta = get_resistance_between_nodes(delta_topology, ["A", "X"])
+        r_wye = get_resistance_between_nodes(wye_topology, ["A", "X"])
+        assert abs(r_delta - r_wye) < 1e-6
+
+    def test_wye_to_delta_corner_labels_match_embedded_circuit(self):
+        r1, r2, r3 = 10.0, 20.0, 30.0  # r1@A, r2@B, r3@C
+        delta = json.loads(wye_to_delta_transform.execute(r1=r1, r2=r2, r3=r3))
+
+        probes = {"PA": 1000.0, "PB": 2000.0, "PC": 3000.0}
+        probe_connections = [["A", "X", "PA"], ["B", "X", "PB"], ["C", "X", "PC"]]
+
+        wye_topology = json.dumps(
+            {
+                "resistors": {"R1": r1, "R2": r2, "R3": r3, **probes},
+                "connections": [
+                    ["A", "CTR", "R1"],
+                    ["B", "CTR", "R2"],
+                    ["C", "CTR", "R3"],
+                    *probe_connections,
+                ],
+            }
+        )
+        # Delta substitute wired per the tool's documented correspondence: ra=A-B, rb=B-C, rc=C-A.
+        delta_topology = json.dumps(
+            {
+                "resistors": {"Rab": delta["ra"], "Rbc": delta["rb"], "Rca": delta["rc"], **probes},
+                "connections": [
+                    ["A", "B", "Rab"],
+                    ["B", "C", "Rbc"],
+                    ["C", "A", "Rca"],
+                    *probe_connections,
+                ],
+            }
+        )
+
+        r_wye = get_resistance_between_nodes(wye_topology, ["A", "X"])
+        r_delta = get_resistance_between_nodes(delta_topology, ["A", "X"])
+        assert abs(r_wye - r_delta) < 1e-6
 
 
 class TestSimulateCircuitResistance:

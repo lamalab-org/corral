@@ -177,9 +177,9 @@ def delta_to_wye_transform(ra: float, rb: float, rc: float) -> str:
     [CONTEXTUAL] How this tool works:
     - Takes three resistance values (Ra, Rb, Rc) representing the resistors in a delta configuration.
     - Calculates the equivalent Wye (star) resistances (R1, R2, R3) using standard transformation formulas:
-        - R1 = (Rb * Rc) / (Ra + Rb + Rc)
-        - R2 = (Ra * Rc) / (Ra + Rb + Rc)
-        - R3 = (Ra * Rb) / (Ra + Rb + Rc)
+        - R1 = (Ra * Rc) / (Ra + Rb + Rc)
+        - R2 = (Ra * Rb) / (Ra + Rb + Rc)
+        - R3 = (Rb * Rc) / (Ra + Rb + Rc)
     - Returns these three calculated resistances.
     [/CONTEXTUAL]
 
@@ -235,9 +235,9 @@ def delta_to_wye_transform(ra: float, rb: float, rc: float) -> str:
     if any(r <= 0 for r in [ra, rb, rc]):
         raise ValueError("All resistances must be positive")
 
-    r1 = (rb * rc) / total  # Connected to node A
-    r2 = (ra * rc) / total  # Connected to node B
-    r3 = (ra * rb) / total  # Connected to node C
+    r1 = (ra * rc) / total  # Connected to node A
+    r2 = (ra * rb) / total  # Connected to node B
+    r3 = (rb * rc) / total  # Connected to node C
 
     result = {"r1": r1, "r2": r2, "r3": r3}
     return json.dumps(result)
@@ -398,94 +398,7 @@ def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> flo
     - Numerical stability issues can arise for extremely large/small resistance values.
     [/LIMITATIONS]
     """
-    try:
-        circuit = json.loads(topology)
-        resistors = circuit["resistors"]
-        connections = circuit["connections"]
-
-        if len(terminal_nodes) != 2:
-            raise ValueError("Must specify exactly two terminal nodes")
-
-        # Build adjacency matrix for nodal analysis
-        nodes = set()
-        for conn in connections:
-            nodes.add(conn[0])
-            nodes.add(conn[1])
-
-        node_list = sorted(nodes)
-        n = len(node_list)
-        node_to_idx = {node: i for i, node in enumerate(node_list)}
-
-        # Create conductance matrix
-        G = np.zeros((n, n))
-
-        for node1, node2, resistor_id in connections:
-            if resistor_id not in resistors:
-                raise ValueError(f"Resistor {resistor_id} not found in resistor list")
-
-            resistance = resistors[resistor_id]
-            if resistance <= 0:
-                raise ValueError(f"Resistance must be positive, got {resistance}")
-
-            conductance = 1.0 / resistance
-            i, j = node_to_idx[node1], node_to_idx[node2]
-
-            G[i, i] += conductance
-            G[j, j] += conductance
-            G[i, j] -= conductance
-            G[j, i] -= conductance
-
-        # Solve for resistance between terminal nodes
-        term1_idx = node_to_idx[terminal_nodes[0]]
-        term2_idx = node_to_idx[terminal_nodes[1]]
-
-        # Apply 1A current between terminals and solve for voltage
-        Ia = np.zeros(n)
-        Ia[term1_idx] = 1.0
-        Ia[term2_idx] = -1.0
-
-        # Remove one equation (use term2 as reference)
-        # This handles cases where term2_idx is the last element
-        if n == 1:  # Handle single-node circuit, which implies shorted
-            return 0.0
-
-        if term2_idx == n - 1:
-            G_reduced = G[:-1, :-1]
-            I_reduced = Ia[:-1]
-        else:
-            G_reduced = np.delete(np.delete(G, term2_idx, 0), term2_idx, 1)
-            I_reduced = np.delete(Ia, term2_idx)
-
-        try:
-            # Handle cases where G_reduced might be empty or singular (e.g., two nodes directly connected with no resistors to other nodes)
-            if G_reduced.size == 0:
-                # If only two nodes and directly connected without other paths, resistance is sum of direct path.
-                # This specific case is handled by the loop over connections
-                # If G_reduced is empty after removing rows/cols, it implies a 2-node circuit with no other connections.
-                # In such cases, if a direct resistor exists between term1 and term2, its value is the resistance.
-                # This logic is complex and better handled by checking for direct connections first.
-                # For simplicity here, if the reduced matrix is empty or singular, it's likely an error unless it's a very simple 2-node series circuit.
-                raise np.linalg.LinAlgError(
-                    "Reduced conductance matrix is empty or singular"
-                )
-
-            V_reduced = np.linalg.solve(G_reduced, I_reduced)
-        except np.linalg.LinAlgError as err:
-            raise ValueError(
-                "Circuit is not solvable (possibly disconnected or ill-conditioned)"
-            ) from err
-
-        # Insert reference voltage (0V at term2)
-        if term2_idx == n - 1:
-            V = np.append(V_reduced, 0)
-        else:
-            V = np.insert(V_reduced, term2_idx, 0)
-
-        # Resistance is voltage difference with 1A current
-        return abs(V[term1_idx] - V[term2_idx])
-
-    except Exception as e:
-        raise ValueError(f"Error simulating circuit: {e!s}") from e
+    return get_resistance_between_nodes(topology, terminal_nodes)
 
 
 @tool

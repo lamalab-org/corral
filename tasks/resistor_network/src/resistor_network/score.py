@@ -6,8 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from loguru import logger
+from resistor_network.utils import get_resistance_between_nodes
 
 from corral.utils.tool_helpers import smart_resolve_path
 
@@ -398,62 +398,13 @@ def check_resistance_measurements(
 
 def _simulate_resistance(topology: dict, node_a: str, node_b: str) -> float:
     """
-    Simulate resistance between two nodes in a topology.
+    Simulate resistance between two nodes in a topology, delegating to the
+    canonical nodal-analysis solver (`utils.get_resistance_between_nodes`) so
+    this scoring path can never silently drift from the ground-truth
+    simulator or the agent-facing `simulate_circuit_resistance` tool.
     """
     try:
-        resistors = topology["resistors"]
-        connections = topology["connections"]
-
-        # Build adjacency matrix for nodal analysis
-        nodes = set()
-        for conn in connections:
-            nodes.add(conn[0])
-            nodes.add(conn[1])
-
-        node_list = sorted(nodes)
-        n = len(node_list)
-        node_to_idx = {node: i for i, node in enumerate(node_list)}
-
-        # Create conductance matrix
-        G = np.zeros((n, n))
-
-        for node1, node2, resistor_id in connections:
-            resistance = resistors[resistor_id]
-            conductance = 1.0 / resistance
-            i, j = node_to_idx[node1], node_to_idx[node2]
-
-            G[i, i] += conductance
-            G[j, j] += conductance
-            G[i, j] -= conductance
-            G[j, i] -= conductance
-
-        # Solve for resistance between nodes
-        term1_idx = node_to_idx[node_a]
-        term2_idx = node_to_idx[node_b]
-
-        # Apply 1A current and solve for voltage
-        Ia = np.zeros(n)
-        Ia[term1_idx] = 1.0
-        Ia[term2_idx] = -1.0
-
-        # Remove reference equation
-        G_reduced = (
-            G[:-1, :-1]
-            if term2_idx == n - 1
-            else np.delete(np.delete(G, term2_idx, 0), term2_idx, 1)
-        )
-        I_reduced = Ia[:-1] if term2_idx == n - 1 else np.delete(Ia, term2_idx)
-
-        V_reduced = np.linalg.solve(G_reduced, I_reduced)
-
-        # Insert reference voltage
-        if term2_idx == n - 1:
-            Va = np.append(V_reduced, 0)
-        else:
-            Va = np.insert(V_reduced, term2_idx, 0)
-
-        return abs(Va[term1_idx] - Va[term2_idx])
-
+        return get_resistance_between_nodes(json.dumps(topology), [node_a, node_b])
     except Exception as e:
         logger.error(f"Simulation error: {e}")
         return float("inf")
