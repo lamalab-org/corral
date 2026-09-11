@@ -1,10 +1,4 @@
-"""Tests for conductance-map scoring (`check_conductance_topology`).
-
-The conductance map is the canonical form of a resistor network: one merged
-conductance per node pair. It is exactly what measurements can identify, so
-scoring it accepts every electrically-indistinguishable answer and rejects
-everything else.
-"""
+"""Tests for conductance-map scoring."""
 
 import json
 
@@ -41,7 +35,6 @@ def test_exact_ground_truth_scores_one():
 
 
 def test_parallel_group_may_be_submitted_as_one_resistor():
-    """The whole point: parallel resistors are indistinguishable, so merging is free."""
     merged = {
         "resistors": {"Ra": 1 / (1 / 47 + 1 / 33), "Rb": 20.0},
         "connections": [["A", "N1", "Ra"], ["N1", "B", "Rb"]],
@@ -93,7 +86,6 @@ def test_dropping_the_only_resistor_on_a_pair_is_rejected():
 
 
 def test_halving_a_parallel_group_conductance_is_rejected():
-    """Merging is free; actually losing conductance is not."""
     half = {
         "resistors": {"Ra": 47.0, "Rb": 20.0},
         "connections": [["A", "N1", "Ra"], ["N1", "B", "Rb"]],

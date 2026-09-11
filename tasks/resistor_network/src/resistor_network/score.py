@@ -578,11 +578,6 @@ def check_valid_circuit_json(json_path: str) -> float:
         return 0.0
 
 
-# ---------------------------------------------------------------------------
-# Conductance-matrix scoring
-# ---------------------------------------------------------------------------
-
-
 def _parse_topology(topology_input: str) -> dict[str, Any] | None:
     """Parse and structurally validate a submitted topology.
 
@@ -632,14 +627,7 @@ def _parse_topology(topology_input: str) -> dict[str, Any] | None:
 
 
 def conductance_map(topology: dict[str, Any]) -> dict[tuple[str, str], float]:
-    """Merged conductance (siemens) per node pair.
-
-    This is the canonical form of a resistor network: resistors sharing a node pair
-    are in parallel, and no measurement can ever separate them -- effective
-    resistance depends only on the graph Laplacian, which sees their *sum*. Two
-    circuits have the same conductance map exactly when they are electrically
-    indistinguishable on the given nodes.
-    """
+    """Return merged conductance in siemens for each node pair."""
     conductances: dict[tuple[str, str], float] = {}
     for node_a, node_b, resistor_id in topology["connections"]:
         pair = (node_a, node_b) if node_a < node_b else (node_b, node_a)
@@ -652,24 +640,7 @@ def conductance_map(topology: dict[str, Any]) -> dict[tuple[str, str], float]:
 def check_conductance_topology(
     expected_topology: dict[str, Any], tolerance: float = 0.1
 ) -> Callable[[str], float]:
-    """Score a submitted topology against the expected *conductance map*.
-
-    Scoring the conductance map rather than the resistance measurements grades the
-    thing that is actually identifiable from the data, and nothing else:
-
-    - Resistor ids, ordering, and how many physical resistors sit on a node pair are
-      all free. Submitting `47 ohm || 33 ohm` or the equivalent single `19.4 ohm` both
-      score 1.0, because parallel resistors are provably indistinguishable.
-    - The node set and the set of connected node pairs must match exactly. A
-      submission cannot invent a connection (a near-open 80k-ohm resistor across a pair
-      the real circuit leaves unconnected is still a claim that a component is
-      there), nor drop the only resistor on a pair.
-    - Each pair's merged conductance must agree within `tolerance` relative error.
-
-    Comparing conductances is strictly tighter than comparing simulated
-    measurements, which accumulate slack through the solve and let materially
-    different circuits pass.
-    """
+    """Score a submitted topology against the expected conductance map."""
     expected_conductances = conductance_map(expected_topology)
     expected_nodes = {node for pair in expected_conductances for node in pair}
 

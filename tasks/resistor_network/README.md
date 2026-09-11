@@ -93,8 +93,5 @@ Drop `--list-tasks` and add `--model` to actually execute the tasks.
 ## Notes
 
 - Submissions are expected to describe the circuit as JSON with `resistors` and `connections` fields.
-- Scoring compares **conductance maps** (`check_conductance_topology` in `score.py`). A circuit's conductance map is one number per node pair: the summed conductance (1/R) of every resistor directly connecting them, with a zero meaning "no resistor here". This is the canonical form of a resistor network -- two circuits have the same map exactly when they are electrically indistinguishable on the given nodes.
-  - Free: resistor ids, connection ordering, and how many physical resistors sit on a node pair. Resistors sharing a pair are in parallel and provably cannot be told apart from any measurement (effective resistance depends only on the graph Laplacian, which sees their sum), so `47Ω || 33Ω` and a single `19.4Ω` both score 1.0.
-  - Required: the node set and the set of connected pairs must match exactly, and each pair's merged conductance must agree within `tolerance` relative error.
-  - Why not score the measurements directly: a submission only has to *reproduce* them, which a complete graph with near-open branches or a circuit missing resistors both do. Those score 1.0 under measurement scoring and 0.0 here. Comparing conductances is also tighter, since simulated measurements accumulate slack through the solve.
+- Scoring compares **conductance maps** (`check_conductance_topology` in `score.py`): summed conductance (1/R) for each connected node pair. Resistor ids, connection order, and grouping of parallel resistors are free. The node set, connected-pair set, and each merged conductance must match within `tolerance`.
 - Internal resistance validation is based on nodal analysis, so the submitted topology should define a passive resistor network with positive resistance values.

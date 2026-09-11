@@ -104,7 +104,7 @@ def get_resistance_between_nodes(topology: str, terminal_nodes: list[str]) -> fl
         nodes = set()
         referenced_resistors = set()
         for index, conn in enumerate(connections):
-            if not isinstance(conn, (list, tuple)) or len(conn) != 3:
+            if not isinstance(conn, list | tuple) or len(conn) != 3:
                 raise ValueError(
                     f"Connection {index} must contain node1, node2, and resistor_id"
                 )
@@ -147,7 +147,7 @@ def get_resistance_between_nodes(topology: str, terminal_nodes: list[str]) -> fl
                 raise ValueError(f"Resistor {resistor_id} not found in resistor list")
 
             resistance = resistors[resistor_id]
-            if not isinstance(resistance, (int, float)) or not math.isfinite(resistance):
+            if not isinstance(resistance, int | float) or not math.isfinite(resistance):
                 raise ValueError(f"Resistance must be finite, got {resistance}")
             if resistance <= 0:
                 raise ValueError(f"Resistance must be positive, got {resistance}")

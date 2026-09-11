@@ -158,11 +158,6 @@ class TestGenerateLevelTasks:
             generate_level_tasks(level=99, count=1, seed=1)
 
     def test_scoring_params_target_the_conductance_map(self):
-        """Tasks are graded on the conductance map -- the canonical form of the
-        network -- not on the simulated measurements. Measurements are input the
-        agent reasons from; grading them instead accepts circuits that merely
-        reproduce them (a complete graph with near-open branches, or a circuit
-        missing resistors), which the conductance map rejects."""
         tasks = generate_level_tasks(level=1, count=3, seed=1)
         for t in tasks:
             assert t["scoring_function"] == "resistor_conductance"

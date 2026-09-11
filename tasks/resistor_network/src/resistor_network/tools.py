@@ -88,7 +88,10 @@ def calculate_series_resistance(resistances: list[float]) -> float:
     """
     if not resistances:
         raise ValueError("No resistances provided")
-    if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r <= 0 for r in resistances):
+    if any(
+        not isinstance(r, int | float) or not math.isfinite(r) or r <= 0
+        for r in resistances
+    ):
         raise ValueError("All resistances must be positive")
     return sum(resistances)
 
@@ -155,7 +158,10 @@ def calculate_parallel_resistance(resistances: list[float]) -> float:
     """
     if not resistances:
         raise ValueError("No resistances provided")
-    if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r <= 0 for r in resistances):
+    if any(
+        not isinstance(r, int | float) or not math.isfinite(r) or r <= 0
+        for r in resistances
+    ):
         raise ValueError("All resistances must be positive")
 
     return 1 / sum(1 / r for r in resistances)
@@ -235,7 +241,10 @@ def delta_to_wye_transform(ra: float, rb: float, rc: float) -> str:
     total = ra + rb + rc
     if total == 0:
         raise ValueError("Sum of delta resistances cannot be zero")
-    if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r <= 0 for r in [ra, rb, rc]):
+    if any(
+        not isinstance(r, int | float) or not math.isfinite(r) or r <= 0
+        for r in [ra, rb, rc]
+    ):
         raise ValueError("All resistances must be positive")
 
     r1 = (ra * rc) / total  # Connected to node A
@@ -313,7 +322,10 @@ def wye_to_delta_transform(r1: float, r2: float, r3: float) -> str:
     [/LIMITATIONS]
     """
     denominator = r1 * r2 + r2 * r3 + r3 * r1
-    if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r <= 0 for r in [r1, r2, r3]):
+    if any(
+        not isinstance(r, int | float) or not math.isfinite(r) or r <= 0
+        for r in [r1, r2, r3]
+    ):
         raise ValueError("All resistances must be positive")
 
     ra = denominator / r3  # Between nodes A and B
@@ -433,7 +445,9 @@ def validate_circuit_topology(
         referenced: set[str] = set()
         for index, connection in enumerate(connections):
             if not isinstance(connection, list) or len(connection) != 3:
-                errors.append(f"connection {index} must be [node_a, node_b, resistor_id]")
+                errors.append(
+                    f"connection {index} must be [node_a, node_b, resistor_id]"
+                )
                 continue
             node_a, node_b, resistor_id = connection
             if not isinstance(node_a, str) or not isinstance(node_b, str):
@@ -442,7 +456,9 @@ def validate_circuit_topology(
             if node_a == node_b:
                 errors.append(f"connection {index} is a self-loop")
             if resistor_id not in resistors:
-                errors.append(f"connection {index} references undefined resistor {resistor_id}")
+                errors.append(
+                    f"connection {index} references undefined resistor {resistor_id}"
+                )
             elif resistor_id in referenced:
                 errors.append(f"resistor {resistor_id} is referenced more than once")
             referenced.add(resistor_id)
@@ -452,20 +468,30 @@ def validate_circuit_topology(
             adjacency.setdefault(node_b, set()).add(node_a)
 
         for resistor_id, resistance in resistors.items():
-            if not isinstance(resistance, (int, float)) or not math.isfinite(resistance):
-                errors.append(f"resistor {resistor_id} must have a finite numeric value")
+            if not isinstance(resistance, int | float) or not math.isfinite(resistance):
+                errors.append(
+                    f"resistor {resistor_id} must have a finite numeric value"
+                )
             elif resistance <= 0:
                 errors.append(f"resistor {resistor_id} must have positive resistance")
-        for resistor_id in set(resistors) - referenced:
-            errors.append(f"resistor {resistor_id} is not connected")
+        errors.extend(
+            [
+                f"resistor {resistor_id} is not connected"
+                for resistor_id in set(resistors) - referenced
+            ]
+        )
 
         terminals = terminal_nodes or ["A", "B"]
         if len(terminals) != 2 or terminals[0] == terminals[1]:
             errors.append("terminal_nodes must contain two distinct nodes")
         else:
-            for terminal in terminals:
-                if terminal not in degrees:
-                    errors.append(f"terminal {terminal} is not present in the circuit")
+            errors.extend(
+                [
+                    f"terminal {terminal} is not present in the circuit"
+                    for terminal in terminals
+                    if terminal not in degrees
+                ]
+            )
 
             if all(terminal in degrees for terminal in terminals):
                 reachable = {terminals[0]}
@@ -701,7 +727,11 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
     - "series_parallel" and "bridge" types have minimum `num_resistors` requirements.
     [/LIMITATIONS]
     """
-    if not isinstance(num_resistors, int) or isinstance(num_resistors, bool) or num_resistors < 1:
+    if (
+        not isinstance(num_resistors, int)
+        or isinstance(num_resistors, bool)
+        or num_resistors < 1
+    ):
         raise ValueError("num_resistors must be a positive integer")
 
     def node_name(index: int) -> str:
