@@ -107,27 +107,27 @@ class TestJSONProcessing:
 
     @given(
         st.lists(
-            st.dictionaries(
-                keys=st.sampled_from(["energy", "id", "value"]),
-                values=st.one_of(st.floats(min_value=-100, max_value=100), st.text()),
+            st.fixed_dictionaries(
+                {
+                    "energy": st.floats(min_value=-100, max_value=100),
+                    "id": st.one_of(
+                        st.floats(min_value=-100, max_value=100), st.text()
+                    ),
+                },
+                optional={"value": st.one_of(st.floats(), st.text())},
             ),
             min_size=1,
         )
     )
     def test_sort_and_get_first_hypothesis(self, data_list):
         """Property-based test for sorting function."""
-        # Filter to ensure we have the required keys
-        valid_data = [d for d in data_list if "energy" in d and "id" in d]
-        assume(len(valid_data) > 0)
-        assume(all(isinstance(d.get("energy"), int | float) for d in valid_data))
-
-        json_data = json.dumps(valid_data)
+        json_data = json.dumps(data_list)
         result = sort_and_get_first_from_json.execute(
             polymorph_data_json=json_data, sort_key="energy", return_key="id"
         )
 
         # Result should be the id of the item with minimum energy
-        min_energy_item = min(valid_data, key=lambda x: x["energy"])
+        min_energy_item = min(data_list, key=lambda x: x["energy"])
         assert result == str(min_energy_item["id"])
 
 

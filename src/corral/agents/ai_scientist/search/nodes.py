@@ -219,7 +219,7 @@ class MeasuredOutcome(MeasuredMetric):
 class ReplicationSummary(BaseModel):
     """Deterministic statistics over stage-boundary replication outcomes.
 
-    ``std`` is the sample standard deviation and ``stderr`` is computed from
+    `std` is the sample standard deviation and `stderr` is computed from
     the number of comparable scalar values. Non-scalar Corral experiments keep
     the run/success/seed accounting while leaving metric statistics unset.
     """
@@ -304,7 +304,7 @@ class ExperimentNode(BaseModel):
     id: str
     parent_id: str | None = None
     branch_id: str | None = None
-    trial_runtime_id: str | None = None
+    execution_id: str | None = None
     branch_workspace: str | None = None
     stage: ResearchStage
     stage_seed_id: str | None = None
@@ -318,7 +318,7 @@ class ExperimentNode(BaseModel):
     success_criteria: list[str] = Field(default_factory=list)
     related_node_ids: list[str] = Field(default_factory=list)
     visual_artifacts: list[str] = Field(default_factory=list)
-    # ``plan`` is the realized action sequence. Actions are appended only after
+    # `plan` is the realized action sequence. Actions are appended only after
     # the worker has observed every preceding result; it is never precomputed.
     plan: list[PlannedAction] = Field(default_factory=list)
     observations: list[Observation] = Field(default_factory=list)

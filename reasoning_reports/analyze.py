@@ -594,15 +594,21 @@ async def llm_json_call_async(
     last_err: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
-            resp = await litellm.acompletion(
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+            response_stream = await litellm.acompletion(
                 model=model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
+                messages=messages,
                 temperature=temperature,
                 timeout=timeout_s,
+                stream=True,
             )
+            chunks = [chunk async for chunk in response_stream]
+            resp = litellm.stream_chunk_builder(chunks, messages=messages)
+            if resp is None:
+                raise ValueError("LLM stream returned no response chunks")
             content = resp["choices"][0]["message"]["content"] or ""
             content = _extract_json_text(content)
             if not content:

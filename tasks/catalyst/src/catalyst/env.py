@@ -2,6 +2,7 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from time import perf_counter
 
 from catalyst.score import (
     BASE_WORK_DIR,
@@ -13,12 +14,11 @@ from catalyst.score import (
     check_valid_json_file,
 )
 from catalyst.tools import create_tools
-from loguru import logger
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition
-from corral.backend.tool import Tool
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.task import InputRef, TaskDefinition
+from corral.core.tool import Tool
+from corral.report.logging import event, exception_fields
 from corral.utils.task_loader import (
     load_task_entries,
     load_task_entries_from_env_package,
@@ -34,7 +34,13 @@ SCORING_FUNCTIONS = {
     "file_exists": check_valid_json_file,
 }
 
-logger.info(f"Using BASE_WORK_DIR: {BASE_WORK_DIR}")
+event(
+    "DEBUG",
+    "environment.configuration",
+    subsystem="runtime",
+    benchmark="catalyst",
+    work_dir=BASE_WORK_DIR,
+)
 
 
 def get_scoring_function(name: str, params: dict | None = None) -> Callable:
@@ -45,14 +51,27 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
 
     if params:
         try:
-            logger.info(f"Initializing scoring function '{name}' with params: {params}")
+            event(
+                "DEBUG",
+                "environment.scorer_initializing",
+                subsystem="runtime",
+                benchmark="catalyst",
+                scorer=name,
+                arguments=params,
+            )
             return fn(**params)
         except Exception as e:
             raise ValueError(
                 f"Error initializing scoring function '{name}' with params {params}: {e}"
             ) from e
     else:
-        logger.info(f"Using scoring function '{name}' without params")
+        event(
+            "DEBUG",
+            "environment.scorer_selected",
+            subsystem="runtime",
+            benchmark="catalyst",
+            scorer=name,
+        )
         return fn
 
 
@@ -116,55 +135,71 @@ def create_environments(
     Returns:
         Dictionary of environments keyed by task ID.
     """
-    if local_dir is not None:
-        entries = load_task_entries(local_dir=local_dir)
-    elif environment is not None:
-        entries = load_task_entries(
-            environment=environment, level=level, task_type=task_type
-        )
-    else:
-        # Default: load from standard directory layout relative to this package
-        entries = load_task_entries_from_env_package(
-            Path(__file__).parent, level=level, subtask=(task_type == "subtask")
-        )
-
-    tasks = entries_to_task_definitions(entries, work_dir)
-
-    logger.info(f"Creating linked task environments '{name}' with {len(tasks)} tasks")
-
-    # Create environments for all tasks; grouping is derived from the graph
-    return build_environments(
-        tasks,
-        base_work_dir=work_dir,
-        name=name,
-        toolset=Toolset(
-            pool=create_tools(),
-            common=taskgroup_common_tools or {},
-        ),
+    started = perf_counter()
+    event(
+        "INFO",
+        "environment.started",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
     )
+    try:
+        if local_dir is not None:
+            entries = load_task_entries(local_dir=local_dir)
+        elif environment is not None:
+            entries = load_task_entries(
+                environment=environment, level=level, task_type=task_type
+            )
+        else:
+            entries = load_task_entries_from_env_package(
+                Path(__file__).parent, level=level, subtask=(task_type == "subtask")
+            )
+
+        tasks = entries_to_task_definitions(entries, work_dir)
+        environments = build_environments(
+            tasks,
+            base_work_dir=work_dir,
+            name=name,
+            toolset=Toolset(
+                pool=create_tools(),
+                common=taskgroup_common_tools or {},
+            ),
+        )
+    except Exception as exc:
+        event(
+            "ERROR",
+            "environment.failed",
+            subsystem="runtime",
+            benchmark=name,
+            operation="create",
+            status="failed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            **exception_fields(exc),
+        )
+        raise
+
+    event(
+        "INFO",
+        "environment.completed",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+        status="completed",
+        duration_ms=round((perf_counter() - started) * 1000, 3),
+        environment_count=len(environments),
+    )
+    return environments
 
 
 if __name__ == "__main__":
     import argparse as _argparse
 
-    parser = _argparse.ArgumentParser(description="Catalyst Benchmark Server")
+    parser = _argparse.ArgumentParser(description="Inspect Catalyst environments")
     parser.add_argument(
         "tasks_json_path",
         nargs="?",
         default=None,
         help="Path to tasks JSON file or directory (optional if --mode is provided)",
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
-        help="Host to run the server on",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("CORRAL_PORT", "8000")),
-        help="Port to run the server on",
     )
     parser.add_argument(
         "--mode",
@@ -197,7 +232,15 @@ if __name__ == "__main__":
             raise ValueError(f"Unsupported mode: {args.mode}")
 
         if not Path(local_dir).exists():
-            logger.error(f"Task config not found: {local_dir}")
+            error = FileNotFoundError(f"Task config not found: {local_dir}")
+            event(
+                "ERROR",
+                "environment.configuration_failed",
+                subsystem="runtime",
+                benchmark="catalyst",
+                status="failed",
+                **exception_fields(error),
+            )
             sys.exit(1)
     else:
         local_dir = (
@@ -207,15 +250,18 @@ if __name__ == "__main__":
             / "tasks_json"
         )
         if not Path(local_dir).exists():
-            logger.error(f"Task config not found: {local_dir}")
+            error = FileNotFoundError(f"Task config not found: {local_dir}")
+            event(
+                "ERROR",
+                "environment.configuration_failed",
+                subsystem="runtime",
+                benchmark="catalyst",
+                status="failed",
+                **exception_fields(error),
+            )
             sys.exit(1)
 
-    host = args.host
-    port = args.port
-    # Absolute so the workspace path the server reports to a sandbox-running
-    # agent (e.g. Codex) resolves the same in that agent's process (a different
-    # cwd) instead of silently missing and losing files. BASE_WORK_DIR is already
-    # absolute; resolve() also normalizes a relative CORRAL_WORK_DIR override.
+    # Resolve the configured workspace root before constructing definitions.
     work_dir = str(Path(os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)).resolve())
     Path(work_dir).mkdir(parents=True, exist_ok=True)
 
@@ -224,12 +270,13 @@ if __name__ == "__main__":
         work_dir=work_dir,
     )
 
-    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        logger.info(f"- {env_id}")
-        logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_map:
-            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
-
-    logger.info(f"Running server on {host}:{port}")
-    run_server(environments, host, port)
+        event(
+            "DEBUG",
+            "environment.created",
+            subsystem="runtime",
+            benchmark="catalyst",
+            task_id=env_id,
+            task_name=env.current_task.name,
+            dependencies=sorted(env.current_task.dependencies()),
+        )

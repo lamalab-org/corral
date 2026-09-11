@@ -84,7 +84,7 @@ class PubChem:
 
         Args:
             formula: Molecular formula accepted by PubChem's fast-formula search.
-            limit: Maximum number of isomers to return. ``0`` returns all matches.
+            limit: Maximum number of isomers to return. `0` returns all matches.
 
         Returns:
             A shuffled list of isomeric SMILES strings.

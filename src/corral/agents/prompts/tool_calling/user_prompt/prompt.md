@@ -21,7 +21,7 @@ Task Guide:
 
 You must think what to do next. You can use some of the tools available in the system.
 
-When you think that the task is completed, you can submit the answer.
-For that, answer with: "Final Answer: <your answer>". It is very important to follow this format.
+When the task is complete, call the `submit_answer` tool with the complete
+answer. Do not return a final answer as plain text.
 
 **`{{surrender_instructions}}`**

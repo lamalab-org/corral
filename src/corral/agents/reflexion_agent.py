@@ -1,321 +1,247 @@
-"""
-ReflexionAgent: A wrapper agent that adds self-reflection capabilities.
+"""Reflexion wrapper for first-class session agents."""
 
-This implements the Reflexion architecture (https://arxiv.org/abs/2303.11366)
-by wrapping existing agents with a trial-reflect-retry loop.
-"""
+from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
-from corral.agents import BaseAgent
+from corral.agents.base_agent import BaseAgent, _UsageAccumulator
 from corral.agents.reflection import (
     Reflection,
     ReflectionMemory,
     ReflectionModule,
     create_reflexion_history,
 )
-from corral.router.routes import CorralRouter
+from corral.agents.schema import AgentOutcome, AgentUsage
+from corral.agents.session import Agent
+from corral.core.errors import concise_error_message
+from corral.report.logging import logger
 
 if TYPE_CHECKING:
-    from corral.agents.utils import LiteLLMMessage
+    from corral.agents.session import AgentSession
+
+
+_REFLEXION_STATE_NAMESPACE = "reflexion"
+
+
+def _combined_usage(reflection: AgentUsage, actor: AgentUsage) -> AgentUsage:
+    return AgentUsage(
+        input_tokens=reflection.input_tokens + actor.input_tokens,
+        output_tokens=reflection.output_tokens + actor.output_tokens,
+        reasoning_tokens=reflection.reasoning_tokens + actor.reasoning_tokens,
+        llm_calls=reflection.llm_calls + actor.llm_calls,
+    )
 
 
 class ReflexionAgent(BaseAgent):
-    """
-    Agent that uses the Reflexion framework (https://arxiv.org/abs/2303.11366) to improve through self-reflection.
+    """Generate verbal memory from a prior evaluation, then run an actor.
 
-    The ReflexionAgent wraps an existing agent (the "Actor") and adds:
-    1. A Self-Reflection module that generates verbal insights from failures
-    2. Long-term episodic memory that stores reflections across attempts
-    3. A trial-reflect-retry loop that learns from mistakes
-
-    The architecture follows: Actor + Evaluator (external) + Self-Reflection
-    where the Evaluator is provided by the environment's scoring function.
-
-    ## Usage Example
-
-    ```python
-    # Create base agent (the Actor)
-    base_agent = ReActAgent(model="gpt-4o", max_iterations=10)
-
-    # Wrap with Reflexion capabilities
-    reflexion_agent = ReflexionAgent(actor=base_agent, reflection_model="gpt-4o")
-
-    # Use like any other agent - framework handles trials
-    runner = CorralRunner(interface, reflexion_agent)
-    result = runner.bench(task_ids=["task_1"], trials_per_task=5)
-    ```
-
-    ### Custom Prompt Requirements:
-    The ReflexionAgent requires a specific user prompt that instructs the agent:
-    - Generate reflections based on previous trial results.
-    - Ideally encourage concise and actionable reflections.
-    - Include {{task_id}}, {{trial_id}}, {{score}}, {{task_description}} and {{trajectory}} placeholders.
-
-
-    Args:
-        actor (BaseAgent): The base agent to wrap (ReActAgent, ToolCallingAgent, etc.)
-        reflection_model (str | None): Model to use for generating reflections. Defaults to actor's model.
-        api_endpoint (str | None): Custom API endpoint for reflection model
-        reflection_system_prompt (str | None): Custom system prompt for reflection generation
-        reflection_prompt (str | None): The prompt to use for reflection generation.
-            It must be a string that supports the next variables:
-            - task_id
-            - trial_id
-            - score
-            - task_description
-            - trajectory
-        If None, uses default prompt with ID "src/corral/agents/prompts/reflexion/user_prompt/prompt.md".
-        reflection_temperature (float | None): Temperature for reflection generation (default: 0.0)
-        max_reflections (int): Maximum number of reflections to store in memory. Defaults to 5.
-        **kwargs: Additional arguments passed to the actor
+    The task projection is authoritative for the reflection model.
+    `reflection_model` remains a construction-time hint so older worker
+    registrations can populate that metadata, but it is never read from the
+    wrapped actor and never overrides the model recorded for a session.
     """
 
     def __init__(
         self,
-        actor: BaseAgent,
+        actor: Agent,
         reflection_model: str | None = None,
         api_endpoint: str | None = None,
         reflection_system_prompt: str | None = None,
         reflection_prompt: str | None = None,
         reflection_temperature: float | None = None,
         max_reflections: int = 5,
-        **kwargs,
-    ):
-        # Validate that actor is a BaseAgent instance
-        if not isinstance(actor, BaseAgent):
+        **kwargs: Any,
+    ) -> None:
+        if not isinstance(actor, Agent):
             raise TypeError(
-                f"actor must be an instance of BaseAgent, got {type(actor).__name__}"
+                "actor must implement run_session(AgentSession), got "
+                f"{type(actor).__name__}"
             )
-
-        if reflection_prompt is None:
-            reflection_prompt = "reflexion/user_prompt"
-
+        model_hint = reflection_model or ""
         super().__init__(
-            model=reflection_model or actor.model,
-            max_iterations=actor.max_iterations,
-            user_prompt=reflection_prompt,
-            api_endpoint=actor.api_endpoint,
-            temperature=actor.temperature,
+            model=model_hint,
+            api_endpoint=api_endpoint or getattr(actor, "api_endpoint", None),
+            system_prompt=reflection_system_prompt,
+            user_prompt=reflection_prompt or "reflexion/user_prompt",
+            surrender_prompt=None,
+            temperature=(
+                0.0 if reflection_temperature is None else reflection_temperature
+            ),
             **kwargs,
         )
-
-        # Store the actor (the actual agent doing the work)
         self.actor = actor
+        self.max_reflections = max_reflections
+        self.reflection_system_prompt = reflection_system_prompt
 
-        final_reflection_temperature = (
-            reflection_temperature if reflection_temperature is not None else 0.0
-        )
-
-        # Initialize reflection components
-        self.memory = ReflectionMemory(max_size=max_reflections)
-        self.reflection_module = ReflectionModule(
-            model=reflection_model or actor.model,
+    def _reflection_module(self, session: AgentSession) -> ReflectionModule:
+        """Build a run-local reflection client from projection metadata."""
+        raw_model = session.model_name
+        if not isinstance(raw_model, str) or not raw_model.strip():
+            raise ValueError(
+                "ReflexionAgent requires ExecutionState.task.model.name to be a "
+                "non-empty string"
+            )
+        return ReflectionModule(
+            model=raw_model,
             reflection_prompt=self.user_prompt,
-            temperature=final_reflection_temperature,
-            api_endpoint=api_endpoint or actor.api_endpoint,
-            reflection_system_prompt=reflection_system_prompt,
+            temperature=self.temperature,
+            api_endpoint=self.api_endpoint,
+            reflection_system_prompt=self.reflection_system_prompt,
         )
 
-        # Track current task
-        self._current_task_id = None
+    def _memory_from_state(self, session: AgentSession) -> ReflectionMemory:
+        """Restore bounded verbal memory from agent-state events."""
+        payload = session.get_agent_state(_REFLEXION_STATE_NAMESPACE)
+        if payload is None:
+            payload = session.get_agent_state(
+                _REFLEXION_STATE_NAMESPACE,
+                previous=True,
+            )
+        raw_memory = payload.get("memory") if payload is not None else None
+        if isinstance(raw_memory, dict):
+            try:
+                memory = ReflectionMemory.from_dict(raw_memory)
+            except (KeyError, TypeError, ValueError):
+                logger.warning("Ignoring invalid Reflexion memory in agent state")
+            else:
+                # Configuration is authoritative if it changed between runs.
+                if memory.max_size == self.max_reflections:
+                    return memory
+                resized = ReflectionMemory(max_size=self.max_reflections)
+                for reflection in list(memory.reflections)[-self.max_reflections :]:
+                    resized.add_reflection(reflection)
+                return resized
+        return ReflectionMemory(max_size=self.max_reflections)
 
-        # Store messages from previous trial for reflection generation
-        self._previous_messages: list[LiteLLMMessage] = []
+    @staticmethod
+    def _trajectory_from_state(session: AgentSession) -> list[dict[str, Any]]:
+        """Read the evaluated attempt's canonical projected transcript."""
+        return [dict(message) for message in session.previous_messages]
 
-        # Track token usage for reflection generation
-        self.reflection_token_usage: dict[str, int] = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        }
+    @staticmethod
+    async def _store_memory(
+        session: AgentSession,
+        memory: ReflectionMemory,
+        *,
+        reflection_model: str,
+        actor_status: str | None = None,
+    ) -> None:
+        await session.set_agent_state(
+            _REFLEXION_STATE_NAMESPACE,
+            {
+                "schema_version": 1,
+                "reflection_model": reflection_model,
+                "memory": memory.to_dict(),
+                "source_commit_hash": session.previous_commit_hash,
+                "actor_status": actor_status,
+            },
+        )
 
-    def run(
+    async def _generate_reflection(
         self,
-        interface: CorralRouter,
-        task_id: str,
-        task_prompt: str | None = None,
-        examples: list[str] | None = None,
-        **kwargs,  # noqa: ARG002
-    ) -> str:
-        """
-        Run the agent with reflexion capabilities.
-
-        This works with the framework's trial system:
-        1. Retrieve the last score (if this is not the first trial)
-        2. If previous trial exists, generate reflection and add to memory
-        3. Inject reflections from memory into the actor's `_initial_messages`
-        4. Run the actor
-        5. Return the answer (framework will submit and score it)
-
-        Args:
-            interface (CorralRouter): The interface to use
-            task_id (str): The task ID to solve
-            task_prompt (str | None): Custom task prompt (optional)
-            examples (list[str] | None): Few-shot examples (optional)
-            enable_surrender (bool): Whether to enable surrendering (not used here)
-
-        Returns:
-            str: The final answer from the actor
-        """
-        logger.info(f"Starting ReflexionAgent for task {task_id}")
-
-        # Try to get last score from previous trial
-        last_score_data = None
-        try:
-            last_score_data = interface.get_last_score(task_id)
-            logger.info(
-                f"Retrieved last score: {last_score_data['score']} from trial {last_score_data['trial_id']}"
-            )
-        except Exception as e:
-            # First trial - no previous score exists
-            logger.info(
-                f"No previous trial found (this is likely the first trial): {e}"
-            )
-
-        # If we have a previous score, generate reflection from previous attempt
-        if last_score_data is not None:
-            task_description = interface.get_task_prompt(task_id)
-            score = last_score_data.get("score")
-            trial_id = last_score_data.get("trial_id", "unknown")
-
-            # Generate and store reflection from previous trial
-            logger.info(f"Generating reflection from previous trial (score: {score})")
-            if self.messages:
-                self._generate_and_store_reflection(
-                    task_id=task_id,
-                    trial_id=trial_id,
-                    score=score,
-                    task_description=task_description,
-                )
-
-        # Inject reflections from memory into actor's _initial_messages
-        reflexion_history = create_reflexion_history(self.memory)
-
-        if reflexion_history:
-            self.actor._initial_messages = list(reflexion_history)
-        else:
-            self.actor._initial_messages = None
-
-        # Run the actor
-        try:
-            answer = self.actor.run(
-                interface=interface,
-                task_id=task_id,
-                task_prompt=task_prompt,
-                examples=examples,
-            )
-
-            # Copy actor's messages and token usage for tracking
-            self.messages = self.actor.messages.copy()
-            self.token_usage = self.actor.token_usage.copy()
-
-            # Store messages for next trial's reflection generation
-            self._previous_messages = self.messages.copy()
-            if hasattr(self.actor, "_available_tools") and self.actor._available_tools:
-                self._available_tools = self.actor._available_tools.copy()
-
-            logger.info(f"ReflexionAgent completed task {task_id}")
-            return answer
-
-        except Exception as e:
-            logger.error(f"Error in ReflexionAgent: {e}")
-            raise
-
-    def _generate_and_store_reflection(
-        self,
+        *,
+        reflection_module: ReflectionModule,
+        memory: ReflectionMemory,
+        trajectory: list[dict[str, Any]],
         task_id: str,
         trial_id: str,
         score: float,
         task_description: str,
-    ) -> None:
-        """
-        Generate a reflection from the previous trial and store it in memory.
-
-        This method uses the trajectory stored in self._previous_messages from
-        the previous trial and generates a reflection based on the score achieved.
-
-        Args:
-            task_id (str): The task ID
-            trial_id (str): The trial ID from the previous attempt
-            score (float): The score achieved in the previous trial
-            task_description (str): Description of the task
-        """
-        # Use the messages stored from the previous trial
-        trajectory = self._previous_messages
-
+    ) -> AgentUsage:
         if not trajectory:
-            logger.warning(
-                f"No previous messages found for task {task_id}. "
-                "Skipping reflection generation."
-            )
-            return
-
-        # Generate reflection using the in-memory trajectory directly
-        reflection_text, token_usage = self.reflection_module.generate_reflection(
+            return AgentUsage()
+        text, raw_usage = await reflection_module.generate_reflection(
             task_id=task_id,
             trial_id=trial_id,
             trajectory=trajectory,
             score=score,
             task_description=task_description,
         )
-
-        # Accumulate reflection token usage
-        self.reflection_token_usage["prompt_tokens"] = token_usage.get(
-            "prompt_tokens", 0
+        memory.add_reflection(
+            Reflection(
+                trial_index=len(memory.reflections),
+                task_id=task_id,
+                trajectory=list(trajectory),
+                reflection_text=text,
+                score=score,
+            )
         )
-        self.reflection_token_usage["completion_tokens"] = token_usage.get(
-            "completion_tokens", 0
+        usage = _UsageAccumulator(self._usage)
+        usage.add(raw_usage)
+        return usage.outcome()
+
+    async def run_session(self, session: AgentSession) -> AgentOutcome:
+        """Run the reflect-then-act lifecycle against one bound session."""
+        try:
+            reflection_module = self._reflection_module(session)
+        except ValueError as exc:
+            return AgentOutcome(
+                status="agent_failure", error=concise_error_message(exc)
+            )
+        reflection_model = reflection_module.model
+        task_id = str(getattr(session, "task_id", session.execution_id))
+        memory = self._memory_from_state(session)
+        previous_trajectory = self._trajectory_from_state(session)
+        reflection_usage = AgentUsage()
+        previous = session.previous_evaluation
+        if previous is not None and previous_trajectory and session.iteration_limit > 1:
+            prompt = session.prompt
+            task_description = (
+                prompt
+                if isinstance(prompt, str)
+                else json.dumps(prompt, ensure_ascii=False)
+            )
+            raw_score = previous.get("score", 0.0)
+            try:
+                score = float(raw_score)
+            except (TypeError, ValueError):
+                score = 0.0
+            trial_id = str(previous.get("trial_id", "unknown"))
+            try:
+                reflection_usage = await self._generate_reflection(
+                    reflection_module=reflection_module,
+                    memory=memory,
+                    trajectory=previous_trajectory,
+                    task_id=task_id,
+                    trial_id=trial_id,
+                    score=score,
+                    task_description=task_description,
+                )
+            except Exception as exc:
+                logger.warning(f"Reflexion memory update failed: {exc}")
+
+        await self._store_memory(
+            session,
+            memory,
+            reflection_model=reflection_model,
         )
-        self.reflection_token_usage["total_tokens"] = token_usage.get("total_tokens", 0)
+        for message in create_reflexion_history(memory) or []:
+            await session.record_message(dict(message))
 
-        # Store the reflection with the full trajectory
-        reflection = Reflection(
-            trial_index=len(self.memory.reflections),
-            task_id=task_id,
-            trajectory=trajectory,
-            reflection_text=reflection_text,
-            score=score,
+        remaining_iterations = session.iteration_limit - reflection_usage.llm_calls
+        outcome = await session.run_delegate(
+            self.actor,
+            max_iterations=remaining_iterations,
+        )
+        await self._store_memory(
+            session,
+            memory,
+            reflection_model=reflection_model,
+            actor_status=outcome.status,
+        )
+        return AgentOutcome(
+            status=outcome.status,
+            answer=outcome.answer,
+            error=outcome.error,
+            usage=_combined_usage(reflection_usage, outcome.usage),
+            metadata={
+                "actor": type(self.actor).__name__,
+                "reflection_model": reflection_model,
+                "reflection_count": len(memory.reflections),
+                **dict(outcome.metadata),
+            },
         )
 
-        # Store in memory
-        self.memory.add_reflection(reflection)
 
-        logger.info(
-            f"Stored reflection from trial {trial_id} (score: {score:.3f}): "
-            f"{reflection_text[:100]}..."
-        )
-
-    def get_total_token_usage(self) -> dict[str, int]:
-        """
-        Get total token usage including actor and reflection module.
-
-        Returns:
-            dict[str, int]: Dictionary with token usage statistics including reflection generation tokens
-        """
-        # Get actor's token usage
-        actor_usage = (
-            self.actor.get_total_token_usage()
-            if hasattr(self.actor, "get_total_token_usage")
-            else self.token_usage
-        )
-
-        # Combine actor usage with reflection usage
-        total_usage = {
-            "prompt_tokens": actor_usage.get("prompt_tokens", 0)
-            + self.reflection_token_usage.get("prompt_tokens", 0),
-            "completion_tokens": actor_usage.get("completion_tokens", 0)
-            + self.reflection_token_usage.get("completion_tokens", 0),
-            "total_tokens": actor_usage.get("total_tokens", 0)
-            + self.reflection_token_usage.get("total_tokens", 0),
-        }
-
-        # Add breakdown if desired
-        total_usage["actor_tokens"] = actor_usage.get("total_tokens", 0)
-        total_usage["reflection_tokens"] = self.reflection_token_usage.get(
-            "total_tokens", 0
-        )
-
-        return total_usage
+__all__ = ["ReflexionAgent"]

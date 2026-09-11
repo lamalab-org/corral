@@ -15,9 +15,9 @@ uv sync
 
 If you prefer not to activate the environment, use `uv run` to prefix the commands below.
 
-## Run The Server
+## Inspect The Environment Definitions
 
-Run the task-group benchmark using JSON task definitions from this directory:
+Build and list a task group using JSON task definitions from this directory:
 
 ```bash
 cd tasks/samplemath
@@ -33,17 +33,9 @@ source .venv/bin/activate
 python samplemath/env_subtask.py environments/level_1/subtasks_json/task_1.json
 ```
 
-The task-group server reads these environment variables:
+The task-group script reads this environment variable:
 
-- `CORRAL_HOST`: Bind host for the server. Defaults to `0.0.0.0`.
-- `CORRAL_PORT`: Bind port for the server. Defaults to `8000`.
 - `CORRAL_WORK_DIR`: Base working directory for per-task files.
-
-## See The Tasks
-
-```bash
-curl http://localhost:8000/tasks/
-```
 
 ## Notes
 

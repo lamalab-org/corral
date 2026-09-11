@@ -7,7 +7,7 @@ rather than surfacing as `NOT YET AVAILABLE` text inside a prompt.
 
 import pytest
 
-from corral.backend.task import (
+from corral.core.task import (
     assert_dependencies_selected,
     order_selected,
     topological_order,
@@ -75,7 +75,7 @@ class TestOrderSelected:
 
 class TestTopologicalOrderDelegates:
     def test_matches_graph_ordering(self):
-        from corral.backend.task import InputRef, TaskDefinition
+        from corral.core.task import InputRef, TaskDefinition
 
         def task(name, deps):
             return TaskDefinition(
@@ -92,68 +92,3 @@ class TestTopologicalOrderDelegates:
         for tid, deps in GRAPH.items():
             for dep in deps:
                 assert ordered.index(dep) < ordered.index(tid)
-
-
-class TestChainedShortCircuit:
-    """Broken-chain handling in `run_chained_trials` (no agent, no raise)."""
-
-    @staticmethod
-    def _result(task_id, score):
-        from corral.report.results import TaskTrialResult
-
-        return TaskTrialResult(
-            task_id=task_id,
-            trial_id="attempt_1",
-            score=score,
-            state={},
-            tool_statistics={},
-        )
-
-    def _run(self, ordered_ids, graph, scores):
-        """Run one round with a fake executor; return (results, executed_ids)."""
-        from corral.report.results import TaskTrialResults
-        from corral.run import run_chained_trials
-
-        task_results = {t: TaskTrialResults(task_id=t) for t in ordered_ids}
-        executed: list[str] = []
-
-        def fake_executor(task_id, trial_index):
-            executed.append(task_id)
-            return self._result(task_id, scores[task_id])
-
-        run_chained_trials(
-            ordered_ids,
-            trials_per_task=1,
-            task_results=task_results,
-            trial_executor=fake_executor,
-            checkpoint_saver=lambda results, completed: None,
-            graph=graph,
-        )
-        return task_results, executed
-
-    def test_broken_chain_cascades_without_agent(self):
-        # A -> B -> C; A fails (score 0), so B and C are unreachable.
-        graph = {"A": [], "B": ["A"], "C": ["B"]}
-        scores = {"A": 0.0, "B": 1.0, "C": 1.0}
-
-        task_results, executed = self._run(["A", "B", "C"], graph, scores)
-
-        # Only A actually ran; B and C were short-circuited.
-        assert executed == ["A"]
-
-        b = task_results["B"].trials[0]
-        c = task_results["C"].trials[0]
-        for result, missing in ((b, "A"), (c, "B")):
-            assert result.score == 0.0
-            assert result.success is False
-            assert result.error_message is None  # stays out of error-rate
-            assert result.token_usage == {}  # 0 tokens: a non-attempt
-            assert result.state["unreachable"] is True
-            assert result.state["missing_dependency"] == missing
-
-    def test_healthy_chain_runs_every_task(self):
-        graph = {"A": [], "B": ["A"], "C": ["B"]}
-        scores = {"A": 1.0, "B": 1.0, "C": 1.0}
-
-        _, executed = self._run(["A", "B", "C"], graph, scores)
-        assert executed == ["A", "B", "C"]

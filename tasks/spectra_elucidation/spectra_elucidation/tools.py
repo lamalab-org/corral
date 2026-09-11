@@ -16,7 +16,7 @@ from spectra_elucidation.spectra_utils import (
     predict_nmr_spectra,
 )
 
-from corral.backend.tool import Tool, tool
+from corral.core.tool import Tool, tool
 from corral.utils.rag import vector_database_search
 
 
@@ -418,7 +418,7 @@ def retrieve_carbon_shifts() -> str:
     )
 
 
-@tool(hidden_args=["h_smiles"])
+@tool(hidden_args=["h_smiles"], trusted=True)
 def carbon_nmr_spectra(h_smiles: str) -> str:
     """[BRIEF] Return the 13C NMR spectra for the sample at hand. [/BRIEF]
 
@@ -472,7 +472,7 @@ def carbon_nmr_spectra(h_smiles: str) -> str:
     return asyncio.run(SpectraAPI.get_c13_nmr_prediction(h_smiles))
 
 
-@tool(hidden_args=["h_smiles"])
+@tool(hidden_args=["h_smiles"], trusted=True)
 def proton_nmr_spectra(h_smiles: str) -> str:
     """[BRIEF] Returns the 1H NMR spectra for a given SMILES string. [/BRIEF]
 
@@ -524,7 +524,7 @@ def proton_nmr_spectra(h_smiles: str) -> str:
     return asyncio.run(SpectraAPI.get_h_nmr_prediction(h_smiles))
 
 
-@tool(hidden_args=["h_smiles"])
+@tool(hidden_args=["h_smiles"], trusted=True)
 def ir_spectra(h_smiles: str) -> str:
     """[BRIEF] Returns the IR spectra for the sample at hand. This spectra may not be accurate for all compounds. It works best for identifying functional groups such as C=O. [/BRIEF]
 
@@ -576,7 +576,7 @@ def ir_spectra(h_smiles: str) -> str:
     return asyncio.run(SpectraAPI.get_ir_prediction(h_smiles))
 
 
-@tool(hidden_args=["h_smiles"])
+@tool(hidden_args=["h_smiles"], trusted=True)
 def hsqc_nmr_spectra(h_smiles: str) -> str:
     """[BRIEF] Returns the HSQC (Heteronuclear Single Quantum Coherence) NMR spectra for the sample at hand. [/BRIEF]
 
@@ -639,7 +639,7 @@ def hsqc_nmr_spectra(h_smiles: str) -> str:
     return "No HSQC spectrum found for the provided SMILES."
 
 
-@tool(hidden_args=["h_smiles"])
+@tool(hidden_args=["h_smiles"], trusted=True)
 def mass_spectrometry_spectra(h_smiles: str) -> str:
     """[BRIEF] Returns the mass spectrometry spectra for the sample at hand using the Electrospray Ionization (ESI) technique. [/BRIEF]
 
@@ -1040,7 +1040,7 @@ def validate_smiles(smiles: str) -> bool:
     return mol is not None
 
 
-@tool(hidden_args=["h_smiles"])
+@tool(hidden_args=["h_smiles"], trusted=True)
 def return_possible_fragments(h_smiles: str) -> list[str]:
     """[BRIEF] Return a list of fragments of the sample at hand by removing one or two atoms from the molecule. [/BRIEF]
 

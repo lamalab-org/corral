@@ -1,19 +1,36 @@
-"""Tests for the ClaudeCodeAgent (Claude Code harness wrapper)."""
+"""Tests for the first-class Claude Code session agent."""
+
+from __future__ import annotations
 
 import asyncio
-import threading
+from datetime import datetime, timezone
+from pathlib import Path
 
-import anyio
 import pytest
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 from corral.agents import ClaudeCodeAgent
 from corral.agents import claude_code as claude_code_module
 from corral.agents.claude_code import _to_sdk_content_blocks
+from corral.agents.schema import AgentOutcome
+from corral.core.action import submit_answer_tool
+from corral.core.environment import Environment, Toolset
+from corral.core.task import TaskDefinition
+from corral.core.tool import ToolConnection
+from corral.persistence import SQLiteCommitStore
+from corral.runtime import TaskRuntime
+
+
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
 
 
 class FakeAssistantMessage:
-    def __init__(self, content):
+    def __init__(self, content, model=None):
         self.content = content
+        self.model = model
 
 
 class FakeUserMessage:
@@ -27,9 +44,8 @@ class FakeTextBlock:
 
 
 class FakeThinkingBlock:
-    def __init__(self, thinking, signature=""):
+    def __init__(self, thinking):
         self.thinking = thinking
-        self.signature = signature
 
 
 class FakeToolUseBlock:
@@ -47,12 +63,23 @@ class FakeToolResultBlock:
 
 
 class FakeResultMessage:
-    def __init__(self, result, usage=None, subtype="success", is_error=False):
+    def __init__(
+        self,
+        result,
+        *,
+        usage=None,
+        subtype="success",
+        is_error=False,
+        num_turns=1,
+        session_id="claude-session-1",
+    ):
         self.result = result
         self.usage = usage or {}
         self.subtype = subtype
         self.is_error = is_error
         self.stop_reason = None
+        self.num_turns = num_turns
+        self.session_id = session_id
 
 
 class FakeClaudeAgentOptions:
@@ -61,15 +88,6 @@ class FakeClaudeAgentOptions:
 
 
 def _default_mcp_status(options):
-    """A healthy MCP status exposing exactly the run's allow-listed tools.
-
-    The agent's preflight compares the tools exposed by the (faked) MCP endpoint
-    against the REST allowlist, so by default we echo the allow-listed tools back
-    as bare (un-namespaced) names — the shape the real tools/list returns.
-    """
-    # Only the corral HTTP server's tools appear in its `tools/list`; the
-    # in-process `mcp__submit__submit_answer` channel is a separate server and is
-    # not reported here (mirroring the real MCP status the preflight inspects).
     exposed = [
         {"name": name.removeprefix("mcp__corral__")}
         for name in getattr(options, "allowed_tools", [])
@@ -79,16 +97,6 @@ def _default_mcp_status(options):
 
 
 def _install_fake_sdk(monkeypatch, message_factory, mcp_status_factory=None):
-    """Patch the SDK names in claude_code with fakes.
-
-    The agent imports the Claude Agent SDK symbols at the top of
-    corral.agents.claude_code, so the fakes are patched onto that module's
-    namespace. message_factory receives the ClaudeAgentOptions and
-    returns the list of messages the fake client's receive_response should
-    yield. It also gets a captured dict to record what the harness saw.
-    mcp_status_factory (given the options) returns the value the fake
-    get_mcp_status reports; it defaults to a healthy, matching status.
-    """
     captured: dict = {}
     status_factory = mcp_status_factory or _default_mcp_status
 
@@ -108,16 +116,12 @@ def _install_fake_sdk(monkeypatch, message_factory, mcp_status_factory=None):
 
         async def query(self, prompt):
             captured["prompt"] = prompt
+            if hasattr(prompt, "__aiter__"):
+                captured["prompt_messages"] = [item async for item in prompt]
 
         async def receive_response(self):
             for message in await message_factory(self.options, captured):
                 yield message
-
-    def fake_create_sdk_mcp_server(name, tools):
-        # Expose the decorated in-process handler to tests so they can simulate
-        # an actual submit tool execution independently of SDK stream events.
-        captured["submit_tools"] = tools
-        return {"type": "sdk", "name": name}
 
     monkeypatch.setattr(claude_code_module, "AssistantMessage", FakeAssistantMessage)
     monkeypatch.setattr(claude_code_module, "UserMessage", FakeUserMessage)
@@ -127,602 +131,350 @@ def _install_fake_sdk(monkeypatch, message_factory, mcp_status_factory=None):
     monkeypatch.setattr(claude_code_module, "ToolResultBlock", FakeToolResultBlock)
     monkeypatch.setattr(claude_code_module, "ResultMessage", FakeResultMessage)
     monkeypatch.setattr(
-        claude_code_module, "create_sdk_mcp_server", fake_create_sdk_mcp_server
-    )
-    monkeypatch.setattr(
-        claude_code_module, "ClaudeAgentOptions", FakeClaudeAgentOptions
+        claude_code_module,
+        "ClaudeAgentOptions",
+        FakeClaudeAgentOptions,
     )
     monkeypatch.setattr(claude_code_module, "ClaudeSDKClient", FakeClaudeSDKClient)
     return captured
 
 
-def test_model_is_split_between_harness_and_extractor():
+class FakeSession:
+    def __init__(
+        self,
+        *,
+        prompt="Test task",
+        surrender_allowed=False,
+        submission=None,
+        submission_status=None,
+    ):
+        self.prompt = prompt
+        self.tools = (
+            {
+                "type": "function",
+                "function": {
+                    "name": "test_tool",
+                    "description": "A test tool",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            submit_answer_tool(),
+        )
+        self.workspace = None
+        self.surrender_allowed = surrender_allowed
+        self.iteration_limit = 7
+        self.execution_id = "execution-1"
+        self.messages: list[dict] = []
+        self.tool_connection = ToolConnection("mcp", "http://127.0.0.1:8765/mcp")
+        self.submission = submission
+        self.submission_status = submission_status
+
+    async def record_message(self, message):
+        self.messages.append(dict(message))
+
+
+def test_claude_is_only_a_new_session_agent():
     agent = ClaudeCodeAgent(model="claude-opus-4-8")
-    assert agent.harness_model == "claude-opus-4-8"
-    # Base machinery gets a LiteLLM-routable model derived from the harness one.
-    assert agent.model == "anthropic/claude-opus-4-8"
+
+    assert agent.model == "claude-opus-4-8"
+    assert not hasattr(agent, "max_turns")
+    assert not hasattr(agent, "run")
+    assert not hasattr(agent, "arun")
+    assert not hasattr(agent, "step")
+    assert not hasattr(agent, "arun_agent")
+    assert not hasattr(agent, "messages")
+    assert not hasattr(agent, "harness_result")
 
 
-def test_explicit_extractor_model_and_provider_prefixed_model():
-    agent = ClaudeCodeAgent(model="anthropic/claude-sonnet-4-5")
-    assert agent.harness_model == "anthropic/claude-sonnet-4-5"
-    assert agent.model == "anthropic/claude-sonnet-4-5"
+def test_claude_usage_includes_cached_and_cache_created_input_tokens():
+    usage = ClaudeCodeAgent()._usage(
+        {
+            "input_tokens": 100,
+            "output_tokens": 25,
+            "cache_read_input_tokens": 5,
+            "cache_creation_input_tokens": 7,
+        },
+        llm_calls=3,
+    )
 
-    agent2 = ClaudeCodeAgent(model="claude-opus-4-8", extractor_model="openai/gpt-4o")
-    assert agent2.model == "openai/gpt-4o"
+    assert usage.input_tokens == 112
+    assert usage.output_tokens == 25
+    assert usage.llm_calls == 3
 
 
-def test_run_returns_final_answer_and_points_at_task_mcp(mock_interface, monkeypatch):
+@pytest.mark.anyio()
+async def test_run_session_returns_typed_outcome_and_preserves_harness(
+    monkeypatch,
+):
     async def factory(options, captured):
+        captured["cwd_exists_during_run"] = Path(options.cwd).is_dir()
         return [
             FakeAssistantMessage(
                 [
                     FakeThinkingBlock("let me reason"),
-                    FakeTextBlock("thinking out loud"),
+                    FakeTextBlock("working"),
                     FakeToolUseBlock("tu-1", "test_tool", {"query": "hi"}),
-                ]
+                ],
+                model="claude-opus-4-8",
             ),
-            FakeUserMessage([FakeToolResultBlock("tu-1", "tool-ok", is_error=False)]),
+            FakeUserMessage([FakeToolResultBlock("tu-1", "tool-ok")]),
             FakeResultMessage(
                 "42",
-                usage={"input_tokens": 100, "output_tokens": 25},
+                usage={
+                    "input_tokens": 100,
+                    "output_tokens": 25,
+                    "cache_read_input_tokens": 5,
+                },
+                num_turns=3,
             ),
         ]
 
     captured = _install_fake_sdk(monkeypatch, factory)
+    session = FakeSession(submission="42", submission_status="submitted")
+    outcome = await ClaudeCodeAgent().run_session(session)
 
-    agent = ClaudeCodeAgent(model="claude-opus-4-8", max_iterations=7)
-    answer = agent.run(mock_interface, "task-1")
-
-    # Answer extraction is off by default: the harness answer is submitted
-    # verbatim and appears in the transcript exactly once (no duplicate append).
-    assert answer == "42"
-    assert [m.get("content") for m in agent.messages].count("42") == 1
+    assert isinstance(outcome, AgentOutcome)
+    assert outcome.status == "completed"
+    assert outcome.answer == "42"
+    assert outcome.error is None
+    assert outcome.usage.input_tokens == 105
+    assert outcome.usage.output_tokens == 25
+    assert outcome.usage.llm_calls == 3
+    assert outcome.usage.reasoning_tokens == 0
+    assert outcome.metadata["session_id"] == "claude-session-1"
+    assert outcome.metadata["mcp_tools_exposed"] == ["submit_answer", "test_tool"]
 
     options = captured["options"]
-    # The harness connects directly to the environment server's task-scoped MCP
-    # endpoint (Streamable HTTP); the agent no longer bridges tools in-process.
-    # The REST tool verbosity (defaulting to "brief") is forwarded to the MCP
-    # endpoint so the harness sees the same tool descriptions the allowlist used.
-    assert options.mcp_servers["corral"] == {
-        "type": "http",
-        "url": "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief",
-    }
-    assert agent.harness_result.metadata["mcp_url"] == (
-        "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief"
-    )
-    assert agent.harness_result.metadata["tool_verbosity"] == "brief"
-    # The corral task tool plus the agent-only submit channel are allowed;
-    # built-ins are disabled by fail-closed config (empty base tool set +
-    # dontAsk), not a stale denylist.
+    assert captured["cwd_exists_during_run"] is True
+    assert not Path(options.cwd).exists()
+    assert options.model == "claude-opus-4-8"
+    assert options.max_turns == 7
+    assert options.tools == {"type": "preset", "preset": "claude_code"}
     assert options.allowed_tools == [
         "mcp__corral__test_tool",
-        "mcp__submit__submit_answer",
+        "mcp__corral__submit_answer",
     ]
-    # The in-process submit server is registered only by this agent.
-    assert "submit" in options.mcp_servers
-    assert options.tools == []
-    assert options.permission_mode == "dontAsk"
-    assert options.max_turns == 7
-    assert options.model == "claude-opus-4-8"
-    # Fully isolated config: no filesystem settings/skills/plugins are loaded
-    # and only the corral MCP server is used (strict_mcp_config).
-    assert options.setting_sources == []
+    assert options.mcp_servers == {
+        "corral": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}
+    }
     assert options.strict_mcp_config is True
+    assert options.permission_mode == "auto"
+    assert options.sandbox == {
+        "enabled": True,
+        "autoAllowBashIfSandboxed": True,
+        "allowUnsandboxedCommands": False,
+    }
+    assert options.setting_sources == []
     assert options.skills == []
     assert options.plugins == []
-    # A fresh, per-episode working directory is used (cleaned up after the run).
-    assert isinstance(options.cwd, str)
-    assert "corral-claude-" in options.cwd
-    # Reasoning is configured explicitly, not left to a version-dependent default.
-    assert options.effort == "high"
-    assert options.thinking == {"type": "adaptive"}
-    # The system prompt uses the real Claude Code preset (not a bare string).
-    assert options.system_prompt["type"] == "preset"
+    assert options.include_partial_messages is True
     assert options.system_prompt["preset"] == "claude_code"
-
-    # Thinking, tool-use, and tool-result blocks are recorded in the transcript.
-    roles = [(m.get("role"), m.get("name")) for m in agent.messages]
-    assert ("assistant", "thinking") in roles
-    assert ("tool", "tool_result") in roles
-    tool_call_msg = next(m for m in agent.messages if m.get("tool_calls"))
-    assert tool_call_msg["tool_calls"][0]["function"]["name"] == "test_tool"
-
-    # Token usage is mapped from the harness usage dict.
-    usage = agent.get_total_token_usage()
-    assert usage == {
-        "prompt_tokens": 100,
-        "completion_tokens": 25,
-        "total_tokens": 125,
-    }
-    # Cache token components are preserved separately for cost accounting.
-    assert agent.token_usage["cache_read_input_tokens"] == 0
-    assert agent.token_usage["cache_creation_input_tokens"] == 0
-    assert agent.token_usage["input_tokens"] == 100
-
-    # A structured run result records the outcome + provenance for the record.
-    assert agent.harness_result is not None
-    assert agent.harness_result.status == "success"
-    assert agent.harness_result.answer == "42"
-    meta = agent.harness_result.metadata
-    assert meta["model_requested"] == "claude-opus-4-8"
-    assert meta["reasoning_effort"] == "high"
-    assert meta["max_turns_configured"] == 7
-    assert "system_prompt_append_sha256" in meta
-    assert "rest_tool_schema_sha256" in meta
-
-    # First message is the task prompt; last message is the final answer.
-    assert agent.messages[0]["role"] == "user"
-    assert agent.messages[-1]["content"] == "42"
+    assert session.messages[0] == {"role": "user", "content": "Test task"}
+    assert {"role": "assistant", "content": "42"} not in session.messages
 
 
-def test_run_falls_back_to_assistant_text_without_result(mock_interface, monkeypatch):
+@pytest.mark.anyio()
+async def test_claude_hydrates_query_and_limit_from_session_state(monkeypatch):
+    async def factory(_options, _captured):
+        return [FakeResultMessage("42", num_turns=1)]
+
+    captured = _install_fake_sdk(monkeypatch, factory)
+    session = FakeSession(submission="42", submission_status="submitted")
+    session.messages.append({"role": "user", "content": "resume from canonical state"})
+    session.iteration_limit = 2
+
+    outcome = await ClaudeCodeAgent().run_session(session)
+
+    assert outcome.status == "completed"
+    assert "resume from canonical state" in captured["prompt"]
+    assert captured["options"].max_turns == 2
+
+
+@pytest.mark.anyio()
+@pytest.mark.parametrize(
+    ("subtype", "expected_status"),
+    [
+        ("error_max_turns", "iteration_limit"),
+        ("error_mcp_connection", "tool_failure"),
+        ("error_mcp_tool_mismatch", "protocol_failure"),
+        ("error_unknown", "harness_failure"),
+    ],
+)
+async def test_sdk_failures_are_typed_not_error_answers(
+    monkeypatch,
+    subtype,
+    expected_status,
+):
     async def factory(options, captured):
-        return [FakeAssistantMessage([FakeTextBlock("just the answer")])]
+        return [FakeResultMessage("partial", subtype=subtype, is_error=True)]
 
     _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1")
-    assert answer == "just the answer"
+    outcome = await ClaudeCodeAgent().run_session(FakeSession())
+
+    assert outcome.status == expected_status
+    assert outcome.answer is None
+    assert outcome.error
 
 
-def test_surrender_returns_give_up(mock_interface, monkeypatch):
+@pytest.mark.anyio()
+async def test_wall_clock_timeout_is_a_typed_failure(monkeypatch):
     async def factory(options, captured):
-        return [FakeResultMessage("SURRENDER")]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1", enable_surrender=True)
-    assert answer == "SURRENDER"
-
-
-def test_harness_error_is_caught(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        raise RuntimeError("boom")
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1")
-    assert answer.startswith("Error solving the task")
-    # Infrastructure failures are tagged so the benchmark does not score them
-    # as a wrong model answer.
-    assert agent.harness_result.status == "sdk_failure"
-
-
-def test_error_result_message_is_reported_as_failure(mock_interface, monkeypatch):
-    # An error ResultMessage (e.g. hitting the turn limit) must not be accepted
-    # as a valid answer.
-    async def factory(options, captured):
-        return [FakeResultMessage("partial", subtype="error_max_turns", is_error=True)]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1")
-    assert answer.startswith("Error solving the task")
-    # Budget exhaustion is distinguished from an ordinary failure/wrong answer.
-    assert agent.harness_result.status == "max_turns"
-
-
-def test_wall_clock_timeout_is_reported(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(1)
         return [FakeResultMessage("too late")]
 
     _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent(wall_clock_timeout_s=0.05)
-    answer = agent.run(mock_interface, "task-1")
-    assert answer.startswith("Error solving the task")
-    assert agent.harness_result.status == "timeout"
+    outcome = await ClaudeCodeAgent(wall_clock_timeout_s=0.01).run_session(
+        FakeSession()
+    )
+
+    assert outcome.status == "timeout"
+    assert outcome.answer is None
+    assert "timed out" in outcome.error
 
 
-def test_surrender_records_status(mock_interface, monkeypatch):
+@pytest.mark.anyio()
+async def test_surrender_is_status_not_a_magic_answer(monkeypatch):
     async def factory(options, captured):
         return [FakeResultMessage("SURRENDER")]
 
     _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1", enable_surrender=True)
-    assert answer == "SURRENDER"
-    assert agent.harness_result.status == "surrender"
+    outcome = await ClaudeCodeAgent().run_session(
+        FakeSession(
+            surrender_allowed=True,
+            submission="SURRENDER",
+            submission_status="surrendered",
+        )
+    )
+
+    assert outcome.status == "surrendered"
+    assert outcome.answer is None
+    assert outcome.error is None
 
 
-def test_multimodal_prompt_is_forwarded(mock_interface, monkeypatch):
+@pytest.mark.anyio()
+async def test_multimodal_prompt_uses_sdk_streaming_input(monkeypatch):
     async def factory(options, captured):
         return [FakeResultMessage("a cat")]
 
     captured = _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-    task_prompt = [
+    prompt = [
         {"type": "text", "text": "describe this"},
         {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
     ]
-    answer = agent.run(mock_interface, "task-1", task_prompt=task_prompt)
-    assert answer == "a cat"
-
-    # Images go through the SDK streaming-input interface (an async iterable),
-    # not the plain-string prompt.
-    assert hasattr(captured["prompt"], "__aiter__")
-    # The structured content is preserved in the transcript, image included.
-    first = agent.messages[0]
-    assert first["role"] == "user"
-    assert any(
-        isinstance(p, dict) and p.get("type") == "image_url" for p in first["content"]
+    outcome = await ClaudeCodeAgent().run_session(
+        FakeSession(
+            prompt=prompt,
+            submission="a cat",
+            submission_status="submitted",
+        )
     )
 
-
-def test_claude_code_bypasses_answer_extraction():
-    # The harness returns a submit-ready answer, so the base class must not make
-    # a second answer-extraction model call.
-    agent = ClaudeCodeAgent(model="claude-opus-4-8")
-    assert agent.requires_answer_extraction is False
-
-
-def test_preflight_records_exposed_mcp_tool_metadata(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        return [FakeResultMessage("ok")]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-    agent.run(mock_interface, "task-1")
-
-    meta = agent.harness_result.metadata
-    # Provenance reflects the tools the harness actually sees via `tools/list`.
-    assert meta["mcp_tools_exposed"] == ["test_tool"]
-    # `get_mcp_status` exposes tool metadata, not input schemas — named honestly.
-    assert "mcp_tool_metadata_sha256" in meta
-
-
-def test_mcp_connection_failure_is_reported(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        return [FakeResultMessage("unreachable")]
-
-    def bad_status(options):
-        return {
-            "mcpServers": [
-                {"name": "corral", "status": "failed", "error": "connection refused"}
-            ]
-        }
-
-    _install_fake_sdk(monkeypatch, factory, mcp_status_factory=bad_status)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1")
-    assert answer.startswith("Error solving the task")
-    # A dead MCP transport is an infrastructure/tool failure, not a wrong answer.
-    assert agent.harness_result.status == "tool_failure"
-
-
-def test_mcp_tool_mismatch_is_reported(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        return [FakeResultMessage("wrong tools")]
-
-    def mismatched_status(options):
-        return {
-            "mcpServers": [
-                {
-                    "name": "corral",
-                    "status": "connected",
-                    "tools": [{"name": "some_other_tool"}],
-                }
-            ]
-        }
-
-    _install_fake_sdk(monkeypatch, factory, mcp_status_factory=mismatched_status)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1")
-    assert answer.startswith("Error solving the task")
-    assert agent.harness_result.status == "sdk_failure"
-
-
-def test_mcp_pending_state_is_retried(mock_interface, monkeypatch):
-    # A transient `pending` MCP state must be retried, not treated as a failure.
-    async def factory(options, captured):
-        return [FakeResultMessage("eventually")]
-
-    calls = {"n": 0}
-
-    def flaky_status(options):
-        calls["n"] += 1
-        state = "pending" if calls["n"] == 1 else "connected"
-        exposed = [
-            {"name": name.removeprefix("mcp__corral__")}
-            for name in options.allowed_tools
-            if name.startswith("mcp__corral__")
-        ]
-        return {"mcpServers": [{"name": "corral", "status": state, "tools": exposed}]}
-
-    _install_fake_sdk(monkeypatch, factory, mcp_status_factory=flaky_status)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1")
-    assert answer == "eventually"
-    assert calls["n"] >= 2  # polled again after the initial pending status
-
-
-def test_tool_errors_are_counted(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        return [
-            FakeAssistantMessage([FakeToolUseBlock("tu-1", "test_tool", {})]),
-            FakeUserMessage([FakeToolResultBlock("tu-1", "boom", is_error=True)]),
-            FakeResultMessage("recovered"),
-        ]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1")
-    # A recoverable tool error does not fail the run, but is recorded.
-    assert answer == "recovered"
-    assert agent.harness_result.status == "success"
-    assert agent.harness_result.metadata["tool_errors"] == 1
-
-
-def test_default_system_prompt_instructs_submit_tool():
-    """The harness is told to return its answer via the `submit_answer` tool."""
-    agent = ClaudeCodeAgent()
-    assert agent.requires_answer_extraction is False
-    append = agent._build_system_prompt(enable_surrender=False)["append"]
-    # No brittle chat-scraping convention: the answer comes back through the tool.
-    assert "Final Answer:" not in append
-    assert "submit_answer" in append
-
-
-def test_submit_tool_answer_is_preferred_over_trailing_message(
-    mock_interface, monkeypatch
-):
-    """A tool-submitted answer wins over the harness's chatty final message.
-
-    This is the whole point of the submit channel: whatever prose the model
-    wraps around the answer in its trailing message, the run submits exactly the
-    value it passed to `submit_answer`.
-    """
-
-    async def factory(options, captured):
-        # Run the actual in-process handler without emitting SDK tool blocks.
-        # This exercises the fallback that guarantees the call is still traced.
-        await captured["submit_tools"][0].handler({"answer": "clean.cif"})
-        return [
-            FakeResultMessage("Perfect! I saved everything to **clean.cif** (2.0 A)."),
-        ]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-
-    answer = agent.run(mock_interface, "task-1")
-    assert answer == "clean.cif"
-    assert agent.harness_result.status == "success"
-    assert agent.harness_result.metadata["submit_tool_used"] is True
-    submit_calls = [
-        call
-        for message in agent.messages
-        for call in message.get("tool_calls", []) or []
-        if call["function"]["name"] == "mcp__submit__submit_answer"
-    ]
-    assert len(submit_calls) == 1
-    assert submit_calls[0]["function"]["arguments"] == '{"answer": "clean.cif"}'
-    submit_id = submit_calls[0]["id"]
-    assert any(
-        message.get("role") == "tool"
-        and message.get("tool_call_id") == submit_id
-        and '"text": "Answer submitted."' in message.get("content", "")
-        for message in agent.messages
-    )
-
-
-def test_streamed_submit_tool_call_is_not_duplicated(mock_interface, monkeypatch):
-    """Handler capture and normal SDK events reconcile to one trace step."""
-
-    async def factory(options, captured):
-        await captured["submit_tools"][0].handler({"answer": "42"})
-        return [
-            FakeAssistantMessage(
-                [
-                    FakeToolUseBlock(
-                        "submit-1",
-                        "mcp__submit__submit_answer",
-                        {"answer": "42"},
-                    )
-                ]
-            ),
-            FakeUserMessage([FakeToolResultBlock("submit-1", "Answer submitted.")]),
-            FakeResultMessage("ignored trailing text"),
-        ]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-
-    assert agent.run(mock_interface, "task-1") == "42"
-    submit_calls = [
-        call
-        for message in agent.messages
-        for call in message.get("tool_calls", []) or []
-        if call["function"]["name"] == "mcp__submit__submit_answer"
-    ]
-    submit_results = [
-        message
-        for message in agent.messages
-        if message.get("role") == "tool" and message.get("tool_call_id") == "submit-1"
-    ]
-    assert len(submit_calls) == 1
-    assert len(submit_results) == 1
-
-
-@pytest.mark.parametrize(
-    ("submitted", "expected"),
-    [
-        ("```python\nprint('hello')\n```", "print('hello')"),
-        (
-            "```language-with+symbols {anything}\n/path/to/result.cif\n```",
-            "/path/to/result.cif",
-        ),
-        ("```\n42\n```", "42"),
-        ("answer with `inline code`", "answer with `inline code`"),
-    ],
-)
-def test_submit_tool_strips_outer_code_fence(
-    submitted, expected, mock_interface, monkeypatch
-):
-    """An enclosing fence is removed regardless of its language info string."""
-
-    async def factory(options, captured):
-        await captured["submit_tools"][0].handler({"answer": submitted})
-        return [FakeResultMessage("ignored trailing text")]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-
-    assert agent.run(mock_interface, "task-1") == expected
-
-
-def test_falls_back_to_trailing_message_when_submit_tool_unused(
-    mock_interface, monkeypatch
-):
-    """If the harness never calls the tool, the final message is still used."""
-
-    async def factory(options, captured):
-        return [FakeResultMessage("42")]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-    answer = agent.run(mock_interface, "task-1")
-    assert answer == "42"
-    assert agent.harness_result.metadata["submit_tool_used"] is False
-
-
-def test_data_uri_converted_to_sdk_image_block():
-    blocks = _to_sdk_content_blocks(
-        [
-            {"type": "text", "text": "hi"},
-            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
-        ]
-    )
-    assert blocks[0] == {"type": "text", "text": "hi"}
-    assert blocks[1] == {
+    assert outcome.answer == "a cat"
+    content = captured["prompt_messages"][0]["message"]["content"]
+    assert content[1] == {
         "type": "image",
         "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
     }
 
 
-def test_arun_matches_run_and_records_thread(mock_interface, monkeypatch):
-    """`arun` drives the SDK natively on the caller's loop, no worker thread."""
-    seen: dict = {}
-
+@pytest.mark.anyio()
+async def test_mcp_tool_mismatch_is_a_protocol_failure(monkeypatch):
     async def factory(options, captured):
-        seen["thread"] = threading.current_thread().name
-        return [
-            FakeAssistantMessage(
-                [FakeToolUseBlock("tu-1", "test_tool", {"query": "x"})]
-            ),
-            FakeUserMessage([FakeToolResultBlock("tu-1", "ok", is_error=False)]),
-            FakeResultMessage("42", usage={"input_tokens": 5, "output_tokens": 2}),
-        ]
+        return [FakeResultMessage("wrong")]
 
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent(model="claude-opus-4-8")
-
-    answer = anyio.run(agent.arun, mock_interface, "task-1")
-
-    assert answer == "42"
-    assert agent.harness_result.status == "success"
-    # The SDK coroutine ran on the event-loop thread — no nested worker thread.
-    assert seen["thread"] == threading.current_thread().name
-
-
-def test_run_and_arun_produce_the_same_answer(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        return [FakeResultMessage("same-answer")]
-
-    _install_fake_sdk(monkeypatch, factory)
-
-    sync_answer = ClaudeCodeAgent().run(mock_interface, "task-1")
-    async_answer = anyio.run(ClaudeCodeAgent().arun, mock_interface, "task-1")
-
-    assert sync_answer == async_answer == "same-answer"
-
-
-def test_arun_surrender_returns_give_up(mock_interface, monkeypatch):
-    async def factory(options, captured):
-        return [FakeResultMessage("SURRENDER")]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent()
-
-    async def _go():
-        return await agent.arun(mock_interface, "task-1", enable_surrender=True)
-
-    assert anyio.run(_go) == "SURRENDER"
-
-
-def test_arun_wall_clock_timeout_is_reported(mock_interface, monkeypatch):
-    """The async path enforces the deadline with a structured cancel scope."""
-
-    async def factory(options, captured):
-        await asyncio.sleep(1.0)
-        return [FakeResultMessage("too late")]
-
-    _install_fake_sdk(monkeypatch, factory)
-    agent = ClaudeCodeAgent(wall_clock_timeout_s=0.05)
-
-    answer = anyio.run(agent.arun, mock_interface, "task-1")
-
-    assert answer.startswith("Error solving the task")
-    assert agent.harness_result.status == "timeout"
-
-
-class AsyncMockInterface:
-    """A minimal async benchmark interface (mirrors the AsyncCorralRouter shape).
-
-    Its prompt/tools methods are `async def` and record the thread they ran on,
-    so a test can prove the native `arun` awaited them on the event-loop thread
-    rather than offloading to a worker thread.
-    """
-
-    def __init__(self):
-        self.base_url = "http://test-server:8000"
-        self.current_verbosity = "brief"
-        self.calls: list[tuple[str, str]] = []
-
-    async def get_available_tools_for_task(self, task_id, verbosity=None):
-        self.calls.append(("tools", threading.current_thread().name))
+    def mismatch(_options):
         return {
-            "tools": [
+            "mcpServers": [
                 {
-                    "type": "function",
-                    "function": {
-                        "name": "test_tool",
-                        "description": "A test tool",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": [],
-                        },
-                    },
+                    "name": "corral",
+                    "status": "connected",
+                    "tools": [{"name": "other_tool"}],
                 }
             ]
         }
 
-    async def get_task_prompt(self, task_id):
-        self.calls.append(("prompt", threading.current_thread().name))
-        return "Test task prompt"
+    _install_fake_sdk(monkeypatch, factory, mismatch)
+    outcome = await ClaudeCodeAgent().run_session(FakeSession())
 
-    def mcp_url(self, task_id, verbosity=None):
-        verbosity = verbosity or self.current_verbosity or "brief"
-        return f"{self.base_url}/tasks/{task_id}/mcp/?verbosity={verbosity}"
+    assert outcome.status == "protocol_failure"
+    assert "tool mismatch" in outcome.error
 
 
-def test_arun_fetches_prompt_and_tools_through_async_router(monkeypatch):
-    """The native `arun` awaits prompts/tools directly on the async interface."""
-
+@pytest.mark.anyio()
+async def test_plain_text_result_is_not_a_submission(monkeypatch):
     async def factory(options, captured):
-        return [FakeResultMessage("42", usage={"input_tokens": 5, "output_tokens": 2})]
+        return [FakeResultMessage("42")]
 
     _install_fake_sdk(monkeypatch, factory)
-    interface = AsyncMockInterface()
-    agent = ClaudeCodeAgent(model="claude-opus-4-8")
-    main_thread = threading.current_thread().name
+    outcome = await ClaudeCodeAgent().run_session(FakeSession())
 
-    answer = anyio.run(agent.arun, interface, "task-1")
+    assert outcome.status == "protocol_failure"
+    assert "without calling submit_answer" in outcome.error
 
-    assert answer == "42"
-    assert agent.harness_result.status == "success"
-    # Both HTTP fetches were awaited on the loop thread — no worker-thread
-    # offload — proving the native path fetches through the async router.
-    assert ("tools", main_thread) in interface.calls
-    assert ("prompt", main_thread) in interface.calls
+
+def test_data_uri_converted_to_sdk_image_block():
+    assert _to_sdk_content_blocks(
+        [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]
+    ) == [
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
+        }
+    ]
+
+
+@pytest.mark.anyio()
+async def test_claude_submits_through_the_session_mcp_tool(monkeypatch, tmp_path):
+    async def factory(options, captured):
+        url = options.mcp_servers["corral"]["url"]
+        async with (
+            streamablehttp_client(url) as streams,
+            ClientSession(streams[0], streams[1]) as mcp_session,
+        ):
+            await mcp_session.initialize()
+            result = await mcp_session.call_tool("submit_answer", {"answer": "42"})
+            assert result.isError is False
+        return [
+            FakeResultMessage(
+                "42",
+                usage={"input_tokens": 5, "output_tokens": 2},
+                num_turns=1,
+            )
+        ]
+
+    _install_fake_sdk(monkeypatch, factory)
+    task = TaskDefinition(
+        name="task",
+        description="answer 42",
+        tools=[],
+        scoring_fn=lambda answer: float(answer == "42"),
+        submission_format={"answer": "string"},
+        resolve_answer=False,
+    )
+    environment = Environment(
+        "task",
+        task,
+        toolset=Toolset(pool={}, workspace_factory=None),
+    )
+
+    async with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
+        final = await TaskRuntime(store).run(
+            ClaudeCodeAgent(),
+            environment,
+            execution_id="claude-task",
+            started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            max_iterations=1,
+        )
+
+    assert final.runtime.status == "submitted"
+    assert final.submission == "42"
+    assert final.usage.input_tokens == 5
+    assert final.usage.output_tokens == 2
+    assert final.usage.llm_calls == 1
+    assert final.usage.tool_calls == 1
+    assert final.usage.agent_steps == 1
+    assert final.tool_statistics == {"submit_answer": 1}

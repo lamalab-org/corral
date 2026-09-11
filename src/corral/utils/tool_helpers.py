@@ -1,18 +1,16 @@
 import os
 import re
 from pathlib import Path
-from typing import Any
-from urllib.parse import quote
 
-import requests
 from litellm import embedding
-from loguru import logger
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
+
+from corral.report.logging import logger
 
 
 def extract_path_from_answer(answer: str) -> str:
@@ -57,9 +55,19 @@ def find_file_by_name(filename: str, base_dir: str | None = None) -> str:
     if not base_dir or not Path(base_dir).exists():
         return filename
 
-    # Search for the file recursively
+    # Search for the file recursively. A symlink is never a valid workspace
+    # file, even if its current target happens to remain below `base_dir`.
+    from corral.workspace import confine_workspace_path
+
     base_path = Path(base_dir)
-    matches = list(base_path.rglob(filename))
+    matches = []
+    for match in base_path.rglob(filename):
+        try:
+            confined = confine_workspace_path(base_path, match)
+        except ValueError:
+            continue
+        if confined.is_file():
+            matches.append(confined)
 
     if matches:
         # Return the most recent file
@@ -69,78 +77,35 @@ def find_file_by_name(filename: str, base_dir: str | None = None) -> str:
 
 
 def smart_resolve_path(input_path: str, base_dir: str | None = None) -> str:
-    """Resolve path intelligently - use absolute path if exists, search only as fallback.
+    """Resolve a path, confining task submissions to `base_dir` when supplied.
 
-    When `base_dir` is given, the fallback file search is scoped to that
-    directory (typically a trial's isolated workspace) instead of the
-    process-global `CORRAL_WORK_DIR`. This is what keeps two concurrent trials
-    that both submit the same bare filename from resolving to each other's file.
+    With an explicit `base_dir`, both direct paths and fallback searches are
+    restricted to that one task workspace. Existing absolute sibling paths,
+    `..` traversal, and symlink aliases are rejected instead of being passed
+    to a scorer. Without `base_dir` the legacy process-global lookup remains
+    available for non-runtime callers.
     """
     extracted_path = extract_path_from_answer(input_path)
+
+    if base_dir is not None:
+        from corral.workspace import confine_workspace_path
+
+        candidate = confine_workspace_path(base_dir, extracted_path)
+        if candidate.is_file():
+            return str(candidate)
+
+        # Preserve the historical basename fallback, but search this execution
+        # root only. A missing result remains rooted inside the workspace so a
+        # relative process cwd can never redirect the scorer elsewhere.
+        found = find_file_by_name(Path(extracted_path).name, base_dir)
+        if Path(found).is_absolute():
+            return found
+        return str(confine_workspace_path(base_dir, Path(extracted_path).name))
 
     if Path(extracted_path).exists():
         return extracted_path  # Use the extracted path directly
     else:
-        # Search as fallback, scoped to base_dir when provided.
-        return find_file_by_name(Path(extracted_path).name, base_dir)
-
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(
-        (requests.exceptions.RequestException, requests.exceptions.HTTPError)
-    ),
-)
-def make_api_request(
-    url: str,
-    method: str = "GET",
-    headers: dict[str, str] | None = None,
-    params: dict[str, Any] | None = None,
-    json_data: dict[str, Any] | None = None,
-    verbose: bool = False,
-    json: bool = True,
-) -> dict[str, Any]:
-    """
-    Make an API request with retry capabilities.
-
-    Args:
-        url (str): The API endpoint URL
-        method (str, optional): HTTP method (GET, POST, PUT, etc.). Defaults to "GET".
-        headers (dict[str, str], optional): Request headers. Defaults to None.
-        params (dict[str, Any], optional): URL parameters. Defaults to None.
-        json_data (dict[str, Any], optional): JSON data for POST/PUT requests. Defaults to None.
-        verbose (bool, optional): Whether to print verbose output. Defaults to False.
-        json (bool, optional): Whether to parse response as JSON. Defaults to True.
-
-    Returns:
-        dict[str, Any]: JSON response from the API
-
-    Raises:
-        requests.exceptions.RequestException: If the request fails after retries
-    """
-    method = method.upper()
-    url = quote(url, safe=":/?&=%")
-    logger.info(f"Making {method} request to {url}")
-
-    if verbose:
-        logger.debug(f"Headers: {headers}")
-        logger.debug(f"Params: {params}")
-        if json_data:
-            logger.debug(f"JSON data: {json_data}")
-
-    response = requests.request(
-        method=method, url=url, headers=headers, params=params, json=json_data
-    )
-
-    if verbose:
-        logger.debug(f"Response status code: {response.status_code}")
-        logger.debug(f"Response content: {response.text[:500]}...")
-
-    response.raise_for_status()
-    if json:
-        return response.json()
-    return response.text
+        return find_file_by_name(Path(extracted_path).name)
 
 
 @retry(
@@ -171,10 +136,9 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
         or not isinstance(chunks, list)
         or not all(isinstance(chunk, str) for chunk in chunks)
     ):
-        logger.error("Invalid input: chunks must be a non-empty list of strings")
         raise ValueError("Input must be a non-empty list of strings")
 
-    logger.info(
+    logger.debug(
         f"Embedding {len(chunks)} {'chemical' if chemical else 'text'} chunks using model: {model}"
     )
 
@@ -183,22 +147,21 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
 
     # Process in batches if the input is large
     if len(chunks) > BATCH_SIZE:
-        logger.info(f"Input size exceeds {BATCH_SIZE} chunks, processing in batches")
+        logger.debug(f"Input size exceeds {BATCH_SIZE} chunks, processing in batches")
         all_embeddings = []
 
         # Process chunks in batches
         for i in range(0, len(chunks), BATCH_SIZE):
             batch = chunks[i : i + BATCH_SIZE]
-            logger.info("Processing batched chunks")
+            logger.debug("Processing batched chunks")
 
             try:
                 batch_embeddings = embed_text(batch, model=model, chemical=chemical)
                 all_embeddings.extend(batch_embeddings)
-            except Exception as e:
-                logger.error(f"Error in batch {i // BATCH_SIZE + 1}: {e!s}")
+            except Exception:
                 raise
 
-        logger.info(
+        logger.debug(
             f"Successfully generated {len(all_embeddings)} embeddings across all batches"
         )
         return all_embeddings
@@ -209,7 +172,7 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
             import torch
             from transformers import AutoModel, AutoTokenizer
 
-            logger.info("Using MoLFormer model for chemical embeddings")
+            logger.debug("Using MoLFormer model for chemical embeddings")
 
             # Load model & tokenizer
             tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
@@ -229,11 +192,12 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
             # Extract embeddings
             embeddings = outputs.pooler_output.tolist()  # Convert to list format
 
-            logger.info(f"Successfully generated {len(embeddings)} chemical embeddings")
+            logger.debug(
+                f"Successfully generated {len(embeddings)} chemical embeddings"
+            )
             return embeddings
 
         except Exception as e:
-            logger.error(f"Error generating chemical embeddings: {e!s}", exc_info=True)
             raise RuntimeError(f"Failed to generate chemical embeddings: {e!s}") from e
 
     # For text embeddings, use litellm as before
@@ -242,10 +206,9 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
             model=model,
             input=chunks,
         )
-        logger.info(
+        logger.debug(
             f"Successfully generated {len(result_embeddings['data'])} embeddings"
         )
         return [item["embedding"] for item in result_embeddings["data"]]
     except Exception as e:
-        logger.error(f"Error generating embeddings: {e!s}", exc_info=True)
         raise RuntimeError(f"Failed to generate embeddings: {e!s}") from e

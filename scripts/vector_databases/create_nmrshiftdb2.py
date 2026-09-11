@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from rdkit import Chem
 
-from corral.utils import create_vector_database
+from corral.utils.rag import create_vector_database
 
 load_dotenv("../.env", override=True)
 

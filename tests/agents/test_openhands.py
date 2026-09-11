@@ -1,819 +1,302 @@
-"""Tests for the OpenHandsAgent (OpenHands harness wrapper).
+"""Tests for the OpenHands native session adapter."""
 
-The OpenHands SDK is an optional dependency; these tests patch the SDK names on
-the `corral.agents.openhands` module with fakes that mimic the SDK's Agent /
-Conversation / event shapes. The real `ConversationExecutionStatus` enum is
-reused because it is a stable, dependency-free enum.
-"""
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
-import asyncio
-import hashlib
-import json
-import threading
+import pytest
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
-import anyio
-from openhands.sdk.conversation.state import ConversationExecutionStatus
+pytest.importorskip("openhands.sdk")
 
+import corral.agents.openhands as openhands_module
 from corral.agents import OpenHandsAgent
-from corral.agents import openhands as openhands_module
-from corral.agents.schema import SURRENDER_SENTINEL
-
-
-class FakeMessage:
-    def __init__(self, role, content):
-        self.role = role
-        self.content = content
-
-
-class FakeLLMConvertibleEvent:
-    """Base marker class so `isinstance(event, LLMConvertibleEvent)` works."""
-
-
-class FakeMessageEvent(FakeLLMConvertibleEvent):
-    def __init__(self, role, content):
-        self._message = FakeMessage(role, content)
-
-    def to_llm_message(self):
-        return self._message
-
-
-class FakeTextContent:
-    """Mirrors an openhands `TextContent` (carries `.text`)."""
-
-    def __init__(self, text):
-        self.text = text
-
-
-class FakeSystemPromptEvent(FakeLLMConvertibleEvent):
-    """Mirrors `SystemPromptEvent`: rendered `system_prompt` + optional
-    per-conversation `dynamic_context`."""
-
-    def __init__(self, text, dynamic_context=None):
-        self.system_prompt = FakeTextContent(text)
-        self.dynamic_context = (
-            FakeTextContent(dynamic_context) if dynamic_context is not None else None
-        )
-
-    def to_llm_message(self):
-        return FakeMessage("system", self.system_prompt.text)
-
-
-class FakeFinishAction:
-    def __init__(self, message):
-        self.message = message
-
-
-class FakeToolAction:
-    """A non-finish, non-MCP action whose args come from `model_dump()`.
-
-    Mirrors a builtin/tool action envelope: `model_dump()` includes non-argument
-    keys (`kind`) that the recorder must strip.
-    """
-
-    def __init__(self, **arguments):
-        self._arguments = arguments
-
-    def model_dump(self, mode=None):
-        return {"kind": "tool_action", **self._arguments}
-
-
-class FakeMCPToolAction:
-    """Mirrors openhands `MCPToolAction`: the tool arguments live in `.data`.
-
-    The SDK envelope (`model_dump()`) wraps them under `kind`/`data`; the
-    recorder must surface the flat `.data` args, not the envelope.
-    """
-
-    def __init__(self, **data):
-        self.data = dict(data)
-
-    def model_dump(self, mode=None):
-        return {"kind": "mcp_tool_action", "data": dict(self.data)}
-
-
-class FakeActionEvent(FakeLLMConvertibleEvent):
-    def __init__(self, action, tool_name="", tool_call_id="", thought=""):
-        self.action = action
-        self.tool_name = tool_name
-        self.tool_call_id = tool_call_id
-        self.thought = thought
-
-    def to_llm_message(self):
-        message = getattr(self.action, "message", "")
-        return FakeMessage("assistant", message)
-
-
-class FakeObservation:
-    """Mirrors an openhands `Observation`: failure is `is_error`, not `error`."""
-
-    def __init__(self, text, is_error=False):
-        self.text = text
-        self.is_error = is_error
-
-
-class FakeObservationEvent(FakeLLMConvertibleEvent):
-    def __init__(self, tool_name, tool_call_id, result, is_error=False):
-        self.tool_name = tool_name
-        self.tool_call_id = tool_call_id
-        # Real `ObservationEvent` carries an `Observation` (with `is_error`) and
-        # has no event-level `error` attribute; mirror that here so the fake
-        # cannot silently agree with an implementation that reads `.error`.
-        self.observation = FakeObservation(result, is_error=is_error)
-
-    def to_llm_message(self):
-        return FakeMessage("tool", self.observation.text)
-
-
-class FakeConversationErrorEvent:
-    def __init__(self, code, detail):
-        self.code = code
-        self.detail = detail
-
-
-class FakeTokenUsage:
-    def __init__(self, prompt_tokens, completion_tokens):
-        self.prompt_tokens = prompt_tokens
-        self.completion_tokens = completion_tokens
-
-
-class FakeMetrics:
-    def __init__(self, prompt_tokens=100, completion_tokens=25, cost=0.5):
-        self.accumulated_token_usage = FakeTokenUsage(prompt_tokens, completion_tokens)
-        self.accumulated_cost = cost
-
-
-class FakeLLM:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.metrics = FakeMetrics()
-
-
-class FakeAgentContext:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-
-
-class FakeMCPServer:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-
-
-class FakeStateAgent:
-    def __init__(self, tools_map):
-        self._tools_map = tools_map
-
-    @property
-    def tools_map(self):
-        return self._tools_map
-
-
-class FakeState:
-    def __init__(self, execution_status, agent):
-        self.execution_status = execution_status
-        self.agent = agent
-
-
-class FakeAgent:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-
-
-class FakeConversation:
-    def __init__(self, captured, events, block_seconds, run_error, state, **kwargs):
-        self._captured = captured
-        self._events = events
-        self._block_seconds = block_seconds
-        self._run_error = run_error
-        self.state = state
-        self.kwargs = kwargs
-        captured["conversation_kwargs"] = kwargs
-        self.callbacks = kwargs.get("callbacks", [])
-        self._interrupted = threading.Event()
-
-    def send_message(self, prompt):
-        self._captured["sent_message"] = prompt
-
-    def _emit_events(self):
-        for event in self._events:
-            for cb in self.callbacks:
-                cb(event)
-
-    def run(self):
-        # The agent now always drives the async entrypoint (`arun`); this sync
-        # path is kept only so the fake stays a faithful stand-in for the SDK.
-        self._captured["ran"] = True
-        if self._run_error is not None:
-            raise self._run_error
-        self._emit_events()
-
-    async def arun(self):
-        self._captured["aran"] = True
-        # Record the thread the SDK ran on so a test can prove the native `arun`
-        # drives the harness on the event-loop thread (no worker-thread nesting).
-        self._captured["arun_thread"] = threading.current_thread().name
-        if self._run_error is not None:
-            raise self._run_error
-        if self._block_seconds:
-            # Genuinely async block (mirrors the real SDK's awaiting `arun`) so a
-            # loop-level deadline/interrupt can unwind the run promptly instead of
-            # freezing the event loop.
-            waited = 0.0
-            while waited < self._block_seconds and not self._interrupted.is_set():
-                await asyncio.sleep(0.02)
-                waited += 0.02
-            if self._interrupted.is_set():
-                return
-        self._emit_events()
-
-    def interrupt(self):
-        self._captured["interrupted"] = True
-        self._interrupted.set()
-
-    def pause(self):
-        self._captured["paused"] = True
-
-    def close(self):
-        self._captured["closed"] = self._captured.get("closed", 0) + 1
-
-
-def _default_state(execution_status, runtime_tools):
-    if runtime_tools is None:
-        runtime_tools = {"finish": object(), "think": object(), "test_tool": object()}
-    else:
-        runtime_tools = {name: object() for name in runtime_tools}
-    return FakeState(execution_status, FakeStateAgent(runtime_tools))
-
-
-def _install_fake_sdk(
-    monkeypatch,
-    events,
-    *,
-    block_seconds=0.0,
-    run_error=None,
-    execution_status=ConversationExecutionStatus.FINISHED,
-    runtime_tools=None,
-):
-    """Patch the SDK names on openhands_module and capture what the agent saw."""
-    captured: dict = {}
-    state = _default_state(execution_status, runtime_tools)
-
-    def _agent_factory(**kwargs):
-        captured["agent_kwargs"] = kwargs
-        return FakeAgent(**kwargs)
-
-    def _conversation_factory(**kwargs):
-        return FakeConversation(
-            captured, events, block_seconds, run_error, state, **kwargs
-        )
-
-    def _llm_factory(**kwargs):
-        llm = FakeLLM(**kwargs)
-        captured["llm"] = llm
-        return llm
-
-    monkeypatch.setattr(openhands_module, "Agent", _agent_factory)
-    monkeypatch.setattr(openhands_module, "Conversation", _conversation_factory)
-    monkeypatch.setattr(openhands_module, "LLM", _llm_factory)
-    monkeypatch.setattr(openhands_module, "AgentContext", FakeAgentContext)
-    monkeypatch.setattr(openhands_module, "MCPServer", FakeMCPServer)
-    monkeypatch.setattr(
-        openhands_module, "LLMConvertibleEvent", FakeLLMConvertibleEvent
+from corral.agents.openhands import HarnessRunResult
+from corral.core.action import submit_answer_tool
+from corral.core.environment import Environment, Toolset
+from corral.core.task import TaskDefinition
+from corral.core.tool import ToolConnection
+from corral.persistence import SQLiteCommitStore
+from corral.runtime import TaskRuntime
+
+
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
+
+
+class Session:
+    tool_connection = ToolConnection("mcp", "http://127.0.0.1:1234/mcp")
+    prompt = "solve"
+    tools = (
+        {
+            "type": "function",
+            "function": {
+                "name": "measure",
+                "description": "measure",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        submit_answer_tool(),
     )
-    monkeypatch.setattr(openhands_module, "ActionEvent", FakeActionEvent)
-    monkeypatch.setattr(openhands_module, "ObservationEvent", FakeObservationEvent)
-    monkeypatch.setattr(openhands_module, "SystemPromptEvent", FakeSystemPromptEvent)
-    monkeypatch.setattr(openhands_module, "FinishAction", FakeFinishAction)
-    monkeypatch.setattr(
-        openhands_module, "ConversationErrorEvent", FakeConversationErrorEvent
-    )
-    return captured
-
-
-def _finish(message):
-    return FakeActionEvent(FakeFinishAction(message))
-
-
-def test_model_split_between_harness_and_extractor():
-    agent = OpenHandsAgent(model="openai/gpt-5.6")
-    assert agent.harness_model == "openai/gpt-5.6"
-    # An already-routable model is reused verbatim for the base machinery.
-    assert agent.model == "openai/gpt-5.6"
-    # No second (extractor) model call: the harness answer is submitted verbatim.
-    assert agent.requires_answer_extraction is False
-
-    agent2 = OpenHandsAgent(model="gpt-5.6", extractor_model="openai/gpt-4o")
-    assert agent2.harness_model == "gpt-5.6"
-    assert agent2.model == "openai/gpt-4o"
-
-
-def test_run_returns_final_answer_and_reuses_task_mcp(mock_interface, monkeypatch):
-    events = [
-        FakeMessageEvent("assistant", "let me think"),
-        _finish("42"),
-    ]
-    captured = _install_fake_sdk(monkeypatch, events)
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = agent.run(mock_interface, "task-1")
-
-    # Answer extraction is off by default: the harness answer is submitted
-    # verbatim and appears in the transcript exactly once (no duplicate append).
-    assert answer == "42"
-    assert [m.get("content") for m in agent.messages].count("42") == 1
-
-    # The harness connects to the environment server's task-scoped MCP endpoint,
-    # with the REST tool verbosity (default "brief") forwarded as a query param.
-    meta = agent.harness_result.metadata
-    assert (
-        meta["mcp_url"] == "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief"
-    )
-    assert meta["tool_verbosity"] == "brief"
-    assert meta["mcp_tools_enabled"] == ["test_tool"]
-    assert meta["model_requested"] == "openai/gpt-5.6"
-    # The schema hash reflects the MCP schema OpenHands actually sees.
-    assert meta["mcp_tool_schema_sha256"] == "deadbeef"
-    # The runtime tool set is recorded and only the expected tools are present.
-    assert meta["runtime_tools"] == ["finish", "test_tool", "think"]
-    assert meta["system_prompt_identity_pinned"] is True
-
-    # Token usage mapped from the OpenHands LLM metrics.
-    usage = agent.get_total_token_usage()
-    assert usage["prompt_tokens"] == 100
-    assert usage["completion_tokens"] == 25
-    assert usage["total_tokens"] == 125
-
-    assert agent.harness_result.status == "success"
-    assert agent.harness_result.answer == "42"
-    assert agent.harness_result.total_cost_usd == 0.5
-    # First message is the task prompt; last message is the final answer.
-    assert agent.messages[0]["role"] == "user"
-    assert agent.messages[-1]["content"] == "42"
-    # The conversation is always closed, and the default visualizer is disabled.
-    assert captured["closed"] == 1
-    assert captured["conversation_kwargs"]["visualizer"] is None
-
-
-def test_tool_isolation(mock_interface, monkeypatch):
-    """OpenHands receives no built-in acting tools; only the corral MCP endpoint."""
-    captured = _install_fake_sdk(monkeypatch, [_finish("ok")])
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    agent.run(mock_interface, "task-1")
-
-    agent_kwargs = captured["agent_kwargs"]
-    assert agent_kwargs["tools"] == []
-    assert agent_kwargs["include_default_tools"] == ["FinishTool", "ThinkTool"]
-    # The agent identity is pinned so it cannot inherit a machine-local SOUL.md.
-    assert agent_kwargs["system_prompt_kwargs"]["soul_content"]
-    assert len(agent_kwargs["mcp_config"]) == 1
-    assert "corral" in agent_kwargs["mcp_config"]
-    server = agent_kwargs["mcp_config"]["corral"]
-    assert server.kwargs["url"] == (
-        "http://test-server:8000/tasks/task-1/mcp/?verbosity=brief"
-    )
-    assert server.kwargs["transport"] == "streamable-http"
-
-
-def test_unexpected_runtime_tool_is_sdk_failure(mock_interface, monkeypatch):
-    """A tool OpenHands adds outside the allowlist fails the run (capability leak)."""
-    _install_fake_sdk(
-        monkeypatch,
-        [_finish("42")],
-        runtime_tools={"finish", "think", "test_tool", "browser_tool_set"},
-    )
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = agent.run(mock_interface, "task-1")
-    assert "Error solving the task" in answer
-    assert agent.harness_result.status == "sdk_failure"
-    assert "browser_tool_set" in agent.harness_result.error
-
-
-def test_structured_tool_call_is_recorded(mock_interface, monkeypatch):
-    """Tool calls/results are recorded structurally (name, id, args, result)."""
-    events = [
-        FakeActionEvent(
-            FakeToolAction(query="q"),
-            tool_name="test_tool",
-            tool_call_id="call_1",
-            thought="let me use the tool",
-        ),
-        FakeObservationEvent("test_tool", "call_1", "tool output"),
-        _finish("42"),
-    ]
-    _install_fake_sdk(monkeypatch, events)
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    agent.run(mock_interface, "task-1")
-
-    tool_calls = [m for m in agent.messages if m.get("tool_calls")]
-    assert len(tool_calls) == 1
-    fn = tool_calls[0]["tool_calls"][0]["function"]
-    assert fn["name"] == "test_tool"
-    assert '"query": "q"' in fn["arguments"]
-    assert tool_calls[0]["tool_calls"][0]["id"] == "call_1"
-
-    # A non-MCP action's args come from model_dump(), with the envelope key
-    # ("kind") stripped so only the real arguments are recorded.
-    assert "kind" not in json.loads(fn["arguments"])
-
-    tool_results = [m for m in agent.messages if m.get("role") == "tool"]
-    assert len(tool_results) == 1
-    assert tool_results[0]["name"] == "test_tool"
-    assert tool_results[0]["tool_call_id"] == "call_1"
-    assert tool_results[0]["content"] == "tool output"
-    # A successful observation is not flagged or counted as an error.
-    assert tool_results[0]["is_error"] is False
-    assert agent.harness_result.metadata.get("tool_errors", 0) == 0
-
-    # The model's reasoning is preserved as a thinking message.
-    assert any(m.get("name") == "thinking" for m in agent.messages)
-
-
-def test_mcp_tool_action_records_flat_data_not_envelope(mock_interface, monkeypatch):
-    """MCP tool args are recorded from `MCPToolAction.data`, not the envelope."""
-    events = [
-        FakeActionEvent(
-            FakeMCPToolAction(query="benzene", n=3),
-            tool_name="test_tool",
-            tool_call_id="call_1",
-        ),
-        _finish("42"),
-    ]
-    _install_fake_sdk(monkeypatch, events)
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    agent.run(mock_interface, "task-1")
-
-    fn = next(m for m in agent.messages if m.get("tool_calls"))
-    args = json.loads(fn["tool_calls"][0]["function"]["arguments"])
-    # The flat call arguments, not the SDK `{"kind": ..., "data": {...}}` wrapper.
-    assert args == {"query": "benzene", "n": 3}
-
-
-def test_tool_error_observation_is_recorded_and_counted(mock_interface, monkeypatch):
-    """A failed MCP observation (`is_error=True`) is flagged and counted."""
-    events = [
-        FakeActionEvent(
-            FakeMCPToolAction(query="q"),
-            tool_name="test_tool",
-            tool_call_id="c1",
-        ),
-        FakeObservationEvent("test_tool", "c1", "tool blew up", is_error=True),
-        _finish("42"),
-    ]
-    _install_fake_sdk(monkeypatch, events)
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    agent.run(mock_interface, "task-1")
-
-    tool_result = next(m for m in agent.messages if m.get("role") == "tool")
-    assert tool_result["is_error"] is True
-    assert agent.harness_result.metadata["tool_errors"] == 1
-
-
-def test_system_prompt_is_hashed_for_reproducibility(mock_interface, monkeypatch):
-    """The rendered system prompt is hashed into the run provenance."""
-    events = [FakeSystemPromptEvent("SYSTEM PROMPT TEXT"), _finish("42")]
-    _install_fake_sdk(monkeypatch, events)
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    agent.run(mock_interface, "task-1")
-
-    meta = agent.harness_result.metadata
-    assert (
-        meta["system_prompt_sha256"]
-        == hashlib.sha256(b"SYSTEM PROMPT TEXT").hexdigest()
-    )
-    assert meta["system_prompt_has_dynamic_context"] is False
-
-
-def test_system_prompt_recorded_first_in_transcript(mock_interface, monkeypatch):
-    """The system prompt is recorded ahead of the seeded task prompt.
-
-    The task prompt is pre-seeded as `messages[0]` before the harness runs, but
-    the system message precedes it in the real conversation, so the saved
-    transcript must record `system` first and `user` (task prompt) second.
-    """
-    events = [FakeSystemPromptEvent("SYSTEM PROMPT TEXT"), _finish("42")]
-    _install_fake_sdk(monkeypatch, events)
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    agent.run(mock_interface, "task-1")
-
-    assert agent.messages[0]["role"] == "system"
-    assert agent.messages[0]["content"] == "SYSTEM PROMPT TEXT"
-    assert agent.messages[1]["role"] == "user"
-    # Exactly one system message (inserted, not duplicated).
-    assert [m.get("role") for m in agent.messages].count("system") == 1
-
-
-def test_agent_context_datetime_is_pinned_off(mock_interface, monkeypatch):
-    """The system-prompt datetime is pinned off so the prompt is reproducible."""
-    captured = _install_fake_sdk(monkeypatch, [_finish("ok")])
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    agent.run(mock_interface, "task-1")
-
-    ctx = captured["agent_kwargs"]["agent_context"]
-    assert ctx.kwargs["current_datetime"] is None
-
-
-def test_default_tool_timeout_matches_executor_cap():
-    """The default per-call timeout is enforceable (== the SDK executor cap)."""
-    cap = openhands_module._OPENHANDS_EXECUTOR_TIMEOUT_S
-    agent = OpenHandsAgent(model="openai/gpt-5.6")
-    assert agent.tool_timeout_s == cap
-    assert agent.effective_tool_timeout_s == cap
-
-
-def test_reasoning_effort_forwarded_to_llm(mock_interface, monkeypatch):
-    """An explicit reasoning_effort reaches the harness LLM and the metadata."""
-    captured = _install_fake_sdk(monkeypatch, [_finish("42")])
-
-    agent = OpenHandsAgent(
-        model="openai/gpt-5.6", api_key="test-key", reasoning_effort="low"
-    )
-    agent.run(mock_interface, "task-1")
-
-    assert captured["llm"].kwargs["reasoning_effort"] == "low"
-    assert agent.harness_result.metadata["reasoning_effort"] == "low"
-
-
-def test_reasoning_effort_unset_defers_to_sdk_default(mock_interface, monkeypatch):
-    """When unset, reasoning_effort is not pinned on the LLM (SDK default applies)."""
-    captured = _install_fake_sdk(monkeypatch, [_finish("42")])
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    agent.run(mock_interface, "task-1")
-
-    assert "reasoning_effort" not in captured["llm"].kwargs
-    assert agent.harness_result.metadata["reasoning_effort"] is None
-
-
-def test_timeout_metadata_records_executor_cap(mock_interface, monkeypatch):
-    """A configured timeout above the executor cap is recorded honestly."""
-    _install_fake_sdk(monkeypatch, [_finish("42")])
-    cap = openhands_module._OPENHANDS_EXECUTOR_TIMEOUT_S
-
-    agent = OpenHandsAgent(
-        model="openai/gpt-5.6", api_key="test-key", tool_timeout_s=cap + 300.0
-    )
-    agent.run(mock_interface, "task-1")
-
-    meta = agent.harness_result.metadata
-    assert meta["configured_mcp_timeout_s"] == cap + 300.0
-    assert meta["openhands_executor_timeout_s"] == cap
-    # The value OpenHands can actually enforce per call is capped at the executor.
-    assert meta["effective_tool_timeout_s"] == cap
-    assert agent.effective_tool_timeout_s == cap
-
-
-def test_generic_connection_error_is_sdk_failure(mock_interface, monkeypatch):
-    """A non-MCP connection error is an infra failure, not a tool failure."""
-    _install_fake_sdk(
-        monkeypatch,
-        [],
-        run_error=RuntimeError("Connection refused by the LLM provider proxy"),
-    )
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = agent.run(mock_interface, "task-1")
-    assert "Error solving the task" in answer
-    # "connection" is no longer enough to look like a corral MCP/tool failure.
-    assert agent.harness_result.status == "sdk_failure"
-
-
-def test_mcp_url_encodes_task_id_and_verbosity(mock_interface, monkeypatch):
-    _install_fake_sdk(monkeypatch, [_finish("ok")])
-    mock_interface.current_verbosity = "full"
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    url = agent._mcp_url(mock_interface, "task/with space", "full")
-    assert url == (
-        "http://test-server:8000/tasks/task%2Fwith%20space/mcp/?verbosity=full"
-    )
-
-
-def test_finish_action_returned_verbatim_without_extraction(
-    mock_interface, monkeypatch
-):
-    """A FinishAction message is returned exactly, with no answer-extractor call."""
-    _install_fake_sdk(monkeypatch, [_finish("42")])
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    # Guard: any extractor call would flip this contract.
-    assert agent.requires_answer_extraction is False
-    assert agent.run(mock_interface, "task-1") == "42"
-
-
-def test_surrender_only_on_exact_sentinel(mock_interface, monkeypatch):
-    _install_fake_sdk(monkeypatch, [_finish(SURRENDER_SENTINEL)])
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = agent.run(mock_interface, "task-1", enable_surrender=True)
-    assert answer == SURRENDER_SENTINEL
-    assert agent.harness_result.status == "surrender"
-
-
-def test_sentinel_inside_longer_answer_is_not_surrender(mock_interface, monkeypatch):
-    longer = f"The answer mentions {SURRENDER_SENTINEL} but is not a surrender."
-    _install_fake_sdk(monkeypatch, [_finish(longer)])
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = agent.run(mock_interface, "task-1", enable_surrender=True)
-    assert answer == longer
-    assert agent.harness_result.status == "success"
-
-
-def test_missing_finish_action_is_sdk_failure(mock_interface, monkeypatch):
-    """A run that never emits a FinishAction is an infra failure, not an answer."""
-    _install_fake_sdk(monkeypatch, [FakeMessageEvent("assistant", "thinking...")])
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = agent.run(mock_interface, "task-1")
-    assert "Error solving the task" in answer
-    assert agent.harness_result.status == "sdk_failure"
-
-
-def test_max_iterations_error_event_is_reported(mock_interface, monkeypatch):
-    """Reaching max iterations (no exception) is reported as `max_iterations`."""
-    _install_fake_sdk(
-        monkeypatch,
-        [FakeConversationErrorEvent("MaxIterationsReached", "reached max iterations")],
-        execution_status=ConversationExecutionStatus.ERROR,
-    )
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = agent.run(mock_interface, "task-1")
-    assert "Error solving the task" in answer
-    assert agent.harness_result.status == "max_iterations"
-
-
-def test_stuck_detection_is_reported(mock_interface, monkeypatch):
-    """A STUCK terminal status (no exception) is reported as `stuck`."""
-    _install_fake_sdk(
-        monkeypatch,
-        [FakeMessageEvent("assistant", "looping")],
-        execution_status=ConversationExecutionStatus.STUCK,
-    )
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = agent.run(mock_interface, "task-1")
-    assert "Error solving the task" in answer
-    assert agent.harness_result.status == "stuck"
-
-
-def test_mcp_connection_failure_is_tool_failure(mock_interface, monkeypatch):
-    captured = _install_fake_sdk(
-        monkeypatch,
-        [],
-        run_error=RuntimeError("MCP server failed to connect"),
-    )
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = agent.run(mock_interface, "task-1")
-    assert "Error solving the task" in answer
-    assert agent.harness_result.status == "tool_failure"
-    # The conversation is closed even when run() raises.
-    assert captured["closed"] == 1
-
-
-def test_wall_clock_timeout_interrupts_and_closes(mock_interface, monkeypatch):
-    """An overrunning run is interrupted + closed and reported as a timeout."""
-    captured = _install_fake_sdk(monkeypatch, [_finish("42")], block_seconds=2.0)
-
-    agent = OpenHandsAgent(
-        model="openai/gpt-5.6", api_key="test-key", wall_clock_timeout_s=0.1
-    )
-    answer = agent.run(mock_interface, "task-1")
-    assert "Error solving the task" in answer
-    assert agent.harness_result.status == "timeout"
-    # The async entrypoint is driven and cancelled via interrupt(), not pause().
-    assert captured.get("aran") is True
-    assert captured.get("interrupted") is True
-    assert captured["closed"] == 1
-
-
-class AsyncMockInterface:
-    """A minimal async benchmark interface (mirrors the AsyncCorralRouter shape).
-
-    Its prompt/tools/schema methods are `async def` and record the thread they
-    ran on, so a test can prove the native `arun` awaited them on the
-    event-loop thread rather than offloading each to a worker thread.
-    """
-
-    def __init__(self):
-        self.base_url = "http://test-server:8000"
-        self.current_verbosity = "brief"
-        self.calls: list[tuple[str, str]] = []
-
-    async def get_available_tools_for_task(self, task_id, verbosity=None):
-        self.calls.append(("tools", threading.current_thread().name))
-        return {
-            "tools": [
+    surrender_allowed = False
+    execution_id = "execution-1"
+    iteration_limit = 1
+    initial_state = SimpleNamespace(metadata=SimpleNamespace(task={"id": "task-1"}))
+
+    def __init__(self, submission=None, submission_status=None):
+        self.messages = []
+        self.submission = submission
+        self.submission_status = submission_status
+
+    async def record_message(self, message):
+        self.messages.append(message)
+
+
+@pytest.mark.anyio()
+async def test_openhands_uses_only_the_iteration_run_limit(monkeypatch, tmp_path):
+    captured = {"arun_calls": 0}
+
+    class FakeConversation:
+        def __init__(
+            self,
+            *,
+            agent,
+            mcp_tool_provider,
+            callbacks,
+            token_callbacks,
+            workspace,
+            max_iteration_per_run,
+            stuck_detection,
+            persistence_dir,
+            visualizer,
+        ):
+            captured.update(
                 {
-                    "type": "function",
-                    "function": {
-                        "name": "test_tool",
-                        "description": "A test tool",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": [],
-                        },
-                    },
+                    "agent": agent,
+                    "mcp_tool_provider": mcp_tool_provider,
+                    "callbacks": callbacks,
+                    "token_callbacks": token_callbacks,
+                    "workspace": workspace,
+                    "max_iteration_per_run": max_iteration_per_run,
+                    "stuck_detection": stuck_detection,
+                    "persistence_dir": persistence_dir,
+                    "visualizer": visualizer,
                 }
-            ]
-        }
+            )
+            self.state = SimpleNamespace(
+                execution_status=openhands_module.ConversationExecutionStatus.FINISHED,
+                agent=SimpleNamespace(tools_map={}),
+            )
 
-    async def get_task_prompt(self, task_id):
-        self.calls.append(("prompt", threading.current_thread().name))
-        return "Test task prompt"
+        def send_message(self, prompt):
+            captured["prompt"] = prompt
 
-    async def get_mcp_tool_schema(self, task_id, verbosity=None):
-        self.calls.append(("schema", threading.current_thread().name))
-        return {"tools": [], "mcp_schema_sha256": "deadbeef"}
+        async def arun(self):
+            captured["arun_calls"] += 1
 
-    def mcp_url(self, task_id, verbosity=None):
-        verbosity = verbosity or self.current_verbosity or "brief"
-        return f"{self.base_url}/tasks/{task_id}/mcp/?verbosity={verbosity}"
+        def close(self):
+            captured["closed"] = True
 
-
-def test_arun_drives_the_sdk_on_the_loop_thread(mock_interface, monkeypatch):
-    """`arun` drives conversation.arun() natively on the caller's loop."""
-    captured = _install_fake_sdk(monkeypatch, [_finish("42")])
-
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="test-key")
-    answer = anyio.run(agent.arun, mock_interface, "task-1")
-
-    assert answer == "42"
-    assert agent.harness_result.status == "success"
-    # The SDK conversation ran on the event-loop thread — no nested worker thread.
-    assert captured["arun_thread"] == threading.current_thread().name
-    # The async entrypoint (not the sync `run`) drove the harness.
-    assert captured.get("aran") is True
-    assert "ran" not in captured
-
-
-def test_run_and_arun_produce_the_same_answer(mock_interface, monkeypatch):
-    """The sync wrapper and the native async path return the same answer."""
-    _install_fake_sdk(monkeypatch, [_finish("same-answer")])
-
-    sync_answer = OpenHandsAgent(model="openai/gpt-5.6", api_key="k").run(
-        mock_interface, "task-1"
+    monkeypatch.setattr(openhands_module, "LocalConversation", FakeConversation)
+    monkeypatch.setattr(
+        OpenHandsAgent,
+        "_make_llm",
+        lambda self: SimpleNamespace(metrics=None),
     )
-    async_answer = anyio.run(
-        OpenHandsAgent(model="openai/gpt-5.6", api_key="k").arun,
-        mock_interface,
-        "task-1",
-    )
+    monkeypatch.setattr(OpenHandsAgent, "_build_agent", lambda self, *args, **kw: {})
 
-    assert sync_answer == async_answer == "same-answer"
-
-
-def test_arun_surrender_returns_give_up(mock_interface, monkeypatch):
-    _install_fake_sdk(monkeypatch, [_finish(SURRENDER_SENTINEL)])
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="k")
-
-    async def _go():
-        return await agent.arun(mock_interface, "task-1", enable_surrender=True)
-
-    assert anyio.run(_go) == SURRENDER_SENTINEL
-    assert agent.harness_result.status == "surrender"
-
-
-def test_arun_wall_clock_timeout_is_reported(mock_interface, monkeypatch):
-    """The native async path enforces the deadline + interrupt on the loop."""
-    captured = _install_fake_sdk(monkeypatch, [_finish("42")], block_seconds=2.0)
     agent = OpenHandsAgent(
-        model="openai/gpt-5.6", api_key="k", wall_clock_timeout_s=0.1
+        model="openai/test",
+        api_key="key",
+        system_prompt="system",
+    )
+    run = openhands_module._RunState()
+    await agent._execute_openhands(
+        prompt="solve",
+        mcp_url="http://127.0.0.1:1234/mcp",
+        cwd=str(tmp_path),
+        enable_surrender=False,
+        iteration_limit=7,
+        run=run,
     )
 
-    answer = anyio.run(agent.arun, mock_interface, "task-1")
+    assert captured["max_iteration_per_run"] == 7
+    assert captured["mcp_tool_provider"].tool_timeout_s == agent.tool_timeout_s
+    assert captured["stuck_detection"] is False
+    assert len(captured["token_callbacks"]) == 1
+    assert captured["token_callbacks"][0](object()) is None
+    assert captured["arun_calls"] == 1
+    assert captured["closed"] is True
+    assert not hasattr(agent, "wall_clock_timeout_s")
+    assert not hasattr(agent, "interrupt_grace_s")
 
-    assert "Error solving the task" in answer
-    assert agent.harness_result.status == "timeout"
-    # The overrunning run was interrupted and the conversation closed, on the loop.
-    assert captured.get("interrupted") is True
-    assert captured["closed"] == 1
+
+@pytest.mark.parametrize("name", ["wall_clock_timeout_s", "interrupt_grace_s"])
+def test_openhands_rejects_removed_time_based_run_limits(name):
+    with pytest.raises(TypeError, match="configure limits in BenchmarkTaskMetadata"):
+        OpenHandsAgent(system_prompt="system", **{name: 1.0})
 
 
-def test_arun_fetches_prompt_and_tools_through_async_router(monkeypatch):
-    """The native `arun` awaits prompts/tools/schema on the async interface."""
-    _install_fake_sdk(monkeypatch, [_finish("42")])
-    interface = AsyncMockInterface()
-    agent = OpenHandsAgent(model="openai/gpt-5.6", api_key="k")
-    main_thread = threading.current_thread().name
+def test_openhands_counts_each_sdk_completion_as_one_llm_call():
+    agent = OpenHandsAgent(api_key="key", system_prompt="system")
+    run = openhands_module._RunState(metadata={"sdk_turns": 1})
+    metrics = SimpleNamespace(
+        token_usages=[object(), object(), object()],
+        accumulated_token_usage=SimpleNamespace(
+            prompt_tokens=12,
+            completion_tokens=4,
+        ),
+        accumulated_cost=0.25,
+    )
 
-    answer = anyio.run(agent.arun, interface, "task-1")
+    agent._record_usage(SimpleNamespace(metrics=metrics), run)
 
-    assert answer == "42"
-    assert agent.harness_result.status == "success"
-    # Every HTTP fetch was awaited on the loop thread — no worker-thread offload —
-    # proving the native path fetches through the async router.
-    assert ("tools", main_thread) in interface.calls
-    assert ("prompt", main_thread) in interface.calls
-    assert ("schema", main_thread) in interface.calls
-    # The digest fetched through the async router lands in the run metadata.
-    assert agent.harness_result.metadata["mcp_tool_schema_sha256"] == "deadbeef"
+    assert run.metadata["sdk_turns"] == 3
+    assert run.usage == {
+        "input_tokens": 12,
+        "output_tokens": 4,
+        "reasoning_tokens": 0,
+        "total_tokens": 16,
+    }
+    assert agent._usage(metrics, llm_calls=3).llm_calls == 3
+
+
+@pytest.mark.anyio()
+async def test_openhands_uses_session_mcp_and_returns_typed_outcome(monkeypatch):
+    captured = {}
+
+    async def fake_run(self, *, run, **kwargs):
+        captured.update(kwargs)
+        run.messages.append({"role": "assistant", "content": "42"})
+        run.usage = {
+            "prompt_tokens": 8,
+            "completion_tokens": 2,
+            "total_tokens": 10,
+        }
+        run.result = HarnessRunResult(
+            status="success", answer="42", metadata={"session_id": "oh-1"}
+        )
+        return "42"
+
+    monkeypatch.setattr(OpenHandsAgent, "_execute_harness", fake_run)
+    agent = OpenHandsAgent(model="openai/test", api_key="key", system_prompt="system")
+    outcome = await agent.run_session(Session("42", "submitted"))
+
+    assert outcome.status == "completed"
+    assert outcome.answer == "42"
+    assert outcome.usage.output_tokens == 2
+    assert outcome.usage.llm_calls == 1
+    assert outcome.metadata["session_id"] == "oh-1"
+    assert captured["mcp_url"] == "http://127.0.0.1:1234/mcp"
+    assert captured["iteration_limit"] == 1
+    assert agent.__dict__.keys().isdisjoint(
+        {
+            "messages",
+            "token_usage",
+            "cumulative_token_usage",
+            "harness_result",
+            "_run_meta",
+            "_available_tools",
+        }
+    )
+    assert not hasattr(agent, "run")
+    assert not hasattr(agent, "arun")
+    assert not hasattr(agent, "step")
+    assert not hasattr(agent, "arun_agent")
+
+
+@pytest.mark.anyio()
+async def test_openhands_plain_text_answer_is_not_a_submission(monkeypatch):
+    async def fake_run(self, *, run, **_kwargs):
+        run.result = HarnessRunResult(status="success", answer="42")
+        return "42"
+
+    monkeypatch.setattr(OpenHandsAgent, "_execute_harness", fake_run)
+    outcome = await OpenHandsAgent(api_key="key", system_prompt="system").run_session(
+        Session()
+    )
+
+    assert outcome.status == "protocol_failure"
+    assert "without calling submit_answer" in outcome.error
+
+
+@pytest.mark.anyio()
+async def test_openhands_maps_tool_failure(monkeypatch):
+    async def fake_run(self, *, run, **_kwargs):
+        run.result = HarnessRunResult(status="tool_failure", error="MCP unavailable")
+        return "Error solving the task: MCP unavailable"
+
+    monkeypatch.setattr(OpenHandsAgent, "_execute_harness", fake_run)
+    outcome = await OpenHandsAgent(api_key="key", system_prompt="system").run_session(
+        Session()
+    )
+
+    assert outcome.status == "tool_failure"
+    assert outcome.error == "MCP unavailable"
+
+
+@pytest.mark.anyio()
+async def test_openhands_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
+    async def fake_run(self, *, mcp_url, run, **_kwargs):
+        async with (
+            streamablehttp_client(mcp_url) as streams,
+            ClientSession(streams[0], streams[1]) as mcp_session,
+        ):
+            await mcp_session.initialize()
+            result = await mcp_session.call_tool("submit_answer", {"answer": "42"})
+            assert result.isError is False
+
+        run.messages.append(
+            {"role": "assistant", "content": "OpenHands completed the task"}
+        )
+        run.usage = {
+            "prompt_tokens": 8,
+            "completion_tokens": 2,
+            "total_tokens": 10,
+        }
+        run.metadata.update({"num_events": 4, "total_cost_usd": 0.01})
+        run.result = self._result(run, "success", answer="42")
+        return "42"
+
+    monkeypatch.setattr(OpenHandsAgent, "_execute_harness", fake_run)
+    task = TaskDefinition(
+        name="task",
+        description="answer 42",
+        tools=[],
+        scoring_fn=lambda answer: float(answer == "42"),
+        submission_format={"answer": "string"},
+        resolve_answer=False,
+    )
+    environment = Environment(
+        "task",
+        task,
+        toolset=Toolset(pool={}, workspace_factory=None),
+    )
+    agent = OpenHandsAgent(model="openai/test", api_key="key", system_prompt="system")
+
+    async with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
+        final = await TaskRuntime(store).run(
+            agent,
+            environment,
+            execution_id="openhands-state-fold",
+            started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            max_iterations=1,
+        )
+
+    assert final.submission == "42"
+    assert final.usage.input_tokens == 8
+    assert final.usage.output_tokens == 2
+    assert final.tool_statistics == {"submit_answer": 1}
+    assert any(
+        message.get("content") == "OpenHands completed the task"
+        for conversation in final.conversations.values()
+        for message in conversation
+    )
+    assert final.runtime.metadata["agent_status"] == "completed"
+    session_metadata = next(iter(final.agent_runs.values())).metadata
+    assert session_metadata["harness_status"] == "success"
+    assert session_metadata["num_events"] == 4
+    assert session_metadata["total_cost_usd"] == 0.01
+    assert not hasattr(agent, "harness_result")
+    assert not hasattr(agent, "messages")

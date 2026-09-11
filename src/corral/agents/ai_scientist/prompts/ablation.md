@@ -18,7 +18,7 @@ Existing child experiments from this checkpoint:
 Proposal slot in this expansion:
 {{proposal_slots}}
 
-Trial-relative workspace:
+Execution-relative workspace:
 {{branch_workspaces}}
 
 Global research journal:

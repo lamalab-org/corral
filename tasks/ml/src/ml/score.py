@@ -13,9 +13,9 @@ uid = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
 
 # Default base work dir when CORRAL_WORK_DIR is unset (relative path + UID).
 # NOTE: intentionally do NOT write CORRAL_WORK_DIR back into the process
-# environment here. That pins every concurrent trial to one shared directory and
-# breaks per-trial workspace isolation (Phase 4 work-directory hygiene). Scoring
-# resolves the submitted answer against the trial's own workspace via
+# environment here. That pins every concurrent task execution to one shared
+# directory and breaks execution workspace isolation. Scoring resolves the
+# submitted answer against the task execution's workspace via
 # Environment._resolve_answer.
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", f"../CORRAL_WORK_DIR/ml_{uid}")
 

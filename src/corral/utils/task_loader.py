@@ -20,10 +20,9 @@ Usage:
 import json
 from pathlib import Path
 
-from loguru import logger
+from corral.report.logging import logger
 
 HF_REPO = "jablonkagroup/corral-environment-tasks"
-TASKS_ROOT = Path("tasks")
 
 
 def load_task_entries(

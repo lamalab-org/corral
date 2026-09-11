@@ -66,9 +66,9 @@ python -m resistor_network.visualize environments/level_2/tasks_json --out figur
 
 Pass either a single task JSON file or a whole `tasks_json/` directory. Omit `--out` to display each figure interactively instead of saving it.
 
-## Run The Server
+## Inspect The Environment Definitions
 
-Start the resistor network environment server from this directory:
+Build and list the resistor-network environment definitions from this directory:
 
 ```bash
 cd tasks/resistor_network
@@ -88,16 +88,23 @@ python src/resistor_network/env.py --level 2
 python src/resistor_network/env.py path/to/tasks_json
 ```
 
-The server also accepts these options:
+The inspection command accepts these options:
 
-- `--host`: Bind host. Defaults to `CORRAL_HOST` or `0.0.0.0`.
-- `--port`: Bind port. Defaults to `CORRAL_PORT` or `8000`.
+- `tasks_json_path`: Optional path to a task JSON file or directory. If omitted, the command auto-discovers the level 1 benchmark.
+- `--level`: `1` or `2`. Loads `environments/level_{level}/tasks_json`. Defaults to `1`.
 
-## See The Tasks
+## Run The Benchmark
+
+The environment is registered with Corral's runtime as `resistor_network`, so it
+runs from the repository root through the CLI. Select the level with
+`--env-kwargs`:
 
 ```bash
-curl http://localhost:8000/tasks/
+uv run corral bench --environment resistor_network \
+  --env-kwargs '{"level": 2}' --agent react --list-tasks
 ```
+
+Drop `--list-tasks` and add `--model` to actually execute the tasks.
 
 ## Notes
 

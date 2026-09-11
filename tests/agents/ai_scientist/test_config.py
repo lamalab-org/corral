@@ -7,7 +7,6 @@ from corral.agents.ai_scientist import AIScientistConfig, SakanaAIScientistConfi
 def test_default_search_is_not_capped_at_the_three_initial_drafts():
     config = AIScientistConfig()
 
-    assert config.max_nodes is None
     assert config.max_search_nodes is None
     assert config.search_node_budget == 18
     assert config.validation_node_budget == 16
@@ -29,7 +28,7 @@ def test_config_rejects_inconsistent_stage_budgets():
 
 def test_planned_node_budget_obeys_search_cap_but_keeps_validation_separate():
     config = AIScientistConfig(
-        max_nodes=7,
+        max_search_nodes=7,
         initial_drafts=1,
         preliminary_node_budget=2,
         tuning_node_budget=2,
@@ -40,11 +39,6 @@ def test_planned_node_budget_obeys_search_cap_but_keeps_validation_separate():
 
     assert config.planned_node_budget == 7
     assert config.validation_node_budget == 16
-
-
-def test_config_rejects_both_search_cap_spellings():
-    with pytest.raises(ValidationError, match="Set only one"):
-        AIScientistConfig(max_nodes=2, max_search_nodes=3)
 
 
 def test_sakana_fidelity_profile_uses_original_search_behavior():
@@ -78,16 +72,21 @@ def test_sakana_fidelity_profile_uses_original_search_behavior():
     assert config.preliminary_require_critic_validity is False
 
 
-def test_legacy_trial_inheritance_flag_maps_to_explicit_strategy():
+def test_execution_inheritance_strategy_is_explicit():
     assert (
         AIScientistConfig(
-            inherit_parent_trial_state=True
-        ).effective_trial_state_inheritance
+            execution_state_inheritance="replay"
+        ).execution_state_inheritance
         == "replay"
     )
     assert (
         AIScientistConfig(
-            inherit_parent_trial_state=False
-        ).effective_trial_state_inheritance
+            execution_state_inheritance="clean"
+        ).execution_state_inheritance
         == "clean"
     )
+
+
+def test_removed_trial_inheritance_flag_is_rejected():
+    with pytest.raises(ValidationError):
+        AIScientistConfig(inherit_parent_trial_state=True)

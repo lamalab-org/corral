@@ -2,7 +2,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
+from corral.report.logging import logger
 
 from .base import Metric
 
@@ -35,7 +35,7 @@ def _calculate_single_metric(args: tuple) -> tuple[str, Any]:
         value = metric.calculate(benchmark_result)
         return (name, value)
     except Exception as e:
-        logger.error(f"Error calculating metric '{name}': {e}")
+        logger.warning(f"Metric '{name}' could not be calculated: {e}")
         return (name, None)
 
 
@@ -233,7 +233,7 @@ class MetricRegistry:
             try:
                 results[name] = metric.calculate(benchmark_result)
             except Exception as e:
-                logger.error(f"Error calculating metric '{name}': {e}")
+                logger.warning(f"Metric '{name}' could not be calculated: {e}")
                 results[name] = None
 
         return results

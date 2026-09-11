@@ -1,19 +1,11 @@
-"""
-Retrosynthesis Benchmark Server
-
-Command-line arguments:
-    --host: Host address to run the server (default: value of CORRAL_HOST env var or '0.0.0.0').
-    --port: Port to run the server (default: value of CORRAL_PORT env var or 8000).
-    --level: Level of the environment (1, 2, or 3) (default: 1).
-    --subtask_level: Whether to use subtask-level tasks (default: False).
-"""
+"""Retrosynthesis environment definitions."""
 
 import argparse
 import json
 import os
 from pathlib import Path
+from time import perf_counter
 
-from loguru import logger
 from retrosynthesis.checks import check_database
 from retrosynthesis.score import (
     check_apply_template,
@@ -25,9 +17,10 @@ from retrosynthesis.score import (
 )
 from retrosynthesis.tools import create_tools
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition, with_fixed_inputs
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.state import ExecutionState
+from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
+from corral.report.logging import event, exception_fields
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "CORRAL_WORK_DIR/rethrosynthesis")
 
@@ -84,7 +77,7 @@ def load_tasks_from_json(
     return tasks
 
 
-def _retro_prompt(env: Environment) -> str:
+def _retro_prompt(env: Environment, state: ExecutionState) -> str:
     """Task prompt that echoes each dependency's question and answer."""
     task = env.current_task
     prompt = (
@@ -95,17 +88,21 @@ def _retro_prompt(env: Environment) -> str:
     )
 
     if task.input_map:
-        logger.info(f"Available input tasks for {env.task_id}:")
-        logger.info(sorted(task.dependencies()))
+        event(
+            "DEBUG",
+            "environment.dependencies_resolved",
+            subsystem="runtime",
+            benchmark="retrosynthesis",
+            task_id=env.task_id,
+            dependencies=sorted(task.dependencies()),
+        )
         prompt += "\nAvailable input data:\n"
 
         # Display resolved inputs from dependencies
-        for ref in task.input_map.values():
-            logger.info(f"Checking dependency: {ref.task_id}")
-            if env.state.is_completed(ref.task_id):
-                value = env.state.get_output(ref.task_id, ref.key)
-                dep_prompt = env.group_tasks[ref.task_id].description
-                prompt += f"- Input from '{ref.task_id}' with question: '{dep_prompt}' and answer: '{value}'\n"
+        resolved = env.resolve_inputs(state)
+        for input_name, ref in task.input_map.items():
+            dep_prompt = env.group_tasks[ref.task_id].description
+            prompt += f"- Input from '{ref.task_id}' with question: '{dep_prompt}' and answer: '{resolved[input_name]}'\n"
 
     # Display initial input data
     if task.initial_input:
@@ -113,7 +110,14 @@ def _retro_prompt(env: Environment) -> str:
             if key != "work_dir":
                 prompt += f"- {key}: {value}\n"
 
-    logger.info(f"Task prompt for {env.task_id}:\n{prompt}")
+    event(
+        "DEBUG",
+        "environment.prompt_generated",
+        subsystem="runtime",
+        benchmark="retrosynthesis",
+        task_id=env.task_id,
+        prompt=prompt,
+    )
     return prompt
 
 
@@ -123,7 +127,15 @@ def create_rethrosynthesis_environments(
     level: int = 1,
 ) -> dict[str, Environment]:
     """Create environments for the rethrosynthesis benchmark tasks."""
-    logger.info("Creating environments for rethrosynthesis tasks...")
+    started = perf_counter()
+    name = "rethrosynthesis" if not subtask_level else "rethrosynthesis_subtasks"
+    event(
+        "INFO",
+        "environment.started",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+    )
     if subtask_level:
         json_path = (
             Path(__file__).parent.parent
@@ -133,46 +145,61 @@ def create_rethrosynthesis_environments(
         )
     else:
         json_path = (
-            Path(__file__).parent.parent / "environments" / f"level_{level}" / "tasks_json"
+            Path(__file__).parent.parent
+            / "environments"
+            / f"level_{level}"
+            / "tasks_json"
         )
-    if not json_path.exists():
-        raise ValueError(f"Task file {json_path} does not exist.")
-
-    logger.info(f"Loading tasks from {json_path}")
-
-    tasks = load_tasks_from_json(json_path, work_dir=work_dir)
-
-    name = "rethrosynthesis" if not subtask_level else "rethrosynthesis_subtasks"
-    logger.info(f"Creating linked task environments {name} with {len(tasks)} tasks")
-
-    # Top-level tasks get the full toolset; subtasks get only their named tools.
-    tool_pool = create_tools()
-    return build_environments(
-        tasks,
-        base_work_dir=work_dir,
-        name=name,
-        toolset=Toolset(
-            pool=tool_pool,
-            common={} if subtask_level else tool_pool,
-            workspace_factory=None,
-        ),
+    event(
+        "DEBUG",
+        "environment.tasks_loading",
+        subsystem="runtime",
+        benchmark=name,
+        task_source=str(json_path),
     )
+    try:
+        if not json_path.exists():
+            raise ValueError(f"Task file {json_path} does not exist.")
+        tasks = load_tasks_from_json(json_path, work_dir=work_dir)
+        tool_pool = create_tools()
+        environments = build_environments(
+            tasks,
+            base_work_dir=work_dir,
+            name=name,
+            toolset=Toolset(
+                pool=tool_pool,
+                common={} if subtask_level else tool_pool,
+                workspace_factory=None,
+            ),
+        )
+    except Exception as exc:
+        event(
+            "ERROR",
+            "environment.failed",
+            subsystem="runtime",
+            benchmark=name,
+            operation="create",
+            status="failed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            **exception_fields(exc),
+        )
+        raise
+
+    event(
+        "INFO",
+        "environment.completed",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+        status="completed",
+        duration_ms=round((perf_counter() - started) * 1000, 3),
+        environment_count=len(environments),
+    )
+    return environments
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Rethrosynthesis Benchmark Server")
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
-        help="Host to run the server on",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("CORRAL_PORT", "8000")),
-        help="Port to run the server on",
-    )
+    parser = argparse.ArgumentParser(description="Inspect retrosynthesis environments")
 
     parser.add_argument(
         "--level",
@@ -190,18 +217,35 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Check database availability and schema before starting the environment
-    logger.info("Performing database checks before starting the environment...")
+    check_started = perf_counter()
+    event(
+        "INFO",
+        "environment.database_check_started",
+        subsystem="runtime",
+        benchmark="retrosynthesis",
+    )
     try:
         check_database()
-    except (ConnectionError, ValueError) as e:
-        logger.error(f"Database check failed: {e}")
-        logger.error(
-            "Please ensure the database is properly set up before starting the environment."
+    except (ConnectionError, ValueError) as exc:
+        event(
+            "ERROR",
+            "environment.database_check_failed",
+            subsystem="runtime",
+            benchmark="retrosynthesis",
+            status="failed",
+            duration_ms=round((perf_counter() - check_started) * 1000, 3),
+            remediation="Run the retrosynthesis database setup script.",
+            **exception_fields(exc),
         )
-        logger.error(
-            "You may need to run: python tasks/retrosynthesis/database_config/phase_b_production.py"
-        )
-        raise SystemExit(1) from e
+        raise SystemExit(1) from exc
+    event(
+        "INFO",
+        "environment.database_check_completed",
+        subsystem="runtime",
+        benchmark="retrosynthesis",
+        status="completed",
+        duration_ms=round((perf_counter() - check_started) * 1000, 3),
+    )
 
     Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
 
@@ -210,15 +254,13 @@ if __name__ == "__main__":
         work_dir=BASE_WORK_DIR, subtask_level=args.subtask_level, level=args.level
     )
 
-    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        logger.info(f"- {env_id}")
-        logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_map:
-            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
-
-    run_server(
-        environments=environments,
-        host=args.host,
-        port=args.port,
-    )
+        event(
+            "DEBUG",
+            "environment.created",
+            subsystem="runtime",
+            benchmark="retrosynthesis",
+            task_id=env_id,
+            task_name=env.current_task.name,
+            dependencies=sorted(env.current_task.dependencies()),
+        )

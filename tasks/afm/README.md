@@ -28,19 +28,17 @@ The repository also includes Windows helper scripts:
 - `env.bat`: Opens a command shell in the AFM task environment.
 - `report.bat`: Opens a command shell in the AFM reports environment.
 
-## Run The Server
+## Inspect The Environment Definitions
 
-Start the AFM task server from the supported Windows workstation after activating the correct environment:
+Build and list the AFM environment definitions from the supported Windows workstation after activating the correct environment:
 
 ```bat
 cd tasks\afm\src
 python env.py
 ```
 
-The server reads these environment variables:
+The script reads these environment variables:
 
-- `CORRAL_HOST`: Bind host for the server. Defaults to `0.0.0.0`.
-- `CORRAL_PORT`: Bind port for the server. Defaults to `8000`.
 - `LLM_MODEL`: Used to build the per-run output directory.
 
 ## Task Layout
@@ -48,12 +46,6 @@ The server reads these environment variables:
 - Benchmark task definitions are stored under `environments/level_1` through `environments/level_4`.
 - Both `tasks_json` and `subtasks_json` variants are included in the repository.
 - The current `src/env.py` entrypoint uses an internal workstation-specific configuration rather than a portable CLI for selecting level or mode.
-
-## See The Tasks
-
-```bash
-curl http://localhost:8000/tasks/
-```
 
 ## Notes
 

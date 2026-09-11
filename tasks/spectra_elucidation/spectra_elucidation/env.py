@@ -1,18 +1,11 @@
-"""
-Spectra Elucidation Benchmark Server
-
-Command-line arguments:
-    --host: Host address to run the server (default: value of CORRAL_HOST env var or '0.0.0.0').
-    --port: Port to run the server (default: value of CORRAL_PORT env var or 8000).
-    --subtask_level: Whether to use subtask-level tasks (default: False).
-"""
+"""Spectra-elucidation environment definitions."""
 
 import argparse
 import json
 import os
 from pathlib import Path
+from time import perf_counter
 
-from loguru import logger
 from spectra_elucidation.score import (
     score_formula_match,
     score_isotopic_distribution,
@@ -29,9 +22,15 @@ from spectra_elucidation.tools import (
     create_tools,
 )
 
-from corral.backend.env import Environment, Toolset, build_environments
-from corral.backend.server import run_server
-from corral.backend.task import InputRef, TaskDefinition, with_fixed_inputs
+from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.state import ExecutionState
+from corral.core.task import (
+    EnvironmentSetup,
+    InputRef,
+    TaskDefinition,
+    with_fixed_inputs,
+)
+from corral.report.logging import event, exception_fields
 
 BASE_WORK_DIR = os.environ.get(
     "CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/spectra_elucidation"
@@ -90,7 +89,7 @@ def load_tasks_from_json(
     return tasks
 
 
-def _spectra_prompt(env: Environment) -> str:
+def _spectra_prompt(env: Environment, state: ExecutionState) -> str:
     """Task prompt that echoes each dependency's question and answer."""
     task = env.current_task
     prompt = (
@@ -103,11 +102,10 @@ def _spectra_prompt(env: Environment) -> str:
     prompt += "\nAvailable input data:\n"
 
     # Display resolved inputs from dependencies
-    for ref in task.input_map.values():
-        if env.state.is_completed(ref.task_id):
-            value = env.state.get_output(ref.task_id, ref.key)
-            dep_prompt = env.group_tasks[ref.task_id].description
-            prompt += f"- Input from '{ref.task_id}' with question: '{dep_prompt}' and answer: '{value}'\n"
+    resolved = env.resolve_inputs(state)
+    for input_name, ref in task.input_map.items():
+        dep_prompt = env.group_tasks[ref.task_id].description
+        prompt += f"- Input from '{ref.task_id}' with question: '{dep_prompt}' and answer: '{resolved[input_name]}'\n"
 
     # Display initial input data
     if task.initial_input:
@@ -115,14 +113,24 @@ def _spectra_prompt(env: Environment) -> str:
             if key != "work_dir":
                 prompt += f"- {key}: {value}\n"
 
-    logger.info(f"Task prompt for {env.task_id}:\n{prompt}")
+    event(
+        "DEBUG",
+        "environment.prompt_generated",
+        subsystem="runtime",
+        benchmark="spectra_elucidation",
+        task_id=env.task_id,
+        prompt=prompt,
+    )
     return prompt
 
 
-def _expose_ground_truth(env: Environment) -> str:
+def _expose_ground_truth(env: Environment, state: ExecutionState) -> EnvironmentSetup:
     """Expose the target molecule to tools as a hidden `h_smiles` argument."""
-    env.hidden_args = {"h_smiles": env.current_task.scoring_inputs}
-    return "Ground-truth molecule exposed to tools."
+    del state
+    return EnvironmentSetup(
+        hidden_arguments={"h_smiles": env.current_task.scoring_inputs},
+        status="Ground-truth molecule exposed to tools.",
+    )
 
 
 def create_spectra_elu_environments(
@@ -131,7 +139,7 @@ def create_spectra_elu_environments(
     level: int = 1,
 ) -> dict[str, Environment]:
     """Create environments for the spectra elucidation benchmark tasks."""
-    logger.info("Creating environments for spectra elucidation tasks...")
+    started = perf_counter()
     if subtask_level:
         json_path = (
             Path(__file__).parent.parent
@@ -146,37 +154,60 @@ def create_spectra_elu_environments(
             / f"level_{level}"
             / "tasks_json"
         )
-    if not json_path.exists():
-        raise ValueError(f"Task file {json_path} does not exist.")
-
-    logger.info(f"Loading tasks from {json_path}")
-
-    tasks = load_tasks_from_json(json_path, work_dir=work_dir)
-
-    logger.info(f"Creating linked task environments with {len(tasks)} tasks")
-
-    # Spectra tasks have no filesystem workspace; grouping is derived.
-    return build_environments(
-        tasks,
-        base_work_dir=work_dir,
-        name="spectra_elucidation",
-        toolset=Toolset(pool=create_tools(), workspace_factory=None),
+    name = "spectra_elucidation"
+    event(
+        "INFO",
+        "environment.started",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
     )
+    event(
+        "DEBUG",
+        "environment.tasks_loading",
+        subsystem="runtime",
+        benchmark=name,
+        task_source=str(json_path),
+    )
+    try:
+        if not json_path.exists():
+            raise ValueError(f"Task file {json_path} does not exist.")
+        tasks = load_tasks_from_json(json_path, work_dir=work_dir)
+        environments = build_environments(
+            tasks,
+            base_work_dir=work_dir,
+            name=name,
+            toolset=Toolset(pool=create_tools(), workspace_factory=None),
+        )
+    except Exception as exc:
+        event(
+            "ERROR",
+            "environment.failed",
+            subsystem="runtime",
+            benchmark=name,
+            operation="create",
+            status="failed",
+            duration_ms=round((perf_counter() - started) * 1000, 3),
+            **exception_fields(exc),
+        )
+        raise
+
+    event(
+        "INFO",
+        "environment.completed",
+        subsystem="runtime",
+        benchmark=name,
+        operation="create",
+        status="completed",
+        duration_ms=round((perf_counter() - started) * 1000, 3),
+        environment_count=len(environments),
+    )
+    return environments
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Spectra Elucidation Benchmark Server")
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=os.environ.get("CORRAL_HOST", "0.0.0.0"),
-        help="Host to run the server on",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("CORRAL_PORT", "8000")),
-        help="Port to run the server on",
+    parser = argparse.ArgumentParser(
+        description="Inspect spectra-elucidation environments"
     )
     parser.add_argument(
         "--level",
@@ -199,15 +230,13 @@ if __name__ == "__main__":
         work_dir=BASE_WORK_DIR, subtask_level=args.subtask_level, level=args.level
     )
 
-    logger.info("\nCreated Environments:")
     for env_id, env in environments.items():
-        logger.info(f"- {env_id}")
-        logger.info(f"  Task: {env.current_task.name}")
-        if env.current_task.input_map:
-            logger.info(f"  Depends on: {sorted(env.current_task.dependencies())}")
-
-    run_server(
-        environments=environments,
-        host=args.host,
-        port=args.port,
-    )
+        event(
+            "DEBUG",
+            "environment.created",
+            subsystem="runtime",
+            benchmark="spectra_elucidation",
+            task_id=env_id,
+            task_name=env.current_task.name,
+            dependencies=sorted(env.current_task.dependencies()),
+        )

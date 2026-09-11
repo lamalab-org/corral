@@ -1,16 +1,20 @@
 import asyncio
 import hashlib
+import importlib.resources
 import json
 import platform
 import re
-import shutil
 import tempfile
-import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
-from typing import Any, Literal
+from typing import Any
+
+import anyio
+from promptstore import PromptStore
+
+from corral.report.logging import logger
 
 # The Claude Agent SDK ships as the optional `corral[claude]` extra. Wrap the
 # import so an environment without the extra gets an actionable install hint
@@ -26,79 +30,42 @@ try:
         ToolResultBlock,
         ToolUseBlock,
         UserMessage,
-        create_sdk_mcp_server,
-        tool,
     )
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
     raise ModuleNotFoundError(
         "ClaudeCodeAgent requires the Claude Agent SDK, which ships as the "
         "optional 'claude' extra. Install it with `pip install 'corral[claude]'`."
     ) from exc
-import anyio
-from loguru import logger
 
-from corral.agents.base_agent import BaseAgent
-from corral.agents.hooks import HookPoint
-from corral.agents.schema import SURRENDER_SENTINEL
+from corral.agents.base_agent import provider_messages
+from corral.agents.hooks import AgentHooks
+from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
+from corral.agents.schema import AgentOutcome, AgentUsage
+from corral.agents.session import AgentSession
+from corral.agents.usage import usage_from_mapping
 from corral.agents.utils import LiteLLMMessage
-from corral.router.routes import CorralRouter, acall
 
 # Name under which the corral MCP server is registered with the Claude Code
 # harness. Tool names are namespaced by the SDK as
 # `mcp__<server_name>__<tool_name>` when building the allowed-tools list.
 _MCP_SERVER_NAME = "corral"
 
-# In-process SDK MCP server exposing a single `submit_answer` tool. It is
-# registered *only* by this agent (it is not part of any task's tool set and
-# does not touch the shared environment MCP surface), so no other agent is
-# affected. It gives the harness an explicit, format-agnostic channel to return
-# its final answer instead of us scraping it out of the trailing chat message —
-# which silently corrupts any answer the model wraps in prose (a file path, a
-# number, a SMILES string, ...). Tool names are namespaced by the SDK as
-# `mcp__<server_name>__<tool_name>`.
-_SUBMIT_SERVER_NAME = "submit"
-_SUBMIT_TOOL_NAME = "submit_answer"
-_SUBMIT_TOOL_FQN = f"mcp__{_SUBMIT_SERVER_NAME}__{_SUBMIT_TOOL_NAME}"
-_SUBMIT_TOOL_RESULT_TEXT = "Answer submitted."
 
-# Terminal status of a single harness run. Distinguishing these lets the
-# benchmark record *why* a run ended instead of collapsing infrastructure
-# failures (timeouts, SDK/CLI crashes, budget exhaustion) into an ordinary
-# wrong model answer.
-HarnessStatus = Literal[
-    "success",
-    "surrender",
-    "max_turns",
-    "timeout",
-    "tool_failure",
-    "sdk_failure",
-]
+@dataclass(slots=True)
+class _RunState:
+    """Mutable scratch owned by one invocation, never by the agent instance."""
 
-
-@dataclass
-class HarnessRunResult:
-    """Structured outcome of one Claude Code harness run.
-
-    `run()` still returns a plain string for interface compatibility, but the
-    benchmark record should read the structured status from here so that, for
-    example, `max_turns` (budget exhaustion) is not scored as a wrong answer.
-    """
-
-    status: HarnessStatus
-    answer: str | None = None
-    error: str | None = None
-    num_turns: int | None = None
-    usage: dict[str, Any] = field(default_factory=dict)
-    total_cost_usd: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    usage: dict[str, int] = field(default_factory=dict)
+    last_assistant_text: str | None = None
 
 
 class _HarnessError(RuntimeError):
     """Raised when the SDK reports a non-success ResultMessage.
 
     Carries the SDK `subtype` (e.g. `"error_max_turns"`) so the caller can
-    map it onto a :data:`HarnessStatus` instead of treating every failure the
-    same way.
+    map it onto a typed :class:`AgentOutcome` instead of treating every failure
+    the same way.
     """
 
     def __init__(self, message: str, subtype: str | None):
@@ -123,22 +90,6 @@ def _stringify_tool_content(content: Any) -> str:
     if isinstance(content, str):
         return content
     return json.dumps(content, ensure_ascii=False, default=str)
-
-
-def _strip_outer_code_fence(text: str) -> str:
-    """Remove one enclosing Markdown backtick fence from an answer.
-
-    The opening fence may have any language/info string. Only a fence wrapping
-    the entire answer is removed, so inline backticks and code blocks embedded
-    in a larger answer are preserved.
-    """
-    stripped = text.strip()
-    match = re.fullmatch(
-        r"(?P<fence>`{3,})[^\r\n]*\r?\n(?P<body>.*?)(?:\r?\n)?(?P=fence)[ \t]*",
-        stripped,
-        re.DOTALL,
-    )
-    return match.group("body").strip() if match else stripped
 
 
 def _parse_data_uri(url: str) -> tuple[str, str] | None:
@@ -197,209 +148,54 @@ def _to_sdk_content_blocks(parts: list[Any]) -> list[dict[str, Any]]:
     return blocks
 
 
-def _run_coroutine(coro: Any, timeout: float | None = None) -> Any:
-    """Run `coro` to completion from synchronous code.
+def _static_prompt(value: str | None, default_id: str) -> str:
+    """Resolve one static harness prompt."""
+    if value is not None:
+        return ensure_jinja_compatible(value).fill({})
+    with importlib.resources.path("corral.agents", "") as package_path:
+        store = PromptStore(f"{package_path}/prompts")
+    return get_prompt(store, None, default_id).fill({})
 
-    `BaseAgent.run` is synchronous while the Claude Agent SDK is async. When
-    no event loop is running we use :func:`asyncio.run`; if one is already
-    running (e.g. the agent is driven from async code) we execute the coroutine
-    in a dedicated loop on a background thread to avoid clobbering the caller's
-    loop.
 
-    Exceptions raised inside the coroutine are re-raised to the caller (rather
-    than surfacing as a confusing `KeyError`), and `timeout` enforces a hard
-    wall-clock deadline so a stalled CLI, tool, or network call cannot block the
-    benchmark indefinitely — a :class:`TimeoutError` is raised instead.
+class ClaudeCodeAgent:
+    """Session agent backed by the native Claude Code harness.
+
+    Claude owns its SDK loop, context management, and result extraction. Corral
+    owns the task-bound MCP endpoint, canonical tool transitions, usage folding,
+    and final `submit_answer` action. The adapter has no legacy `run` or
+    `arun_agent` entry point and keeps no task transcript on the instance.
     """
-    try:
-        running_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        running_loop = None
 
-    if running_loop is None:
-        if timeout is not None:
-            coro = asyncio.wait_for(coro, timeout)
-        return asyncio.run(coro)
-
-    result: dict[str, Any] = {}
-    finished = threading.Event()
-
-    def _worker() -> None:
-        try:
-            inner = asyncio.wait_for(coro, timeout) if timeout is not None else coro
-            result["value"] = asyncio.run(inner)
-        except BaseException as exc:  # propagate to the caller thread
-            result["exception"] = exc
-        finally:
-            finished.set()
-
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
-    # `finished` is set even on timeout inside the worker, but guard the join
-    # with the same deadline in case the worker itself wedges.
-    finished.wait(timeout)
-
-    if not finished.is_set():
-        raise TimeoutError(f"Claude Code harness did not finish within {timeout}s.")
-    if "exception" in result:
-        raise result["exception"]
-    return result["value"]
-
-
-class ClaudeCodeAgent(BaseAgent):
-    """Agent that delegates solving a task to the Claude Code harness.
-
-    Unlike the other agents in this package, `ClaudeCodeAgent` does not
-    implement its own reasoning loop. Instead it runs the Claude Code harness
-    (via the `Claude Agent SDK <https://code.claude.com/docs/en/agent-sdk>`_)
-    as a black box: the harness owns the planning/acting loop, context
-    management, and tool orchestration. The corral task tools are exposed to it
-    through the environment server's own task-scoped MCP endpoint
-    (`{base_url}/tasks/{task_id}/mcp`), which the harness connects to directly
-    over Streamable HTTP. Routing tool calls through the server's MCP transport
-    (rather than an in-process bridge) means schemas and execution reuse the same
-    `Tool.to_mcp` / `Environment.call_tool` code paths as the REST API, with
-    no second tool-definition or dispatch layer to keep in sync.
-
-    The harness returns its final answer by calling an in-process
-    `submit_answer` tool (see :meth:`_make_submit_server`) rather than having its
-    trailing chat message scraped. That message is natural-language prose, so
-    scraping it silently corrupts any answer the model wraps in explanation — a
-    file path, a number, a SMILES string — regardless of task family; the tool
-    gives a deterministic, format-agnostic channel instead. The submit tool is
-    registered only by this agent, so no other agent or task is affected.
-
-    Because the harness is a black box, the `max_iterations`/prompt-format
-    machinery used by the other agents does not directly apply. Instead the
-    harness turn budget is controlled by `max_iterations` (mapped to the SDK's
-    `max_turns`) and the built-in Claude Code tools (`Bash`, `Read`,
-    `Write`, ...) are disabled so the agent can only use the corral tools plus
-    the `submit_answer` channel.
-
-    Args:
-        model (str): The model the Claude Code harness should use. Accepts any
-            model string the harness understands (e.g. `"claude-opus-4-8"` or
-            an alias like `"sonnet"`). Defaults to `"claude-opus-4-8"`.
-        max_iterations (int, optional): Maximum number of harness turns
-            (mapped to the SDK `max_turns`). Defaults to 30.
-        api_endpoint (str, optional): Unused by the harness; kept for interface
-            compatibility with :class:`BaseAgent` (used only by the answer
-            extractor). Defaults to None.
-        system_prompt (str, optional): System prompt handed to the harness. If
-            None, uses the default corral system prompt. Tool-usage and
-            final-answer instructions are appended automatically.
-        user_prompt (str, optional): Prompt template used only for the base
-            machinery. If None, defaults to `"tool_calling/user_prompt"`.
-        extractor_prompt (str, optional): The extractor prompt for cleaning the
-            harness's final answer. If None, uses the default extractor prompt.
-        surrender_prompt (str, optional): Instructions for surrendering an
-            unsolvable task. Only used when `enable_surrender=True`.
-        temperature (float, optional): Kept for interface compatibility (the
-            harness manages its own sampling). Defaults to 0.7.
-        reasoning_effort (str, optional): Effort level passed to the harness
-            (`"low"`/`"medium"`/`"high"`/`"xhigh"`/`"max"`). Set
-            explicitly so the benchmark condition does not depend on a
-            version-dependent SDK default. Defaults to `"high"`.
-        thinking (dict, optional): Thinking configuration for the harness (e.g.
-            `{"type": "adaptive"}` or `{"type": "enabled", "budget_tokens": N}`).
-            Defaults to `{"type": "adaptive"}`; pass `{"type": "disabled"}`
-            to turn extended thinking off.
-        tool_timeout_s (float, optional): Recorded in the run metadata for
-            provenance. Tool execution is now delegated to the environment
-            server's MCP endpoint, so this is no longer enforced per-tool by the
-            agent; use `wall_clock_timeout_s` to bound the whole run. Kept for
-            interface compatibility. Defaults to None.
-        wall_clock_timeout_s (float, optional): Hard wall-clock deadline for the
-            whole harness run. On expiry the run is cancelled and reported with
-            `status="timeout"`. Defaults to None (no timeout).
-        extractor_model (str, optional): LiteLLM-compatible model used by the
-            base class for the answer-extraction step. If None, it is derived
-            from `model` (prefixing `"anthropic/"` when `model` has no
-            provider prefix).
-        **kwargs: Additional keyword arguments forwarded to :class:`BaseAgent`.
-    """
+    tool_transport = "mcp"
 
     def __init__(
         self,
         model: str = "claude-opus-4-8",
-        max_iterations: int = 30,
-        api_endpoint: str | None = None,
         system_prompt: str | None = None,
-        user_prompt: str | None = None,
-        extractor_prompt: str | None = None,
         surrender_prompt: str | None = None,
-        temperature: float = 0.7,
         reasoning_effort: str | None = "high",
         thinking: dict[str, Any] | None = None,
-        tool_timeout_s: float | None = None,
         wall_clock_timeout_s: float | None = None,
-        extractor_model: str | None = None,
-        **kwargs,
-    ):
-        """Initialize the agent."""
-        # Configure thinking explicitly (default adaptive) rather than relying
-        # on a version-dependent SDK default. To turn extended thinking off,
-        # pass `thinking={"type": "disabled"}`.
+        hooks: AgentHooks | None = None,
+    ) -> None:
         if thinking is None:
             thinking = {"type": "adaptive"}
 
-        # The harness model (e.g. "claude-opus-4-8") is not a LiteLLM route on
-        # its own. Derive a LiteLLM-compatible model for the base machinery
-        # (token counting + answer extraction) so those steps keep working.
-        if extractor_model is None:
-            extractor_model = model if "/" in model else f"anthropic/{model}"
-
-        if user_prompt is None:
-            user_prompt = "tool_calling/user_prompt"
-
-        super().__init__(
-            model=extractor_model,
-            max_iterations=max_iterations,
-            api_endpoint=api_endpoint,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            extractor_prompt=extractor_prompt,
-            surrender_prompt=surrender_prompt,
-            temperature=temperature,
-            **kwargs,
-        )
-
-        # Model string handed to the Claude Code harness itself.
+        self.model = model
         self.harness_model = model
+        self.system_prompt = _static_prompt(
+            system_prompt,
+            "system_prompt/system_prompt",
+        )
+        self.surrender_prompt = (
+            ensure_jinja_compatible(surrender_prompt).fill({})
+            if surrender_prompt is not None
+            else None
+        )
         self.reasoning_effort = reasoning_effort
         self.thinking = thinking
-        self.tool_timeout_s = tool_timeout_s
         self.wall_clock_timeout_s = wall_clock_timeout_s
-        self._available_tools = None
-        # Answer captured from the harness's `submit_answer` tool call (see
-        # `_make_submit_server`). `None` until the tool is called; an enclosing
-        # Markdown code fence is removed before the answer is submitted.
-        self._submitted_answer: str | None = None
-        # Arguments observed by the in-process submit handler. The SDK normally
-        # streams the corresponding ToolUseBlock/ToolResultBlock as well, but
-        # that is not guaranteed for an in-process terminal tool. At the end of
-        # the receive loop these records are reconciled with the streamed
-        # transcript so every actual submission is present exactly once.
-        self._submit_trace_calls: list[dict[str, Any]] = []
-        # Structured outcome of the most recent run (see `HarnessRunResult`).
-        self.harness_result: HarnessRunResult | None = None
-        # Per-run scratch populated by `_run_harness` for the benchmark record.
-        self._run_meta: dict[str, Any] = {}
-
-    @property
-    def requires_answer_extraction(self) -> bool:
-        """Submit the harness answer directly, without a second model call.
-
-        The harness returns its answer through the in-process `submit_answer`
-        tool (see :meth:`_make_submit_server`), which removes an optional outer
-        code fence so :meth:`run` already has a format-clean string. Running the
-        base class's LiteLLM answer extractor would add an extra, separately
-        billed model call
-        whose paraphrase could differ from — or fail on — that answer. Bypassing
-        it keeps this condition a faithful measurement of the Claude Code harness
-        alone.
-        """
-        return False
+        self.hooks = hooks or AgentHooks()
 
     def _build_system_prompt(self, enable_surrender: bool) -> dict[str, Any]:
         """Compose the harness system prompt.
@@ -409,124 +205,61 @@ class ClaudeCodeAgent(BaseAgent):
         harness prompt rather than replacing it with a custom string. (Passing a
         bare string to the SDK replaces the preset entirely.)
         """
-        # The final answer is returned through the `submit_answer` tool rather
-        # than scraped from the last chat message, so instruct the model to call
-        # it with only the answer value. This keeps a path / number / SMILES /
-        # JSON answer intact regardless of any prose the model produces.
         final_answer_directive = (
-            "When you have solved the task, submit your final answer by calling "
-            f"the `{_SUBMIT_TOOL_NAME}` tool exactly once, passing ONLY the answer "
-            "value (for example a file path, a number, or a short string) as its "
-            "`answer` argument, with no explanation or surrounding text. Always "
-            f"return the answer through the `{_SUBMIT_TOOL_NAME}` tool rather than "
-            "as an ordinary chat message."
+            "When you have solved the task, call the `submit_answer` MCP tool "
+            "with the complete final answer. A plain-text final response does "
+            "not complete the task."
         )
         append = (
             self.system_prompt
-            + "\n\nYou are solving a task in a sandboxed environment. You may ONLY "
-            f"interact with it through the provided `{_MCP_SERVER_NAME}` MCP tools; "
-            "do not attempt to use the filesystem, shell, web, or subagents. "
-            + final_answer_directive
+            + "\n\nYou are solving a task in a sandboxed environment. You may use "
+            "Claude Code's built-in tools as well as the provided "
+            f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
+            "start in a fresh per-run workspace and remain governed by Claude "
+            "Code's sandbox and path checks; use the MCP tools for task environment "
+            "data and actions. " + final_answer_directive
         )
-        if enable_surrender and self.surrender_prompt is not None:
-            append += "\n\n" + self.surrender_prompt.fill({})
+        if enable_surrender:
+            if self.surrender_prompt is not None:
+                append += "\n\n" + self.surrender_prompt
+            append += (
+                "\nTo surrender, call `submit_answer` with the exact answer "
+                "`SURRENDER`; do not return the sentinel as text."
+            )
         return {"type": "preset", "preset": "claude_code", "append": append}
-
-    def _make_submit_server(self) -> Any:
-        """Build the in-process SDK MCP server exposing `submit_answer`.
-
-        The single tool captures its `answer` argument onto the agent after
-        removing an optional outer Markdown code fence, and records the raw call
-        arguments for trace reconciliation. :meth:`_run_harness` then submits
-        that normalized string and ensures the tool call/result are present in
-        ``self.messages`` even
-        if the SDK omits terminal in-process tool events from its response
-        stream. Because the handler runs in-process on the same event loop as
-        the receive loop, no locking is needed. Registering the server only here
-        — never in a task's tool set — keeps the submit channel scoped to this
-        agent and leaves every other agent and the shared MCP surface untouched.
-        """
-
-        @tool(
-            _SUBMIT_TOOL_NAME,
-            "Submit your final answer for scoring. Call this exactly once when "
-            "the task is solved, passing ONLY the answer value (for example a "
-            "file path, a number, or a short string) as `answer` — no "
-            "explanation or extra text. An enclosing Markdown code fence is "
-            "removed automatically.",
-            {"answer": str},
-        )
-        async def _submit(args: dict[str, Any]) -> dict[str, Any]:
-            answer = args.get("answer", "")
-            if not isinstance(answer, str):
-                answer = str(answer)
-            answer = _strip_outer_code_fence(answer)
-            # Last call wins: a re-submission simply overwrites the previous one.
-            self._submitted_answer = answer
-            # Keep an independent record at the point the tool actually runs.
-            # The SDK usually emits matching ToolUseBlock/ToolResultBlock events,
-            # so these are reconciled after streaming rather than appended here;
-            # doing that avoids duplicates while still covering SDK versions that
-            # suppress the terminal in-process tool exchange.
-            self._submit_trace_calls.append(dict(args))
-            return {"content": [{"type": "text", "text": _SUBMIT_TOOL_RESULT_TEXT}]}
-
-        return create_sdk_mcp_server(name=_SUBMIT_SERVER_NAME, tools=[_submit])
-
-    def _mcp_server_config(
-        self, interface: CorralRouter, task_id: str
-    ) -> tuple[str, dict[str, Any], str]:
-        """Build the Streamable-HTTP MCP server config for this task.
-
-        Points the harness at the environment server's own task-scoped MCP
-        endpoint. Execution and tool schemas are served there (via
-        `Environment.call_tool` / `Tool.to_mcp`), so the agent does not bridge
-        tools itself.
-
-        The REST allowlist is fetched at the router's current tool verbosity, so
-        the same verbosity is forwarded to the MCP endpoint as a query parameter.
-        Otherwise the harness could see full tool descriptions while the
-        allowlist metadata reflects a briefer condition, silently breaking
-        tool-description ablations.
-
-        Returns the endpoint URL, the SDK `mcp_servers` config entry, and the
-        resolved verbosity.
-        """
-        # Mirror the REST tool verbosity (defaults to the router's own "brief").
-        verbosity = getattr(interface, "current_verbosity", None) or "brief"
-        # The router owns the URL convention (task-scoped, or trial-scoped when
-        # a trial router is passed) and handles encoding / trailing slash.
-        url = interface.mcp_url(task_id, verbosity)
-        return url, {"type": "http", "url": url}, verbosity
 
     def _build_options(
         self,
         server: Any,
-        submit_server: Any,
         allowed_tools: list[str],
         enable_surrender: bool,
         cwd: str,
+        max_turns: int,
     ) -> Any:
         """Assemble the fully-isolated `ClaudeAgentOptions` for a run."""
         opts: dict[str, Any] = {
             "system_prompt": self._build_system_prompt(enable_surrender),
             "model": self.harness_model,
-            # Fail closed: expose *no* built-in tools (empty base tool set) and
-            # deny anything that was not explicitly pre-approved. Only the
-            # `mcp__corral__*` task tools and the in-process
-            # `mcp__submit__submit_answer` channel reach the agent. This does not
-            # rely on a denylist, which would silently go stale as the SDK adds
-            # built-ins.
-            "tools": [],
-            "mcp_servers": {
-                _MCP_SERVER_NAME: server,
-                _SUBMIT_SERVER_NAME: submit_server,
-            },
+            # Follow the SDK-owned native preset so newly added Claude Code
+            # built-ins are available without maintaining a stale local list.
+            "tools": {"type": "preset", "preset": "claude_code"},
+            "mcp_servers": {_MCP_SERVER_NAME: server},
             # Ignore project `.mcp.json`, user settings, and plugin MCP servers
             # so only the corral task endpoint is loaded.
             "strict_mcp_config": True,
             "allowed_tools": allowed_tools,
-            "permission_mode": "dontAsk",
+            # Native tools remain subject to Claude Code's automatic safety
+            # review. Task-scoped MCP tools are pre-approved above because the
+            # benchmark is non-interactive and the endpoint is capability-scoped.
+            "permission_mode": "auto",
+            # Bash and its children run inside Claude Code's OS sandbox and may
+            # not use the unsandboxed escape hatch. Read/Edit retain their SDK
+            # path permission checks and start from the fresh per-run cwd.
+            "sandbox": {
+                "enabled": True,
+                "autoAllowBashIfSandboxed": True,
+                "allowUnsandboxedCommands": False,
+            },
             # Load *no* filesystem configuration: `[]` (unlike `None`, which
             # loads user/project/local settings, CLAUDE.md, hooks, and MCP
             # config) keeps runs reproducible across machines.
@@ -536,7 +269,12 @@ class ClaudeCodeAgent(BaseAgent):
             # A fresh empty working directory per episode so the preset's
             # dynamic (cwd/git/memory) context cannot leak between runs.
             "cwd": cwd,
-            "max_turns": self.max_iterations,
+            "max_turns": max_turns,
+            # Ask the SDK to forward partial model events as they arrive. The
+            # receive loop deliberately records only completed messages, so
+            # partials keep the transport active without duplicating transcript
+            # content.
+            "include_partial_messages": True,
         }
         if self.reasoning_effort is not None:
             opts["effort"] = self.reasoning_effort
@@ -571,185 +309,71 @@ class ClaudeCodeAgent(BaseAgent):
             ).hexdigest(),
             "reasoning_effort": self.reasoning_effort,
             "thinking": self.thinking,
-            "max_turns_configured": self.max_iterations,
+            "max_turns_configured": getattr(options, "max_turns", None),
             "wall_clock_timeout_s": self.wall_clock_timeout_s,
-            "tool_timeout_s": self.tool_timeout_s,
+            "streaming_enabled": bool(
+                getattr(options, "include_partial_messages", False)
+            ),
+            "sdk_internal_tools_policy": "native_defaults",
+            "permission_mode": getattr(options, "permission_mode", None),
+            "sandbox_enabled": bool(
+                (getattr(options, "sandbox", None) or {}).get("enabled", False)
+            ),
         }
 
-    async def _run_harness(
+    async def _execute_harness(
         self,
-        interface: CorralRouter,
-        task_id: str,
+        session: AgentSession,
+        mcp_url: str,
         prompt_input: Any,
         tools: list[dict[str, Any]],
         enable_surrender: bool,
         cwd: str,
+        max_turns: int,
+        run: _RunState,
     ) -> str:
         """Drive the Claude Code harness to completion and return its answer."""
-        self._submitted_answer = None
-        self._submit_trace_calls = []
-        mcp_url, server, verbosity = self._mcp_server_config(interface, task_id)
-        submit_server = self._make_submit_server()
+        server = {"type": "http", "url": mcp_url}
         allowed_tools = [
             f"mcp__{_MCP_SERVER_NAME}__{t['function']['name']}"
             for t in tools
             if t.get("function", {}).get("name")
         ]
-        # The agent-only submit channel is always allowed, alongside the task
-        # tools, so the harness can return its final answer through it.
-        allowed_tools.append(f"mcp__{_SUBMIT_SERVER_NAME}__{_SUBMIT_TOOL_NAME}")
-
         options = self._build_options(
-            server, submit_server, allowed_tools, enable_surrender, cwd
+            server,
+            allowed_tools,
+            enable_surrender,
+            cwd,
+            max_turns,
         )
-        self._run_meta = self._harness_metadata(options, tools)
-        self._run_meta["mcp_url"] = mcp_url
-        self._run_meta["tool_verbosity"] = verbosity
+        run.metadata = self._harness_metadata(options, tools)
+        run.metadata["mcp_url"] = mcp_url
 
         assistant_text: list[str] = []
         result_text: str | None = None
 
         # Use the persistent client (rather than the one-shot `query()`) so the
         # corral MCP endpoint can be inspected before the model starts solving.
-        try:
-            async with ClaudeSDKClient(options=options) as client:
-                await self._preflight_mcp(client, tools)
-                await client.query(self._sdk_prompt(prompt_input))
-                async for message in client.receive_response():
-                    result_text = self._consume_message(
-                        message, assistant_text, result_text
-                    )
-        finally:
-            # An in-process terminal tool call is not consistently included in
-            # the SDK response stream. Materialize any calls seen by the handler
-            # but not by `_consume_message`, including when the stream fails
-            # after the tool ran.
-            self._reconcile_submit_trace_calls()
-            self._run_meta["submit_tool_used"] = self._submitted_answer is not None
+        async with ClaudeSDKClient(options=options) as client:
+            await self._preflight_mcp(client, tools, run)
+            await client.query(self._sdk_prompt(prompt_input))
+            async for message in client.receive_response():
+                result_text, transcript = self._consume_message(
+                    message,
+                    assistant_text,
+                    result_text,
+                    run,
+                )
+                for item in transcript:
+                    await session.record_message(item)
 
-        # Prefer the answer the harness explicitly submitted through the tool;
-        # only fall back to the trailing chat message if it never called it.
-        if self._submitted_answer is not None:
-            return self._submitted_answer
         return result_text or ("\n".join(assistant_text)).strip()
 
-    @staticmethod
-    def _is_submit_tool_name(name: Any) -> bool:
-        """Return whether ``name`` identifies the agent-only submit tool."""
-        return name in {_SUBMIT_TOOL_NAME, _SUBMIT_TOOL_FQN}
-
-    @staticmethod
-    def _tool_call_arguments(tool_call: dict[str, Any]) -> dict[str, Any] | None:
-        """Parse one LiteLLM-style tool call's arguments for comparison."""
-        function = tool_call.get("function", {})
-        arguments = function.get("arguments")
-        if isinstance(arguments, dict):
-            return arguments
-        if not isinstance(arguments, str):
-            return None
-        try:
-            parsed = json.loads(arguments)
-        except (TypeError, ValueError):
-            return None
-        return parsed if isinstance(parsed, dict) else None
-
-    def _reconcile_submit_trace_calls(self) -> None:
-        """Ensure every executed submit call appears exactly once in the trace.
-
-        Claude Agent SDK normally streams the submit ToolUseBlock and its
-        ToolResultBlock, in which case this method leaves them untouched. If an
-        SDK version suppresses either event for the in-process terminal tool, a
-        standard LiteLLM-style assistant/tool pair is appended from the call
-        captured by :meth:`_make_submit_server`.
-        """
-        streamed_calls: list[tuple[dict[str, Any] | None, str | None]] = []
-        tool_result_ids = {
-            message.get("tool_call_id")
-            for message in self.messages
-            if message.get("role") == "tool"
-        }
-        existing_ids = set(tool_result_ids)
-
-        for message in self.messages:
-            for tool_call in message.get("tool_calls", []) or []:
-                function = tool_call.get("function", {})
-                call_id = tool_call.get("id")
-                if call_id:
-                    existing_ids.add(call_id)
-                if self._is_submit_tool_name(function.get("name")):
-                    streamed_calls.append(
-                        (self._tool_call_arguments(tool_call), call_id)
-                    )
-
-        matched = [False] * len(streamed_calls)
-        synthetic_index = 1
-        for arguments in self._submit_trace_calls:
-            match_index = next(
-                (
-                    index
-                    for index, (streamed_arguments, _) in enumerate(streamed_calls)
-                    if not matched[index] and streamed_arguments == arguments
-                ),
-                None,
-            )
-            if match_index is not None:
-                matched[match_index] = True
-                call_id = streamed_calls[match_index][1]
-                if call_id and call_id not in tool_result_ids:
-                    self.messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": _stringify_tool_content(
-                                [
-                                    {
-                                        "type": "text",
-                                        "text": _SUBMIT_TOOL_RESULT_TEXT,
-                                    }
-                                ]
-                            ),
-                            "name": "tool_result",
-                            "is_error": False,
-                        }
-                    )
-                    tool_result_ids.add(call_id)
-                continue
-
-            call_id = f"corral-submit-{synthetic_index}"
-            while call_id in existing_ids:
-                synthetic_index += 1
-                call_id = f"corral-submit-{synthetic_index}"
-            synthetic_index += 1
-            existing_ids.add(call_id)
-            self.messages.extend(
-                [
-                    {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [
-                            {
-                                "id": call_id,
-                                "function": {
-                                    "name": _SUBMIT_TOOL_FQN,
-                                    "arguments": json.dumps(arguments, default=str),
-                                },
-                            }
-                        ],
-                    },
-                    {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": _stringify_tool_content(
-                            [{"type": "text", "text": _SUBMIT_TOOL_RESULT_TEXT}]
-                        ),
-                        "name": "tool_result",
-                        "is_error": False,
-                    },
-                ]
-            )
-
     async def _preflight_mcp(
-        self, client: ClaudeSDKClient, tools: list[dict[str, Any]]
+        self,
+        client: ClaudeSDKClient,
+        tools: list[dict[str, Any]],
+        run: _RunState,
     ) -> None:
         """Fail fast if the corral MCP endpoint is not usable for this run.
 
@@ -779,8 +403,8 @@ class ClaudeCodeAgent(BaseAgent):
         # the input schemas, so this is deliberately not called a schema digest;
         # the REST-format schema digest is recorded separately as
         # `rest_tool_schema_sha256`.
-        self._run_meta["mcp_tools_exposed"] = sorted(exposed)
-        self._run_meta["mcp_tool_metadata_sha256"] = hashlib.sha256(
+        run.metadata["mcp_tools_exposed"] = sorted(exposed)
+        run.metadata["mcp_tool_metadata_sha256"] = hashlib.sha256(
             json.dumps(
                 exposed_tools, sort_keys=True, separators=(",", ":"), default=str
             ).encode("utf-8")
@@ -836,32 +460,40 @@ class ClaudeCodeAgent(BaseAgent):
         return name[len(prefix) :] if name.startswith(prefix) else name
 
     def _consume_message(
-        self, message: Any, assistant_text: list[str], result_text: str | None
-    ) -> str | None:
-        """Fold one SDK message into the transcript; return the final result.
+        self,
+        message: Any,
+        assistant_text: list[str],
+        result_text: str | None,
+        run: _RunState,
+    ) -> tuple[str | None, list[dict[str, Any]]]:
+        """Translate one SDK event into result state and provider messages.
 
         Raises :class:`_HarnessError` on a non-success `ResultMessage`.
         """
+        transcript: list[dict[str, Any]] = []
         if isinstance(message, AssistantMessage):
             reported = getattr(message, "model", None)
             if reported:
-                self._run_meta["model_reported"] = reported
+                run.metadata["model_reported"] = reported
             for block in message.content:
                 if isinstance(block, TextBlock) and block.text:
                     assistant_text.append(block.text)
-                    self.messages.append(
-                        LiteLLMMessage(role="assistant", content=block.text)
+                    run.last_assistant_text = block.text
+                    transcript.append(
+                        dict(LiteLLMMessage(role="assistant", content=block.text))
                     )
                 elif isinstance(block, ThinkingBlock):
-                    self.messages.append(
-                        LiteLLMMessage(
-                            role="assistant",
-                            content=block.thinking,
-                            name="thinking",
+                    transcript.append(
+                        dict(
+                            LiteLLMMessage(
+                                role="assistant",
+                                content=block.thinking,
+                                name="thinking",
+                            )
                         )
                     )
                 elif isinstance(block, ToolUseBlock):
-                    self.messages.append(
+                    transcript.append(
                         {
                             "role": "assistant",
                             "content": "",
@@ -888,10 +520,10 @@ class ClaudeCodeAgent(BaseAgent):
                             # Count (but don't terminate on) MCP tool errors:
                             # recovering from them is legitimate agent behaviour,
                             # so this is provenance, not a failure by itself.
-                            self._run_meta["tool_errors"] = (
-                                self._run_meta.get("tool_errors", 0) + 1
+                            run.metadata["tool_errors"] = (
+                                run.metadata.get("tool_errors", 0) + 1
                             )
-                        self.messages.append(
+                        transcript.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": block.tool_use_id,
@@ -901,10 +533,10 @@ class ClaudeCodeAgent(BaseAgent):
                             }
                         )
         elif isinstance(message, ResultMessage):
-            self._record_result_meta(message)
+            self._record_result_meta(message, run)
             usage = getattr(message, "usage", None)
             if usage:
-                self._record_usage(usage)
+                self._record_usage(usage, run)
             # Record metadata *before* raising: the SDK may emit an error
             # ResultMessage (e.g. `error_max_turns`) and only then raise.
             subtype = getattr(message, "subtype", "success")
@@ -919,7 +551,7 @@ class ClaudeCodeAgent(BaseAgent):
             if getattr(message, "result", None):
                 result_text = message.result
 
-        return result_text
+        return result_text, transcript
 
     def _sdk_prompt(self, prompt_input: Any) -> Any:
         """Return the value to hand to `query(prompt=...)`.
@@ -943,7 +575,7 @@ class ClaudeCodeAgent(BaseAgent):
 
         return _messages()
 
-    def _record_result_meta(self, message: Any) -> None:
+    def _record_result_meta(self, message: Any, run: _RunState) -> None:
         """Capture the SDK ResultMessage fields for the benchmark record."""
         for attr in (
             "subtype",
@@ -958,32 +590,39 @@ class ClaudeCodeAgent(BaseAgent):
         ):
             value = getattr(message, attr, None)
             if value is not None:
-                self._run_meta[attr] = value
+                run.metadata[attr] = value
 
-    def _record_usage(self, usage: dict[str, Any]) -> None:
-        """Map the harness usage dict onto the base token-usage schema.
-
-        `prompt_tokens`/`completion_tokens`/`total_tokens` keep the base
-        class working, while the cache-read and cache-creation components are
-        preserved separately because they have different cost semantics.
-        """
-        input_tokens = int(usage.get("input_tokens", 0) or 0)
-        cache_read = int(usage.get("cache_read_input_tokens", 0) or 0)
-        cache_creation = int(usage.get("cache_creation_input_tokens", 0) or 0)
-        completion_tokens = int(usage.get("output_tokens", 0) or 0)
-        prompt_tokens = input_tokens + cache_read + cache_creation
-        self.token_usage = {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-            "input_tokens": input_tokens,
-            "cache_read_input_tokens": cache_read,
-            "cache_creation_input_tokens": cache_creation,
+    def _record_usage(self, usage: dict[str, Any], run: _RunState) -> None:
+        """Record canonical scratch usage from Claude's aggregate usage."""
+        normalized = self._usage(usage)
+        run.usage = {
+            "input_tokens": normalized.input_tokens,
+            "output_tokens": normalized.output_tokens,
+            "reasoning_tokens": normalized.reasoning_tokens,
+            "total_tokens": normalized.input_tokens + normalized.output_tokens,
         }
-        # The harness reports usage already aggregated for the whole session, so
-        # mirror it into the run total that `get_total_token_usage` reads
-        # rather than summing (which would double-count on repeated results).
-        self.cumulative_token_usage = dict(self.token_usage)
+
+    def _usage(
+        self,
+        raw_usage: Mapping[str, Any] | None,
+        *,
+        llm_calls: int = 0,
+    ) -> AgentUsage:
+        """Include Claude cache reads and cache creation in input tokens."""
+        raw_usage = raw_usage or {}
+        if "input_tokens" in raw_usage:
+            input_tokens = int(raw_usage.get("input_tokens", 0) or 0)
+            input_tokens += int(raw_usage.get("cache_read_input_tokens", 0) or 0)
+            input_tokens += int(raw_usage.get("cache_creation_input_tokens", 0) or 0)
+        else:
+            input_tokens = int(raw_usage.get("prompt_tokens", 0) or 0)
+        return usage_from_mapping(
+            {
+                **raw_usage,
+                "input_tokens": input_tokens,
+            },
+            llm_calls=llm_calls,
+        )
 
     def _normalize_prompt(self, task_guide: Any) -> tuple[Any, Any]:
         """Split a raw task prompt into `(transcript_content, sdk_prompt)`.
@@ -1007,315 +646,144 @@ class ClaudeCodeAgent(BaseAgent):
         text = str(task_guide)
         return text, text
 
-    def run(
-        self,
-        interface: CorralRouter,
-        task_id: str,
-        task_prompt: str | None = None,
-        examples: list[str] | None = None,  # noqa: ARG002
-        enable_surrender: bool = False,
-        **kwargs,  # noqa: ARG002
-    ) -> str:
-        """Run the Claude Code harness to solve the task (synchronous entry).
+    @staticmethod
+    def _prompt_with_state_history(
+        prompt_input: Any,
+        messages: tuple[Mapping[str, Any], ...] | list[dict[str, Any]],
+    ) -> Any:
+        """Add the canonical agent conversation to a fresh harness query.
 
-        This is the blocking wrapper over the natively-async :meth:`arun`: the
-        harness coroutine is driven via :func:`_run_coroutine` (`asyncio.run`,
-        or a dedicated background loop when already inside one). Prefer
-        :meth:`arun` from async code so the SDK call runs directly on the caller's
-        loop instead of nesting an extra event loop in a worker thread.
-
-        Args:
-            interface (CorralRouter): The interface to the environment server.
-            task_id (str): The task ID to solve.
-            task_prompt (str, optional): The task prompt to use. If None, the
-                task prompt is fetched from the environment. Defaults to None.
-            examples (list[str], optional): Unused; the harness manages its own
-                context. Kept for interface compatibility. Defaults to None.
-            enable_surrender (bool, optional): Whether to allow the agent to give
-                up on an unsolvable task. Defaults to False.
-
-        Returns:
-            str: The final answer produced by the harness, or the
-            `SURRENDER_SENTINEL` value if the agent surrendered. Infrastructure
-            failures return an `"Error solving the task: ..."` string; inspect
-            `self.harness_result` for the structured status.
+        Claude Code owns a new SDK session for each Corral task attempt, so an
+        existing commit history cannot be restored through an SDK session
+        id.  Supplying its provider-safe messages in the query gives the harness
+        the same resumable context without introducing adapter-owned memory.
         """
-        tools, sdk_prompt, cwd = self._prepare_run(interface, task_id, task_prompt)
-        try:
-            final_answer = _run_coroutine(
-                self._run_harness(
-                    interface, task_id, sdk_prompt, tools, enable_surrender, cwd
-                ),
-                timeout=self.wall_clock_timeout_s,
-            )
-        except ImportError:
-            raise
-        except Exception as e:  # surface as infra failure, not a model answer
-            return self._harness_failure_answer(e)
-        finally:
-            shutil.rmtree(cwd, ignore_errors=True)
-
-        return self._finalize_answer(final_answer, task_id, enable_surrender)
-
-    async def arun(
-        self,
-        interface: CorralRouter,
-        task_id: str,
-        task_prompt: str | None = None,
-        examples: list[str] | None = None,  # noqa: ARG002
-        enable_surrender: bool = False,
-        **kwargs,  # noqa: ARG002
-    ) -> str:
-        """Run the Claude Code harness natively on the caller's event loop.
-
-        The Claude Agent SDK is asynchronous, so this drives it directly with
-        `await` — no background thread and no nested event loop — and enforces
-        the wall-clock deadline with a structured :func:`anyio.fail_after` scope.
-        A timeout (or a cancellation from the scheduler) unwinds the
-        `async with ClaudeSDKClient` cleanly, cancelling the in-flight SDK call
-        rather than orphaning a worker thread. Behaviour and return value match
-        :meth:`run`; the synchronous :meth:`run` is the wrapper around this.
-
-        Tools and the task prompt are fetched through :meth:`_aprepare_run`, so
-        against an :class:`~corral.router.AsyncCorralRouter` the HTTP is awaited
-        on the loop and this path never touches a worker thread for HTTP.
-        """
-        tools, sdk_prompt, cwd = await self._aprepare_run(
-            interface, task_id, task_prompt
+        if not messages:
+            return prompt_input
+        history = json.dumps(
+            list(messages),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
         )
-        try:
-            final_answer = await self._arun_harness(
-                interface, task_id, sdk_prompt, tools, enable_surrender, cwd
-            )
-        except ImportError:
-            raise
-        except Exception as e:  # surface as infra failure, not a model answer
-            return self._harness_failure_answer(e)
-        finally:
-            shutil.rmtree(cwd, ignore_errors=True)
-
-        return self._finalize_answer(final_answer, task_id, enable_surrender)
-
-    async def _arun_harness(
-        self,
-        interface: CorralRouter,
-        task_id: str,
-        sdk_prompt: Any,
-        tools: list[dict[str, Any]],
-        enable_surrender: bool,
-        cwd: str,
-    ) -> str:
-        """Drive the harness on the loop, enforcing the wall-clock deadline.
-
-        `anyio.fail_after` converts the deadline into a cancel scope: on expiry
-        the surrounding `async with ClaudeSDKClient` in :meth:`_run_harness` is
-        cancelled and unwound before a :class:`TimeoutError` propagates, which
-        :meth:`_harness_failure_answer` maps to `status="timeout"`.
-        """
-        if self.wall_clock_timeout_s is None:
-            return await self._run_harness(
-                interface, task_id, sdk_prompt, tools, enable_surrender, cwd
-            )
-        with anyio.fail_after(self.wall_clock_timeout_s):
-            return await self._run_harness(
-                interface, task_id, sdk_prompt, tools, enable_surrender, cwd
-            )
-
-    def _prepare_run(
-        self, interface: CorralRouter, task_id: str, task_prompt: str | None
-    ) -> tuple[list[dict[str, Any]], Any, str]:
-        """Fetch tools + prompt synchronously, then assemble the run (sync entry).
-
-        The setup for the synchronous :meth:`run`. Fetches the tool allowlist and
-        (unless one was supplied) the task prompt with plain synchronous calls,
-        then delegates the shared, no-I/O assembly to :meth:`_assemble_run`.
-        """
-        self.harness_result = None
-        tools = interface.get_available_tools_for_task(task_id).get("tools", [])
-        task_guide = (
-            interface.get_task_prompt(task_id) if task_prompt is None else task_prompt
+        context = (
+            "Continue from this canonical Corral agent conversation. "
+            "Treat it as prior context and do not repeat completed tool calls:\n"
+            f"{history}\n\nCurrent task input follows."
         )
-        return self._assemble_run(interface, task_id, tools, task_guide)
+        if isinstance(prompt_input, str):
+            return f"{context}\n\n{prompt_input}"
+        return [{"type": "text", "text": context}, *list(prompt_input)]
 
-    async def _aprepare_run(
-        self, interface: CorralRouter, task_id: str, task_prompt: str | None
-    ) -> tuple[list[dict[str, Any]], Any, str]:
-        """Fetch tools + prompt through the async router, then assemble the run.
+    def _run_usage(self, run: _RunState) -> AgentUsage:
+        llm_calls = int(run.metadata.get("num_turns", 0) or 0)
+        if llm_calls == 0 and "subtype" in run.metadata:
+            llm_calls = 1
+        return self._usage(run.usage, llm_calls=llm_calls)
 
-        The async twin of :meth:`_prepare_run` for the native :meth:`arun`. The
-        two HTTP fetches go through :func:`acall`, so a run against an
-        :class:`~corral.router.AsyncCorralRouter` **awaits** them directly on the
-        scheduler loop (no worker thread for HTTP), while a synchronous router is
-        offloaded per call. The no-I/O assembly is shared verbatim with the sync
-        path via :meth:`_assemble_run`.
-        """
-        self.harness_result = None
-        payload = await acall(interface.get_available_tools_for_task, task_id)
-        tools = payload.get("tools", [])
-        task_guide = (
-            task_prompt
-            if task_prompt is not None
-            else await acall(interface.get_task_prompt, task_id)
-        )
-        return self._assemble_run(interface, task_id, tools, task_guide)
-
-    def _assemble_run(
+    async def _failure_outcome(
         self,
-        interface: CorralRouter,
-        task_id: str,
-        tools: list[dict[str, Any]],
-        task_guide: Any,
-    ) -> tuple[list[dict[str, Any]], Any, str]:
-        """Shared, no-I/O run setup for :meth:`_prepare_run`/:meth:`_aprepare_run`.
-
-        Normalizes the (possibly multimodal) prompt, seeds the transcript, fires
-        the `BEFORE_TASK` hooks, and mints a fresh per-episode working dir (the
-        caller owns cleanup). Returns the REST tool allowlist, the SDK-ready
-        prompt, and the `cwd`, so the sync and async entry points behave
-        identically once the fetches are done.
-        """
-        self._available_tools = tools
-
-        # `get_task_prompt` may return multimodal content. Text stays a plain
-        # string; images are forwarded through the SDK's streaming input.
-        transcript_content, sdk_prompt = self._normalize_prompt(task_guide)
-
-        # Seed the message history so the base-class answer extractor and
-        # transcript saving have the task prompt as the first message.
-        self.messages = [LiteLLMMessage(role="user", content=transcript_content)]
-
-        self._execute_hooks(HookPoint.BEFORE_TASK, interface, task_id)
-
-        # Fresh, empty working directory per episode; cleaned up afterwards.
-        cwd = tempfile.mkdtemp(prefix="corral-claude-")
-        return tools, sdk_prompt, cwd
-
-    def _harness_failure_answer(self, exc: Exception) -> str:
-        """Map a harness-drive exception onto a `_fail` answer string.
-
-        Shared by :meth:`run` and :meth:`arun`. The SDK/preflight subtype is
-        mapped onto a precise terminal status so a budget exhaustion, an MCP
-        transport failure, and a tool-set mismatch are not all collapsed into a
-        generic SDK crash; a wall-clock `TimeoutError` becomes `"timeout"`.
-        """
+        session: AgentSession,
+        exc: Exception,
+        run: _RunState,
+    ) -> AgentOutcome:
         if isinstance(exc, TimeoutError):
-            return self._fail(
-                "timeout",
-                f"harness timed out after {self.wall_clock_timeout_s}s",
-                exc,
-            )
-        if isinstance(exc, _HarnessError):
-            subtype_status: dict[str, HarnessStatus] = {
-                "error_max_turns": "max_turns",
+            status = "timeout"
+            error = f"harness timed out after {self.wall_clock_timeout_s}s"
+        elif isinstance(exc, _HarnessError):
+            statuses = {
+                "error_max_turns": "iteration_limit",
                 "error_mcp_connection": "tool_failure",
-                "error_mcp_tool_mismatch": "sdk_failure",
+                "error_mcp_tool_mismatch": "protocol_failure",
             }
-            status: HarnessStatus = subtype_status.get(exc.subtype or "", "sdk_failure")
-            return self._fail(status, str(exc), exc)
-        return self._fail("sdk_failure", str(exc), exc)
-
-    def _finalize_answer(
-        self, final_answer: str, task_id: str, enable_surrender: bool
-    ) -> str:
-        """Normalize the harness output into a submit-ready answer.
-
-        Shared post-processing for :meth:`run` and :meth:`arun`.
-        """
-        # Normalize the harness output into a submit-ready answer. Answer
-        # extraction is disabled by default (`requires_answer_extraction` is
-        # False), so the harness output is submitted without another model call.
-        # When extraction is enabled, strip the declared "Final Answer:" marker,
-        # then reason about that normalized value.
-        if self.requires_answer_extraction:
-            final_answer_match = re.search(
-                r"Final Answer:\s*(.*)", final_answer, re.DOTALL | re.IGNORECASE
-            )
-            final_answer = (
-                final_answer_match.group(1).strip()
-                if final_answer_match
-                else final_answer.strip()
-            )
+            status = statuses.get(exc.subtype or "", "harness_failure")
+            error = str(exc)
         else:
-            final_answer = final_answer.strip()
+            status = "harness_failure"
+            error = str(exc)
 
-        # Surrender only on an *exact* sentinel answer, so the marker appearing
-        # inside a longer response is not mistaken for giving up.
-        if (
-            enable_surrender
-            and final_answer.casefold() == SURRENDER_SENTINEL.casefold()
-        ):
-            logger.info(f"Agent retiring from task {task_id}")
-            self.harness_result = HarnessRunResult(
-                status="surrender",
-                answer=SURRENDER_SENTINEL,
-                num_turns=self._run_meta.get("num_turns"),
-                usage=dict(self.token_usage),
-                total_cost_usd=self._run_meta.get("total_cost_usd"),
-                metadata=dict(self._run_meta),
-            )
-            return SURRENDER_SENTINEL
-
-        if not final_answer:
-            self.messages.append(
+        await session.record_message(
+            dict(
                 LiteLLMMessage(
                     role="assistant",
-                    content="Error: harness returned no answer.",
+                    content=f"Claude Code harness failed: {error}",
                     name="claude-code-error",
                 )
             )
-            self.harness_result = HarnessRunResult(
-                status="sdk_failure",
-                error="the harness returned no answer",
-                num_turns=self._run_meta.get("num_turns"),
-                usage=dict(self.token_usage),
-                total_cost_usd=self._run_meta.get("total_cost_usd"),
-                metadata=dict(self._run_meta),
-            )
-            return "Error solving the task: the harness returned no answer."
-
-        # Ensure the submit-ready answer is in the transcript exactly once. The
-        # harness `ResultMessage` is not otherwise recorded, so append it unless
-        # the last streamed assistant message already equals it (ignoring
-        # surrounding whitespace). In non-extraction mode this avoids the
-        # duplicate the `Final Answer:`-stripping used to produce, while still
-        # keeping the answer in the trace.
-        last_content = self.messages[-1].get("content") if self.messages else None
-        already_recorded = (
-            isinstance(last_content, str) and last_content.strip() == final_answer
         )
-        if not already_recorded:
-            self.messages.append(LiteLLMMessage(role="assistant", content=final_answer))
-        self.harness_result = HarnessRunResult(
-            status="success",
-            answer=final_answer,
-            num_turns=self._run_meta.get("num_turns"),
-            usage=dict(self.token_usage),
-            total_cost_usd=self._run_meta.get("total_cost_usd"),
-            metadata=dict(self._run_meta),
-        )
-        return final_answer
-
-    def _fail(self, status: HarnessStatus, error: str, exc: BaseException) -> str:
-        """Record an infrastructure failure and return an error answer string.
-
-        The failure is stored on `self.harness_result` with a precise status
-        so the benchmark can distinguish a timeout / budget exhaustion / SDK
-        crash from an ordinary wrong model answer.
-        """
-        logger.error(f"Claude Code harness {status}: {error}")
-        self.messages.append(
-            LiteLLMMessage(
-                role="assistant",
-                content=f"Error running Claude Code harness: {exc}",
-                name="claude-code-error",
-            )
-        )
-        self.harness_result = HarnessRunResult(
+        return AgentOutcome(
             status=status,
             error=error,
-            num_turns=self._run_meta.get("num_turns"),
-            usage=dict(self.token_usage),
-            total_cost_usd=self._run_meta.get("total_cost_usd"),
-            metadata=dict(self._run_meta),
+            usage=self._run_usage(run),
+            metadata=dict(run.metadata),
         )
-        return f"Error solving the task: {error}"
+
+    async def _finalize_outcome(
+        self,
+        session: AgentSession,
+        final_answer: str,
+        run: _RunState,
+    ) -> AgentOutcome:
+        submission = session.submission
+        if submission is None:
+            answer = final_answer.strip()
+            if answer:
+                await session.record_message(
+                    dict(LiteLLMMessage(role="assistant", content=answer))
+                )
+            return AgentOutcome(
+                status="protocol_failure",
+                error="Claude Code finished without calling submit_answer",
+                usage=self._run_usage(run),
+                metadata=dict(run.metadata),
+            )
+        if session.submission_status == "surrendered":
+            logger.debug(f"Agent retiring from execution {session.execution_id}")
+            return AgentOutcome(
+                status="surrendered",
+                usage=self._run_usage(run),
+                metadata=dict(run.metadata),
+            )
+        return AgentOutcome(
+            status="completed",
+            answer=submission,
+            usage=self._run_usage(run),
+            metadata=dict(run.metadata),
+        )
+
+    async def run_session(self, session: AgentSession) -> AgentOutcome:
+        """Run Claude's native loop against one task-bound Corral session."""
+        run = _RunState()
+        tools = [dict(tool) for tool in session.tools]
+        history = provider_messages(session.messages)
+        transcript_content, sdk_prompt = self._normalize_prompt(session.prompt)
+        sdk_prompt = self._prompt_with_state_history(sdk_prompt, history)
+        max_turns = session.iteration_limit
+        await session.record_message(
+            dict(LiteLLMMessage(role="user", content=transcript_content))
+        )
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="corral-claude-") as cwd:
+                mcp_url = session.tool_connection.mcp_url
+                call = self._execute_harness(
+                    session,
+                    mcp_url,
+                    sdk_prompt,
+                    tools,
+                    session.surrender_allowed,
+                    cwd,
+                    max_turns,
+                    run,
+                )
+                if self.wall_clock_timeout_s is None:
+                    final_answer = await call
+                else:
+                    with anyio.fail_after(self.wall_clock_timeout_s):
+                        final_answer = await call
+        except ImportError:
+            raise
+        except Exception as exc:
+            return await self._failure_outcome(session, exc, run)
+
+        return await self._finalize_outcome(session, final_answer, run)

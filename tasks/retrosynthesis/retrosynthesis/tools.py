@@ -20,8 +20,7 @@ from retrosynthesis.retrosynthesis_utils import (
 )
 from rxnmapper import RXNMapper
 
-from corral.backend.tool import Tool, tool
-from corral.utils.modal import remote_call
+from corral.core.tool import Tool, tool
 
 
 # TODO: Include reaction type in the search_template_catalog tool
@@ -219,9 +218,7 @@ def search_template_catalog_by_criteria(
             ]
             if invalid_bonds:
                 if bond_param_name == "bonds_order_changed":
-                    expected_format = (
-                        'e.g., "6-6 (1.0->2.0)", "6-8 (2.0->3.0)"'
-                    )
+                    expected_format = 'e.g., "6-6 (1.0->2.0)", "6-8 (2.0->3.0)"'
                 else:
                     expected_format = 'e.g., "6-6", "6-8"'
                 raise ValueError(
@@ -746,144 +743,6 @@ def is_buyable(smiles_list: list[str]) -> list[bool]:
 
 
 @tool
-def smiles_to_cas(molecule_smiles: str) -> str:
-    """
-    [BRIEF] Converts a SMILES string to a CAS number. [/BRIEF]
-
-    [DETAILED] This function takes a SMILES (Simplified Molecular Input Line Entry System) string as input and converts it to the corresponding CAS (Chemical Abstracts Service) number. The CAS number is a unique numerical identifier assigned to every chemical substance described in the open scientific literature. [/DETAILED]
-
-    [PROCEDURAL] When to use this tool:
-    - When you have a SMILES representation of a molecule and need to find its CAS number.[/PROCEDURAL]
-
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Obtain the SMILES string of the molecule you want to convert. [/PREREQUISITE]
-    2. [CURRENT] Use `smiles_to_cas` to convert the SMILES string to a CAS number. [/CURRENT]
-    3. [FOLLOW_UP] Use the obtained CAS number for further chemical information lookup, procurement, or documentation. You can also use the tool `search_catalog_by_cas` to find available precursors or `is_buyable` to check if the molecule is commercially available. [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
-
-    [CONTEXTUAL] How this tool works:
-    - The function takes a SMILES string as input and queries a chemical database or service that maps SMILES strings to CAS numbers.
-    - The function first validates the SMILES string to ensure it represents a valid molecular structure.
-    - It retrieves the CAS number associated with the provided SMILES string.
-    - If a matching CAS number is found, it is returned as a string. If no match is found, an appropriate message or exception may be raised. [/CONTEXTUAL]
-
-    [SYNTACTICAL] Usage examples:
-    [
-        `smiles_to_cas("CCO")`,
-        `smiles_to_cas("c1ccccc1O")`,
-        `smiles_to_cas("C1=CC=CC=C1")`,
-        `smiles_to_cas("C1=CC=CC=C1C(=O)O")`,
-        `smiles_to_cas("C1=CC=CC=C1C(=O)Cl")`,
-    ]
-    [/SYNTACTICAL]
-
-    Args:
-        molecule_smiles (str):
-            [ARGS_BRIEF] SMILES string of the molecule to convert. [/ARGS_BRIEF]
-            [ARGS_DETAILED] A valid SMILES string of the molecule that you need the CAS number for. [/ARGS_DETAILED]
-            [ARGS_SYNTACTICAL] Valid SMILES string [/ARGS_SYNTACTICAL]
-            [ARGS_EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/ARGS_EXAMPLES]
-
-    Returns:
-        str:
-            [RETURNS_BRIEF] The corresponding CAS number as a string. [/RETURNS_BRIEF]
-            [RETURNS_DETAILED] The function returns the CAS number associated with the provided SMILES string. The CAS number is a unique identifier for chemical substances and is widely used in chemical databases and literature. [/RETURNS_DETAILED]
-            [RETURNS_SYNTACTICAL] String representing a CAS number [/RETURNS_SYNTACTICAL]
-            [RETURNS_EXAMPLES] "50-00-0", "64-17-5", "67-56-1" [/RETURNS_EXAMPLES]
-
-    [RAISES] Exceptions:
-        Exception:
-            [ERROR_WHEN] Raised for any unexpected errors during the conversion process. [/ERROR_WHEN]
-            [ERROR_DETAILS] This could be due to connectivity issues, or server errors in the conversion service. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] If the error comes from the conversion service, being a server error or similar, inform the user to try again later, and you should go through a different route. [/ERROR_RECOVERY]
-
-        ValueError:
-            [ERROR_WHEN] Raised when the provided SMILES string is invalid. [/ERROR_WHEN]
-            [ERROR_DETAILS] This occurs if the SMILES string cannot be parsed into a valid molecular structure. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] Ensure the SMILES string is correctly formatted. [/ERROR_RECOVERY]
-    [/RAISES]
-
-    [LIMITATIONS] Known limitations:
-    - The function relies on the accuracy and completeness of the underlying database or service used for the conversion.
-    - Not all SMILES strings may have a corresponding CAS number, especially for novel or less common compounds.
-    - The function does not handle stereochemistry or isotopic variations in the SMILES string.
-    - If the conversion service is down or unreachable, the function will not be able to return results.
-    [/LIMITATIONS]
-    """
-    mol = Chem.MolFromSmiles(molecule_smiles)
-    if mol is None:
-        raise ValueError(f"Invalid SMILES string: {molecule_smiles}")
-    return remote_call(function_name="return_cas_number", env_name="chemenv")(
-        compound=molecule_smiles
-    )
-
-
-@tool
-def cas_to_smiles(cas_number: str) -> str:
-    """
-    [BRIEF] Converts a CAS number to an isomeric SMILES string. [/BRIEF]
-
-    [DETAILED] This function takes a CAS (Chemical Abstracts Service) number as input and converts it to the corresponding isomeric SMILES (Simplified Molecular Input Line Entry System) string.
-    The isomeric SMILES representation includes stereochemical information, making it more specific than standard SMILES. [/DETAILED]
-
-    [PROCEDURAL] When to use this tool:
-    - When you have a CAS number and need to find the corresponding isomeric SMILES representation of the molecule. [/PROCEDURAL]
-
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Obtain the CAS number of the molecule you want to convert. You can obtain the CAS number for a chemical by using the tool `smiles_to_cas`. [/PREREQUISITE]
-    2. [CURRENT] Use `cas_to_smiles` to convert the CAS number to an isomeric SMILES string. [/CURRENT]
-    3. [FOLLOW_UP] Use the obtained isomeric SMILES string for further chemical analysis, modeling, or synthesis planning. You can also use the tool `detect_functional_groups` to identify functional groups in the molecule. [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
-
-    [CONTEXTUAL] How this tool works:
-    - The function takes a CAS number as input and queries a chemical database or service that maps CAS numbers to isomeric SMILES strings.
-    - It retrieves the isomeric SMILES representation associated with the provided CAS number.
-    - If a matching isomeric SMILES string is found, it is returned as a string. If no match is found, an appropriate message or exception may be raised. [/CONTEXTUAL]
-
-    [SYNTACTICAL] Usage examples:
-    [
-        `cas_to_smiles("50-00-0")`,
-        `cas_to_smiles("64-17-5")`,
-        `cas_to_smiles("67-56-1")`,
-        `cas_to_smiles("000-00-0")`,
-        `cas_to_smiles("999-99-9")`,
-    ]
-    [/SYNTACTICAL]
-
-    Args:
-        cas_number (str):
-            [ARGS_BRIEF] CAS number of the molecule to convert. [/ARGS_BRIEF]
-            [ARGS_DETAILED] Valid CAS number string that corresponds to a specific chemical substance that you want to convert to SMILES. [/ARGS_DETAILED]
-            [ARGS_SYNTACTICAL] Valid CAS number string [/ARGS_SYNTACTICAL]
-            [ARGS_EXAMPLES] "50-00-0", "64-17-5", "67-56-1" [/ARGS_EXAMPLES]
-
-    Returns:
-        str:
-            [RETURNS_BRIEF] The corresponding isomeric SMILES string. [/RETURNS_BRIEF]
-            [RETURNS_DETAILED] The function returns the isomeric SMILES representation associated with the provided CAS number. The isomeric SMILES includes stereochemical information, making it more specific than standard SMILES. [/RETURNS_DETAILED]
-            [RETURNS_SYNTACTICAL] String representing an isomeric SMILES [/RETURNS_SYNTACTICAL]
-            [RETURNS_EXAMPLES] "C(CO)O", "CCO", "C1=CC=CC=C1" [/RETURNS_EXAMPLES]
-
-    [RAISES] Exceptions:
-        Exception:
-            [ERROR_WHEN] Raised for any unexpected errors during the conversion process. [/ERROR_WHEN]
-            [ERROR_DETAILS] This could be due to connectivity issues, invalid CAS number format, or server errors in the conversion service. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] Verify the CAS number format if the error has to do with the CAS number. If the error comes from the conversion service, inform the user to try again later. [/ERROR_RECOVERY]
-    [/RAISES]
-
-    [LIMITATIONS] Known limitations:
-    - The function relies on the accuracy and completeness of the underlying database or service used for the conversion.
-    - Not all CAS numbers may have a corresponding isomeric SMILES representation, especially for novel or less common compounds.
-    - The function does not handle cases where multiple isomeric SMILES strings may correspond to the same CAS number.
-    - If the conversion service is down or unreachable, the function will not be able to return results.
-    [/LIMITATIONS]
-    """
-    return remote_call(function_name="get_isomeric_smiles_pubchem", env_name="chemenv")(
-        compound=cas_number
-    )
-
-
-@tool
 def deprotect_molecule(molecule_smiles: str) -> str:
     """
     [BRIEF] Removes protecting groups from a molecule represented by a SMILES string. [/BRIEF]
@@ -1332,7 +1191,5 @@ def create_tools() -> dict[str, Tool]:
         "detect_protection_groups": detect_protection_groups,
         "detect_functional_groups": detect_functional_groups,
         "map_reaction_smiles": map_reaction_smiles,
-        "smiles_to_cas": smiles_to_cas,
-        "cas_to_smiles": cas_to_smiles,
         "check_smiles_reaction_template_matching": check_smiles_reaction_template_matching,
     }

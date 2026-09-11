@@ -3,8 +3,7 @@ from pathlib import Path
 import chromadb
 from loguru import logger
 
-# Import the embed_text function from corral.utils
-from corral.utils import embed_text
+from corral.utils.tool_helpers import embed_text
 
 
 def verify_vector_database(db_path: str, collection_name: str):

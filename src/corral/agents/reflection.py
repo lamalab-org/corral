@@ -12,9 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from loguru import logger
-
 from corral.agents.utils import LiteLLMMessage, llm_call
+from corral.report.logging import logger
 
 
 @dataclass
@@ -170,7 +169,7 @@ class ReflectionModule:
         self.api_endpoint = api_endpoint
         self.kwargs = kwargs
 
-    def generate_reflection(
+    async def generate_reflection(
         self,
         task_id: str,
         trial_id: str,
@@ -192,7 +191,7 @@ class ReflectionModule:
             tuple[str, dict[str, int]]: A tuple of (reflection_text, token_usage_dict) where
                 token_usage_dict contains 'prompt_tokens', 'completion_tokens', and 'total_tokens'
         """
-        logger.info(f"Generating reflection for attempt with score {score:.2f}")
+        logger.debug(f"Generating reflection for attempt with score {score:.2f}")
 
         # Summarize trajectory (take key messages to avoid context overflow)
         trajectory_summary = self._summarize_trajectory(trajectory)
@@ -218,7 +217,7 @@ class ReflectionModule:
             )
 
         try:
-            response = llm_call(
+            response = await llm_call(
                 model=self.model,
                 messages=messages,
                 temperature=self.temperature,
@@ -229,7 +228,11 @@ class ReflectionModule:
 
             content = response.content or ""
             reflection_text = content.strip()
-            logger.debug(f"Generated reflection: {reflection_text}")
+            logger.bind(
+                event="agent.reflection_generated",
+                subsystem="agent",
+                reasoning=reflection_text,
+            ).debug("Generated reflection")
 
             # Extract usage from metadata
             usage_info = response.usage or {
@@ -240,7 +243,7 @@ class ReflectionModule:
             return reflection_text, usage_info
 
         except Exception as e:
-            logger.error(f"Error generating reflection: {e}")
+            logger.warning(f"Reflection generation degraded to fallback: {e}")
             # Return a basic reflection on error with zero token usage
             fallback_reflection = (
                 f"Previous attempt achieved score {score:.3f}. "

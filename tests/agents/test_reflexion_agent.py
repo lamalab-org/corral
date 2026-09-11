@@ -1,591 +1,210 @@
-"""Integration tests for ReflexionAgent."""
+"""Tests for Reflexion's session-agent composition."""
+
+from types import SimpleNamespace
 
 import pytest
 
-from corral.agents.react import ReActAgent
 from corral.agents.reflection import ReflectionModule
 from corral.agents.reflexion_agent import ReflexionAgent
-from corral.agents.tool_calling import ToolCallingAgent
-from corral.agents.utils import LiteLLMMessage
-from corral.types import ToolResponse
-
-from .conftest import MockLLMResponse
+from corral.agents.schema import AgentOutcome, AgentUsage
+from corral.agents.session import AgentSession, ToolResponse
+from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 
 
-class TestReflexionAgentInitialization:
-    """Test cases for ReflexionAgent initialization."""
+@pytest.fixture()
+def anyio_backend():
+    return "asyncio"
 
-    def test_init_with_react_agent(self, mock_promptstore_module):
-        """Test initializing ReflexionAgent with ReActAgent."""
-        base_agent = ReActAgent(
-            model="test-model",
-            max_iterations=5,
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+
+class Actor:
+    api_endpoint = None
+
+    def __init__(self):
+        self.calls = 0
+
+    async def run_session(self, session):
+        self.calls += 1
+        await session.record_message(
+            {"role": "assistant", "content": f"actor attempt {self.calls}"}
         )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
+        result = await session.execute(
+            Action(name=SUBMIT_ANSWER_TOOL_NAME, arguments={"answer": "42"})
         )
-
-        assert reflexion_agent.actor == base_agent
-        assert reflexion_agent.model == base_agent.model
-        assert reflexion_agent.max_iterations == base_agent.max_iterations
-
-    def test_init_with_tool_calling_agent(self, mock_promptstore_module):
-        """Test initializing ReflexionAgent with ToolCallingAgent."""
-        base_agent = ToolCallingAgent(
-            model="test-model",
-            max_iterations=10,
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
-        )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
+        assert result.success is True
+        return AgentOutcome(
+            status="completed",
+            answer="42",
+            usage=AgentUsage(input_tokens=2, output_tokens=1, llm_calls=1),
         )
 
-        assert reflexion_agent.actor == base_agent
 
-    def test_init_custom_reflection_model(self, mock_promptstore_module):
-        """Test initializing with custom reflection model."""
-        base_agent = ReActAgent(
-            model="gpt-4",
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
-        )
-        reflexion_agent = ReflexionAgent(actor=base_agent, reflection_model="gpt-4o")
+class FakeSession:
+    prompt = "solve"
+    execution_id = "execution-1"
+    model_name = AgentSession.model_name
+    previous_messages = AgentSession.previous_messages
+    previous_commit_hash = AgentSession.previous_commit_hash
 
-        assert reflexion_agent.reflection_module.model == "gpt-4o"
-
-    def test_memory_initialization(self, mock_promptstore_module):
-        """Test that memory is properly initialized."""
-        base_agent = ReActAgent(
-            model="test-model",
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
-        )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
-        )
-
-        assert len(reflexion_agent.memory.reflections) == 0
-        assert reflexion_agent.memory.max_size == 5
-
-
-class TestReflexionAgentRun:
-    """Test cases for ReflexionAgent.run method."""
-
-    def test_success_on_first_attempt(
-        self, mock_interface, monkeypatch, mock_promptstore_module
+    def __init__(
+        self,
+        previous_evaluation=None,
+        previous_state=None,
+        model="test-model",
+        iteration_limit=10,
     ):
-        """Test that reflexion agent succeeds on first attempt."""
-        # Create base agent
-        base_agent = ReActAgent(
-            model="test-model",
-            max_iterations=3,
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
+        self.state = SimpleNamespace(
+            task=SimpleNamespace(model=({"name": model} if model is not None else {}))
         )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
-        )
+        self.task_id = "task-1"
+        self.actor = SimpleNamespace(actor_id="actor")
+        self.previous_evaluation = previous_evaluation
+        self.previous_state = previous_state
+        self.iteration_limit = iteration_limit
+        self.messages = []
+        self.submission = None
+        self.agent_state = {}
+        self.delegate_budgets = []
 
-        # Mock successful response
-        response = MockLLMResponse(
-            content="Thought: <thought>I can answer this.</thought>\nFinal Answer: <final_answer>42</final_answer>"
-        )
+    def get_agent_state(self, namespace, *, previous=False):
+        if previous:
+            if self.previous_state is None:
+                return None
+            run = next(iter(self.previous_state.agent_runs.values()))
+            namespaces = run.algorithm_state
+            return namespaces.get(namespace)
+        return self.agent_state.get(namespace)
 
-        call_count = {"llm": 0, "reflection": 0}
+    async def set_agent_state(self, namespace, value):
+        self.agent_state[namespace] = dict(value)
 
-        def mock_get_llm_response(*args, **kwargs):
-            call_count["llm"] += 1
-            return response
+    async def record_message(self, message):
+        self.messages.append(dict(message))
 
-        def mock_reflection_generate(*args, **kwargs):
-            call_count["reflection"] += 1
-            return "This should not be called"
+    async def execute(self, action):
+        assert action.name == SUBMIT_ANSWER_TOOL_NAME
+        self.submission = str(action.arguments["answer"])
+        return ToolResponse(success=True, result="answer accepted", error=None)
 
-        monkeypatch.setattr(
-            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
-        )
-        monkeypatch.setattr(
-            "corral.agents.reflection.ReflectionModule.generate_reflection",
-            mock_reflection_generate,
-        )
+    async def run_delegate(self, agent, *, max_iterations=None):
+        assert max_iterations is not None
+        assert max_iterations >= 1
+        self.delegate_budgets.append(max_iterations)
+        return await agent.run_session(self)
 
-        # Run agent
-        result = reflexion_agent.run(mock_interface, "test_task")
+    def final_messages(self):
+        return tuple(self.messages)
 
-        # Should succeed on first attempt
-        assert result == "42"
-        assert call_count["llm"] == 1
-        assert call_count["reflection"] == 0  # No reflection needed
-        assert len(reflexion_agent.memory.reflections) == 0
 
-    def test_retry_with_reflection(
-        self, mock_interface, monkeypatch, mock_promptstore_module
-    ):
-        """Test that agent retries with reflection after failure."""
-        base_agent = ReActAgent(
-            model="test-model",
-            max_iterations=3,
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
-        )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
-        )
+def test_reflexion_requires_a_session_agent():
+    with pytest.raises(TypeError, match="run_session"):
+        ReflexionAgent(actor=object())
 
-        # First trial fails (needs 3 responses to exhaust iterations), second trial succeeds
-        responses = [
-            # First trial - iteration 1
-            MockLLMResponse(
-                content="Thought: <thought>Let me try something.</thought>\nAction: <action>tool1</action>\nAction Input: <action_input>{}</action_input>"
-            ),
-            # First trial - iteration 2
-            MockLLMResponse(
-                content="Thought: <thought>That didn't work.</thought>\nAction: <action>tool2</action>\nAction Input: <action_input>{}</action_input>"
-            ),
-            # First trial - iteration 3
-            MockLLMResponse(
-                content="Thought: <thought>Still not working.</thought>\nAction: <action>tool3</action>\nAction Input: <action_input>{}</action_input>"
-            ),
-            # Second trial - succeeds immediately
-            MockLLMResponse(
-                content="Thought: <thought>Using the reflection, I now understand.</thought>\nFinal Answer: <final_answer>Success</final_answer>"
-            ),
-        ]
 
-        call_count = {"llm": 0, "reflection": 0}
+@pytest.mark.anyio()
+async def test_reflexion_requires_model_metadata_without_requiring_actor_model():
+    actor = Actor()
+    agent = ReflexionAgent(actor=actor)
 
-        def mock_get_llm_response(*args, **kwargs):
-            response = responses[call_count["llm"]]
-            call_count["llm"] += 1
-            return response
+    outcome = await agent.run_session(FakeSession(model=None))
 
-        def mock_reflection_generate(*args, **kwargs):
-            call_count["reflection"] += 1
-            return "I should try a different approach next time.", {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            }
+    assert outcome.status == "agent_failure"
+    assert "ExecutionState.task.model.name" in str(outcome.error)
+    assert actor.calls == 0
 
-        monkeypatch.setattr(
-            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
-        )
-        monkeypatch.setattr(
-            "corral.agents.reflection.ReflectionModule.generate_reflection",
-            mock_reflection_generate,
+
+@pytest.mark.anyio()
+async def test_reflexion_generates_memory_before_next_actor_attempt(monkeypatch):
+    actor = Actor()
+    agent = ReflexionAgent(
+        actor=actor,
+        reflection_prompt=(
+            "{{task_id}} {{trial_id}} {{score}} {{trajectory_summary}} "
+            "{{task_description}}"
+        ),
+    )
+    first = FakeSession()
+    first_outcome = await agent.run_session(first)
+
+    reflection_models = []
+
+    async def generate_reflection(reflection_module, **_kwargs):
+        reflection_models.append(reflection_module.model)
+        return (
+            "Check the measured value before answering.",
+            {"prompt_tokens": 5, "completion_tokens": 2},
         )
 
-        # Set up tool responses for the failed tools
-        mock_interface.tool_responses = [
-            ToolResponse(success=True, result="result1", error=None),
-            ToolResponse(success=True, result="result2", error=None),
-            ToolResponse(success=True, result="result3", error=None),
-        ]
-
-        # Run first trial (should fail by exhausting iterations)
-        result1 = reflexion_agent.run(mock_interface, "test_task")
-
-        # Verify first trial failed
-        assert "Error" in result1
-        assert call_count["llm"] == 3  # 3 iterations exhausted
-
-        # Mock get_last_score to simulate framework providing previous score
-        def mock_get_last_score(task_id):
-            return {"score": 0.0, "trial_id": "trial_1"}
-
-        monkeypatch.setattr(mock_interface, "get_last_score", mock_get_last_score)
-
-        # Run second trial (should succeed with reflection)
-        result2 = reflexion_agent.run(mock_interface, "test_task")
-
-        # Should succeed on second trial
-        assert result2 == "Success"
-        assert call_count["llm"] == 4  # 3 for first trial + 1 for second
-        assert call_count["reflection"] == 1
-        assert len(reflexion_agent.memory.reflections) == 1
-
-    def test_exhausts_all_attempts(
-        self, mock_interface, monkeypatch, mock_promptstore_module
-    ):
-        """Test that agent can be called multiple times and generates reflections."""
-        base_agent = ReActAgent(
-            model="test-model",
-            max_iterations=3,
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
-        )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
-        )
-
-        # All trials fail - each needs 3 responses to exhaust iterations
-        call_count = {"llm": 0, "reflection": 0, "trial": 0}
-
-        def mock_get_llm_response(*args, **kwargs):
-            call_count["llm"] += 1
-            # Each iteration returns a failed action
-            return MockLLMResponse(
-                content=f"Thought: <thought>Trial {call_count['trial']}, iteration {call_count['llm']}.</thought>\nAction: <action>failing_tool</action>\nAction Input: <action_input>{{}}</action_input>"
+    monkeypatch.setattr(
+        ReflectionModule,
+        "generate_reflection",
+        generate_reflection,
+    )
+    previous_state = SimpleNamespace(
+        through_commit_hash="a" * 64,
+        agent_runs={
+            "previous": SimpleNamespace(
+                run_id="previous",
+                actor_id="actor",
+                algorithm_state=first.agent_state,
             )
+        },
+        conversations={"previous": tuple(first.messages)},
+    )
+    second = FakeSession(
+        previous_evaluation={
+            "trial_id": "trial-1",
+            "score": 0.2,
+            "commit_hash": "a" * 64,
+        },
+        previous_state=previous_state,
+    )
+    second_outcome = await agent.run_session(second)
 
-        def mock_reflection_generate(*args, **kwargs):
-            call_count["reflection"] += 1
-            return f"Reflection {call_count['reflection']}", {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            }
-
-        def mock_get_last_score(task_id):
-            # Return previous score if not first trial
-            if call_count["trial"] > 0:
-                return {"score": 0.0, "trial_id": f"trial_{call_count['trial']}"}
-            raise AttributeError("No previous score")
-
-        monkeypatch.setattr(
-            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
-        )
-        monkeypatch.setattr(
-            "corral.agents.reflection.ReflectionModule.generate_reflection",
-            mock_reflection_generate,
-        )
-        monkeypatch.setattr(mock_interface, "get_last_score", mock_get_last_score)
-
-        # Set up tool responses that always succeed (but agent never finds final answer)
-        mock_interface.tool_responses = [
-            ToolResponse(success=True, result="result", error=None)
-        ] * 20  # More than enough for all trials
-
-        # Run agent 3 times (3 trials)
-        for i in range(3):
-            call_count["trial"] = i
-            result = reflexion_agent.run(mock_interface, "test_task")
-            assert "Error" in result  # Each trial fails
-
-        # Should have tried all 3 trials
-        assert call_count["llm"] == 9  # 3 trials x 3 iterations each
-        assert (
-            call_count["reflection"] == 2
-        )  # Generate reflection after first 2 failures
-        assert len(reflexion_agent.memory.reflections) == 2
-
-    def test_memory_clears_for_new_task(
-        self, mock_interface, monkeypatch, mock_promptstore_module
-    ):
-        """Test that memory accumulates reflections across tasks."""
-        base_agent = ReActAgent(
-            model="test-model",
-            max_iterations=3,
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
-        )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
-        )
-
-        trial_count = {"count": 0}
-
-        def mock_actor_run(self, interface, task_id, **kwargs):
-            self.messages = [LiteLLMMessage(role="assistant", content="Error")]
-            return "Error solving the task"
-
-        def mock_reflection_generate(*args, **kwargs):
-            return f"Reflection for {kwargs.get('task_id', 'unknown')}", {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            }
-
-        def mock_get_last_score(task_id):
-            # Only return score if not first trial for a task
-            if trial_count["count"] > 0:
-                return {"score": 0.0, "trial_id": f"trial_{trial_count['count']}"}
-            raise AttributeError("No previous score")
-
-        monkeypatch.setattr("corral.agents.react.ReActAgent.run", mock_actor_run)
-        monkeypatch.setattr(
-            "corral.agents.reflection.ReflectionModule.generate_reflection",
-            mock_reflection_generate,
-        )
-        monkeypatch.setattr(mock_interface, "get_last_score", mock_get_last_score)
-
-        # Run first trial for task_1
-        trial_count["count"] = 0
-        reflexion_agent.run(mock_interface, "task_1")
-
-        # Run second trial for task_1 (should generate reflection)
-        trial_count["count"] = 1
-        reflexion_agent.run(mock_interface, "task_1")
-        assert len(reflexion_agent.memory.reflections) == 1
-
-        # Run first trial for task_2 (should generate another reflection from task_1's second trial)
-        trial_count["count"] = 2
-        reflexion_agent.run(mock_interface, "task_2")
-
-        # Memory continues to accumulate (FIFO with max_size=3)
-        assert len(reflexion_agent.memory.reflections) >= 1
-
-    def test_with_tool_execution(
-        self, mock_interface, monkeypatch, mock_promptstore_module
-    ):
-        """Test reflexion agent with tool execution across trials."""
-        base_agent = ReActAgent(
-            model="test-model",
-            max_iterations=5,
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
-        )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
-        )
-
-        # First trial uses wrong tool and exhausts iterations, second trial uses right tool and succeeds
-        responses = [
-            # First trial - iteration 1
-            MockLLMResponse(
-                content="""Thought: <thought>I'll use tool A.</thought>
-Action: <action>wrong_tool</action>
-Action Input: <action_input>{}</action_input>"""
-            ),
-            # First trial - iteration 2
-            MockLLMResponse(
-                content="""Thought: <thought>Let me try again.</thought>
-Action: <action>wrong_tool</action>
-Action Input: <action_input>{}</action_input>"""
-            ),
-            # First trial - iteration 3
-            MockLLMResponse(
-                content="""Thought: <thought>Still trying.</thought>
-Action: <action>wrong_tool</action>
-Action Input: <action_input>{}</action_input>"""
-            ),
-            # First trial - iteration 4
-            MockLLMResponse(
-                content="""Thought: <thought>One more time.</thought>
-Action: <action>wrong_tool</action>
-Action Input: <action_input>{}</action_input>"""
-            ),
-            # First trial - iteration 5
-            MockLLMResponse(
-                content="""Thought: <thought>Last try.</thought>
-Action: <action>wrong_tool</action>
-Action Input: <action_input>{}</action_input>"""
-            ),
-            # Second trial - iteration 1 (with reflection)
-            MockLLMResponse(
-                content="""Thought: <thought>Based on reflection, I'll use tool B.</thought>
-Action: <action>correct_tool</action>
-Action Input: <action_input>{}</action_input>"""
-            ),
-            # Second trial - iteration 2
-            MockLLMResponse(
-                content="Thought: <thought>Got result.</thought>\nFinal Answer: <final_answer>Success</final_answer>"
-            ),
-        ]
-
-        call_count = {"llm": 0}
-
-        def mock_get_llm_response(*args, **kwargs):
-            response = responses[call_count["llm"]]
-            call_count["llm"] += 1
-            return response
-
-        def mock_reflection_generate(*args, **kwargs):
-            return "Use correct_tool instead of wrong_tool", {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            }
-
-        def mock_get_last_score(task_id):
-            # Return score after first trial
-            if call_count["llm"] >= 5:
-                return {"score": 0.0, "trial_id": "trial_1"}
-            raise AttributeError("No previous score")
-
-        monkeypatch.setattr(
-            "corral.agents.base_agent.BaseAgent.get_llm_response", mock_get_llm_response
-        )
-        monkeypatch.setattr(
-            "corral.agents.reflection.ReflectionModule.generate_reflection",
-            mock_reflection_generate,
-        )
-        monkeypatch.setattr(mock_interface, "get_last_score", mock_get_last_score)
-
-        # Set up tool responses
-        mock_interface.tool_responses = [
-            ToolResponse(
-                success=False, result=None, error="Wrong tool"
-            ),  # First trial calls
-            ToolResponse(success=False, result=None, error="Wrong tool"),
-            ToolResponse(success=False, result=None, error="Wrong tool"),
-            ToolResponse(success=False, result=None, error="Wrong tool"),
-            ToolResponse(success=False, result=None, error="Wrong tool"),
-            ToolResponse(
-                success=True, result="Correct result", error=None
-            ),  # Second trial call
-        ]
-
-        # Run first trial (should fail by exhausting iterations)
-        result1 = reflexion_agent.run(mock_interface, "test_task")
-        assert "Error" in result1
-
-        # Run second trial (should succeed with reflection)
-        result2 = reflexion_agent.run(mock_interface, "test_task")
-        assert result2 == "Success"
-        assert len(reflexion_agent.memory.reflections) == 1
+    assert first_outcome.status == "completed"
+    assert second_outcome.status == "completed"
+    assert second_outcome.usage.llm_calls == 2
+    assert first.delegate_budgets == [10]
+    assert second.delegate_budgets == [9]
+    assert second_outcome.metadata["reflection_model"] == "test-model"
+    assert reflection_models == ["test-model"]
+    assert not hasattr(agent, "memory")
+    assert not hasattr(agent, "_previous_messages")
+    memory = second.agent_state["reflexion"]["memory"]
+    assert second.agent_state["reflexion"]["reflection_model"] == "test-model"
+    assert len(memory["reflections"]) == 1
+    assert second.agent_state["reflexion"]["source_commit_hash"] == ("a" * 64)
+    assert any(
+        "Check the measured value" in str(message.get("content"))
+        for message in second.messages
+    )
 
 
-class TestReflexionAgentEdgeCases:
-    """Test edge cases for ReflexionAgent."""
+@pytest.mark.anyio()
+async def test_reflexion_reserves_a_single_available_call_for_the_actor(monkeypatch):
+    actor = Actor()
+    agent = ReflexionAgent(actor=actor)
+    previous_state = SimpleNamespace(
+        through_commit_hash="a" * 64,
+        agent_runs={
+            "previous": SimpleNamespace(
+                run_id="previous", actor_id="actor", algorithm_state={}
+            )
+        },
+        conversations={
+            "previous": ({"role": "assistant", "content": "previous attempt"},)
+        },
+    )
+    session = FakeSession(
+        previous_evaluation={"trial_id": "trial-1", "score": 0.0},
+        previous_state=previous_state,
+        iteration_limit=1,
+    )
 
-    def test_exception_handling(
-        self, mock_interface, monkeypatch, mock_promptstore_module
-    ):
-        """Test that exceptions from the actor are propagated."""
-        base_agent = ReActAgent(
-            model="test-model",
-            max_iterations=3,
-            system_prompt="You are a helpful assistant.",
-            extractor_prompt="Extract the answer from: {{answer}}. Context: {{message}}",
-        )
-        reflexion_agent = ReflexionAgent(
-            reflection_model="test-model", actor=base_agent
-        )
+    generate = pytest.fail
+    monkeypatch.setattr(ReflectionModule, "generate_reflection", generate)
 
-        call_count = {"attempt": 0}
+    outcome = await agent.run_session(session)
 
-        def mock_actor_run(self, interface, task_id, **kwargs):
-            call_count["attempt"] += 1
-            if call_count["attempt"] == 1:
-                raise ValueError("Simulated error")
-
-            self.messages = [LiteLLMMessage(role="assistant", content="Success")]
-            return "Success"
-
-        def mock_reflection_generate(*args, **kwargs):
-            return "Handle the error better", {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            }
-
-        monkeypatch.setattr("corral.agents.react.ReActAgent.run", mock_actor_run)
-        monkeypatch.setattr(
-            "corral.agents.reflection.ReflectionModule.generate_reflection",
-            mock_reflection_generate,
-        )
-
-        # Run - should propagate exception from actor
-        with pytest.raises(ValueError, match="Simulated error"):
-            reflexion_agent.run(mock_interface, "test_task")
-
-
-class TestReflectionModuleToolFormatting:
-    """Test cases for tool output detection and formatting in ReflectionModule."""
-
-    def test_is_tool_output_message_with_tool_role(self):
-        """Test detection of messages with role='tool'."""
-        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
-        msg = LiteLLMMessage(role="tool", content="some content", tool_call_id="123")
-
-        assert module._is_tool_output_message(msg, "some content") is True
-
-    def test_is_tool_output_message_with_observation(self):
-        """Test detection of ReAct-style Observation messages."""
-        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
-        msg = LiteLLMMessage(role="user", content="Observation: tool result")
-
-        assert module._is_tool_output_message(msg, msg["content"]) is True
-
-    def test_is_tool_output_message_with_tool_structure(self):
-        """Test detection of messages with tool output structure."""
-        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
-        content = "{'tool_name': 'test', 'status': 'success', 'result': 'data'}"
-        msg = LiteLLMMessage(role="user", content=content)
-
-        assert module._is_tool_output_message(msg, content) is True
-
-    def test_is_tool_output_message_regular_message(self):
-        """Test that regular messages are not detected as tool outputs."""
-        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
-        msg = LiteLLMMessage(role="user", content="What is the answer?")
-
-        assert module._is_tool_output_message(msg, msg["content"]) is False
-
-    def test_summarize_tool_message_with_dict_string(self):
-        """Test summarization of tool message with Python dict string format."""
-        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
-        content = "{'tool_name': 'list_files', 'arguments': {'path': '/test'}, 'result': 'file1\\nfile2\\nfile3', 'status': 'success', 'error_message': None, 'duration': 1.234, 'timestamp': '2025-08-03T10:16:37'}"
-        msg = LiteLLMMessage(role="tool", content=content, name="list_files")
-
-        summary = module._summarize_tool_message(msg, content)
-
-        assert "Tool: list_files" in summary
-        assert "Status: success" in summary
-        assert "Duration: 1.23s" in summary
-        assert "Arguments:" in summary
-        assert "Result: <returned" in summary
-
-    def test_summarize_tool_message_with_observation_format(self):
-        """Test summarization of ReAct-style observation format."""
-        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
-        content = "Observation: {'tool_name': 'search', 'status': 'success', 'result': 'found data'}"
-        msg = LiteLLMMessage(role="user", content=content, name="search")
-
-        summary = module._summarize_tool_message(msg, content)
-
-        assert "Tool: search" in summary
-        assert "Status: success" in summary
-
-    def test_summarize_tool_message_with_error(self):
-        """Test summarization of tool message with error."""
-        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
-        content = "{'tool_name': 'execute_python', 'arguments': {}, 'result': None, 'status': 'execution_error', 'error_message': 'Syntax error in code', 'duration': 0.5}"
-        msg = LiteLLMMessage(role="tool", content=content, name="execute_python")
-
-        summary = module._summarize_tool_message(msg, content)
-
-        assert "Tool: execute_python" in summary
-        assert "Status: execution_error" in summary
-        assert "Error: Syntax error in code" in summary
-
-    def test_format_messages_preserves_non_tool_messages(self):
-        """Test that non-tool messages are preserved as-is."""
-        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
-        messages = [
-            LiteLLMMessage(role="system", content="You are a helpful assistant"),
-            LiteLLMMessage(role="user", content="What is 2+2?"),
-            LiteLLMMessage(role="assistant", content="The answer is 4"),
-        ]
-
-        formatted = module._format_messages(messages)
-
-        assert "SYSTEM: You are a helpful assistant" in formatted
-        assert "USER: What is 2+2?" in formatted
-        assert "ASSISTANT: The answer is 4" in formatted
-
-    def test_format_messages_summarizes_tool_outputs(self):
-        """Test that tool output messages are summarized."""
-        module = ReflectionModule(model="test-model", reflection_prompt="test prompt")
-        messages = [
-            LiteLLMMessage(role="user", content="List files"),
-            LiteLLMMessage(
-                role="tool",
-                content="{'tool_name': 'list_files', 'status': 'success', 'result': 'very long file list...', 'arguments': {}, 'duration': 0.5}",
-                name="list_files",
-            ),
-        ]
-
-        formatted = module._format_messages(messages)
-
-        # Tool output should be summarized
-        assert "USER: List files" in formatted
-        assert "TOOL:" in formatted
-        assert "Tool: list_files" in formatted
-        assert "Status: success" in formatted
-        # Should not contain the full result
-        assert "very long file list" not in formatted
+    assert outcome.status == "completed"
+    assert outcome.usage.llm_calls == 1
+    assert session.delegate_budgets == [1]

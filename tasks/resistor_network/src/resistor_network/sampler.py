@@ -235,7 +235,11 @@ def build_random_block(
         # undershoot their target resistor count, sometimes badly).
         leaves = [leaf_resistor(rng, ids) for _ in range(target_resistors)]
         mode = rng.choice(["series", "parallel"])
-        return compose_series(leaves) if mode == "series" else compose_parallel(leaves, ids)
+        return (
+            compose_series(leaves)
+            if mode == "series"
+            else compose_parallel(leaves, ids)
+        )
 
     if allow_bridge and target_resistors >= 5 and rng.random() < bridge_prob:
         bridge = leaf_bridge(rng, ids)
@@ -255,7 +259,11 @@ def build_random_block(
         for size in sizes
     ]
     mode = rng.choice(["series", "parallel"])
-    return compose_series(children) if mode == "series" else compose_parallel(children, ids)
+    return (
+        compose_series(children)
+        if mode == "series"
+        else compose_parallel(children, ids)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -459,8 +467,14 @@ def sample_circuit(
         if not bad_ids:
             return topology
 
-        if best_loadbearing_bad_count is None or len(bad_ids) < best_loadbearing_bad_count:
-            best_loadbearing_topology, best_loadbearing_bad_count = topology, len(bad_ids)
+        if (
+            best_loadbearing_bad_count is None
+            or len(bad_ids) < best_loadbearing_bad_count
+        ):
+            best_loadbearing_topology, best_loadbearing_bad_count = (
+                topology,
+                len(bad_ids),
+            )
 
     # Fell through every attempt (only possible for degenerate resistor budgets, or very
     # unlucky runs): prefer the floor-clearing candidate with the fewest non-load-bearing
@@ -468,7 +482,9 @@ def sample_circuit(
     return best_loadbearing_topology or best_structural_topology
 
 
-def build_task(rng: random.Random, config: LevelConfig, index: int, num_resistors: int) -> dict:
+def build_task(
+    rng: random.Random, config: LevelConfig, index: int, num_resistors: int
+) -> dict:
     """Sample one circuit and assemble it into a full task definition dict."""
     topology = sample_circuit(rng, config, num_resistors)
     measurements = compute_all_measurements(topology)

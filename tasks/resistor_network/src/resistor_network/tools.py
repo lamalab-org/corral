@@ -5,7 +5,7 @@ import numpy as np
 from resistor_network.utils import get_resistance_between_nodes
 from scipy.optimize import minimize
 
-from corral.backend.tool import Tool, tool
+from corral.core.tool import Tool, tool
 
 
 @dataclass

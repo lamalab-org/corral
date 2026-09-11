@@ -1,532 +1,215 @@
+# Architecture
 
-These explanations help you understand the "why" behind `Corral`'s design.
+Corral has three distinct execution values:
 
-## Why Microservice Architecture?
-
-`Corral` separates the environment (server) and agent (runner) into distinct services. This design choice stems from several important considerations.
-
-### Isolation and Safety
-
-By running agents and environments in separate processes, we achieve:
-
-**Resource Isolation**: If an agent consumes excessive memory or CPU, it doesn't affect the environment or other agents. Each component can be monitored and controlled independently.
-
-**Security Boundaries**: Environments may interact with external systems, databases, or instruments. Separating them from agent code creates a security boundary - agents cannot directly access environment internals.
-
-**Failure Independence**: If an agent crashes or hangs, the environment remains available. The runner can restart the agent without losing environment state.
-
-### Scalability
-
-The microservice design enables:
-
-**Distributed Execution**: Agents can run on different machines from environments. This is crucial when environments require specialized hardware (GPUs, lab instruments) while agents need only compute.
-
-**Parallel Benchmarking**: Multiple agents can evaluate against the same environment server simultaneously. This accelerates research comparing different agent architectures.
-
-**Language Flexibility**: While `Corral` is Python-based, the REST API allows implementing agents in any language. Researchers can leverage the ecosystem best suited for their agent design.
-
-### Reproducibility
-
-REST API communication provides:
-
-**Observable Interactions**: Every agent-environment interaction is an HTTP request/response, which can be logged, replayed, and audited. This creates a complete record of agent behavior.
-
-**Versioned Protocols**: The API can be versioned, allowing environments and agents to evolve independently while maintaining compatibility.
-
-**Deterministic Replay**: By recording API interactions, we can replay agent executions exactly, crucial for debugging and scientific reproducibility.
-
-### Development Workflow
-
-Separation enables:
-
-**Independent Development**: Environment creators and agent researchers work independently. Changes to agent logic don't require environment modifications and vice versa.
-
-**Easier Testing**: Environments can be tested with simple HTTP clients before agents exist. Agents can be developed against mock environments.
-
-**Clear Contracts**: The API defines exactly what environments must provide and what agents can expect, reducing ambiguity.
-
-### The Trade-off
-
-The microservice approach adds complexity - you must run two processes, manage network communication, and handle distributed failure modes. `Corral` accepts this trade-off because the benefits (isolation, scalability, reproducibility) are fundamental to reliable agent research.
-
-For simple cases, you might prefer a monolithic design where agent and environment run in the same process. `Corral` prioritizes the needs of serious research over convenience for simple cases.
-
----
-
-## Understanding the Verbosity System
-
-The verbosity system in `Corral` allows controlling how much detail tool descriptions provide. This addresses a fundamental question in agent research: *How much does documentation context affect agent performance?*
-
-### The Research Question
-
-When we give LLM agents access to tools, we provide descriptions of what each tool does. But how should these descriptions be written?
-
-- Should we provide just a brief summary?
-- Should we include detailed usage instructions?
-- Do examples help or add noise?
-- Does explaining when to use a tool improve decision-making?
-
-These questions matter because token limits and context management are real constraints. If minimal documentation works just as well as comprehensive documentation, we should use minimal documentation to save tokens and reduce latency.
-
-### The Solution: Structured Verbosity
-
-Rather than forcing one documentation style, `Corral` lets you tag different *types* of information in tool docstrings:
-
-```
-[BRIEF] - What the tool does (1-2 sentences)
-[DETAILED] - How the tool works (technical details)
-[PROCEDURAL] - When to use the tool (decision guidance)
-[WORKFLOW_INTEGRATION] - How it fits with other tools
-[SYNTACTICAL] - Syntax details and formats
-[EXAMPLES] - Usage examples
+```text
+Commit log          Immutable source of truth
+ExecutionState      Materialized projection at one commit
+AgentContext        Authorized view for one agent run
 ```
 
-Then, at benchmark time, you select a verbosity level that determines which tags are included.
+## Authored commit ledger
 
-### Why This Matters
+Every durable event is one small typed commit in SQLite. The store assigns the
+timestamp, global execution sequence, branch sequence, `parent_hash`, and
+content hash atomically. Runtime code submits only a `CommitRequest` containing
+an idempotency key, selected branch, `based_on_hash`, bound actor, and event.
 
-**Ablation Studies**: You can run the same agent on the same tasks with different verbosity levels and measure the impact. This reveals whether your agent benefits from detailed documentation or not.
+Ordinary activity always extends the selected branch head. A stale
+`based_on_hash` records that an agent or tool worked from an older observation;
+it does not create a fork. Divergence is possible only through the explicit
+`SQLiteCommitStore.create_branch()` API.
 
-**Model Comparison**: Different models may respond differently to documentation. A highly capable model might infer usage from brief descriptions, while a smaller model might need explicit guidance.
+```text
+execution.started
+  -> task.configured
+  -> agent.started
+  -> agent.turn_recorded
+  -> tool.started
+  -> tool.completed
+  -> agent.completed
+  -> execution.completed
+```
 
-**Token Optimization**: Once you know the minimal effective verbosity for your use case, you can reduce token usage without sacrificing performance.
+The event reducer is deterministic and reconstructs `ExecutionState` from the
+ledger. Occasional complete projections are stored only as replay accelerators.
+They are not independent history records and replay never emits observability
+events.
 
-**Real-World Relevance**: In production systems, documentation quality varies. Testing agents across verbosity levels reveals robustness to documentation variation.
+## Trusted authors and concurrency
 
-### Design Principles
+Every commit carries an `ActorRef` for a runtime, agent run, or tool invocation.
+Agent and tool commits use author-bound store capabilities, so model-produced
+content cannot select its own durable author. The SQLite transaction serializes
+concurrent commits and advances the branch head only after author checks,
+history checks, event reduction, and shared-state preconditions succeed.
 
-The system follows several principles:
+Private events can safely append from stale observations. Environment and
+workspace effects carry expected revision numbers; an overlapping shared write
+raises a retryable conflict instead of being silently rebased.
 
-**Composable**: Higher verbosity levels include everything from lower levels plus additional tags. This ensures fair comparison - you're always adding information, not changing it.
+One model turn may propose an ordered parallel action group. Each tool gets a
+stable invocation ID. Completion commits retain real completion order, while an
+agent's next context presents tool results in declared action order.
 
-**Semantic**: Each tag type represents a different *kind* of information (what vs. when vs. how), not just "more words."
+## Runtime-selected tool transport
 
-**Opt-in**: Tools work fine without any verbosity tags. The `[BRIEF]` tag is optional - if absent, the regular docstring serves as brief documentation.
+`Environment` owns the task's tool implementations, resolves the toolset, and
+provides the workspace and execution guards. `AgentSession.tool_catalog` exposes
+a validated schema snapshot derived from that environment, together with
+applicable runtime/session actions such as submission and subagent inspection.
+`session.tools` returns that catalog in provider format; the catalog's
+`mcp_tools()` method supplies the MCP representation of the same schemas.
 
+Agents request actions through `AgentSession`, which supplies agent identity,
+records commits, and dispatches task-tool execution to the environment. The
+session runner in `corral.agents.session` selects and provisions tool access for
+every agent invocation:
 
----
+- `tool_transport = "python"` uses direct `session.execute()` calls without an
+  MCP binding. This is the default when an agent omits the declaration.
+- `tool_transport = "mcp"` asks the runtime to expose the bound catalog through
+  HTTP/MCP. Codex, Claude Code and OpenHands declare this transport.
 
-## The Philosophy Behind Hooks
-
-Hooks in `Corral` allow injecting custom code at specific points in agent execution.
-
-### The Core Problem
-
-When building agents, you often need to:
-
-- Log what's happening for debugging
-- Modify behavior in specific situations
-- Inject test conditions or failures
-- Track custom metrics
-- Implement intervention studies
-
-You could hard-code these features into each agent, but this creates several problems:
-
-**Tight Coupling**: Agent logic becomes mixed with logging, metrics, and special-case handling.
-
-**Limited Reusability**: You can't easily apply the same logging to different agents.
-
-**Fork Proliferation**: Every research variation requires copying and modifying agent code.
-
-### The Hook Solution
-
-Hooks provide *extension points* where you can inject behavior without modifying agent code:
+The runtime supplies a `ToolConnection` through `session.tool_connection`.
+An external adapter reads its URL and runs the harness:
 
 ```python
-def my_hook(context: HookContext) -> None:
-    # Your custom logic
-    print(f"Iteration {context.iteration}")
-
-
-hooks = AgentHooks()
-hooks.register(HookPoint.BEFORE_ITERATION, my_hook)
-
-agent = ReActAgent(model="gpt-4", hooks=hooks)
+mcp_url = session.tool_connection.mcp_url
+# Configure the harness with mcp_url and return its AgentOutcome.
 ```
 
-The agent doesn't know about your hook. It just exposes hook points and executes registered callbacks.
+The adapter owns no listener or server lifecycle. Run adapters through
+`TaskRuntime` or pass a caller-owned `mcp_host` to `run_agent_session()` so the
+session runner can supply their connection.
+Reading `mcp_url` without a provisioned MCP connection raises an explanatory error.
 
-### Why This Design
+Each active `TaskRuntime.run()` attempt owns a host that starts one localhost
+HTTP/MCP server when its first MCP invocation requests a binding. Python-only
+executions allocate no listener or server task. An MCP delegate or subagent can
+start the listener later; concurrent first bindings share the same startup.
+Failed or cancelled startup releases its resources and permits a later binding
+to retry. Already terminal executions follow the recovery path without creating
+a host. The host is local to the call, so concurrent executions on one runtime
+have independent listeners and state.
 
-**Separation of Concerns**: Agent logic stays focused on reasoning. Logging, metrics, and interventions live in hooks.
-
-**Composability**: Multiple hooks can be registered at the same point. You can combine logging hooks, metric hooks, and intervention hooks.
-
-**Reusability**: Write a hook once, use it with any agent that supports the hook point.
-
-**Research Flexibility**: Run the same agent with different hooks to test interventions without modifying agent code.
-
-### Hook Point Selection
-
-`Corral` provides four hook points, chosen to cover common needs without overwhelming users:
-
-**BEFORE_TASK**: For setup, intervention injection, initialization
-**AFTER_TASK**: For cleanup, final metrics, result processing
-**BEFORE_ITERATION**: For logging, iteration-specific setup
-**AFTER_ITERATION**: For analyzing tool calls, checking progress
-
-This is deliberately minimal. More hook points would provide more flexibility but increase complexity. These four cover most research needs while keeping the system understandable.
-
-### The HookContext Design
-
-Hooks receive a `HookContext` object that's *mutable*. This is important:
+The backend separates that server from its agent bindings:
 
 ```python
-def early_stopping_hook(context: HookContext) -> None:
-    if too_many_errors(context):
-        context.should_continue = False  # Stops agent
+async with open_mcp_host() as host:
+    async with host.bind(catalog=catalog, execute=dispatcher) as connection:
+        ...
 ```
 
-The hook can *modify* the context, affecting agent behavior. This is more powerful than read-only observation.
+`corral.backend.mcp.open_mcp_host()` owns the listener and async server task.
+`host.bind()` starts the listener if needed and registers a catalog and authorized
+action dispatcher, with no dependency on agent classes. The runtime supplies
+`session.execute`, preserving
+the ordinary authored commit and environment tool execution path. Each binding
+has an unguessable route on the shared host and port; requests resolve directly
+to their binding. The transport creates no separate tool implementations.
+
+Transport selection also runs for `run_delegate()` and `spawn_subagent()`.
+Delegates sharing a session receive context-local connection details, and their
+caller's connection is restored when they return or raise. Subagents and forked
+sessions borrow the same host while retaining their own catalogs, identities,
+branches and dispatchers. Standalone callers using MCP must own an
+`open_mcp_host()` context and pass its host to `run_agent_session(mcp_host=host, ...)`,
+including when a Python parent delegates to an MCP agent. The session runner
+borrows that host without creating or closing it. An MCP invocation without a
+host raises `RuntimeError`; Python-only standalone runs may omit it. Host and
+connection details are ephemeral; recovery provisions fresh resources against
+the saved execution history, and state snapshots contain only data.
+
+The server runs on the execution's event loop and preserves the application's
+signal handlers. Requests inherit the context captured when their binding was
+registered, including delegate iteration limits. Synchronous tools continue to
+run off the event loop through the session's execution path.
+
+When an invocation exits, the runtime revokes its route and drains accepted
+requests before recording agent completion. Other bindings remain usable.
+Before-task hooks run before binding registration, so a rejecting hook grants
+no tool connection and does not start a listener.
+At execution teardown, agents and their descendants finish or are cancelled,
+their requests are drained, and the server is stopped and awaited before the
+final execution commit. Accepting `submit_answer` does not stop the server: the
+HTTP response and the SDK's final processing must finish first. Cancellation
+awaits cleanup; a synchronous tool already running in a Python thread must
+finish before session resources can be released, with no cleanup timeout that
+silently abandons it.
+
+Completion waits for outstanding subagents and propagates unobserved child
+failures. A failure already delivered through `wait_for_subagent()` is not raised
+again by cleanup, allowing the caller to catch it and complete with a fallback.
+
+Custom adapters previously opening MCP themselves should declare
+`tool_transport = "mcp"` and consume `session.tool_connection.mcp_url`.
+`ToolConnection` and `ToolResponse` live in `corral.core.tool`.
+`AgentSession.close()` is removed; transport cleanup belongs to the runtime.
+
+## Multi-agent context isolation
+
+`ExecutionState` partitions conversations, actions, tool invocations, usage,
+and algorithm state by agent run. It has no flat global message list.
+`AgentContextResolver` exposes only an agent's own conversation and actions,
+tool or subagent results it requested, task context, handoff, and explicitly
+imported trace details.
+
+`AgentSession.spawn_subagent()` appends `agent.spawned` at the current branch
+tip, registers the child, and runs it with its own `ActorRef` and filtered
+context. In the parent's conversation, spawning is rendered exactly like a
+tool call and child completion automatically produces the corresponding
+tool-style result summary. Spawning is not branching. The child's private
+conversation and state remain isolated: a parent may inspect descendants, but
+inspection does not change model context. Selected trace details can be added
+by `import_subagent_context()`, which appends `context.imported` with source
+commit hashes for provenance. Children and siblings cannot inspect a parent's
+or each other's private trace.
+
+Model-driven inspection is an opt-in session capability. An agent declaring
+`AgentSessionCapabilities(inspect_subagents=True)` receives the general
+`inspect_subagent` tool in addition to its environment tools. Calling it follows
+the ordinary action/tool-completion path and returns a bounded child context,
+optionally including recent commits. Agents without the capability never see
+the schema, and the context resolver still enforces ancestor-only access. AI
+Scientist opts in by default.
+
+`run_delegate()` remains available for composite scaffolds that deliberately
+share one identity and context. Explicit experimental histories use
+`fork_branch()`.
+
+## Recovery and terminal behavior
+
+An `agent.turn_recorded` event durably records actions before execution.
+`tool.started` records the stable invocation identity; `tool.completed` stores
+the observation and all environment/workspace/runtime effects atomically. A
+retry materializes the current head, finds pending actions, and resumes them
+without asking the model to decide again. Repeating a completed action request
+returns its existing idempotent commit.
+
+`submit_answer` is the only canonical answer path and only a root agent run may
+submit. The runtime records `submission.accepted`, the agent outcome, and then
+`execution.completed`. Ordinary actions cannot run after submission, and no
+commit may follow `execution.completed`.
+
+## Observability
+
+Observers receive persisted commits after the transaction succeeds. Langfuse
+exports the typed event delta plus commit, author, branch, causal, timing, and
+usage metadata; it never receives a complete `ExecutionState`. Event payloads
+are redacted before export, idempotent commit hashes are emitted once, and an
+observer failure cannot roll back persistence.
+
+## Task and benchmark execution
+
+`execute_task` in `run.py` launches one task. `CorralRunner` schedules trials
+with asyncio, applies retries and concurrency limits, and waits for dependency
+outputs. Scheduling runs in the invoking process, while authored commits keep
+task state persisted independently.
 
-The context includes:
-- State (messages, iteration number, task_id)
-- Control flags (should_continue, skip_current_step)
-- Storage (metadata dict for custom data)
+## Why evaluation is separate
 
-This gives hooks both observability and control.
-
-### Interventions as Hooks
-
-Intervention studies (where you inject thoughts or actions into agents) are implemented as hooks:
-
-```python
-intervention_hook = create_intervention_hook(
-    intervention_map={"task_1": "helpful hint"}, execute_tools=True
-)
-hooks.register(HookPoint.BEFORE_TASK, intervention_hook)
-```
-
-This demonstrates hook composability - interventions are just another type of hook, compatible with logging hooks and metric hooks.
-
-
-### Design Trade-offs
-
-Hooks add complexity - there's more API surface, more concepts to learn. For simple use cases, they're overkill.
-
-`Corral` accepts this because the target use case is *research*, where you'll run many variations and need flexibility. The hook system pays for itself when you need to:
-
-- Run the same agent with and without interventions
-- Compare different logging strategies
-- Test custom stopping conditions
-- Inject test failures
-
-If you're just running one agent on one task once, hooks are unnecessary. But research involves many variations, and hooks enable that efficiently.
-
----
-
-## Task Chaining vs. Independent Tasks
-
-`Corral` supports two task execution modes: independent tasks and chained tasks. Understanding when to use each requires understanding what they represent.
-
-### Independent Tasks
-
-In independent mode, each task is self-contained. An agent's solution to task_1 doesn't affect task_2.
-
-**When This Makes Sense**:
-
-- Tasks are different instances of the same problem type
-- You want to measure success rate across a task suite
-- Tasks share no state or context
-
-**Example**: A benchmark with tasks like:
-- "Calculate 25 * 4"
-- "Write a function to reverse a string"
-- "Explain why the sky is blue"
-
-These are unrelated. Success on one doesn't help with others.
-
-**Execution Model**: The runner completes all trials of task_1, then all trials of task_2. Tasks can even run in parallel (though `Corral` currently runs sequentially).
-
-### Chained Tasks
-
-In chained mode, tasks form a workflow where later tasks depend on earlier task outputs.
-
-**When This Makes Sense**:
-
-- Tasks represent steps in a multi-stage problem
-- Later tasks need data produced by earlier tasks
-- You're modeling real-world workflows that have stages
-- You want to measure end-to-end workflow completion
-
-**Example**: A molecular design workflow:
-- Task 1: "Retrieve structure for material X"
-- Task 2: "Calculate band gap using the structure from task 1"
-- Task 3: "Suggest modifications based on band gap from task 2"
-
-Each task needs the previous task's output.
-
-**Execution Model**: For each trial, the runner completes task_1, then task_2 (using task_1's output), then task_3 (using task_2's output). Trials are atomic - if task_2 fails, you still run a new trial from task_1.
-
-### Why Both Modes?
-
-Different research questions need different models:
-
-**Independent Tasks** answer: "What fraction of diverse problems can the agent solve?"
-
-**Chained Tasks** answer: "Can the agent complete complex multi-step workflows?"
-
-These are fundamentally different questions.
-
-### Implementation Differences
-
-**Independent Tasks**:
-```python
-environments = {
-    "task_1": Environment1(...),
-    "task_2": Environment2(...),
-}
-```
-
-Each environment is independent. No shared state.
-
-**Chained Tasks**:
-```python
-tasks = {
-    "task_1": TaskDefinition(...),
-    "task_2": TaskDefinition(..., input_map={"value": InputRef("task_1")}),
-}
-
-environments = build_environments(
-    tasks,
-    base_work_dir="workdir",
-    name="my_workflow",
-    available_tools=my_tools,
-)
-```
-
-Linked environments share a single run store (`task_runs`) through their `CorralState`, which coordinates state passing; the dependency graph is derived from the task definitions.
-
-### Scoring Implications
-
-**Independent**: Each task's score is independent. Average score = mean across all task trials.
-
-**Chained**: A workflow succeeds only if all tasks succeed. You might score:
-- Individual task success
-- Partial workflow completion (got through 2 of 3 tasks)
-- End-to-end success (all tasks solved)
-
-`Corral` tracks both individual task scores and full workflow completion.
-
-### Design Philosophy
-
-`Corral` doesn't force one model. It provides primitives for both because they serve different research needs.
-
-If you're evaluating general agent capabilities across diverse tasks, use independent tasks.
-
-If you're evaluating agent performance on complex, structured problems requiring multiple steps, use chained tasks.
-
-You can even mix them - some tasks independent, some chained - by creating separate groups of linked environments.
-
-The key insight: *task independence vs. chaining is a property of the research question, not the implementation*. `Corral`'s architecture lets you model both.
-
----
-
-## Scoring Function Design Principles
-
-Scoring functions in `Corral` evaluate agent solutions, typically returning values between 0.0 (failure) and 1.0 (success). Designing good scoring functions requires careful thought.
-
-### Binary vs. Continuous Scores
-
-**Binary Scoring** (0.0 or 1.0):
-```python
-def score(self):
-    return 1.0 if self.state.submitted_answer == self.correct_answer else 0.0
-```
-
-**When to use**:
-- Task has a clear right/wrong answer
-- Partial credit doesn't make sense
-- You want simple pass/fail metrics
-
-**Continuous Scoring** (range 0.0 to 1.0):
-```python
-def score(self):
-    error = abs(float(self.state.submitted_answer) - self.true_value)
-    if error < 0.1:
-        return 1.0
-    elif error < 0.5:
-        return 0.8
-    elif error < 1.0:
-        return 0.5
-    return 0.0
-```
-
-**When to use**:
-- Answers have varying quality
-- Near-misses should get partial credit
-- You want fine-grained performance measurement
-
-### Determinism
-
-Scoring functions should be deterministic - same input always produces same score.
-
-**Bad**:
-```python
-def score(self):
-    # Uses current time - not deterministic!
-    if datetime.now().hour < 12:
-        return 1.0
-    return 0.0
-```
-
-**Good**:
-```python
-def score(self):
-    # Uses only submitted answer and fixed ground truth
-    return compare(self.state.submitted_answer, self.ground_truth)
-```
-
-**Why**: Research requires reproducibility. If scores change between runs, you can't compare results or debug issues.
-
-### Robustness to Format Variation
-
-Agents might format answers differently:
-
-- "42" vs. "42.0" vs. "The answer is 42"
-- "Yes" vs. "yes" vs. "YES" vs. "True"
-
-Robust scoring handles variation:
-
-```python
-def score(self):
-    # Extract number from answer text
-    import re
-
-    match = re.search(r"\d+\.?\d*", self.state.submitted_answer)
-    if match:
-        answer = float(match.group())
-        return 1.0 if abs(answer - self.correct_answer) < 0.001 else 0.0
-    return 0.0
-```
-
-**Trade-off**: More lenient parsing means agents get credit despite poor formatting. Stricter parsing encourages agents to format correctly but may penalize correct answers in wrong format.
-
-### Using External Ground Truth
-
-Sometimes you need external systems for scoring:
-
-```python
-def score(self):
-    # Use external library to validate structure
-    from pymatgen import Structure
-
-    try:
-        structure = Structure.from_str(self.state.submitted_answer, fmt="cif")
-        return structure_quality_score(structure, self.reference)
-    except:
-        return 0.0
-```
-
-**Considerations**:
-- External dependencies must be reproducible (fixed versions)
-- External calls should be fast (scoring happens per trial)
-- Failures should be handled gracefully (bad format -> 0.0, not crash)
-
-### Partial Credit for Process
-
-Should agents get credit for using the right approach even if the final answer is wrong?
-
-**Process-based scoring**:
-```python
-def score(self):
-    score = 0.0
-
-    # Check if correct tools were used
-    tools_used = set(call.tool_name for call in self.state.tool_calls)
-    if "database_query" in tools_used:
-        score += 0.3  # Credit for retrieving data
-
-    if "structure_analyzer" in tools_used:
-        score += 0.3  # Credit for analysis
-
-    # Check final answer
-    if self.state.submitted_answer == self.correct_answer:
-        score += 0.4  # Credit for correct answer
-
-    return score
-```
-
-**Trade-offs**:
-- Encourages agents to follow intended workflow
-- Allows measuring "partial completion"
-- But may reward inefficient approaches
-- Requires defining what counts as "correct process"
-
-`Corral` doesn't prescribe a philosophy - you design scoring to match your research question.
-
-### Scoring in Chained Tasks
-
-In task chains, you have two scoring opportunities:
-
-**Individual Task Scores**:
-```python
-def score(self):
-    # Did this task succeed?
-    return 1.0 if valid(self.state.submitted_answer) else 0.0
-```
-
-**Workflow-Level Scores**:
-```python
-# After all tasks complete
-workflow_score = task1_score * 0.3 + task2_score * 0.3 + task3_score * 0.4
-```
-
-You can weight tasks by importance or require all tasks to succeed.
-
-### The Meta-Principle
-
-Scoring functions encode what you value. Ask:
-
-- Do I care about exact answers or approximate answers?
-- Should process matter or only outcomes?
-- Are some errors worse than others?
-- Should agents get credit for trying?
-
-Your scoring function answers these questions. Design it to match your research goals, not generic notions of "correctness."
-
----
-
-## When to Use Surrender
-
-The surrender mechanism lets agents quit tasks they cannot solve. This might seem like giving up, but in research and production, knowing when to quit is valuable.
-
-### The Problem
-
-Without surrender, agents may:
-
-- Waste time and tokens on impossible tasks
-- Hit iteration limits without useful output
-- Get stuck in loops trying approaches that cannot work
-- Consume resources that could go to solvable tasks
-
-Consider an agent given a task: "Find the molecular structure of unobtanium." If the database doesn't contain unobtanium, no amount of searching will succeed. An agent that recognizes this and surrenders is more efficient than one that tries all 10 iterations.
-
-### When Surrender Makes Sense
-
-**Impossible Tasks**: If the task cannot be solved with available tools, surrender is correct.
-
-**Missing Prerequisites**: If data or tools the task requires are unavailable, surrender is appropriate.
-
-**Resource Constraints**: If solving the task would exceed reasonable resource bounds, surrender saves resources.
-
-**Ambiguous Tasks**: If the task description is unclear or contradictory, surrender with explanation is better than guessing.
-
-### Design Philosophy
-
-`Corral` makes surrender explicit and trackable:
-
-- Agents must deliberately return "GIVE UP"
-- Results mark `surrendered=True`
-- Metrics distinguish surrenders from failures
-
-This lets you analyze:
-
-- Surrender rates per task
-- Whether surrenders are justified
-- Resource savings from surrender
-- Agent calibration (surrenders on hard tasks, persists on easy ones)
-
-Surrender is a signal worth studying, not a failure to hide.
-
----
+Execution produces a final `ExecutionState` projection and optional task output.
+A scorer evaluates that projection independently and associates its result with
+the final commit hash. Benchmark correctness never mutates execution state and
+never controls whether downstream task dependencies receive an output.

@@ -12,7 +12,7 @@ class AIScientistConfig(BaseModel):
     Search-node budgets are upper bounds for each stage, not unconditional
     iteration counts. Boundary replications and aggregations have a separate
     validation-node budget, so validating one stage can never consume the
-    capacity reserved for later scientific search. ``max_llm_tokens`` stops
+    capacity reserved for later scientific search. `max_llm_tokens` stops
     further search after the provider-reported total reaches the ceiling; final
     synthesis is still reserved so the run can return an answer.
     """
@@ -38,14 +38,10 @@ class AIScientistConfig(BaseModel):
     parallel_parent_selection: bool = False
     prefer_distinct_root_trees: bool = False
     parent_selection_mode: Literal["deterministic", "llm"] = "deterministic"
-    # ``max_nodes`` is retained as a backwards-compatible alias for the search
-    # cap. It no longer includes boundary validation nodes. Leaving both caps
-    # unset relies on the explicit per-stage budgets.
+    # Leaving both global caps unset relies on the explicit per-stage budgets.
     max_search_nodes: int | None = Field(default=None, ge=1)
     max_validation_nodes: int | None = Field(default=None, ge=0)
-    max_nodes: int | None = Field(default=None, ge=1, deprecated=True)
     max_tool_calls: int = Field(default=32, ge=0)
-    max_llm_calls: int = Field(default=64, ge=2)
     max_llm_tokens: int | None = Field(default=None, ge=1)
     max_actions_per_node: int = Field(default=3, ge=1)
     max_debug_depth: int = Field(default=2, ge=0)
@@ -71,8 +67,8 @@ class AIScientistConfig(BaseModel):
     stage_boundary_replications: int = Field(default=3, ge=0, le=16)
     aggregate_stage_replications: bool = True
     # Exact replication bypasses the adaptive experiment worker and replays the
-    # selected node's realized actions in clean trials. When a tool schema
-    # exposes ``seed`` or ``random_state``, only those arguments are changed.
+    # selected node's realized actions in clean executions. When a tool schema
+    # exposes `seed` or `random_state`, only those arguments are changed.
     deterministic_replication: bool = False
 
     # Stage 4 is systematic ablation/assumption testing. Counterfactuals are a
@@ -90,12 +86,10 @@ class AIScientistConfig(BaseModel):
     # as tunable and therefore always attempts the stage when it has a budget.
     force_tuning_stage: bool = False
 
-    # ``auto`` uses a router's optional trial-cloning capability and otherwise
-    # starts non-continuation children clean. ``replay`` reconstructs parent
-    # state when cloning is unavailable. ``inherit_parent_trial_state`` is the
-    # legacy boolean spelling and maps to clean/replay when provided.
-    trial_state_inheritance: Literal["auto", "clean", "replay"] = "auto"
-    inherit_parent_trial_state: bool | None = Field(default=None, deprecated=True)
+    # `auto` uses the branch-session provider's optional cloning capability and
+    # otherwise starts non-continuation children clean. `replay` reconstructs
+    # parent state when cloning is unavailable.
+    execution_state_inheritance: Literal["auto", "clean", "replay"] = "auto"
 
     # Local image artifacts are sent to a multimodal evaluator when the model
     # gateway supports that call shape.
@@ -130,8 +124,6 @@ class AIScientistConfig(BaseModel):
             raise ValueError(
                 "verification_min_nodes cannot exceed verification_node_budget"
             )
-        if self.max_search_nodes is not None and self.max_nodes is not None:
-            raise ValueError("Set only one of max_search_nodes and legacy max_nodes")
         return self
 
     @property
@@ -143,11 +135,7 @@ class AIScientistConfig(BaseModel):
             + self.research_node_budget
             + self.verification_node_budget
         )
-        configured = (
-            self.max_search_nodes
-            if self.max_search_nodes is not None
-            else self.max_nodes
-        )
+        configured = self.max_search_nodes
         return min(stage_total, configured) if configured is not None else stage_total
 
     @property
@@ -159,13 +147,6 @@ class AIScientistConfig(BaseModel):
             self.aggregate_stage_replications and self.stage_boundary_replications > 0
         )
         return 4 * per_stage
-
-    @property
-    def effective_trial_state_inheritance(self) -> Literal["auto", "clean", "replay"]:
-        """Resolve the legacy state-inheritance flag without mutating the model."""
-        if self.inherit_parent_trial_state is None:
-            return self.trial_state_inheritance
-        return "replay" if self.inherit_parent_trial_state else "clean"
 
     @property
     def planned_node_budget(self) -> int:
@@ -207,4 +188,3 @@ class SakanaAIScientistConfig(AIScientistConfig):
     preliminary_evidence_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
     preliminary_require_critic_validity: bool = False
     max_tool_calls: int = Field(default=256, ge=0)
-    max_llm_calls: int = Field(default=512, ge=2)

@@ -4,13 +4,19 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from corral.backend.env import Environment, Toolset
-from corral.backend.schema import ToolArgument, ToolCall, ToolCallStatus
-from corral.backend.task import TaskDefinition
-from corral.backend.tool import Tool
+from corral.core.action import Action
+from corral.core.environment import Environment, Toolset
+from corral.core.state import ActionState, ExecutionState
+from corral.core.task import TaskDefinition
+from corral.core.tool import (
+    Tool,
+    ToolArgument,
+    ToolConcurrency,
+)
+from corral.core.transition import execute_action
 
 
-class TestEnv(Environment):
+class _TestEnv(Environment):
     """Mock Environment for testing purposes"""
 
     def __init__(self, task_id: str, base_work_dir: str, fs_manager: Any):
@@ -29,11 +35,9 @@ class TestEnv(Environment):
             toolset=Toolset(workspace_factory=None),
         )
 
-    def get_task_prompt(self) -> str:
+    def get_task_prompt(self, state) -> str:
+        del state
         return "Mock task prompt"
-
-    def score(self) -> int:
-        return 100
 
 
 class TestEnvironmentPreprocessing:
@@ -43,7 +47,7 @@ class TestEnvironmentPreprocessing:
         """Set up test environment with mock tools"""
 
         # Now create the environment instance
-        self.env = TestEnv(
+        self.env = _TestEnv(
             task_id="test_task", base_work_dir="/tmp/test", fs_manager=None
         )
 
@@ -104,6 +108,13 @@ class TestEnvironmentPreprocessing:
             "string_tool": string_tool,
             "mixed_tool": mixed_tool,
         }
+        for name, tool_object in self.env.tools.items():
+            tool_object.hidden_args = {}
+            tool_object.concurrency = ToolConcurrency.SERIAL
+            tool_object.get_openai_tool_format.return_value = {
+                "type": "function",
+                "function": {"name": name, "parameters": {}},
+            }
 
     def test_preprocess_dict_parameter(self):
         """Test parsing of JSON string to dictionary"""
@@ -112,7 +123,7 @@ class TestEnvironmentPreprocessing:
             "output_path": "/tmp/output.json",
         }
 
-        result = self.env._preprocess_arguments("dict_tool", args)
+        result = self.env.preprocess_arguments("dict_tool", args)
 
         assert result["config"] == {"key1": "value1", "key2": "value2"}
         assert isinstance(result["config"], dict)
@@ -123,7 +134,7 @@ class TestEnvironmentPreprocessing:
         """Test parsing of JSON string to list"""
         args = {"items": '["item1", "item2", "item3"]', "count": 5}
 
-        result = self.env._preprocess_arguments("list_tool", args)
+        result = self.env.preprocess_arguments("list_tool", args)
 
         assert result["items"] == ["item1", "item2", "item3"]
         assert isinstance(result["items"], list)
@@ -137,7 +148,7 @@ class TestEnvironmentPreprocessing:
             "path": "/tmp/file.json",
         }
 
-        result = self.env._preprocess_arguments("string_tool", args)
+        result = self.env.preprocess_arguments("string_tool", args)
 
         # Content should remain as string (not parsed)
         assert (
@@ -156,7 +167,7 @@ class TestEnvironmentPreprocessing:
             "count": 42,
         }
 
-        result = self.env._preprocess_arguments("mixed_tool", args)
+        result = self.env.preprocess_arguments("mixed_tool", args)
 
         # Dict should be parsed
         assert result["data"] == {"nested": {"key": "value"}, "array": [1, 2, 3]}
@@ -181,7 +192,7 @@ class TestEnvironmentPreprocessing:
             "output_path": "/tmp/nested.json",
         }
 
-        result = self.env._preprocess_arguments("dict_tool", args)
+        result = self.env.preprocess_arguments("dict_tool", args)
 
         expected = {
             "level1": {
@@ -199,7 +210,7 @@ class TestEnvironmentPreprocessing:
             "output_path": "/tmp/output.json",
         }
 
-        result = self.env._preprocess_arguments("dict_tool", args)
+        result = self.env.preprocess_arguments("dict_tool", args)
 
         # Should fallback to original string on JSON parse error
         assert result["config"] == '{"malformed": json, "missing": quotes}'
@@ -210,7 +221,7 @@ class TestEnvironmentPreprocessing:
         """Test that non-JSON strings are preserved unchanged"""
         args = {"config": "not_json_at_all", "output_path": "/tmp/output.json"}
 
-        result = self.env._preprocess_arguments("dict_tool", args)
+        result = self.env.preprocess_arguments("dict_tool", args)
 
         # Non-JSON string should be preserved
         assert result["config"] == "not_json_at_all"
@@ -223,7 +234,7 @@ class TestEnvironmentPreprocessing:
             "output_path": "/tmp/output.json",
         }
 
-        result = self.env._preprocess_arguments("dict_tool", args)
+        result = self.env.preprocess_arguments("dict_tool", args)
 
         # Should remain unchanged
         assert result["config"] == {"already": "parsed", "dict": True}
@@ -236,7 +247,7 @@ class TestEnvironmentPreprocessing:
             "param2": "normal_string",
         }
 
-        result = self.env._preprocess_arguments("unknown_tool", args)
+        result = self.env.preprocess_arguments("unknown_tool", args)
 
         # Should return original args unchanged
         assert result == args
@@ -245,7 +256,7 @@ class TestEnvironmentPreprocessing:
         """Test parsing of JSON arrays with mixed content types"""
         args = {"items": '["string", 123, {"object": "value"}, [1, 2, 3], true, null]'}
 
-        result = self.env._preprocess_arguments("list_tool", args)
+        result = self.env.preprocess_arguments("list_tool", args)
 
         expected = ["string", 123, {"object": "value"}, [1, 2, 3], True, None]
         assert result["items"] == expected
@@ -274,7 +285,7 @@ class TestEnvironmentPreprocessing:
             "object_param": '{"nested": {"data": true}}',
         }
 
-        result = self.env._preprocess_arguments("varied_tool", args)
+        result = self.env.preprocess_arguments("varied_tool", args)
 
         assert result["dict_param"] == {"key": "value"}
         assert result["list_param"] == ["item1", "item2"]
@@ -290,7 +301,19 @@ class TestEnvironmentPreprocessing:
 
         # Mock the time functions to avoid real timing
         with patch("time.perf_counter", side_effect=[0.0, 0.1]):
-            result = self.env.call_tool("dict_tool", args)
+            action = Action(name="dict_tool", arguments=args)
+            state = ExecutionState(
+                through_commit_hash="a" * 64,
+                execution_id="execution",
+                branch_id="main",
+                actions={
+                    action.id: ActionState(
+                        action=action,
+                        requested_by_run_id="agent",
+                    )
+                },
+            )
+            result = execute_action(self.env, state, action)
 
         # Verify tool was called with processed arguments
         dict_tool = self.env.tools["dict_tool"]
@@ -303,10 +326,8 @@ class TestEnvironmentPreprocessing:
         assert isinstance(call_args["config"], dict)
         assert call_args["output_path"] == "/tmp/integration.json"
 
-        # Verify ToolCall result
-        assert isinstance(result, ToolCall)
-        assert result.status == ToolCallStatus.SUCCESS
-        assert result.tool_name == "dict_tool"
+        assert result.status == "success"
+        assert result.observation == "dict_tool_result"
 
     def test_empty_and_null_values(self):
         """Test handling of empty and null values"""
@@ -314,7 +335,7 @@ class TestEnvironmentPreprocessing:
             "output_path": None,
         }
 
-        result = self.env._preprocess_arguments("mixed_tool", args)
+        result = self.env.preprocess_arguments("mixed_tool", args)
 
         assert result["output_path"] is None
 
@@ -325,7 +346,7 @@ class TestEnvironmentPreprocessing:
             "output_path": "/tmp/unicode.json",
         }
 
-        result = self.env._preprocess_arguments("dict_tool", args)
+        result = self.env.preprocess_arguments("dict_tool", args)
 
         expected = {"unicode": "こんにちは", "special": "chars: \n\t\r", "emoji": "🎯"}
         assert result["config"] == expected
@@ -348,13 +369,13 @@ class TestEnvironmentPreprocessing:
     def test_parametrized_json_parsing(self, json_string, expected):
         """Parametrized test for various JSON parsing scenarios"""
         args = {"config": json_string, "output_path": "/tmp/test.json"}
-        result = self.env._preprocess_arguments("dict_tool", args)
+        result = self.env.preprocess_arguments("dict_tool", args)
         assert result["config"] == expected
 
     def _setup_for_additional_tests(self):
         # Create a mock environment that implements the abstract methods
 
-        self.env = TestEnv(
+        self.env = _TestEnv(
             task_id="test_task", base_work_dir="/tmp/test", fs_manager=None
         )
 
@@ -375,7 +396,7 @@ class TestEnvironmentPreprocessing:
         self.env.tools["recursive_tool"] = mock_tool
 
         args = {"data": nested_json}
-        _result = self.env._preprocess_arguments("recursive_tool", args)
+        _result = self.env.preprocess_arguments("recursive_tool", args)
 
     def test_large_json_structures(self):
         """Test handling of large JSON structures"""
@@ -394,7 +415,7 @@ class TestEnvironmentPreprocessing:
         self.env.tools["large_tool"] = mock_tool
 
         args = {"items": large_list}
-        result = self.env._preprocess_arguments("large_tool", args)
+        result = self.env.preprocess_arguments("large_tool", args)
 
         assert len(result["items"]) == 1000
 
@@ -418,8 +439,8 @@ class TestEnvironmentPreprocessing:
         args1 = {"data": '{"call": 1, "data": "first"}'}
         args2 = {"data": '{"call": 2, "data": "second"}'}
 
-        result1 = self.env._preprocess_arguments("concurrent_tool", args1)
-        result2 = self.env._preprocess_arguments("concurrent_tool", args2)
+        result1 = self.env.preprocess_arguments("concurrent_tool", args1)
+        result2 = self.env.preprocess_arguments("concurrent_tool", args2)
 
         assert result1["data"] == {"call": 1, "data": "first"}
         assert result2["data"] == {"call": 2, "data": "second"}
@@ -435,7 +456,7 @@ class TestGetAvailableTools:
     """Tests for Environment.get_available_tools()"""
 
     def setup_method(self):
-        self.env = TestEnv(
+        self.env = _TestEnv(
             task_id="test_task", base_work_dir="/tmp/test", fs_manager=None
         )
 

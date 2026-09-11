@@ -94,9 +94,9 @@ class ScientistState:
         self.tool_calls = 0
         self.scientific_tool_calls = 0
         self.replay_tool_calls = 0
-        self.trial_runtimes_created = 0
-        self.trial_runtimes_cloned = 0
-        self.peak_simultaneous_trials = 0
+        self.executions_created = 0
+        self.executions_cloned = 0
+        self.peak_simultaneous_executions = 0
         self.replay_results = []
         self.artifact_source_workspace: str | None = None
         self.artifact_destination_workspace: str | None = None

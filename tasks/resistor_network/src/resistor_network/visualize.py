@@ -17,6 +17,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import networkx as nx
 
+from corral.report.logging import event
+
 TERMINAL_COLOR = "#f4a261"
 NODE_COLOR = "#8ecae6"
 
@@ -38,7 +40,9 @@ def draw_topology(topology: dict, ax=None, title: str | None = None) -> None:
     pos = nx.spring_layout(g, seed=0)
 
     node_colors = [TERMINAL_COLOR if n in ("A", "B") else NODE_COLOR for n in g.nodes]
-    nx.draw_networkx_nodes(g, pos, node_color=node_colors, node_size=700, edgecolors="black", ax=ax)
+    nx.draw_networkx_nodes(
+        g, pos, node_color=node_colors, node_size=700, edgecolors="black", ax=ax
+    )
     nx.draw_networkx_labels(g, pos, font_size=9, font_weight="bold", ax=ax)
 
     # group parallel edges between the same node pair so they can be curved apart
@@ -67,7 +71,12 @@ def draw_topology(topology: dict, ax=None, title: str | None = None) -> None:
                 fontsize=7,
                 ha="center",
                 va="center",
-                bbox={"boxstyle": "round,pad=0.15", "fc": "white", "ec": "none", "alpha": 0.8},
+                bbox={
+                    "boxstyle": "round,pad=0.15",
+                    "fc": "white",
+                    "ec": "none",
+                    "alpha": 0.8,
+                },
             )
 
     if title:
@@ -85,9 +94,18 @@ def _load_tasks(path: Path) -> list[dict]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Visualize resistor_network circuit topologies")
-    parser.add_argument("path", type=Path, help="Task JSON file, or directory of task JSON files")
-    parser.add_argument("--out", type=Path, default=None, help="Output directory for PNGs (default: show interactively)")
+    parser = argparse.ArgumentParser(
+        description="Visualize resistor_network circuit topologies"
+    )
+    parser.add_argument(
+        "path", type=Path, help="Task JSON file, or directory of task JSON files"
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Output directory for PNGs (default: show interactively)",
+    )
     args = parser.parse_args()
 
     tasks = _load_tasks(args.path)
@@ -107,7 +125,14 @@ def main() -> None:
         if args.out:
             out_path = args.out / f"{task['id']}.png"
             fig.savefig(out_path, dpi=150, bbox_inches="tight")
-            print(f"Wrote {out_path}")
+            event(
+                "INFO",
+                "visualize.figure_written",
+                subsystem="runtime",
+                benchmark="resistor_network",
+                task_id=task["id"],
+                path=str(out_path),
+            )
             plt.close(fig)
         else:
             plt.show()

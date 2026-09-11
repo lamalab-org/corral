@@ -1,10 +1,11 @@
-from typing import Literal, Union
+from typing import Literal
 
 import pytest
+from jsonschema.validators import validator_for
 from pydantic import Field
 
-from corral.backend.tool import Tool, tool
-from corral.backend.tool_utils import format_json_schema_type, format_type_annotation
+from corral.core.tool import Tool, tool
+from corral.workspace import WorkspaceFilesystem, build_workspace_tools
 
 
 # Sample functions for testing (new Field-based style)
@@ -122,120 +123,18 @@ class TestDocstringValidation:
         assert "docstring" in str(exc_info.value)
 
 
-def test_format_type_annotation():
-    """Test the format_type_annotation function with various types including unions."""
-    # Basic types
-    assert format_type_annotation(str) == "str"
-    assert format_type_annotation(int) == "int"
-    assert format_type_annotation(float) == "float"
-
-    # Union types using | operator
-    union_type = str | int
-    assert format_type_annotation(union_type) == "str | int"
-
-    # Union types using typing.Union
-
-    union_type_old = Union[str, int]  # noqa: UP007
-    assert format_type_annotation(union_type_old) == "str | int"
-
-    # Optional type (which is Union[T, None])
-    optional_type = str | None
-    assert format_type_annotation(optional_type) == "str | None"
-
-    # Nested unions and complex types
-    complex_union = list[str | int] | None
-    formatted = format_type_annotation(complex_union)
-    assert "list" in formatted
-    assert "str | int" in formatted
-    assert "None" in formatted
-
-    # Tuple with mixed types
-    assert format_type_annotation(tuple[str, int]) == "tuple[str, int]"
-
-
-def test_format_json_schema_type():
-    """Test converting JSON Schema property dicts to human-readable type strings."""
-    assert format_json_schema_type({"type": "string"}) == "string"
-    assert format_json_schema_type({"type": "integer"}) == "integer"
-    assert format_json_schema_type({"type": "number"}) == "number"
-    assert format_json_schema_type({"type": "boolean"}) == "boolean"
-    assert format_json_schema_type({"type": "null"}) == "null"
-
-    assert (
-        format_json_schema_type({"type": "array", "items": {"type": "string"}})
-        == "list[string]"
-    )
-
-    assert format_json_schema_type({"type": "array"}) == "list"
-
-    assert (
-        format_json_schema_type(
-            {
-                "type": "array",
-                "prefixItems": [{"type": "string"}, {"type": "number"}],
-                "minItems": 2,
-                "maxItems": 2,
-            }
-        )
-        == "tuple[string, number]"
-    )
-
-    assert (
-        format_json_schema_type(
-            {
-                "type": "array",
-                "items": {
-                    "type": "array",
-                    "prefixItems": [{"type": "string"}, {"type": "number"}],
-                    "minItems": 2,
-                    "maxItems": 2,
-                },
-            }
-        )
-        == "list[tuple[string, number]]"
-    )
-
-    assert (
-        format_json_schema_type(
-            {
-                "anyOf": [
-                    {"type": "array", "items": {"type": "number"}},
-                    {"type": "null"},
-                ]
-            }
-        )
-        == "list[number] | null"
-    )
-
-    assert (
-        format_json_schema_type(
-            {
-                "type": "string",
-                "enum": ["fast", "slow"],
-            }
-        )
-        == "Literal['fast', 'slow']"
-    )
-
-    assert format_json_schema_type({"type": ["string", "null"]}) == "string | null"
-
-    assert format_json_schema_type({}) == "any"
-
-
-def test_usage_guide_uses_rich_types():
-    """Test that get_usage_guide renders structured types from the JSON schema."""
+def test_usage_guide():
+    """Test that get_usage_guide renders argument metadata."""
 
     @tool
-    def rich_tool(
-        mixture: list[tuple[str, float]] = Field(description="mixture components"),
+    def documented_tool(
         name: str = Field(description="a name"),
     ) -> str:
-        """A tool with complex types."""
+        """A documented tool."""
         return "ok"
 
-    guide = rich_tool.get_usage_guide()
-    assert "list[tuple[string, number]]" in guide
-    assert "string," in guide
+    guide = documented_tool.get_usage_guide()
+    assert "- name (string, required): a name" in guide
 
 
 def test_integration_with_field_annotations():
@@ -280,9 +179,9 @@ def test_integration_with_field_annotations():
     assert result == "Test result"
 
 
-# Tests for MCP integration methods
-def test_tool_for_mcp_basic():
-    """Test basic conversion of tool to MCP format"""
+# Tests for provider tool schemas
+def test_tool_openai_format_basic():
+    """Test basic conversion of a tool to OpenAI function format."""
 
     @tool
     def sample_tool(param1: str, param2: int = 5) -> str:
@@ -297,19 +196,21 @@ def test_tool_for_mcp_basic():
         """
         return f"{param1}-{param2}"
 
-    mcp_def = sample_tool.to_mcp()
+    tool_def = sample_tool.get_openai_tool_format()
+    function = tool_def["function"]
 
     # Check structure
-    assert "name" in mcp_def
-    assert "description" in mcp_def
-    assert "inputSchema" in mcp_def
+    assert tool_def["type"] == "function"
+    assert "name" in function
+    assert "description" in function
+    assert "parameters" in function
 
     # Check values
-    assert mcp_def["name"] == "sample_tool"
-    assert "Sample tool description" in mcp_def["description"]
+    assert function["name"] == "sample_tool"
+    assert "Sample tool description" in function["description"]
 
     # Check schema
-    schema = mcp_def["inputSchema"]
+    schema = function["parameters"]
     assert schema["type"] == "object"
     assert "properties" in schema
     assert "required" in schema
@@ -332,8 +233,8 @@ def test_tool_for_mcp_basic():
     assert schema["properties"]["param2"]["default"] == 5
 
 
-def test_tool_for_mcp_with_choices():
-    """Test MCP conversion with parameter choices"""
+def test_tool_openai_format_with_choices():
+    """Test provider schema conversion with parameter choices."""
 
     @tool
     def tool_with_choices(mode: Literal["fast", "accurate", "balanced"]) -> str:
@@ -347,51 +248,19 @@ def test_tool_for_mcp_with_choices():
         """
         return f"Mode: {mode}"
 
-    mcp_def = tool_with_choices.to_mcp()
+    schema = tool_with_choices.get_openai_tool_format()["function"]["parameters"]
 
     # Check that choices are converted to enum
-    assert "enum" in mcp_def["inputSchema"]["properties"]["mode"]
-    assert mcp_def["inputSchema"]["properties"]["mode"]["enum"] == [
+    assert "enum" in schema["properties"]["mode"]
+    assert schema["properties"]["mode"]["enum"] == [
         "fast",
         "accurate",
         "balanced",
     ]
 
 
-def test_tool_for_mcp_with_verbosity():
-    """Test MCP conversion with different verbosity levels"""
-    from corral.router.verbosity import ToolVerbosity
-
-    @tool
-    def verbose_tool(param: str) -> str:
-        """Brief description of the tool
-
-        Long detailed description that should be filtered
-        based on verbosity level.
-
-        Args:
-            param: Parameter description
-
-        Returns:
-            Result
-        """
-        return param
-
-    # Test COMPREHENSIVE (default)
-    comprehensive = verbose_tool.to_mcp()
-    assert "Brief description" in comprehensive["description"]
-
-    # Test BRIEF
-    brief = verbose_tool.to_mcp(verbosity=ToolVerbosity.BRIEF)
-    assert "description" in brief
-
-    # Test WORKFLOW
-    workflow = verbose_tool.to_mcp(verbosity=ToolVerbosity.WORKFLOW)
-    assert "description" in workflow
-
-
-def test_tool_for_mcp_complex_types():
-    """Test MCP conversion with complex parameter types"""
+def test_tool_openai_format_complex_types():
+    """Test provider schema conversion with complex parameter types."""
 
     @tool
     def complex_tool(
@@ -411,8 +280,8 @@ def test_tool_for_mcp_complex_types():
         """
         return "result"
 
-    mcp_def = complex_tool.to_mcp()
-    props = mcp_def["inputSchema"]["properties"]
+    schema = complex_tool.get_openai_tool_format()["function"]["parameters"]
+    props = schema["properties"]
 
     # Check type mappings (required params have simple types)
     assert props["name"]["type"] == "string"
@@ -428,35 +297,17 @@ def test_tool_for_mcp_complex_types():
         assert tags_type == "string"
 
     # Check required fields
-    required = mcp_def["inputSchema"]["required"]
+    required = schema["required"]
     assert "name" in required
     assert "count" in required
     assert "value" in required
     assert "active" in required
-    assert "tags" not in required  # Has default
+    # Strict provider schemas keep nullable/defaulted fields in `required`.
+    assert "tags" in required
 
 
-def test_tool_from_mcp_raises_not_implemented():
-    """Test that from_mcp raises NotImplementedError"""
-
-    mcp_definition = {
-        "name": "test_tool",
-        "description": "Test tool",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"param": {"type": "string"}},
-            "required": ["param"],
-        },
-    }
-
-    with pytest.raises(NotImplementedError) as exc_info:
-        Tool.from_mcp(mcp_definition)
-
-    assert "is not currently supported." in str(exc_info.value)
-
-
-def test_tool_for_mcp_preserves_descriptions():
-    """Test that parameter descriptions are preserved in MCP format"""
+def test_tool_openai_format_preserves_descriptions():
+    """Test that parameter descriptions are preserved in provider format."""
 
     @tool
     def documented_tool(param1: str, param2: int) -> str:
@@ -471,15 +322,15 @@ def test_tool_for_mcp_preserves_descriptions():
         """
         return "result"
 
-    mcp_def = documented_tool.to_mcp()
-    props = mcp_def["inputSchema"]["properties"]
+    schema = documented_tool.get_openai_tool_format()["function"]["parameters"]
+    props = schema["properties"]
 
     assert "detailed description of param1" in props["param1"]["description"]
     assert "detailed description of param2" in props["param2"]["description"]
 
 
-def test_tool_for_mcp_with_hidden_args():
-    """Test that hidden args are not exposed in MCP format"""
+def test_tool_openai_format_with_hidden_args():
+    """Test that hidden args are not exposed in provider format."""
 
     @tool(hidden_args=["api_key"])
     def api_tool(endpoint: str, api_key: str = "secret") -> str:
@@ -493,32 +344,22 @@ def test_tool_for_mcp_with_hidden_args():
         """
         return f"Calling {endpoint} with {api_key}"
 
-    mcp_def = api_tool.to_mcp()
-    props = mcp_def["inputSchema"]["properties"]
+    schema = api_tool.get_openai_tool_format()["function"]["parameters"]
+    props = schema["properties"]
 
     # Only endpoint should be in the schema
     assert "endpoint" in props
     assert "api_key" not in props
 
     # endpoint should be required
-    assert "endpoint" in mcp_def["inputSchema"]["required"]
+    assert "endpoint" in schema["required"]
 
 
 def test_file_tool_schemas_pass_metaschema_validation(tmp_path):
-    """Every filesystem tool (write_file, grep, ...) must be metaschema-valid.
+    """Every filesystem tool schema must satisfy its JSON metaschema."""
 
-    Exercises the same validation OpenHands runs on each MCP tool schema, so a
-    Python type name (e.g. `"str"`) leaking into a file-tool schema — the
-    original OpenHands `write_file` failure — is caught here.
-    """
-    from jsonschema.validators import validator_for
-
-    from corral.utils.io_tools import FSManager, build_file_tools
-
-    tools = build_file_tools(FSManager("file", base_path=str(tmp_path)))
+    tools = build_workspace_tools(WorkspaceFilesystem(tmp_path))
     assert "write_file" in tools
-    for name, file_tool in tools.items():
+    for file_tool in tools.values():
         schema = file_tool.params_json_schema
         validator_for(schema).check_schema(schema)
-        mcp_schema = file_tool.to_mcp()["inputSchema"]
-        validator_for(mcp_schema).check_schema(mcp_schema), name
