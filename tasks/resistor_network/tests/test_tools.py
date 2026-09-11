@@ -5,11 +5,13 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from resistor_network.tools import (
+    calculate_series_resistance,
     delta_to_wye_transform,
     estimate_resistor_values,
     generate_test_measurements,
     propose_simple_topology,
     simulate_circuit_resistance,
+    validate_circuit_topology,
     validate_measurements,
     wye_to_delta_transform,
 )
@@ -325,6 +327,24 @@ class TestSimulateCircuitResistance:
                 topology=json.dumps(topology), terminal_nodes=["A", "B"]
             )
 
+    def test_non_finite_resistance_error(self):
+        topology = {"resistors": {"R1": float("nan")}, "connections": [["A", "B", "R1"]]}
+        with pytest.raises(ValueError, match="Resistance must be finite"):
+            simulate_circuit_resistance.execute(
+                topology=json.dumps(topology), terminal_nodes=["A", "B"]
+            )
+
+    def test_missing_terminal_error(self):
+        topology = {"resistors": {"R1": 10.0}, "connections": [["A", "B", "R1"]]}
+        with pytest.raises(ValueError, match="Terminal node X is not present"):
+            simulate_circuit_resistance.execute(
+                topology=json.dumps(topology), terminal_nodes=["A", "X"]
+            )
+
+    def test_series_rejects_non_positive_resistance(self):
+        with pytest.raises(ValueError, match="All resistances must be positive"):
+            calculate_series_resistance.execute(resistances=[10.0, 0.0])
+
     def test_wrong_terminal_count(self):
         """Test error with wrong number of terminal nodes"""
         topology = {"resistors": {"R1": 10.0}, "connections": [["A", "B", "R1"]]}
@@ -467,6 +487,47 @@ class TestValidateMeasurements:
         assert result["detailed_errors"][0]["relative_error"] == float("inf")
 
 
+class TestValidateCircuitTopology:
+    def test_valid_cycle_and_direct_terminal_edge(self):
+        topology = {
+            "resistors": {"R1": 10.0, "R2": 20.0, "R3": 30.0, "R4": 40.0},
+            "connections": [
+                ["A", "N1", "R1"],
+                ["N1", "B", "R2"],
+                ["A", "B", "R3"],
+                ["A", "B", "R4"],
+            ],
+        }
+        result = json.loads(
+            validate_circuit_topology.execute(topology=json.dumps(topology))
+        )
+        assert result["valid"] is True
+        assert result["num_nodes"] == 3
+
+    def test_rejects_dangling_internal_node(self):
+        topology = {
+            "resistors": {"R1": 10.0, "R2": 20.0},
+            "connections": [["A", "B", "R1"], ["A", "N1", "R2"]],
+        }
+        result = json.loads(
+            validate_circuit_topology.execute(topology=json.dumps(topology))
+        )
+        assert result["valid"] is False
+        assert any("dangling" in error for error in result["errors"])
+
+    def test_rejects_disconnected_component_and_bad_reference(self):
+        topology = {
+            "resistors": {"R1": 10.0, "R2": 20.0},
+            "connections": [["A", "B", "R1"], ["C", "D", "RX"]],
+        }
+        result = json.loads(
+            validate_circuit_topology.execute(topology=json.dumps(topology))
+        )
+        assert result["valid"] is False
+        assert any("undefined resistor" in error for error in result["errors"])
+        assert any("disconnected" in error for error in result["errors"])
+
+
 class TestProposeSimpleTopology:
     """Tests for propose_simple_topology tool"""
 
@@ -534,6 +595,15 @@ class TestProposeSimpleTopology:
         ]
         assert result["connections"] == expected_connections
 
+    def test_bridge_connects_extra_resistors(self):
+        result = json.loads(
+            propose_simple_topology.execute(num_resistors=7, topology_type="bridge")
+        )
+        assert len(result["resistors"]) == len(result["connections"]) == 7
+        assert {connection[2] for connection in result["connections"]} == set(
+            result["resistors"]
+        )
+
     def test_insufficient_resistors_for_bridge(self):
         """Test bridge with insufficient resistors defaults to series"""
         result_json = propose_simple_topology.execute(
@@ -567,14 +637,8 @@ class TestProposeSimpleTopology:
         assert result["connections"] == [["A", "B", "R1"]]
 
     def test_zero_resistors(self):
-        """Test with zero resistors"""
-        result_json = propose_simple_topology.execute(
-            num_resistors=0, topology_type="series"
-        )
-        result = json.loads(result_json)
-
-        assert len(result["resistors"]) == 0
-        assert len(result["connections"]) == 0
+        with pytest.raises(ValueError, match="positive integer"):
+            propose_simple_topology.execute(num_resistors=0, topology_type="series")
 
 
 class TestEstimateResistorValues:
@@ -606,7 +670,7 @@ class TestEstimateResistorValues:
             )
             result = json.loads(result_json)
 
-        assert result["resistors"]["R1"] == 10.0
+        assert result["resistors"]["R1"] == pytest.approx(10.0)
 
     def test_multiple_resistors_optimization(self):
         """Test optimization with multiple resistors"""

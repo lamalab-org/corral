@@ -1,10 +1,6 @@
 """Generate level 2 resistor_network tasks_json/*.json files.
 
-Level 2 circuits are harder: 12-18 resistors combined with deeper random
-series/parallel nesting and, with some probability, Wheatstone-bridge
-motifs that cannot be solved by series/parallel reduction alone (real
-nodal analysis, or a delta-wye transform, is required). Sampled by
-`resistor_network.sampler`. Ground truth measurements come from actually
+Level 2 circuits are sampled by `resistor_network.sampler`. Ground truth measurements come from actually
 simulating each sampled circuit, not from hand-derived formulas.
 
 Usage (from tasks/resistor_network, with the venv set up per README.md):
@@ -20,7 +16,7 @@ from loguru import logger
 from resistor_network.sampler import generate_level_tasks
 
 LEVEL = 2
-DEFAULT_COUNT = 14
+DEFAULT_COUNT = 10
 DEFAULT_SEED = 2
 
 

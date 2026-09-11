@@ -1,6 +1,5 @@
 import json
 import math
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -9,7 +8,6 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.strategies import composite
 
-os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files" / "temp")
 from resistor_network.score import _simulate_resistance, check_resistance_measurements
 
 

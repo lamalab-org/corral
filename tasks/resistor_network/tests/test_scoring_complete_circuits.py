@@ -1,12 +1,9 @@
-import os
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.strategies import composite
 
-os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files" / "temp")
 from resistor_network.score import check_complete_circuit_solution
 
 

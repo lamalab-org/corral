@@ -19,10 +19,20 @@ If you prefer not to activate the environment, use `uv run` to prefix the comman
 
 ## Levels
 
-- **Level 1** (`environments/level_1/`): 8 to 12 resistors combined via nested series *and* parallel composition (no bridge motifs).
-- **Level 2** (`environments/level_2/`): 12 to 18 resistors, deeper nesting, and (with some probability) Wheatstone-bridge motifs that cannot be solved by series/parallel reduction alone and force genuine nodal analysis (or a delta-wye transform).
+- **Level 1** (`environments/level_1/`): 8 to 12 resistors.
+- **Level 2** (`environments/level_2/`): 10 to 16 resistors.
 
-Every sampled circuit is guaranteed to have at least 3 measurable node pairs (see `_min_required_nodes` in `sampler.py`) so the inference problem is never trivially under-determined by a single equivalent-resistance number.
+Every sampled circuit is guaranteed to have multiple measurable node pairs and must satisfy the sampler constraints below, so the inference problem is never reduced to a single equivalent-resistance number.
+
+## Sampler decisions
+
+- Complexity is enforced when generating ground truth, not on submissions. Functionally equivalent circuits may use fewer resistors.
+- Level 1 requires at least 6 visible nodes, a series/parallel mixture, and two parallel groups.
+- Level 2 requires at least 7 visible nodes, multiple independent branches/cycles, and deeper composition.
+- Samples must be connected; every resistor must be used exactly once; internal nodes may not be dangling.
+- Resistor values come from a bounded E12-like 10–100Ω pool to avoid extreme branches masking one another.
+- Samples are rejected when a resistor is effectively unobservable in the complete measurement set.
+- Ground truth measurements are all pairwise resistances between visible nodes, computed by the canonical nodal solver.
 
 ## The Circuit Sampler Engine
 
@@ -47,8 +57,8 @@ Each level has its own generator script:
 ```bash
 cd tasks/resistor_network
 source .venv/bin/activate
-python environments/level_1/generate_tasks.py --count 8 --seed 1
-python environments/level_2/generate_tasks.py --count 14 --seed 2
+python environments/level_1/generate_tasks.py --count 10 --seed 1
+python environments/level_2/generate_tasks.py --count 10 --seed 2
 ```
 
 `--count` controls how many tasks to produce (recommended: 6-10 for level 1, 10-18 for level 2) and resistor complexity ramps up roughly linearly across the batch, so later tasks in a level are harder than earlier ones. `--seed` controls reproducibility — the same seed always produces the same topologies (only each task's `uuid` differs run to run). Re-running a script overwrites that level's `tasks_json/` directory.
@@ -66,32 +76,6 @@ python -m resistor_network.visualize environments/level_2/tasks_json --out figur
 
 Pass either a single task JSON file or a whole `tasks_json/` directory. Omit `--out` to display each figure interactively instead of saving it.
 
-## Inspect The Environment Definitions
-
-Build and list the resistor-network environment definitions from this directory:
-
-```bash
-cd tasks/resistor_network
-source .venv/bin/activate
-python src/resistor_network/env.py --level 1
-```
-
-Or level 2:
-
-```bash
-python src/resistor_network/env.py --level 2
-```
-
-`--level` defaults to `1` if omitted. You can also point directly at any tasks JSON file or directory:
-
-```bash
-python src/resistor_network/env.py path/to/tasks_json
-```
-
-The inspection command accepts these options:
-
-- `tasks_json_path`: Optional path to a task JSON file or directory. If omitted, the command auto-discovers the level 1 benchmark.
-- `--level`: `1` or `2`. Loads `environments/level_{level}/tasks_json`. Defaults to `1`.
 
 ## Run The Benchmark
 

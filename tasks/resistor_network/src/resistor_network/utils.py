@@ -1,4 +1,5 @@
 import json
+import math
 
 import numpy as np
 
@@ -85,17 +86,54 @@ def get_resistance_between_nodes(topology: str, terminal_nodes: list[str]) -> fl
     """
     try:
         circuit = json.loads(topology)
-        resistors = circuit["resistors"]
-        connections = circuit["connections"]
+        if not isinstance(circuit, dict):
+            raise ValueError("Topology must be a JSON object")
+        resistors = circuit.get("resistors")
+        connections = circuit.get("connections")
+        if not isinstance(resistors, dict) or not resistors:
+            raise ValueError("Topology must contain a non-empty resistors object")
+        if not isinstance(connections, list) or not connections:
+            raise ValueError("Topology must contain a non-empty connections list")
 
-        if len(terminal_nodes) != 2:
+        if not isinstance(terminal_nodes, list) or len(terminal_nodes) != 2:
             raise ValueError("Must specify exactly two terminal nodes")
+        if any(not isinstance(node, str) for node in terminal_nodes):
+            raise ValueError("Terminal nodes must be strings")
 
         # Build adjacency matrix for nodal analysis
         nodes = set()
-        for conn in connections:
-            nodes.add(conn[0])
-            nodes.add(conn[1])
+        referenced_resistors = set()
+        for index, conn in enumerate(connections):
+            if not isinstance(conn, (list, tuple)) or len(conn) != 3:
+                raise ValueError(
+                    f"Connection {index} must contain node1, node2, and resistor_id"
+                )
+            node1, node2, resistor_id = conn
+            if not isinstance(node1, str) or not isinstance(node2, str):
+                raise ValueError(f"Connection {index} has invalid node names")
+            if node1 == node2:
+                raise ValueError(f"Connection {index} cannot connect a node to itself")
+            if resistor_id in referenced_resistors:
+                raise ValueError(f"Resistor {resistor_id} is referenced more than once")
+            referenced_resistors.add(resistor_id)
+            nodes.add(node1)
+            nodes.add(node2)
+
+        if referenced_resistors != set(resistors):
+            missing = set(resistors) - referenced_resistors
+            undefined = referenced_resistors - set(resistors)
+            if undefined:
+                raise ValueError(
+                    f"Resistor {sorted(undefined)[0]} not found in resistor list"
+                )
+            details = []
+            if missing:
+                details.append(f"unused resistors: {sorted(missing)}")
+            raise ValueError("Invalid resistor references (" + "; ".join(details) + ")")
+
+        for terminal in terminal_nodes:
+            if terminal not in nodes:
+                raise ValueError(f"Terminal node {terminal} is not present in topology")
 
         node_list = sorted(nodes)
         n = len(node_list)
@@ -109,6 +147,8 @@ def get_resistance_between_nodes(topology: str, terminal_nodes: list[str]) -> fl
                 raise ValueError(f"Resistor {resistor_id} not found in resistor list")
 
             resistance = resistors[resistor_id]
+            if not isinstance(resistance, (int, float)) or not math.isfinite(resistance):
+                raise ValueError(f"Resistance must be finite, got {resistance}")
             if resistance <= 0:
                 raise ValueError(f"Resistance must be positive, got {resistance}")
 
@@ -166,8 +206,14 @@ def get_resistance_between_nodes(topology: str, terminal_nodes: list[str]) -> fl
         else:
             V = np.insert(V_reduced, term2_idx, 0)
 
+        if not np.all(np.isfinite(V)):
+            raise ValueError("Circuit solution is non-finite")
+
         # Resistance is voltage difference with 1A current
-        return abs(V[term1_idx] - V[term2_idx])
+        resistance = abs(V[term1_idx] - V[term2_idx])
+        if not math.isfinite(float(resistance)):
+            raise ValueError("Calculated resistance is non-finite")
+        return float(resistance)
 
     except Exception as e:
         raise ValueError(f"Error simulating circuit: {e!s}") from e

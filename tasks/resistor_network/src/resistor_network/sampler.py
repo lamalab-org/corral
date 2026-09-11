@@ -21,6 +21,7 @@ files that the server loads.
 
 import itertools
 import json
+import math
 import random
 import uuid
 from dataclasses import dataclass
@@ -29,31 +30,9 @@ from resistor_network.utils import get_resistance_between_nodes
 
 # "Nice" resistor values (E-series flavored), so sampled circuits read like
 # real components rather than arbitrary floats.
-RESISTOR_POOL: list[float] = [
-    1,
-    2,
-    5,
-    10,
-    15,
-    20,
-    25,
-    30,
-    40,
-    47,
-    50,
-    68,
-    75,
-    100,
-    120,
-    150,
-    180,
-    200,
-    220,
-    250,
-    330,
-    470,
-    500,
-]
+# Keep values distinguishable without allowing a 1-ohm branch to mask a
+# 500-ohm branch in parallel. This E12-like range spans one decade.
+RESISTOR_POOL: list[float] = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100]
 
 # Scoring is purely functional (see `check_resistor_topology` in score.py): a submitted
 # topology is graded only on whether it reproduces every pairwise measurement within this
@@ -62,16 +41,15 @@ RESISTOR_POOL: list[float] = [
 # check (below) can never silently drift from the tolerance actually used to grade agents.
 SCORING_TOLERANCE: float = 0.1
 
-# Multipliers used to test whether a resistor's value is actually constrained by the
-# measurements it produces ("load-bearing"), rather than free to vary without detection.
+# Multipliers used to test whether a resistor's value is constrained by the measurements.
 # By Rayleigh's monotonicity law, the effective resistance between any two nodes is a
 # monotonic function of any single resistor's value with all others held fixed -- so as a
 # resistor sweeps from near-zero to near-infinite, every measurement sweeps monotonically
 # between its values at those two extremes. Testing exactly these two extremes is therefore
 # both necessary and sufficient: if neither escapes `SCORING_TOLERANCE`, no intermediate
 # value (doubling, +/-30%, etc.) could either, so checking additional multipliers would add
-# cost without adding coverage. `RESISTOR_POOL` spans 1-500ohm, so these multipliers push any
-# pool value to >=10,000ohm or <=0.05ohm respectively -- safely outside the pool's dynamic
+# cost without adding coverage. These multipliers push every pool value well outside the
+# sampled range while remaining finite.
 # range in either direction while remaining finite (the simulator requires strictly positive
 # resistances).
 SENSITIVITY_OPEN_MULTIPLIER: float = 1e4  # proxy for "resistor removed / open circuit"
@@ -83,7 +61,10 @@ TOOLS: list[str] = [
     "delta_to_wye_transform",
     "wye_to_delta_transform",
     "simulate_circuit_resistance",
+    "validate_circuit_topology",
     "validate_measurements",
+    "propose_simple_topology",
+    "estimate_resistor_values",
 ]
 
 SUBMISSION_FORMAT = (
@@ -229,10 +210,8 @@ def build_random_block(
         return leaf_resistor(rng, ids)
 
     if max_depth <= 0:
-        # Out of nesting budget, but resistors are still owed: spend them as one
-        # flat series/parallel bank instead of silently truncating to a single
-        # leaf and dropping the rest (that used to make sampled circuits
-        # undershoot their target resistor count, sometimes badly).
+        # Spend the remaining resistors as one flat bank when the depth budget
+        # is exhausted.
         leaves = [leaf_resistor(rng, ids) for _ in range(target_resistors)]
         mode = rng.choice(["series", "parallel"])
         return (
@@ -320,7 +299,10 @@ class LevelConfig:
     resistor_range: tuple[int, int]
     max_depth: int
     allow_bridge: bool
-    description_suffix: str
+    min_nodes: int
+    min_cycle_rank: int
+    require_parallel: bool
+    min_parallel_groups: int
 
 
 LEVELS: dict[int, LevelConfig] = {
@@ -329,20 +311,20 @@ LEVELS: dict[int, LevelConfig] = {
         resistor_range=(8, 12),
         max_depth=3,
         allow_bridge=False,
-        description_suffix=(
-            "Level 1: a nested series/parallel resistor network (both combination "
-            "types appear, no bridge motifs)."
-        ),
+        min_nodes=6,
+        min_cycle_rank=2,
+        require_parallel=True,
+        min_parallel_groups=2,
     ),
     2: LevelConfig(
         level=2,
-        resistor_range=(12, 18),
+        resistor_range=(10, 16),
         max_depth=5,
         allow_bridge=True,
-        description_suffix=(
-            "Level 2: a deeply nested series/parallel network that may include "
-            "bridge circuits which cannot be solved with series/parallel reduction alone."
-        ),
+        min_nodes=7,
+        min_cycle_rank=2,
+        require_parallel=True,
+        min_parallel_groups=1,
     ),
 }
 
@@ -363,6 +345,99 @@ def _min_required_nodes(num_resistors: int) -> int:
     topologies by rejecting parallel/mixed ones in the retry loop below.
     """
     return min(num_resistors + 1, 4)
+
+
+def _sampled_topology_quality(topology: dict) -> tuple[int, int, int, int]:
+    """Return simple graph-complexity metrics used to choose among candidates."""
+    edges = topology["connections"]
+    nodes = {node for a, b, _ in edges for node in (a, b)}
+    degrees = {node: 0 for node in nodes}
+    pairs: dict[tuple[str, str], int] = {}
+    for a, b, _ in edges:
+        degrees[a] += 1
+        degrees[b] += 1
+        pair = tuple(sorted((a, b)))
+        pairs[pair] = pairs.get(pair, 0) + 1
+    cycle_rank = len(edges) - len(nodes) + 1
+    parallel_groups = sum(count > 1 for count in pairs.values())
+    branch_nodes = sum(degree >= 3 for node, degree in degrees.items() if node not in {"A", "B"})
+    return cycle_rank, parallel_groups, branch_nodes, len(nodes)
+
+
+def _validate_sampled_topology(
+    topology: dict, config: LevelConfig, num_resistors: int
+) -> bool:
+    """Check structural validity and minimum richness before measuring a sample."""
+    resistors = topology.get("resistors")
+    connections = topology.get("connections")
+    if not isinstance(resistors, dict) or not resistors or not isinstance(connections, list):
+        return False
+
+    nodes: set[str] = set()
+    degrees: dict[str, int] = {}
+    referenced: set[str] = set()
+    adjacency: dict[str, set[str]] = {}
+    pair_counts: dict[tuple[str, str], int] = {}
+    for connection in connections:
+        if not isinstance(connection, list) or len(connection) != 3:
+            return False
+        a, b, rid = connection
+        if not isinstance(a, str) or not isinstance(b, str) or a == b:
+            return False
+        if rid not in resistors or rid in referenced:
+            return False
+        if not isinstance(resistors[rid], (int, float)) or not math.isfinite(resistors[rid]):
+            return False
+        if resistors[rid] <= 0:
+            return False
+        referenced.add(rid)
+        nodes.update((a, b))
+        degrees[a] = degrees.get(a, 0) + 1
+        degrees[b] = degrees.get(b, 0) + 1
+        adjacency.setdefault(a, set()).add(b)
+        adjacency.setdefault(b, set()).add(a)
+        pair = tuple(sorted((a, b)))
+        pair_counts[pair] = pair_counts.get(pair, 0) + 1
+
+    if referenced != set(resistors) or {"A", "B"} - nodes:
+        return False
+    # Tests and callers may request toy circuits below the level's benchmark
+    # range. Apply the full level contract only to in-range benchmark samples.
+    in_benchmark_range = num_resistors >= config.resistor_range[0]
+    min_nodes = (
+        min(config.min_nodes, num_resistors + 1)
+        if in_benchmark_range
+        else _min_required_nodes(num_resistors)
+    )
+    min_cycle_rank = (
+        min(config.min_cycle_rank, max(0, num_resistors - 1))
+        if in_benchmark_range
+        else 0
+    )
+    if len(nodes) < min_nodes:
+        return False
+    if any(degrees[node] < 2 for node in nodes - {"A", "B"}):
+        return False  # no dangling internal branch
+
+    reachable = {"A"}
+    frontier = ["A"]
+    while frontier:
+        node = frontier.pop()
+        for neighbor in adjacency[node]:
+            if neighbor not in reachable:
+                reachable.add(neighbor)
+                frontier.append(neighbor)
+    if reachable != nodes:
+        return False  # no disconnected/open component
+
+    quality = _sampled_topology_quality(topology)
+    if quality[1] < min_cycle_rank:
+        return False
+    parallel_groups = sum(count > 1 for count in pair_counts.values())
+    required_parallel_groups = config.min_parallel_groups if in_benchmark_range else 0
+    if config.require_parallel and parallel_groups < required_parallel_groups:
+        return False
+    return True
 
 
 def _resistor_is_load_bearing(
@@ -429,7 +504,7 @@ def find_non_load_bearing_resistors(
 
 
 def sample_circuit(
-    rng: random.Random, config: LevelConfig, num_resistors: int, max_attempts: int = 50
+    rng: random.Random, config: LevelConfig, num_resistors: int, max_attempts: int = 200
 ) -> dict:
     """Sample one relabeled circuit topology for a given level and resistor
     budget, retrying (deterministically, since `rng` keeps advancing) until it
@@ -439,10 +514,8 @@ def sample_circuit(
     detection, which would otherwise let a submission omit or grossly
     misvalue it and still score a perfect match.
     """
-    min_nodes = _min_required_nodes(num_resistors)
-    best_structural_topology: dict | None = None
-    best_structural_nodes = -1
-    best_loadbearing_topology: dict | None = None
+    best_candidate: dict | None = None
+    best_quality: tuple[int, int, int, int] | None = None
     best_loadbearing_bad_count: int | None = None
 
     for _ in range(max_attempts):
@@ -455,31 +528,29 @@ def sample_circuit(
             allow_bridge=config.allow_bridge,
         )
         topology = relabel_circuit(block)
-        num_nodes = len({n for conn in topology["connections"] for n in conn[:2]})
-
-        if num_nodes > best_structural_nodes:
-            best_structural_topology, best_structural_nodes = topology, num_nodes
-        if num_nodes < min_nodes:
+        if not _validate_sampled_topology(topology, config, num_resistors):
             continue
 
         measurements = compute_all_measurements(topology)
         bad_ids = find_non_load_bearing_resistors(topology, measurements)
-        if not bad_ids:
-            return topology
+        if bad_ids:
+            if best_loadbearing_bad_count is None or len(bad_ids) < best_loadbearing_bad_count:
+                best_loadbearing_bad_count = len(bad_ids)
+            continue
 
-        if (
-            best_loadbearing_bad_count is None
-            or len(bad_ids) < best_loadbearing_bad_count
-        ):
-            best_loadbearing_topology, best_loadbearing_bad_count = (
-                topology,
-                len(bad_ids),
-            )
+        quality = _sampled_topology_quality(topology)
+        if best_quality is None or quality > best_quality:
+            best_candidate, best_quality = topology, quality
 
-    # Fell through every attempt (only possible for degenerate resistor budgets, or very
-    # unlucky runs): prefer the floor-clearing candidate with the fewest non-load-bearing
-    # resistors, falling back to the richest structure found if none ever cleared the floor.
-    return best_loadbearing_topology or best_structural_topology
+    if best_candidate is not None:
+        return best_candidate
+
+    # Do not emit a task that violates the sampler contract.
+    raise RuntimeError(
+        f"Could not sample a valid level-{config.level} circuit with "
+        f"{num_resistors} resistors after {max_attempts} attempts "
+        f"(best non-load-bearing count: {best_loadbearing_bad_count})"
+    )
 
 
 def build_task(
@@ -495,7 +566,7 @@ def build_task(
         "name": task_id,
         "description": (
             "Infer the circuit topology and resistor values from node-to-node resistance "
-            f"measurements. {config.description_suffix}"
+            "measurements."
         ),
         "tools": list(TOOLS),
         "scoring_function": "resistor_topology",

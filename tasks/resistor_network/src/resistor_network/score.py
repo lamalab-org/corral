@@ -1,7 +1,4 @@
 import json
-import os
-import secrets
-import string
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -10,17 +7,6 @@ from loguru import logger
 from resistor_network.utils import get_resistance_between_nodes
 
 from corral.utils.tool_helpers import smart_resolve_path
-
-# Generate a random 4-letter unique identifier
-uid = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
-
-# Default base work dir when CORRAL_WORK_DIR is unset (relative path + UID).
-# NOTE: intentionally do NOT write CORRAL_WORK_DIR back into the process
-# environment here. That pins every concurrent task execution to one shared
-# directory and breaks execution workspace isolation. Scoring resolves the
-# submitted answer against the task execution's workspace via
-# Environment._resolve_answer.
-BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", f"../CORRAL_WORK_DIR/resistor_{uid}")
 
 
 def check_resistor_topology(
@@ -111,6 +97,27 @@ def check_resistor_topology(
 
             proposed_resistors = topology_data["resistors"]
             proposed_connections = topology_data["connections"]
+            if not isinstance(proposed_resistors, dict) or not isinstance(
+                proposed_connections, list
+            ):
+                return 0.0
+
+            # Do not let the simulator silently ignore declared or undefined
+            # components. This also makes the complexity floor meaningful.
+            referenced = set()
+            for connection in proposed_connections:
+                if not isinstance(connection, (list, tuple)) or len(connection) != 3:
+                    return 0.0
+                node_a, node_b, resistor_id = connection
+                if not isinstance(node_a, str) or not isinstance(node_b, str):
+                    return 0.0
+                if resistor_id not in proposed_resistors:
+                    return 0.0
+                if resistor_id in referenced:
+                    return 0.0
+                referenced.add(resistor_id)
+            if referenced != set(proposed_resistors):
+                return 0.0
             expected_resistors = expected_topology["resistors"]
             expected_connections = expected_topology["connections"]
 
@@ -246,6 +253,7 @@ def _score_functional_behavior(
 
             predicted_resistance = _simulate_resistance(topology_data, node_a, node_b)
 
+            relative_error = 0.0
             if expected_resistance == 0:
                 score = 1.0 if abs(predicted_resistance) < 1e-6 else 0.0
             else:

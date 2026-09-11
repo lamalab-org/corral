@@ -1,8 +1,6 @@
 """Generate level 1 resistor_network tasks_json/*.json files.
 
-Level 1 circuits are simple: 8-12 resistors combined with nested series and
-parallel composition (no bridge motifs), sampled by
-`resistor_network.sampler`. Ground truth measurements come from actually
+Level 1 circuits are sampled by `resistor_network.sampler`. Ground truth measurements come from actually
 simulating each sampled circuit, not from hand-derived formulas.
 
 Usage (from tasks/resistor_network, with the venv set up per README.md):
@@ -18,7 +16,7 @@ from loguru import logger
 from resistor_network.sampler import generate_level_tasks
 
 LEVEL = 1
-DEFAULT_COUNT = 8
+DEFAULT_COUNT = 10
 DEFAULT_SEED = 1
 
 

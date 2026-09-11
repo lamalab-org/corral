@@ -1,4 +1,5 @@
 import json
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -87,6 +88,8 @@ def calculate_series_resistance(resistances: list[float]) -> float:
     """
     if not resistances:
         raise ValueError("No resistances provided")
+    if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r <= 0 for r in resistances):
+        raise ValueError("All resistances must be positive")
     return sum(resistances)
 
 
@@ -152,7 +155,7 @@ def calculate_parallel_resistance(resistances: list[float]) -> float:
     """
     if not resistances:
         raise ValueError("No resistances provided")
-    if any(r <= 0 for r in resistances):
+    if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r <= 0 for r in resistances):
         raise ValueError("All resistances must be positive")
 
     return 1 / sum(1 / r for r in resistances)
@@ -232,7 +235,7 @@ def delta_to_wye_transform(ra: float, rb: float, rc: float) -> str:
     total = ra + rb + rc
     if total == 0:
         raise ValueError("Sum of delta resistances cannot be zero")
-    if any(r <= 0 for r in [ra, rb, rc]):
+    if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r <= 0 for r in [ra, rb, rc]):
         raise ValueError("All resistances must be positive")
 
     r1 = (ra * rc) / total  # Connected to node A
@@ -310,7 +313,7 @@ def wye_to_delta_transform(r1: float, r2: float, r3: float) -> str:
     [/LIMITATIONS]
     """
     denominator = r1 * r2 + r2 * r3 + r3 * r1
-    if any(r <= 0 for r in [r1, r2, r3]):
+    if any(not isinstance(r, (int, float)) or not math.isfinite(r) or r <= 0 for r in [r1, r2, r3]):
         raise ValueError("All resistances must be positive")
 
     ra = denominator / r3  # Between nodes A and B
@@ -402,6 +405,97 @@ def simulate_circuit_resistance(topology: str, terminal_nodes: list[str]) -> flo
 
 
 @tool
+def validate_circuit_topology(
+    topology: str, terminal_nodes: list[str] | None = None
+) -> str:
+    """Validate circuit structure before running resistance calculations.
+
+    Checks JSON shape, positive finite resistor values, resistor references,
+    connectivity, terminal presence, self-loops, duplicate resistor use, and
+    dangling non-terminal nodes. Returns a JSON report rather than raising.
+    """
+    errors: list[str] = []
+    try:
+        circuit = json.loads(topology)
+        if not isinstance(circuit, dict):
+            raise ValueError("topology must be a JSON object")
+        resistors = circuit.get("resistors")
+        connections = circuit.get("connections")
+        if not isinstance(resistors, dict) or not resistors:
+            errors.append("resistors must be a non-empty object")
+        if not isinstance(connections, list) or not connections:
+            errors.append("connections must be a non-empty list")
+        if errors:
+            return json.dumps({"valid": False, "errors": errors})
+
+        degrees: dict[str, int] = {}
+        adjacency: dict[str, set[str]] = {}
+        referenced: set[str] = set()
+        for index, connection in enumerate(connections):
+            if not isinstance(connection, list) or len(connection) != 3:
+                errors.append(f"connection {index} must be [node_a, node_b, resistor_id]")
+                continue
+            node_a, node_b, resistor_id = connection
+            if not isinstance(node_a, str) or not isinstance(node_b, str):
+                errors.append(f"connection {index} has invalid node names")
+                continue
+            if node_a == node_b:
+                errors.append(f"connection {index} is a self-loop")
+            if resistor_id not in resistors:
+                errors.append(f"connection {index} references undefined resistor {resistor_id}")
+            elif resistor_id in referenced:
+                errors.append(f"resistor {resistor_id} is referenced more than once")
+            referenced.add(resistor_id)
+            degrees[node_a] = degrees.get(node_a, 0) + 1
+            degrees[node_b] = degrees.get(node_b, 0) + 1
+            adjacency.setdefault(node_a, set()).add(node_b)
+            adjacency.setdefault(node_b, set()).add(node_a)
+
+        for resistor_id, resistance in resistors.items():
+            if not isinstance(resistance, (int, float)) or not math.isfinite(resistance):
+                errors.append(f"resistor {resistor_id} must have a finite numeric value")
+            elif resistance <= 0:
+                errors.append(f"resistor {resistor_id} must have positive resistance")
+        for resistor_id in set(resistors) - referenced:
+            errors.append(f"resistor {resistor_id} is not connected")
+
+        terminals = terminal_nodes or ["A", "B"]
+        if len(terminals) != 2 or terminals[0] == terminals[1]:
+            errors.append("terminal_nodes must contain two distinct nodes")
+        else:
+            for terminal in terminals:
+                if terminal not in degrees:
+                    errors.append(f"terminal {terminal} is not present in the circuit")
+
+            if all(terminal in degrees for terminal in terminals):
+                reachable = {terminals[0]}
+                frontier = [terminals[0]]
+                while frontier:
+                    node = frontier.pop()
+                    for neighbor in adjacency.get(node, ()):
+                        if neighbor not in reachable:
+                            reachable.add(neighbor)
+                            frontier.append(neighbor)
+                if reachable != set(degrees):
+                    errors.append("circuit contains disconnected components")
+                for node, degree in degrees.items():
+                    if node not in terminals and degree < 2:
+                        errors.append(f"internal node {node} is dangling")
+
+        return json.dumps(
+            {
+                "valid": not errors,
+                "errors": errors,
+                "num_resistors": len(resistors),
+                "num_nodes": len(degrees),
+            },
+            indent=2,
+        )
+    except Exception as exc:
+        return json.dumps({"valid": False, "errors": [f"invalid topology: {exc}"]})
+
+
+@tool
 def validate_measurements(topology: str, measurements: str) -> str:
     """[BRIEF] Validate if proposed topology matches all given measurements. [/BRIEF]
 
@@ -481,26 +575,36 @@ def validate_measurements(topology: str, measurements: str) -> str:
             node_a = measurement["node_a"]
             node_b = measurement["node_b"]
 
+            if "resistance" not in measurement:
+                errors.append(1000.0)
+                detailed_errors.append(
+                    {
+                        "nodes": f"{node_a}-{node_b}",
+                        "error": 1000.0,
+                        "error_type": "measurement_missing_resistance",
+                    }
+                )
+                continue
+
             try:
                 predicted_resistance = get_resistance_between_nodes(
                     topology=topology, terminal_nodes=[node_a, node_b]
                 )
 
-                if "resistance" in measurement:
-                    actual_resistance = measurement["resistance"]
-                    error = abs(predicted_resistance - actual_resistance)
-                    errors.append(error)
-                    detailed_errors.append(
-                        {
-                            "nodes": f"{node_a}-{node_b}",
-                            "predicted": predicted_resistance,
-                            "actual": actual_resistance,
-                            "error": error,
-                            "relative_error": error / actual_resistance
-                            if actual_resistance != 0
-                            else float("inf"),
-                        }
-                    )
+                actual_resistance = measurement["resistance"]
+                error = abs(predicted_resistance - actual_resistance)
+                errors.append(error)
+                detailed_errors.append(
+                    {
+                        "nodes": f"{node_a}-{node_b}",
+                        "predicted": predicted_resistance,
+                        "actual": actual_resistance,
+                        "error": error,
+                        "relative_error": error / actual_resistance
+                        if actual_resistance != 0
+                        else float("inf"),
+                    }
+                )
 
             except Exception as e:
                 # If simulation fails, assign large error
@@ -597,6 +701,12 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
     - "series_parallel" and "bridge" types have minimum `num_resistors` requirements.
     [/LIMITATIONS]
     """
+    if not isinstance(num_resistors, int) or isinstance(num_resistors, bool) or num_resistors < 1:
+        raise ValueError("num_resistors must be a positive integer")
+
+    def node_name(index: int) -> str:
+        return chr(ord("A") + index) if index < 26 else f"N{index - 25}"
+
     topology = {"resistors": {}, "connections": []}
 
     # Create resistor entries with placeholder values
@@ -606,8 +716,8 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
     if topology_type == "series":
         # Chain resistors in series A-R1-B-R2-C-R3-D...
         for i in range(1, num_resistors + 1):
-            node1 = chr(ord("A") + i - 1)  # A, B, C, ...
-            node2 = chr(ord("A") + i)  # B, C, D, ...
+            node1 = node_name(i - 1)
+            node2 = node_name(i)
             topology["connections"].append([node1, node2, f"R{i}"])
 
     elif topology_type == "parallel":
@@ -624,8 +734,8 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
 
         # Add any remaining resistors in series
         for i in range(4, num_resistors + 1):
-            node1 = chr(ord("A") + i - 2)
-            node2 = chr(ord("A") + i - 1)
+            node1 = node_name(i - 2)
+            node2 = node_name(i - 1)
             topology["connections"].append([node1, node2, f"R{i}"])
 
     elif topology_type == "bridge" and num_resistors >= 5:
@@ -637,12 +747,19 @@ def propose_simple_topology(num_resistors: int, topology_type: str) -> str:
             ["C", "D", "R4"],
             ["B", "C", "R5"],  # Bridge resistor
         ]
+        # Keep additional requested resistors connected; otherwise R6+ are
+        # declared but absent from the topology.
+        previous = "D"
+        for i in range(6, num_resistors + 1):
+            node = chr(ord("D") + i - 4)
+            topology["connections"].append([previous, node, f"R{i}"])
+            previous = node
 
     else:
         # Default to series for unsupported configurations
         for i in range(1, num_resistors + 1):
-            node1 = chr(ord("A") + i - 1)
-            node2 = chr(ord("A") + i)
+            node1 = node_name(i - 1)
+            node2 = node_name(i)
             topology["connections"].append([node1, node2, f"R{i}"])
 
     return json.dumps(topology, indent=2)
@@ -702,7 +819,7 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
 
     Returns:
         str: [RETURNS_BRIEF] JSON string with optimized resistor values and optimization info. [/RETURNS_BRIEF]
-             [RETURNS_DETAILED] A JSON string containing a dictionary. If successful, it includes the `optimized_resistors` (mapping resistor IDs to their newly estimated values, rounded to integers), the original `connections`, and an `optimization_info` sub-dictionary with details like `success` status, `final_error`, `iterations`, and `message`. If optimization fails, it provides an `error` message. [/RETURNS_DETAILED]
+             [RETURNS_DETAILED] A JSON string containing a dictionary. If successful, it includes the optimized resistor values, the original `connections`, and an `optimization_info` sub-dictionary with details like `success` status, `final_error`, `iterations`, and `message`. If optimization fails, it provides an `error` message. [/RETURNS_DETAILED]
              [RETURNS_EXAMPLES] `{"resistors": {"R1": 15, "R2": 30}, "connections": [...], "optimization_info": {"success": true, "final_error": 0.001, "iterations": 50, "message": "CONVERGENCE: NORM_OF_GRADIENT_<=_TF_GAUSSIAN_SUM"}` (on success) [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
@@ -777,7 +894,7 @@ def estimate_resistor_values(topology: str, measurements: str) -> str:
             # Create optimized topology
             optimized_topology = circuit.copy()
             optimized_topology["resistors"] = {
-                name: round(float(value), 0)
+                name: float(value)
                 for name, value in zip(resistor_names, result.x, strict=False)
             }
 
@@ -921,8 +1038,8 @@ def create_tools() -> dict[str, Tool]:
         "delta_to_wye_transform": delta_to_wye_transform,
         "wye_to_delta_transform": wye_to_delta_transform,
         "simulate_circuit_resistance": simulate_circuit_resistance,
+        "validate_circuit_topology": validate_circuit_topology,
         "validate_measurements": validate_measurements,
         "propose_simple_topology": propose_simple_topology,
         "estimate_resistor_values": estimate_resistor_values,
-        "generate_test_measurements": generate_test_measurements,
     }
