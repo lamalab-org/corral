@@ -52,6 +52,14 @@ class LLMPlanner(BaseAgent):
             temperature=temperature,
             **kwargs,
         )
+        # Load the delegate's prompts before Docker workers lose source access.
+        # ReAct keeps execution state in the session, so the delegate is reusable.
+        self._executor = ReActAgent(
+            model=self.model,
+            api_endpoint=self.api_endpoint,
+            temperature=self.temperature,
+            **self._call_kwargs(),
+        )
 
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Own planning and delegate low-level actions through the same session."""
@@ -154,12 +162,7 @@ class LLMPlanner(BaseAgent):
                 )
             )
         )
-        executor = ReActAgent(
-            model=self.model,
-            api_endpoint=self.api_endpoint,
-            temperature=self.temperature,
-            **self._call_kwargs(),
-        )
+        executor = self._executor
         outcome = await session.run_delegate(
             executor,
             max_iterations=remaining_iterations,

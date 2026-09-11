@@ -18,6 +18,7 @@ from corral.core.events import (
     WorkspaceDelta,
 )
 from corral.core.tool import ToolCallStatus
+from corral.runtime import permissions
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -193,6 +194,11 @@ def execute_action(
         if tool is None:
             status = ToolCallStatus.INVALID_TOOL
             content = f"Tool {action.name} not found"
+        elif permissions.enabled() and (
+            error := permissions.visible_argument_error(tool, dict(action.arguments))
+        ):
+            status = ToolCallStatus.INVALID_ARGS
+            content = error
         else:
             visible_arguments = environment.preprocess_arguments(
                 action.name, dict(action.arguments)
@@ -223,8 +229,14 @@ def execute_action(
                         guard = getattr(environment, "execution_guard", None)
                         context = guard(tool) if guard is not None else nullcontext()
                         with context:
-                            raw_result = environment.execute_tool(
-                                state, tool, call_arguments
+                            raw_result = (
+                                permissions.execute_tool(
+                                    environment, state, tool, call_arguments
+                                )
+                                if permissions.enabled()
+                                else environment.execute_tool(
+                                    state, tool, call_arguments
+                                )
                             )
                         if isinstance(raw_result, ToolExecutionResult):
                             content = raw_result.content

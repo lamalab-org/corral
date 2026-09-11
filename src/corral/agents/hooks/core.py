@@ -51,12 +51,11 @@ class HookContext:
     @property
     def task_id(self) -> str:
         """Return the projected task ID, falling back to execution ID."""
-        value = self.session.state.task.metadata.get("id")
-        return str(value or self.session.execution_id)
+        return self.session.task_id
 
     @property
     def state(self) -> ExecutionState:
-        """Return the session's current immutable projection."""
+        """Return the local projection; unavailable in restricted agent workers."""
         return self.session.state
 
     @property

@@ -89,8 +89,13 @@ class WorkspaceFilesystem:
     def _resolve(self, path: str, *, allow_root: bool = False) -> Path:
         if allow_root and path in {"", "."}:
             return self.root
-        normalized = normalize_workspace_path(path)
-        return confine_workspace_path(self.root, normalized, allow_root=allow_root)
+        try:
+            normalized = normalize_workspace_path(path)
+            return confine_workspace_path(self.root, normalized, allow_root=allow_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Permission denied: operation is not permitted: {exc}"
+            ) from exc
 
     def _logical_path(self, path: Path) -> str:
         resolved = path.resolve(strict=False)
@@ -392,36 +397,21 @@ def build_terminal_tool(filesystem: WorkspaceFilesystem) -> Tool:
         if not 1 <= max_output_chars <= _TERMINAL_MAX_OUTPUT_CHARS:
             raise ValueError("max_output_chars must be between 1 and 100000")
 
-        terminal_uid = int(os.environ.get("CORRAL_TERMINAL_UID", str(os.geteuid())))
-        terminal_gid = int(os.environ.get("CORRAL_TERMINAL_GID", str(os.getegid())))
-
-        identity_options: dict[str, Any] = {}
-        if os.geteuid() == 0 and terminal_uid != 0:
-            # The runtime owns the volume; the terminal user owns only this
-            # materialization and never the separately mounted checkpoint path.
-            for entry in (filesystem.root, *filesystem.root.rglob("*")):
-                if entry.is_symlink():
-                    raise ValueError("workspace cannot contain symbolic links")
-                entry.chown(terminal_uid, terminal_gid)
-            identity_options = {
-                "user": terminal_uid,
-                "group": terminal_gid,
-                "extra_groups": (),
-            }
-
+        # The shell inherits its caller's identity; Docker tool workers have
+        # already dropped privileges at the shared execution boundary.
         with tempfile.TemporaryFile() as output_stream:
             process = subprocess.Popen(
-                ["/bin/sh", "-lc", command],
+                ["/bin/sh", "-c", command],
                 cwd=filesystem.root,
                 env={
                     "HOME": str(filesystem.root),
+                    "TMPDIR": str(filesystem.root),
                     "LANG": "C.UTF-8",
-                    "PATH": "/usr/local/bin:/usr/bin:/bin",
+                    "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
                 },
                 stdout=output_stream,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
-                **identity_options,
             )
             timed_out = False
             try:
@@ -453,4 +443,7 @@ def build_terminal_tool(filesystem: WorkspaceFilesystem) -> Tool:
             indent=2,
         )
 
+    # The restricted bootstrap rebuilds this tool from the workspace path.
+    # No controller-side callable or environment is serialized for shell input.
+    terminal.worker_operation = "terminal"
     return terminal

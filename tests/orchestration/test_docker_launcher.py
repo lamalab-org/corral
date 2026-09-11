@@ -47,6 +47,12 @@ def test_docker_benchmark_accepts_complete_runtime_definitions():
     assert request.sandbox.mode == SandboxMode.DOCKER.value
 
 
+@pytest.mark.parametrize("version", ["1", "2", "3"])
+def test_legacy_runtime_cannot_disable_worker_permissions(version):
+    with pytest.raises(ValueError, match="rebuild the image"):
+        DockerSandboxSpec(runtime_protocol_version=version)
+
+
 def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
@@ -81,6 +87,7 @@ async def test_docker_launcher_uses_one_hardened_container_and_host_shard(
         commands.append(arguments)
         operation = arguments[1:3]
         if arguments[1] == "create":
+            assert execution_dir.stat().st_mode & 0o7777 == 0o700
             return 0, "container-id"
         if operation == ("start", "--attach"):
             result = StateRef(
@@ -130,9 +137,18 @@ async def test_docker_launcher_uses_one_hardened_container_and_host_shard(
     assert durable_metadata["sandbox"]["final_commit_hash"] == "a" * 64
     create = next(command for command in commands if command[1] == "create")
     assert "--read-only" in create
-    assert create[
-        create.index("--security-opt") : create.index("--security-opt") + 2
-    ] == ("--security-opt", "no-new-privileges")
+    assert "--init" in create
+    assert create[create.index("--user") + 1] == "0:0"
+    assert durable_metadata["sandbox"]["permissions_policy"] == "workspace-root-v1"
+    assert "SYS_ADMIN" in create
+    assert "SYS_CHROOT" in create
+    security_options = {
+        create[index + 1]
+        for index, argument in enumerate(create)
+        if argument == "--security-opt"
+    }
+    assert security_options == {"no-new-privileges", "apparmor=unconfined"}
+    assert "--privileged" not in create
     assert create[create.index("--cap-drop") : create.index("--cap-drop") + 2] == (
         "--cap-drop",
         "ALL",
