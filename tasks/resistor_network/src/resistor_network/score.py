@@ -1,26 +1,13 @@
 import json
-import os
-import secrets
-import string
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from loguru import logger
+from resistor_network.utils import get_resistance_between_nodes
 
 from corral.utils.tool_helpers import smart_resolve_path
-
-# Generate a random 4-letter unique identifier
-uid = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
-
-# Default base work dir when CORRAL_WORK_DIR is unset (relative path + UID).
-# NOTE: intentionally do NOT write CORRAL_WORK_DIR back into the process
-# environment here. That pins every concurrent task execution to one shared
-# directory and breaks execution workspace isolation. Scoring resolves the
-# submitted answer against the task execution's workspace via
-# Environment._resolve_answer.
-BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", f"../CORRAL_WORK_DIR/resistor_{uid}")
 
 
 def check_resistor_topology(
@@ -111,6 +98,27 @@ def check_resistor_topology(
 
             proposed_resistors = topology_data["resistors"]
             proposed_connections = topology_data["connections"]
+            if not isinstance(proposed_resistors, dict) or not isinstance(
+                proposed_connections, list
+            ):
+                return 0.0
+
+            # Do not let the simulator silently ignore declared or undefined
+            # components. This also makes the complexity floor meaningful.
+            referenced = set()
+            for connection in proposed_connections:
+                if not isinstance(connection, list | tuple) or len(connection) != 3:
+                    return 0.0
+                node_a, node_b, resistor_id = connection
+                if not isinstance(node_a, str) or not isinstance(node_b, str):
+                    return 0.0
+                if resistor_id not in proposed_resistors:
+                    return 0.0
+                if resistor_id in referenced:
+                    return 0.0
+                referenced.add(resistor_id)
+            if referenced != set(proposed_resistors):
+                return 0.0
             expected_resistors = expected_topology["resistors"]
             expected_connections = expected_topology["connections"]
 
@@ -246,6 +254,7 @@ def _score_functional_behavior(
 
             predicted_resistance = _simulate_resistance(topology_data, node_a, node_b)
 
+            relative_error = 0.0
             if expected_resistance == 0:
                 score = 1.0 if abs(predicted_resistance) < 1e-6 else 0.0
             else:
@@ -398,62 +407,13 @@ def check_resistance_measurements(
 
 def _simulate_resistance(topology: dict, node_a: str, node_b: str) -> float:
     """
-    Simulate resistance between two nodes in a topology.
+    Simulate resistance between two nodes in a topology, delegating to the
+    canonical nodal-analysis solver (`utils.get_resistance_between_nodes`) so
+    this scoring path can never silently drift from the ground-truth
+    simulator or the agent-facing `simulate_circuit_resistance` tool.
     """
     try:
-        resistors = topology["resistors"]
-        connections = topology["connections"]
-
-        # Build adjacency matrix for nodal analysis
-        nodes = set()
-        for conn in connections:
-            nodes.add(conn[0])
-            nodes.add(conn[1])
-
-        node_list = sorted(nodes)
-        n = len(node_list)
-        node_to_idx = {node: i for i, node in enumerate(node_list)}
-
-        # Create conductance matrix
-        G = np.zeros((n, n))
-
-        for node1, node2, resistor_id in connections:
-            resistance = resistors[resistor_id]
-            conductance = 1.0 / resistance
-            i, j = node_to_idx[node1], node_to_idx[node2]
-
-            G[i, i] += conductance
-            G[j, j] += conductance
-            G[i, j] -= conductance
-            G[j, i] -= conductance
-
-        # Solve for resistance between nodes
-        term1_idx = node_to_idx[node_a]
-        term2_idx = node_to_idx[node_b]
-
-        # Apply 1A current and solve for voltage
-        Ia = np.zeros(n)
-        Ia[term1_idx] = 1.0
-        Ia[term2_idx] = -1.0
-
-        # Remove reference equation
-        G_reduced = (
-            G[:-1, :-1]
-            if term2_idx == n - 1
-            else np.delete(np.delete(G, term2_idx, 0), term2_idx, 1)
-        )
-        I_reduced = Ia[:-1] if term2_idx == n - 1 else np.delete(Ia, term2_idx)
-
-        V_reduced = np.linalg.solve(G_reduced, I_reduced)
-
-        # Insert reference voltage
-        if term2_idx == n - 1:
-            Va = np.append(V_reduced, 0)
-        else:
-            Va = np.insert(V_reduced, term2_idx, 0)
-
-        return abs(Va[term1_idx] - Va[term2_idx])
-
+        return get_resistance_between_nodes(json.dumps(topology), [node_a, node_b])
     except Exception as e:
         logger.error(f"Simulation error: {e}")
         return float("inf")
@@ -616,3 +576,115 @@ def check_valid_circuit_json(json_path: str) -> float:
             f"Error validating circuit JSON file {json_path}: {e}", exc_info=True
         )
         return 0.0
+
+
+def _parse_topology(topology_input: str) -> dict[str, Any] | None:
+    """Parse and structurally validate a submitted topology.
+
+    Returns None for anything malformed: bad JSON, missing keys, connections that
+    are not `[node_a, node_b, resistor_id]`, self-loops, resistor ids that are
+    undefined / reused across connections / declared but never connected, and
+    non-positive or non-finite resistances. Every one of these would otherwise let
+    the submission claim components the simulator silently ignores.
+    """
+    stripped = topology_input.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return None
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    resistors = data.get("resistors")
+    connections = data.get("connections")
+    if not isinstance(resistors, dict) or not resistors:
+        return None
+    if not isinstance(connections, list) or not connections:
+        return None
+
+    referenced: set[str] = set()
+    for connection in connections:
+        if not isinstance(connection, list | tuple) or len(connection) != 3:
+            return None
+        node_a, node_b, resistor_id = connection
+        if not isinstance(node_a, str) or not isinstance(node_b, str):
+            return None
+        if node_a == node_b:
+            return None  # self-loop carries no current
+        if resistor_id not in resistors or resistor_id in referenced:
+            return None
+        value = resistors[resistor_id]
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            return None
+        if not math.isfinite(value) or value <= 0:
+            return None
+        referenced.add(resistor_id)
+    if referenced != set(resistors):
+        return None
+    return data
+
+
+def conductance_map(topology: dict[str, Any]) -> dict[tuple[str, str], float]:
+    """Return merged conductance in siemens for each node pair."""
+    conductances: dict[tuple[str, str], float] = {}
+    for node_a, node_b, resistor_id in topology["connections"]:
+        pair = (node_a, node_b) if node_a < node_b else (node_b, node_a)
+        conductances[pair] = (
+            conductances.get(pair, 0.0) + 1.0 / (topology["resistors"][resistor_id])
+        )
+    return conductances
+
+
+def check_conductance_topology(
+    expected_topology: dict[str, Any], tolerance: float = 0.1
+) -> Callable[[str], float]:
+    """Score a submitted topology against the expected conductance map."""
+    expected_conductances = conductance_map(expected_topology)
+    expected_nodes = {node for pair in expected_conductances for node in pair}
+
+    def score_fn(topology_input: str) -> float:
+        try:
+            proposed = _parse_topology(topology_input)
+            if proposed is None:
+                logger.info("Conductance scoring: submission failed structural checks")
+                return 0.0
+
+            proposed_conductances = conductance_map(proposed)
+            proposed_nodes = {node for pair in proposed_conductances for node in pair}
+
+            if proposed_nodes != expected_nodes:
+                logger.info(
+                    "Conductance scoring: node set mismatch "
+                    f"(missing={sorted(expected_nodes - proposed_nodes)}, "
+                    f"invented={sorted(proposed_nodes - expected_nodes)})"
+                )
+                return 0.0
+
+            if set(proposed_conductances) != set(expected_conductances):
+                logger.info(
+                    "Conductance scoring: connection set mismatch "
+                    f"(missing={sorted(set(expected_conductances) - set(proposed_conductances))}, "
+                    f"extra={sorted(set(proposed_conductances) - set(expected_conductances))})"
+                )
+                return 0.0
+
+            for pair, expected_g in expected_conductances.items():
+                proposed_g = proposed_conductances[pair]
+                relative_error = abs(proposed_g - expected_g) / expected_g
+                if relative_error > tolerance:
+                    logger.info(
+                        f"Conductance scoring: {pair} expected {expected_g:.6g} S, "
+                        f"got {proposed_g:.6g} S (rel err {relative_error:.4f})"
+                    )
+                    return 0.0
+
+            logger.info("Conductance scoring: exact match on every node pair")
+            return 1.0
+
+        except Exception as e:
+            logger.error(f"CONDUCTANCE SCORING ERROR: {e}", exc_info=True)
+            return 0.0
+
+    return score_fn

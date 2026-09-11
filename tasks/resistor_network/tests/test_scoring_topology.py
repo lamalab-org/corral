@@ -1,10 +1,6 @@
 import json
-import os
-from pathlib import Path
 
 import pytest
-
-os.environ["CORRAL_WORK_DIR"] = str(Path(__file__).parent / "test_files" / "temp")
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -149,6 +145,35 @@ class TestMainTopologyChecker:
             "resistors": {"R1": 100.0, "R2": 200.0},
             "connections": [("A", "B", "R1"), ("B", "C", "R2")],
         }
+
+    def test_functional_scoring_accepts_smaller_equivalent_submission(self):
+        expected = {
+            "resistors": {"R1": 10.0, "R2": 20.0, "R3": 20.0},
+            "connections": [
+                ["A", "B", "R1"],
+                ["B", "C", "R2"],
+                ["B", "C", "R3"],
+            ],
+        }
+        checker = check_resistor_topology(
+            expected_topology=expected,
+            expected_measurements=[
+                {"node_a": "A", "node_b": "B", "resistance": 10.0},
+                {"node_a": "B", "node_b": "C", "resistance": 10.0},
+                {"node_a": "A", "node_b": "C", "resistance": 20.0},
+            ],
+            use_functional_scoring=True,
+            topology_weight=0.0,
+            functional_weight=1.0,
+            exact_values_weight=0.0,
+        )
+        one_resistor = json.dumps(
+            {
+                "resistors": {"R": 10.0, "S": 10.0},
+                "connections": [["A", "B", "R"], ["B", "C", "S"]],
+            }
+        )
+        assert checker(one_resistor) == 1.0
 
     def test_json_string_input_perfect(self):
         """Test with JSON string input - perfect match"""

@@ -1,13 +1,12 @@
 import json
-import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
 from resistor_network.score import (
-    BASE_WORK_DIR,
     check_complete_circuit_solution,
+    check_conductance_topology,
     check_resistance_measurements,
     check_resistor_topology,
     check_resistor_values_only,
@@ -20,17 +19,11 @@ from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
 from corral.report.logging import event, exception_fields
 
-event(
-    "DEBUG",
-    "environment.configuration",
-    subsystem="runtime",
-    benchmark="resistor_network",
-    work_dir=BASE_WORK_DIR,
-)
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     # Resistor network scoring functions
     "resistor_topology": check_resistor_topology,
+    "resistor_conductance": check_conductance_topology,
     "resistance_measurements": check_resistance_measurements,
     "complete_circuit_solution": check_complete_circuit_solution,
     "resistor_values_only": check_resistor_values_only,
@@ -71,16 +64,12 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
         return fn
 
 
-def load_tasks_from_json(
-    json_path: str | Path, work_dir: str
-) -> dict[str, TaskDefinition]:
+def load_tasks_from_json(json_path: str | Path) -> dict[str, TaskDefinition]:
     """Load task definitions from a directory of JSON files.
 
     Args:
         json_path: Path to a directory containing JSON files with task definitions.
                    Each file contains a list of task objects with an "id" field.
-        work_dir: Working directory to use for task execution
-
     Returns:
         dictionary of task definitions keyed by task ID
     """
@@ -107,10 +96,7 @@ def load_tasks_from_json(
             scoring_params = task_info.get("scoring_params", {})
             scoring_fn = get_scoring_function(scoring_fn_name, scoring_params)
 
-            # Add work_dir to initial input if not already present
             initial_input = task_info.get("initial_input", {}).copy()
-            if "work_dir" not in initial_input:
-                initial_input["work_dir"] = work_dir
 
             tasks[task_id] = TaskDefinition(
                 name=task_info["name"],
@@ -130,15 +116,12 @@ def load_tasks_from_json(
 def create_environments(
     task_json_path: str | Path,
     taskgroup_common_tools: dict[str, Tool] | None = None,
-    work_dir: str = BASE_WORK_DIR,
 ) -> dict[str, Environment]:
     """Create environments for tasks defined in a JSON file
 
     Args:
         task_json_path: Path to the JSON file with task definitions
         taskgroup_common_tools: dictionary of Tools which are common for subtasks, for example file system tools
-        work_dir: Working directory for task execution
-
     Returns:
         dictionary of environments keyed by task ID
     """
@@ -159,13 +142,11 @@ def create_environments(
         subsystem="runtime",
         benchmark=name,
         task_source=str(task_json_path),
-        work_dir=work_dir,
     )
     try:
-        tasks = load_tasks_from_json(task_json_path, work_dir)
+        tasks = load_tasks_from_json(task_json_path)
         environments = build_environments(
             tasks,
-            base_work_dir=work_dir,
             name=name,
             toolset=Toolset(
                 pool=create_tools(),
@@ -208,54 +189,26 @@ if __name__ == "__main__":
         "tasks_json_path",
         nargs="?",
         default=None,
-        help="Path to tasks JSON file (optional if --mode is provided)",
+        help="Path to a tasks JSON file or directory (optional if --level is provided)",
     )
     parser.add_argument(
-        "--mode",
-        type=str,
-        choices=["single", "chained"],
+        "--level",
+        type=int,
+        choices=[1, 2],
         default=None,
-        help="Task mode (auto-discovers config/{mode}/{mode}.json)",
+        help="Load environments/level_{level}/tasks_json (defaults to level 1)",
     )
     args = parser.parse_args()
 
     # Resolve tasks JSON path
     if args.tasks_json_path:
         tasks_json_path = args.tasks_json_path
-    elif args.mode:
-        if args.mode == "single":
-            tasks_json_path = (
-                Path(__file__).resolve().parents[2]
-                / "environments"
-                / "level_1"
-                / "tasks_json"
-            )
-        elif args.mode == "chained":
-            tasks_json_path = (
-                Path(__file__).resolve().parents[2]
-                / "environments"
-                / "level_1"
-                / "subtasks_json"
-            )
-        else:
-            raise ValueError(f"Unsupported mode: {args.mode}")
-
-        if not Path(tasks_json_path).exists():
-            error = FileNotFoundError(f"Task config not found: {tasks_json_path}")
-            event(
-                "ERROR",
-                "environment.configuration_failed",
-                subsystem="runtime",
-                benchmark="resistor_network",
-                status="failed",
-                **exception_fields(error),
-            )
-            sys.exit(1)
     else:
+        level = args.level or 1
         tasks_json_path = (
             Path(__file__).resolve().parents[2]
             / "environments"
-            / "level_1"
+            / f"level_{level}"
             / "tasks_json"
         )
         if not Path(tasks_json_path).exists():
@@ -270,13 +223,9 @@ if __name__ == "__main__":
             )
             sys.exit(1)
 
-    work_dir = os.environ.get("CORRAL_WORK_DIR", BASE_WORK_DIR)
-    Path(work_dir).mkdir(parents=True, exist_ok=True)
-
     taskgroup_common_tools = None
     environments = create_environments(
         task_json_path=tasks_json_path,
-        work_dir=work_dir,
         taskgroup_common_tools=taskgroup_common_tools,
     )
 
