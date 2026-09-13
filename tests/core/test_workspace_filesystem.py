@@ -5,6 +5,7 @@ import pytest
 
 from corral.core.environment import Environment, Toolset, default_file_tools
 from corral.core.task import TaskDefinition
+from corral.orchestration.registry import RuntimeRegistry
 from corral.workspace import (
     WorkspaceFilesystem,
     build_terminal_tool,
@@ -99,6 +100,40 @@ def test_environment_materializes_missing_root_before_resolving_workspace_tools(
 
     assert workspace.is_dir()
     assert observed_roots == [workspace.resolve()]
+
+
+def test_execution_workspaces_do_not_require_workspace_tools(tmp_path):
+    task = TaskDefinition(
+        name="scratch",
+        description="Use native agent tools for scratch files.",
+        tools=[],
+        scoring_fn=lambda _answer: 1.0,
+        submission_format={},
+        resolve_answer=False,
+    )
+    template = Environment(
+        "scratch",
+        task,
+        base_work_dir=str(tmp_path),
+        toolset=Toolset(workspace_factory=None),
+    )
+    registry = RuntimeRegistry(agents={}, environments={"scratch": template})
+    try:
+        first = registry.environment("scratch", "trial-1")
+        second = registry.environment("scratch", "trial-2")
+        assert registry.environment("scratch", "trial-1") is first
+        assert first.workspace_path != second.workspace_path
+        assert template.workspace_path is None
+        for environment in (first, second):
+            root = Path(environment.workspace_path)
+            assert root.parent == tmp_path
+            assert root.is_dir()
+            assert environment.tools.keys() == template.tools.keys()
+            assert environment.toolset.workspace_factory is None
+        Path(first.workspace_path, "notes.txt").write_text("trial one")
+        assert not Path(second.workspace_path, "notes.txt").exists()
+    finally:
+        registry.close()
 
 
 def test_workspace_filesystem_rejects_symlinks_even_when_they_stay_inside_root(

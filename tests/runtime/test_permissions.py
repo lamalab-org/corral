@@ -331,19 +331,30 @@ class ProbeAgent:
         from corral.core.action import Action
 
         assert os.getuid() != 0
-        try:
-            Path("/opt/corral/tasks/wetlab/wetlab/env.py").read_text()
-        except PermissionError:
-            pass
-        else:
-            raise AssertionError("agent could inspect task source")
+        for target in (
+            "/opt/corral/tasks/wetlab/wetlab/env.py",
+            "/opt/corral/tasks/wetlab/wetlab/tasks_json/level_1/task_1.json",
+            "/opt/corral/tasks/wetlab/wetlab/WetChem.yaml",
+            "/corral-state",
+        ):
+            try:
+                Path(target).read_text()
+            except PermissionError:
+                pass
+            else:
+                raise AssertionError(f"agent could inspect private task data: {target}")
         child = subprocess.run(  # noqa: ASYNC221 - intentionally test synchronous SDK-style spawning
-            [sys.executable, "-c", "import os; print(os.getuid())"],
+            [
+                sys.executable,
+                "-c",
+                "import os, pathlib; pathlib.Path('notes.txt').write_text('scratch only'); print(os.getuid())",
+            ],
             capture_output=True,
             text=True,
             check=True,
         )
         assert int(child.stdout) == os.getuid()
+        assert Path(session.workspace, "notes.txt").read_text() == "scratch only"
         answer = json.dumps({"uid": os.getuid(), "child_uid": int(child.stdout)})
         await session.execute(
             Action(name="submit_answer", arguments={"answer": answer})
@@ -1091,6 +1102,59 @@ def test_wetlab_stateful_tool_retains_its_environment_update(workspace):
     )
     assert isinstance(result, ToolExecutionResult)
     assert result.environment["hidden_arguments"]["wetlab"] != initial
+    restored = engine_module.WetlabState.from_dict(
+        result.environment["hidden_arguments"]["wetlab"]
+    )
+    restored_engine = engine_module.WetlabEngine(restored.chemical_system)
+    assert "mixture" in restored_engine.restore(restored)
+
+
+@pytest.mark.anyio()
+async def test_wetlab_agent_can_use_scratch_but_cannot_read_private_state(
+    workspace, tmp_path
+):
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from corral.observability import NoOpObserver
+    from corral.orchestration.registry import RuntimeRegistry
+    from corral.persistence import SQLiteCommitStore, WorkspaceManager
+    from corral.runtime.environment_loader import load_environment_group
+    from corral.runtime.task_runner import TaskRuntime
+
+    pytest.importorskip("wetlab.engine")
+    environments = load_environment_group(
+        "wetlab", env_kwargs={"level": 1, "work_dir": workspace}
+    )
+    manager = WorkspaceManager(artifact_root=tmp_path / "artifacts")
+    registry = RuntimeRegistry(
+        agents={},
+        environments=environments,
+        workspace_manager_factory=lambda _execution_id: manager,
+    )
+    try:
+        environment = registry.environment("qualysis_lvl1_01", "wetlab-scratch")
+        assert environment.toolset.workspace_factory is None
+        assert "write_file" not in environment.tools
+        async with SQLiteCommitStore(
+            tmp_path / "wetlab.sqlite3", execution_id="wetlab-scratch"
+        ) as store:
+            state = await TaskRuntime(store, NoOpObserver()).run(
+                ProbeAgent(),
+                environment,
+                execution_id="wetlab-scratch",
+                max_iterations=3,
+                started_at=datetime.now(timezone.utc),
+            )
+            assert state.submission is not None, state.runtime.model_dump()
+            assert state.environment.values["hidden_arguments"]["wetlab"]  # noqa: PD011 - EnvironmentState mapping, not pandas
+            assert set(state.workspace.files) == {"notes.txt"}
+            assert (
+                Path(environment.workspace_path, "notes.txt").read_text()
+                == "scratch only"
+            )
+    finally:
+        registry.close()
 
 
 class WaitingAgent:

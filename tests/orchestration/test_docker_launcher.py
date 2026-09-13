@@ -75,6 +75,46 @@ def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
 
 
 @pytest.mark.anyio()
+@pytest.mark.parametrize("cached", [False, True])
+async def test_preflight_builds_selected_extra_only_when_image_is_missing(
+    monkeypatch, tmp_path, cached
+):
+    commands = []
+    digest = "sha256:" + "a" * 64
+
+    async def command(*arguments, **_kwargs):
+        commands.append(arguments)
+        if len(commands) == 1 and not cached:
+            return 1, "image missing"
+        return 0, digest
+
+    monkeypatch.setattr(launchers, "_command", command)
+    dockerfile = tmp_path / "wetlab.Dockerfile"
+    result = await launchers.DockerTaskLauncher.preflight(
+        DockerSandboxSpec(image="corral-wetlab:claude"),
+        build_context=tmp_path,
+        dockerfile=dockerfile,
+        build_args={"CORRAL_EXTRAS": "claude"},
+    )
+    assert result.image_digest == digest
+    if cached:
+        assert len(commands) == 1
+    else:
+        assert commands[1] == (
+            "docker",
+            "build",
+            "--file",
+            str(dockerfile),
+            "--tag",
+            "corral-wetlab:claude",
+            "--build-arg",
+            "CORRAL_EXTRAS=claude",
+            str(tmp_path),
+        )
+        assert commands[-1][1:3] == ("image", "inspect")
+
+
+@pytest.mark.anyio()
 async def test_docker_launcher_uses_one_hardened_container_and_host_shard(
     monkeypatch, tmp_path
 ):
