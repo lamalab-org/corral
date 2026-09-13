@@ -18,7 +18,8 @@ ENV PATH=/opt/conda/envs/wetlab/bin:$PATH
 WORKDIR /opt/corral
 COPY . /opt/corral
 ARG CORRAL_EXTRAS=""
-RUN sh docker/install-runtime.sh --editable tasks/wetlab
+ARG CORRAL_TASK="wetlab"
+RUN sh docker/install-runtime.sh --editable "tasks/${CORRAL_TASK}"
 
 VOLUME ["/workspace"]
 CMD ["corral", "--help"]

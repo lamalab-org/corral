@@ -268,7 +268,7 @@ def test_legacy_benchmark_namespace_also_defaults_to_docker():
     assert sandbox.docker.image == "corral-benchmark:latest"
 
 
-@pytest.mark.parametrize("environment", ["samplemath", "wetlab"])
+@pytest.mark.parametrize("environment", cli.ENVIRONMENT_NAMES)
 @pytest.mark.parametrize(
     ("agent", "options", "extra"),
     [
@@ -279,7 +279,7 @@ def test_legacy_benchmark_namespace_also_defaults_to_docker():
         ("reflexion", {"actor": "ClaudeCodeAgent"}, "claude"),
     ],
 )
-def test_benchmark_selects_image_and_extra_for_environment_and_harness(
+def test_benchmark_selects_image_task_and_extra_for_environment_and_harness(
     monkeypatch, environment, agent, options, extra
 ):
     monkeypatch.setattr(
@@ -296,7 +296,7 @@ def test_benchmark_selects_image_and_extra_for_environment_and_harness(
         pass
 
     async def preflight(spec, **kwargs):
-        assert spec.image == f"corral-{image_kind}:{extra or 'latest'}"
+        assert spec.image == f"corral-{environment}:{extra or 'latest'}"
         assert spec.registry_module is None
         assert (
             kwargs["dockerfile"]
@@ -305,7 +305,10 @@ def test_benchmark_selects_image_and_extra_for_environment_and_harness(
             / f"{image_kind}.Dockerfile"
         )
         assert kwargs["build_context"] == kwargs["dockerfile"].parent.parent
-        assert kwargs["build_args"] == {"CORRAL_EXTRAS": extra}
+        assert kwargs["build_args"] == {
+            "CORRAL_EXTRAS": extra,
+            "CORRAL_TASK": environment,
+        }
         raise PreflightChecked
 
     monkeypatch.setattr(cli.orchestration.DockerTaskLauncher, "preflight", preflight)
@@ -314,7 +317,8 @@ def test_benchmark_selects_image_and_extra_for_environment_and_harness(
 
 
 @pytest.mark.parametrize("build", [False, True])
-def test_benchmark_preserves_explicit_custom_image(monkeypatch, build):
+@pytest.mark.parametrize("environment", ["samplemath", "wetlab"])
+def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environment):
     monkeypatch.setattr(
         cli,
         "load_environment_group",
@@ -326,7 +330,7 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build):
             "--agent",
             "claude-code",
             "--environment",
-            "wetlab",
+            environment,
             "--sandbox-image",
             "custom:test",
             *(["--build-sandbox-image"] if build else []),
@@ -339,9 +343,13 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build):
     async def preflight(spec, **kwargs):
         assert spec.image == "custom:test"
         if build:
-            assert kwargs["dockerfile"].name == "wetlab.Dockerfile"
+            image_kind = "wetlab" if environment == "wetlab" else "benchmark"
+            assert kwargs["dockerfile"].name == f"{image_kind}.Dockerfile"
             assert kwargs["build_context"] == kwargs["dockerfile"].parent.parent
-            assert kwargs["build_args"] == {"CORRAL_EXTRAS": "claude"}
+            assert kwargs["build_args"] == {
+                "CORRAL_EXTRAS": "claude",
+                "CORRAL_TASK": environment,
+            }
         else:
             assert kwargs["build_context"] is None
             assert kwargs["dockerfile"] is None

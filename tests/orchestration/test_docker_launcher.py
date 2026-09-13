@@ -76,7 +76,7 @@ def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
 
 @pytest.mark.anyio()
 @pytest.mark.parametrize("cached", [False, True])
-async def test_preflight_builds_selected_extra_only_when_image_is_missing(
+async def test_preflight_builds_selected_task_and_extra_only_when_image_is_missing(
     monkeypatch, tmp_path, cached
 ):
     commands = []
@@ -94,7 +94,7 @@ async def test_preflight_builds_selected_extra_only_when_image_is_missing(
         DockerSandboxSpec(image="corral-wetlab:claude"),
         build_context=tmp_path,
         dockerfile=dockerfile,
-        build_args={"CORRAL_EXTRAS": "claude"},
+        build_args={"CORRAL_EXTRAS": "claude", "CORRAL_TASK": "wetlab"},
     )
     assert result.image_digest == digest
     if cached:
@@ -109,6 +109,8 @@ async def test_preflight_builds_selected_extra_only_when_image_is_missing(
             "corral-wetlab:claude",
             "--build-arg",
             "CORRAL_EXTRAS=claude",
+            "--build-arg",
+            "CORRAL_TASK=wetlab",
             str(tmp_path),
         )
         assert commands[-1][1:3] == ("image", "inspect")

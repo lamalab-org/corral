@@ -11,7 +11,8 @@ RUN apt-get update \
 WORKDIR /opt/corral
 COPY . /opt/corral
 ARG CORRAL_EXTRAS=""
-RUN sh docker/install-runtime.sh
+ARG CORRAL_TASK="samplemath"
+RUN sh docker/install-runtime.sh --editable "tasks/${CORRAL_TASK}"
 
 VOLUME ["/workspace"]
 CMD ["corral", "--help"]

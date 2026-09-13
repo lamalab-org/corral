@@ -412,7 +412,7 @@ async def run_benchmark(
     extra = AGENT_DEFINITIONS[harness].extra or ""
     image_kind = "wetlab" if args.environment == "wetlab" else "benchmark"
     sandbox = _sandbox_profile(
-        args, default_image=f"corral-{image_kind}:{extra or 'latest'}"
+        args, default_image=f"corral-{args.environment}:{extra or 'latest'}"
     )
     agents = {}
     if sandbox.mode == orchestration.SandboxMode.DOCKER.value:
@@ -436,7 +436,11 @@ async def run_benchmark(
                 if build_local
                 else None
             ),
-            build_args={"CORRAL_EXTRAS": extra} if build_local else None,
+            build_args=(
+                {"CORRAL_EXTRAS": extra, "CORRAL_TASK": args.environment}
+                if build_local
+                else None
+            ),
         )
         sandbox = orchestration.SandboxProfile(
             mode=orchestration.SandboxMode.DOCKER,
