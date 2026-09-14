@@ -673,7 +673,6 @@ def build_task(
 ) -> dict:
     """Sample one circuit and assemble it into a full task definition dict."""
     topology, measurements = sample_circuit(rng, config, num_resistors)
-    total_pairs = len(all_node_pairs(topology))
 
     task_id = f"task_{index}"
     return {
@@ -693,20 +692,19 @@ def build_task(
         "input_from_tasks": [],
         "initial_input": {
             "measurements": measurements,
+            # Kept deliberately minimal: the notes state the physical assumptions and
+            # nothing about how to approach the problem. Anything that explains the
+            # scoring rule, hints at parallel-group equivalence, or describes the shape
+            # of the circuit is solving part of the task for the agent.
             "notes": [
-                "Assume ideal resistors. Measurements are exact to 3 decimal places; a "
-                "submitted circuit is accepted when every node-to-node conductance "
-                "matches the true circuit within 10% relative error.",
+                "Assume ideal resistors. Measurements are exact to 3 decimal places.",
                 "Resistor ids (R1, R2, ...) are not assigned in any particular spatial "
                 "order; infer both the topology and the values from the measurements.",
-                f"You are given {len(measurements)} of the {total_pairs} node-pair "
-                "resistances. The unmeasured pairs were simply not probed -- they are "
-                "not missing components.",
-                "The nodes named in the measurements are all the nodes in the circuit: "
-                "do not introduce additional internal nodes.",
-                "Resistors sharing a node pair are in parallel and cannot be told apart "
-                "from measurements, so any equivalent grouping on a pair scores the same "
-                "(e.g. 47 ohm || 33 ohm may be submitted as a single 19.4 ohm resistor).",
+                # Task specification rather than a hint: `select_published_pairs` holds
+                # some pairs back, and without this an absent pair reads as "these nodes
+                # are not connected" -- a wrong inference the task induced, not a
+                # reasoning failure.
+                "Not every node pair was measured.",
             ],
         },
         "uuid": str(uuid.uuid4()),
