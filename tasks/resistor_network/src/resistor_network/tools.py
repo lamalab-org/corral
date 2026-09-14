@@ -468,7 +468,11 @@ def validate_circuit_topology(
             adjacency.setdefault(node_b, set()).add(node_a)
 
         for resistor_id, resistance in resistors.items():
-            if not isinstance(resistance, int | float) or not math.isfinite(resistance):
+            # `bool` is a subclass of `int`, so True would otherwise pass as 1 ohm.
+            is_number = not isinstance(resistance, bool) and isinstance(
+                resistance, int | float
+            )
+            if not is_number or not math.isfinite(resistance):
                 errors.append(
                     f"resistor {resistor_id} must have a finite numeric value"
                 )
@@ -481,7 +485,9 @@ def validate_circuit_topology(
             ]
         )
 
-        terminals = terminal_nodes or ["A", "B"]
+        # Only fall back to the default when no terminals were supplied at all --
+        # an explicit empty list is an invalid terminal list and must be reported.
+        terminals = ["A", "B"] if terminal_nodes is None else terminal_nodes
         if len(terminals) != 2 or terminals[0] == terminals[1]:
             errors.append("terminal_nodes must contain two distinct nodes")
         else:

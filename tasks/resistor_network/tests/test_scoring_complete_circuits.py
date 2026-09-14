@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.strategies import composite
-
 from resistor_network.score import check_complete_circuit_solution
 
 

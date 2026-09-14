@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 from resistor_network.sampler import (
-    SCORING_TOLERANCE,
     LEVELS,
+    SCORING_TOLERANCE,
     Block,
     _IdFactory,
     _min_required_nodes,
@@ -119,7 +119,7 @@ class TestStructuralRichnessFloor:
     def test_sampled_circuits_meet_minimum_node_floor(self, num_resistors):
         rng = random.Random(123)
         config = LEVELS[2] if num_resistors >= 5 else LEVELS[1]
-        topology = sample_circuit(rng, config, num_resistors)
+        topology, _measurements = sample_circuit(rng, config, num_resistors)
         nodes = {n for conn in topology["connections"] for n in conn[:2]}
         assert len(nodes) >= _min_required_nodes(num_resistors)
 
@@ -206,10 +206,18 @@ class TestLoadBearingResistors:
     ):
         rng = random.Random(4242)
         config = LEVELS[2] if num_resistors >= 5 else LEVELS[1]
-        topology = sample_circuit(rng, config, num_resistors)
-        measurements = compute_all_measurements(topology)
+        topology, published = sample_circuit(rng, config, num_resistors)
 
-        assert find_non_load_bearing_resistors(topology, measurements) == []
+        # Pinned against the subset the agent is shown -- the guarantee that
+        # matters. It implies the same against the full set, since extra
+        # measurements can only make a perturbation easier to detect.
+        assert find_non_load_bearing_resistors(topology, published) == []
+        assert (
+            find_non_load_bearing_resistors(
+                topology, compute_all_measurements(topology)
+            )
+            == []
+        )
 
     def test_generate_level_tasks_produce_fully_load_bearing_circuits(self):
         for level in LEVELS:

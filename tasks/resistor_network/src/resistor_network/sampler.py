@@ -34,11 +34,14 @@ from resistor_network.utils import get_resistance_between_nodes
 # 500-ohm branch in parallel. This E12-like range spans one decade.
 RESISTOR_POOL: list[float] = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100]
 
-# Scoring is purely functional (see `check_resistor_topology` in score.py): a submitted
-# topology is graded only on whether it reproduces every pairwise measurement within this
-# relative tolerance, never on resistor count, ids, or exact values. `build_task` pulls its
-# `scoring_params["tolerance"]` from this same constant so the sampler's own load-bearing
-# check (below) can never silently drift from the tolerance actually used to grade agents.
+# Relative tolerance used to grade submissions. `check_conductance_topology` in score.py
+# collapses every resistor sharing a node pair into a single conductance, then requires the
+# submitted node set and node-pair set to match the true circuit exactly, with each pair's
+# conductance within this tolerance. Resistor ids, resistor count, and how values are split
+# across a parallel group therefore do not matter -- but the structure does.
+# `build_task` pulls its `scoring_params["tolerance"]` from this same constant so the
+# sampler's own load-bearing check (below) can never silently drift from the tolerance
+# actually used to grade agents.
 SCORING_TOLERANCE: float = 0.1
 
 # Multipliers used to test whether a resistor's value is constrained by the measurements.
@@ -49,9 +52,8 @@ SCORING_TOLERANCE: float = 0.1
 # both necessary and sufficient: if neither escapes `SCORING_TOLERANCE`, no intermediate
 # value (doubling, +/-30%, etc.) could either, so checking additional multipliers would add
 # cost without adding coverage. These multipliers push every pool value well outside the
-# sampled range while remaining finite.
-# range in either direction while remaining finite (the simulator requires strictly positive
-# resistances).
+# sampled range in either direction while remaining finite (the simulator requires strictly
+# positive resistances).
 SENSITIVITY_OPEN_MULTIPLIER: float = 1e4  # proxy for "resistor removed / open circuit"
 SENSITIVITY_SHORT_MULTIPLIER: float = 1e-4  # proxy for "resistor shorted to ~0 ohms"
 
@@ -195,6 +197,30 @@ def _partition(rng: random.Random, total: int, parts: int) -> list[int]:
     return [boundaries[i + 1] - boundaries[i] for i in range(parts)]
 
 
+def _partition_for_parallel(rng: random.Random, total: int, parts: int) -> list[int]:
+    """Split `total` for a parallel composition, leaving at most one branch of size 1.
+
+    Two single-resistor branches in parallel land on the same node pair, which
+    `check_conductance_topology` merges into one conductance: the result is a
+    duplicate pair, not a cycle, and the scorer cannot see any structure in it.
+    Giving every branch but one at least two resistors routes each branch through
+    its own internal node, so the composition contributes a cycle the scorer
+    actually observes.
+    """
+    parts = min(parts, max(1, total // 2))
+    if parts <= 1:
+        return [total]
+    sizes = [2] * parts
+    for _ in range(total - 2 * parts):
+        sizes[rng.randrange(parts)] += 1
+    # Optionally peel one resistor off into a bare branch -- a single resistor in
+    # parallel with a multi-resistor branch still forms a cycle.
+    if len(sizes) >= 2 and sizes[0] >= 3 and rng.random() < 0.5:
+        sizes[0] -= 1
+        sizes.append(1)
+    return sizes
+
+
 def build_random_block(
     rng: random.Random,
     ids: _IdFactory,
@@ -210,14 +236,13 @@ def build_random_block(
         return leaf_resistor(rng, ids)
 
     if max_depth <= 0:
-        # Spend the remaining resistors as one flat bank when the depth budget
-        # is exhausted.
-        leaves = [leaf_resistor(rng, ids) for _ in range(target_resistors)]
-        mode = rng.choice(["series", "parallel"])
-        return (
-            compose_series(leaves)
-            if mode == "series"
-            else compose_parallel(leaves, ids)
+        # Spend the remaining resistors as one chain when the depth budget is
+        # exhausted. A flat *parallel* bank of single resistors would put every
+        # one of them on the same node pair, which the scorer merges into a
+        # single conductance -- so it would add resistors without adding anything
+        # the scoring function can distinguish.
+        return compose_series(
+            [leaf_resistor(rng, ids) for _ in range(target_resistors)]
         )
 
     if allow_bridge and target_resistors >= 5 and rng.random() < bridge_prob:
@@ -231,18 +256,26 @@ def build_random_block(
         pair = [bridge, extra] if rng.random() < 0.5 else [extra, bridge]
         return compose_series(pair)
 
+    # Decide the composition mode *before* partitioning: a parallel split has to
+    # keep every branch but one at two or more resistors (see
+    # `_partition_for_parallel`), which a series split does not.
+    mode = rng.choice(["series", "parallel"])
+    if mode == "parallel" and target_resistors >= 3:
+        branches = rng.randint(2, min(3, max(2, target_resistors // 2)))
+        sizes = _partition_for_parallel(rng, target_resistors, branches)
+        children = [
+            build_random_block(rng, ids, size, max_depth - 1, allow_bridge, bridge_prob)
+            for size in sizes
+        ]
+        return compose_parallel(children, ids)
+
     branches = rng.randint(2, min(4, target_resistors))
     sizes = _partition(rng, target_resistors, branches)
     children = [
         build_random_block(rng, ids, size, max_depth - 1, allow_bridge, bridge_prob)
         for size in sizes
     ]
-    mode = rng.choice(["series", "parallel"])
-    return (
-        compose_series(children)
-        if mode == "series"
-        else compose_parallel(children, ids)
-    )
+    return compose_series(children)
 
 
 # ---------------------------------------------------------------------------
@@ -272,20 +305,75 @@ def relabel_circuit(block: Block) -> dict:
     return {"resistors": resistors, "connections": connections}
 
 
-def compute_all_measurements(topology: dict) -> list[dict]:
-    """Ground truth: simulate every pairwise node-to-node resistance via
-    nodal analysis (`get_resistance_between_nodes`), the same simulator the
-    task's own tools and scoring functions use.
+def measure_pairs(topology: dict, pairs: list[tuple[str, str]]) -> list[dict]:
+    """Simulate the node-to-node resistance for each requested pair.
+
+    Uses `get_resistance_between_nodes` -- the same nodal-analysis solver the
+    task's own tools and scoring functions use -- so the numbers handed to the
+    agent are always consistent with the sampled topology.
     """
-    nodes = sorted({n for conn in topology["connections"] for n in conn[:2]})
     topology_json = json.dumps(topology)
-    measurements = []
-    for node_a, node_b in itertools.combinations(nodes, 2):
-        resistance = get_resistance_between_nodes(topology_json, [node_a, node_b])
-        measurements.append(
-            {"node_a": node_a, "node_b": node_b, "resistance": round(resistance, 3)}
-        )
-    return measurements
+    return [
+        {
+            "node_a": node_a,
+            "node_b": node_b,
+            "resistance": round(
+                get_resistance_between_nodes(topology_json, [node_a, node_b]), 3
+            ),
+        }
+        for node_a, node_b in pairs
+    ]
+
+
+def all_node_pairs(topology: dict) -> list[tuple[str, str]]:
+    nodes = sorted({n for conn in topology["connections"] for n in conn[:2]})
+    return list(itertools.combinations(nodes, 2))
+
+
+def compute_all_measurements(topology: dict) -> list[dict]:
+    """Every pairwise node-to-node resistance in the circuit."""
+    return measure_pairs(topology, all_node_pairs(topology))
+
+
+def select_published_pairs(
+    rng: random.Random, topology: dict, fraction: float
+) -> list[tuple[str, str]]:
+    """Choose which node pairs the agent is actually shown.
+
+    Publishing every pair hands over the complete effective-resistance matrix,
+    which determines the Laplacian outright: `L = pinv(-1/2 (I-J) R (I-J))`
+    recovers every conductance in closed form, with no circuit reasoning. Holding
+    a fraction of the pairs back removes that identity.
+
+    Two pairs are always kept regardless of `fraction`:
+    every node must appear in at least one published measurement (an unprobed
+    node can be eliminated by a star-mesh transform, leaving an equivalent
+    circuit the data cannot distinguish from the real one), and the A-B terminal
+    pair is always shown since it is the circuit's nominal port.
+    """
+    pairs = all_node_pairs(topology)
+    if fraction >= 1.0:
+        return pairs
+
+    target = min(
+        len(pairs), max(len(topology["resistors"]), round(fraction * len(pairs)))
+    )
+
+    # Cover every node first, then fill up to `target` at random.
+    shuffled = list(pairs)
+    rng.shuffle(shuffled)
+    chosen: set[tuple[str, str]] = {("A", "B")} if ("A", "B") in pairs else set()
+    covered: set[str] = {n for pair in chosen for n in pair}
+    for pair in shuffled:
+        if pair[0] not in covered or pair[1] not in covered:
+            chosen.add(pair)
+            covered.update(pair)
+
+    for pair in shuffled:
+        if len(chosen) >= target:
+            break
+        chosen.add(pair)
+    return sorted(chosen)
 
 
 # ---------------------------------------------------------------------------
@@ -295,14 +383,25 @@ def compute_all_measurements(topology: dict) -> list[dict]:
 
 @dataclass
 class LevelConfig:
+    """Structural contract a sampled circuit must satisfy for a given level.
+
+    There is deliberately no parallel-group requirement. Resistors sharing a node
+    pair are merged by `check_conductance_topology` and are explicitly declared
+    interchangeable in the task notes, so demanding them would require structure
+    the scoring function cannot see. `min_cycle_rank` -- measured on the canonical
+    graph -- carries the structural requirement on its own.
+    """
+
     level: int
     resistor_range: tuple[int, int]
     max_depth: int
     allow_bridge: bool
     min_nodes: int
     min_cycle_rank: int
-    require_parallel: bool
-    min_parallel_groups: int
+    # Fraction of node pairs actually shown to the agent. Below 1.0 the
+    # closed-form Laplacian inversion no longer applies -- see
+    # `select_published_pairs`.
+    measurement_fraction: float = 0.85
 
 
 LEVELS: dict[int, LevelConfig] = {
@@ -313,8 +412,6 @@ LEVELS: dict[int, LevelConfig] = {
         allow_bridge=False,
         min_nodes=6,
         min_cycle_rank=2,
-        require_parallel=True,
-        min_parallel_groups=2,
     ),
     2: LevelConfig(
         level=2,
@@ -322,9 +419,7 @@ LEVELS: dict[int, LevelConfig] = {
         max_depth=5,
         allow_bridge=True,
         min_nodes=7,
-        min_cycle_rank=2,
-        require_parallel=True,
-        min_parallel_groups=1,
+        min_cycle_rank=3,
     ),
 }
 
@@ -348,7 +443,14 @@ def _min_required_nodes(num_resistors: int) -> int:
 
 
 def _sampled_topology_quality(topology: dict) -> tuple[int, int, int, int]:
-    """Return simple graph-complexity metrics used to choose among candidates."""
+    """Return graph-complexity metrics used to choose among candidates.
+
+    Every metric is measured on the *canonical* graph -- the one
+    `check_conductance_topology` compares, in which all resistors sharing a node
+    pair collapse into a single conductance. Counting each resistor as its own
+    edge would credit a parallel bank with cycles the scorer cannot see, so a
+    circuit that is a tree once merged could still report a high cycle rank.
+    """
     edges = topology["connections"]
     nodes = {node for a, b, _ in edges for node in (a, b)}
     degrees = {node: 0 for node in nodes}
@@ -358,7 +460,7 @@ def _sampled_topology_quality(topology: dict) -> tuple[int, int, int, int]:
         degrees[b] += 1
         pair = tuple(sorted((a, b)))
         pairs[pair] = pairs.get(pair, 0) + 1
-    cycle_rank = len(edges) - len(nodes) + 1
+    cycle_rank = len(pairs) - len(nodes) + 1
     parallel_groups = sum(count > 1 for count in pairs.values())
     branch_nodes = sum(
         degree >= 3 for node, degree in degrees.items() if node not in {"A", "B"}
@@ -383,7 +485,6 @@ def _validate_sampled_topology(
     degrees: dict[str, int] = {}
     referenced: set[str] = set()
     adjacency: dict[str, set[str]] = {}
-    pair_counts: dict[tuple[str, str], int] = {}
     for connection in connections:
         if not isinstance(connection, list) or len(connection) != 3:
             return False
@@ -392,7 +493,7 @@ def _validate_sampled_topology(
             return False
         if rid not in resistors or rid in referenced:
             return False
-        if not isinstance(resistors[rid], (int, float)) or not math.isfinite(
+        if not isinstance(resistors[rid], int | float) or not math.isfinite(
             resistors[rid]
         ):
             return False
@@ -404,8 +505,6 @@ def _validate_sampled_topology(
         degrees[b] = degrees.get(b, 0) + 1
         adjacency.setdefault(a, set()).add(b)
         adjacency.setdefault(b, set()).add(a)
-        pair = tuple(sorted((a, b)))
-        pair_counts[pair] = pair_counts.get(pair, 0) + 1
 
     if referenced != set(resistors) or {"A", "B"} - nodes:
         return False
@@ -438,14 +537,10 @@ def _validate_sampled_topology(
     if reachable != nodes:
         return False  # no disconnected/open component
 
-    quality = _sampled_topology_quality(topology)
-    if quality[1] < min_cycle_rank:
-        return False
-    parallel_groups = sum(count > 1 for count in pair_counts.values())
-    required_parallel_groups = config.min_parallel_groups if in_benchmark_range else 0
-    if config.require_parallel and parallel_groups < required_parallel_groups:
-        return False
-    return True
+    cycle_rank, _parallel_groups, _branch_nodes, _num_nodes = _sampled_topology_quality(
+        topology
+    )
+    return cycle_rank >= min_cycle_rank
 
 
 def _resistor_is_load_bearing(
@@ -513,7 +608,7 @@ def find_non_load_bearing_resistors(
 
 def sample_circuit(
     rng: random.Random, config: LevelConfig, num_resistors: int, max_attempts: int = 200
-) -> dict:
+) -> tuple[dict, list[dict]]:
     """Sample one relabeled circuit topology for a given level and resistor
     budget, retrying (deterministically, since `rng` keeps advancing) until it
     both clears the structural-richness floor from `_min_required_nodes` and
@@ -523,6 +618,7 @@ def sample_circuit(
     misvalue it and still score a perfect match.
     """
     best_candidate: dict | None = None
+    best_measurements: list[dict] | None = None
     best_quality: tuple[int, int, int, int] | None = None
     best_loadbearing_bad_count: int | None = None
 
@@ -539,7 +635,11 @@ def sample_circuit(
         if not _validate_sampled_topology(topology, config, num_resistors):
             continue
 
-        measurements = compute_all_measurements(topology)
+        # Identifiability must be judged against what the agent is actually
+        # shown, not against every pair -- a resistor pinned only by a withheld
+        # measurement is not pinned at all from the solver's side.
+        published = select_published_pairs(rng, topology, config.measurement_fraction)
+        measurements = measure_pairs(topology, published)
         bad_ids = find_non_load_bearing_resistors(topology, measurements)
         if bad_ids:
             if (
@@ -551,10 +651,14 @@ def sample_circuit(
 
         quality = _sampled_topology_quality(topology)
         if best_quality is None or quality > best_quality:
-            best_candidate, best_quality = topology, quality
+            best_candidate, best_measurements, best_quality = (
+                topology,
+                measurements,
+                quality,
+            )
 
     if best_candidate is not None:
-        return best_candidate
+        return best_candidate, best_measurements
 
     # Do not emit a task that violates the sampler contract.
     raise RuntimeError(
@@ -568,8 +672,8 @@ def build_task(
     rng: random.Random, config: LevelConfig, index: int, num_resistors: int
 ) -> dict:
     """Sample one circuit and assemble it into a full task definition dict."""
-    topology = sample_circuit(rng, config, num_resistors)
-    measurements = compute_all_measurements(topology)
+    topology, measurements = sample_circuit(rng, config, num_resistors)
+    total_pairs = len(all_node_pairs(topology))
 
     task_id = f"task_{index}"
     return {
@@ -595,6 +699,9 @@ def build_task(
                 "matches the true circuit within 10% relative error.",
                 "Resistor ids (R1, R2, ...) are not assigned in any particular spatial "
                 "order; infer both the topology and the values from the measurements.",
+                f"You are given {len(measurements)} of the {total_pairs} node-pair "
+                "resistances. The unmeasured pairs were simply not probed -- they are "
+                "not missing components.",
                 "The nodes named in the measurements are all the nodes in the circuit: "
                 "do not introduce additional internal nodes.",
                 "Resistors sharing a node pair are in parallel and cannot be told apart "

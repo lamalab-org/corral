@@ -147,7 +147,11 @@ def get_resistance_between_nodes(topology: str, terminal_nodes: list[str]) -> fl
                 raise ValueError(f"Resistor {resistor_id} not found in resistor list")
 
             resistance = resistors[resistor_id]
-            if not isinstance(resistance, int | float) or not math.isfinite(resistance):
+            # `bool` is a subclass of `int`, so True would otherwise pass as a
+            # 1-ohm resistor. `_parse_topology` in score.py rejects it too.
+            if isinstance(resistance, bool) or not isinstance(resistance, int | float):
+                raise ValueError(f"Resistance must be numeric, got {resistance!r}")
+            if not math.isfinite(resistance):
                 raise ValueError(f"Resistance must be finite, got {resistance}")
             if resistance <= 0:
                 raise ValueError(f"Resistance must be positive, got {resistance}")

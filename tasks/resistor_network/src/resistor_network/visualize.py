@@ -123,7 +123,12 @@ def main() -> None:
         draw_topology(topology, ax=ax, title=title)
 
         if args.out:
-            out_path = args.out / f"{task['id']}.png"
+            # Task ids come from JSON on disk, so keep the filename inside --out:
+            # an id like "../x" or "/tmp/x" would otherwise escape the directory.
+            safe_id = Path(str(task["id"])).name
+            if not safe_id or safe_id in {".", ".."}:
+                raise SystemExit(f"Task has an unusable id: {task['id']!r}")
+            out_path = args.out / f"{safe_id}.png"
             fig.savefig(out_path, dpi=150, bbox_inches="tight")
             event(
                 "INFO",
