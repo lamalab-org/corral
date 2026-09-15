@@ -168,6 +168,13 @@ class TestGenerateLevelTasks:
             for t in tasks:
                 assert low <= t["num_resistors"] <= high
 
+    def test_initial_input_states_resistor_count(self):
+        for task in generate_level_tasks(level=1, count=3, seed=1):
+            assert (
+                f"The circuit contains {task['num_resistors']} resistors."
+                in task["initial_input"]["notes"]
+            )
+
     def test_deterministic_given_same_seed(self):
         def strip_uuid(tasks):
             return [{k: v for k, v in t.items() if k != "uuid"} for t in tasks]

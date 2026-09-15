@@ -567,6 +567,7 @@ def build_task(
         "initial_input": {
             "measurements": measurements,
             "notes": [
+                f"The circuit contains {len(topology['resistors'])} resistors.",
                 "Assume ideal resistors. Measurements are exact to 3 decimal places.",
                 "Resistor ids (R1, R2, ...) are not assigned in any particular spatial "
                 "order; infer both the topology and the values from the measurements.",
