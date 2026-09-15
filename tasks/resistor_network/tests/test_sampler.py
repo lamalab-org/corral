@@ -1,3 +1,4 @@
+import itertools
 import json
 import math
 import random
@@ -9,6 +10,8 @@ from resistor_network.sampler import (
     SCORING_TOLERANCE,
     Block,
     _IdFactory,
+    _jacobian_rank,
+    _measurement_jacobian,
     _min_required_nodes,
     build_random_block,
     compose_parallel,
@@ -20,6 +23,7 @@ from resistor_network.sampler import (
     leaf_resistor,
     relabel_circuit,
     sample_circuit,
+    select_published_pairs,
 )
 from resistor_network.utils import get_resistance_between_nodes
 
@@ -112,6 +116,25 @@ class TestGroundTruthSimulation:
                 topology_json, [m["node_a"], m["node_b"]]
             )
             assert resim == pytest.approx(m["resistance"], abs=1e-2)
+
+
+class TestMeasurementSelection:
+    def test_selection_reaches_full_local_rank_with_small_redundancy(self):
+        ids = _IdFactory()
+        block = compose_series(
+            [leaf_resistor(random.Random(seed), ids) for seed in range(1, 5)]
+        )
+        topology = relabel_circuit(block)
+        pairs = select_published_pairs(random.Random(0), topology, redundancy=1)
+        all_pairs = list(
+            itertools.combinations(
+                sorted({n for c in topology["connections"] for n in c[:2]}), 2
+            )
+        )
+        jacobian = _measurement_jacobian(topology, all_pairs)
+        indexes = [all_pairs.index(pair) for pair in pairs]
+        assert _jacobian_rank(jacobian[indexes, :]) == len(topology["resistors"])
+        assert len(pairs) <= len(topology["resistors"]) + 1 + 3
 
 
 class TestStructuralRichnessFloor:

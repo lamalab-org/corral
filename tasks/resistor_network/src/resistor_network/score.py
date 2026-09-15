@@ -20,38 +20,7 @@ def check_resistor_topology(
     require_both: bool = True,
     expected_measurements: list[dict[str, Any]] | None = None,
 ) -> Callable[[str], float]:
-    """
-    Enhanced scoring function that checks:
-    1. Topology structure (connections)
-    2. Functional behavior (does it produce expected measurements?)
-    3. Optionally: exact resistor values
-
-    Args:
-        expected_topology: Expected circuit topology (required)
-        use_functional_scoring: Whether to use functional validation (required)
-        topology_weight: Weight for topology structure score (required, set 0.0 to disable)
-        functional_weight: Weight for functional behavior score (required, set 0.0 to disable)
-        exact_values_weight: Weight for exact resistor values score (required, set 0.0 to disable)
-        tolerance: Tolerance for measurements and resistor values (default: 0.1)
-        require_both: Legacy parameter - ignored when use_functional_scoring=True (default: True)
-        expected_measurements: List of expected resistance measurements (required if functional_weight > 0)
-
-    Notes:
-        - At least one weight must be > 0
-        - If functional_weight > 0, expected_measurements must be provided
-        - Weights are normalized automatically in weighted scoring mode
-
-    Example configurations:
-        # Pure functional scoring (for subtasks with arbitrary resistor names):
-        use_functional_scoring=True, topology_weight=0.0, functional_weight=1.0, exact_values_weight=0.0
-
-        # Functional + topology (for main tasks):
-        use_functional_scoring=True, topology_weight=0.5, functional_weight=0.5, exact_values_weight=0.0
-
-        # Original strict mode (backward compatible):
-        use_functional_scoring=False, topology_weight=0.5, functional_weight=0.0, exact_values_weight=0.5
-    """
-    # Validate configuration
+    """Create a topology scoring function."""
     if topology_weight < 0 or functional_weight < 0 or exact_values_weight < 0:
         raise ValueError("All weights must be non-negative")
 
@@ -76,7 +45,6 @@ def check_resistor_topology(
             logger.info(f"ENHANCED SCORING INPUT: {topology_input!r}")
             logger.info(f"EXPECTED TOPOLOGY: {expected_topology}")
 
-            # Parse topology (same logic as before)
             topology_data = None
             input_stripped = topology_input.strip()
 
@@ -103,8 +71,6 @@ def check_resistor_topology(
             ):
                 return 0.0
 
-            # Do not let the simulator silently ignore declared or undefined
-            # components. This also makes the complexity floor meaningful.
             referenced = set()
             for connection in proposed_connections:
                 if not isinstance(connection, list | tuple) or len(connection) != 3:
@@ -124,7 +90,6 @@ def check_resistor_topology(
 
             logger.info(f"PROPOSED TOPOLOGY: {topology_data}")
 
-            # 1. Score topology structure (connections)
             topology_score = _score_topology_structure(
                 proposed_connections, expected_connections
             )
@@ -137,7 +102,6 @@ def check_resistor_topology(
                 f"Function parameters - use_functional_scoring: {use_functional_scoring}, functional_weight: {functional_weight}, exact_values_weight: {exact_values_weight}"
             )
 
-            # 2. Score functional behavior
             if (
                 use_functional_scoring
                 and expected_measurements
@@ -150,7 +114,6 @@ def check_resistor_topology(
                 weights["functional"] = functional_weight
                 logger.info(f"Functional behavior score: {functional_score}")
 
-            # 3. Score exact resistor values (should be enabled by default for backward compatibility)
             if exact_values_weight > 0:
                 exact_values_score = _score_resistor_values(
                     proposed_resistors, expected_resistors, tolerance
@@ -163,43 +126,25 @@ def check_resistor_topology(
                     f"Exact values scoring disabled (weight={exact_values_weight})"
                 )
 
-            # Calculate final score based on require_both setting
             if use_functional_scoring:
-                # New behavior: use weighted or require_both logic for functional scoring
-                if False:  # Replace with actual condition
-                    # All enabled components must be perfect (score = 1.0)
-                    required_components = [
-                        component for component, weight in weights.items() if weight > 0
-                    ]
-                    all_perfect = all(
-                        scores[component] == 1.0 for component in required_components
-                    )
-                    final_score = 1.0 if all_perfect else 0.0
-                    logger.info(
-                        f"FUNCTIONAL REQUIRE_BOTH=True: All components perfect? {all_perfect}"
-                    )
-                else:
-                    # Use weighted scoring for functional mode
-                    total_weight = sum(weights.values())
-                    if total_weight == 0:
-                        logger.error("No scoring components enabled")
-                        return 0.0
+                total_weight = sum(weights.values())
+                if total_weight == 0:
+                    logger.error("No scoring components enabled")
+                    return 0.0
 
-                    final_score = (
-                        sum(
-                            scores[component] * weight
-                            for component, weight in weights.items()
-                        )
-                        / total_weight
+                final_score = (
+                    sum(
+                        scores[component] * weight
+                        for component, weight in weights.items()
                     )
-                    logger.info("FUNCTIONAL REQUIRE_BOTH=False: Using weighted scoring")
+                    / total_weight
+                )
+                logger.info("Using weighted functional scoring")
             else:
-                # Original behavior: binary logic for backward compatibility
                 topology_score = scores.get("topology", 0.0)
                 resistor_score = scores.get("exact_values", 0.0)
 
                 if require_both:
-                    # Both topology AND resistors must be perfect
                     final_score = (
                         1.0
                         if (topology_score == 1.0 and resistor_score == 1.0)
@@ -209,7 +154,6 @@ def check_resistor_topology(
                         f"ORIGINAL REQUIRE_BOTH=True: topology={topology_score}, resistors={resistor_score}, result={final_score}"
                     )
                 else:
-                    # Either topology OR resistors being perfect is enough
                     final_score = (
                         1.0 if (topology_score == 1.0 or resistor_score == 1.0) else 0.0
                     )
@@ -233,16 +177,10 @@ def check_resistor_topology(
 def _score_functional_behavior(
     topology_data: dict, expected_measurements: list[dict], tolerance: float
 ) -> float:
-    """
-    Score how well the topology functionally matches expected resistance measurements.
-
-    Binary version:
-    - Each measurement: if predicted resistance is within tolerance → 1, else → 0
-    - Final score: 1.0 only if ALL measurements pass, otherwise 0.0
-    """
+    """Score whether all expected measurements pass."""
     if not expected_measurements:
         logger.warning("No expected measurements provided for functional scoring")
-        return 1.0  # Default to success if no measurements to check
+        return 1.0
 
     scores = []
 
@@ -274,7 +212,6 @@ def _score_functional_behavior(
             logger.error(f"Failed to test measurement {measurement}: {e}")
             scores.append(0.0)
 
-    # All measurements must pass for a score of 1.0
     final_functional_score = 1.0 if (scores and all(s == 1.0 for s in scores)) else 0.0
     logger.info(
         f"Overall functional score: {final_functional_score} (passed {sum(scores)}/{len(scores)} measurements)"
@@ -283,20 +220,16 @@ def _score_functional_behavior(
 
 
 def _score_topology_structure(proposed: list, expected: list) -> float:
-    """Score how well the proposed connections match expected ones.
-    Binary scoring: 1.0 if exact match, 0.0 otherwise
-    """
+    """Score exact connection equality."""
     if len(proposed) != len(expected):
         return 0.0
 
-    # Normalize connections for comparison (order shouldn't matter)
     def normalize_connection(conn):
         return (*sorted([conn[0], conn[1]]), conn[2])
 
     proposed_normalized = {normalize_connection(conn) for conn in proposed}
     expected_normalized = {normalize_connection(conn) for conn in expected}
 
-    # Check for exact match
     if proposed_normalized == expected_normalized:
         return 1.0
 
@@ -307,22 +240,20 @@ def _score_topology_structure(proposed: list, expected: list) -> float:
 
 
 def _score_resistor_values(proposed: dict, expected: dict, tolerance: float) -> float:
-    """Score how well proposed resistor values match expected ones.
-    Binary scoring: 1.0 if ALL resistors within tolerance, 0.0 otherwise
-    """
+    """Score resistor values within tolerance."""
     if set(proposed.keys()) != set(expected.keys()):
-        return 0.0  # Must have same resistor names
+        return 0.0
 
     for resistor_id, expected_val in expected.items():
         proposed_val = proposed[resistor_id]
 
         if expected_val == 0:
             if proposed_val != 0:
-                return 0.0  # Fail immediately if any resistor wrong
+                return 0.0
         else:
             relative_error = abs(proposed_val - expected_val) / expected_val
             if relative_error > tolerance:
-                return 0.0  # Fail immediately if any resistor wrong
+                return 0.0
 
     return 1.0
 
@@ -330,16 +261,7 @@ def _score_resistor_values(proposed: dict, expected: dict, tolerance: float) -> 
 def check_resistance_measurements(
     expected_measurements: list[dict[str, Any]], tolerance: float = 0.05
 ) -> Callable[[str], float]:
-    """
-    Returns a scoring function that validates a topology against expected measurements.
-
-    Args:
-        expected_measurements: list of measurement dicts with node_a, node_b, resistance
-        tolerance: Relative tolerance for resistance comparison (default 5%)
-
-    Returns:
-        Scoring function that takes a topology and returns measurement match score 0.0-1.0
-    """
+    """Create a measurement scoring function."""
     logger.info(
         f"Creating measurement checker with {len(expected_measurements)} measurements"
     )
@@ -348,7 +270,6 @@ def check_resistance_measurements(
         try:
             logger.info(f"check_resistance_measurements: input={topology_input!r}")
 
-            # Load topology
             resolved_input = smart_resolve_path(topology_input.strip())
             topology_data = None
 
@@ -368,7 +289,6 @@ def check_resistance_measurements(
 
             for measurement in expected_measurements:
                 try:
-                    # This would call the actual circuit simulation
                     predicted_resistance = _simulate_resistance(
                         topology_data, measurement["node_a"], measurement["node_b"]
                     )
@@ -406,12 +326,7 @@ def check_resistance_measurements(
 
 
 def _simulate_resistance(topology: dict, node_a: str, node_b: str) -> float:
-    """
-    Simulate resistance between two nodes in a topology, delegating to the
-    canonical nodal-analysis solver (`utils.get_resistance_between_nodes`) so
-    this scoring path can never silently drift from the ground-truth
-    simulator or the agent-facing `simulate_circuit_resistance` tool.
-    """
+    """Simulate resistance between two nodes."""
     try:
         return get_resistance_between_nodes(json.dumps(topology), [node_a, node_b])
     except Exception as e:
@@ -426,12 +341,9 @@ def check_complete_circuit_solution(
     measurement_weight: float = 0.4,
     tolerance: float = 0.1,
 ) -> Callable[[str], float]:
-    """
-    Returns a comprehensive scoring function that checks both topology and measurements.
-    """
+    """Create a combined topology and measurement scorer."""
     logger.info("Creating complete circuit solution checker")
 
-    # Use backward-compatible mode (original strict binary scoring)
     topology_scorer = check_resistor_topology(
         expected_topology=expected_topology,
         use_functional_scoring=False,
@@ -470,9 +382,7 @@ def check_complete_circuit_solution(
 def check_resistor_values_only(
     expected_values: dict[str, float], tolerance: float = 0.1
 ) -> Callable[[str], float]:
-    """
-    Returns a scoring function that only checks if resistor values are correct.
-    """
+    """Create a resistor-value scoring function."""
     logger.info(
         f"Creating resistor values checker for {len(expected_values)} resistors"
     )
@@ -481,14 +391,12 @@ def check_resistor_values_only(
         try:
             logger.info(f"check_resistor_values_only: input={values_input!r}")
 
-            # Try to resolve and load values
             resolved_input = smart_resolve_path(values_input.strip())
             values_data = None
 
             if Path(resolved_input).exists():
                 with Path(resolved_input).open() as f:
                     data = json.load(f)
-                    # Extract resistor values if it's a full topology
                     values_data = data.get("resistors", data)
             else:
                 try:
@@ -513,9 +421,7 @@ def check_resistor_values_only(
 
 
 def check_valid_circuit_json(json_path: str) -> float:
-    """
-    Check if a valid circuit topology JSON file exists at the given path.
-    """
+    """Validate a circuit JSON file."""
     try:
         json_path = json_path.strip()
         if not json_path:
@@ -533,7 +439,6 @@ def check_valid_circuit_json(json_path: str) -> float:
         with Path(json_path).open("r", encoding="utf-8") as f:
             circuit_data = json.load(f)
 
-        # Validate circuit structure
         if not isinstance(circuit_data, dict):
             logger.info("Circuit JSON is not a dictionary")
             return 0.0
@@ -543,19 +448,16 @@ def check_valid_circuit_json(json_path: str) -> float:
             logger.info(f"Circuit JSON missing required keys: {required_keys}")
             return 0.0
 
-        # Basic validation of resistors
         resistors = circuit_data["resistors"]
         if not isinstance(resistors, dict) or not resistors:
             logger.info("Invalid or empty resistors section")
             return 0.0
 
-        # Basic validation of connections
         connections = circuit_data["connections"]
         if not isinstance(connections, list) or not connections:
             logger.info("Invalid or empty connections section")
             return 0.0
 
-        # Check connection format
         for conn in connections:
             if not isinstance(conn, list) or len(conn) != 3:
                 logger.info(
@@ -579,14 +481,7 @@ def check_valid_circuit_json(json_path: str) -> float:
 
 
 def _parse_topology(topology_input: str) -> dict[str, Any] | None:
-    """Parse and structurally validate a submitted topology.
-
-    Returns None for anything malformed: bad JSON, missing keys, connections that
-    are not `[node_a, node_b, resistor_id]`, self-loops, resistor ids that are
-    undefined / reused across connections / declared but never connected, and
-    non-positive or non-finite resistances. Every one of these would otherwise let
-    the submission claim components the simulator silently ignores.
-    """
+    """Parse and validate a submitted topology."""
     stripped = topology_input.strip()
     if not (stripped.startswith("{") and stripped.endswith("}")):
         return None
@@ -612,7 +507,7 @@ def _parse_topology(topology_input: str) -> dict[str, Any] | None:
         if not isinstance(node_a, str) or not isinstance(node_b, str):
             return None
         if node_a == node_b:
-            return None  # self-loop carries no current
+            return None
         if resistor_id not in resistors or resistor_id in referenced:
             return None
         value = resistors[resistor_id]
@@ -653,6 +548,14 @@ def check_conductance_topology(
 
             proposed_conductances = conductance_map(proposed)
             proposed_nodes = {node for pair in proposed_conductances for node in pair}
+
+            if len(proposed["resistors"]) != len(expected_topology["resistors"]):
+                logger.info(
+                    "Conductance scoring: resistor-count mismatch "
+                    f"(expected={len(expected_topology['resistors'])}, "
+                    f"got={len(proposed['resistors'])})"
+                )
+                return 0.0
 
             if proposed_nodes != expected_nodes:
                 logger.info(

@@ -1,23 +1,4 @@
-"""Circuit sampler engine for the resistor_network task.
-
-Instead of hand-curating each benchmark circuit, this module procedurally
-assembles bigger resistor networks out of small two-terminal primitives
-(a single resistor, or a Wheatstone-bridge motif) by recursively composing
-them in series and/or parallel. Node names and resistor ids are kept
-globally unique during composition so blocks can always be merged safely,
-then relabeled into readable names (A/B terminals, N1.. internal nodes,
-R1.. resistors) once the circuit is final.
-
-Ground truth is never hand-computed: every pairwise node-to-node resistance
-is obtained by actually simulating the assembled topology with nodal
-analysis (`get_resistance_between_nodes`, the same simulator the tools and
-scoring functions use), so the measurements handed to the agent are always
-consistent with the sampled topology.
-
-`generate_level_tasks` is the entry point used by
-`environments/level_N/generate_tasks.py` to produce the static task JSON
-files that the server loads.
-"""
+"""Generate resistor-network tasks."""
 
 import itertools
 import json
@@ -26,36 +7,15 @@ import random
 import uuid
 from dataclasses import dataclass
 
+import numpy as np
 from resistor_network.utils import get_resistance_between_nodes
 
-# "Nice" resistor values (E-series flavored), so sampled circuits read like
-# real components rather than arbitrary floats.
-# Keep values distinguishable without allowing a 1-ohm branch to mask a
-# 500-ohm branch in parallel. This E12-like range spans one decade.
 RESISTOR_POOL: list[float] = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100]
 
-# Relative tolerance used to grade submissions. `check_conductance_topology` in score.py
-# collapses every resistor sharing a node pair into a single conductance, then requires the
-# submitted node set and node-pair set to match the true circuit exactly, with each pair's
-# conductance within this tolerance. Resistor ids, resistor count, and how values are split
-# across a parallel group therefore do not matter -- but the structure does.
-# `build_task` pulls its `scoring_params["tolerance"]` from this same constant so the
-# sampler's own load-bearing check (below) can never silently drift from the tolerance
-# actually used to grade agents.
 SCORING_TOLERANCE: float = 0.1
 
-# Multipliers used to test whether a resistor's value is constrained by the measurements.
-# By Rayleigh's monotonicity law, the effective resistance between any two nodes is a
-# monotonic function of any single resistor's value with all others held fixed -- so as a
-# resistor sweeps from near-zero to near-infinite, every measurement sweeps monotonically
-# between its values at those two extremes. Testing exactly these two extremes is therefore
-# both necessary and sufficient: if neither escapes `SCORING_TOLERANCE`, no intermediate
-# value (doubling, +/-30%, etc.) could either, so checking additional multipliers would add
-# cost without adding coverage. These multipliers push every pool value well outside the
-# sampled range in either direction while remaining finite (the simulator requires strictly
-# positive resistances).
-SENSITIVITY_OPEN_MULTIPLIER: float = 1e4  # proxy for "resistor removed / open circuit"
-SENSITIVITY_SHORT_MULTIPLIER: float = 1e-4  # proxy for "resistor shorted to ~0 ohms"
+SENSITIVITY_OPEN_MULTIPLIER: float = 1e4
+SENSITIVITY_SHORT_MULTIPLIER: float = 1e-4
 
 TOOLS: list[str] = [
     "calculate_series_resistance",
@@ -77,12 +37,7 @@ SUBMISSION_FORMAT = (
 
 @dataclass
 class Block:
-    """A two-terminal resistor network fragment.
-
-    `resistors` and node names inside `connections` use placeholder ids
-    assigned by `_IdFactory`, guaranteed unique across an entire sampling
-    run, so two blocks can always be composed without accidental collisions.
-    """
+    """A two-terminal resistor-network fragment."""
 
     resistors: dict[str, float]
     connections: list[tuple[str, str, str]]
@@ -95,7 +50,7 @@ class Block:
 
 
 class _IdFactory:
-    """Generates globally-unique placeholder node/resistor ids for one sampling run."""
+    """Generate unique temporary ids."""
 
     def __init__(self) -> None:
         self._counter = itertools.count(1)
@@ -107,11 +62,6 @@ class _IdFactory:
         return f"_r{next(self._counter)}"
 
 
-# ---------------------------------------------------------------------------
-# Primitive blocks
-# ---------------------------------------------------------------------------
-
-
 def leaf_resistor(rng: random.Random, ids: _IdFactory) -> Block:
     """A single resistor between two fresh terminals."""
     a, b = ids.node(), ids.node()
@@ -120,10 +70,7 @@ def leaf_resistor(rng: random.Random, ids: _IdFactory) -> Block:
 
 
 def leaf_bridge(rng: random.Random, ids: _IdFactory) -> Block:
-    """A Wheatstone-bridge motif: 5 resistors that cannot be reduced by
-    series/parallel combination alone, forcing real nodal analysis (or a
-    delta-wye transform) to solve.
-    """
+    """Create a five-resistor Wheatstone bridge."""
     a, b = ids.node(), ids.node()
     n1, n2 = ids.node(), ids.node()
     rids = [ids.resistor() for _ in range(5)]
@@ -138,13 +85,8 @@ def leaf_bridge(rng: random.Random, ids: _IdFactory) -> Block:
     return Block(resistors, connections, a, b)
 
 
-# ---------------------------------------------------------------------------
-# Composition
-# ---------------------------------------------------------------------------
-
-
 def compose_series(blocks: list[Block]) -> Block:
-    """Chain blocks end-to-end: terminal_b of one is identified with terminal_a of the next."""
+    """Compose blocks in series."""
     if not blocks:
         raise ValueError("Need at least one block to compose in series")
     merged = blocks[0]
@@ -167,7 +109,7 @@ def _series_pair(b1: Block, b2: Block) -> Block:
 
 
 def compose_parallel(blocks: list[Block], ids: _IdFactory) -> Block:
-    """Merge blocks between two freshly-created, shared terminals."""
+    """Compose blocks in parallel."""
     if not blocks:
         raise ValueError("Need at least one block to compose in parallel")
     a_new, b_new = ids.node(), ids.node()
@@ -190,7 +132,7 @@ def compose_parallel(blocks: list[Block], ids: _IdFactory) -> Block:
 
 
 def _partition(rng: random.Random, total: int, parts: int) -> list[int]:
-    """Split `total` into `parts` positive integers at random cut points."""
+    """Split a total into random positive parts."""
     parts = min(parts, total)
     cuts = sorted(rng.sample(range(1, total), parts - 1)) if parts > 1 else []
     boundaries = [0, *cuts, total]
@@ -198,23 +140,13 @@ def _partition(rng: random.Random, total: int, parts: int) -> list[int]:
 
 
 def _partition_for_parallel(rng: random.Random, total: int, parts: int) -> list[int]:
-    """Split `total` for a parallel composition, leaving at most one branch of size 1.
-
-    Two single-resistor branches in parallel land on the same node pair, which
-    `check_conductance_topology` merges into one conductance: the result is a
-    duplicate pair, not a cycle, and the scorer cannot see any structure in it.
-    Giving every branch but one at least two resistors routes each branch through
-    its own internal node, so the composition contributes a cycle the scorer
-    actually observes.
-    """
+    """Split resistors into observable parallel branches."""
     parts = min(parts, max(1, total // 2))
     if parts <= 1:
         return [total]
     sizes = [2] * parts
     for _ in range(total - 2 * parts):
         sizes[rng.randrange(parts)] += 1
-    # Optionally peel one resistor off into a bare branch -- a single resistor in
-    # parallel with a multi-resistor branch still forms a cycle.
     if len(sizes) >= 2 and sizes[0] >= 3 and rng.random() < 0.5:
         sizes[0] -= 1
         sizes.append(1)
@@ -229,18 +161,11 @@ def build_random_block(
     allow_bridge: bool,
     bridge_prob: float = 0.35,
 ) -> Block:
-    """Recursively compose primitives in series/parallel to reach exactly
-    `target_resistors` resistors, within roughly `max_depth` levels of nesting.
-    """
+    """Build a random block with the requested resistor count."""
     if target_resistors <= 1:
         return leaf_resistor(rng, ids)
 
     if max_depth <= 0:
-        # Spend the remaining resistors as one chain when the depth budget is
-        # exhausted. A flat *parallel* bank of single resistors would put every
-        # one of them on the same node pair, which the scorer merges into a
-        # single conductance -- so it would add resistors without adding anything
-        # the scoring function can distinguish.
         return compose_series(
             [leaf_resistor(rng, ids) for _ in range(target_resistors)]
         )
@@ -256,9 +181,6 @@ def build_random_block(
         pair = [bridge, extra] if rng.random() < 0.5 else [extra, bridge]
         return compose_series(pair)
 
-    # Decide the composition mode *before* partitioning: a parallel split has to
-    # keep every branch but one at two or more resistors (see
-    # `_partition_for_parallel`), which a series split does not.
     mode = rng.choice(["series", "parallel"])
     if mode == "parallel" and target_resistors >= 3:
         branches = rng.randint(2, min(3, max(2, target_resistors // 2)))
@@ -278,15 +200,8 @@ def build_random_block(
     return compose_series(children)
 
 
-# ---------------------------------------------------------------------------
-# Relabeling + ground truth simulation
-# ---------------------------------------------------------------------------
-
-
 def relabel_circuit(block: Block) -> dict:
-    """Turn placeholder ids into readable names: terminals A/B, internal
-    nodes N1.., resistors R1.. (assigned in first-seen order).
-    """
+    """Relabel temporary nodes and resistors."""
     node_map = {block.terminal_a: "A", block.terminal_b: "B"}
     resistor_map: dict[str, str] = {}
     node_counter = itertools.count(1)
@@ -306,12 +221,7 @@ def relabel_circuit(block: Block) -> dict:
 
 
 def measure_pairs(topology: dict, pairs: list[tuple[str, str]]) -> list[dict]:
-    """Simulate the node-to-node resistance for each requested pair.
-
-    Uses `get_resistance_between_nodes` -- the same nodal-analysis solver the
-    task's own tools and scoring functions use -- so the numbers handed to the
-    agent are always consistent with the sampled topology.
-    """
+    """Measure selected node pairs."""
     topology_json = json.dumps(topology)
     return [
         {
@@ -331,66 +241,93 @@ def all_node_pairs(topology: dict) -> list[tuple[str, str]]:
 
 
 def compute_all_measurements(topology: dict) -> list[dict]:
-    """Every pairwise node-to-node resistance in the circuit."""
+    """Measure every node pair."""
     return measure_pairs(topology, all_node_pairs(topology))
 
 
+def _measurement_jacobian(
+    topology: dict, pairs: list[tuple[str, str]], step: float = 1e-5
+) -> np.ndarray:
+    """Estimate measurement sensitivity to resistor values."""
+    topology_json = json.dumps(topology)
+    resistor_ids = list(topology["resistors"])
+    jacobian = np.zeros((len(pairs), len(resistor_ids)), dtype=float)
+
+    for column, resistor_id in enumerate(resistor_ids):
+        value = topology["resistors"][resistor_id]
+        low = json.loads(topology_json)
+        high = json.loads(topology_json)
+        low["resistors"][resistor_id] = value * math.exp(-step)
+        high["resistors"][resistor_id] = value * math.exp(step)
+        low_json = json.dumps(low)
+        high_json = json.dumps(high)
+        for row, pair in enumerate(pairs):
+            low_measurement = get_resistance_between_nodes(low_json, list(pair))
+            high_measurement = get_resistance_between_nodes(high_json, list(pair))
+            jacobian[row, column] = (high_measurement - low_measurement) / (2 * step)
+
+    return jacobian
+
+
+def _jacobian_rank(jacobian: np.ndarray) -> int:
+    """Return the normalized Jacobian rank."""
+    if jacobian.size == 0:
+        return 0
+    column_scales = np.max(np.abs(jacobian), axis=0)
+    active = column_scales > 1e-10
+    if not np.any(active):
+        return 0
+    normalized = jacobian[:, active] / column_scales[active]
+    return int(np.linalg.matrix_rank(normalized, tol=1e-8))
+
+
 def select_published_pairs(
-    rng: random.Random, topology: dict, fraction: float
+    rng: random.Random,
+    topology: dict,
+    redundancy: int = 2,
 ) -> list[tuple[str, str]]:
-    """Choose which node pairs the agent is actually shown.
-
-    Publishing every pair hands over the complete effective-resistance matrix,
-    which determines the Laplacian outright: `L = pinv(-1/2 (I-J) R (I-J))`
-    recovers every conductance in closed form, with no circuit reasoning. Holding
-    a fraction of the pairs back removes that identity.
-
-    Two pairs are always kept regardless of `fraction`:
-    every node must appear in at least one published measurement (an unprobed
-    node can be eliminated by a star-mesh transform, leaving an equivalent
-    circuit the data cannot distinguish from the real one), and the A-B terminal
-    pair is always shown since it is the circuit's nominal port.
-    """
+    """Select node pairs with full local rank and small redundancy."""
     pairs = all_node_pairs(topology)
-    if fraction >= 1.0:
-        return pairs
+    if not pairs:
+        return []
 
-    target = min(
-        len(pairs), max(len(topology["resistors"]), round(fraction * len(pairs)))
-    )
-
-    # Cover every node first, then fill up to `target` at random.
+    jacobian = _measurement_jacobian(topology, pairs)
+    num_unknowns = len(topology["resistors"])
     shuffled = list(pairs)
     rng.shuffle(shuffled)
     chosen: set[tuple[str, str]] = {("A", "B")} if ("A", "B") in pairs else set()
+
+    # Cover every node before selecting independent measurements.
     covered: set[str] = {n for pair in chosen for n in pair}
     for pair in shuffled:
         if pair[0] not in covered or pair[1] not in covered:
             chosen.add(pair)
             covered.update(pair)
 
-    for pair in shuffled:
-        if len(chosen) >= target:
+    def current_rank(selected: set[tuple[str, str]]) -> int:
+        indexes = [pairs.index(pair) for pair in selected]
+        return _jacobian_rank(jacobian[indexes, :])
+
+    # Add pairs greedily by rank increase.
+    while current_rank(chosen) < num_unknowns:
+        candidates = [pair for pair in shuffled if pair not in chosen]
+        if not candidates:
             break
-        chosen.add(pair)
+        ranked = [(current_rank(chosen | {pair}), pair) for pair in candidates]
+        best_rank = max(rank for rank, _pair in ranked)
+        best_pairs = [pair for rank, pair in ranked if rank == best_rank]
+        chosen.add(rng.choice(best_pairs))
+
+    # Add a small rounding margin.
+    remaining = [pair for pair in shuffled if pair not in chosen]
+    rng.shuffle(remaining)
+    chosen.update(remaining[: max(0, redundancy)])
     return sorted(chosen)
-
-
-# ---------------------------------------------------------------------------
-# Levels + task assembly
-# ---------------------------------------------------------------------------
 
 
 @dataclass
 class LevelConfig:
-    """Structural contract a sampled circuit must satisfy for a given level.
-
-    There is deliberately no parallel-group requirement. Resistors sharing a node
-    pair are merged by `check_conductance_topology` and are explicitly declared
-    interchangeable in the task notes, so demanding them would require structure
-    the scoring function cannot see. `min_cycle_rank` -- measured on the canonical
-    graph -- carries the structural requirement on its own.
-    """
+    """Sampling rules for one difficulty level."""
 
     level: int
     resistor_range: tuple[int, int]
@@ -398,10 +335,7 @@ class LevelConfig:
     allow_bridge: bool
     min_nodes: int
     min_cycle_rank: int
-    # Fraction of node pairs actually shown to the agent. Below 1.0 the
-    # closed-form Laplacian inversion no longer applies -- see
-    # `select_published_pairs`.
-    measurement_fraction: float = 0.85
+    measurement_redundancy: int = 2
 
 
 LEVELS: dict[int, LevelConfig] = {
@@ -411,7 +345,7 @@ LEVELS: dict[int, LevelConfig] = {
         max_depth=3,
         allow_bridge=False,
         min_nodes=6,
-        min_cycle_rank=2,
+        min_cycle_rank=1,
     ),
     2: LevelConfig(
         level=2,
@@ -419,38 +353,18 @@ LEVELS: dict[int, LevelConfig] = {
         max_depth=5,
         allow_bridge=True,
         min_nodes=7,
-        min_cycle_rank=3,
+        min_cycle_rank=2,
     ),
 }
 
 
 def _min_required_nodes(num_resistors: int) -> int:
-    """A structural-richness floor so a sampled circuit can never collapse to a
-    single equivalent-resistance measurement (e.g. an all-parallel bank between
-    just two nodes), which would leave the inference problem trivially
-    under-determined for functional scoring: any resistor combo matching that
-    one number would pass, regardless of the real topology.
-
-    This is deliberately a small constant, not a target scaling with
-    `num_resistors`: it only needs to rule out the fully-collapsed case, not
-    push circuits toward any particular shape. A floor that scaled up with
-    circuit size (e.g. ~half the resistor count) would, for small circuits,
-    approach `num_resistors + 1` -- the node count only a pure series chain
-    can reach -- and silently bias every sampled circuit toward series-only
-    topologies by rejecting parallel/mixed ones in the retry loop below.
-    """
+    """Return the minimum node count for small samples."""
     return min(num_resistors + 1, 4)
 
 
 def _sampled_topology_quality(topology: dict) -> tuple[int, int, int, int]:
-    """Return graph-complexity metrics used to choose among candidates.
-
-    Every metric is measured on the *canonical* graph -- the one
-    `check_conductance_topology` compares, in which all resistors sharing a node
-    pair collapse into a single conductance. Counting each resistor as its own
-    edge would credit a parallel bank with cycles the scorer cannot see, so a
-    circuit that is a tree once merged could still report a high cycle rank.
-    """
+    """Return canonical graph complexity metrics."""
     edges = topology["connections"]
     nodes = {node for a, b, _ in edges for node in (a, b)}
     degrees = {node: 0 for node in nodes}
@@ -471,7 +385,7 @@ def _sampled_topology_quality(topology: dict) -> tuple[int, int, int, int]:
 def _validate_sampled_topology(
     topology: dict, config: LevelConfig, num_resistors: int
 ) -> bool:
-    """Check structural validity and minimum richness before measuring a sample."""
+    """Validate a sampled topology."""
     resistors = topology.get("resistors")
     connections = topology.get("connections")
     if (
@@ -508,8 +422,6 @@ def _validate_sampled_topology(
 
     if referenced != set(resistors) or {"A", "B"} - nodes:
         return False
-    # Tests and callers may request toy circuits below the level's benchmark
-    # range. Apply the full level contract only to in-range benchmark samples.
     in_benchmark_range = num_resistors >= config.resistor_range[0]
     min_nodes = (
         min(config.min_nodes, num_resistors + 1)
@@ -524,7 +436,7 @@ def _validate_sampled_topology(
     if len(nodes) < min_nodes:
         return False
     if any(degrees[node] < 2 for node in nodes - {"A", "B"}):
-        return False  # no dangling internal branch
+        return False
 
     reachable = {"A"}
     frontier = ["A"]
@@ -535,7 +447,7 @@ def _validate_sampled_topology(
                 reachable.add(neighbor)
                 frontier.append(neighbor)
     if reachable != nodes:
-        return False  # no disconnected/open component
+        return False
 
     cycle_rank, _parallel_groups, _branch_nodes, _num_nodes = _sampled_topology_quality(
         topology
@@ -549,16 +461,7 @@ def _resistor_is_load_bearing(
     resistor_id: str,
     tolerance: float = SCORING_TOLERANCE,
 ) -> bool:
-    """True iff `resistor_id`'s value is actually constrained by `measurements`.
-
-    Perturbs the resistor to both sensitivity extremes (`SENSITIVITY_OPEN_MULTIPLIER` and
-    `SENSITIVITY_SHORT_MULTIPLIER`) and checks whether *each* independently moves at least
-    one measurement outside `tolerance` relative error, using the exact same simulator
-    (`get_resistance_between_nodes`) and comparison `check_resistor_topology` uses to grade
-    submissions. If either extreme survives undetected, the resistor's true value is
-    functionally indistinguishable from that extreme (including, for the open-circuit
-    extreme, from a submission that omits the resistor entirely) -- it is not load-bearing.
-    """
+    """Return whether a resistor affects a published measurement."""
     topology_json = json.dumps(topology)
     original_value = topology["resistors"][resistor_id]
 
@@ -572,8 +475,6 @@ def _resistor_is_load_bearing(
                     perturbed_json, [m["node_a"], m["node_b"]]
                 )
             except ValueError:
-                # Solver failure (e.g. near-singular) is itself a maximal deviation
-                # from the expected finite measurement.
                 return True
             expected = m["resistance"]
             if expected == 0:
@@ -584,8 +485,6 @@ def _resistor_is_load_bearing(
                 return True
         return False
 
-    # Check the empirically-dominant exploit direction (open circuit) first so the common
-    # "resistor is not load-bearing" case short-circuits after a single pass.
     if not _escapes_tolerance(SENSITIVITY_OPEN_MULTIPLIER):
         return False
     return _escapes_tolerance(SENSITIVITY_SHORT_MULTIPLIER)
@@ -594,11 +493,7 @@ def _resistor_is_load_bearing(
 def find_non_load_bearing_resistors(
     topology: dict, measurements: list[dict], tolerance: float = SCORING_TOLERANCE
 ) -> list[str]:
-    """Ids of every resistor in `topology` that isn't load-bearing given `measurements`
-    (see `_resistor_is_load_bearing`). An empty list means the circuit is fully load-bearing:
-    no resistor's value can be changed (including toward removing it entirely) without at
-    least one measurement moving outside `tolerance`.
-    """
+    """Return resistors not constrained by the measurements."""
     return [
         rid
         for rid in topology["resistors"]
@@ -609,17 +504,7 @@ def find_non_load_bearing_resistors(
 def sample_circuit(
     rng: random.Random, config: LevelConfig, num_resistors: int, max_attempts: int = 200
 ) -> tuple[dict, list[dict]]:
-    """Sample one relabeled circuit topology for a given level and resistor
-    budget, retrying (deterministically, since `rng` keeps advancing) until it
-    both clears the structural-richness floor from `_min_required_nodes` and
-    has every resistor load-bearing (see `find_non_load_bearing_resistors`) --
-    i.e. no resistor's value can be changed toward either extreme without
-    detection, which would otherwise let a submission omit or grossly
-    misvalue it and still score a perfect match.
-    """
-    best_candidate: dict | None = None
-    best_measurements: list[dict] | None = None
-    best_quality: tuple[int, int, int, int] | None = None
+    """Sample a valid circuit and its measurements."""
     best_loadbearing_bad_count: int | None = None
 
     for _ in range(max_attempts):
@@ -635,10 +520,9 @@ def sample_circuit(
         if not _validate_sampled_topology(topology, config, num_resistors):
             continue
 
-        # Identifiability must be judged against what the agent is actually
-        # shown, not against every pair -- a resistor pinned only by a withheld
-        # measurement is not pinned at all from the solver's side.
-        published = select_published_pairs(rng, topology, config.measurement_fraction)
+        published = select_published_pairs(
+            rng, topology, redundancy=config.measurement_redundancy
+        )
         measurements = measure_pairs(topology, published)
         bad_ids = find_non_load_bearing_resistors(topology, measurements)
         if bad_ids:
@@ -649,18 +533,8 @@ def sample_circuit(
                 best_loadbearing_bad_count = len(bad_ids)
             continue
 
-        quality = _sampled_topology_quality(topology)
-        if best_quality is None or quality > best_quality:
-            best_candidate, best_measurements, best_quality = (
-                topology,
-                measurements,
-                quality,
-            )
+        return topology, measurements
 
-    if best_candidate is not None:
-        return best_candidate, best_measurements
-
-    # Do not emit a task that violates the sampler contract.
     raise RuntimeError(
         f"Could not sample a valid level-{config.level} circuit with "
         f"{num_resistors} resistors after {max_attempts} attempts "
@@ -671,7 +545,7 @@ def sample_circuit(
 def build_task(
     rng: random.Random, config: LevelConfig, index: int, num_resistors: int
 ) -> dict:
-    """Sample one circuit and assemble it into a full task definition dict."""
+    """Build one task definition."""
     topology, measurements = sample_circuit(rng, config, num_resistors)
 
     task_id = f"task_{index}"
@@ -692,18 +566,10 @@ def build_task(
         "input_from_tasks": [],
         "initial_input": {
             "measurements": measurements,
-            # Kept deliberately minimal: the notes state the physical assumptions and
-            # nothing about how to approach the problem. Anything that explains the
-            # scoring rule, hints at parallel-group equivalence, or describes the shape
-            # of the circuit is solving part of the task for the agent.
             "notes": [
                 "Assume ideal resistors. Measurements are exact to 3 decimal places.",
                 "Resistor ids (R1, R2, ...) are not assigned in any particular spatial "
                 "order; infer both the topology and the values from the measurements.",
-                # Task specification rather than a hint: `select_published_pairs` holds
-                # some pairs back, and without this an absent pair reads as "these nodes
-                # are not connected" -- a wrong inference the task induced, not a
-                # reasoning failure.
                 "Not every node pair was measured.",
             ],
         },
@@ -714,9 +580,7 @@ def build_task(
 
 
 def generate_level_tasks(level: int, count: int, seed: int) -> list[dict]:
-    """Generate `count` tasks for `level`, ramping resistor complexity roughly
-    linearly across the batch so later tasks in a level are harder than earlier ones.
-    """
+    """Generate a task batch for one level."""
     if level not in LEVELS:
         raise ValueError(f"Unknown level: {level}. Available levels: {sorted(LEVELS)}")
     if count < 1:

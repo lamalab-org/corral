@@ -34,12 +34,20 @@ def test_exact_ground_truth_scores_one():
     assert score(TRUTH) == 1.0
 
 
-def test_parallel_group_may_be_submitted_as_one_resistor():
+def test_parallel_group_with_wrong_resistor_count_is_rejected():
     merged = {
         "resistors": {"Ra": 1 / (1 / 47 + 1 / 33), "Rb": 20.0},
         "connections": [["A", "N1", "Ra"], ["N1", "B", "Rb"]],
     }
-    assert score(merged) == 1.0
+    assert score(merged) == 0.0
+
+
+def test_parallel_group_with_same_resistor_count_remains_equivalent():
+    equivalent = {
+        "resistors": {"Ra": 47.0, "Rb": 33.0, "Rc": 20.0},
+        "connections": [["A", "N1", "Ra"], ["A", "N1", "Rb"], ["N1", "B", "Rc"]],
+    }
+    assert score(equivalent) == 1.0
 
 
 def test_resistor_ids_and_connection_order_are_free():
@@ -52,13 +60,21 @@ def test_resistor_ids_and_connection_order_are_free():
 
 def test_values_within_tolerance_pass_and_outside_fail():
     near = {
-        "resistors": {"Ra": 1 / (1.05 * (1 / 47 + 1 / 33)), "Rb": 20.0},
-        "connections": [["A", "N1", "Ra"], ["N1", "B", "Rb"]],
+        "resistors": {
+            "Ra": 47.0 / 1.05,
+            "Rb": 33.0,
+            "Rc": 20.0,
+        },
+        "connections": [["A", "N1", "Ra"], ["A", "N1", "Rb"], ["N1", "B", "Rc"]],
     }
     assert score(near) == 1.0  # 5% off, inside the 10% band
     far = {
-        "resistors": {"Ra": 1 / (1.5 * (1 / 47 + 1 / 33)), "Rb": 20.0},
-        "connections": [["A", "N1", "Ra"], ["N1", "B", "Rb"]],
+        "resistors": {
+            "Ra": 47.0 / 1.5,
+            "Rb": 33.0,
+            "Rc": 20.0,
+        },
+        "connections": [["A", "N1", "Ra"], ["A", "N1", "Rb"], ["N1", "B", "Rc"]],
     }
     assert score(far) == 0.0
 
