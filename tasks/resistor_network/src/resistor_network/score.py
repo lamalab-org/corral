@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from resistor_network.sampler import RESISTOR_POOL
 from resistor_network.utils import get_resistance_between_nodes
 
 from corral.utils.tool_helpers import smart_resolve_path
@@ -544,6 +545,12 @@ def check_conductance_topology(
             proposed = _parse_topology(topology_input)
             if proposed is None:
                 logger.info("Conductance scoring: submission failed structural checks")
+                return 0.0
+
+            if any(
+                value not in RESISTOR_POOL for value in proposed["resistors"].values()
+            ):
+                logger.info("Conductance scoring: resistor value outside allowed pool")
                 return 0.0
 
             proposed_conductances = conductance_map(proposed)

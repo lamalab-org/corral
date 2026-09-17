@@ -12,7 +12,7 @@ from resistor_network.utils import get_resistance_between_nodes
 
 RESISTOR_POOL: list[float] = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100]
 
-SCORING_TOLERANCE: float = 0.1
+SCORING_TOLERANCE: float = 0.02
 
 SENSITIVITY_OPEN_MULTIPLIER: float = 1e4
 SENSITIVITY_SHORT_MULTIPLIER: float = 1e-4
@@ -281,18 +281,55 @@ def _jacobian_rank(jacobian: np.ndarray) -> int:
     return int(np.linalg.matrix_rank(normalized, tol=1e-8))
 
 
+def _effective_unknown_count(topology: dict) -> int:
+    """Count unique node-pair conductances."""
+    return len(
+        {
+            tuple(sorted((node_a, node_b)))
+            for node_a, node_b, _resistor_id in topology["connections"]
+        }
+    )
+
+
+def _parallel_values_are_unique(
+    topology: dict, tolerance: float = SCORING_TOLERANCE
+) -> bool:
+    """Check uniqueness of allowed values in parallel groups."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    for node_a, node_b, resistor_id in topology["connections"]:
+        pair = tuple(sorted((node_a, node_b)))
+        groups.setdefault(pair, []).append(resistor_id)
+
+    for resistor_ids in groups.values():
+        if len(resistor_ids) < 2:
+            continue
+        target_values = tuple(
+            sorted(topology["resistors"][resistor_id] for resistor_id in resistor_ids)
+        )
+        target_conductance = sum(1 / value for value in target_values)
+        for candidate in itertools.combinations_with_replacement(
+            RESISTOR_POOL, len(resistor_ids)
+        ):
+            if candidate == target_values:
+                continue
+            conductance = sum(1 / value for value in candidate)
+            if abs(conductance - target_conductance) / target_conductance <= tolerance:
+                return False
+    return True
+
+
 def select_published_pairs(
     rng: random.Random,
     topology: dict,
     redundancy: int = 2,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str]] | None:
     """Select node pairs with full local rank and small redundancy."""
     pairs = all_node_pairs(topology)
     if not pairs:
         return []
 
     jacobian = _measurement_jacobian(topology, pairs)
-    num_unknowns = len(topology["resistors"])
+    num_unknowns = _effective_unknown_count(topology)
     shuffled = list(pairs)
     rng.shuffle(shuffled)
     chosen: set[tuple[str, str]] = {("A", "B")} if ("A", "B") in pairs else set()
@@ -322,6 +359,8 @@ def select_published_pairs(
     remaining = [pair for pair in shuffled if pair not in chosen]
     rng.shuffle(remaining)
     chosen.update(remaining[: max(0, redundancy)])
+    if current_rank(chosen) < num_unknowns:
+        return None
     return sorted(chosen)
 
 
@@ -421,6 +460,8 @@ def _validate_sampled_topology(
         adjacency.setdefault(b, set()).add(a)
 
     if referenced != set(resistors) or {"A", "B"} - nodes:
+        return False
+    if not _parallel_values_are_unique(topology):
         return False
     in_benchmark_range = num_resistors >= config.resistor_range[0]
     min_nodes = (
@@ -523,6 +564,8 @@ def sample_circuit(
         published = select_published_pairs(
             rng, topology, redundancy=config.measurement_redundancy
         )
+        if published is None:
+            continue
         measurements = measure_pairs(topology, published)
         bad_ids = find_non_load_bearing_resistors(topology, measurements)
         if bad_ids:
@@ -568,6 +611,7 @@ def build_task(
             "measurements": measurements,
             "notes": [
                 f"The circuit contains {len(topology['resistors'])} resistors.",
+                f"Allowed resistor values are {RESISTOR_POOL} ohms.",
                 "Assume ideal resistors. Measurements are exact to 3 decimal places.",
                 "Resistor ids (R1, R2, ...) are not assigned in any particular spatial "
                 "order; infer both the topology and the values from the measurements.",
