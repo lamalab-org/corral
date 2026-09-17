@@ -11,10 +11,10 @@ Usage:
     from corral.utils.task_loader import load_task_entries
 
     # From HuggingFace
-    entries = load_task_entries(environment="catalyst", level=1, task_type="task")
+    entries = load_task_entries(environment="afm", level=1, task_type="task")
 
     # From local directory
-    entries = load_task_entries(local_dir="tasks/catalyst/environments/level_1/tasks_json")
+    entries = load_task_entries(local_dir="tasks/afm/environments/level_1/tasks_json")
 """
 
 import json
@@ -38,7 +38,7 @@ def load_task_entries(
     for HuggingFace, or local_dir for a local JSON directory.
 
     Args:
-        environment: Environment name (e.g. "catalyst", "spectra_elucidation").
+        environment: Environment name (e.g. "afm", "spectra_elucidation").
         level: Level number (default 1).
         task_type: "task" or "subtask" (default "task").
         local_dir: Path to a local directory containing JSON files.
