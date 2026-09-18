@@ -2,36 +2,30 @@
 
 ## Task
 
-Assess a reported HSNS difference between two groups. The preliminary memo bases
-its recommendation on observed scores, but the response file and a separate
-file of behavioural indicators provide evidence about the measurement model and
-the underlying traits.
-
-Decide whether the group comparison is defensible. Return a reproducible model,
-one recommendation, and the items that materially affect that recommendation.
+Assess a reported HSNS difference between two groups. The memo uses observed
+scores, while the response file and behavioural indicators provide evidence
+about measurement and the underlying traits. Decide whether the comparison is
+defensible and submit a model, one recommendation, and the affected items.
 
 ## Files
 
 - `data.csv`: HSNS responses and group information;
 - `behavior.csv`: behavioural indicators for the same participants;
-- `codebook.md` and `behavior_codebook.md`: variable definitions;
-- `preliminary_analysis.md`: the initial analysis.
+- `codebook.md`, `behavior_codebook.md`, and `preliminary_analysis.md`.
 
 ## Output
 
-Submit the model, a recommendation, and the affected-item set in the JSON
-format given in the task definition. The model must support the comparison that
-the recommendation rests on.
+Use the JSON format in the task definition. The submitted model must support the
+comparison behind the recommendation.
 
-## Why this requires investigation
+## What needs checking
 
-A difference in observed responses does not by itself establish a difference in
-the underlying traits. Item response behaviour, alternative measurement models,
-and the external indicators can support or weaken the memo's conclusion.
+Observed score differences can reflect item response behaviour rather than
+trait differences. Competing measurement models and the external indicators
+help distinguish those explanations.
 
 ## Rebuild
 
 ```bash
-uv run --with numpy --with pandas --with scipy --with semopy \
-  python generators/level_2/gen_l2_t01_group_comparability.py [--verify|--naive]
+uv run --with numpy --with pandas --with scipy --with semopy python generators/level_2/gen_l2_t01_group_comparability.py [--verify|--naive]
 ```

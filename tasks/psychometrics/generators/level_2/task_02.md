@@ -2,10 +2,8 @@
 
 ## Task
 
-Develop a measurement model in a labelled training sample. Refit that model,
-unchanged, in three anonymised holdouts and classify what happens in each.
-
-Use these rules:
+Develop a measurement model in the labelled training sample. Refit it unchanged
+in three anonymised holdouts and classify each result.
 
 | decision | rule |
 |---|---|
@@ -23,18 +21,16 @@ Do not infer population identities from filenames or metadata.
 
 ## Output
 
-Submit the frozen model and one decision for each holdout. Refit the submitted
-model unchanged; do not modify it separately for a holdout.
+Submit the frozen model and one decision for each holdout. Do not modify the
+model separately for a holdout.
 
-## Why this requires investigation
+## What needs checking
 
-A model can fit well in the data used to develop it and still fail to transport.
-Measurement structure can remain stable while the relationship between factors
-changes, or the item measurement itself can change.
+A model can fit its development sample while failing to transport. Measurement
+structure may remain stable even when the relationship between factors changes.
 
 ## Rebuild
 
 ```bash
-uv run --with numpy --with pandas --with scipy --with semopy \
-  python generators/level_2/gen_l2_t02_out_of_sample_generalization.py [--verify|--naive]
+uv run --with numpy --with pandas --with scipy --with semopy python generators/level_2/gen_l2_t02_out_of_sample_generalization.py [--verify|--naive]
 ```

@@ -2,84 +2,39 @@
 
 ## Task
 
-You are reviewing a two-factor HSNS measurement model. A development sample
-shows several item-level signs of misfit, and an independently collected
-replication sample contains the same questionnaire and group variable.
-
-Determine which apparent problems are reproducible and what mechanism each one
-represents. Consider local dependence, cross-loadings, differential item
-functioning, and poor item quality. A large development-sample modification
-index is evidence to investigate, not evidence that a modification should be
-retained.
+Review a two-factor HSNS model in a development sample and an independent
+replication sample. Decide which apparent problems are reproducible and whether
+they represent local dependence, cross-loadings, DIF, or a weak item.
 
 ## Files
 
 - `data.csv`: development responses and group variable;
-- `replication.csv`: independently collected replication responses;
-- `codebook.md`: variable and item definitions;
-- `preliminary_analysis.md`: the initial fit assessment.
+- `replication.csv`: independent replication responses;
+- `codebook.md` and `preliminary_analysis.md`.
 
-## Required conclusions
+## Output
 
-Provide a final model and a compositional account of the findings. The finding
-categories are not mutually exclusive: an item may participate in more than one
-finding.
+Report a final model and, for each category below, the supported findings and
+whether they replicate. Categories are not mutually exclusive.
 
-Use these categories:
+- `local_dependence`: item pairs requiring residual covariance;
+- `cross_loadings`: items loading on a second factor;
+- `dif_items`: items with group-dependent response after accounting for factors;
+- `poor_items`: items with a loading too weak to retain.
 
-- `local_dependence`: pairs of items requiring a residual covariance;
-- `cross_loadings`: items requiring loading on a second factor;
-- `dif_items`: items whose response differs by group after accounting for the
-  factors;
-- `poor_items`: items that should not be retained because their factor loading
-  is too weak.
+Also report development-supported modifications rejected after replication. Use
+the JSON format in the task definition. A poor item may be omitted from the final
+model; no other item may be omitted. The model must give `gender` a path to each
+factor.
 
-For each category, report whether the retained modification is supported in the
-replication sample. Also report any development-supported modification that you
-reject after examining the replication.
+## What needs checking
 
-## Submission
-
-Submit one JSON object:
-
-```json
-{
-  "model_syntax": "F1 =~ HSNS1+...\nF2 =~ HSNS2+...\nF1 ~~ F2",
-  "findings": {
-    "local_dependence": [["item_a", "item_b"]],
-    "cross_loadings": ["item_c"],
-    "dif_items": ["item_d"],
-    "poor_items": ["item_e"]
-  },
-  "replication": {
-    "local_dependence": "replicates|does_not_replicate",
-    "cross_loadings": "replicates|does_not_replicate",
-    "dif_items": "replicates|does_not_replicate",
-    "poor_items": "replicates|does_not_replicate",
-    "rejected_development_modifications": [["item_f", "item_g"]]
-  }
-}
-```
-
-The final model may include residual covariances, cross-loadings, and paths from
-`gender`. It must give `gender` a path to each factor. An item reported as poor
-quality may be left out of the final measurement model; no other item may be
-omitted.
-
-The scorer refits the submitted syntax in both samples and derives the
-replication verdicts by removing each retained modification from the submitted
-model. It does not require a particular diagnostic workflow.
-
-## Why this requires investigation
-
-Several mechanisms can produce similar global misfit. Adding every path
-suggested by one sample can improve fit while making the model less portable.
-A modification is more defensible when its interpretation is clear and its
-evidence is present again in the independent sample.
+A modification index from one sample is evidence to investigate, not evidence to
+retain. A defensible modification has a clear interpretation and recurs in the
+independent sample.
 
 ## Rebuild
 
 ```bash
-uv run --with numpy --with pandas --with scipy --with semopy \
-  python generators/level_2/gen_l2_t08_misfit_replication.py [--verify|--naive]
+uv run --with numpy --with pandas --with scipy --with semopy python generators/level_2/gen_l2_t08_misfit_replication.py [--verify|--naive]
 ```

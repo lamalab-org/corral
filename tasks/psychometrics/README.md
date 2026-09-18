@@ -13,9 +13,8 @@ pyproject.toml                    project dependencies and tool configuration
 build.py                          rebuild and check the whole environment
 generators/common.py              simulation, fitting and artifact code shared by all tasks
 generators/level_*/gen_*.py       one script per task: the model its data come from
-generators/level_*/task_*.md      human-facing task prompts and output requirements
-artifacts/level_*/task_*/         data.csv and codebook.md, which the agent sees;
-                                  truth.json, which it does not
+generators/level_*/task_*.md      short human-facing task descriptions
+artifacts/level_*/task_*/         generated data and task inputs; truth.json is hidden
 environments/level_*/tasks_json/  the task definitions
 psychometrics/score.py            the scorer
 tests/test_scoring.py             checks every task scores as intended
@@ -51,16 +50,11 @@ uv run python tests/test_scoring.py
 
 ## Scoring
 
-A submission gives a model plus the numbers that model produced.
-Anything else the scorer needs, it works out by re-fitting that model.
-
-Scoring runs in three stages, all of which must pass.
-
-1. **Constraints.** Checks the usability of the model. A negative variance, or two factors too alike to tell apart, make a model invalid.
-2. **Comparison.** The model the data came from sets a floor. A submission must be at least as good on fit, on how many parameters it spends, and on how close the correlations it implies come to the truth.
-3. **Claims.** The numbers reported, checked against the values the data were built from.
-
-Reported: `score_binary`, `score_partial` (for diagnosis only) and `checks_vector`.
+Tasks use either a submitted model or a structured JSON conclusion. When a model
+is submitted, the scorer refits it and checks its fit and reported claims. For
+classification and decision tasks, it checks the required fields against
+results derived from the generated evidence. Every scorer returns a binary
+score and a partial diagnostic score.
 
 ## Model syntax
 
@@ -110,3 +104,5 @@ assumptions, and report a calibrated conclusion.
 | [6](generators/level_2/task_06.md) | Is the group difference real or an export artifact? |
 | [7](generators/level_2/task_07.md) | Does the HSNS predict behaviour beyond group membership? |
 | [8](generators/level_2/task_08.md) | Which model modifications survive replication? |
+| [9](generators/level_2/task_09.md) | Which item bank should the adaptive test use? |
+| [10](generators/level_2/task_10.md) | Which model generated each dataset? |

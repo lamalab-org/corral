@@ -517,6 +517,10 @@ def score_model_criteria(submission: str | dict, params: dict, base_dir: str | P
         return score_behavioral_validity(submission, params, base_dir)
     if params.get("task_type") == "misfit_replication":
         return score_misfit_replication(submission, params, base_dir)
+    if params.get("task_type") == "adaptive_bank_choice":
+        return score_adaptive_bank_choice(submission, params, base_dir)
+    if params.get("task_type") == "model_identification":
+        return score_model_identification(submission, params, base_dir)
 
     base = Path(base_dir)
     if isinstance(submission, str):
@@ -1160,6 +1164,109 @@ def score_misfit_replication(
         {"n_items": len(model_items)},
         "all replicated modification claims pass" if complete else "misfit replication mismatch",
         recorded,
+    )
+
+
+def score_adaptive_bank_choice(
+    submission: str | dict, params: dict, base_dir: str | Path = "."
+) -> dict:
+    """Score an item-bank decision for adaptive testing.
+
+    The answer is what the responses say about the items: which pairs stay
+    correlated once ability is accounted for, which vendor flags they do not
+    support, and which items do not behave the same way in the holdout sample.
+    No model or working is submitted.
+    """
+    base = Path(base_dir)
+    if isinstance(submission, str):
+        try:
+            submission = json.loads(submission.strip().strip("`").removeprefix("json"))
+        except json.JSONDecodeError:
+            return _zero("submission is not valid JSON")
+    if not isinstance(submission, dict):
+        return _zero("submission must be a JSON object")
+
+    truth = json.loads((base / params["truth_path"]).read_text())
+    target = truth["scored"]
+    checks = {}
+
+    def _pairs(value):
+        try:
+            return sorted(sorted(str(x) for x in pair) for pair in value or [])
+        except TypeError:
+            return None
+
+    def _names(value):
+        try:
+            return sorted(str(x) for x in value or [])
+        except TypeError:
+            return None
+
+    checks["bank_choice"] = (
+        "PASS" if submission.get("bank_choice") == target["bank_choice"] else "FAIL"
+    )
+    checks["dependent_pairs"] = (
+        "PASS"
+        if _pairs(submission.get("dependent_pairs")) == _pairs(target["dependent_pairs"])
+        else "FAIL"
+    )
+    checks["unsupported_vendor_flags"] = (
+        "PASS"
+        if _names(submission.get("unsupported_vendor_flags"))
+        == _names(target["unsupported_vendor_flags"])
+        else "FAIL"
+    )
+    checks["unstable_items"] = (
+        "PASS"
+        if _names(submission.get("unstable_items")) == _names(target["unstable_items"])
+        else "FAIL"
+    )
+    checks["recommendation"] = (
+        "PASS" if submission.get("recommendation") == target["recommendation"] else "FAIL"
+    )
+
+    measured = truth.get("measured", {})
+    complete = all(value == "PASS" for value in checks.values())
+    return _result(
+        1.0 if complete else 0.0,
+        checks,
+        {
+            "vendor_bank": measured.get("vendor_bank", {}),
+            "screened_bank": measured.get("screened_bank", {}),
+        },
+        "adaptive bank decision passes" if complete else "adaptive bank decision mismatch",
+    )
+
+
+def score_model_identification(
+    submission: str | dict, params: dict, base_dir: str | Path = "."
+) -> dict:
+    """Score a complete mapping from anonymous datasets to candidate models."""
+    base = Path(base_dir)
+    if isinstance(submission, str):
+        try:
+            submission = json.loads(submission.strip().strip("`").removeprefix("json"))
+        except json.JSONDecodeError:
+            return _zero("submission is not valid JSON")
+    if not isinstance(submission, dict) or not isinstance(submission.get("assignments"), dict):
+        return _zero("submission must contain an assignments object")
+    truth = json.loads((base / params["truth_path"]).read_text())["scored"]["assignments"]
+    assignments = submission["assignments"]
+    checks = {}
+    for dataset in params["datasets"]:
+        value = assignments.get(dataset)
+        checks[dataset] = (
+            "PASS"
+            if isinstance(value, list) and sorted(value) == sorted(truth[dataset])
+            else "FAIL"
+        )
+    checks["complete"] = "PASS" if set(assignments) == set(params["datasets"]) else "FAIL"
+    complete = all(value == "PASS" for value in checks.values())
+    return _result(
+        1.0 if complete else 0.0,
+        checks,
+        {},
+        "model assignments pass" if complete else "model assignments mismatch",
     )
 
 

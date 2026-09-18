@@ -140,6 +140,18 @@ TASKS = [
         "artifacts/level_2/task_08/data.csv",
         "correct",
     ),
+    (
+        "generators/level_2/gen_l2_t09_adaptive_model_choice.py",
+        "environments/level_2/tasks_json/task_09.json",
+        "artifacts/level_2/task_09/data.csv",
+        "correct",
+    ),
+    (
+        "generators/level_2/gen_l2_t10_model_identification.py",
+        "environments/level_2/tasks_json/task_10.json",
+        "artifacts/level_2/task_10/dataset_01.csv",
+        "correct",
+    ),
 ]
 
 
@@ -200,6 +212,10 @@ def run_task(gen_path, task_path, data_path, expected_winner):
         return run_behavioral_validity_task(gen, params, expected_winner)
     if params.get("task_type") == "misfit_replication":
         return run_misfit_replication_task(gen, params, expected_winner)
+    if params.get("task_type") == "adaptive_bank_choice":
+        return run_adaptive_bank_choice_task(gen, params, expected_winner)
+    if params.get("task_type") == "model_identification":
+        return run_model_identification_task(gen, params, expected_winner)
     items = params["items"]
     data = pd.read_csv(ROOT / data_path, sep="\t")
     keep = params["syntax_whitelist"]["items"]
@@ -430,6 +446,56 @@ def run_misfit_replication_task(gen, params, expected_winner):
         result = score_model_criteria(submission, params, base_dir=ROOT)
         if result["score_binary"] != 0.0:
             failures.append(f"adversarial {name} scored {result['score_binary']}")
+        print(
+            f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
+        )
+    return failures
+
+
+def run_adaptive_bank_choice_task(gen, params, expected_winner):
+    failures = []
+    cases = gen.candidate_submissions()
+    print(f"\n{gen.TASK_ID}")
+    print(f"  {'submission':38s} {'binary':>6s} {'partial':>7s}  reason")
+    for name, submission in cases.items():
+        result = score_model_criteria(submission, params, base_dir=ROOT)
+        want = 1.0 if name == expected_winner else 0.0
+        if result["score_binary"] != want:
+            failures.append(f"{name}: expected {want}, got {result['score_binary']}")
+        print(
+            f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
+        )
+    good = cases["correct"]
+    adversarial = {
+        "bank choice omitted": {k: v for k, v in good.items() if k != "bank_choice"},
+        "dependent pairs omitted": {k: v for k, v in good.items() if k != "dependent_pairs"},
+        "vendor flags taken as given": {**good, "unsupported_vendor_flags": []},
+        "recommendation omitted": {k: v for k, v in good.items() if k != "recommendation"},
+        "not JSON": "the screened bank seems preferable",
+    }
+    for name, submission in adversarial.items():
+        result = score_model_criteria(submission, params, base_dir=ROOT)
+        if result["score_binary"] != 0.0:
+            failures.append(f"adversarial {name} scored {result['score_binary']}")
+        print(
+            f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
+        )
+    return failures
+
+
+def run_model_identification_task(gen, params, expected_winner):
+    cases = dict(gen.candidate_submissions())
+    good = cases["correct"]
+    cases["one dataset omitted"] = {"assignments": dict(list(good["assignments"].items())[:-1])}
+    cases["not JSON"] = "the models are unclear"
+    failures = []
+    print(f"\n{gen.TASK_ID}")
+    print(f"  {'submission':38s} {'binary':>6s} {'partial':>7s}  reason")
+    for name, submission in cases.items():
+        result = score_model_criteria(submission, params, base_dir=ROOT)
+        want = 1.0 if name == expected_winner else 0.0
+        if result["score_binary"] != want:
+            failures.append(f"{name}: expected {want}, got {result['score_binary']}")
         print(
             f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
         )
