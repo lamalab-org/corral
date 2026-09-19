@@ -7,6 +7,8 @@ import os
 import sys
 import time
 import traceback
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -17,24 +19,40 @@ from inference_opt.eval_runner.solver import policy_solver
 from inference_opt.eval_runner.spec import RunSpec, RunSummary
 from inference_opt.scoring_specs import spec_for
 
-#: Anything that could authenticate to another model provider is removed before a
-#: policy is imported. The import allowlist already blocks the clients that would
-#: use these, but a credential that is not present cannot leak at all.
+#: Environment variables that may contain provider credentials.
 _SCRUBBED_PREFIXES = ("OPENAI_", "ANTHROPIC_", "GOOGLE_", "AZURE_", "AWS_", "HF_")
 _SCRUBBED_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET")
-_KEEP = {"VLLM_BASE_URL", "VLLM_API_KEY", "INSPECT_EVAL_MODEL"}
+_KEEP = {"VLLM_BASE_URL", "INSPECT_EVAL_MODEL"}
+
+
+def _is_credential(name: str) -> bool:
+    return name not in _KEEP and (
+        name.startswith(_SCRUBBED_PREFIXES) or name.endswith(_SCRUBBED_SUFFIXES)
+    )
 
 
 def scrub_environment() -> list[str]:
     """Remove provider credentials from this process. Returns what was removed."""
     removed: list[str] = []
     for name in list(os.environ):
-        if name in _KEEP:
-            continue
-        if name.startswith(_SCRUBBED_PREFIXES) or name.endswith(_SCRUBBED_SUFFIXES):
+        if _is_credential(name):
             os.environ.pop(name, None)
             removed.append(name)
     return removed
+
+
+@contextmanager
+def scrubbed_environment():
+    """Run code without provider credentials in its environment."""
+    saved = {name: value for name, value in os.environ.items() if _is_credential(name)}
+    scrub_environment()
+    try:
+        yield
+    finally:
+        for name in list(os.environ):
+            if _is_credential(name):
+                os.environ.pop(name, None)
+        os.environ.update(saved)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -207,7 +225,8 @@ def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
             dict(manifest.config),
         )
         try:
-            policy.setup(context)
+            with scrubbed_environment():
+                policy.setup(context)
         except BudgetExhausted as exc:
             summary.first_tracebacks.append(f"setup budget exhausted: {exc}")
         except Exception:
@@ -294,10 +313,12 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         print("usage: python -m inference_opt.eval_runner <spec.json>", file=sys.stderr)
         return 2
-    scrub_environment()
     spec = RunSpec.read(argv[0])
+    api_key = spec.api_key or os.environ.get("VLLM_API_KEY")
+    spec = replace(spec, api_key=api_key)
     try:
-        summary = run(spec)
+        with scrubbed_environment():
+            summary = run(spec)
     except Exception:
         summary = RunSummary(run_id=spec.run_id, ok=False, error=traceback.format_exc())
         summary.write(spec.summary_path)

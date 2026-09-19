@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from inference_opt.eval_runner.__main__ import run
+from inference_opt.eval_runner.__main__ import run, scrubbed_environment
 from inference_opt.eval_runner.spec import RunSpec, RunSummary
 
 __all__ = ["PolicyEvaluator"]
@@ -25,8 +25,13 @@ class PolicyEvaluator:
         # that artifact task-local and must not collide with another run.
         trace_file = Path(spec.out_dir) / "inspect-trace.log"
         trace_file.parent.mkdir(parents=True, exist_ok=True)
-        with _environment("INSPECT_TRACE_FILE", str(trace_file)):
-            return run(spec, targets=targets)
+        api_key = spec.api_key or os.environ.get("VLLM_API_KEY")
+        safe_spec = replace(spec, api_key=api_key)
+        with (
+            _environment("INSPECT_TRACE_FILE", str(trace_file)),
+            scrubbed_environment(),
+        ):
+            return run(safe_spec, targets=targets)
 
 
 @contextmanager

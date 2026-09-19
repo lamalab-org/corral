@@ -236,3 +236,24 @@ class TestEnvironmentScrubbing:
         assert "ANTHROPIC_API_KEY" in removed
         assert "SOMETHING_TOKEN" in removed
         assert os.environ.get("VLLM_BASE_URL") == "http://127.0.0.1:8000/v1"
+
+    def test_policy_cannot_read_provider_credentials(
+        self, tmp_path, questions_file, monkeypatch
+    ):
+        monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
+        monkeypatch.setenv("VLLM_API_KEY", "vllm-secret")
+        spec = make_spec(
+            tmp_path,
+            questions_file,
+            "import os\n"
+            "class Policy:\n"
+            "    def solve(self, q, ctx):\n"
+            "        return os.environ.get('OPENAI_API_KEY') or os.environ.get('VLLM_API_KEY') or 'missing'\n",
+        )
+        run_in_process(spec)
+        rows = [
+            json.loads(line)
+            for line in Path(spec.predictions_path).read_text().splitlines()
+            if line.strip()
+        ]
+        assert {row["answer"] for row in rows} == {"missing"}

@@ -89,7 +89,10 @@ def policy_solver(policy: LoadedPolicy, runtime: RunRuntime, artifacts: Path) ->
         raw: Any = ""
 
         try:
-            raw = await _invoke(policy.solve, question, context)
+            from inference_opt.eval_runner.__main__ import scrubbed_environment
+
+            with scrubbed_environment():
+                raw = await _invoke(policy.solve, question, context)
         except BudgetExhausted as exc:
             error = f"budget_exhausted: {exc}"
             runtime.note_exhaustion(question)
