@@ -115,22 +115,11 @@ def resolve_submission(answer: str, work_dir: Path) -> tuple[Path | None, list[s
 
 
 def _write_test_questions(benchmark: str, path: Path) -> int:
-    """Materialise the test split, with targets, for one run.
-
-    This scoring path reads the private labels and writes the complete evaluation
-    input. Policy code is trusted within the Docker trial.
-    """
+    """Materialise public test questions for one run."""
     items = datasets.load_items(benchmark, "test")
-    targets = datasets.load_targets(benchmark, "test")
-    missing = [item.item_id for item in items if item.item_id not in targets]
-    if missing:
-        raise HarnessError(
-            f"{len(missing)} test item(s) for {benchmark} have no label, e.g. {missing[:3]}"
-        )
     records = []
     for index, item in enumerate(items):
         record = datasets.public_record(item)
-        record["target"] = targets[item.item_id]
         record["index"] = index
         records.append(record)
     return datasets.write_jsonl(path, records)
@@ -174,6 +163,14 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
         with tempfile.TemporaryDirectory(prefix="inference-opt-score-") as scratch:
             scratch_root = Path(scratch)
             questions = scratch_root / "test.jsonl"
+            targets = datasets.load_targets(benchmark, "test")
+            items = datasets.load_items(benchmark, "test")
+            missing = [item.item_id for item in items if item.item_id not in targets]
+            if missing:
+                raise HarnessError(
+                    f"{len(missing)} test item(s) for {benchmark} have no label, "
+                    f"e.g. {missing[:3]}"
+                )
             n_items = _write_test_questions(benchmark, questions)
             report.n_test_items = n_items
 
@@ -199,7 +196,7 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                     split="test",
                     policy_api=str(config.get("policy_api", "primitive")),
                 )
-                summary = evaluator.run(spec)
+                summary = evaluator.run(spec, targets=targets)
 
                 if summary.error and not summary.ok and summary.n_answered == 0:
                     lowered = summary.error.lower()

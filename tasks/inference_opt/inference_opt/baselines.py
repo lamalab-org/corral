@@ -141,11 +141,7 @@ def measure_baseline(
         datasets.write_jsonl(
             questions,
             [
-                {
-                    **datasets.public_record(item),
-                    "target": targets.get(item.item_id, ""),
-                    "index": index,
-                }
+                {**datasets.public_record(item), "index": index}
                 for index, item in enumerate(items)
             ],
         )
@@ -162,7 +158,7 @@ def measure_baseline(
             benchmark=benchmark,
             split=split,
         )
-        summary = PolicyEvaluator().run(spec)
+        summary = PolicyEvaluator().run(spec, targets=targets)
         if not summary.ok and summary.n_answered == 0:
             result.error = summary.error[:600]
             return result

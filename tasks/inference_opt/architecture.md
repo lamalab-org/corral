@@ -95,8 +95,8 @@ is the isolation boundary; the evaluator does not create a second sandbox.
 
 ## Policy evaluation
 
-`evaluate_candidate()` writes the train questions with hidden targets to a private
-temporary file, then runs `PolicyEvaluator`. The evaluator:
+`evaluate_candidate()` writes public train questions to a private temporary file,
+loads targets separately, then runs `PolicyEvaluator`. The evaluator:
 
 - loads the policy;
 - creates Inspect samples and scorers;

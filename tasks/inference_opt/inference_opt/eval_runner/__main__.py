@@ -47,12 +47,13 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def _to_sample(record: dict[str, Any], index: int, total: int) -> Any:
+def _to_sample(
+    record: dict[str, Any], index: int, total: int, target: str | list[str] = ""
+) -> Any:
     from inspect_ai.dataset import Sample
 
     answer_format = str(record.get("answer_format", "text"))
     options = record.get("options") or None
-    target = record.get("target", "")
     if answer_format == "mcq_multi" and isinstance(target, str):
         target = [part.strip() for part in target.split(",") if part.strip()]
     return Sample(
@@ -125,7 +126,7 @@ def _revealed_examples(path: str | None) -> tuple[LabeledExample, ...]:
     return tuple(examples)
 
 
-def run(spec: RunSpec) -> RunSummary:
+def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
     """Execute one policy over one question set and write the run artifacts."""
     from inspect_ai import Task
     from inspect_ai import eval as inspect_eval
@@ -157,6 +158,12 @@ def run(spec: RunSpec) -> RunSummary:
     }
 
     records = _read_jsonl(Path(spec.questions_path))
+    if targets is None:
+        targets = {
+            str(record["item_id"]): str(record["target"])
+            for record in records
+            if "target" in record
+        }
     total = len(records)
     summary.n_questions = total
 
@@ -218,7 +225,12 @@ def run(spec: RunSpec) -> RunSummary:
         benchmark = str(group[0].get("benchmark", spec.benchmark))
         resolved = spec_for(benchmark, answer_format)
         samples = [
-            _to_sample(record, record.get("index", position), total)
+            _to_sample(
+                record,
+                record.get("index", position),
+                total,
+                targets.get(str(record["item_id"]), ""),
+            )
             for position, record in enumerate(group)
         ]
         tasks.append(

@@ -85,16 +85,14 @@ def _stage_submission(
 def _write_questions(
     benchmark: str, split: str, path: Path, only: list[str] | None = None
 ) -> int:
-    """Materialise questions with targets for one run (trusted side only)."""
+    """Materialise public questions for one run."""
     items = datasets.load_items(benchmark, split)  # type: ignore[arg-type]
-    targets = datasets.load_targets(benchmark, split)  # type: ignore[arg-type]
     if only:
         wanted = set(only)
         items = [item for item in items if item.item_id in wanted]
     records = []
     for index, item in enumerate(items):
         record = datasets.public_record(item)
-        record["target"] = targets.get(item.item_id, "")
         record["index"] = index
         records.append(record)
     return datasets.write_jsonl(path, records)
@@ -348,7 +346,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         run_spec = _spec_for(
             work_dir, run_id, policy_dir, questions, models[0], budgeted, "train"
         )
-        summary = PolicyEvaluator().run(run_spec)
+        targets = datasets.load_targets(benchmark, "train")
+        summary = PolicyEvaluator().run(run_spec, targets=targets)
         shutil.rmtree(private_root, ignore_errors=True)
         used = summary.calls_used + summary.setup_calls_used
         ledger.refund(calls=max(0, budgeted - used))
@@ -443,7 +442,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             run_spec = _spec_for(
                 work_dir, run_id, policy_dir, questions, model, model_budget, "train"
             )
-            summary = PolicyEvaluator().run(run_spec)
+            targets = datasets.load_targets(benchmark, "train")
+            summary = PolicyEvaluator().run(run_spec, targets=targets)
             calls_used += summary.calls_used + summary.setup_calls_used
             predictions_path = Path(run_spec.predictions_path)
             predictions = (

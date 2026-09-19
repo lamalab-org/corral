@@ -64,4 +64,4 @@ Running the task outside Docker does not provide the intended safety boundary.
 - `inference_opt/eval_runner/`: policy evaluator, Inspect adapter, runtime, and summaries.
 - `inference_opt/outcomes.py`: Inspect-log outcome parsing.
 - `inference_opt/score.py`: held-out scoring and baseline delta.
-- `inference_opt/datasets.py`: packaged questions and targets.
+- `inference_opt/datasets.py`: frozen questions and evaluator-only targets.
