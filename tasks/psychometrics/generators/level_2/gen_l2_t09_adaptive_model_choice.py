@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 09, choosing an item bank for adaptive testing.
-
-Two item pairs are locally dependent and both have high discrimination, so an
-adaptive test keeps selecting them and buys the same information twice. The
-vendor's review names one of those pairs, misses the other, and flags a third
-item that is fine. The bank with the most nominal information is the worse bank.
-
-    python gen_l2_t09_adaptive_model_choice.py
-    python gen_l2_t09_adaptive_model_choice.py --verify
-    python gen_l2_t09_adaptive_model_choice.py --naive
-"""
+"""Generate Level 2 Task 09 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 07, the cross-country replication task.
-
-The generator simulates the survey, writes the task artifacts and scoring
-metadata, and provides checks for the intended and naive analyses.
-
-    python gen_l1_t07_cross_country_replication.py
-    python gen_l1_t07_cross_country_replication.py --verify
-    python gen_l1_t07_cross_country_replication.py --naive
-"""
+"""Generate Task 07 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

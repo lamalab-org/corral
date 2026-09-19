@@ -34,6 +34,7 @@ EnvironmentName = Literal[
     "samplemath",
     "spectra_elucidation",
     "wetlab",
+    "psychometrics",
 ]
 
 ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
@@ -46,6 +47,7 @@ ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
     "samplemath",
     "spectra_elucidation",
     "wetlab",
+    "psychometrics",
 )
 
 ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
@@ -84,6 +86,9 @@ ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
     ),
     "wetlab": EnvironmentPreset(
         "wetlab.env:create_qualysis_environments", "tasks/wetlab"
+    ),
+    "psychometrics": EnvironmentPreset(
+        "psychometrics.env:create_environments", "tasks/psychometrics"
     ),
 }
 

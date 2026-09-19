@@ -16,6 +16,8 @@ generators/level_*/gen_*.py       one script per task: the model its data come f
 generators/level_*/task_*.md      short human-facing task descriptions
 artifacts/level_*/task_*/         generated data and task inputs; truth.json is hidden
 environments/level_*/tasks_json/  the task definitions
+psychometrics/env.py              Corral environment and agent tool policy
+psychometrics/tools.py            agent-facing workspace and analysis tools
 psychometrics/score.py            the scorer
 tests/test_scoring.py             checks every task scores as intended
 ```
@@ -47,6 +49,26 @@ To run only the scoring integration test:
 ```bash
 uv run python tests/test_scoring.py
 ```
+
+## Agent environment
+
+Create environments with:
+
+```bash
+uv run python -m psychometrics.env --level 1
+uv run python -m psychometrics.env --level 2
+```
+
+Each task gets an isolated workspace containing only the public files named in
+its task definition. The agent receives file tools, a persistent `PythonREPL`,
+and `validate_model_syntax`. Variables, dataframes, and fitted models can
+survive between analysis calls. It can use the installed NumPy, pandas, SciPy,
+factor-analyzer, and semopy packages.
+
+The environment does not expose a shell, the generators, the scorer, build
+checks, or `truth.json`. Preliminary analyses included as task inputs remain
+visible. Model syntax uses the lavaan-style notation accepted by semopy; R and
+lavaan are not required.
 
 ## Scoring
 

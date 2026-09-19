@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Build Level 2 Task 08: test item-level model modifications in replication.
-
-The generator writes development and replication data, task metadata, hidden
-truth, and scoring artifacts.
-
-    python gen_l2_t08_misfit_replication.py
-    python gen_l2_t08_misfit_replication.py --verify
-    python gen_l2_t08_misfit_replication.py --naive
-"""
+"""Generate Level 2 Task 08 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Build Level 2 Task 06: investigate item integrity before a group comparison.
-
-The generator writes the response file, export audit, task metadata, hidden
-truth, and scoring artifacts.
-
-    python gen_l2_t06_gender_item_integrity.py
-    python gen_l2_t06_gender_item_integrity.py --verify
-    python gen_l2_t06_gender_item_integrity.py --naive
-"""
+"""Generate Level 2 Task 06 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

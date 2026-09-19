@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 06, the latent-dimension relationships task.
-
-The generator simulates the survey, writes the task artifacts and scoring
-metadata, and provides checks for the intended and naive analyses.
-
-    python gen_l1_t06_latent_relationships.py
-    python gen_l1_t06_latent_relationships.py --verify
-    python gen_l1_t06_latent_relationships.py --naive
-"""
+"""Generate Task 06 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

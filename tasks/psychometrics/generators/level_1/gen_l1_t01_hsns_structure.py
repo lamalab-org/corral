@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 01, the HSNS factor-structure task.
-
-The generator simulates the survey, writes the task artifacts and scoring
-metadata, and provides checks for the intended and naive analyses.
-
-    python gen_l1_t01_hsns_structure.py
-    python gen_l1_t01_hsns_structure.py --verify
-    python gen_l1_t01_hsns_structure.py --naive
-"""
+"""Generate Task 01 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

@@ -8,7 +8,9 @@ Before estimating the correlations, assess response quality. In particular, cons
 
 ## What to report
 
-Submit one complete lavaan/semopy model covering both instruments, one latent correlation for every cross-instrument pair, and a brief description of the response-quality rule used.
+Submit one complete lavaan/semopy model covering both instruments and one latent
+correlation for every cross-instrument pair. Estimate the correlations after
+applying the response-quality rule you judge appropriate.
 
 Name factors as you wish; dimensions are matched by the items they cover.
 

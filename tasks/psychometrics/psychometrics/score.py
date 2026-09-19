@@ -1,29 +1,11 @@
-"""Scoring for the psychometrics environment.
+"""Score submissions against the generated evidence.
 
-A submission gives a model, not a number, so scoring is not a comparison of
-scalars. It runs in three stages. All three must pass, and they are never
-added up into a weighted total.
+Model submissions pass three gates: usable syntax and parameters, adequate
+fit, and correct reported claims. Structured submissions are checked against
+quantities derived from the public data and hidden construction.
 
-  Stage 1, constraints. Is the model usable at all? A negative variance, two
-  factors correlated above .90, or a factor no item really loads on make a
-  model invalid rather than merely worse. Such a model is dropped here,
-  however well it fits.
-
-  Stage 2, comparison. The model that generated the data sets a floor. The
-  submission has to be at least as good as it on every measure - three of fit,
-  one of how many parameters it spends, and one of how close the correlations
-  it implies come to the truth - allowing a small margin for sampling noise.
-  Beating the floor is fine and never counts against a submission.
-
-  Stage 3, claims. The numbers the agent reported, checked against the values
-  the data were generated from. Not against what the reference model happens to
-  estimate, so a better model is rewarded rather than penalised.
-
-Results:
-
-    score_binary   1.0 only if all three stages pass
-    score_partial  share of applicable checks passed; for diagnosis only
-    checks_vector  {name: "PASS" | "FAIL" | "n/a"}
+Each result contains ``score_binary``, ``score_partial``, and a named check
+vector. The binary score is one only when all required checks pass.
 """
 
 from __future__ import annotations

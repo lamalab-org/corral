@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 10, the item-integrity task.
-
-The generator simulates the survey, writes the task artifacts and scoring
-metadata, and provides checks for the intended and naive analyses.
-
-    python gen_l1_t10_item_integrity.py
-    python gen_l1_t10_item_integrity.py --verify
-    python gen_l1_t10_item_integrity.py --naive
-"""
+"""Generate Task 10 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

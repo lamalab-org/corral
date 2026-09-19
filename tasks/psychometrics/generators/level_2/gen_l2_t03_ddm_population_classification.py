@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Build Level 2 Task 03: match Dirty Dozen case samples to populations.
-
-The generator writes reference populations, case samples, task metadata, hidden
-truth, and scoring artifacts.
-
-Six anonymised reference populations answer the Dirty Dozen under different
-measurement structures. Five case samples of 150 respondents each come from one
-of them. Two of the six are close enough that 150 respondents cannot separate
-them, so those cases have two compatible answers and the rest have one.
-
-    python gen_l2_t03_ddm_population_classification.py
-    python gen_l2_t03_ddm_population_classification.py --verify
-    python gen_l2_t03_ddm_population_classification.py --naive
-"""
+"""Generate Level 2 Task 03 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

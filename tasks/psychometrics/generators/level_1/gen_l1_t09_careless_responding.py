@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 09, the careless-responding task.
-
-The generator simulates the survey, writes the task artifacts and scoring
-metadata, and provides checks for the intended and naive analyses.
-
-    python gen_l1_t09_careless_responding.py
-    python gen_l1_t09_careless_responding.py --verify
-    python gen_l1_t09_careless_responding.py --naive
-"""
+"""Generate Task 09 artifacts and scoring metadata."""
 
 from __future__ import annotations
 
@@ -98,6 +90,11 @@ The survey contains two instruments. Using the participants from the United Stat
 establish a measurement model for each instrument, then report how strongly each \
 dimension of one instrument is related to each dimension of the other, free of \
 measurement error.
+
+Before estimating those relationships, inspect response quality. Some respondents \
+give the same answer to every item. The self-rated `accuracy` field is available, \
+but it is only another piece of evidence, not a guaranteed indicator of careless \
+responding. Use the response patterns to decide which rows should be excluded.
 
 Items are five-point ordinal ratings and 0 denotes a missing response.
 """

@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Build Level 2 Task 05: investigate repeated deliveries and response matches.
-
-The generator writes the delivered records, delivery audit, task metadata,
-hidden truth, and scoring artifacts.
-
-The task asks whether an apparent latent relationship is substantive, a panel
-delivery artifact, a consequence of discrete response collisions, or a mixture
-of mechanisms. The response file, a preliminary memo, and a separate delivery
-audit provide partially overlapping evidence.
-
-    python gen_l2_t05_duplicate_records.py
-    python gen_l2_t05_duplicate_records.py --verify
-    python gen_l2_t05_duplicate_records.py --naive
-"""
+"""Generate Level 2 Task 05 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

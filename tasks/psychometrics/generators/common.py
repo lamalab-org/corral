@@ -1,9 +1,4 @@
-"""Pieces every task generator uses.
-
-A generator supplies its own model and prompt. The survey scaffolding, the
-model fitting and the artifact writing are the same for all of them and live
-here.
-"""
+"""Shared simulation, fitting, and artifact helpers for task generators."""
 
 from __future__ import annotations
 

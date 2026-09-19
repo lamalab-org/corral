@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 04, the gender-comparison measurement-invariance task.
-
-The generator simulates the survey, writes the task artifacts and scoring
-metadata, and provides checks for the intended and naive analyses.
-
-    python gen_l1_t04_invariant_combination.py
-    python gen_l1_t04_invariant_combination.py --verify
-    python gen_l1_t04_invariant_combination.py --naive
-"""
+"""Generate Task 04 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

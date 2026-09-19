@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Build Level 2 Task 01: assess whether an HSNS group comparison is defensible.
-
-The generator writes the synthetic data, task definition, hidden truth, and
-scoring artifacts. Use ``--verify`` to check the intended construction and
-``--naive`` to check the obvious shortcut.
-
-    python gen_l2_t01_group_comparability.py
-    python gen_l2_t01_group_comparability.py --verify
-    python gen_l2_t01_group_comparability.py --naive
-"""
+"""Generate Level 2 Task 01 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

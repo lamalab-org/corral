@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Build Level 2 Task 04: match HSNS case samples to populations.
-
-The generator writes reference populations, case samples, task metadata, hidden
-truth, and scoring artifacts.
-
-Six anonymised reference populations answer the HSNS under different
-measurement structures. Five case samples of 200 respondents come from one of
-them. Compatibility is based on a stated per-respondent likelihood margin, so
-an overlap is an evidence-based result rather than an asserted answer.
-"""
+"""Generate Level 2 Task 04 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

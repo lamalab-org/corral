@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Build Level 2 Task 07: test behavioural validity beyond group differences.
-
-The generator writes training and holdout data, task metadata, hidden truth,
-and scoring artifacts.
-
-    python gen_l2_t07_behavioral_validity.py
-    python gen_l2_t07_behavioral_validity.py --verify
-    python gen_l2_t07_behavioral_validity.py --naive
-"""
+"""Generate Level 2 Task 07 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

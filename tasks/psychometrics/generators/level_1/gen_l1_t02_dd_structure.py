@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 02, the Dirty Dozen factor-structure task.
-
-The generator simulates the survey, writes the task artifacts and scoring
-metadata, and provides checks for the intended and naive analyses.
-
-    python gen_l1_t02_dd_structure.py
-    python gen_l1_t02_dd_structure.py --verify
-    python gen_l1_t02_dd_structure.py --naive
-"""
+"""Generate Task 02 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

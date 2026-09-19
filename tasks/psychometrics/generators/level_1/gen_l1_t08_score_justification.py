@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 08, the score-justification task.
-
-The generator simulates the survey, writes the task artifacts and scoring
-metadata, and provides checks for the intended and naive analyses.
-
-    python gen_l1_t08_score_justification.py
-    python gen_l1_t08_score_justification.py --verify
-    python gen_l1_t08_score_justification.py --naive
-"""
+"""Generate Task 08 artifacts and scoring metadata."""
 
 from __future__ import annotations
 

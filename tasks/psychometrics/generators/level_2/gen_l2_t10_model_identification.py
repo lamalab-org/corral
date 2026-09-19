@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 10, identifying the model behind each dataset.
-
-Six anonymised samples come from six candidate measurement models, in an order
-fixed by a hidden permutation. Each sample also carries a data-quality problem.
-The answer is derived by fitting every candidate to every sample and keeping
-those the evidence cannot separate, so a dataset may have more than one answer.
-
-    python gen_l2_t10_model_identification.py
-    python gen_l2_t10_model_identification.py --verify
-    python gen_l2_t10_model_identification.py --naive
-"""
+"""Generate Level 2 Task 10 artifacts and scoring metadata."""
 
 from __future__ import annotations
 
