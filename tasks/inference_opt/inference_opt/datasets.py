@@ -198,7 +198,13 @@ def load_targets(
     Only ever called from trusted evaluator-side code. Policy execution does not
     receive the path this reads.
     """
-    records = _read_jsonl(labels_path(version))
+    path = labels_path(version)
+    if not path.is_file():
+        raise DatasetError(
+            f"private labels not found: {path}. "
+            "Set CORRAL_INFERENCE_LABELS_PATH to an evaluator-only labels file."
+        )
+    records = _read_jsonl(path)
     targets: dict[str, str] = {}
     for record in records:
         if benchmark and not str(record["item_id"]).startswith(f"{benchmark}:"):

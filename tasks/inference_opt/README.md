@@ -23,6 +23,7 @@ uv run pytest tests -q
 Set `CORRAL_VLLM_URL` before starting Corral (or use a student-specific variable such as `CORRAL_VLLM_URL_STUDENT_A`).
 The environment binds these values into the task at startup, so probes, dry runs, experiments, and final scoring use the same endpoint.
 The committed tasks use placeholder baseline values until `scripts/measure_baselines.py` has been run.
+Private labels are supplied separately through `CORRAL_INFERENCE_LABELS_PATH`.
 
 ## Agent tools
 
