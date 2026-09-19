@@ -6,7 +6,7 @@ import json
 import os
 import re
 import shutil
-from copy import deepcopy
+from collections.abc import Mapping
 from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -80,24 +80,27 @@ def _bind_endpoints(models: list[str], configured: Any) -> dict[str, str]:
     return base_urls
 
 
-def _seed_workspace(root: Path) -> None:
-    """Put the guide, a runnable starter policy, and the state dir in place.
-
-    The agent starts from something that already runs. Without it the first two
-    experiments go on discovering the contract rather than on strategy, which is
-    not what this environment is trying to measure.
-    """
+def _seed_workspace(root: Path, policy_api: str = "primitive") -> None:
+    """Create the guide, starter policy, and artifact directories."""
     (root / "revealed").mkdir(parents=True, exist_ok=True)
     (root / "runs").mkdir(parents=True, exist_ok=True)
 
-    guide_source = _PACKAGE_ROOT / "guide"
-    if guide_source.is_dir():
+    guide_source = _PACKAGE_ROOT / "guide" / "policy_api.md"
+    if guide_source.is_file():
         destination = root / "guide"
         destination.mkdir(parents=True, exist_ok=True)
-        for document in guide_source.glob("*.md"):
-            target = destination / document.name
-            if not target.exists():
-                shutil.copyfile(document, target)
+        core = destination / "policy_api.md"
+        if not core.exists():
+            guide = guide_source.read_text(encoding="utf-8")
+            start = "<!-- enhanced:start -->"
+            end = "<!-- enhanced:end -->"
+            if policy_api != "enhanced":
+                before, _, remainder = guide.partition(start)
+                _, _, after = remainder.partition(end)
+                guide = before.rstrip() + "\n" + after.lstrip()
+            else:
+                guide = guide.replace(start, "").replace(end, "")
+            core.write_text(guide, encoding="utf-8")
 
     template = _PACKAGE_ROOT / "templates" / "policy"
     policy_dir = root / "policy"
@@ -107,13 +110,7 @@ def _seed_workspace(root: Path) -> None:
             if item.is_file():
                 shutil.copyfile(item, policy_dir / item.name)
 
-    for name, body in (
-        ("notes.md", "# Notes\n\nWhat I have learned about this student so far.\n"),
-        (
-            "TODO.md",
-            "# TODO\n\n- [ ] Read guide/policy_api.md\n- [ ] Dry-run the starter policy\n",
-        ),
-    ):
+    for name, body in (("notes.md", "# Notes\n\nWhat I have learned about this student so far.\n"),):
         path = root / name
         if not path.exists():
             path.write_text(body, encoding="utf-8")
@@ -122,10 +119,10 @@ def _seed_workspace(root: Path) -> None:
 def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSetup:
     """Expose the workspace to tools and seed its starting contents."""
     del state
+    config = dict(env.current_task.initial_input)
     workspace = env.workspace_path or ""
     if workspace:
-        _seed_workspace(Path(workspace))
-    config = dict(env.current_task.initial_input)
+        _seed_workspace(Path(workspace), str(config.get("policy_api", "primitive")))
     budget = dict(config.get("budget") or {})
     inference_state = {
         "experiments": 0,
@@ -157,14 +154,17 @@ class InferenceOptEnvironment(Environment):
     def execute_tool(self, state: ExecutionState, tool, arguments):
         if "inference_state" not in tool.hidden_args:
             return super().execute_tool(state, tool, arguments)
-        session = deepcopy(arguments["inference_state"])
-        raw = tool.execute(**{**arguments, "inference_state": session})
+        session = arguments.get("inference_state")
+        if not isinstance(session, Mapping):
+            raise TypeError(
+                "ExecutionState hidden argument 'inference_state' must be an object"
+            )
+        raw = tool.execute(**arguments)
+        hidden = dict(state.environment.values.get("hidden_arguments", {}))
+        hidden["inference_state"] = session
         environment = {
             **dict(state.environment.values),
-            "hidden_arguments": {
-                **dict(state.environment.values.get("hidden_arguments", {})),
-                "inference_state": session,
-            },
+            "hidden_arguments": hidden,
         }
         return ToolExecutionResult(content=raw, environment=environment)
 
@@ -195,9 +195,6 @@ def create_environments(
     )
     try:
         tasks = load_tasks_from_json(source, work_dir)
-        # Built one at a time rather than through `build_environments`, because
-        # each task binds its tools to its own benchmark and student. A single
-        # shared pool would bind every task to whichever was configured last.
         environments = {
             task_id: InferenceOptEnvironment(
                 task_id=task_id,
@@ -206,8 +203,6 @@ def create_environments(
                 component_id=name,
                 toolset=Toolset(
                     pool=create_tools(task.initial_input, work_dir),
-                    # The agent writes policy.py with these. Without workspace
-                    # tools it cannot produce a submission at all.
                     workspace_factory=default_file_tools,
                 ),
             )

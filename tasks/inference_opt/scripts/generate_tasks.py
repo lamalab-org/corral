@@ -1,9 +1,5 @@
 """Generate the level 1 and level 2 task definitions.
 
-Kept as a script rather than hand-edited JSON because the files are one object per
-line across 24 tasks, and because ``measure_baselines.py --write-tasks`` has to
-rewrite the ``baselines`` fields in place afterwards.
-
 Usage::
 
     uv run python scripts/generate_tasks.py
@@ -54,8 +50,6 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
     suffix = "".join(model.rsplit("_", 1)[-1] for model in models)
     labels = [model.upper() for model in models]
     task_id = f"{benchmark}_{suffix}"
-    # Test-time allowance is per model, so a joint policy cannot starve one model
-    # to buy compute for the other and game the level-2 minimum.
     calls_per_question = 8
     final_calls = N_TEST * 12
 
@@ -88,6 +82,7 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
             "benchmark": benchmark,
             "models": models,
             "joint": joint,
+            "policy_api": "primitive",
             "n_train": N_TRAIN,
             "n_test": N_TEST,
             # Filled in by scripts/measure_baselines.py --write-tasks.

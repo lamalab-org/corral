@@ -150,6 +150,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             revealed_path=str(Path(work_dir) / "revealed" / "train_revealed.jsonl"),
             benchmark=benchmark,
             split=split,
+            policy_api=str(config.get("policy_api", "primitive")),
         )
 
     # -- trusted tools: they read gold answers, so they never run policy code ----
@@ -595,7 +596,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON with the run ledger and which run is currently staged to submit.
+            JSON with the run ledger and the run staged for submission.
         """
         ledger = _ledger(inference_state)
         experiments = [run for run in ledger.runs if run.get("kind") == "experiment"]

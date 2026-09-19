@@ -1,4 +1,4 @@
-"""Stage 4: measure each student's zero-shot baseline and gate on headroom.
+"""Measure zero-shot baselines and write them into task definitions.
 
 Needs a running vLLM server. Writes the baselines artifact, prints the headroom
 table, and with ``--write-tasks`` patches the ``baselines`` fields in the task
@@ -7,10 +7,6 @@ JSONs, which ship as placeholder zeros until this has been run.
     uv run python scripts/measure_baselines.py \\
         --model student_a=Qwen/Qwen2.5-7B-Instruct \\
         --base-url http://127.0.0.1:8000/v1 --write-tasks
-
-The headroom table is the go/no-go gate. A (benchmark, model) pair whose verdict is
-``ceiling`` or ``floor`` cannot be moved by any strategy, so shipping it would mean
-scoring agents on noise. Those pairs are refused rather than quietly included.
 
 The agent is shown the **train** baseline; the scorer subtracts the **test**
 baseline. Showing the test number would leak how hard the held-out split is.

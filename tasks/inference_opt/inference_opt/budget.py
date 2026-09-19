@@ -234,7 +234,8 @@ class StateLedger:
         self.runs.append(asdict(record))
         if record.kind == "experiment" and record.delta is not None:
             best = self.best_run()
-            if best is None or record.delta > (best.get("delta") or float("-inf")):
+            best_delta = None if best is None else best.get("delta")
+            if best_delta is None or record.delta > best_delta:
                 self.state["best_run_id"] = record.run_id
 
     def best_run(self) -> dict[str, Any] | None:

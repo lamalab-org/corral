@@ -100,6 +100,7 @@ class TestEndToEnd:
             "class Policy:\n"
             "    def solve(self, q, ctx):\n"
             "        return ctx.student.sample(q.text, n=3)[0]\n",
+            policy_api="enhanced",
         )
         summary = run_in_process(spec)
         assert summary.calls_used == 9
@@ -113,6 +114,7 @@ class TestEndToEnd:
             "    def solve(self, q, ctx):\n"
             "        ctx.memory.append('seen', q.id)\n"
             "        return str(len(ctx.memory.get('seen', [])))\n",
+            policy_api="enhanced",
         )
         summary = run_in_process(spec)
         assert summary.execution == "sequential"
@@ -127,6 +129,7 @@ class TestEndToEnd:
             "    def solve(self, q, ctx):\n"
             "        ctx.memory.set('x', 1)\n"
             "        return 'ANSWER: A'\n",
+            policy_api="enhanced",
         )
         summary = run_in_process(spec)
         assert summary.n_crashed == 3
@@ -157,6 +160,7 @@ class TestEndToEnd:
             "        return 'ANSWER: ' + ctx.memory.get('gold', 'X')\n",
             revealed_path=str(revealed),
             setup_calls=2,
+            policy_api="enhanced",
         )
         summary = run_in_process(spec)
         assert summary.ok, summary.error

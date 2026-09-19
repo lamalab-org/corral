@@ -1,10 +1,15 @@
 # Inference-time optimization environment
 
-This environment asks a teacher agent to write a Python policy that improves a frozen student model at test time. The policy controls prompts, sampling, aggregation, memory, and answer extraction; it does not change model weights.
+This environment asks a teacher agent to write a Python policy that improves a frozen student model at test time. The policy controls the strategy around the model and does not change model weights.
 
 There are six benchmarks (`gsm8k`, `mmlu_pro`, `gpqa_diamond`, `bbh`, `chembench`, `arc_challenge`).
 Level 1 evaluates one student per task; level 2 evaluates one policy against two students and scores the smaller improvement.
 The final score is the accuracy improvement over the measured zero-shot baseline on held-out test questions.
+
+Tasks use the `primitive` policy API by default: the policy gets the question,
+the metered `generate()` call, and basic run context. Tasks may opt into the
+`enhanced` API, which also provides sampling, batching, shared memory, and
+component diagnostics.
 
 ## Run
 
@@ -59,4 +64,3 @@ Running the task outside Docker does not provide the intended safety boundary.
 - `inference_opt/outcomes.py`: Inspect-log outcome parsing.
 - `inference_opt/score.py`: held-out scoring and baseline delta.
 - `inference_opt/datasets.py`: packaged questions and targets.
-- `architecture.md`: detailed design and call flow.

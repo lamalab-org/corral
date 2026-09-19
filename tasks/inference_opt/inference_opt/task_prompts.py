@@ -27,6 +27,7 @@ Evals parses and grades these markers.
 
 Benchmark: {benchmark}
 Student model(s): {models}
+Policy API: {policy_api}
 Train questions: {n_train} (labels revealed a few at a time)
 Test questions: {n_test} (held out; you never should see these or their answers)
 
@@ -85,6 +86,7 @@ def task_prompt(env: Environment, state: ExecutionState) -> str:
             if len(config.get("models", [])) > 1
             else "one frozen student model"
         ),
+        policy_api=config.get("policy_api", "primitive"),
         n_train=config.get("n_train", 30),
         n_test=config.get("n_test", 30),
         budget=_budget_summary(config),

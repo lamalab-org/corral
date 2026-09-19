@@ -67,7 +67,6 @@ The workspace holds source and detailed artifacts:
 policy/policy.py
 guide/policy_api.md
 notes.md
-TODO.md
 revealed/train_revealed.jsonl
 runs/<run-id>/
   predictions.jsonl
@@ -75,6 +74,9 @@ runs/<run-id>/
   log/
 submission.json
 ```
+
+The packaged guide is filtered for the task's `policy_api` mode before it is
+copied into the workspace. Primitive mode is the default.
 
 The ledger stays in Corral state. Files hold the policy, revealed examples, and
 run output because those artifacts are larger and useful to inspect directly.
@@ -115,7 +117,7 @@ task-specific data preparation.
 
 ## Runtime limits
 
-The environment currently has no persistent policy process, background policy
+The environment has no persistent policy process, background policy
 jobs, file-backed active ledger, or restricted policy worker. Policy questions
 run sequentially so shared memory, budgets, and artifacts are deterministic.
 

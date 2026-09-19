@@ -32,8 +32,7 @@ __all__ = [
 
 DATASET_VERSION = "v1"
 
-#: The six benchmarks in the frozen set. ``aime2024`` was dropped (only 30 items
-#: exist in total, which cannot support a 30/30 split); ``arc_challenge`` replaced it.
+#: The benchmarks included in the frozen set.
 BENCHMARKS: tuple[str, ...] = (
     "chembench",
     "bbh",
@@ -60,11 +59,7 @@ PUBLIC_FIELDS: tuple[str, ...] = (
 
 
 class DatasetError(RuntimeError):
-    """Raised when the frozen dataset is missing or internally inconsistent.
-
-    This is a harness fault, never an agent fault, and must propagate rather than
-    being folded into a score of zero.
-    """
+    """Raised when the frozen dataset is missing or inconsistent."""
 
 
 def data_root(version: str = DATASET_VERSION) -> Path:

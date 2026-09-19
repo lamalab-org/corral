@@ -2,7 +2,13 @@
 
 import pytest
 from inference_opt.api import BudgetExhausted
-from inference_opt.budget import Budget, BudgetSpec, QuestionAllocator, StateLedger
+from inference_opt.budget import (
+    Budget,
+    BudgetSpec,
+    QuestionAllocator,
+    RunRecord,
+    StateLedger,
+)
 
 
 def test_budget_charges_student_calls():
@@ -40,3 +46,10 @@ def test_state_ledger_is_json_shaped_corral_state():
     assert state["experiments"] == 1
     assert state["student_calls"] == 3
     assert state["revealed_ids"] == ["q1"]
+
+
+def test_state_ledger_keeps_zero_delta_above_negative_delta():
+    ledger = StateLedger({}, BudgetSpec())
+    ledger.record_run(RunRecord("zero", "experiment", "policy", delta=0.0))
+    ledger.record_run(RunRecord("negative", "experiment", "policy", delta=-0.01))
+    assert ledger.best_run_id == "zero"

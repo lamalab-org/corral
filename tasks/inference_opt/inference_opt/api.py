@@ -24,6 +24,7 @@ __all__ = [
     "MemoryMode",
     "Message",
     "PolicyManifest",
+    "PolicyApiMode",
     "Prompt",
     "Question",
     "SetupContext",
@@ -42,6 +43,7 @@ Prompt = str | Sequence[Message]
 
 AnswerType = Literal["mcq", "numeric", "text"]
 MemoryMode = Literal["none", "shared"]
+PolicyApiMode = Literal["primitive", "enhanced"]
 
 
 class BudgetExhausted(RuntimeError):
@@ -159,7 +161,7 @@ class SetupContext:
 
     student: StudentClient
     train_examples: tuple[LabeledExample, ...]
-    memory: Memory
+    memory: Memory | None
     artifacts: Path
     budget_remaining: int
     log: Callable[[str], None]
@@ -171,7 +173,7 @@ class SolveContext:
     """Arguments passed to ``Policy.solve`` for one question."""
 
     student: StudentClient
-    memory: Memory
+    memory: Memory | None
     artifacts: Path
     budget_remaining: int
     question_budget: int

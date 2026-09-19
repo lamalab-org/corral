@@ -40,6 +40,7 @@ class RunSpec:
     seed: int = 0
     benchmark: str = ""
     split: str = "train"
+    policy_api: str = "primitive"
 
     @property
     def log_dir(self) -> str:

@@ -7,6 +7,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -26,7 +27,13 @@ if TYPE_CHECKING:
 
     from inference_opt.api import Question
 
-__all__ = ["QuestionMeter", "RunRuntime", "SharedMemory", "StudentClientImpl"]
+__all__ = [
+    "PrimitiveStudentClient",
+    "QuestionMeter",
+    "RunRuntime",
+    "SharedMemory",
+    "StudentClientImpl",
+]
 
 
 class SharedMemory(Memory):
@@ -268,6 +275,24 @@ def _output_tokens(output: Any) -> int:
     return int(getattr(usage, "output_tokens", 0) or 0)
 
 
+class PrimitiveStudentClient:
+    """Expose one-call generation and budget access."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def generate(self, prompt: Any, **kwargs: Any) -> str:
+        return self._inner.generate(prompt, **kwargs)
+
+    @property
+    def calls_used(self) -> int:
+        return self._inner.calls_used
+
+    @property
+    def calls_remaining(self) -> int:
+        return self._inner.calls_remaining
+
+
 class RunRuntime:
     """Owns the model handle, the allocator, and the artifacts of one run."""
 
@@ -283,17 +308,23 @@ class RunRuntime:
         predictions_path: Path,
         benchmark: str = "",
         split: str = "train",
+        policy_api: str = "enhanced",
     ) -> None:
+        if policy_api not in {"primitive", "enhanced"}:
+            raise ValueError(f"unknown policy API mode: {policy_api}")
         self.model = model
         self.benchmark = benchmark
         self.split = split
+        self.policy_api = policy_api
         self.max_tokens_per_call = max_tokens_per_call
         self.allocator = QuestionAllocator(
             total_calls=total_calls,
             questions=max(1, questions),
             per_question_cap=max_calls_per_question,
         )
-        self.memory = SharedMemory(enabled=memory_enabled)
+        self.memory = SharedMemory(
+            enabled=memory_enabled and policy_api == "enhanced"
+        )
         self.predictions_path = predictions_path
         self.predictions_path.parent.mkdir(parents=True, exist_ok=True)
         self._predictions: list[dict[str, Any]] = []
@@ -325,24 +356,38 @@ class RunRuntime:
 
     def make_solve_context(
         self, meter: QuestionMeter, artifacts: Path
-    ) -> tuple[SolveContext, list[str]]:
+    ) -> tuple[Any, list[str]]:
         log_lines: list[str] = []
         holder: dict[str, str] = {}
-        client = _TaggingClient(
+        client: Any = _TaggingClient(
             StudentClientImpl(
                 self.model, meter, max_tokens_cap=self.max_tokens_per_call
             ),
             holder,
         )
+        if self.policy_api == "primitive":
+            client = PrimitiveStudentClient(client)
+            return (
+                SimpleNamespace(
+                    student=client,
+                    log=lambda message: log_lines.append(str(message)[:500]),
+                    scratch={},
+                ),
+                log_lines,
+            )
         context = SolveContext(
-            student=client,  # type: ignore[arg-type]
-            memory=self.memory,
+            student=client,
+            memory=self.memory if self.policy_api == "enhanced" else None,
             artifacts=artifacts,
             budget_remaining=self.allocator.pool + 0,
             question_budget=meter.allowance(),
             log=lambda message: log_lines.append(str(message)[:500]),
             scratch={},
-            component=self._component_factory(holder),
+            component=(
+                self._component_factory(holder)
+                if self.policy_api == "enhanced"
+                else None
+            ),
         )
         return context, log_lines
 
@@ -352,14 +397,25 @@ class RunRuntime:
         artifacts: Path,
         examples: tuple[LabeledExample, ...],
         config: dict[str, Any],
-    ) -> tuple[SetupContext, list[str]]:
+    ) -> tuple[Any, list[str]]:
         log_lines: list[str] = []
+        client: Any = StudentClientImpl(
+            self.model, meter, max_tokens_cap=self.max_tokens_per_call
+        )
+        if self.policy_api == "primitive":
+            client = PrimitiveStudentClient(client)
+            return (
+                SimpleNamespace(
+                    student=client,
+                    train_examples=examples,
+                    log=lambda message: log_lines.append(str(message)[:500]),
+                ),
+                log_lines,
+            )
         context = SetupContext(
-            student=StudentClientImpl(  # type: ignore[arg-type]
-                self.model, meter, max_tokens_cap=self.max_tokens_per_call
-            ),
+            student=client,
             train_examples=examples,
-            memory=self.memory,
+            memory=self.memory if self.policy_api == "enhanced" else None,
             artifacts=artifacts,
             budget_remaining=meter.allowance(),
             log=lambda message: log_lines.append(str(message)[:500]),

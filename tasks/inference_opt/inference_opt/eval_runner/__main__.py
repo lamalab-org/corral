@@ -1,8 +1,4 @@
-"""Run one policy evaluation with Inspect.
-
-This module remains a command-line entry point for local debugging and image
-compatibility. Scored task execution calls :class:`PolicyEvaluator` directly.
-"""
+"""Run one policy evaluation with Inspect."""
 
 from __future__ import annotations
 
@@ -185,6 +181,7 @@ def run(spec: RunSpec) -> RunSummary:
         predictions_path=Path(spec.predictions_path),
         benchmark=spec.benchmark,
         split=spec.split,
+        policy_api=spec.policy_api,
     )
 
     # -- setup(), charged against its own allowance --------------------------

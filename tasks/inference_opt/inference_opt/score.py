@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 __all__ = ["ScoreOutcome", "ScoreReport", "policy_score", "resolve_submission"]
 
-#: Above this fraction of crashed items the policy is judged broken rather than bad.
+#: Fraction of crashed items at which a policy run is rejected.
 CRASH_RATE_LIMIT = 0.5
 
 
@@ -69,13 +69,7 @@ class ScoreReport:
 
 
 def resolve_submission(answer: str, work_dir: Path) -> tuple[Path | None, list[str]]:
-    """Find the policy directory a submission refers to.
-
-    Corral hands the scorer a path resolved against a *throwaway* re-materialisation
-    of the workspace, so the ladder has to work from that one string. Several rungs,
-    because losing an agent's whole episode to a slightly-wrong path string would be
-    a harness failure dressed up as a zero.
-    """
+    """Find the policy directory named by a submission."""
     notes: list[str] = []
     candidate = Path(str(answer).strip())
 
@@ -203,6 +197,7 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                     setup_calls=int(config.get("final_setup_calls", 0)),
                     benchmark=benchmark,
                     split="test",
+                    policy_api=str(config.get("policy_api", "primitive")),
                 )
                 summary = evaluator.run(spec)
 
