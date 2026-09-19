@@ -70,7 +70,6 @@ notes.md
 TODO.md
 revealed/train_revealed.jsonl
 runs/<run-id>/
-  questions.jsonl
   predictions.jsonl
   summary.json
   log/
@@ -94,8 +93,8 @@ is the isolation boundary; the evaluator does not create a second sandbox.
 
 ## Policy evaluation
 
-`evaluate_candidate()` writes the train questions with hidden targets to a
-task-local file, then runs `PolicyEvaluator`. The evaluator:
+`evaluate_candidate()` writes the train questions with hidden targets to a private
+temporary file, then runs `PolicyEvaluator`. The evaluator:
 
 - loads the policy;
 - creates Inspect samples and scorers;

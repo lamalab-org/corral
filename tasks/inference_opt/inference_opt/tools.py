@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import random
+import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -96,6 +98,16 @@ def _write_questions(
         record["index"] = index
         records.append(record)
     return datasets.write_jsonl(path, records)
+
+
+def _private_questions(
+    benchmark: str, split: str, only: list[str] | None = None
+) -> tuple[Path, Path, int]:
+    """Write evaluator input outside the agent workspace."""
+    root = Path(tempfile.mkdtemp(prefix="inference-opt-questions-"))
+    path = root / "questions.jsonl"
+    count = _write_questions(benchmark, split, path, only=only)
+    return root, path, count
 
 
 def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
@@ -326,8 +338,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
 
         run_id = f"dry-{len(ledger.runs) + 1}"
         out = _run_dir(work_dir, run_id)
-        questions = out / "questions.jsonl"
-        n_items = _write_questions(benchmark, "train", questions, only=wanted)
+        private_root, questions, n_items = _private_questions(
+            benchmark, "train", only=wanted
+        )
         budgeted = min(32, ledger.remaining()["student_calls"])
         ledger.reserve(debug_runs=1, calls=budgeted)
 
@@ -335,6 +348,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             work_dir, run_id, policy_dir, questions, models[0], budgeted, "train"
         )
         summary = PolicyEvaluator().run(run_spec)
+        shutil.rmtree(private_root, ignore_errors=True)
         used = summary.calls_used + summary.setup_calls_used
         ledger.refund(calls=max(0, budgeted - used))
 
@@ -416,8 +430,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         policy_dir = _resolve(work_dir, policy_path)
         run_id = f"exp-{ledger.experiments + 1}"
         out = _run_dir(work_dir, run_id)
-        questions = out / "questions.jsonl"
-        n_items = _write_questions(benchmark, "train", questions)
+        private_root, questions, n_items = _private_questions(benchmark, "train")
         model_budget = ledger.remaining()["student_calls"] // len(models)
         reserved = model_budget * len(models)
         ledger.reserve(experiments=1, calls=reserved)
@@ -464,6 +477,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "by_topic": outcome.by_category(),
             }
 
+        shutil.rmtree(private_root, ignore_errors=True)
         ledger.refund(calls=max(0, reserved - calls_used))
 
         worst = min(deltas) if deltas else 0.0
