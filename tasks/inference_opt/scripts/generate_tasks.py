@@ -21,6 +21,14 @@ ROOT = Path(__file__).resolve().parents[1]
 NAMESPACE = uuid.UUID("6f1d5a52-0f6e-4a1d-9a27-6b6c9f0e1a10")
 
 BENCHMARKS = ("gsm8k", "mmlu_pro", "gpqa_diamond", "bbh", "chembench", "arc_challenge")
+BENCHMARK_LABELS = {
+    "gsm8k": "GSM8K",
+    "mmlu_pro": "MMLU-Pro",
+    "gpqa_diamond": "GPQA-Diamond",
+    "bbh": "BIG-Bench Hard",
+    "chembench": "ChemBench",
+    "arc_challenge": "ARC-Challenge",
+}
 
 LEVEL_1_MODELS = [["student_a"], ["student_b"]]
 LEVEL_2_MODELS = [["student_a", "student_b"], ["student_c", "student_d"]]
@@ -55,16 +63,15 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
         name = f"Joint {benchmark} improvement on {' and '.join(labels)}"
         description = (
             f"Build one shared inference-time policy that improves the frozen "
-            f"students {' and '.join(labels)}. "
+            f"students {' and '.join(labels)} on {BENCHMARK_LABELS[benchmark]}. "
             f"You are scored on the smaller of the two improvements, so the policy "
             f"must help both models, not trade one off against the other."
         )
     else:
-        name = f"Improve {benchmark} on {labels[0]}"
+        name = f"Improve {benchmark}"
         description = (
-            f"Build and submit an inference-time policy that improves the frozen "
-            f"{labels[0]}. Do not modify model "
-            f"weights; change only what happens around the model at test time."
+            f"Build and submit an inference-time policy for "
+            f"{BENCHMARK_LABELS[benchmark]}."
         )
 
     return {

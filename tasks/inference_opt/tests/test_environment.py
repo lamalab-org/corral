@@ -86,7 +86,8 @@ class TestPrompt:
         environment = environments["gsm8k_a"]
         prompt = environment.current_task.prompt_fn(environment, ExecutionState)
         assert "submit_answer" in prompt
-        assert "only" in prompt and "student client" in prompt
+        assert "modify model weights" in prompt
+        assert "student client" in prompt
         assert "gsm8k" in prompt
 
     def test_prompt_does_not_name_strategies(self, environments):

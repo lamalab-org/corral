@@ -15,39 +15,26 @@ _TEMPLATE = """\
 
 ## The setup
 
-A frozen student model is served for you. You cannot change its weights, and you
-cannot use any other model at inference time. What you *can* change is everything
-that happens around it at test time: the prompts, how many samples you draw, how
+A frozen student model is served for you. Implement any strategy that does not
+modify model weights. You can change the prompts, how many samples you draw, how
 they are combined, whether one call checks another, what is remembered between
-questions, and how the final answer is scored.
+questions, or any strategy you can come up with.
 
-You write that as a Python policy in `{policy_dir}/policy.py`. Read
-`guide/policy_api.md` first - it has the exact contract and a worked example. A
-runnable starter policy is already in place, so you can dry-run immediately and see
-the whole loop before changing anything.
+You write that as a Python policy in `{policy_dir}/policy.py` and `guide/policy_api.md` has the contract details.
 
-Return the answer marker required by the benchmark scorer: use `ANSWER: <answer>`
-for every benchmark except ChemBench, which uses `[ANSWER]<answer>[/ANSWER]`.
-Inspect Evals parses and grades these markers.
+Return the answer marker required by the benchmark scorer: use `ANSWER: <answer>` for every benchmark except ChemBench, which uses `[ANSWER]<answer>[/ANSWER]`.
+Evals parses and grades these markers.
 
 Benchmark: {benchmark}
 Student model(s): {models}
 Train questions: {n_train} (labels revealed a few at a time)
-Test questions: {n_test} (held out; you never see these or their answers)
+Test questions: {n_test} (held out; you never should see these or their answers)
 
 ## How you are scored
 
-Your submitted policy is run on the held-out test split, and your score is the
-**improvement over the student's measured zero-shot baseline** on those same
-questions. Level-2 tasks score the *smaller* of the two models' improvements, so a
-policy has to help both.
+- Your submitted policy is run on the held-out test split, and your score is the improvement over the student's measured zero-shot baseline on those same questions.
+- If the task involve two student models score the *smaller* of the two models' improvements
 
-Because the test set is held out, a policy that memorises the training questions
-scores nothing. What pays is a strategy that generalises.
-
-Be aware of the resolution: with {n_test} test questions, a difference of a few
-questions is noise. Use `evaluate_candidate` to inspect the result, not just the
-headline delta.
 
 ## Budget
 
@@ -58,17 +45,12 @@ Every experiment costs real inference. `dry_run_policy` is much cheaper than
 
 ## The one hard rule
 
-Your policy should use the student client it is given (`ctx.student`) for model
-inference. The environment trusts teacher code; the client
-is still the only supported model interface. `dry_run_policy` checks that the policy
-loads and runs before you spend an experiment.
+Your policy should use the student client it is given (`ctx.student`) for model inference.
 
-## Finishing
+## Submitting
 
-When you are done - or when your budget is nearly gone - call
-`submit_policy('{policy_dir}')`, then pass the exact string it returns to
-`submit_answer`. A policy that is never submitted scores nothing, so submit early
-and re-submit if you improve on it.
+When you are done - or when your budget is nearly gone - call `submit_policy('{policy_dir}')`, then pass the exact string it returns to `submit_answer`.
+A policy that is never submitted scores nothing, so submit early and re-submit if you improve on it.
 """
 
 
@@ -98,7 +80,11 @@ def task_prompt(env: Environment, state: ExecutionState) -> str:
     return _TEMPLATE.format(
         description=task.description,
         benchmark=config.get("benchmark", "?"),
-        models=", ".join(model.upper() for model in config.get("models", [])),
+        models=(
+            ", ".join(model.upper() for model in config.get("models", []))
+            if len(config.get("models", [])) > 1
+            else "one frozen student model"
+        ),
         n_train=config.get("n_train", 30),
         n_test=config.get("n_test", 30),
         budget=_budget_summary(config),
