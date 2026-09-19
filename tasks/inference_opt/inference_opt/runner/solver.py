@@ -1,12 +1,4 @@
-"""The inspect solver that delegates to a teacher-written policy.
-
-Inspect normally owns the prompting: a solver calls ``generate`` and the model answers.
-Here the *policy* owns all prompting, so this solver never calls ``generate`` at all.
-It is a pure adapter — hand the policy a :class:`~inference_opt.api.Question` and a
-metered client, take back a completion, and write it into ``state.output`` for
-Inspect's scorers. Inspect's own multiple-choice parser supplies choice flags where
-the selected scorer needs them.
-"""
+"""Adapt a policy to the Inspect solver interface."""
 
 from __future__ import annotations
 

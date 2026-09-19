@@ -63,7 +63,7 @@ class TestToolSurface:
         } <= set(tools)
 
     def test_inference_tools_are_trusted_for_the_first_iteration(self, environments):
-        """The first implementation intentionally follows wetlab's trusted model."""
+        """The environment uses trusted tools and committed session state."""
         tools = environments["gsm8k_a"].tools
         trusted = {name for name, tool in tools.items() if getattr(tool, "trusted", False)}
         assert trusted == {

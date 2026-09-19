@@ -1,10 +1,4 @@
-"""Serializable configuration and results for one policy evaluation.
-
-The first iteration evaluates trusted policy code inside the Docker trial.
-``RunSpec`` still keeps the evaluator inputs explicit and JSON-shaped, but it is
-not a security boundary and may contain task-local paths that trusted code can
-access.
-"""
+"""Serializable inputs and results for one policy evaluation."""
 
 from __future__ import annotations
 

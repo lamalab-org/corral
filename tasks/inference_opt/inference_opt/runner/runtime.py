@@ -1,7 +1,4 @@
-"""Per-run evaluator state: metering, memory, and the student client.
-
-Everything a policy can use is built here. The runtime meters every request and the controller records the resulting run artifacts.
-"""
+"""Provide per-run memory, metering, and student-client access."""
 
 from __future__ import annotations
 
@@ -112,10 +109,7 @@ class QuestionMeter:
 
 
 def _as_messages(prompt: Any, system: str | None) -> list[Any]:
-    """Accept a bare string or a list of ``{"role", "content"}`` dicts.
-
-    Policies write plain dicts because that is the shape every chat API uses and the import allowlist gives them nothing else; inspect needs its own typed message objects, so the conversion happens here.
-    """
+    """Convert policy prompts to Inspect chat messages."""
     from inspect_ai.model import (
         ChatMessageAssistant,
         ChatMessageSystem,
@@ -149,10 +143,7 @@ def _as_messages(prompt: Any, system: str | None) -> list[Any]:
 
 
 class StudentClientImpl:
-    """The only model access a policy has.
-
-    Synchronous by design — a code-writing model gets sync right far more often than async — and bridged onto the event loop with ``anyio.from_thread.run``, which preserves the contextvars inspect uses to attribute a model call to the sample that made it.
-    """
+    """Expose the metered student model to a policy."""
 
     def __init__(
         self,

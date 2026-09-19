@@ -1,10 +1,4 @@
-"""Corral environment factory for inference-time policy optimization.
-
-Builds one environment per (benchmark, student-model) task. Nothing here contacts a
-vLLM server or reads the dataset at construction time: Corral's shared contract
-suite builds every task in every level with no network and no GPU, so all of that
-has to be lazy and live inside tool execution.
-"""
+"""Build Corral environments for inference-time policy optimization."""
 
 from __future__ import annotations
 
@@ -17,13 +11,12 @@ from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
+from corral.core import ToolExecutionResult
 from corral.core.environment import (
     Environment,
     Toolset,
     default_file_tools,
 )
-from corral.core import ToolExecutionResult
-from corral.core.transition import environment_operations
 from corral.core.task import EnvironmentSetup, TaskDefinition
 from corral.report.logging import event, exception_fields
 from inference_opt.task_prompts import task_prompt
@@ -94,7 +87,6 @@ def _seed_workspace(root: Path) -> None:
     experiments go on discovering the contract rather than on strategy, which is
     not what this environment is trying to measure.
     """
-    (root / "state").mkdir(parents=True, exist_ok=True)
     (root / "revealed").mkdir(parents=True, exist_ok=True)
     (root / "runs").mkdir(parents=True, exist_ok=True)
 
@@ -160,13 +152,7 @@ def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSe
 
 
 class InferenceOptEnvironment(Environment):
-    """Trusted, stateful inference-optimization environment.
-
-    The first iteration intentionally trusts policy code. Its durable session state
-    therefore follows the wetlab pattern: tools receive a JSON state snapshot and
-    return the updated snapshot through ``ToolExecutionResult``. The environment
-    itself retains no mutable execution history.
-    """
+    """Run inference tools and return their updated session state."""
 
     def execute_tool(self, state: ExecutionState, tool, arguments):
         if "inference_state" not in tool.hidden_args:

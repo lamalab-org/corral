@@ -40,10 +40,14 @@ The domain tools are trusted Corral tools and use Corral's committed environment
 Corral owns the session state. Each trusted tool receives a JSON-shaped `inference_state` namespace and returns its updated state in `ToolExecutionResult`.
 The environment commits that state after every call. No active budget or run ledger is stored in the workspace filesystem.
 
-The policy evaluation runs through one sequential `PolicyEvaluator` inside the trial. It uses Inspect AI for task execution and grading, a metered `StudentClient`, and writes predictions and Inspect logs. Policy code is trusted within the Docker trial for this first iteration; Docker, not the evaluator, is the host-isolation boundary.
-The teacher-facing tools remain synchronous; there is no background job or persistent policy REPL.
+Policy evaluation runs sequentially through one `PolicyEvaluator` inside the
+trial. Inspect AI handles execution and grading; a metered `StudentClient` handles
+model access; predictions and Inspect logs are written to the run directory.
+Policy code is trusted inside the Docker trial, which is the isolation boundary.
+The client is the only supported model interface. There is no background job or
+persistent policy REPL.
 
-This first iteration trusts teacher-written policy code inside Docker. The client is the only supported model interface by contract, but policy execution is not an AST sandbox or a restricted Corral worker. Running the task outside Docker therefore does not provide the intended safety boundary.
+Running the task outside Docker does not provide the intended safety boundary.
 
 ## Source map
 

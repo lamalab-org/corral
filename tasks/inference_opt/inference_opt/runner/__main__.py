@@ -235,8 +235,7 @@ def run(spec: RunSpec) -> RunSummary:
             )
         )
 
-    # Policy questions are deliberately sequential. This keeps shared memory,
-    # budgets, artifacts, and restart/retry behavior deterministic.
+    # Run questions sequentially so memory, budgets, and artifacts are stable.
     summary.execution = "sequential"
 
     try:

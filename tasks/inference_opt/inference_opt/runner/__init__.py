@@ -1,8 +1,4 @@
-"""Inference-opt policy evaluation.
-
-The first iteration treats policy code as trusted within the Docker trial and
-uses one in-process evaluator.
-"""
+"""Run inference-opt policies."""
 
 from __future__ import annotations
 

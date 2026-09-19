@@ -1,11 +1,4 @@
-"""The task prompt shown to the teacher agent.
-
-States the goal, the budget, the one hard rule, and how to finish. It deliberately
-does **not** suggest strategies — which strategies an agent reaches for is the thing
-this environment measures. Mechanics live in ``guide/policy_api.md``, seeded into
-the workspace; strategy ideas, if a level enables them, live in a separate document
-so the two regimes stay distinguishable.
-"""
+"""Build the prompt shown to the teacher agent."""
 
 from __future__ import annotations
 
@@ -66,7 +59,7 @@ Every experiment costs real inference. `dry_run_policy` is much cheaper than
 ## The one hard rule
 
 Your policy should use the student client it is given (`ctx.student`) for model
-inference. The environment trusts teacher code in this first iteration; the client
+inference. The environment trusts teacher code; the client
 is still the only supported model interface. `dry_run_policy` checks that the policy
 loads and runs before you spend an experiment.
 

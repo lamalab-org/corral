@@ -1,10 +1,4 @@
-"""Trusted policy evaluator for one inference-opt run.
-
-Policy code is trusted inside the Docker trial for the first iteration. This
-module is the single task-level execution boundary: Corral owns the outer
-process/container lifecycle, while the evaluator owns policy setup,
-per-question contexts, metering, artifacts, and scoring.
-"""
+"""Evaluate one inference-opt policy run."""
 
 from __future__ import annotations
 
@@ -21,13 +15,7 @@ __all__ = ["PolicyEvaluator"]
 
 @dataclass(frozen=True, slots=True)
 class PolicyEvaluator:
-    """Run trusted teacher-written policy code in the current trial process.
-
-    The evaluator deliberately does not create another security boundary.
-    Callers must use it inside Corral's per-trial Docker container. Inspect's
-    ``time_limit`` remains the policy-run limit; Docker supplies the outer
-    resource and lifecycle boundary.
-    """
+    """Run policy code in the current task process."""
 
     def run(self, spec: RunSpec) -> RunSummary:
         # Inspect otherwise writes a process-global trace file under the

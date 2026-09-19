@@ -45,7 +45,7 @@ BENCHMARKS: tuple[str, ...] = (
 
 Split = Literal["train", "test"]
 
-#: Fields policy execution may see. `target` is deliberately absent here.
+#: Fields exposed to policy execution. The target is not included.
 PUBLIC_FIELDS: tuple[str, ...] = (
     "item_id",
     "benchmark",

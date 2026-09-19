@@ -124,7 +124,7 @@ def _write_test_questions(benchmark: str, path: Path) -> int:
     """Materialise the test split, with targets, for one run.
 
     This scoring path reads the private labels and writes the complete evaluation
-    input. Policy code is trusted within the Docker trial in this first iteration.
+    input. Policy code is trusted within the Docker trial.
     """
     items = datasets.load_items(benchmark, "test")
     targets = datasets.load_targets(benchmark, "test")

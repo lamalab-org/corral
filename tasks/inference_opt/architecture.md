@@ -1,122 +1,39 @@
 # Inference-opt architecture
 
-This document describes the current first-iteration design of the inference-time optimization environment.
+Inference-opt asks an agent to write a Python policy that improves a frozen
+student model. The agent edits `policy/policy.py`, tests it on labelled train
+data, and submits it for scoring on held-out test data.
 
-The environment asks a teacher agent to write a Python policy that improves a frozen student model. The teacher edits `policy/policy.py`, runs experiments on the training split, and submits the policy for evaluation on the held-out test split.
-
-The implementation currently follows the stateful pattern used by the wetlab environment.
-Inference tools are trusted and return updated session state through Corral's normal environment-state transition mechanism.
-
-## System overview
+## Components
 
 ```text
-                         Corral host
+Corral
+  └─ InferenceOptEnvironment
+       ├─ workspace tools
+       ├─ inference tools
+       └─ committed environment state
 
-  teacher agent
-       │
-       │ actions: edit files, call tools, submit answer
-       ▼
-  AgentSession
-       │
-       ▼
-  InferenceOptEnvironment
-       │
-       ├── workspace tools ───────────────► task workspace
-       │                                    policy/policy.py
-       │                                    guide/, notes.md, TODO.md
-       │
-       ├── trusted inference tools
-       │       ├── get_baseline
-       │       ├── reveal_train_questions
-       │       ├── query_student
-       │       ├── dry_run_policy
-       │       ├── evaluate_candidate
-       │       ├── inspect_failures
-       │       ├── compare_runs
-       │       ├── get_budget
-       │       └── submit_policy
-       │
-       └── committed Corral environment state
-               └── inference_state
-                       budget counters
-                       revealed question IDs
-                       experiment history
-                       best run ID
-
-  evaluate_candidate / final scorer
-       │
-       ▼
-  inspect-ai runner
-       │
-       ├── loads policy.py
-       ├── calls the student model through StudentClient
-       ├── grades with hidden targets
-       └── returns accuracy and run artifacts
+inference tools
+  └─ PolicyEvaluator
+       └─ Inspect AI task
+            └─ StudentClient and benchmark scorer
 ```
 
-## Main abstractions
+Each task binds one benchmark and one or two student models. The task definition
+contains immutable configuration, the teacher prompt, the workspace setup, and
+the final scorer. It does not contain session history.
 
-### `TaskDefinition`
+## Corral state
 
-Defined by Corral in `src/corral/core/task.py`.
+`InferenceOptEnvironment` is stateless. Corral passes the current
+`ExecutionState` to each tool call. Inference-opt copies the hidden
+`inference_state` mapping, passes the copy to the tool, and returns the updated
+mapping in `ToolExecutionResult.environment`.
 
-Inference-opt creates one task definition per `(benchmark, student-model)` pair.
-The task contains:
+Corral commits that environment update with the tool result. This makes the
+session ledger available after replay, restart, and task branching.
 
-- the benchmark description shown to the teacher
-- the list of teacher-facing tools
-- immutable benchmark/model configuration in `initial_input`
-- the prompt function
-- the workspace setup function
-- the final scoring function
-
-`TaskDefinition` is configuration. It does not contain mutable experiment history.
-
-### `InferenceOptEnvironment`
-
-Defined in `inference_opt/env.py`.
-
-This is the task-specific Corral environment subclass. It is responsible for:
-
-- exposing the task's tools
-- preparing the workspace
-- initializing the inference session state
-- executing trusted inference tools
-- returning updated state through `ToolExecutionResult`
-
-It does not retain the current execution state as an object attribute. Corral gives
-it the current `ExecutionState` for every operation.
-
-### `ExecutionState`
-
-Defined by Corral in `src/corral/core/state.py`.
-
-This is the immutable materialized projection of the committed event stream. It
-contains the normal Corral execution fields:
-
-- runtime status
-- submitted answer
-- actions and tool invocations
-- workspace state
-- environment state
-- dependency outputs
-
-Inference-opt stores its mutable session data inside:
-
-```text
-ExecutionState.environment.values
-└── hidden_arguments
-    ├── work_dir
-    └── inference_state
-```
-
-The environment state is serialized JSON-shaped data. Corral commits the updated
-namespace after every successful tool transition, so it survives replay, restart,
-branching, and Docker task execution.
-
-### `inference_state`
-
-The current session state has this shape:
+The session state is JSON-shaped:
 
 ```json
 {
@@ -139,194 +56,80 @@ The current session state has this shape:
 }
 ```
 
-The state is initialized by `_prepare_workspace()` and then updated by trusted
-tools.
+`StateLedger` in `budget.py` provides the budget and run-record operations used
+by the tools. The mapping in Corral state remains the source of truth.
 
-### `StateLedger`
+## Workspace
 
-Defined in `inference_opt/budget.py`.
-
-`StateLedger` is a small convenience wrapper over the mutable JSON mapping passed to a tool. It provides operations such as:
-
-- `reserve()`
-- `remaining()`
-- `record_run()`
-- `mark_revealed()`
-- `best_run()`
-- `snapshot()`
-
-The source of truth is the mapping inside the Corral environment projection. `StateLedger` only gives tool implementations a convenient API for reading and updating that mapping.
-
-## Tool execution flow
-
-For a normal teacher action:
+The workspace holds source and detailed artifacts:
 
 ```text
-1. Agent proposes an Action.
-2. Corral records the action.
-3. Corral materializes the current ExecutionState.
-4. Corral injects hidden arguments from environment state.
-5. InferenceOptEnvironment.execute_tool() receives the state.
-6. The tool mutates a copied inference_state mapping.
-7. The environment returns ToolExecutionResult:
-
-       content = tool response
-       environment = updated environment namespace
-
-8. Corral commits the tool result and updated environment state.
-9. The agent receives the tool response.
-```
-
-The environment makes a deep copy before tool execution. This prevents a failed tool from accidentally mutating the `ExecutionState` object supplied by Corral.
-
-## Trusted tools
-
-All inference-opt domain tools are currently marked with:
-
-```python
-@tool(hidden_args=["work_dir", "inference_state"], trusted=True)
-```
-
-This includes tools that execute the teacher-written policy. That is an explicit first-iteration trust assumption: teacher policy code runs as trusted task code. Docker can still provide the outer deployment boundary when needed.
-
-## Workspace state versus Corral state
-
-The two kinds of state have different roles.
-
-### Corral environment state
-
-Used for small, structured session state that must survive tool calls:
-
-- budget counters
-- revealed IDs
-- run summaries
-- best run ID
-
-This state is committed through Corral events.
-
-### Workspace files
-
-Used for files that the teacher edits or needs to inspect:
-
-```text
-policy/
-  policy.py
-guide/
-  policy_api.md
+policy/policy.py
+guide/policy_api.md
 notes.md
 TODO.md
-revealed/
-  train_revealed.jsonl
-runs/
-  <run-id>/
-    questions.jsonl
-    predictions.jsonl
-    summary.json
-    log/
+revealed/train_revealed.jsonl
+runs/<run-id>/
+  questions.jsonl
+  predictions.jsonl
+  summary.json
+  log/
 submission.json
 ```
 
-The policy source and detailed run artifacts are intentionally files. They are large, human-readable artifacts rather than compact execution-state fields.
+The ledger stays in Corral state. Files hold the policy, revealed examples, and
+run output because those artifacts are larger and useful to inspect directly.
 
-The revealed training records are also written to a workspace JSONL file because the inspect runner consumes them during `Policy.setup()`.
+## Tool flow
 
-## Evaluation layers
+1. Corral materializes `ExecutionState` and injects hidden arguments.
+2. `InferenceOptEnvironment.execute_tool()` copies `inference_state`.
+3. The trusted tool reads or updates the copy and writes any workspace artifacts.
+4. The environment returns the tool result and updated environment namespace.
+5. Corral commits both as one transition.
 
-There are two different evaluations.
+The domain tools are trusted because they read private labels and run the
+submitted policy. Policy code is also trusted inside the task container. Docker
+is the isolation boundary; the evaluator does not create a second sandbox.
 
-### Teacher-side candidate evaluation
+## Policy evaluation
 
-`evaluate_candidate()`:
+`evaluate_candidate()` writes the train questions with hidden targets to a
+task-local file, then runs `PolicyEvaluator`. The evaluator:
 
-1. resolves `policy/policy.py`
-2. creates a trusted question file for the train split
-3. runs the `PolicyEvaluator`, which uses the Inspect AI adapter
-4. reads the resulting accuracy/log artifacts
-5. computes the candidate's improvement over the stored baseline
-6. records a compact run summary in `inference_state`
-7. writes detailed results below `runs/`
+- loads the policy;
+- creates Inspect samples and scorers;
+- runs questions sequentially;
+- meters calls through `StudentClient`;
+- writes predictions, summaries, and Inspect logs.
 
-The inspect adapter remains in `inference_opt/runner/`. It handles conversion from the policy API to inspect samples, student-client calls, answer normalization, and inspect scoring.
+The tool stores a compact `RunRecord` in the session ledger and keeps detailed
+output under `runs/`. `dry_run_policy()` uses the same runner on a smaller set.
 
-### Final Corral scoring
+Final scoring runs the submitted policy on the held-out split and subtracts the
+stored zero-shot baseline. Level-2 tasks score the smaller improvement across
+the two student models.
 
-The teacher eventually submits the string `submission.json`. Corral resolves that answer against the task workspace and invokes the task scoring function.
+Inspect handles model execution, sample execution, answer parsing, grading, and
+logs. Inference-opt supplies the policy solver, policy API, client metering, and
+task-specific data preparation.
 
-`policy_score()` then:
+## Runtime limits
 
-1. resolves the staged policy directory
-2. loads the held-out test questions and hidden targets
-3. runs the policy through the inspect runner
-4. obtains policy accuracy
-5. subtracts the stored scalar baseline accuracy
-6. returns the final score
+The environment currently has no persistent policy process, background policy
+jobs, file-backed active ledger, or restricted policy worker. Policy questions
+run sequentially so shared memory, budgets, and artifacts are deterministic.
 
-The policy-run labels are required internally by inspect to calculate policy accuracy. They are not exposed to the teacher as an answer-selection mechanism.
-Item-level baseline pairing is not required for the scalar score.
-
-## Why inspect-ai is retained
-
-Inspect-ai provides the actual model-evaluation and grading machinery:
-
-- model calls
-- task/sample execution
-- multiple-choice grading
-- numeric grading
-- logs
-- accuracy metrics
-
-Inference-opt supplies a policy solver and a metered student client so the policy controls prompting while inspect remains responsible for evaluation.
-
-The current inspect adapter is therefore an evaluation abstraction, not another teacher-agent environment abstraction. `PolicyEvaluator` is the single task-level policy execution boundary; Corral provides the outer trial lifecycle and Docker boundary.
-
-## Docker execution
-
-When Corral runs the task in Docker, the task container receives a task-scoped workspace and Corral state volume. The same environment-state protocol applies:
-
-```text
-Docker container
-├── /workspace       policy and run artifacts
-└── /corral-state   committed Corral state and request/result files
-```
-
-Docker is the security boundary for the trusted first-iteration policy design. It does not change the Corral state model, and `PolicyEvaluator` deliberately does not add another policy-execution boundary.
-
-## Current deliberate simplifications
-
-The first iteration intentionally does not use:
-
-- a persistent Python REPL
-- background evaluation jobs
-- a file-backed budget ledger for active session state
-- a separate restricted policy worker
-- per-item baseline pairing for the primary score
-
-The following abstractions remain because they still provide direct value:
-
-- Corral `TaskDefinition` and `Environment`
-- Corral committed `ExecutionState`
-- Corral `ToolExecutionResult`
-- `StateLedger` as a budget API
-- `PolicyEvaluator` using Inspect AI
-- the policy API and answer normalization layer
-- workspace files for source and detailed artifacts
-
-## Main source map
+## Source map
 
 | Responsibility | Source |
-|---|---|
-| Environment factory | `inference_opt/env.py` |
-| Corral-native environment state | `inference_opt/env.py` |
-| Teacher tools | `inference_opt/tools.py` |
-| State budget wrapper | `inference_opt/budget.py` |
-| Policy contract | `inference_opt/api.py` |
-| Policy loading | `inference_opt/policy.py` |
-| Inspect runner interface | `inference_opt/runner/spec.py` |
-| Policy evaluation and Inspect execution | `inference_opt/runner/evaluator.py`, `inference_opt/runner/__main__.py` |
-| Policy solver | `inference_opt/runner/solver.py` |
-| Student client and per-run metering | `inference_opt/runner/runtime.py` |
-| Answer normalization and grading specs | `inference_opt/scoring_specs.py` |
+| --- | --- |
+| Task and environment factory | `inference_opt/env.py` |
+| Teacher tools and ledger updates | `inference_opt/tools.py`, `inference_opt/budget.py` |
+| Policy contract and loading | `inference_opt/api.py`, `inference_opt/policy.py` |
+| Inspect adapter | `inference_opt/runner/` |
 | Final scoring | `inference_opt/score.py` |
-| Corral environment loading | `src/corral/runtime/environment_loader.py` |
-| Corral action/tool transitions | `src/corral/core/transition.py` |
-| Corral environment base class | `src/corral/core/environment.py` |
+| Frozen data | `inference_opt/datasets.py` |
+| Environment base class | `src/corral/core/environment.py` |
+| State projection | `src/corral/core/state.py` |
+| Tool transition | `src/corral/core/transition.py` |

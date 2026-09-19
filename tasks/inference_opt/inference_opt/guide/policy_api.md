@@ -80,8 +80,8 @@ All keys optional; unknown keys are rejected so a typo cannot silently do nothin
 
 ## Imports and model access
 
-Teacher policy code is trusted in this first iteration, so it is not restricted by
-an AST validator or a Corral worker sandbox. The policy should still use the
+Teacher policy code is trusted inside the Docker trial, so it is not restricted by
+an AST validator or a Corral worker sandbox. The policy should use the
 provided `ctx.student` client as its model interface; other model endpoints are
 outside the task's intended scope. The policy directory may contain normal helper
 modules and prompt files.
