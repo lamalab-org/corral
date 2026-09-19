@@ -164,6 +164,11 @@ class ClaudeCodeAgent:
     owns the task-bound MCP endpoint, canonical tool transitions, usage folding,
     and final `submit_answer` action. The adapter has no legacy `run` or
     `arun_agent` entry point and keeps no task transcript on the instance.
+
+    Bare mode is enabled by default: native tools are limited to Bash, Read,
+    and Edit alongside the explicit Corral MCP tools. Authentication requires
+    `ANTHROPIC_API_KEY` or provider credentials; set `bare=False` to use a
+    normal Claude subscription login and the full native tool preset.
     """
 
     tool_transport = "mcp"
@@ -177,6 +182,7 @@ class ClaudeCodeAgent:
         thinking: dict[str, Any] | None = None,
         wall_clock_timeout_s: float | None = None,
         hooks: AgentHooks | None = None,
+        bare: bool = True,
     ) -> None:
         if thinking is None:
             thinking = {"type": "adaptive"}
@@ -196,6 +202,7 @@ class ClaudeCodeAgent:
         self.thinking = thinking
         self.wall_clock_timeout_s = wall_clock_timeout_s
         self.hooks = hooks or AgentHooks()
+        self.bare = bare
 
     def _build_system_prompt(self, enable_surrender: bool) -> dict[str, Any]:
         """Compose the harness system prompt.
@@ -240,8 +247,8 @@ class ClaudeCodeAgent:
         opts: dict[str, Any] = {
             "system_prompt": self._build_system_prompt(enable_surrender),
             "model": self.harness_model,
-            # Follow the SDK-owned native preset so newly added Claude Code
-            # built-ins are available without maintaining a stale local list.
+            # Follow the SDK-owned native preset. Bare mode restricts this to
+            # Bash, Read, and Edit; disabling it restores the full preset.
             "tools": {"type": "preset", "preset": "claude_code"},
             "mcp_servers": {_MCP_SERVER_NAME: server},
             # Ignore project `.mcp.json`, user settings, and plugin MCP servers
@@ -276,6 +283,8 @@ class ClaudeCodeAgent:
             # content.
             "include_partial_messages": True,
         }
+        if self.bare:
+            opts["extra_args"] = {"bare": None}
         if self.reasoning_effort is not None:
             opts["effort"] = self.reasoning_effort
         if self.thinking is not None:
@@ -314,7 +323,8 @@ class ClaudeCodeAgent:
             "streaming_enabled": bool(
                 getattr(options, "include_partial_messages", False)
             ),
-            "sdk_internal_tools_policy": "native_defaults",
+            "claude_bare_mode": self.bare,
+            "native_tools_policy": "bare" if self.bare else "claude_code_default",
             "permission_mode": getattr(options, "permission_mode", None),
             "sandbox_enabled": bool(
                 (getattr(options, "sandbox", None) or {}).get("enabled", False)

@@ -6,18 +6,21 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
+import anyio
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from corral.agents import ClaudeCodeAgent
 from corral.agents import claude_code as claude_code_module
-from corral.agents.claude_code import _to_sdk_content_blocks
+from corral.agents.claude_code import _RunState, _to_sdk_content_blocks
 from corral.agents.schema import AgentOutcome
+from corral.backend.mcp import open_mcp_host
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
 from corral.core.tool import ToolConnection
+from corral.core.tool_catalog import ToolCatalogSnapshot
 from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
@@ -181,6 +184,7 @@ def test_claude_is_only_a_new_session_agent():
     agent = ClaudeCodeAgent(model="claude-opus-4-8")
 
     assert agent.model == "claude-opus-4-8"
+    assert agent.bare is True
     assert not hasattr(agent, "max_turns")
     assert not hasattr(agent, "run")
     assert not hasattr(agent, "arun")
@@ -207,8 +211,14 @@ def test_claude_usage_includes_cached_and_cache_created_input_tokens():
 
 
 @pytest.mark.anyio()
+@pytest.mark.parametrize(
+    ("agent_kwargs", "bare"),
+    [({}, True), ({"bare": True}, True), ({"bare": False}, False)],
+)
 async def test_run_session_returns_typed_outcome_and_preserves_harness(
     monkeypatch,
+    agent_kwargs,
+    bare,
 ):
     async def factory(options, captured):
         captured["cwd_exists_during_run"] = Path(options.cwd).is_dir()
@@ -235,7 +245,7 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
 
     captured = _install_fake_sdk(monkeypatch, factory)
     session = FakeSession(submission="42", submission_status="submitted")
-    outcome = await ClaudeCodeAgent().run_session(session)
+    outcome = await ClaudeCodeAgent(**agent_kwargs).run_session(session)
 
     assert isinstance(outcome, AgentOutcome)
     assert outcome.status == "completed"
@@ -247,6 +257,10 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
     assert outcome.usage.reasoning_tokens == 0
     assert outcome.metadata["session_id"] == "claude-session-1"
     assert outcome.metadata["mcp_tools_exposed"] == ["submit_answer", "test_tool"]
+    assert outcome.metadata["claude_bare_mode"] is bare
+    assert outcome.metadata["native_tools_policy"] == (
+        "bare" if bare else "claude_code_default"
+    )
 
     options = captured["options"]
     assert captured["cwd_exists_during_run"] is True
@@ -254,6 +268,7 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
     assert options.model == "claude-opus-4-8"
     assert options.max_turns == 7
     assert options.tools == {"type": "preset", "preset": "claude_code"}
+    assert getattr(options, "extra_args", {}) == ({"bare": None} if bare else {})
     assert options.allowed_tools == [
         "mcp__corral__test_tool",
         "mcp__corral__submit_answer",
@@ -425,6 +440,51 @@ def test_data_uri_converted_to_sdk_image_block():
             "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
         }
     ]
+
+
+@pytest.mark.anyio()
+async def test_bare_mode_real_sdk_preflight_exposes_corral_tools(tmp_path):
+    """Connect the bundled CLI to Corral without sending a model query."""
+    agent = ClaudeCodeAgent()
+    tools = list(FakeSession().tools)
+    run = _RunState()
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    config_dir = tmp_path / "claude-config"
+    config_dir.mkdir()
+
+    async def execute(action):
+        pytest.fail("MCP preflight must not execute tools")
+
+    with anyio.fail_after(30):
+        async with (
+            open_mcp_host() as host,
+            host.bind(
+                catalog=ToolCatalogSnapshot.capture(tools),
+                execute=execute,
+            ) as connection,
+        ):
+            options = agent._build_options(
+                server={"type": "http", "url": connection.url},
+                allowed_tools=[
+                    f"mcp__corral__{tool['function']['name']}" for tool in tools
+                ],
+                enable_surrender=False,
+                cwd=str(cwd),
+                max_turns=1,
+            )
+            # Keep CLI state local to this test. Preflight uses only the SDK
+            # control protocol, so it needs neither credentials nor model turns.
+            options.env = {
+                "CLAUDE_CONFIG_DIR": str(config_dir),
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                "ANTHROPIC_API_KEY": "unused-mcp-smoke-test",
+            }
+            assert options.extra_args == {"bare": None}
+            async with claude_code_module.ClaudeSDKClient(options=options) as client:
+                await agent._preflight_mcp(client, tools, run)
+
+    assert run.metadata["mcp_tools_exposed"] == ["submit_answer", "test_tool"]
 
 
 @pytest.mark.anyio()

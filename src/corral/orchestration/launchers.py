@@ -243,6 +243,7 @@ class DockerTaskLauncher:
         docker_executable: str = "docker",
         build_context: str | Path | None = None,
         dockerfile: str | Path | None = None,
+        build_args: Mapping[str, str] | None = None,
     ) -> DockerSandboxSpec:
         """Ensure an image exists before trials start and pin it to an image ID."""
         if spec.image_digest is not None:
@@ -273,6 +274,11 @@ class DockerTaskLauncher:
                     str(Path(dockerfile).resolve()),
                     "--tag",
                     spec.image,
+                    *(
+                        argument
+                        for name, value in (build_args or {}).items()
+                        for argument in ("--build-arg", f"{name}={value}")
+                    ),
                     str(Path(build_context).resolve()),
                     output_limit=1_000_000,
                 )

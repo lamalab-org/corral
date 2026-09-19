@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import importlib.util
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,8 @@ from corral.agents.tool_calling import ToolCallingAgent
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.environment import Environment, Toolset
 from corral.core.task import InputRef, TaskDefinition
+from corral.observability import LoggingObserver
+from corral.orchestration.launchers import LocalTaskLauncher
 
 
 def _load_legacy_script():
@@ -248,7 +251,7 @@ def test_benchmark_parser_has_safe_docker_defaults():
     )
 
     assert args.sandbox == "docker"
-    assert args.sandbox_image == "corral-benchmark:latest"
+    assert args.sandbox_image is None
     assert args.sandbox_cpus == 2.0
     assert args.sandbox_memory == "4g"
     assert args.sandbox_pids_limit == 256
@@ -263,6 +266,174 @@ def test_legacy_benchmark_namespace_also_defaults_to_docker():
     assert sandbox.mode == "docker"
     assert sandbox.docker is not None
     assert sandbox.docker.image == "corral-benchmark:latest"
+
+
+@pytest.mark.parametrize("environment", cli.ENVIRONMENT_NAMES)
+@pytest.mark.parametrize(
+    ("agent", "options", "extra"),
+    [
+        ("react", {}, ""),
+        ("claude-code", {}, "claude"),
+        ("codex", {}, "codex"),
+        ("openhands", {}, "openhands"),
+        ("reflexion", {"actor": "ClaudeCodeAgent"}, "claude"),
+    ],
+)
+def test_benchmark_selects_image_task_and_extra_for_environment_and_harness(
+    monkeypatch, environment, agent, options, extra
+):
+    monkeypatch.setattr(
+        cli,
+        "load_environment_group",
+        lambda *args, **kwargs: {"task1": _environment("task1")},
+    )
+    args = cli.build_parser().parse_args(
+        ["bench", "--agent", agent, "--environment", environment]
+    )
+    image_kind = "wetlab" if environment == "wetlab" else "benchmark"
+
+    class PreflightChecked(Exception):
+        pass
+
+    async def preflight(spec, **kwargs):
+        assert spec.image == f"corral-{environment}:{extra or 'latest'}"
+        assert spec.registry_module is None
+        assert (
+            kwargs["dockerfile"]
+            == Path(cli.__file__).resolve().parents[2]
+            / "docker"
+            / f"{image_kind}.Dockerfile"
+        )
+        assert kwargs["build_context"] == kwargs["dockerfile"].parent.parent
+        assert kwargs["build_args"] == {
+            "CORRAL_EXTRAS": extra,
+            "CORRAL_TASK": environment,
+        }
+        raise PreflightChecked
+
+    monkeypatch.setattr(cli.orchestration.DockerTaskLauncher, "preflight", preflight)
+    with pytest.raises(PreflightChecked):
+        asyncio.run(cli.run_benchmark(args, agent_kwargs=options))
+
+
+@pytest.mark.parametrize("build", [False, True])
+@pytest.mark.parametrize("environment", ["samplemath", "wetlab"])
+def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environment):
+    monkeypatch.setattr(
+        cli,
+        "load_environment_group",
+        lambda *args, **kwargs: {"task1": _environment("task1")},
+    )
+    args = cli.build_parser().parse_args(
+        [
+            "bench",
+            "--agent",
+            "claude-code",
+            "--environment",
+            environment,
+            "--sandbox-image",
+            "custom:test",
+            *(["--build-sandbox-image"] if build else []),
+        ]
+    )
+
+    class PreflightChecked(Exception):
+        pass
+
+    async def preflight(spec, **kwargs):
+        assert spec.image == "custom:test"
+        if build:
+            image_kind = "wetlab" if environment == "wetlab" else "benchmark"
+            assert kwargs["dockerfile"].name == f"{image_kind}.Dockerfile"
+            assert kwargs["build_context"] == kwargs["dockerfile"].parent.parent
+            assert kwargs["build_args"] == {
+                "CORRAL_EXTRAS": "claude",
+                "CORRAL_TASK": environment,
+            }
+        else:
+            assert kwargs["build_context"] is None
+            assert kwargs["dockerfile"] is None
+            assert kwargs["build_args"] is None
+        raise PreflightChecked
+
+    monkeypatch.setattr(cli.orchestration.DockerTaskLauncher, "preflight", preflight)
+    with pytest.raises(PreflightChecked):
+        asyncio.run(cli.run_benchmark(args))
+
+
+@pytest.mark.parametrize("agent", ["claude-code", "codex", "openhands", "reflexion"])
+@pytest.mark.parametrize(
+    ("model_args", "expected_model"),
+    [
+        ([], None),
+        (["--agent-kwargs", '{"model": "kwargs-model"}'], "kwargs-model"),
+        (
+            ["--model", "explicit-model", "--agent-kwargs", '{"model": "ignored"}'],
+            "explicit-model",
+        ),
+    ],
+)
+def test_docker_benchmark_does_not_import_agent_on_host(
+    monkeypatch, tmp_path, agent, model_args, expected_model
+):
+    environments = {"task1": _environment("task1")}
+    monkeypatch.setattr(cli, "load_environment_group", lambda *a, **kw: environments)
+
+    def forbid_agent_import(name):
+        pytest.fail(f"host must not import agent {name}")
+
+    monkeypatch.setattr(cli, "_load_agent_class", forbid_agent_import)
+    requests = []
+
+    async def preflight(spec, **kwargs):
+        return replace(spec, image_digest="sha256:" + "a" * 64)
+
+    async def container_run(self, request, *, observation_context=None):
+        requests.append(request)
+        # Substitute a deterministic agent for the container's SDK execution.
+        registry = cli.orchestration.RuntimeRegistry(
+            agents={request.agent_id: SubmitAgent()}, environments=environments
+        )
+        try:
+            launcher = LocalTaskLauncher(self.state_store, registry, LoggingObserver())
+            return await launcher.run(request, observation_context=observation_context)
+        finally:
+            registry.close()
+
+    monkeypatch.setattr(cli.orchestration.DockerTaskLauncher, "preflight", preflight)
+    monkeypatch.setattr(cli.orchestration.DockerTaskLauncher, "run", container_run)
+    args = cli.build_parser().parse_args(
+        [
+            "bench",
+            "--agent",
+            agent,
+            "--environment",
+            "samplemath",
+            "--task",
+            "task1",
+            "--no-evaluate",
+            "--max-attempts",
+            "1",
+            "--output-dir",
+            str(tmp_path),
+            *model_args,
+        ]
+    )
+    options = {"actor": "ClaudeCodeAgent"} if agent == "reflexion" else {}
+
+    assert asyncio.run(cli.run_benchmark(args, agent_kwargs=options)) == 0
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.sandbox.mode == "docker"
+    assert request.model == expected_model
+    assert request.agent_runtime.name == agent
+    assert request.agent_runtime.model == expected_model
+    assert request.agent_runtime.options == {**args.agent_kwargs, **options}
+    (report_path,) = tmp_path.rglob("report.json")
+    report = json.loads(report_path.read_text())
+    assert report["metadata"]["model"]["by_task"] == {"task1": expected_model}
+    if expected_model is None:
+        assert "__model-default__" in report_path.parent.name
 
 
 def test_run_parser_requires_one_task_and_has_non_benchmark_defaults():

@@ -24,9 +24,7 @@ from corral.report.logging import (
 
 TASK_ENVIRONMENT_MODULES = (
     "tasks/afm/src/env.py",
-    "tasks/catalyst/src/catalyst/env.py",
     "tasks/corral_md/src/corral_md/env.py",
-    "tasks/ml/src/ml/env.py",
     "tasks/resistor_network/src/resistor_network/env.py",
     "tasks/retrosynthesis/retrosynthesis/env.py",
     "tasks/samplemath/samplemath/env_subtask.py",

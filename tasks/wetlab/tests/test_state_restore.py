@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from functools import partial
+from pathlib import Path
 
+import anyio
 import pytest
 from wetlab.engine import ChemicalSystemSpec, WetlabEngine, WetlabState
 from wetlab.env import QualitativeAnalysisEnvironment, QualitativeAnalysisTask
@@ -12,7 +15,9 @@ from corral.agents.session import AgentSession
 from corral.core import Action, ActorRef, AgentStarted, CommitRequest, ExecutionState
 from corral.core.environment import Toolset
 from corral.core.task import InputRef
-from corral.persistence import SQLiteCommitStore
+from corral.orchestration.registry import RuntimeRegistry
+from corral.persistence import SQLiteCommitStore, WorkspaceManager
+from corral.runtime.environment_loader import load_environment_group
 
 
 @pytest.fixture()
@@ -39,11 +44,20 @@ async def _start_session(environment, store, *, dependency_outputs=None):
 
     await append(
         "started",
-        environment.initial_event(
-            execution_id=execution_id, dependency_outputs=dependency_outputs
+        await anyio.to_thread.run_sync(
+            partial(
+                environment.initial_event,
+                execution_id=execution_id,
+                dependency_outputs=dependency_outputs,
+            )
         ),
     )
-    await append("configured", environment.configure(await store.materialize("main")))
+    await append(
+        "configured",
+        await anyio.to_thread.run_sync(
+            environment.configure, await store.materialize("main")
+        ),
+    )
     await append(
         "agent-started",
         AgentStarted(agent_run_id=actor.run_id, agent_id=actor.actor_id),
@@ -58,7 +72,7 @@ async def _start_session(environment, store, *, dependency_outputs=None):
     )
 
 
-def _environment() -> QualitativeAnalysisEnvironment:
+def _environment(work_dir: str = "") -> QualitativeAnalysisEnvironment:
     task = QualitativeAnalysisTask(
         name="wetlab-state-test",
         description="Run a deterministic wetlab experiment.",
@@ -79,6 +93,7 @@ def _environment() -> QualitativeAnalysisEnvironment:
     return QualitativeAnalysisEnvironment(
         "wetlab-state-test",
         task,
+        base_work_dir=work_dir,
         toolset=Toolset(
             pool=create_tools(),
             workspace_factory=None,
@@ -89,6 +104,30 @@ def _environment() -> QualitativeAnalysisEnvironment:
 
 def _wetlab_payload(state: ExecutionState) -> dict:
     return dict(state.environment.values["hidden_arguments"]["wetlab"])
+
+
+def test_loader_binds_wetlab_scratch_per_execution(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CORRAL_WORK_DIR", str(tmp_path))
+    environments = load_environment_group("wetlab", env_kwargs={"level": 1})
+    task_id = "qualysis_lvl1_01"
+    template = environments[task_id]
+    assert template.base_work_dir == str(tmp_path)
+    assert template.workspace_path is None
+    registry = RuntimeRegistry(agents={}, environments=environments)
+    try:
+        first = registry.environment(task_id, "trial-1")
+        second = registry.environment(task_id, "trial-2")
+        assert first.workspace_path != second.workspace_path
+        for environment in (first, second):
+            assert isinstance(environment, QualitativeAnalysisEnvironment)
+            assert Path(environment.workspace_path).parent == tmp_path
+            assert environment.toolset.workspace_factory is None
+            assert environment.tools.keys() == template.tools.keys()
+            assert "write_file" not in environment.tools
+        Path(first.workspace_path, "notes.txt").write_text("scratch only")
+        assert list(Path(second.workspace_path).iterdir()) == []
+    finally:
+        registry.close()
 
 
 def test_structured_inventory_round_trip_is_exact() -> None:
@@ -133,7 +172,13 @@ def test_incompatible_chemistry_checkpoint_fails_loudly() -> None:
 
 @pytest.mark.anyio()
 async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) -> None:
-    environment = _environment()
+    workspace_root = tmp_path / "workspace"
+    private = tmp_path / "corral-state"
+    private.mkdir(mode=0o700)
+    manager = WorkspaceManager(artifact_root=private / "artifacts")
+    environment = _environment(str(workspace_root)).for_task("wetlab-replay")
+    environment.workspace_manager = manager
+    Path(environment.workspace_path, "notes.txt").write_text("scratch only")
     action = Action(
         id="mix-1",
         name="mix_two_solutions",
@@ -147,9 +192,10 @@ async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) 
         actor_id="agent_0",
     )
 
-    database = tmp_path / "replay.sqlite3"
+    database = private / "replay.sqlite3"
     async with SQLiteCommitStore(database, "wetlab-replay") as store:
         session = await _start_session(environment, store)
+        initial = _wetlab_payload(await store.materialize("main"))
         replay_session = await session.fork_branch(branch_id="replay")
         first_result = await session.execute(action)
         replay_result = await replay_session.execute(
@@ -160,6 +206,11 @@ async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) 
         first = await store.materialize("main")
         replay = await store.materialize("replay")
         assert _wetlab_payload(first) == _wetlab_payload(replay)
+        assert _wetlab_payload(first) != initial
+        assert set(first.workspace.files) == {"notes.txt"}
+        assert {path.name for path in Path(environment.workspace_path).iterdir()} == {
+            "notes.txt"
+        }
 
     # Reopen the durable commit store and reconstruct a fresh environment/session.
     # Continuation must use the inventory produced by the committed mix.
@@ -172,8 +223,19 @@ async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) 
     async with SQLiteCommitStore(database, "wetlab-replay") as restored_store:
         checkpoint = await restored_store.materialize("main")
         assert checkpoint == first
+        restored_environment = _environment(
+            str(tmp_path / "restored-workspace")
+        ).for_task("wetlab-replay")
+        restored_environment.workspace_manager = manager
+        await manager.materialize(
+            checkpoint.workspace, restored_environment.workspace_path
+        )
+        assert (
+            Path(restored_environment.workspace_path, "notes.txt").read_text()
+            == "scratch only"
+        )
         restored_session = AgentSession(
-            _environment(),
+            restored_environment,
             checkpoint,
             actor=session.actor,
             runtime_actor=session.runtime_actor,
@@ -184,6 +246,7 @@ async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) 
         assert result.success
         continued = await restored_store.materialize("main")
         assert _wetlab_payload(continued) == _wetlab_payload(checkpoint)
+        assert set(continued.workspace.files) == {"notes.txt"}
 
 
 @pytest.mark.anyio()

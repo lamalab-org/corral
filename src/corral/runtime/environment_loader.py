@@ -26,9 +26,7 @@ class EnvironmentPreset:
 
 EnvironmentName = Literal[
     "afm",
-    "catalyst",
     "corral_md",
-    "ml",
     "resistor_network",
     "retrosynthesis",
     "samplemath",
@@ -39,9 +37,7 @@ EnvironmentName = Literal[
 
 ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
     "afm",
-    "catalyst",
     "corral_md",
-    "ml",
     "resistor_network",
     "retrosynthesis",
     "samplemath",
@@ -54,16 +50,8 @@ ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
     "afm": EnvironmentPreset(
         "env:create_environments", "tasks/afm/src", "task_json_path"
     ),
-    "catalyst": EnvironmentPreset(
-        "catalyst.env:create_environments",
-        "tasks/catalyst/src",
-        "local_dir",
-    ),
     "corral_md": EnvironmentPreset(
         "corral_md.env:create_environments", "tasks/corral_md/src"
-    ),
-    "ml": EnvironmentPreset(
-        "ml.env:create_environments", "tasks/ml/src", "task_json_path"
     ),
     "resistor_network": EnvironmentPreset(
         "resistor_network.env:create_environments",
