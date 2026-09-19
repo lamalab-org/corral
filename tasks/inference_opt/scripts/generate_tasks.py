@@ -17,20 +17,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-BENCHMARKS: dict[str, str] = {
-    "gsm8k": "GSM8K grade-school maths word problems",
-    "mmlu_pro": "MMLU-Pro multiple-choice questions across 14 subjects",
-    "gpqa_diamond": "GPQA-Diamond graduate-level science questions",
-    "bbh": "BIG-Bench Hard reasoning tasks",
-    "chembench": "ChemBench chemistry questions",
-    "arc_challenge": "ARC-Challenge science questions",
-}
-
 #: A deterministic namespace, so regenerating does not churn every uuid.
 NAMESPACE = uuid.UUID("6f1d5a52-0f6e-4a1d-9a27-6b6c9f0e1a10")
 
-LEVEL_1_MODELS = [["model_a"], ["model_b"]]
-LEVEL_2_MODELS = [["model_a", "model_b"], ["model_c", "model_d"]]
+BENCHMARKS = ("gsm8k", "mmlu_pro", "gpqa_diamond", "bbh", "chembench", "arc_challenge")
+
+LEVEL_1_MODELS = [["student_a"], ["student_b"]]
+LEVEL_2_MODELS = [["student_a", "student_b"], ["student_c", "student_d"]]
 
 TOOLS = [
     "get_baseline",
@@ -51,6 +44,7 @@ N_TEST = 30
 def _task(benchmark: str, models: list[str], level: int) -> dict:
     joint = len(models) > 1
     suffix = "".join(model.rsplit("_", 1)[-1] for model in models)
+    labels = [model.upper() for model in models]
     task_id = f"{benchmark}_{suffix}"
     # Test-time allowance is per model, so a joint policy cannot starve one model
     # to buy compute for the other and game the level-2 minimum.
@@ -58,18 +52,18 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
     final_calls = N_TEST * calls_per_question
 
     if joint:
-        name = f"Joint {benchmark} improvement on {' and '.join(models)}"
+        name = f"Joint {benchmark} improvement on {' and '.join(labels)}"
         description = (
             f"Build one shared inference-time policy that improves the frozen "
-            f"students {' and '.join(models)} on {BENCHMARKS[benchmark]}. "
+            f"students {' and '.join(labels)}. "
             f"You are scored on the smaller of the two improvements, so the policy "
             f"must help both models, not trade one off against the other."
         )
     else:
-        name = f"Improve {benchmark} on {models[0]}"
+        name = f"Improve {benchmark} on {labels[0]}"
         description = (
             f"Build and submit an inference-time policy that improves the frozen "
-            f"student {models[0]} on {BENCHMARKS[benchmark]}. Do not modify model "
+            f"{labels[0]}. Do not modify model "
             f"weights; change only what happens around the model at test time."
         )
 

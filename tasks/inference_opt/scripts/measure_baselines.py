@@ -5,7 +5,7 @@ table, and with ``--write-tasks`` patches the ``baselines`` fields in the task
 JSONs, which ship as placeholder zeros until this has been run.
 
     uv run python scripts/measure_baselines.py \\
-        --model model_a=Qwen/Qwen2.5-7B-Instruct \\
+        --model student_a=Qwen/Qwen2.5-7B-Instruct \\
         --base-url http://127.0.0.1:8000/v1 --write-tasks
 
 The headroom table is the go/no-go gate. A (benchmark, model) pair whose verdict is
@@ -67,7 +67,7 @@ def _patch_tasks(level: int, measured: dict, refused: set[tuple[str, str]]) -> i
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", action="append", default=[],
-                        help="name=served_spec, e.g. model_a=vllm/Qwen/Qwen2.5-7B-Instruct")
+                        help="name=served_spec, e.g. student_a=vllm/Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--base-url", default=None,
                         help="OpenAI-compatible endpoint, ending in /v1")
     parser.add_argument("--benchmarks", nargs="*", default=list(datasets.BENCHMARKS))

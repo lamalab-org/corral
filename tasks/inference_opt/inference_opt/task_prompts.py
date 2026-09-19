@@ -98,7 +98,7 @@ def task_prompt(env: Environment, state: ExecutionState) -> str:
     return _TEMPLATE.format(
         description=task.description,
         benchmark=config.get("benchmark", "?"),
-        models=", ".join(config.get("models", [])),
+        models=", ".join(model.upper() for model in config.get("models", [])),
         n_train=config.get("n_train", 30),
         n_test=config.get("n_test", 30),
         budget=_budget_summary(config),
