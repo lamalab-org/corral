@@ -197,7 +197,79 @@ pairs. Assignments beyond the released distance cutoff are omitted from that
 average; planet-count agreement remains a separate required gate. Requiring
 strict recovery of every weak component made the benchmark collapse to an
 all-zero regime in the original evaluation, eliminating useful discrimination
-between agents.
+between agents. Upstream keeps the stricter alternative commented beside the
+mean it chose, in `evaluator.py`:
+
+```python
+score = float(np.mean(s_list)) if len(s_list)>0 else 1.0
+# For the strictest pass criterion (every planet must individually clear
+# the threshold rather than only the mean), swap the line above for:
+#     score = float(np.min(s_list)) if len(s_list)>0 else 1.0
+```
+
+## Deliberate design decisions
+
+The choices below are recurring review findings. They are decisions, not
+defects, and changing any of them changes what this environment measures.
+
+### Which gate carries the discrimination
+
+A submission must pass four gates: ΔBIC, residual RMS, physical match, and
+planet count. The match and count gates are the discriminating ones. ΔBIC is a
+floor check that a candidate explains the data better than a constant, and it
+is easy to clear: an empty `{"planets": []}` submission reaches
+`delta_bic_per_point = 38.17` on `seed101_diff9` and passes that gate alone,
+while failing the other three.
+
+### Jitter and the ΔBIC comparison
+
+`normalize_submission` fits a jitter term to the residual RMS when an agent
+omits `noise_jitter_ms`, whereas the null model is scored at exactly zero
+jitter, and a candidate's jitter is not counted in the BIC parameter count.
+Both follow upstream: `best_constant_fit` calls
+`loglike_white_jitter(rv_obs, model, sigma_obs, 0.0)`, and the candidate uses
+`k = len(guesses) * 5 + n_inst`. Corral preserves that comparison rather than
+making the likelihood symmetric, because changing it changes every threshold
+the bundled references were validated against. Charging one BIC parameter for
+candidate jitter alone would lower `delta_bic_per_point` by `log(n)/n`,
+about 0.055 to 0.092 across the bundled tasks; all 20 references still pass,
+so this is a protocol choice rather than a correctness fix.
+
+### Two difficulty levels
+
+Upstream difficulties 5-7 and 8-10 collapse into Corral's two levels to match
+the framework's level structure. The two levels are not a reproduction of the
+upstream difficulty ladder.
+
+### No REPL execution deadline
+
+`PythonREPL` has no per-call time limit, and its tool description says so. The
+agent's budget is Corral's configured `max_iterations`, not wall-clock time
+inside one call. A long fit is therefore a legitimate use of the budget.
+
+### No plotting
+
+This task's executor refuses code containing `matplotlib`, inherited from the
+upstream REPL. It is a task policy, not a property of Corral's shared REPL.
+The binding constraint is not the filter but the return channel: the tool
+returns captured stdout, so a rendered figure has no path back to the agent.
+Text output, including character-plotted series, is unrestricted. Allowing
+plots would need multimodal tool results to change anything.
+
+### Upstream defects left in place
+
+Three upstream behaviours are knowingly unpatched. In
+`corral.runtime.python_repl`, now shared by any task adopting that REPL,
+`sanitize_input`'s quote scanner mis-handles apostrophes inside comments and
+its leading-`python` strip is not anchored to a word boundary. In this task's
+`tools.py`, `detect_shadowing_callable_conflict` rejects a name rebound to a
+callable in the same cell.
+
+Replaying 240 REPL cells from recorded runs triggered neither the scanner nor
+the prefix strip; the rebind check needs namespace replay and was not
+measured. Rewriting the scanner carries the largest regression risk of any
+change in that module, which is why it is tracked upstream rather than
+patched here.
 
 ## Task-bank audit
 
