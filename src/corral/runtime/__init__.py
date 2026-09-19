@@ -23,6 +23,12 @@ _EXPORTS = {
         "EnvironmentPreset",
     ),
     "TaskRuntime": ("corral.runtime.task_runner", "TaskRuntime"),
+    "PythonREPLResult": ("corral.runtime.python_repl", "PythonREPLResult"),
+    "PythonREPLSession": ("corral.runtime.python_repl", "PythonREPLSession"),
+    "execute_python_repl": (
+        "corral.runtime.python_repl",
+        "execute_python_repl",
+    ),
     "load_environment_group": (
         "corral.runtime.environment_loader",
         "load_environment_group",
@@ -38,7 +44,10 @@ __all__ = [
     "ENVIRONMENT_PRESETS",
     "EnvironmentName",
     "EnvironmentPreset",
+    "PythonREPLResult",
+    "PythonREPLSession",
     "TaskRuntime",
+    "execute_python_repl",
     "load_environment_group",
     "normalise_environment_name",
 ]
