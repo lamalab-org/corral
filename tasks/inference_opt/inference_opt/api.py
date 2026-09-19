@@ -133,7 +133,7 @@ class StudentClient(Protocol):
         prompts: Sequence[Prompt],
         **kwargs: Any,
     ) -> list[str]:
-        """Complete several prompts concurrently. Charges ``len(prompts)`` calls."""
+        """Complete several prompts. Charges ``len(prompts)`` calls."""
         ...
 
     @property
