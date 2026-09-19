@@ -48,19 +48,17 @@ N_TEST = 30
 def _task(benchmark: str, models: list[str], level: int) -> dict:
     joint = len(models) > 1
     suffix = "".join(model.rsplit("_", 1)[-1] for model in models)
-    labels = [model.upper() for model in models]
     task_id = f"{benchmark}_{suffix}"
     calls_per_question = 8
     final_calls = N_TEST * 12
 
     if joint:
-        name = f"Joint {benchmark} improvement on {' and '.join(labels)}"
+        name = f"Joint {benchmark} improvement on two student models"
         description = (
             f"Build and submit one inference-time policy for "
             f"{BENCHMARK_LABELS[benchmark]}. The same policy is evaluated against "
-            f"the frozen students {' and '.join(labels)}. "
-            f"You are scored on the smaller of the two improvements, so the policy "
-            f"must help both models, not trade one off against the other."
+            "two frozen student models. You are scored on the smaller improvement, "
+            "so the policy must help both models."
         )
     else:
         name = f"Improve {benchmark}"

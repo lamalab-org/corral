@@ -1,4 +1,4 @@
-"""The policy contract: discovery, manifests, and backwards compatibility."""
+"""Tests for policy loading and validation."""
 
 from __future__ import annotations
 

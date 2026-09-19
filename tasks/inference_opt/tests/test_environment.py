@@ -62,7 +62,7 @@ class TestToolSurface:
             "compare_runs", "get_budget", "submit_policy",
         } <= set(tools)
 
-    def test_inference_tools_are_trusted_for_the_first_iteration(self, environments):
+    def test_inference_tools_are_trusted(self, environments):
         """The environment uses trusted tools and committed session state."""
         tools = environments["gsm8k_a"].tools
         trusted = {name for name, tool in tools.items() if getattr(tool, "trusted", False)}
@@ -87,11 +87,11 @@ class TestPrompt:
         prompt = environment.current_task.prompt_fn(environment, ExecutionState)
         assert "submit_answer" in prompt
         assert "modify model weights" in prompt
-        assert "student client" in prompt
+        assert "frozen student model" in prompt
         assert "gsm8k" in prompt
 
     def test_prompt_does_not_name_strategies(self, environments):
-        """Which strategies the agent reaches for is what we are measuring."""
+        """The prompt leaves strategy choice to the policy."""
         from corral.core.state import ExecutionState
 
         environment = environments["gsm8k_a"]

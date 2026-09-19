@@ -20,10 +20,10 @@ modify model weights. You can change the prompts, how many samples you draw, how
 they are combined, whether one call checks another, what is remembered between
 questions, or any strategy you can come up with.
 
-You write that as a Python policy in `{policy_dir}/policy.py` and `guide/policy_api.md` has the contract details.
+Write it as a Python policy in `{policy_dir}/policy.py`. The API is documented in `guide/policy_api.md`.
 
 Return the answer marker required by the benchmark scorer: use `ANSWER: <answer>` for every benchmark except ChemBench, which uses `[ANSWER]<answer>[/ANSWER]`.
-Evals parses and grades these markers.
+The scorer parses and grades these markers.
 
 Benchmark: {benchmark}
 Student model(s): {models}
@@ -31,10 +31,10 @@ Policy API: {policy_api}
 Train questions: {n_train} (labels revealed a few at a time)
 Test questions: {n_test} (held out; you never should see these or their answers)
 
-## How you are scored
+## Scoring
 
 - Your submitted policy is run on the held-out test split, and your score is the improvement over the student's measured zero-shot baseline on those same questions.
-- If the task involve two student models score the *smaller* of the two models' improvements
+- For two student models, the score is the smaller improvement.
 
 
 ## Budget
@@ -43,10 +43,6 @@ Test questions: {n_test} (held out; you never should see these or their answers)
 
 Every experiment costs real inference. `dry_run_policy` is much cheaper than
 `evaluate_candidate` and catches the errors that would otherwise waste one.
-
-## The one hard rule
-
-Your policy should use the student client it is given (`ctx.student`) for model inference.
 
 ## Submitting
 
@@ -82,7 +78,7 @@ def task_prompt(env: Environment, state: ExecutionState) -> str:
         description=task.description,
         benchmark=config.get("benchmark", "?"),
         models=(
-            ", ".join(model.upper() for model in config.get("models", []))
+            "two frozen student models"
             if len(config.get("models", [])) > 1
             else "one frozen student model"
         ),

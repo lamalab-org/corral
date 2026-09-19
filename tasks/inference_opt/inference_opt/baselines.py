@@ -88,7 +88,7 @@ def headroom_verdict(accuracy: float, chance: float) -> str:
     The go/no-go gate. A pair at the ceiling has nothing left to win; one at the
     floor cannot be climbed off, and "improvement over baseline" does not rescue
     it — 0.17 to 0.17 is noise, not a result. Either way the task measures nothing
-    and should not ship.
+    and are not part of the packaged task data.
     """
     if 1.0 - accuracy < 0.15:
         return "ceiling"

@@ -63,8 +63,7 @@ def load_tasks_from_json(
             prompt_fn=task_prompt,
             setup_fn=_prepare_workspace,
             # The scorer needs the path resolved against the re-materialised
-            # workspace; that resolution is the only channel telling it where
-            # the agent's files ended up.
+            # workspace so the scorer can find the submitted files.
             resolve_answer=True,
         )
     return tasks

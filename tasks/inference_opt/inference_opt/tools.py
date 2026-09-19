@@ -291,7 +291,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             served_name=model_specs.get(models[0], "").split("/")[-1] or None,
         )
         return _compact(
-            {"model": models[0], "completions": completions},
+            {"model": "student", "completions": completions},
             f"Student returned {len(completions)} completion(s).",
             ledger,
         )

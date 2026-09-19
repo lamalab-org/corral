@@ -26,9 +26,9 @@ the final scorer. It does not contain session history.
 ## Corral state
 
 `InferenceOptEnvironment` is stateless. Corral passes the current
-`ExecutionState` to each tool call. Inference-opt copies the hidden
-`inference_state` mapping, passes the copy to the tool, and returns the updated
-mapping in `ToolExecutionResult.environment`.
+`ExecutionState` to each tool call. Inference-opt passes the hidden
+`inference_state` mapping to the tool and returns the updated mapping in
+`ToolExecutionResult.environment`.
 
 Corral commits that environment update with the tool result. This makes the
 session ledger available after replay, restart, and task branching.
@@ -84,8 +84,8 @@ run output because those artifacts are larger and useful to inspect directly.
 ## Tool flow
 
 1. Corral materializes `ExecutionState` and injects hidden arguments.
-2. `InferenceOptEnvironment.execute_tool()` copies `inference_state`.
-3. The trusted tool reads or updates the copy and writes any workspace artifacts.
+2. `InferenceOptEnvironment.execute_tool()` passes `inference_state` to the tool.
+3. The trusted tool updates the state and writes any workspace artifacts.
 4. The environment returns the tool result and updated environment namespace.
 5. Corral commits both as one transition.
 
@@ -96,7 +96,8 @@ is the isolation boundary; the evaluator does not create a second sandbox.
 ## Policy evaluation
 
 `evaluate_candidate()` writes public train questions to a private temporary file,
-loads targets separately, then runs `PolicyEvaluator`. The evaluator:
+loads targets separately, then runs `PolicyEvaluator` once per configured model.
+The evaluator:
 
 - loads the policy;
 - creates Inspect samples and scorers;

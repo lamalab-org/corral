@@ -22,8 +22,8 @@ class RunSpec:
 
     #: e.g. ``"vllm/Qwen/Qwen2.5-7B-Instruct"`` or ``"mockllm/model"``.
     model_spec: str = "mockllm/model"
-    #: Must end in ``/v1``. When this is unset for a ``vllm/`` model, inspect's
-    #: provider starts a *new* local vLLM server rather than using ours.
+    #: Must end in ``/v1``. When unset for a ``vllm/`` model, Inspect starts its
+    #: own local vLLM server.
     base_url: str | None = None
     api_key: str | None = None
 

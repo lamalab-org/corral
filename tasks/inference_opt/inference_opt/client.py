@@ -1,4 +1,4 @@
-"""Query the student directly from the controller-side probe tool."""
+"""Query student models from trusted environment tools."""
 
 from __future__ import annotations
 

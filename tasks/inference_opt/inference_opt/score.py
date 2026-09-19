@@ -135,7 +135,7 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
         models = list(config["models"])
         baselines = dict(config.get("baselines") or {})
 
-        # Configuration and dataset faults are ours, not the agent's.
+        # Configuration and dataset faults belong to the environment.
         if not models:
             raise HarnessError(f"task config for {benchmark} lists no models")
         missing_baselines = [model for model in models if model not in baselines]
@@ -255,9 +255,8 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                     report.write(workspace / "state" / "scoring_diagnostics.json")
                     return 0.0
 
-                # A policy that beat the baseline without calling the student at all
-                # did not do inference-time optimisation; it read something it should
-                # not have. The import allowlist should already have stopped this.
+                # A policy that beats the baseline without calling the student did
+                # not perform inference-time optimisation.
                 if summary.calls_used == 0 and accuracy > baseline_value:
                     report.outcome = ScoreOutcome.SUSPECTED_CHEATING
                     report.notes.append(
