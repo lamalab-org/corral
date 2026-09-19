@@ -197,9 +197,9 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                     # The test allowance is per model, so a policy cannot starve one
                     # model to buy compute for the other and game the level-2 `min`.
                     total_calls=int(config["final_max_student_calls"]),
-                    max_calls_per_question=int(
-                        config.get("final_max_calls_per_question", 12)
-                    ),
+                    # The total budget is the only final allocation limit. The
+                    # policy manifest may still define its own per-question cap.
+                    max_calls_per_question=int(config["final_max_student_calls"]),
                     setup_calls=int(config.get("final_setup_calls", 0)),
                     benchmark=benchmark,
                     split="test",

@@ -110,7 +110,6 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
     spec = BudgetSpec.from_mapping(config.get("budget"))
     model_specs = dict(config.get("model_specs") or {})
     base_urls = dict(config.get("base_urls") or {})
-    max_calls_per_question = int(config.get("max_calls_per_question", 8))
 
     def _ledger(inference_state: Any) -> StateLedger:
         return StateLedger(inference_state or {}, spec)
@@ -132,7 +131,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             model_spec=model_specs.get(model, model),
             base_url=base_urls.get(model),
             total_calls=total_calls,
-            max_calls_per_question=max_calls_per_question,
+            # The policy manifest controls per-question spending. The task
+            # supplies only the total budget for this run.
+            max_calls_per_question=max(1, total_calls),
             setup_calls=int(config.get("setup_calls", 0)),
             revealed_path=str(Path(work_dir) / "revealed" / "train_revealed.jsonl"),
             benchmark=benchmark,
@@ -327,14 +328,15 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         out = _run_dir(work_dir, run_id)
         questions = out / "questions.jsonl"
         n_items = _write_questions(benchmark, "train", questions, only=wanted)
-        budgeted = min(n_items * max_calls_per_question, 32)
+        budgeted = min(32, ledger.remaining()["student_calls"])
         ledger.reserve(debug_runs=1, calls=budgeted)
 
         run_spec = _spec_for(
             work_dir, run_id, policy_dir, questions, models[0], budgeted, "train"
         )
         summary = PolicyEvaluator().run(run_spec)
-        ledger.refund(calls=max(0, budgeted - summary.calls_used))
+        used = summary.calls_used + summary.setup_calls_used
+        ledger.refund(calls=max(0, budgeted - used))
 
         predictions = []
         predictions_path = Path(run_spec.predictions_path)
@@ -416,19 +418,19 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         out = _run_dir(work_dir, run_id)
         questions = out / "questions.jsonl"
         n_items = _write_questions(benchmark, "train", questions)
-        budgeted = min(
-            n_items * max_calls_per_question,
-            ledger.remaining()["student_calls"],
-        )
-        ledger.reserve(experiments=1, calls=budgeted)
+        model_budget = ledger.remaining()["student_calls"] // len(models)
+        reserved = model_budget * len(models)
+        ledger.reserve(experiments=1, calls=reserved)
 
         results: dict[str, Any] = {}
         deltas = []
+        calls_used = 0
         for model in models:
             run_spec = _spec_for(
-                work_dir, run_id, policy_dir, questions, model, budgeted, "train"
+                work_dir, run_id, policy_dir, questions, model, model_budget, "train"
             )
             summary = PolicyEvaluator().run(run_spec)
+            calls_used += summary.calls_used + summary.setup_calls_used
             predictions_path = Path(run_spec.predictions_path)
             predictions = (
                 [
@@ -461,6 +463,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "error": summary.error[:300],
                 "by_topic": outcome.by_category(),
             }
+
+        ledger.refund(calls=max(0, reserved - calls_used))
 
         worst = min(deltas) if deltas else 0.0
         record = RunRecord(

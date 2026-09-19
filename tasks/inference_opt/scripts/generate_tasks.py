@@ -57,13 +57,14 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
     # Test-time allowance is per model, so a joint policy cannot starve one model
     # to buy compute for the other and game the level-2 minimum.
     calls_per_question = 8
-    final_calls = N_TEST * calls_per_question
+    final_calls = N_TEST * 12
 
     if joint:
         name = f"Joint {benchmark} improvement on {' and '.join(labels)}"
         description = (
-            f"Build one shared inference-time policy that improves the frozen "
-            f"students {' and '.join(labels)} on {BENCHMARK_LABELS[benchmark]}. "
+            f"Build and submit one inference-time policy for "
+            f"{BENCHMARK_LABELS[benchmark]}. The same policy is evaluated against "
+            f"the frozen students {' and '.join(labels)}. "
             f"You are scored on the smaller of the two improvements, so the policy "
             f"must help both models, not trade one off against the other."
         )
@@ -95,8 +96,6 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
             "baseline_items": {},
             "model_specs": {},
             "base_urls": {},
-            "max_calls_per_question": calls_per_question,
-            "final_max_calls_per_question": 12,
             "final_max_student_calls": final_calls,
             "final_setup_calls": 0,
             "setup_calls": 20,

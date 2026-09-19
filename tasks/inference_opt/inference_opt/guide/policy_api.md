@@ -72,7 +72,7 @@ All keys optional; unknown keys are rejected so a typo cannot silently do nothin
 | --- | --- | --- |
 | `name` | `"policy"` | label in diagnostics |
 | `memory` | `"none"` | `"shared"` enables `ctx.memory` |
-| `max_calls_per_question` | `8` | your own cap; the task cap still applies |
+| `max_calls_per_question` | `8` | your per-question cap; the run budget still applies |
 | `setup_calls` | `0` | calls reserved for `setup` |
 | `max_tokens_per_call` | `2048` | clamped by the task |
 | `components` | `()` | `[{"name": "critic", "kind": "critic"}]`, for diagnostics |
