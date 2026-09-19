@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from inference_opt.datasets import write_jsonl
-from inference_opt.runner import run_in_process
-from inference_opt.runner.spec import RunSpec
+from inference_opt.eval_runner import run_in_process
+from inference_opt.eval_runner.spec import RunSpec
 
 QUESTIONS = [
     {
@@ -169,7 +169,7 @@ class TestEndToEnd:
             )
         }
         # The policy echoed the revealed gold answer "2", proving setup ran and
-        # saw the labelled example. The runner preserves that raw completion;
+        # saw the labelled example. The evaluator preserves that raw completion;
         # Inspect's choice scorer grades it incorrect because "2" is not a letter.
         assert rows["gsm8k:q1"] == "ANSWER: 2"
         assert rows["gsm8k:q2"] == "ANSWER: 2"
@@ -219,7 +219,7 @@ class TestFailureHandling:
 
 class TestEnvironmentScrubbing:
     def test_provider_credentials_are_removed(self, monkeypatch):
-        from inference_opt.runner.__main__ import scrub_environment
+        from inference_opt.eval_runner.__main__ import scrub_environment
 
         monkeypatch.setenv("OPENAI_API_KEY", "secret")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")

@@ -7,8 +7,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from inference_opt.runner.__main__ import run
-from inference_opt.runner.spec import RunSpec, RunSummary
+from inference_opt.eval_runner.__main__ import run
+from inference_opt.eval_runner.spec import RunSpec, RunSummary
 
 __all__ = ["PolicyEvaluator"]
 

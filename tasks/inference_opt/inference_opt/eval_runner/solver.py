@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from inference_opt.policy import LoadedPolicy
-    from inference_opt.runner.runtime import RunRuntime
+    from inference_opt.eval_runner.runtime import RunRuntime
 
 __all__ = ["policy_solver", "question_from_state", "unwrap_answer"]
 

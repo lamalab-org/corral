@@ -55,7 +55,7 @@ Running the task outside Docker does not provide the intended safety boundary.
 - `inference_opt/tools.py`: trusted teacher-facing tools.
 - `inference_opt/budget.py`: local meters and `StateLedger`.
 - `inference_opt/policy.py` and `api.py`: policy loading and policy/client contract.
-- `inference_opt/runner/`: policy evaluator, Inspect adapter, runtime, and summaries.
+- `inference_opt/eval_runner/`: policy evaluator, Inspect adapter, runtime, and summaries.
 - `inference_opt/outcomes.py`: Inspect-log outcome parsing.
 - `inference_opt/score.py`: held-out scoring and baseline delta.
 - `inference_opt/datasets.py`: packaged questions and targets.

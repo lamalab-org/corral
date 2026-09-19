@@ -20,7 +20,7 @@ class Policy:
 `solve` returns the student's completion. Inspect Evals owns parsing and grading.
 Use `ANSWER: <answer>` for all benchmarks except ChemBench, which requires
 `[ANSWER]<answer>[/ANSWER]`. A structured `Answer(final=..., ...)` is also
-accepted and is formatted for the selected benchmark by the runner.
+accepted and is formatted for the selected benchmark by the evaluator.
 
 ### `question`
 

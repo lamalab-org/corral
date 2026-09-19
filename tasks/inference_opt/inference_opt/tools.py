@@ -14,8 +14,8 @@ from inference_opt.budget import BudgetSpec, RunRecord, StateLedger
 from inference_opt.client import probe_student
 from inference_opt.outcomes import read_outcomes
 from inference_opt.policy import PolicyError, discover_policy
-from inference_opt.runner import PolicyEvaluator
-from inference_opt.runner.spec import RunSpec
+from inference_opt.eval_runner import PolicyEvaluator
+from inference_opt.eval_runner.spec import RunSpec
 
 __all__ = ["create_tools"]
 

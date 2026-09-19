@@ -122,7 +122,7 @@ class LegacyPolicy:
 
 @dataclass(frozen=True, slots=True)
 class LoadedPolicy:
-    """A discovered policy plus everything the runner needs to execute it."""
+    """A discovered policy plus everything the evaluator needs to run it."""
 
     obj: Any
     manifest: PolicyManifest

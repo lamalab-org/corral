@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any
 
 from inference_opt import datasets
 from inference_opt.outcomes import read_outcomes
-from inference_opt.runner import PolicyEvaluator
-from inference_opt.runner.spec import RunSpec
+from inference_opt.eval_runner import PolicyEvaluator
+from inference_opt.eval_runner.spec import RunSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -183,7 +183,7 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
             n_items = _write_test_questions(benchmark, questions)
             report.n_test_items = n_items
 
-            runner = PolicyEvaluator()
+            evaluator = PolicyEvaluator()
             deltas: dict[str, float] = {}
 
             for model in models:
@@ -204,7 +204,7 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                     benchmark=benchmark,
                     split="test",
                 )
-                summary = runner.run(spec)
+                summary = evaluator.run(spec)
 
                 if summary.error and not summary.ok and summary.n_answered == 0:
                     lowered = summary.error.lower()

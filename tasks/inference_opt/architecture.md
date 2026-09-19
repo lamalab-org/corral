@@ -104,7 +104,7 @@ task-local file, then runs `PolicyEvaluator`. The evaluator:
 - writes predictions, summaries, and Inspect logs.
 
 The tool stores a compact `RunRecord` in the session ledger and keeps detailed
-output under `runs/`. `dry_run_policy()` uses the same runner on a smaller set.
+output under `runs/`. `dry_run_policy()` uses the same evaluator on a smaller set.
 
 Final scoring runs the submitted policy on the held-out split and subtracts the
 stored zero-shot baseline. Level-2 tasks score the smaller improvement across
@@ -127,7 +127,7 @@ run sequentially so shared memory, budgets, and artifacts are deterministic.
 | Task and environment factory | `inference_opt/env.py` |
 | Teacher tools and ledger updates | `inference_opt/tools.py`, `inference_opt/budget.py` |
 | Policy contract and loading | `inference_opt/api.py`, `inference_opt/policy.py` |
-| Inspect adapter | `inference_opt/runner/` |
+| Inspect adapter | `inference_opt/eval_runner/` |
 | Final scoring | `inference_opt/score.py` |
 | Frozen data | `inference_opt/datasets.py` |
 | Environment base class | `src/corral/core/environment.py` |

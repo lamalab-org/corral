@@ -16,9 +16,9 @@ from typing import Any
 
 from inference_opt.api import BudgetExhausted, LabeledExample, Question
 from inference_opt.policy import PolicyError, discover_policy
-from inference_opt.runner.runtime import RunRuntime
-from inference_opt.runner.solver import policy_solver
-from inference_opt.runner.spec import RunSpec, RunSummary
+from inference_opt.eval_runner.runtime import RunRuntime
+from inference_opt.eval_runner.solver import policy_solver
+from inference_opt.eval_runner.spec import RunSpec, RunSummary
 from inference_opt.scoring_specs import spec_for
 
 #: Anything that could authenticate to another model provider is removed before a
@@ -190,7 +190,7 @@ def run(spec: RunSpec) -> RunSummary:
     # -- setup(), charged against its own allowance --------------------------
     if policy.has_setup and spec.setup_calls > 0:
         from inference_opt.budget import QuestionAllocator
-        from inference_opt.runner.runtime import QuestionMeter
+        from inference_opt.eval_runner.runtime import QuestionMeter
 
         setup_allocator = QuestionAllocator(
             total_calls=spec.setup_calls, questions=1, per_question_cap=spec.setup_calls
@@ -283,7 +283,7 @@ def run(spec: RunSpec) -> RunSummary:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        print("usage: python -m inference_opt.runner <spec.json>", file=sys.stderr)
+        print("usage: python -m inference_opt.eval_runner <spec.json>", file=sys.stderr)
         return 2
     scrub_environment()
     spec = RunSpec.read(argv[0])

@@ -10,8 +10,8 @@ from typing import Any
 
 from inference_opt import datasets
 from inference_opt.outcomes import read_outcomes
-from inference_opt.runner import PolicyEvaluator
-from inference_opt.runner.spec import RunSpec
+from inference_opt.eval_runner import PolicyEvaluator
+from inference_opt.eval_runner.spec import RunSpec
 
 __all__ = [
     "BASELINE_POLICY_SOURCE",

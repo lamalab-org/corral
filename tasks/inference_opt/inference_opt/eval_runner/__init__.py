@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from inference_opt.runner.evaluator import PolicyEvaluator
-from inference_opt.runner.spec import RunSpec, RunSummary
+from inference_opt.eval_runner.evaluator import PolicyEvaluator
+from inference_opt.eval_runner.spec import RunSpec, RunSummary
 
 __all__ = ["PolicyEvaluator", "RunSpec", "RunSummary", "run_in_process"]
 
