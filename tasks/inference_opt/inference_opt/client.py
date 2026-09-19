@@ -6,10 +6,28 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
 __all__ = ["StudentEndpoint", "endpoint_for", "probe_student"]
+
+
+def _check_url(url: str, api_key: str | None) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme == "https":
+        return
+    if parsed.scheme == "http" and not api_key:
+        return
+    if parsed.scheme == "http" and parsed.hostname in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }:
+        return
+    if api_key:
+        raise ValueError("refusing to send an API key over non-local HTTP")
+    raise ValueError(f"unsupported student endpoint scheme: {parsed.scheme or '<none>'}")
 
 
 def endpoint_for(model: str) -> str:
@@ -50,6 +68,7 @@ class StudentEndpoint:
         n: int = 1,
     ) -> list[str]:
         """Return ``n`` completions, or raise with a message worth reading."""
+        _check_url(self.completions_url, self.api_key)
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
