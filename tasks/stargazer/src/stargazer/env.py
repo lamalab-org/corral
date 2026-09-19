@@ -17,10 +17,10 @@ from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.task import EnvironmentSetup, TaskDefinition
 from corral.core.transition import ToolExecutionResult
 from corral.runtime import permissions
-from stargazer.docker import execute_analysis
+from corral.tools.python_repl import PythonREPLTool
 from stargazer.models import load_task
 from stargazer.score import make_stargazer_scorer, score_execution, submit_candidate
-from stargazer.tools import create_analysis_session, create_tools
+from stargazer.tools import create_tools
 
 if TYPE_CHECKING:
     from corral.core.state import ExecutionState
@@ -315,6 +315,8 @@ class StargazerEnvironment(Environment):
                 "Your next step MUST be submit_action now; skip summaries and extra analysis."
             )
         if tool.name == "PythonREPL":
+            if not isinstance(tool, PythonREPLTool):
+                raise TypeError("PythonREPL must use Corral's PythonREPLTool")
             observations = benchmark_task.observations
             public_data = {
                 "times_days": observations.times_days,
@@ -334,31 +336,33 @@ class StargazerEnvironment(Environment):
                 )
                 else None
             )
-            if history is not None:
-                public_data["history"] = history
+            namespace_updates = {"history": history} if history is not None else None
             if permissions.enabled():
-                result = execute_analysis(
+                result = tool.execute_repl(
                     code=arguments["input_code"],
-                    public_data=public_data,
+                    initial_data=public_data,
                     checkpoint=hidden["analysis_session"],
                     workspace=self.workspace_path,
+                    namespace_updates=namespace_updates,
                 )
-                content = result["output"]
-                hidden["analysis_session"] = result["checkpoint"]
-                submission["protocol_ack"] = result["protocol_ack"]
+                content = result.output
+                hidden["analysis_session"] = result.checkpoint
+                submission["protocol_ack"] = bool(
+                    result.exports.get("_protocol_guide_ack", False)
+                )
             else:
-                session = create_analysis_session(
-                    **{k: v for k, v in public_data.items() if k != "history"}
-                )
+                session = tool.create_session(public_data)
                 try:
                     session.restore(hidden["analysis_session"])
                     try:
                         content = session.execute(
-                            arguments["input_code"], history=history
+                            arguments["input_code"], namespace_updates
                         )
                     except TimeoutError as exc:
                         content = f"AnalysisTimeoutError: {exc}"
-                    submission["protocol_ack"] = session.protocol_acknowledged()
+                    submission["protocol_ack"] = bool(
+                        session.exports().get("_protocol_guide_ack", False)
+                    )
                     hidden["analysis_session"] = session.snapshot()
                 finally:
                     session.close()

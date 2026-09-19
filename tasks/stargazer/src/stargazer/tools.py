@@ -3,266 +3,33 @@
 from __future__ import annotations
 
 import ast
-import base64
 import builtins
 import importlib
-import io
-import multiprocessing as mp
-import os
-import re
-import tempfile
-import threading
-import traceback
 import types
-from contextlib import redirect_stdout, suppress
 from typing import Any
 
-import cloudpickle
 import numpy as np
 
 from corral.core.tool import Tool
+from corral.runtime import python_repl as _python_repl
+from corral.tools.python_repl import create_python_repl_tool
 
-try:
-    import resource
-except ImportError:  # pragma: no cover - unavailable on Windows
-    resource = None  # type: ignore[assignment]
-
-_MAX_OUTPUT_CHARS = 5_000 + len("...(output truncated)")
-_MAX_CODE_CHARS = 50_000
-_WORKER_ADDRESS_SPACE_BYTES = 2 * 1024**3
+# Compatibility aliases keep old analysis checkpoints and task imports usable.
+_MAX_CODE_CHARS = _python_repl.DEFAULT_MAX_CODE_CHARS
+_MAX_OUTPUT_CHARS = _python_repl.DEFAULT_MAX_OUTPUT_CHARS
+PythonREPLSession = _python_repl.PythonREPLSession
+_restore_function_state = _python_repl._restore_function_state
+_restore_session_function = _python_repl._restore_session_function
+_apply_worker_resource_limits = _python_repl.apply_worker_resource_limits
+execute_in_namespace = _python_repl.execute_in_namespace
+sanitize_input = _python_repl.sanitize_input
+_snapshot_namespace = _python_repl.snapshot_namespace
+wrap_last_line_with_print = _python_repl.wrap_last_line_with_print
 
 
 def _restore_module_proxy(name: str) -> types.ModuleType:
     """Restore legacy checkpoints as ordinary modules, without restrictions."""
     return baselines if name == "baselines" else importlib.import_module(name)
-
-
-def _restore_session_function(
-    code: types.CodeType,
-    namespace: dict[str, Any],
-    session_builtins: dict[str, Any],
-    closure: tuple[types.CellType, ...] | None,
-) -> types.FunctionType:
-    # Functions must retain their session globals across checkpoints. Upgrade
-    # legacy builtin dictionaries before FunctionType captures their reference.
-    session_builtins.update(_session_builtins())
-    namespace["__builtins__"] = session_builtins
-    return types.FunctionType(code, namespace, closure=closure)
-
-
-def _restore_function_state(function: types.FunctionType, state: tuple) -> None:
-    attributes, closure = state
-    for name, value in attributes.items():
-        setattr(function, name, value)
-    if closure is not None:
-        for target, source in zip(function.__closure__, closure, strict=True):
-            with suppress(ValueError):  # A closure cell can be empty.
-                target.cell_contents = source.cell_contents
-
-
-class _SessionPickler(cloudpickle.CloudPickler):
-    """Keep notebook functions attached to the restored session namespace."""
-
-    def __init__(self, file: io.BytesIO, namespace: dict[str, Any]):
-        super().__init__(file)
-        self.namespace = namespace
-        self.closure_cells: dict[int, types.CellType] = {}
-
-    def reducer_override(self, value: Any) -> Any:
-        if (
-            isinstance(value, types.FunctionType)
-            and value.__globals__.get("__name__") == "__stargazer_session__"
-        ):
-            attributes = {
-                name: getattr(value, name)
-                for name in (
-                    "__name__",
-                    "__qualname__",
-                    "__defaults__",
-                    "__kwdefaults__",
-                    "__annotations__",
-                    "__dict__",
-                    "__module__",
-                    "__doc__",
-                )
-            }
-            # Shared nonlocal variables need shared cells. Empty placeholders
-            # allow a closure to refer recursively to its own function.
-            closure = (
-                tuple(
-                    self.closure_cells.setdefault(id(cell), types.CellType())
-                    for cell in value.__closure__
-                )
-                if value.__closure__ is not None
-                else None
-            )
-            return (
-                _restore_session_function,
-                (
-                    value.__code__,
-                    value.__globals__,
-                    value.__globals__["__builtins__"],
-                    closure,
-                ),
-                (attributes, value.__closure__),
-                None,
-                None,
-                _restore_function_state,
-            )
-        return super().reducer_override(value)
-
-
-def _snapshot_namespace(namespace: dict[str, Any]) -> str:
-    output = io.BytesIO()
-    # Preserve the legacy module RNG as well as Generator objects in locals.
-    random_state = np.random.get_state()  # noqa: NPY002
-    _SessionPickler(output, namespace).dump((namespace, random_state))
-    return base64.b64encode(output.getvalue()).decode("ascii")
-
-
-class AnalysisSession:
-    """Handle for a persistent, public-data-only analysis worker process."""
-
-    def __init__(self, public_data: dict[str, Any]):
-        self._public_data = public_data
-        self._connection: Any = None
-        self._process: Any = None
-        self._worker_directory: tempfile.TemporaryDirectory[str] | None = None
-        self._lock = threading.RLock()
-
-    def _stop_worker(self) -> None:
-        connection, process = self._connection, self._process
-        worker_directory = self._worker_directory
-        self._connection = None
-        self._process = None
-        self._worker_directory = None
-        if connection is not None:
-            with suppress(OSError, ValueError):
-                connection.close()
-        if process is not None:
-            try:
-                if process.is_alive():
-                    process.terminate()
-                process.join(timeout=1.0)
-                if process.is_alive() and hasattr(process, "kill"):
-                    process.kill()
-                    process.join(timeout=1.0)
-                process.close()
-            except (AssertionError, OSError, ValueError):
-                pass
-        if worker_directory is not None:
-            with suppress(OSError, PermissionError):
-                worker_directory.cleanup()
-
-    def _start_worker(self) -> None:
-        self._stop_worker()
-        context = mp.get_context("spawn")
-        parent_connection, child_connection = context.Pipe(duplex=True)
-        worker_directory = tempfile.TemporaryDirectory(
-            prefix="corral-stargazer-analysis-"
-        )
-        process = context.Process(
-            target=_analysis_worker,
-            args=(child_connection, self._public_data, worker_directory.name),
-            daemon=True,
-            name="stargazer-analysis",
-        )
-        try:
-            process.start()
-        except BaseException:
-            parent_connection.close()
-            child_connection.close()
-            worker_directory.cleanup()
-            raise
-        child_connection.close()
-        self._connection = parent_connection
-        self._process = process
-        self._worker_directory = worker_directory
-        try:
-            ready = parent_connection.recv()
-        except EOFError as exc:
-            self._stop_worker()
-            raise RuntimeError("The Stargazer analysis worker failed to start") from exc
-        if ready != {"status": "ready"}:
-            self._stop_worker()
-            raise RuntimeError(f"The Stargazer analysis worker failed: {ready!r}")
-
-    def execute(self, code: str, history: list[dict[str, Any]] | None = None) -> str:
-        """Run code in the persistent worker without a per-call time limit."""
-        if len(code) > _MAX_CODE_CHARS:
-            raise ValueError(
-                f"Analysis code is limited to {_MAX_CODE_CHARS:,} characters"
-            )
-        return str(
-            self._request({"command": "execute", "code": code, "history": history})
-        )
-
-    def protocol_acknowledged(self) -> bool:
-        """Read only the protocol boolean from the worker, never decode its checkpoint."""
-        if self._process is None:
-            return False
-        return bool(self._request({"command": "protocol_ack"}))
-
-    def snapshot(self) -> str | None:
-        """Export JSON-compatible state; a stopped worker is empty."""
-        with self._lock:
-            if self._process is None or not self._process.is_alive():
-                return None
-            return self._request({"command": "snapshot"})
-
-    def restore(self, checkpoint: str | None) -> None:
-        """Restore state in an isolated worker, never unpickling in the controller."""
-        with self._lock:
-            self._stop_worker()
-            if checkpoint is not None:
-                self._request({"command": "restore", "checkpoint": checkpoint})
-
-    def _request(self, request: dict[str, Any]) -> Any:
-        with self._lock:
-            process = self._process
-            if process is None or not process.is_alive():
-                self._start_worker()
-            connection = self._connection
-            assert connection is not None
-            try:
-                connection.send(request)
-                response = connection.recv()
-            except (BrokenPipeError, EOFError, OSError) as exc:
-                self._stop_worker()
-                raise RuntimeError(
-                    "The analysis worker stopped unexpectedly; "
-                    "the persistent session was reset"
-                ) from exc
-            except BaseException:
-                self._stop_worker()
-                raise
-            if isinstance(response, dict) and "error" in response:
-                self._stop_worker()
-                raise RuntimeError(response["error"])
-            if not isinstance(response, dict) or "result" not in response:
-                self._stop_worker()
-                raise RuntimeError(
-                    "The analysis worker returned an invalid response; "
-                    "the persistent session was reset"
-                )
-            return response["result"]
-
-    def close(self) -> None:
-        """Release the worker process and its private IPC channel."""
-        with self._lock:
-            connection = self._connection
-            process = self._process
-            if connection is not None and process is not None and process.is_alive():
-                try:
-                    connection.send({"command": "close"})
-                    process.join(timeout=1.0)
-                except (BrokenPipeError, OSError):
-                    pass
-            self._stop_worker()
-
-    def __del__(self) -> None:
-        with suppress(Exception):
-            self._stop_worker()
 
 
 def _session_import(
@@ -338,153 +105,42 @@ def _create_worker_namespace(public_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _apply_worker_resource_limits() -> None:
-    """Bound pathological allocations where POSIX address-space limits exist."""
-    if resource is None:
-        return
-    try:
-        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-        limit = _WORKER_ADDRESS_SPACE_BYTES
-        if hard != resource.RLIM_INFINITY:
-            limit = min(limit, hard)
-        if soft == resource.RLIM_INFINITY or soft > limit:
-            resource.setrlimit(resource.RLIMIT_AS, (limit, hard))
-    except (OSError, ValueError):
-        # Windows lacks `resource`; some macOS/container policies reject
-        # RLIMIT_AS changes. Docker still enforces its configured memory budget.
-        return
-
-
-def _analysis_worker(
-    connection: Any,
-    public_data: dict[str, Any],
-    working_directory: str,
-) -> None:
-    """Serve persistent executions in a process that never receives task truth."""
-
-    try:
-        os.chdir(working_directory)
-        os.environ.clear()
-        namespace = _create_worker_namespace(public_data)
-        _apply_worker_resource_limits()
-        connection.send({"status": "ready"})
-        while True:
-            try:
-                request = connection.recv()
-            except EOFError:
-                return
-            if not isinstance(request, dict):
-                connection.send({"result": "Invalid analysis-worker request."})
-                continue
-            command = request.get("command")
-            if command == "close":
-                return
-            if command == "protocol_ack":
-                connection.send(
-                    {"result": bool(namespace.get("_protocol_guide_ack", False))}
-                )
-                continue
-            if command in {"snapshot", "restore"}:
-                try:
-                    if command == "snapshot":
-                        checkpoint = _snapshot_namespace(namespace)
-                        connection.send({"result": checkpoint})
-                    else:
-                        # Checkpoints may contain Python objects, so decoding is
-                        # confined to this public-data-only worker. Local
-                        # execution is intended for trusted debugging only.
-                        namespace, random_state = cloudpickle.loads(
-                            base64.b64decode(request["checkpoint"], validate=True)
-                        )
-                        np.random.set_state(random_state)  # noqa: NPY002
-                        connection.send({"result": None})
-                except BaseException:
-                    connection.send({"error": traceback.format_exc(limit=8)})
-                continue
-            if command != "execute" or not isinstance(request.get("code"), str):
-                connection.send({"result": "Invalid analysis-worker request."})
-                continue
-            try:
-                if request.get("history") is not None:
-                    namespace["history"] = request["history"]
-                result = _execute_persistent(request["code"], namespace)
-            except BaseException:
-                result = traceback.format_exc(limit=8)
-            if len(result) > _MAX_OUTPUT_CHARS:
-                result = result[:_MAX_OUTPUT_CHARS] + "\n... output truncated"
-            connection.send({"result": result})
-    except BaseException:
-        with suppress(BaseException):
-            connection.send({"status": "error", "error": traceback.format_exc(limit=8)})
-    finally:
-        connection.close()
-
-
-def _format_execution_error(error: Exception, code: str) -> str:
-    result = "Error Traceback:\n"
-    lines = code.split("\n")
-    for frame in traceback.extract_tb(error.__traceback__):
-        if frame.filename == "<string>":
-            result += f"  line {frame.lineno}:\n"
-            if 0 < frame.lineno <= len(lines):
-                result += f"    {lines[frame.lineno - 1].strip()}\n"
-    return result + f"{type(error).__name__}: {error}"
-
-
 def _execute_persistent(code: str, namespace: dict[str, Any]) -> str:
-    """Run the original REPL protocol inside the isolated analysis worker."""
+    """Apply Stargazer policy around Corral's generic namespace executor."""
     if "matplotlib" in code:
         return "No plotting is allowed. Code was not executed since it contained 'matplotlib'."
+    namespace["__builtins__"].update(_session_builtins())
     cleaned = wrap_last_line_with_print(sanitize_input(code))
-    # Stargazer executes each call in merged globals/locals. Functions retain
-    # that call's globals, including after Corral checkpoint restoration.
+    # Preserve Stargazer's historical cell-global behavior: functions retain
+    # the bindings from their defining cell, while mutable values remain shared.
     execution_namespace = dict(namespace)
     conflict = detect_shadowing_callable_conflict(cleaned, execution_namespace)
     if conflict:
         return conflict
-
-    class CappedOutput(io.StringIO):
-        truncated = False
-
-        def write(self, value: str) -> int:
-            remaining = 5000 - self.tell()
-            if remaining > 0:
-                super().write(value[:remaining])
-            self.truncated |= len(value) > remaining
-            return len(value)
-
-    output = CappedOutput()
-    execution_namespace["__builtins__"].update(_session_builtins())
-    result = None
-    try:
-        with redirect_stdout(output):
-            exec(cleaned, execution_namespace)
-    except ModuleNotFoundError as exc:
-        if exc.name in PRELOADED_VARS:
-            name = exc.name
-            result = (
-                f"ModuleNotFoundError: No module named '{name}'\n\n"
-                f"HINT: `{name}` is a PRE-LOADED VARIABLE, not a module.\n"
-                f"Do NOT import it. Just use it directly:\n"
-                f"  CORRECT: print({name})\n"
-                f"  WRONG:   from {name} import {name}"
-            )
-        else:
-            result = _format_execution_error(exc, cleaned)
-    except Exception as exc:
-        result = _format_execution_error(exc, cleaned)
-    finally:
-        namespace.update(execution_namespace)
-    if result is None:
-        result = output.getvalue()
-        if output.truncated:
-            result += "...(output truncated)"
-    elif len(result) > 5000:
-        result = result[:5000] + "...(output truncated)"
-    return (
-        result
-        or "No output. You likely forgot to print the result. Please use `print(...)` to see any output."
+    result = execute_in_namespace(
+        cleaned, execution_namespace, preloaded_names=tuple(PRELOADED_VARS)
     )
+    namespace.update(execution_namespace)
+    return result
+
+
+class AnalysisSession(PythonREPLSession):
+    """Backward-compatible Stargazer adapter over Corral's generic REPL."""
+
+    def __init__(self, public_data: dict[str, Any]):
+        super().__init__(
+            public_data,
+            namespace_factory=_create_worker_namespace,
+            code_executor=_execute_persistent,
+            export_names=("_protocol_guide_ack",),
+        )
+
+    def execute(self, code: str, history: list[dict[str, Any]] | None = None) -> str:
+        updates = {"history": history} if history is not None else None
+        return super().execute(code, updates)
+
+    def protocol_acknowledged(self) -> bool:
+        return bool(self.exports().get("_protocol_guide_ack", False))
 
 
 class StargazerTool(Tool):
@@ -658,67 +314,6 @@ def baseline_one_sine(observation: dict[str, Any]) -> dict[str, Any]:
 baselines = types.ModuleType("baselines")
 baselines.baseline_null_model = baseline_null_model
 baselines.baseline_one_sine = baseline_one_sine
-
-
-def sanitize_input(query: str) -> str:
-    """Sanitize input to the Python REPL."""
-    query = re.sub(r"^(\s|`)*(?i:python)?\s*", "", query)
-    query = re.sub(r"(\s|`)*$", "", query)
-
-    result = []
-    i = 0
-    in_string = False
-    string_char = None
-
-    while i < len(query):
-        if not in_string:
-            if query[i] in "\"'":
-                in_string = True
-                string_char = query[i]
-                result.append(query[i])
-            elif i < len(query) - 1 and query[i : i + 2] == "\\n":
-                result.append("\n")
-                i += 1
-            else:
-                result.append(query[i])
-        else:
-            if query[i] == "\\" and i + 1 < len(query):
-                result.append(query[i : i + 2])
-                i += 1
-            elif query[i] == string_char:
-                in_string = False
-                result.append(query[i])
-            else:
-                result.append(query[i])
-        i += 1
-
-    return "".join(result)
-
-
-def _is_bare_expression(source: str) -> bool:
-    """True only when `source` is an expression, so wrapping it stays valid.
-
-    Statements such as `x=1`, `n+=1`, `arr[0]=1` and `pass` look like a single
-    word to the shape test below, but wrapping them produces either a keyword
-    argument to print() or a SyntaxError that discards the whole cell.
-    """
-    try:
-        ast.parse(source, mode="eval")
-    except SyntaxError:
-        return False
-    return True
-
-
-def wrap_last_line_with_print(code: str) -> str:
-    """If last line of code is a single bare expression then wrap it in print."""
-    lines = code.strip().split("\n")
-    last_line = lines[-1].strip()
-    if re.match(r"^[^\s,()]+$", last_line) and _is_bare_expression(last_line):
-        # Keep the original column: a dedented print() is either a SyntaxError
-        # inside a block or, worse, silently hoisted out of it.
-        indent = lines[-1][: len(lines[-1]) - len(lines[-1].lstrip())]
-        lines[-1] = f"{indent}print({last_line})"
-    return "\n".join(lines)
 
 
 def detect_shadowing_callable_conflict(code: str, namespace: dict) -> str | None:
@@ -902,12 +497,27 @@ def create_tools() -> dict[str, Tool]:
             },
         },
     ]
+    repl, submission = (entry["function"] for entry in definitions)
+    repl_tool = create_python_repl_tool(
+        name=repl["name"],
+        description=repl["description"],
+        argument_name="input_code",
+        argument_description=repl["parameters"]["properties"]["input_code"][
+            "description"
+        ],
+        namespace_factory=_create_worker_namespace,
+        code_executor=_execute_persistent,
+        synchronized_names=("history",),
+        export_names=("_protocol_guide_ack",),
+        # Preserve the Stargazer worker wire format during migration.
+        export_result_names={"_protocol_guide_ack": "protocol_ack"},
+    )
     return {
-        entry["function"]["name"]: StargazerTool(
-            name=entry["function"]["name"],
-            description=entry["function"]["description"],
-            params_json_schema=entry["function"]["parameters"],
+        repl_tool.name: repl_tool,
+        submission["name"]: StargazerTool(
+            name=submission["name"],
+            description=submission["description"],
+            params_json_schema=submission["parameters"],
             trusted=True,
-        )
-        for entry in definitions
+        ),
     }
