@@ -6,10 +6,14 @@ import argparse
 import hashlib
 import json
 import shutil
+import sys
 import urllib.request
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from zipfile import ZipFile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from asset_versions import asset_volume_names
 
 TASK_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = json.loads(Path(__file__).with_name("assets.json").read_text())
@@ -67,8 +71,8 @@ def upload_assets(source: Path) -> None:
     pending = []
     # Check every volume before uploading anything. Existing identical files
     # make setup repeatable; mismatches require an explicit operator decision.
-    for name in (*MANIFEST["archives"], "models"):
-        volume = modal.Volume.from_name(name, create_if_missing=True)
+    for name, volume_name in asset_volume_names(MANIFEST).items():
+        volume = modal.Volume.from_name(volume_name, create_if_missing=True)
         missing = []
         for path in sorted((source / name).rglob("*")):
             if not path.is_file():

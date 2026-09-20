@@ -4,25 +4,23 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
-from typing import ClassVar
+from typing import Any, ClassVar
 
-from corral_md.score import (
-    PACKAGE_DATA_ROOT,
-    check_cosine_similarity,
-    check_log,
-    check_msd,
-    check_multiple_trajectory_temp,
-    check_numerical,
-    check_phonon,
-    check_potential_file,
-    check_r2,
-    check_structure,
-    check_trajectory_temperature,
+from corral_md.modal_workspace import (
+    configured_app_name,
+    configured_release_id,
+    configured_volume_name,
+    pinned_release,
+    recovery_snapshot,
 )
+from corral_md.score import WorkflowScorer, check_level2_workflow
 from corral_md.submission import resolve_submission
+from corral_md.submission_examples import example_prompt, seed_examples
 from corral_md.tools import (
     build_execute_python_script_tool,
+    build_md_terminal_tool,
     build_run_lammps_tool,
+    build_run_verified_md_tool,
     convert_structure_to_lammps_data,
     get_nth_run_log,
     get_potential_metadata,
@@ -31,37 +29,30 @@ from corral_md.tools import (
     run_lammps,
     visualisation_tool,
 )
+from corral_md.workspace import MDWorkspaceFilesystem, local_path
 
 from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.events import ExecutionStarted
 from corral.core.state import ExecutionState
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
+from corral.core.workspace import WorkspaceState
 from corral.report.logging import event, exception_fields
 from corral.utils.context7_tools import get_library_documentation
 from corral.workspace import (
-    WorkspaceFilesystem,
     build_workspace_tools,
-    confine_workspace_path,
 )
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/corral_md")
+PACKAGE_DATA_ROOT = Path(__file__).resolve().parents[2] / "environments"
 
 SCORING_FUNCTIONS = {
-    "check_structure": check_structure,
-    "check_potential_file": check_potential_file,
-    "check_log": check_log,
-    "check_msd": check_msd,
-    "check_numerical": check_numerical,
-    "check_phonon": check_phonon,
-    "check_multiple_trajectory_temp": check_multiple_trajectory_temp,
-    "check_trajectory_temperature": check_trajectory_temperature,
-    "check_cosine_similarity": check_cosine_similarity,
-    "check_r2": check_r2,
+    "check_level2_workflow": check_level2_workflow,
 }
 
 
 def get_scoring_function(name: str, params: dict | None = None) -> Callable:
-    """Validate a scoring factory and its references before initializing it."""
+    """Validate and initialize a configured scoring factory."""
     fn = SCORING_FUNCTIONS.get(name)
     if fn is None:
         raise ValueError(f"Scoring function '{name}' not found in the registry")
@@ -126,11 +117,7 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
                 initial_input=initial_input,
                 prompt_fn=_md_task_prompt,
                 resolve_answer=False,
-                submission_resolver=(
-                    resolve_submission
-                    if scoring_fn_name != "check_potential_file"
-                    else None
-                ),
+                submission_resolver=resolve_submission,
             )
 
     return tasks
@@ -138,7 +125,7 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
 
 def _md_file_tools(workspace: str) -> dict[str, Tool]:
     """MD filesystem and LAMMPS tools bound to one local workspace."""
-    tools = build_workspace_tools(WorkspaceFilesystem(workspace))
+    tools = build_workspace_tools(MDWorkspaceFilesystem(workspace))
     return {
         **{
             name: tools[name]
@@ -153,23 +140,77 @@ def _md_file_tools(workspace: str) -> dict[str, Tool]:
             )
         },
         "library_docs": get_library_documentation,
+        "terminal": build_md_terminal_tool(workspace),
         "execute_python_script": build_execute_python_script_tool(workspace),
         # Overrides the statically selected tool with a workspace-aware variant
         # that handles Modal upload and download internally.
         "run_lammps": build_run_lammps_tool(workspace),
+        "run_verified_md": build_run_verified_md_tool(workspace),
     }
 
 
 class MolecularDynamicsEnvironment(Environment):
     """Confine every agent-controlled domain-tool path to this task workspace."""
 
+    def _ensure_seed_directories(self) -> None:
+        if self.workspace_path:
+            seed = json.loads(
+                Path(__file__).with_name("base_workspace.json").read_text()
+            )
+            for name in seed["directories"]:
+                (Path(self.workspace_path) / name).mkdir(parents=True, exist_ok=True)
+            scorer = self.current_task.scoring_fn
+            if isinstance(scorer, WorkflowScorer):
+                seed_examples(self.workspace_path, scorer.task_number)
+
+    def initial_event(self, **kwargs: Any) -> ExecutionStarted:
+        """Start the local workspace from the same seed as the Modal release."""
+        self._ensure_seed_directories()
+        started = super().initial_event(**kwargs)
+        release = configured_release_id()
+        if release is None:
+            return started
+        payload = started.model_dump(mode="python")
+        payload["runtime"]["metadata"]["corral_md_release_id"] = release
+        payload["runtime"]["metadata"]["corral_md_app_name"] = configured_app_name(
+            release
+        )
+        payload["runtime"]["metadata"]["corral_md_volume_name"] = (
+            configured_volume_name(release)
+        )
+        return type(started).model_validate(payload)
+
+    def prepare_workspace(self, workspace: WorkspaceState) -> None:
+        super().prepare_workspace(workspace)
+        if not workspace.files:
+            self._ensure_seed_directories()
+
+    def execute_tool(
+        self, state: ExecutionState, tool: Tool, arguments: dict[str, Any]
+    ) -> Any:
+        release = state.runtime.metadata.get("corral_md_release_id")
+        app_name = state.runtime.metadata.get("corral_md_app_name")
+        volume_name = state.runtime.metadata.get("corral_md_volume_name")
+        with (
+            pinned_release(
+                release if isinstance(release, str) else None,
+                app_name if isinstance(app_name, str) else None,
+                volume_name if isinstance(volume_name, str) else None,
+            ),
+            recovery_snapshot(state.workspace, self.workspace_manager),
+        ):
+            result = super().execute_tool(state, tool, arguments)
+            if isinstance(result, str) and self.workspace_path:
+                return result.replace(
+                    str(Path(self.workspace_path).resolve()), "/workspace"
+                )
+            return result
+
     _PATH_ARGUMENTS: ClassVar[dict[str, tuple[str, ...]]] = {
         "get_structure_from_mp_text": ("file_path",),
         "convert_structure_to_lammps_data": ("structure_path", "output_file"),
-        "run_lammps": ("input_file",),
         "get_nth_run_log": ("path", "save"),
         "keyword_log_extractor": ("path",),
-        "execute_python_script": ("script_path", "working_dir"),
         "visualisation_tool": ("path",),
     }
 
@@ -179,9 +220,9 @@ class MolecularDynamicsEnvironment(Environment):
             return parsed
         for argument in self._PATH_ARGUMENTS.get(tool_name, ()):
             value = parsed.get(argument)
-            if isinstance(value, str) and value:
+            if value is not None:
                 parsed[argument] = str(
-                    confine_workspace_path(
+                    local_path(
                         self.workspace_path,
                         value,
                         allow_root=argument == "working_dir",
@@ -199,6 +240,19 @@ Required submission format:
 {env.current_task.submission_format}
 
 """
+
+    scorer = env.current_task.scoring_fn
+    if isinstance(scorer, WorkflowScorer):
+        prompt += example_prompt(scorer.task_number, workspace=bool(env.workspace_path))
+        if scorer.task_number == 10:
+            prompt += (
+                "\nFor independently verifiable execution, run_verified_md accepts a JSON "
+                "configuration for the continuous aluminum Langevin cycle and saves its "
+                "states and thermal traces. You choose the timestep, friction, phase "
+                "durations and sampling. Include its run_id and action_id in your manifest, "
+                "then analyze the saved data. Other simulation methods remain allowed; "
+                "their execution provenance may need independent review.\n"
+            )
 
     prompt += "\nAvailable input data:\n"
 
@@ -218,19 +272,24 @@ Required submission format:
     if env.workspace_path:
         prompt += (
             "\nYou have an isolated task workspace. Filesystem and domain tools "
-            "resolve paths against it automatically. Always pass workspace-relative "
-            "POSIX paths such as `input/run.in`; never pass an absolute host path "
-            "to a workspace tool.\n\n"
+            "accept only absolute POSIX paths under /workspace, such as "
+            "`/workspace/input/run.in`. Relative paths (including `input/run.in`), "
+            "parent traversal, symbolic links and controller paths are forbidden. "
+            "Use /workspace/input for inputs, /workspace/scripts for code and "
+            "/workspace/output for results.\n\n"
             "### Important Resource and File Access Guidelines ###\n"
             "1. **Potential Files**:\n"
-            "   - All potentials are mounted read-only below /potentials/. Hence whenever working with potential files, always use absolute paths (eg. /potentials/SW/Si.sw) as all potential files are mounted at fixed locations. Otherwise, the simulation will fail due to wrong path for the potential.\n"
+            "   - All potentials are mounted read-only below /workspace/potentials/. Hence whenever working with potential files, always use absolute paths (eg. /workspace/potentials/SW/Si.sw) as all potential files are mounted at fixed locations. Otherwise, the simulation will fail due to wrong path for the potential.\n"
             "   - These files are *fully verified and correct*.\n"
             "   - You must **not attempt to read or parse them directly**.\n"
             "   - Reading them is unnecessary and will waste important computational resources.\n\n"
             "2. **Simulation Log Files**:\n"
             "   - These files are *very large* and should **not be directly parsed**.\n"
             "   - Direct parsing would cause excessive cost and resource usage.\n\n"
-            "Important: Files in /structures and /potentials should not be modified at any cost, including operations like copying or moving them. Doing this will immediately return in error.\n\n"
+            "Shared assets in /workspace/structures, /workspace/models and "
+            "/workspace/potentials are read-only. You may copy a supplied structure "
+            "into /workspace/input to work on it. Models are available to Python "
+            "at /workspace/models/teacher.model and /workspace/models/student.model.\n\n"
             "### Choosing a Simulation Engine ###\n"
             "If the task calls for a MACE-family potential/model, always conduct the "
             "MD simulation via an ASE Python script (execute_python_script), not LAMMPS. "
@@ -239,8 +298,8 @@ Required submission format:
             "### GPU Execution ###\n"
             "Set `use_gpu=True` in execute_python_script only for scripts that construct "
             "an ASE Calculator backed by a MACE model. Leave it False (default) for "
-            "everything else, including analysis and plotting — those run locally and "
-            "are faster and cheaper.\n\n"
+            "everything else, including analysis and plotting. CPU and GPU scripts "
+            "both run in isolated Modal sandboxes with /workspace as their working directory.\n\n"
             "### Simulation Logging Requirements ###\n"
             "For every simulation run involving any ensemble (e.g., NVT, NPT, NVE, etc.), if applicable, the log file **must** record the following quantities:\n"
             "   - Step\n"
@@ -306,18 +365,25 @@ def create_environments(
 
     try:
         if not json_path.exists():
-            raise FileNotFoundError(f"Task config not found: {json_path}")
-        tasks = load_tasks_from_json(json_path, work_dir)
-        environments = build_environments(
-            tasks,
-            base_work_dir=work_dir,
-            name=name,
-            toolset=Toolset(
-                pool=subtask_specific_tools,
-                common=taskgroup_common_tools or {},
-                workspace_factory=_md_file_tools,
-            ),
-            env_cls=MolecularDynamicsEnvironment,
+            if not subtask_level:
+                raise FileNotFoundError(f"Task config not found: {json_path}")
+            tasks = {}
+        else:
+            tasks = load_tasks_from_json(json_path, work_dir)
+        environments = (
+            build_environments(
+                tasks,
+                base_work_dir=work_dir,
+                name=name,
+                toolset=Toolset(
+                    pool=subtask_specific_tools,
+                    common=taskgroup_common_tools or {},
+                    workspace_factory=_md_file_tools,
+                ),
+                env_cls=MolecularDynamicsEnvironment,
+            )
+            if tasks
+            else {}
         )
     except Exception as exc:
         event(

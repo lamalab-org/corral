@@ -36,7 +36,12 @@ from corral.core.events import (
 from corral.core.state import ExecutionState, UsageState
 from corral.core.tool import ToolConnection, ToolResponse
 from corral.core.tool_catalog import ToolCatalogSnapshot
-from corral.core.transition import ToolEffects, execute_action, propose_action
+from corral.core.transition import (
+    ToolEffects,
+    ToolRecoveryPending,
+    execute_action,
+    propose_action,
+)
 from corral.observability import record_commit_safely
 from corral.persistence import CommitConflictError
 
@@ -689,6 +694,13 @@ class AgentSession:
                     with anyio.CancelScope(shield=True):
                         await asyncio.gather(work, return_exceptions=True)
                     raise
+            except ToolRecoveryPending:
+                # Keep ToolStarted durable and let the runner resume this same
+                # invocation. Neither ToolFailed nor ToolCompleted is valid yet.
+                head = await self.state_store.head(self.branch_id)
+                assert head is not None
+                await self._refresh(observed_hash=head.hash)
+                raise
             except Exception as exc:
                 return await fail(exc)
         try:
@@ -781,6 +793,16 @@ class AgentSession:
                     error="the session is terminal; no further actions can run",
                 )
                 return tuple(failure for _ in actions)
+            requested_ids = {action.id for action in actions}
+            if any(
+                pending.requested_by_run_id == self.actor.run_id
+                and pending.status in {"pending", "running"}
+                and pending.action.id not in requested_ids
+                for pending in self.state.actions.values()
+            ):
+                raise ToolRecoveryPending(
+                    "Resume pending actions before proposing new work"
+                )
             group_id = str(uuid4()) if len(actions) > 1 else None
             normalized = usage_from_mapping(
                 usage,
@@ -1342,6 +1364,18 @@ async def run_agent_session(
     try:
         result = await _run_bound_agent(agent, interface)
         await interface._finish_subagents()
+        # SDK/MCP adapters may turn a raised tool exception into an agent
+        # outcome. Do not close the agent or execution while its tool still
+        # needs recovery, even when an adapter swallowed the suspension.
+        head = await state_store.head(branch_id)
+        assert head is not None
+        await interface._refresh(observed_hash=head.hash)
+        if any(
+            action.requested_by_run_id == actor.run_id
+            and action.status in {"pending", "running"}
+            for action in interface.state.actions.values()
+        ):
+            raise ToolRecoveryPending("The agent has pending tool work to recover")
         completed = await interface._append_agent(
             AgentCompleted(
                 agent_run_id=actor.run_id,

@@ -107,31 +107,81 @@ def test_upload_is_repeatable_and_preserves_conflicting_assets(
             files[self.name, remote] = Path(local).read_bytes()
 
     monkeypatch.setattr(modal.Volume, "from_name", lambda name, **_kw: Volume(name))
+    names = assets.asset_volume_names(assets.MANIFEST)
     assets.upload_assets(tmp_path)
-    assert ("potentials", "/SW/Si.sw") in uploaded
-    assert ("models", "/test.model") in uploaded
+    assert (names["potentials"], "/SW/Si.sw") in uploaded
+    assert (names["models"], "/test.model") in uploaded
     uploaded.clear()
     assets.upload_assets(tmp_path)
     assert uploaded == []
 
     # Even missing files in an earlier volume must not be uploaded if a later
     # volume conflicts with the selected benchmark inputs.
-    del files["potentials", "/SW/Si.sw"]
-    files["models", "/test.model"] = b"another benchmark's checkpoint"
+    del files[names["potentials"], "/SW/Si.sw"]
+    files[names["models"], "/test.model"] = b"another benchmark's checkpoint"
     with pytest.raises(ValueError, match="Refusing to overwrite"):
         assets.upload_assets(tmp_path)
     assert uploaded == []
-    assert files["models", "/test.model"] == b"another benchmark's checkpoint"
+    assert files[names["models"], "/test.model"] == b"another benchmark's checkpoint"
+
+    # A deliberate checkpoint upgrade must coexist with the old version.
+    files[names["models"], "/test.model"] = (tmp_path / "models/test.model").read_bytes()
+    old_files = dict(files)
+    new_model = b"new checkpoint"
+    (tmp_path / "models/test.model").write_bytes(new_model)
+    new_manifest = json.loads(json.dumps(assets.MANIFEST))
+    new_manifest["models"]["test.model"]["sha256"] = hashlib.sha256(new_model).hexdigest()
+    monkeypatch.setattr(assets, "MANIFEST", new_manifest)
+    new_names = assets.asset_volume_names(new_manifest)
+    assert new_names["models"] != names["models"]
+    assert new_names["potentials"] == names["potentials"]
+    assets.upload_assets(tmp_path)
+    assert files[new_names["models"], "/test.model"] == new_model
+    assert all(files[key] == value for key, value in old_files.items())
 
 
-def test_prompt_and_task_use_provisioned_checkpoint_paths(tmp_path):
+def test_prompts_use_provisioned_checkpoint_names(tmp_path):
     environments = create_environments(work_dir=str(tmp_path), level=2)
-    template = environments["level_2_task_8"]
-    bound = template.for_task(task_execution_id="asset-check")
-    prompt = bound.initial_event(execution_id="asset-check").task["prompt"]
     manifest = json.loads((APP_DIR / "assets.json").read_text())
-    for name in manifest["models"]:
-        assert f"/models/{name}" in prompt
-    assert "default_dtype='float64'" in prompt
-    assert "dispersion=False" in prompt
-    assert "./models/" not in bound.current_task.description
+    model_inputs = {"teacher_model": "teacher.model", "student_model": "student.model"}
+    assert set(manifest["models"]) == set(model_inputs.values())
+    for task_id in ("level_2_task_3", "level_2_task_8"):
+        bound = environments[task_id].for_task(task_execution_id="asset-check")
+        prompt = bound.initial_event(execution_id="asset-check").task["prompt"]
+        assert bound.current_task.initial_input.items() >= model_inputs.items()
+        for key, name in model_inputs.items():
+            assert f"- {key}: {name}" in prompt
+        assert "/workspace/models" in prompt
+
+
+def test_catalog_uses_release_asset_volumes(tmp_path, monkeypatch):
+    from corral_md import modal_workspace as bridge
+
+    monkeypatch.setattr(bridge, "__file__", str(tmp_path / "modal_workspace.py"))
+    monkeypatch.delenv("CORRAL_MD_RELEASE_ID", raising=False)
+    record = {"release_id": "release-1", "asset_volumes": {"potentials": "corral-md-potentials-version1"}}
+    (tmp_path / "release.json").write_text(json.dumps(record))
+    assert bridge.configured_asset_volume_name("potentials") == "corral-md-potentials-version1"
+    monkeypatch.setenv("CORRAL_MD_RELEASE_ID", "legacy-release")
+    assert bridge.configured_asset_volume_name("potentials") == "potentials"
+
+
+def test_asset_catalog_follows_execution_pin_after_a_new_release(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from corral_md import modal_workspace as bridge
+
+    monkeypatch.setattr(bridge, "__file__", str(tmp_path / "modal_workspace.py"))
+    (tmp_path / "release.json").write_text(json.dumps({
+        "release_id": "new", "asset_volumes": {"models": "models-new"},
+    }))
+    paths = []
+
+    def read(path):
+        paths.append(path)
+        yield json.dumps({"release_id": "old", "asset_volumes": {"models": "models-old"}}).encode()
+
+    monkeypatch.setattr(bridge.modal.Volume, "from_name", lambda _name: SimpleNamespace(read_file=read))
+    with bridge.pinned_release("old"):
+        assert bridge.configured_asset_volume_name("models") == "models-old"
+    assert paths == ["/corral/releases/old/base.json"]

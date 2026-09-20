@@ -10,7 +10,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from corral.core.tool import Tool, tool
@@ -18,6 +18,27 @@ from corral.core.workspace import normalize_workspace_path
 
 _TERMINAL_MAX_TIMEOUT_SECONDS = 3600
 _TERMINAL_MAX_OUTPUT_CHARS = 100_000
+
+
+def workspace_relative_path(path: str, *, allow_root: bool = False) -> str:
+    """Validate an agent's absolute /workspace path before translating it.
+
+    Snapshot keys and controller paths are separate, trusted representations.
+    Never normalize a relative path or traversal into an allowed tool argument.
+    """
+    if not isinstance(path, str) or "\\" in path or "\x00" in path:
+        raise ValueError("Path must be an absolute POSIX path under /workspace")
+    parsed = PurePosixPath(path)
+    if (
+        not parsed.is_relative_to("/workspace")
+        or parsed.as_posix() != path
+        or ".." in parsed.parts
+    ):
+        raise ValueError("Path must be an absolute, canonical path under /workspace")
+    relative = parsed.relative_to("/workspace").as_posix()
+    if relative == "." and not allow_root:
+        raise ValueError("Path must name a file or directory below /workspace")
+    return relative
 
 
 def confine_workspace_path(
@@ -30,7 +51,7 @@ def confine_workspace_path(
 
     This helper is for trusted server code that needs a physical path (for
     example, evaluation of a file submission). Agent-facing filesystem tools
-    remain stricter and accept logical relative paths only. Symbolic links are
+    validate their own public path convention before calling this. Symbolic links are
     rejected even when they currently point back inside the workspace so a
     task cannot turn one workspace path into ambient host-filesystem access.
     """
@@ -85,6 +106,8 @@ class WorkspaceFilesystem:
         if root_path.is_symlink() or not root_path.is_dir():
             raise ValueError(f"workspace root must be a regular directory: {root}")
         self.root = root_path.resolve()
+
+    path_root = "."
 
     def _resolve(self, path: str, *, allow_root: bool = False) -> Path:
         if allow_root and path in {"", "."}:
@@ -142,7 +165,9 @@ class WorkspaceFilesystem:
         if target.is_symlink() or not target.exists():
             raise FileNotFoundError(f"workspace path was not found: {path}")
         info: dict[str, Any] = {
-            "path": "." if target == self.root else self._logical_path(target),
+            "path": self.path_root
+            if target == self.root
+            else self._logical_path(target),
             "type": "directory" if target.is_dir() else "file",
         }
         if target.is_file():
@@ -196,10 +221,10 @@ class WorkspaceFilesystem:
         """Search workspace text files using a Python regular expression."""
         if context_lines < 0 or max_matches < 0:
             raise ValueError("context_lines and max_matches cannot be negative")
-        target = self._resolve(path, allow_root=True)
-        if target.is_file():
-            files = [self._logical_path(target)]
-        elif target.is_dir():
+        info = self.file_info(path)
+        if info["type"] == "file":
+            files = [info["path"]]
+        elif info["type"] == "directory":
             files = self.list_files(path, recursive=recursive)
         else:
             raise FileNotFoundError(f"workspace path was not found: {path}")
@@ -231,11 +256,30 @@ class WorkspaceFilesystem:
         return matches
 
 
+class AbsoluteWorkspaceFilesystem(WorkspaceFilesystem):
+    """Expose one materialization exclusively through absolute /workspace paths."""
+
+    path_root = "/workspace"
+
+    def _resolve(self, path: str, *, allow_root: bool = False) -> Path:
+        relative = workspace_relative_path(path, allow_root=allow_root)
+        return confine_workspace_path(self.root, relative, allow_root=allow_root)
+
+    def _logical_path(self, path: Path) -> str:
+        relative = super()._logical_path(path)
+        return str(PurePosixPath(self.path_root) / relative)
+
+    def list_files(
+        self, path: str = "/workspace", *, recursive: bool = False
+    ) -> list[str]:
+        return super().list_files(path, recursive=recursive)
+
+
 def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
     """Build local file tools for one materialized v2 workspace."""
 
     @tool
-    def list_files(path: str = ".", recursive: bool = False) -> str:
+    def list_files(path: str = filesystem.path_root, recursive: bool = False) -> str:
         """List regular files in the workspace.
 
         Args:
@@ -353,7 +397,7 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
             indent=2,
         )
 
-    return {
+    result = {
         item.name: item
         for item in (
             list_files,
@@ -367,6 +411,16 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
             grep,
         )
     }
+    if filesystem.path_root == "/workspace":
+        for item in result.values():
+            item.description += " All paths must be absolute /workspace paths; relative paths are forbidden."
+            for name, parameter in item.params_json_schema["properties"].items():
+                if name in {"path", "paths", "source", "destination"}:
+                    parameter["description"] = (
+                        "Absolute POSIX path(s) under /workspace. Relative paths, "
+                        "parent traversal and symbolic links are forbidden."
+                    )
+    return result
 
 
 def build_terminal_tool(filesystem: WorkspaceFilesystem) -> Tool:

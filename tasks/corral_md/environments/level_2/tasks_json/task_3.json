@@ -1,7 +1,7 @@
 [
   {
     "name": "Level_2 - Task_3",
-    "description": "Finetune the MACE-MP-0b machine learning interatomic potential for a diatomic Ag₂ system. First, generate a dataset of Ag₂ configurations using an interatomic-distance grid spanning from 0.6 Å to 5.0 Å with a uniform spacing of 0.1 Å. Use the base MACE-MP foundation model as an ASE calculator to compute the potential energies and forces for all configurations, and store these as proxy labels. Reserve zero-based grid indices 4, 9, 14, 19, 24, 29, 34, 39 and 44 for held-out evaluation only. Next, use the remaining generated pseudo-labels to fine-tune the MACE-MP-0b foundation model. Once fine-tuning is complete, load the resulting checkpoint as an ASE calculator. Construct a conventional cubic FCC unit cell of Silver (a = 4.09 Å, 4 Ag atoms) and expand it into a 3×3×3 supercell (108 atoms). Perform a molecular dynamics (MD) simulation on this supercell using a Langevin thermostat at 300 K with a 1.0 fs timestep for 5,000 steps, logging the atomic configurations every 100 steps into a trajectory file. Return a JSON dictionary containing the trajectory and supporting artifacts described below. Save momenta, potential energy and forces from the MACE calculator in every trajectory frame. Set each frame's atoms.info fields step (cumulative MD step), time_fs (step times 1.0 fs), thermostat (\"Langevin\"), and model (\"MACE-MP-0b-finetuned\"). The initial frame at step zero (or the start of production) is optional; include the final step. Submit the resulting checkpoint in the default torch.save ZIP format, the full labeled Ag2 dataset in increasing distance order as ASE extxyz, and an evaluation JSON file. The evaluation must contain sorted train_indices and test_indices, held-out checkpoint predictions energies (9 total energies in eV) and forces (9 x 2 x 3 in eV/Å), training_loss (at least two finite nonnegative epoch losses), and SHA-256 digests checkpoint_sha256 and base_checkpoint_sha256. Also save checkpoint_sha256 in each MD frame. Held-out RMSE must not exceed 0.1 eV/atom for energies or 0.2 eV/Å for forces.",
+    "description": "Investigate whether a MACE model can learn a silver-dimer reference dataset and support a short bulk-silver simulation. Use the supplied MACE-MP-0 checkpoint named by teacher_model in /workspace/models, with dispersion enabled, to label 45 isolated, nonperiodic Ag2 structures with separations from 0.6 to 5.0 Å in 0.1 Å increments. Save the structures, total energies in eV, and complete atomic forces in eV/Å.\n\nStarting from the supplied MACE-MP-0b checkpoint named by student_model in /workspace/models, fine-tune on all 45 labeled structures. Choose and document training settings, numerical precision, and a validation strategy appropriate to this dataset. Quantify energy agreement per atom and force agreement with the teacher before and after training, including aggregate errors and their dependence on separation. Clearly distinguish fitting diagnostics on training data from evidence of generalization. Save a loadable trained checkpoint and training history sufficient to establish that optimization occurred and to reproduce the reported diagnostics.\n\nBuild periodic FCC silver using a conventional four-atom cubic cell with lattice parameter 4.09 Å repeated 3 × 3 × 3, giving 108 atoms. Keep the cell fixed and use the fine-tuned model for a 5 ps simulation targeting 300 K. Initialize velocities at 300 K with a recorded random seed, remove center-of-mass momentum once, and do not reinitialize velocities during the run. Choose and justify the thermostat, integration timestep, and sampling. Quantify temperature behavior and assess physical stability using energies, forces, and structural evolution. Discuss the limitations of transferring a dimer-trained model to bulk silver; report instability or poor agreement honestly rather than assuming successful transfer.\n\nSubmit a manifest linking the labeled dataset, trained checkpoint, training and MD logs, scripts, settings, and structured JSON analysis data. Include trajectory data containing cell, positions, momenta, time, potential energies, and forces, sampled sufficiently to reproduce the temperature and stability assessment. Record input checkpoint identities and the provenance of the trained model.",
     "tools": [
       "get_potential_metadata",
       "get_structure_from_mp_text",
@@ -11,26 +11,14 @@
       "keyword_log_extractor",
       "visualisation_tool"
     ],
-    "scoring_function": "check_trajectory_temperature",
-    "submission_format": "JSON dictionary with keys \"300\" (trajectory path), \"checkpoint\" (fine-tuned model path), \"dataset\" (labeled Ag2 extxyz path), and \"evaluation\" (held-out evaluation JSON path). All values are file paths.",
-    "initial_input": {},
+    "scoring_function": "check_level2_workflow",
+    "submission_format": "Fill in the blank manifest below and submit its path inside the task workspace\n(for example, output/manifest.json). Linked paths may be relative to the manifest.\nReplace null, empty strings and arrays with your results, file paths and data;\nrepeat example records and replace <...> keys with your actual identifiers.\nFixed units and method names describe the illustrated format. Where the task\nleaves a method open, choose and record your method. Retain raw evidence and\ncalculations for any alternative method; unsupported calculations require\nindependent review before a final score.",
+    "initial_input": {
+      "teacher_model": "teacher.model",
+      "student_model": "student.model"
+    },
     "scoring_params": {
-      "target": 300.0,
-      "window_size": 10.0,
-      "tolerance": 0.1,
-      "trajectory": {
-        "species": "Ag",
-        "atom_count": 108,
-        "cell_length": 12.27,
-        "steps": 5000,
-        "sample_interval": 100,
-        "timestep_fs": 1.0,
-        "model": "MACE-MP-0b-finetuned"
-      },
-      "finetuning": {
-        "energy_rmse_per_atom": 0.1,
-        "force_rmse": 0.2
-      }
+      "task_number": 3
     },
     "id": "level_2_task_3",
     "uuid": "a82b49d3-6e1c-4b55-87d2-7c3a9f1b4a6e"

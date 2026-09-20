@@ -9,13 +9,169 @@ and results analysis in materials science workflows.
 import base64
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
 
-from corral_md.modal_workspace import run_lammps_in_modal, run_python_in_modal
+from corral_md.modal_workspace import (
+    run_lammps_in_modal,
+    run_python_in_modal,
+    run_shell_in_modal,
+    run_verified_md_in_modal,
+)
+from corral_md.workspace import local_path
 
 from corral.core.tool import tool
+from corral.core.transition import ToolRecoveryPending
+from corral.workspace import workspace_relative_path
+
+
+def build_run_verified_md_tool(workspace: str | Path):
+    @tool(hidden_args=["corral_action_id"])
+    def run_verified_md(config_file: str, corral_action_id: str | None = None) -> str:
+        """[BRIEF] Run the verified aluminum heat-capacity cycle and save its simulation artifacts. [/BRIEF]
+
+        [DETAILED] The backend runs a fixed-cell MACE-MP-0 Langevin simulation at 300, 400, 500, 600, 700, 800, 900, and 300 K. It saves the states and thermal traces needed to analyze the cycle. [/DETAILED]
+
+        [PROCEDURAL] When to use this tool:
+        - Use it for the aluminum heat-capacity task when independently verifiable execution is useful.
+        - Analyze the saved artifacts after the run finishes.
+        [/PROCEDURAL]
+
+        [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Save the cycle settings in a JSON file. [/PREREQUISITE]
+        2. [CURRENT] Run this tool with the configuration file. [/CURRENT]
+        3. [FOLLOW_UP] Analyze the output and add the returned run and action IDs to the manifest. [/FOLLOW_UP]
+        [/WORKFLOW_INTEGRATION]
+
+        [CONTEXTUAL] How this tool works:
+        - Reads the cycle configuration from the task workspace.
+        - Initializes velocities once and runs the eight temperature stages in order.
+        - Saves settings, trajectories, thermal traces, and a run receipt under /workspace/output.
+        [/CONTEXTUAL]
+
+        [SYNTACTICAL] Usage example:
+        `run_verified_md("/workspace/input/verified_md.json")`
+        [/SYNTACTICAL]
+
+        Args:
+            config_file: [ARGS_BRIEF] Absolute path to the cycle configuration JSON file. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The file must be under /workspace and contain random_seed. It may also set timestep_fs, friction_fs, default_dtype, and per-stage step and sampling values. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Absolute /workspace path to a JSON file. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] "/workspace/input/verified_md.json" [/ARGS_EXAMPLES]
+
+        Returns:
+            str: [RETURNS_BRIEF] JSON receipt for the completed run. [/RETURNS_BRIEF]
+                [RETURNS_DETAILED] The receipt includes the run ID, action ID, release ID, and output directory. [/RETURNS_DETAILED]
+                [RETURNS_EXAMPLES] `{"run_id": "...", "action_id": "...", "output_directory": "/workspace/output"}` [/RETURNS_EXAMPLES]
+
+        [RAISES] Exceptions:
+            FileNotFoundError:
+                [ERROR_WHEN] The configuration file does not exist. [/ERROR_WHEN]
+                [ERROR_DETAILS] The supplied path does not name a workspace file. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Check the path and create the configuration file first. [/ERROR_RECOVERY]
+            ValueError:
+                [ERROR_WHEN] The configuration is invalid. [/ERROR_WHEN]
+                [ERROR_DETAILS] A required value is missing or a setting is outside the supported range. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Correct the configuration and run the tool again. [/ERROR_RECOVERY]
+        [/RAISES]
+
+        [LIMITATIONS] Known limitations:
+        - This tool runs only the fixed aluminum heat-capacity workflow.
+        - It does not run submitted code or submitted models.
+        [/LIMITATIONS]
+        """
+        config = local_path(workspace, config_file)
+        run_verified_md_in_modal(workspace, str(config), action_id=corral_action_id)
+        return local_path(
+            workspace, "/workspace/output/verified_md_receipt.json"
+        ).read_text()
+
+    return run_verified_md
+
+
+def build_md_terminal_tool(workspace: str | Path):
+    """Keep shell execution behind the same boundary as MD Python."""
+
+    @tool(hidden_args=["corral_action_id"])
+    def terminal(
+        command: str,
+        timeout_seconds: int = 120,
+        max_output_chars: int = 20_000,
+        corral_action_id: str | None = None,
+    ) -> str:
+        """[BRIEF] Run a shell command in the isolated MD CPU sandbox. [/BRIEF]
+
+        [DETAILED] The command runs from /workspace with the task files and read-only shared assets. Changed task files are synchronized back after the command finishes. [/DETAILED]
+
+        [PROCEDURAL] When to use this tool:
+        - Use it for shell operations that need the MD runtime.
+        - Use absolute /workspace paths when naming task files in tool arguments.
+        [/PROCEDURAL]
+
+        [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Prepare any input files in the task workspace. [/PREREQUISITE]
+        2. [CURRENT] Run one non-interactive shell command. [/CURRENT]
+        3. [FOLLOW_UP] Inspect the returned output and any files saved under /workspace/output. [/FOLLOW_UP]
+        [/WORKFLOW_INTEGRATION]
+
+        [CONTEXTUAL] How this tool works:
+        - Starts an isolated CPU sandbox at /workspace.
+        - Captures combined standard output and standard error.
+        - Saves the command result to /workspace/output/terminal.json.
+        [/CONTEXTUAL]
+
+        [SYNTACTICAL] Usage example:
+        `terminal("ls -la /workspace/output", timeout_seconds=120)`
+        [/SYNTACTICAL]
+
+        Args:
+            command: [ARGS_BRIEF] Shell command to run. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The command must be non-empty and must not require interactive input. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Non-empty shell command string. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] "ls -la /workspace/output" [/ARGS_EXAMPLES]
+            timeout_seconds: [ARGS_BRIEF] Maximum run time in seconds. Defaults to 120. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The value must be between 1 and 3600. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Integer from 1 to 3600. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] 120, 600 [/ARGS_EXAMPLES]
+            max_output_chars: [ARGS_BRIEF] Maximum number of output characters to return. Defaults to 20000. [/ARGS_BRIEF]
+                [ARGS_DETAILED] Older output is removed when the combined output exceeds this limit. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Integer from 1 to 100000. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] 20000, 50000 [/ARGS_EXAMPLES]
+
+        Returns:
+            str: [RETURNS_BRIEF] JSON with the exit code and captured output. [/RETURNS_BRIEF]
+                [RETURNS_DETAILED] The JSON also states whether the returned output was truncated. [/RETURNS_DETAILED]
+                [RETURNS_EXAMPLES] `{"exit_code": 0, "output": "...", "truncated": false}` [/RETURNS_EXAMPLES]
+
+        [RAISES] Exceptions:
+            ValueError:
+                [ERROR_WHEN] The command or a limit is invalid. [/ERROR_WHEN]
+                [ERROR_DETAILS] The command is empty or a numeric value is outside its accepted range. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Provide a command and valid limits. [/ERROR_RECOVERY]
+            Exception:
+                [ERROR_WHEN] The sandbox cannot complete the command. [/ERROR_WHEN]
+                [ERROR_DETAILS] The backend reports the execution or synchronization failure. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Read the error, correct the command or inputs, and try again. [/ERROR_RECOVERY]
+        [/RAISES]
+
+        [LIMITATIONS] Known limitations:
+        - Commands cannot access controller files or other task workspaces.
+        - Interactive commands are not supported.
+        [/LIMITATIONS]
+        """
+        if not command.strip():
+            raise ValueError("command cannot be empty")
+        if not 1 <= timeout_seconds <= 3600 or not 1 <= max_output_chars <= 100_000:
+            raise ValueError("Invalid terminal timeout or output limit")
+        run_shell_in_modal(
+            workspace,
+            command,
+            timeout=timeout_seconds,
+            max_output_chars=max_output_chars,
+            action_id=corral_action_id,
+        )
+        return local_path(workspace, "/workspace/output/terminal.json").read_text()
+
+    return terminal
 
 
 @tool
@@ -45,10 +201,10 @@ def get_nth_run_log(
     - Optionally saves the data to a CSV file and retrieves specific data at a given index. [/CONTEXTUAL]
     [SYNTACTICAL] Usage examples:
     [
-        `get_nth_run_log("/path/to/log.lammps", 0, "run0_thermo.csv")`,
+        `get_nth_run_log("/workspace/output/log.lammps", 0, "/workspace/output/run0_thermo.csv")`,
         `get_nth_run_log("log.lammps", 1, None)`,
         `get_nth_run_log("/data/simulations/log.lammps", 2, "run2_thermo.csv", 10)`,
-        `get_nth_run_log("sim_log.lammps", 0, "run0_thermo.csv", 5)`,
+        `get_nth_run_log("sim_log.lammps", 0, "/workspace/output/run0_thermo.csv", 5)`,
         `get_nth_run_log("/workspace/log.lammps", 3, None, 20)`,
     ]
     [/SYNTACTICAL]
@@ -56,7 +212,7 @@ def get_nth_run_log(
         path: [ARGS_BRIEF] Absolute path to the LAMMPS log file. [/ARGS_BRIEF]
               [ARGS_DETAILED] Complete file path to the LAMMPS log file containing simulation output. [/ARGS_DETAILED]
               [ARGS_SYNTACTICAL] Format: "Valid file path to LAMMPS log file" [/ARGS_SYNTACTICAL]
-              [ARGS_EXAMPLES] Examples: "/path/to/log.lammps", "simulations/log.lammps" [/ARGS_EXAMPLES]
+              [ARGS_EXAMPLES] Examples: "/workspace/output/log.lammps", "/workspace/output/log.lammps" [/ARGS_EXAMPLES]
         n: [ARGS_BRIEF] Index of the run log to extract (0-based). Defaults to 0. [/ARGS_BRIEF]
               [ARGS_DETAILED] The zero-based index of the run log to extract from the LAMMPS log file. [/ARGS_DETAILED]
               [ARGS_SYNTACTICAL] Format: "Non-negative integer" [/ARGS_SYNTACTICAL]
@@ -64,7 +220,7 @@ def get_nth_run_log(
         save: [ARGS_BRIEF] Optional path to save the extracted run log as a CSV file. [/ARGS_BRIEF]
                 [ARGS_DETAILED] If provided, the extracted run log will be saved to this path in CSV format. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Format: "Valid file path to save CSV file" [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] Examples: "run0_thermo.csv", "/data/run1_thermo.csv" [/ARGS_EXAMPLES]
+                [ARGS_EXAMPLES] Examples: "/workspace/output/run0_thermo.csv", "/data/run1_thermo.csv" [/ARGS_EXAMPLES]
         index: [ARGS_BRIEF] Optional index to retrieve specific thermodynamic data from the run log. [/ARGS_BRIEF]
                  [ARGS_DETAILED] If provided, the tool will return the thermodynamic data at this index from the extracted run log. [/ARGS_DETAILED]
                  [ARGS_SYNTACTICAL] Format: "Non-negative integer" [/ARGS_SYNTACTICAL]
@@ -128,7 +284,7 @@ def keyword_log_extractor(path: str, keyword: str) -> str:
     - Extracts and returns those sections as a structured dictionary. [/CONTEXTUAL]
     [SYNTACTICAL] Usage examples:
     [
-        `keyword_log_extractor("/path/to/log.lammps", "fix")`,
+        `keyword_log_extractor("/workspace/output/log.lammps", "fix")`,
         `keyword_log_extractor("log.lammps", "BULK ENERGY")`,
         `keyword_log_extractor("/data/simulations/log.lammps", "thermo")`,
         `keyword_log_extractor("sim_log.lammps", "dump")`,
@@ -139,7 +295,7 @@ def keyword_log_extractor(path: str, keyword: str) -> str:
         path: [ARGS_BRIEF] Path to the LAMMPS log file. [/ARGS_BRIEF]
                 [ARGS_DETAILED] Complete file path to the LAMMPS log file containing simulation output. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Format: "Valid file path to LAMMPS log file" [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] Examples: "/path/to/log.lammps", "simulations/log.lammps" [/ARGS_EXAMPLES]
+                [ARGS_EXAMPLES] Examples: "/workspace/output/log.lammps", "/workspace/output/log.lammps" [/ARGS_EXAMPLES]
         keyword: [ARGS_BRIEF] Keyword to search for in the log file. [/ARGS_BRIEF]
                   [ARGS_DETAILED] The specific keyword that marks the beginning of sections to extract from the log file. [/ARGS_DETAILED]
                   [ARGS_SYNTACTICAL] Format: "Non-empty string" [/ARGS_SYNTACTICAL]
@@ -171,168 +327,119 @@ def keyword_log_extractor(path: str, keyword: str) -> str:
 
 
 def build_execute_python_script_tool(workspace: str | Path):
-    """Build execute_python_script bound to one local Corral task workspace."""
-    @tool
+    """Build a Python tool whose code executes only in an isolated MD sandbox."""
+
+    @tool(hidden_args=["corral_action_id"])
     def execute_python_script(
         script_path: str,
-        args: list | None = None,
+        args: list[str] | None = None,
         timeout: int = 600,
         working_dir: str | None = None,
         use_gpu: bool = False,
+        corral_action_id: str | None = None,
     ) -> str:
-        """[BRIEF] Execute a Python script file with arguments in a controlled environment, optionally on remote GPU compute. [/BRIEF]
+        """[BRIEF] Run a saved Python script in an isolated MD CPU or GPU sandbox. [/BRIEF]
 
-        [DETAILED] This tool executes existing Python script files with command-line arguments, providing a controlled environment for running complex analysis workflows, data processing pipelines, or computational simulations.
-        It captures all output streams and provides comprehensive execution monitoring with timeout protection.
-        This is essential for integrating existing Python scripts into automated workflows and materials analysis pipelines.
-        By default, scripts run locally on CPU. Setting `use_gpu=True` instead runs the script on remote GPU compute (Modal): the entire task workspace is uploaded, the script executes there with GPU access, and all resulting files (including any it wrote) are synchronized back into the local workspace afterward. This should only be used for scripts that genuinely require GPU acceleration. [/DETAILED]
+        [DETAILED] The script runs in the task workspace with read-only access to shared models, potentials, and structures. Changed task files are synchronized back after a successful run. [/DETAILED]
 
         [PROCEDURAL] When to use this tool:
-        - Use when you need to execute existing Python scripts with specific arguments. You can also use io tool to write a script and then execute it.
-        - Best suited for running complex analysis workflows or simulations
-        - Essential for integrating external Python tools into automated pipelines
-        - Recommended for batch processing and computational workflows
-        - Avoid for simple code execution
-        - Set `use_gpu=True` only for scripts that construct an ASE Calculator backed by a MACE model, or otherwise require GPU acceleration. Leave `use_gpu=False` (default) for everything else, including analysis and plotting — those run locally and are faster and cheaper.
+        - Use it for saved analysis or simulation scripts.
+        - Request a GPU only when the script needs GPU computation.
         [/PROCEDURAL]
 
-        [CONTEXTUAL] How this tool works:
-        - Validates script file existence and accessibility
-        - Constructs command with script path and provided arguments
-        - If `use_gpu=False` (default): executes the script in a local subprocess with timeout protection, using `working_dir` (or the script's own directory) as the working directory.
-        - If `use_gpu=True`: uploads the entire task workspace to remote GPU compute, executes the script there, and downloads the complete workspace back afterward, atomically replacing the local copy. `timeout` and `working_dir` do not apply in this mode; the effective working directory is the task workspace root.
-        - Captures standard output, error streams, and return codes (or, for GPU runs, surfaces failure diagnostics — including remote stdout/stderr — in the error message if the script fails)
-        - Provides comprehensive execution monitoring and error reporting
-        [/CONTEXTUAL]
-
-        [WORKFLOW_INTEGRATION] Typical workflow integration example:
-        1. [PREREQUISITE] Ensure script file exists and is executable with proper dependencies [/PREREQUISITE]
-        2. [CURRENT] Execute script with appropriate arguments and timeout, setting `use_gpu=True` only if the script needs GPU acceleration [/CURRENT]
-        3. [FOLLOW_UP] Process script output and results for further analysis. Can be used to process json script as required [/FOLLOW_UP]
+        [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Save the Python script and its inputs under /workspace. [/PREREQUISITE]
+        2. [CURRENT] Run the script with its arguments and resource choice. [/CURRENT]
+        3. [FOLLOW_UP] Inspect the saved outputs and captured stdout and stderr. [/FOLLOW_UP]
         [/WORKFLOW_INTEGRATION]
 
+        [CONTEXTUAL] How this tool works:
+        - Validates the script and working-directory paths.
+        - Runs the script in an isolated CPU or GPU sandbox.
+        - Synchronizes changed task files and saves captured output under /workspace/output.
+        [/CONTEXTUAL]
+
         [SYNTACTICAL] Usage examples:
-        `execute_python_script("analysis.py", ["--input", "data.json", "--output", "results.json"], 300)`,
-        `execute_python_script("simulation.py", ["--steps", "1000", "--temp", "300"], 1800, "/path/to/workdir")`,
-        `execute_python_script("processing.py", None, 600, None)`,
-        `execute_python_script("mace_md.py", ["--structure", "input/Mg.data"], use_gpu=True)`,
+        `execute_python_script("/workspace/scripts/analyze.py", ["--input", "/workspace/output/data.json"])`
+        `execute_python_script("/workspace/scripts/mace_md.py", use_gpu=True, timeout=3600)`
         [/SYNTACTICAL]
 
         Args:
-            script_path: [ARGS_BRIEF] Path to the Python script file to execute. [/ARGS_BRIEF]
-                        [ARGS_DETAILED] Complete file path to the Python script that should be executed.
-                        The script must exist and be readable.
-                        The path can be relative to the current working directory or absolute.
-                        The script should be a valid Python file with appropriate shebang or run using the Python interpreter. [/ARGS_DETAILED]
-                        [ARGS_SYNTACTICAL] "Valid file path to Python script" [/ARGS_SYNTACTICAL]
-                        [ARGS_EXAMPLES] "scripts/analysis.py", "/home/user/simulations/run_sim.py", "data_processing.py" [/ARGS_EXAMPLES]
-            args: [ARGS_BRIEF] Optional list of command-line arguments for the script. [/ARGS_BRIEF]
-                 [ARGS_DETAILED] A list of strings representing command-line arguments to pass to the script.
-                 These arguments will be passed to the script in the order provided.
-                 Common arguments include input files, output paths, configuration parameters, and processing options.
-                 If None, the script will be executed without arguments. [/ARGS_DETAILED]
-                 [ARGS_SYNTACTICAL] ["arg1", "arg2", "arg3", ...] or None [/ARGS_SYNTACTICAL]
-                 [ARGS_EXAMPLES] ["--input", "data.json"], ["--verbose", "--output", "results.csv"], None [/ARGS_EXAMPLES]
-            timeout: [ARGS_BRIEF] Maximum execution time in seconds for local (use_gpu=False) runs. Defaults to 600. [/ARGS_BRIEF]
-                    [ARGS_DETAILED] The maximum time in seconds the script is allowed to run before being terminated.
-                    This prevents runaway processes and ensures resource management.
-                    Choose appropriate values based on expected script execution time.
-                    For computational simulations, longer timeouts may be necessary.
-                    Ignored when `use_gpu=True`. [/ARGS_DETAILED]
-                    [ARGS_SYNTACTICAL] positive integer representing seconds [/ARGS_SYNTACTICAL]
-                    [ARGS_EXAMPLES] 300 (5 minutes), 600 (10 minutes), 3600 (1 hour) [/ARGS_EXAMPLES]
-            working_dir: [ARGS_BRIEF] Optional working directory for local (use_gpu=False) script execution. [/ARGS_BRIEF]
-                        [ARGS_DETAILED] The directory from which the script should be executed.
-                        This affects relative path resolution and file I/O operations within the script.
-                        If None, the script's own directory will be used.
-                        This is useful when scripts expect to run from specific directories or access relative files.
-                        Ignored when `use_gpu=True`, where the task workspace root is always used instead. [/ARGS_DETAILED]
-                        [ARGS_SYNTACTICAL] Valid directory path or None [/ARGS_SYNTACTICAL]
-                        [ARGS_EXAMPLES] "/path/to/project", "data/analysis", None [/ARGS_EXAMPLES]
-            use_gpu: [ARGS_BRIEF] If True, runs the script on remote GPU compute instead of locally. Defaults to False. [/ARGS_BRIEF]
-                    [ARGS_DETAILED] When True, the entire task workspace is uploaded to remote compute with GPU access, the script is executed there, and all resulting files are synchronized back into the local workspace afterward (replacing it atomically). Use this only for scripts that require GPU acceleration, such as ASE calculations using a MACE calculator. For everything else — including analysis, plotting, and non-GPU simulations — leave this False; local execution is faster and cheaper. [/ARGS_DETAILED]
-                    [ARGS_SYNTACTICAL] true or false [/ARGS_SYNTACTICAL]
-                    [ARGS_EXAMPLES] True, False [/ARGS_EXAMPLES]
+            script_path: [ARGS_BRIEF] Absolute path to the Python script. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The script must be a file under /workspace. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Absolute /workspace path to a Python file. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] "/workspace/scripts/analyze.py" [/ARGS_EXAMPLES]
+            args: [ARGS_BRIEF] Optional command-line arguments for the script. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The strings are passed to the script in the given order. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] List of strings or null. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] ["--input", "/workspace/output/data.json"], null [/ARGS_EXAMPLES]
+            timeout: [ARGS_BRIEF] Maximum run time in seconds. Defaults to 600. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The value must be between 1 and 7200. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Integer from 1 to 7200. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] 600, 3600 [/ARGS_EXAMPLES]
+            working_dir: [ARGS_BRIEF] Directory in which to run the script. Defaults to /workspace. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The directory must be under /workspace. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Absolute /workspace directory path or null. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] "/workspace", "/workspace/output" [/ARGS_EXAMPLES]
+            use_gpu: [ARGS_BRIEF] Whether to request a GPU. Defaults to false. [/ARGS_BRIEF]
+                [ARGS_DETAILED] Use true for scripts that need GPU computation; otherwise use the CPU sandbox. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Boolean. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] true, false [/ARGS_EXAMPLES]
 
         Returns:
-            str: [RETURNS_BRIEF] JSON string with comprehensive execution results and monitoring data. [/RETURNS_BRIEF]
-                 [RETURNS_DETAILED] A JSON-formatted string containing execution status, captured output streams, error messages, and return code. For local runs this also includes the exact command executed. For GPU runs, failures include remote stdout/stderr embedded in the error message.
-                 This provides full visibility into the script execution process and enables debugging and monitoring of automated workflows. [/RETURNS_DETAILED]
-                 [RETURNS_EXAMPLES] "{"success": true, "stdout": "Processing complete", "stderr": "", "return_code": 0, "command": "python script.py --input data.json"}", "{"success": true, "stdout": "GPU script ran successfully. Downloaded 4 workspace file(s).", "stderr": "", "return_code": 0}" [/RETURNS_EXAMPLES]
+            str: [RETURNS_BRIEF] JSON confirming successful script execution. [/RETURNS_BRIEF]
+                [RETURNS_DETAILED] The result reports success, synchronization, and where stdout and stderr were saved. [/RETURNS_DETAILED]
+                [RETURNS_EXAMPLES] `{"success": true, "stdout": "Script completed.", "stderr": "", "return_code": 0}` [/RETURNS_EXAMPLES]
 
         [RAISES] Exceptions:
-            FileNotFoundError: [ERROR_WHEN] When the specified script file doesn't exist [/ERROR_WHEN]
-                              [ERROR_DETAILS] Script path is invalid or file is not accessible [/ERROR_DETAILS]
-                              [ERROR_RECOVERY] Verify script path exists and is readable [/ERROR_RECOVERY]
-            TimeoutExpired: [ERROR_WHEN] When script execution exceeds the specified timeout (local runs only) [/ERROR_WHEN]
-                           [ERROR_DETAILS] Script terminated due to timeout limit [/ERROR_DETAILS]
-                           [ERROR_RECOVERY] Increase timeout value or optimize script performance [/ERROR_RECOVERY]
-            PermissionError: [ERROR_WHEN] When script file lacks execute permissions [/ERROR_WHEN]
-                            [ERROR_DETAILS] Insufficient permissions to execute the script [/ERROR_DETAILS]
-                            [ERROR_RECOVERY] Check file permissions and ensure script is executable [/ERROR_RECOVERY]
+            FileNotFoundError:
+                [ERROR_WHEN] The script does not exist. [/ERROR_WHEN]
+                [ERROR_DETAILS] The supplied script path does not name a workspace file. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Check the path and save the script first. [/ERROR_RECOVERY]
+            NotADirectoryError:
+                [ERROR_WHEN] The working directory does not exist. [/ERROR_WHEN]
+                [ERROR_DETAILS] The supplied working-directory path is not a directory. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Use an existing workspace directory. [/ERROR_RECOVERY]
+            ValueError:
+                [ERROR_WHEN] The timeout or a workspace path is invalid. [/ERROR_WHEN]
+                [ERROR_DETAILS] A value is outside its accepted range or path boundary. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Correct the value and run the tool again. [/ERROR_RECOVERY]
         [/RAISES]
 
         [LIMITATIONS] Known limitations:
-        - Cannot modify script execution environment beyond working directory
-        - Limited to Python scripts and available system Python installation
-        - No real-time output streaming during execution
-        - Cannot interact with scripts requiring user input
-        - GPU runs (use_gpu=True) replace the entire local workspace with what comes back from remote compute; any local changes made to workspace files during the remote run that weren't reflected remotely could be lost
+        - Scripts cannot access controller files or other task workspaces.
+        - Interactive input and live output streaming are not supported.
         [/LIMITATIONS]
         """
-        script = Path(script_path)
+        script = local_path(workspace, script_path)
+        directory = working_dir if working_dir is not None else "/workspace"
+        local_directory = local_path(workspace, directory, allow_root=True)
         if not script.is_file():
-            return json.dumps(
-                {"success": False, "error": f"Script file not found: {script_path}"}
-            )
-
-        if use_gpu:
-            return _execute_python_script_gpu(Path(workspace), script, args or [])
-
-        command = [sys.executable, str(script), *(str(arg) for arg in (args or []))]
-        try:
-            process = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=working_dir or str(script.parent),
-                check=False,
-            )
-            return json.dumps(
-                {
-                    "success": process.returncode == 0,
-                    "stdout": process.stdout,
-                    "stderr": process.stderr,
-                    "return_code": process.returncode,
-                    "command": command,
-                },
-                indent=2,
-            )
-        except subprocess.TimeoutExpired:
-            return json.dumps(
-                {"success": False, "error": f"Script execution timed out after {timeout} seconds"}
-            )
-        except Exception as e:
-            return json.dumps({"success": False, "error": str(e)})
-
-    return execute_python_script
-
-
-def _execute_python_script_gpu(workspace: Path, script: Path, args: list) -> str:
-    try:
-        downloaded = run_python_in_modal(workspace, str(script.resolve()), args)
+            raise FileNotFoundError(f"Script not found: {script_path}")
+        if not local_directory.is_dir():
+            raise NotADirectoryError(f"Working directory not found: {directory}")
+        if type(timeout) is not int or not 1 <= timeout <= 7200:
+            raise ValueError("timeout must be between 1 and 7200 seconds")
+        downloaded = run_python_in_modal(
+            workspace,
+            str(script),
+            args or [],
+            action_id=corral_action_id,
+            use_gpu=use_gpu,
+            timeout=timeout,
+            working_dir=directory,
+        )
         return json.dumps(
             {
                 "success": True,
-                "stdout": f"GPU script ran successfully. Downloaded {downloaded} workspace file(s).",
+                "stdout": f"Script completed. Synchronized {downloaded} workspace file(s). "
+                "Captured stdout/stderr are in /workspace/output/.",
                 "stderr": "",
                 "return_code": 0,
-            },
-            indent=2,
+            }
         )
-    except Exception as e:
-        return json.dumps({"success": False, "error": str(e)})
+
+    return execute_python_script
 
 
 @tool
@@ -370,10 +477,10 @@ def get_potential_metadata(file_path: str) -> str:
 
     [SYNTACTICAL] Usage examples:
     [
-        `get_potential_metadata("/potentials/EAM/Al99.eam.alloy")`,
-        `get_potential_metadata("/potentials/EAM/Mg_Zhou04.eam.alloy")`,
-        `get_potential_metadata("/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs")`,
-        `get_potential_metadata("/potentials/SW/Si.sw")`
+        `get_potential_metadata("/workspace/potentials/EAM/Al99.eam.alloy")`,
+        `get_potential_metadata("/workspace/potentials/EAM/Mg_Zhou04.eam.alloy")`,
+        `get_potential_metadata("/workspace/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs")`,
+        `get_potential_metadata("/workspace/potentials/SW/Si.sw")`
     ]
     [/SYNTACTICAL]
 
@@ -382,7 +489,7 @@ def get_potential_metadata(file_path: str) -> str:
             [ARGS_BRIEF] Path to the potential file. [/ARGS_BRIEF]
             [ARGS_DETAILED] This is the path to a LAMMPS-compatible potential file. The file must be accessible, and its filename is used to determine metadata, so it must match one of the known potential filenames. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: "string ending in a recognized potential filename". [/ARGS_SYNTACTICAL]
-            [ARGS_EXAMPLES] Examples: "/path/to/file/Al99.eam.alloy", "Mg_Zhou04.eam.alloy" [/ARGS_EXAMPLES]
+            [ARGS_EXAMPLES] Examples: "/workspace/potentials/EAM/Al99.eam.alloy", "/workspace/potentials/EAM/Mg_Zhou04.eam.alloy" [/ARGS_EXAMPLES]
 
     Returns:
         str :
@@ -421,33 +528,28 @@ def get_potential_metadata(file_path: str) -> str:
             "Na (Sodium), Si (Silicon), O (Oxygen), "
             "pair_style : hybrid/overlay buck/coul/long + kspace_style pppm}"
         ),
-        
-        
     }
     POTENTIAL_PATHS = {
-        "Si.sw": "/potentials/SW/Si.sw",
-        "2007_SiO.tersoff": "/potentials/TERSOFF/2007_SiO.tersoff",
-        "Al99.eam.alloy": "/potentials/EAM/Al99.eam.alloy",
-        "Cu_Zhou04.eam.alloy": "/potentials/EAM/Cu_Zhou04.eam.alloy",
-        "Mg_Zhou04.eam.alloy": "/potentials/EAM/Mg_Zhou04.eam.alloy",
-        "Fe-C_Hepburn_Ackland.eam.fs": ("/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs"),
-        "pot.mod": "/potentials/BKS/pot.mod",
+        "Si.sw": "/workspace/potentials/SW/Si.sw",
+        "2007_SiO.tersoff": "/workspace/potentials/TERSOFF/2007_SiO.tersoff",
+        "Al99.eam.alloy": "/workspace/potentials/EAM/Al99.eam.alloy",
+        "Cu_Zhou04.eam.alloy": "/workspace/potentials/EAM/Cu_Zhou04.eam.alloy",
+        "Mg_Zhou04.eam.alloy": "/workspace/potentials/EAM/Mg_Zhou04.eam.alloy",
+        "Fe-C_Hepburn_Ackland.eam.fs": (
+            "/workspace/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs"
+        ),
+        "pot.mod": "/workspace/potentials/BKS/pot.mod",
     }
 
-    if not file_path or not file_path.strip():
-        raise ValueError("File path must not be None or empty.")
-
-    potential_path = Path(file_path.strip())
+    workspace_relative_path(file_path)
+    potential_path = Path(file_path)
     potential_name = potential_path.name
     metadata = POTENTIALS.get(potential_name)
     if metadata is None:
         raise ValueError(f"Unrecognized potential file: {potential_name}")
 
     expected_remote_path = POTENTIAL_PATHS[potential_name]
-    if (
-        not potential_path.is_file()
-        and potential_path.as_posix() != expected_remote_path
-    ):
+    if potential_path.as_posix() != expected_remote_path:
         raise FileNotFoundError(f"Incorrect potential file path: {file_path}")
 
     return metadata
@@ -482,8 +584,8 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
     [SYNTACTICAL] Usage examples:
     [
         `get_structure_from_mp_text("mp-149", "/workspace/Si_conventional.cif")`,
-        `get_structure_from_mp_text("mp-13", "outputs/Aluminum_structure.cif")`,
-        `get_structure_from_mp_text("mp-1692", "/data/structures/CuO_conventional.cif")`,
+        `get_structure_from_mp_text("mp-13", "/workspace/output/Aluminum_structure.cif")`,
+        `get_structure_from_mp_text("mp-1692", "/workspace/input/CuO_conventional.cif")`,
         `get_structure_from_mp_text("mp-19770", "structure_files/Fe2O3.cif")`,
         `get_structure_from_mp_text("mp-1143", "/tmp/Al2O3_structure.cif")`,
     ]
@@ -581,7 +683,7 @@ def convert_structure_to_lammps_data(
     [SYNTACTICAL] Usage examples:
     [
         `convert_structure_to_lammps_data("/workspace/graphene.cif", "/workspace/output/graphene.data")`,
-        `convert_structure_to_lammps_data("./structures/NaCl.cif", "./data/NaCl.data", atom_style="atomic")`,
+        `convert_structure_to_lammps_data("/workspace/input/NaCl.cif", "/workspace/output/NaCl.data", atom_style="atomic")`,
         `convert_structure_to_lammps_data("/data/SiO2.cif", "/converted_data/SiO2.data", atom_style="charge")`,
         `convert_structure_to_lammps_data("MgO.cif", "MgO.data", atom_style="charge")`,
         `convert_structure_to_lammps_data("/tmp/Al2O3.cif", "/tmp/Al2O3.data", atom_style="atomic")`
@@ -594,7 +696,7 @@ def convert_structure_to_lammps_data(
             [ARGS_DETAILED] Path to the file containing the crystallographic structure.
             This file is read and converted into a pymatgen `Structure` object internally before being serialized to LAMMPS data format. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: 'string ending in ".cif" correspoding to the path of the CIF file.' [/ARGS_SYNTACTICAL]
-            [ARGS_EXAMPLES] Examples: "/workspace/graphene.cif", "./data/SiO2.cif" [/ARGS_EXAMPLES]
+            [ARGS_EXAMPLES] Examples: "/workspace/graphene.cif", "/workspace/input/SiO2.cif" [/ARGS_EXAMPLES]
         output_file (str):
             [ARGS_BRIEF] Path where the LAMMPS data file will be saved. [/ARGS_BRIEF]
             [ARGS_DETAILED] This is the destination file path where the generated LAMMPS-compatible data file will be written.
@@ -602,7 +704,7 @@ def convert_structure_to_lammps_data(
             [ARGS_SYNTACTICAL] Format: 'valid string representing a writable `.data` file path'. [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] Examples:
                 - "/workspace/output/graphene.data",
-                -"./converted_data/SiO2.data" [/ARGS_EXAMPLES]
+                -"/workspace/output/SiO2.data" [/ARGS_EXAMPLES]
         atom_style (str):
             [ARGS_BRIEF] Atom style to be used in the LAMMPS data file, defaults to "charge". [/ARGS_BRIEF]
             [ARGS_DETAILED] Specifies the LAMMPS atom style to use when formatting the data file.
@@ -701,22 +803,22 @@ def run_lammps(input_file: str) -> str:
     [SYNTACTICAL] Usage examples:
     [
         `run_lammps("/workspace/lammps_inputs/graphene_sim.in")`,
-        `run_lammps("./data/sio2_minimize.in")`,
-        `run_lammps("minimize_bulk_sio2.in")`,
-        `run_lammps("/path/to/simulation/input_script.in")`,
-        `run_lammps("job123.lmp", 2)`,
+        `run_lammps("/workspace/input/sio2_minimize.in")`,
+        `run_lammps("/workspace/input/minimize_bulk_sio2.in")`,
+        `run_lammps("/workspace/input/input_script.in")`,
+        `run_lammps("/workspace/input/job123.lmp")`,
     ]
     [/SYNTACTICAL]
 
     Args:
         input_file (str):
             [ARGS_BRIEF] Path to the LAMMPS input script file. [/ARGS_BRIEF]
-            [ARGS_DETAILED] This parameter specifies the absolute or relative path to the input script used by LAMMPS. The script typically contains simulation settings such as atom style, force field parameters, boundary conditions, and compute directives. The file must be in LAMMPS-compatible format (`.in` extension is conventional but not required) and should not require interactive input during execution. [/ARGS_DETAILED]
+            [ARGS_DETAILED] This parameter specifies the absolute /workspace path to the input script used by LAMMPS. The script typically contains simulation settings such as atom style, force field parameters, boundary conditions, and compute directives. The file must be in LAMMPS-compatible format (`.in` extension is conventional but not required) and should not require interactive input during execution. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: string representing a file path; must be readable by the backend LAMMPS engine. [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] Examples:
                 - "/workspace/lammps_inputs/graphene_sim.in"
-                - "./simulations/liquid_water.in"
-                - "minimize_bulk_sio2.in" [/ARGS_EXAMPLES]
+                - "/workspace/input/liquid_water.in"
+                - "/workspace/input/minimize_bulk_sio2.in" [/ARGS_EXAMPLES]
 
     Returns:
         str:
@@ -750,20 +852,23 @@ def run_lammps(input_file: str) -> str:
         - The tool is designed to work with a specific backend (modal) and may not function correctly if the backend is misconfigured or unavailable.
     [/LIMITATIONS]
     """
-    if not input_file:
-        raise ValueError("Input file path must not be None or empty.")
-
-    input_path = Path(input_file).resolve()
-    return _run_lammps_for_workspace(input_path.parent, str(input_path))
+    workspace_relative_path(input_file)
+    raise RuntimeError("run_lammps must be bound to an MD task workspace")
 
 
-def _run_lammps_for_workspace(workspace: str | Path, input_file: str) -> str:
+def _run_lammps_for_workspace(
+    workspace: str | Path, input_file: str, *, action_id: str | None = None
+) -> str:
     try:
-        log_file, downloaded = run_lammps_in_modal(workspace, input_file)
-        return (
-            f"Simulation ran successfully using input: {input_file}. "
-            f"Downloaded {downloaded} workspace file(s); local log: {log_file}"
+        log_file, downloaded = run_lammps_in_modal(
+            workspace, input_file, action_id=action_id
         )
+        return (
+            f"Simulation completed. Synchronized {downloaded} workspace file(s); "
+            f"log: /workspace/{log_file.relative_to(Path(workspace).resolve()).as_posix()}"
+        )
+    except ToolRecoveryPending:
+        raise
     except ValueError as e:
         raise ValueError(f"The LAMMPS simulation failed: {e!s}") from None
     except Exception as e:
@@ -775,15 +880,66 @@ def _run_lammps_for_workspace(workspace: str | Path, input_file: str) -> str:
 def build_run_lammps_tool(workspace: str | Path):
     """Build the LAMMPS tool bound to one local Corral workspace."""
 
-    @tool
-    def run_lammps(input_file: str) -> str:
-        """Run a workspace LAMMPS input on Modal and copy every output back locally.
+    @tool(hidden_args=["corral_action_id"])
+    def run_lammps(input_file: str, corral_action_id: str | None = None) -> str:
+        """[BRIEF] Run a LAMMPS input file in the isolated MD sandbox. [/BRIEF]
+
+        [DETAILED] The tool runs LAMMPS with the task workspace and read-only shared assets, then synchronizes changed task files. [/DETAILED]
+
+        [PROCEDURAL] When to use this tool:
+        - Use it after preparing a complete LAMMPS input file.
+        - Inspect the log and output files after the simulation finishes.
+        [/PROCEDURAL]
+
+        [WORKFLOW_INTEGRATION] Typical workflow integration:
+        1. [PREREQUISITE] Save the LAMMPS input and any included task files under /workspace. [/PREREQUISITE]
+        2. [CURRENT] Run this tool with the input-file path. [/CURRENT]
+        3. [FOLLOW_UP] Check the synchronized log and simulation outputs. [/FOLLOW_UP]
+        [/WORKFLOW_INTEGRATION]
+
+        [CONTEXTUAL] How this tool works:
+        - Validates the input path inside the task workspace.
+        - Runs LAMMPS in an isolated sandbox.
+        - Synchronizes changed task files after a successful run.
+        [/CONTEXTUAL]
+
+        [SYNTACTICAL] Usage example:
+        `run_lammps("/workspace/input/simulation.in")`
+        [/SYNTACTICAL]
 
         Args:
-            input_file: Workspace-relative or absolute path to the LAMMPS input file.
+            input_file: [ARGS_BRIEF] Absolute path to the LAMMPS input file. [/ARGS_BRIEF]
+                [ARGS_DETAILED] The file must be under /workspace and contain a non-interactive LAMMPS script. [/ARGS_DETAILED]
+                [ARGS_SYNTACTICAL] Absolute /workspace file path. [/ARGS_SYNTACTICAL]
+                [ARGS_EXAMPLES] "/workspace/input/simulation.in" [/ARGS_EXAMPLES]
+
+        Returns:
+            str: [RETURNS_BRIEF] Message confirming completion and giving the log path. [/RETURNS_BRIEF]
+                [RETURNS_DETAILED] The message also reports how many workspace files were synchronized. [/RETURNS_DETAILED]
+                [RETURNS_EXAMPLES] "Simulation completed. Synchronized 4 workspace file(s); log: /workspace/output/simulation.log" [/RETURNS_EXAMPLES]
+
+        [RAISES] Exceptions:
+            FileNotFoundError:
+                [ERROR_WHEN] The input file does not exist. [/ERROR_WHEN]
+                [ERROR_DETAILS] The supplied path does not name a workspace file. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Check the path and create the input file first. [/ERROR_RECOVERY]
+            ValueError:
+                [ERROR_WHEN] The path or LAMMPS run is invalid. [/ERROR_WHEN]
+                [ERROR_DETAILS] The path is outside the workspace or LAMMPS rejects the input. [/ERROR_DETAILS]
+                [ERROR_RECOVERY] Correct the path or input script and run the tool again. [/ERROR_RECOVERY]
+        [/RAISES]
+
+        [LIMITATIONS] Known limitations:
+        - The input must not require interactive input.
+        - Only files in the task workspace are synchronized back.
+        [/LIMITATIONS]
         """
 
-        return _run_lammps_for_workspace(workspace, input_file)
+        return _run_lammps_for_workspace(
+            workspace,
+            str(local_path(workspace, input_file)),
+            action_id=corral_action_id,
+        )
 
     return run_lammps
 
@@ -821,22 +977,22 @@ def visualisation_tool(path: str, query: str) -> str:
 
     [SYNTACTICAL] Usage examples:
     [
-        `visualisation_tool("plots/density_vs_temperature.png", "At what temperature does the visible kink occur?")`,
-        `visualisation_tool("plots/stress_strain.png", "Is there a clear yield point visible?")`,
-        `visualisation_tool("plots/energy_vs_step.png", "Is there a plateau region, and where does it start?")`,
-        `visualisation_tool("plots/spectrum.png", "Where is the main peak located on the x-axis?")`,
-        `visualisation_tool("plots/density_vs_temperature.png", "Does the curve look linear or does it change regime?")`,
+        `visualisation_tool("/workspace/output/density_vs_temperature.png", "At what temperature does the visible kink occur?")`,
+        `visualisation_tool("/workspace/output/stress_strain.png", "Is there a clear yield point visible?")`,
+        `visualisation_tool("/workspace/output/energy_vs_step.png", "Is there a plateau region, and where does it start?")`,
+        `visualisation_tool("/workspace/output/spectrum.png", "Where is the main peak located on the x-axis?")`,
+        `visualisation_tool("/workspace/output/density_vs_temperature.png", "Does the curve look linear or does it change regime?")`,
     ]
     [/SYNTACTICAL]
 
     Args:
         path (str):
             [ARGS_BRIEF] Path to the image file containing the plot to be analyzed. [/ARGS_BRIEF]
-            [ARGS_DETAILED] This parameter specifies the absolute or relative path to an image file (e.g., PNG, JPG) that contains a plot or figure. The image should be readable by the backend and should include visible axes, labels, and plotted data so that visual features and directly readable values can be identified. [/ARGS_DETAILED]
+            [ARGS_DETAILED] This parameter specifies the absolute /workspace path to an image file (e.g., PNG, JPG) that contains a plot or figure. The image should be readable by the backend and should include visible axes, labels, and plotted data so that visual features and directly readable values can be identified. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: string representing a file path to an image file. [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] Examples:
-                - "plots/density_vs_temperature.png"
-                - "./figures/msd_vs_time.jpg"
+                - "/workspace/output/density_vs_temperature.png"
+                - "/workspace/output/msd_vs_time.jpg"
                 - "/workspace/results/phase_transition_plot.png" [/ARGS_EXAMPLES]
 
         query (str):
