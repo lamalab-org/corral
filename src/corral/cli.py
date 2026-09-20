@@ -534,6 +534,7 @@ async def run_benchmark(
             trials_per_task=args.trials,
             max_parallel=args.max_parallel,
             max_parallel_per_task=args.max_parallel_per_task,
+            max_parallel_evaluations=getattr(args, "max_parallel_evaluations", None),
             enable_surrender=args.enable_surrender,
             evaluate=not args.no_evaluate,
             verbose=args.verbose,
@@ -711,6 +712,7 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     execution.add_argument("--trials", type=int, default=1)
     execution.add_argument("--max-parallel", type=int, default=1)
     execution.add_argument("--max-parallel-per-task", type=int, default=1)
+    execution.add_argument("--max-parallel-evaluations", type=int)
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--run-id")
     _add_execution_arguments(

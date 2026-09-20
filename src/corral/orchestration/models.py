@@ -261,6 +261,7 @@ class BenchmarkInput:
     model_by_task: dict[str, str] = field(default_factory=dict)
     max_parallel: int = 1
     max_parallel_per_task: int = 1
+    max_parallel_evaluations: int | None = None
     max_parallel_by_model: dict[str, int] = field(default_factory=dict)
     max_parallel_by_environment: dict[str, int] = field(default_factory=dict)
     enable_surrender: bool = False
@@ -283,6 +284,11 @@ class BenchmarkInput:
             raise ValueError("trials_per_task must be at least 1")
         if self.max_parallel < 1 or self.max_parallel_per_task < 1:
             raise ValueError("parallelism limits must be at least 1")
+        if (
+            self.max_parallel_evaluations is not None
+            and self.max_parallel_evaluations < 1
+        ):
+            raise ValueError("max_parallel_evaluations must be at least 1")
         missing_agents = set(self.task_ids) - self.agent_by_task.keys()
         missing_environments = set(self.task_ids) - self.environment_by_task.keys()
         if missing_agents or missing_environments:

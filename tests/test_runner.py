@@ -211,6 +211,7 @@ def test_runner_builds_dependency_closed_metadata():
         trials_per_task=4,
         max_parallel=8,
         max_parallel_per_task=2,
+        max_parallel_evaluations=3,
         max_parallel_by_model={"model-a": 1},
         max_parallel_by_environment={"env-downstream": 1},
     )
@@ -229,6 +230,24 @@ def test_runner_builds_dependency_closed_metadata():
     }
     assert request.max_parallel == 8
     assert request.max_parallel_per_task == 2
+    assert request.max_parallel_evaluations == 3
+
+
+def test_runner_defaults_to_unlimited_evaluation_parallelism():
+    executor = RecordingExecutor(BenchmarkExecutionResult("benchmark", (), 1, ()))
+    runner = _runner(executor, _metadata())
+
+    request = runner.build_input("benchmark")
+
+    assert request.max_parallel_evaluations is None
+
+
+def test_runner_rejects_invalid_evaluation_parallelism():
+    executor = RecordingExecutor(BenchmarkExecutionResult("benchmark", (), 1, ()))
+    runner = _runner(executor, _metadata())
+
+    with pytest.raises(ValueError, match="max_parallel_evaluations"):
+        runner.build_input("benchmark", max_parallel_evaluations=0)
 
 
 def test_runner_rejects_an_incomplete_task_selection():
@@ -365,6 +384,7 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
     }
     assert report.metadata["benchmark"]["trials_per_task"] == 1
     assert report.metadata["benchmark"]["k_values"] == [1]
+    assert report.metadata["benchmark"]["max_parallel_evaluations"] is None
 
 
 @pytest.mark.anyio()

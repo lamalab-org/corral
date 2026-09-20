@@ -117,6 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     execution.add_argument("--trials", type=int, default=1)
     execution.add_argument("--max-parallel", type=int, default=1)
     execution.add_argument("--max-parallel-per-task", type=int, default=1)
+    execution.add_argument("--max-parallel-evaluations", type=int)
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--run-id")
     execution.add_argument("--max-attempts", type=int, default=3)

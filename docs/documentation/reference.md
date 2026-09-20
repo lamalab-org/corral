@@ -47,8 +47,13 @@ result = await runner.run(
     k_values=[1, 2, 3],
     max_parallel=8,
     max_parallel_per_task=2,
+    max_parallel_evaluations=2,
 )
 ```
+
+Task execution and evaluation use separate concurrency controls. Evaluation
+defaults to unlimited parallelism (`max_parallel_evaluations=None`), and the
+runner waits for all queued evaluations before returning.
 
 Set `include_dependencies=False` for strict validation instead of automatic
 dependency expansion.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from time import perf_counter
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -330,6 +330,7 @@ def _report_metadata(
             "max_iterations_by_task": dict(request.max_iterations_by_task),
             "max_parallel": request.max_parallel,
             "max_parallel_per_task": request.max_parallel_per_task,
+            "max_parallel_evaluations": request.max_parallel_evaluations,
             "max_parallel_by_model": dict(request.max_parallel_by_model),
             "max_parallel_by_environment": dict(request.max_parallel_by_environment),
             "enable_surrender": request.enable_surrender,
@@ -396,6 +397,7 @@ class CorralRunner:
         trials_per_task: int = 1,
         max_parallel: int = 1,
         max_parallel_per_task: int = 1,
+        max_parallel_evaluations: int | None = None,
         max_parallel_by_model: Mapping[str, int] | None = None,
         max_parallel_by_environment: Mapping[str, int] | None = None,
         enable_surrender: bool = False,
@@ -439,6 +441,7 @@ class CorralRunner:
             },
             max_parallel=max_parallel,
             max_parallel_per_task=max_parallel_per_task,
+            max_parallel_evaluations=max_parallel_evaluations,
             max_parallel_by_model=dict(max_parallel_by_model or {}),
             max_parallel_by_environment=dict(max_parallel_by_environment or {}),
             enable_surrender=enable_surrender,
@@ -473,13 +476,22 @@ class CorralRunner:
             environment: asyncio.Semaphore(limit)
             for environment, limit in request.max_parallel_by_environment.items()
         }
-        handles: dict[tuple[int, str], asyncio.Task[TaskExecutionResult]] = {}
+        evaluation_gate = (
+            asyncio.Semaphore(request.max_parallel_evaluations)
+            if request.max_parallel_evaluations is not None
+            else None
+        )
+        execution_handles: dict[tuple[int, str], asyncio.Task[TaskExecutionResult]] = {}
+        evaluation_handles: dict[
+            tuple[int, str], asyncio.Task[TaskExecutionResult]
+        ] = {}
+        active_evaluations: set[tuple[int, str]] = set()
 
-        async def run_one(trial_index: int, task_id: str) -> TaskExecutionResult:
+        async def execute_one(trial_index: int, task_id: str) -> TaskExecutionResult:
             execution_id = f"{request.benchmark_run_id}:{task_id}:{trial_index}"
             dependencies: dict[str, dict[str, Any]] = {}
             for dependency in request.dependency_graph.get(task_id, ()):
-                result = await handles[(trial_index, dependency)]
+                result = await execution_handles[(trial_index, dependency)]
                 if not result.output_ready:
                     return TaskExecutionResult(
                         task_id=task_id,
@@ -530,43 +542,11 @@ class CorralRunner:
                         docker_launcher=self.docker_launcher,
                         retry_policy=request.retry_policy,
                     )
-                    evaluation = None
-                    evaluation_error = None
-                    if request.evaluate and current.output is not None:
-                        try:
-                            evaluation = await _with_retries(
-                                lambda: evaluate_task(
-                                    EvaluateTaskInput(
-                                        execution_id=execution_id,
-                                        environment_id=environment_id,
-                                        commit_hash=current.commit_hash,
-                                        branch_id=current.branch_id,
-                                        task_id=task_id,
-                                        benchmark_run_id=request.benchmark_run_id,
-                                    ),
-                                    state_store=self.state_store,
-                                    registry=self.registry,
-                                    observer=self.observer,
-                                ),
-                                request.retry_policy,
-                            )
-                        except Exception as exc:
-                            evaluation_error = str(exc) or type(exc).__name__
-                            event(
-                                "WARNING",
-                                "evaluation.degraded",
-                                subsystem="runtime",
-                                execution_id=execution_id,
-                                task_id=task_id,
-                                **exception_fields(exc),
-                            )
                     return TaskExecutionResult(
                         task_id=task_id,
                         trial_index=trial_index,
                         execution_id=execution_id,
                         state=current,
-                        evaluation=evaluation,
-                        evaluation_error=evaluation_error,
                         error=current.error if current.status == "failed" else None,
                     )
             except Exception as exc:
@@ -586,20 +566,89 @@ class CorralRunner:
                     error=str(exc) or type(exc).__name__,
                 )
 
+        async def evaluate_one(
+            key: tuple[int, str],
+        ) -> TaskExecutionResult:
+            _, task_id = key
+            result = await execution_handles[key]
+            current = result.state
+            if (
+                not request.evaluate
+                or current is None
+                or current.status != "submitted"
+                or current.output is None
+                or result.error is not None
+                or result.unreachable_dependency is not None
+            ):
+                return result
+
+            if evaluation_gate is not None:
+                await evaluation_gate.acquire()
+            active_evaluations.add(key)
+            try:
+                try:
+                    evaluation = await _with_retries(
+                        lambda: evaluate_task(
+                            EvaluateTaskInput(
+                                execution_id=result.execution_id,
+                                environment_id=request.environment_by_task[task_id],
+                                commit_hash=current.commit_hash,
+                                branch_id=current.branch_id,
+                                task_id=task_id,
+                                benchmark_run_id=request.benchmark_run_id,
+                            ),
+                            state_store=self.state_store,
+                            registry=self.registry,
+                            observer=self.observer,
+                        ),
+                        request.retry_policy,
+                    )
+                except Exception as exc:
+                    event(
+                        "WARNING",
+                        "evaluation.degraded",
+                        subsystem="runtime",
+                        execution_id=result.execution_id,
+                        task_id=task_id,
+                        **exception_fields(exc),
+                    )
+                    return replace(
+                        result,
+                        evaluation_error=str(exc) or type(exc).__name__,
+                    )
+                return replace(result, evaluation=evaluation)
+            finally:
+                active_evaluations.discard(key)
+                if evaluation_gate is not None:
+                    evaluation_gate.release()
+
         # Register every handle before a task can await its same-trial dependencies.
         for trial_index in range(request.trials_per_task):
             for task_id in request.task_ids:
-                handles[(trial_index, task_id)] = asyncio.create_task(
-                    run_one(trial_index, task_id)
+                key = (trial_index, task_id)
+                execution_handles[key] = asyncio.create_task(
+                    execute_one(trial_index, task_id)
                 )
+        for key in execution_handles:
+            evaluation_handles[key] = asyncio.create_task(evaluate_one(key))
+
+        evaluations = asyncio.gather(*evaluation_handles.values())
         try:
-            trials = await asyncio.gather(*handles.values())
+            # Shield the group so cancellation can safely drain scoring that has
+            # already entered evaluate_task (which may be running in a thread).
+            trials = await asyncio.shield(evaluations)
         finally:
-            # Finish cancellation before callers close stores and environments.
-            for handle in handles.values():
+            for handle in execution_handles.values():
                 if not handle.done():
                     handle.cancel()
-            await asyncio.gather(*handles.values(), return_exceptions=True)
+            for key, handle in evaluation_handles.items():
+                if key not in active_evaluations and not handle.done():
+                    handle.cancel()
+            # Finish cancellation and active scoring before callers close stores
+            # and environments used by those operations.
+            await asyncio.gather(*execution_handles.values(), return_exceptions=True)
+            await asyncio.gather(*evaluation_handles.values(), return_exceptions=True)
+            await asyncio.gather(evaluations, return_exceptions=True)
         return BenchmarkExecutionResult(
             benchmark_run_id=request.benchmark_run_id,
             task_ids=request.task_ids,
@@ -616,6 +665,7 @@ class CorralRunner:
         k_values: int | Iterable[int] | None = None,
         max_parallel: int = 1,
         max_parallel_per_task: int = 1,
+        max_parallel_evaluations: int | None = None,
         max_parallel_by_model: Mapping[str, int] | None = None,
         max_parallel_by_environment: Mapping[str, int] | None = None,
         enable_surrender: bool = False,
@@ -634,6 +684,7 @@ class CorralRunner:
             trials_per_task=trials_per_task,
             max_parallel=max_parallel,
             max_parallel_per_task=max_parallel_per_task,
+            max_parallel_evaluations=max_parallel_evaluations,
             max_parallel_by_model=max_parallel_by_model,
             max_parallel_by_environment=max_parallel_by_environment,
             enable_surrender=enable_surrender,

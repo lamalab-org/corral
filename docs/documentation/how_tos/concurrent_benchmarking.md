@@ -11,6 +11,7 @@ result = await runner.run(
     k_values=[1, 2, 4],
     max_parallel=16,
     max_parallel_per_task=4,
+    max_parallel_evaluations=2,
     max_parallel_by_model={"gpt-5": 8},
     max_parallel_by_environment={"wetlab": 1},
 )
@@ -22,8 +23,13 @@ The following limits apply throughout the benchmark:
 |---|---|
 | `max_parallel` | All running task attempts in the benchmark. |
 | `max_parallel_per_task` | Attempts of the same task. |
+| `max_parallel_evaluations` | Concurrent evaluations. The default, `None`, has no limit. |
 | `max_parallel_by_model` | Attempts using each model ID. |
 | `max_parallel_by_environment` | Attempts using each environment ID. |
+
+Evaluation runs independently after each task attempt finishes, so scoring
+does not consume execution capacity or delay dependency-ready tasks. The
+runner still waits for all evaluations before returning the report.
 
 These benchmark limits are the concurrency controls. Corral does
 not serialize requests that share an `agent_id`; a registered agent instance

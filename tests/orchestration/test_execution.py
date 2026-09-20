@@ -17,6 +17,7 @@ from corral.orchestration import (
     AgentRuntimeDefinition,
     DockerSandboxSpec,
     EnvironmentRuntimeDefinition,
+    EvaluationRef,
     RetryPolicy,
     RuntimeRegistry,
     SandboxMode,
@@ -456,6 +457,144 @@ async def test_benchmark_enforces_concurrency_limits(
 
 
 @pytest.mark.anyio()
+async def test_evaluation_does_not_consume_execution_capacity(monkeypatch):
+    evaluation_started = asyncio.Event()
+    second_started = asyncio.Event()
+    release_evaluations = asyncio.Event()
+
+    async def launch(*, task, **kwargs):
+        if task.task_id == "second":
+            second_started.set()
+            await evaluation_started.wait()
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        if request.task_id == "first":
+            evaluation_started.set()
+            await second_started.wait()
+        await release_evaluations.wait()
+        return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {
+            task_id: BenchmarkTaskMetadata("agent", task_id)
+            for task_id in ("first", "second")
+        },
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+    benchmark = asyncio.create_task(
+        runner.run(
+            "overlap",
+            max_parallel=1,
+            max_parallel_evaluations=1,
+        )
+    )
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(evaluation_started.wait(), second_started.wait()),
+            timeout=2,
+        )
+        assert not benchmark.done()
+    finally:
+        release_evaluations.set()
+
+    report = await asyncio.wait_for(benchmark, timeout=2)
+    assert [trial.score for trial in report.all_results] == [1.0, 1.0]
+
+
+@pytest.mark.anyio()
+async def test_dependency_execution_does_not_wait_for_upstream_evaluation(
+    monkeypatch,
+):
+    downstream_started = asyncio.Event()
+
+    async def launch(*, task, **kwargs):
+        if task.task_id == "downstream":
+            assert task.dependency_outputs == {"upstream": {"answer": "42"}}
+            downstream_started.set()
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        if request.task_id == "upstream":
+            await downstream_started.wait()
+        return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {
+            "upstream": BenchmarkTaskMetadata("agent", "upstream"),
+            "downstream": BenchmarkTaskMetadata("agent", "downstream", ("upstream",)),
+        },
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+
+    report = await asyncio.wait_for(
+        runner.run(
+            "dependencies",
+            max_parallel=1,
+            max_parallel_evaluations=1,
+        ),
+        timeout=2,
+    )
+
+    assert downstream_started.is_set()
+    assert all(trial.score == 1.0 for trial in report.all_results)
+
+
+@pytest.mark.anyio()
+@pytest.mark.parametrize(
+    ("max_parallel_evaluations", "expected_peak"),
+    [(None, 4), (2, 2)],
+)
+async def test_benchmark_enforces_evaluation_concurrency_limit(
+    monkeypatch, max_parallel_evaluations, expected_peak
+):
+    active = 0
+    peak = 0
+
+    async def launch(*, task, **kwargs):
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.01)
+            return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {"task": BenchmarkTaskMetadata("agent", "environment")},
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+
+    report = await runner.run(
+        "evaluation-limit",
+        trials_per_task=4,
+        max_parallel=4,
+        max_parallel_per_task=4,
+        max_parallel_evaluations=max_parallel_evaluations,
+    )
+
+    assert len(report.all_results) == 4
+    assert peak == expected_peak
+    assert active == 0
+
+
+@pytest.mark.anyio()
 async def test_failed_trial_blocks_only_its_own_descendants(monkeypatch):
     requests = []
 
@@ -578,4 +717,54 @@ async def test_benchmark_cancellation_finishes_active_trials(monkeypatch):
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+    assert active == 0
+
+
+@pytest.mark.anyio()
+async def test_benchmark_cancellation_drains_active_evaluation(monkeypatch):
+    started = asyncio.Event()
+    release = asyncio.Event()
+    active = 0
+    calls = 0
+
+    async def launch(*, task, **kwargs):
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        nonlocal active, calls
+        calls += 1
+        active += 1
+        started.set()
+        try:
+            await release.wait()
+            return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {"task": BenchmarkTaskMetadata("agent", "environment")},
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+    benchmark = asyncio.create_task(
+        runner.run(
+            "cancel-evaluation",
+            trials_per_task=2,
+            max_parallel=2,
+            max_parallel_per_task=2,
+            max_parallel_evaluations=1,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=2)
+    benchmark.cancel()
+    await asyncio.sleep(0)
+    assert not benchmark.done()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(benchmark, timeout=2)
+    assert calls == 1
     assert active == 0

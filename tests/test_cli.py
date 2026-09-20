@@ -234,6 +234,8 @@ def test_benchmark_parser_accepts_agent_environment_model_and_json_options():
             '{"level": 2}',
             "--agent-kwargs",
             '{"seed": 7}',
+            "--max-parallel-evaluations",
+            "3",
         ]
     )
 
@@ -243,6 +245,7 @@ def test_benchmark_parser_accepts_agent_environment_model_and_json_options():
     assert args.tasks == ["task1"]
     assert args.env_kwargs == {"level": 2}
     assert args.agent_kwargs == {"seed": 7}
+    assert args.max_parallel_evaluations == 3
 
 
 def test_benchmark_parser_has_safe_docker_defaults():
@@ -258,6 +261,7 @@ def test_benchmark_parser_has_safe_docker_defaults():
     assert args.sandbox_network == "bridge"
     assert args.keep_sandboxes == "never"
     assert args.state_dir == ".corral/runs"
+    assert args.max_parallel_evaluations is None
 
 
 def test_legacy_benchmark_namespace_also_defaults_to_docker():
