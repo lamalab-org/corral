@@ -41,6 +41,10 @@ class RunSpec:
     benchmark: str = ""
     split: str = "train"
     policy_api: str = "primitive"
+    #: Concurrent samples/model-connections. Kept at 1 for real policy runs, where
+    #: memory, budgets, and artifacts must stay stable across questions; the
+    #: stateless zero-shot baseline is free to raise this.
+    max_connections: int = 1
 
     @property
     def log_dir(self) -> str:

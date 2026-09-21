@@ -25,7 +25,11 @@ __all__ = [
 BASELINE_POLICY_SOURCE = '''\
 """The pinned zero-shot baseline. One call, no system message, no demonstrations."""
 
-MANIFEST = {"name": "baseline-zero-shot", "max_calls_per_question": 1}
+MANIFEST = {
+    "name": "baseline-zero-shot",
+    "max_calls_per_question": 1,
+    "max_tokens_per_call": 8192,
+}
 
 
 class Policy:
@@ -33,8 +37,14 @@ class Policy:
         prompt = question.text
         if question.choices:
             prompt += "\\n\\n" + question.rendered_choices()
-            prompt += "\\n\\nAnswer with the letter of the correct option."
-        return ctx.student.generate(prompt, temperature=0.0, max_tokens=1024, seed=0)
+        if question.benchmark == "chembench":
+            prompt += "\\n\\nRespond with your final answer wrapped as [ANSWER]<answer>[/ANSWER]."
+        elif question.choices:
+            prompt += (
+                "\\n\\nAnswer with the letter of the correct option, in the "
+                "format 'ANSWER: <letter>'."
+            )
+        return ctx.student.generate(prompt, temperature=0.0, max_tokens=8192, seed=0)
 '''
 
 
@@ -85,10 +95,10 @@ class BaselineResult:
 def headroom_verdict(accuracy: float, chance: float) -> str:
     """Whether a (benchmark, model) pair can be moved at all.
 
-    The go/no-go gate. A pair at the ceiling has nothing left to win; one at the
-    floor cannot be climbed off, and "improvement over baseline" does not rescue
-    it — 0.17 to 0.17 is noise, not a result. Either way the task measures nothing
-    and are not part of the packaged task data.
+    A pair at the ceiling has nothing left to win; one at the floor cannot be
+    climbed off, and "improvement over baseline" does not rescue it — 0.17 to
+    0.17 is noise, not a result. Shown in the baseline report so a human can
+    decide whether to recalibrate item selection or pick a different student.
     """
     if 1.0 - accuracy < 0.15:
         return "ceiling"
@@ -119,6 +129,7 @@ def measure_baseline(
     base_url: str | None = None,
     out_dir: Path | None = None,
     timeout_s: int = 3600,
+    max_connections: int = 8,
 ) -> BaselineResult:
     """Run the pinned zero-shot policy over one split and grade it."""
     items = datasets.load_items(benchmark, split)  # type: ignore[arg-type]
@@ -155,8 +166,10 @@ def measure_baseline(
             base_url=base_url,
             total_calls=len(items) * 2,
             max_calls_per_question=1,
+            max_tokens_per_call=8192,
             benchmark=benchmark,
             split=split,
+            max_connections=max(1, max_connections),
         )
         summary = PolicyEvaluator().run(spec, targets=targets)
         if not summary.ok and summary.n_answered == 0:

@@ -263,15 +263,16 @@ def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
             )
         )
 
-    # Run questions sequentially so memory, budgets, and artifacts are stable.
-    summary.execution = "sequential"
+    # Sequential by default so memory, budgets, and artifacts are stable; the
+    # stateless zero-shot baseline opts into concurrency via spec.max_connections.
+    summary.execution = "sequential" if spec.max_connections <= 1 else "concurrent"
 
     try:
         inspect_eval(
             tasks,
             model=model,
-            max_samples=1,
-            max_connections=1,
+            max_samples=spec.max_connections,
+            max_connections=spec.max_connections,
             max_tasks=1,
             log_dir=spec.log_dir,
             log_format="json",

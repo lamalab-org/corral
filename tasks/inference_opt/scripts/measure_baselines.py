@@ -36,7 +36,7 @@ def _parse_models(pairs: list[str]) -> dict[str, str]:
     return models
 
 
-def _patch_tasks(level: int, measured: dict, refused: set[tuple[str, str]]) -> int:
+def _patch_tasks(level: int, measured: dict) -> int:
     directory = ROOT / "environments" / f"level_{level}" / "tasks_json"
     paths = sorted(directory.glob("task_*.json"))
     tasks = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
@@ -52,9 +52,6 @@ def _patch_tasks(level: int, measured: dict, refused: set[tuple[str, str]]) -> i
             config["baselines_train"][model] = entry["train"]["accuracy"]
             config.setdefault("baseline_items", {})[model] = entry["train"]["per_item"]
             patched += 1
-        config["refused"] = any(
-            (benchmark, model) in refused for model in config["models"]
-        )
     for path, task in zip(paths, tasks, strict=True):
         path.write_text(json.dumps(task, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return patched
@@ -70,6 +67,8 @@ def main() -> None:
     parser.add_argument("--out", type=Path,
                         default=ROOT / "inference_opt" / "data" / "baselines" / "v1.json")
     parser.add_argument("--write-tasks", action="store_true")
+    parser.add_argument("--max-connections", type=int, default=8,
+                        help="concurrent requests against the student endpoint")
     args = parser.parse_args()
 
     models = _parse_models(args.model)
@@ -78,7 +77,6 @@ def main() -> None:
 
     manifest = datasets.load_manifest()
     measured: dict[str, dict] = {}
-    refused: set[tuple[str, str]] = set()
     rows: list[tuple[str, str, float, float, float, str]] = []
 
     for model, spec in models.items():
@@ -89,6 +87,7 @@ def main() -> None:
                 result = measure_baseline(
                     benchmark, model, split,
                     model_spec=spec, base_url=args.base_url,
+                    max_connections=args.max_connections,
                 )
                 if result.error:
                     raise SystemExit(
@@ -102,17 +101,26 @@ def main() -> None:
                 (benchmark, model, test["accuracy"], test["headroom"],
                  test["floor_margin"], test["verdict"])
             )
-            if test["verdict"] in ("ceiling", "floor"):
-                refused.add((benchmark, model))
+
+    # Merge with any prior run's artifact so re-running for one model (e.g. to add
+    # student_b after student_a) doesn't drop earlier students' results.
+    prior_models: dict[str, str] = {}
+    if args.out.exists():
+        prior = json.loads(args.out.read_text(encoding="utf-8"))
+        prior_models = prior.get("models", {})
+        for model, per_benchmark in prior.get("results", {}).items():
+            measured.setdefault(model, {}).update(
+                {b: e for b, e in per_benchmark.items() if b not in measured.get(model, {})}
+            )
+    models = {**prior_models, **models}
 
     print(f"\n{'benchmark':16}{'model':14}{'acc':>7}{'headroom':>10}"
           f"{'floor':>8}  verdict")
     print("-" * 70)
     for benchmark, model, accuracy, headroom, floor, verdict in rows:
-        flag = "  <-- REFUSED" if verdict in ("ceiling", "floor") else ""
         print(
             f"{benchmark:16}{model:14}{accuracy:7.3f}{headroom:10.3f}{floor:8.3f}"
-            f"  {verdict}{flag}"
+            f"  {verdict}"
         )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -127,7 +135,6 @@ def main() -> None:
                 },
                 "models": models,
                 "results": measured,
-                "refused": sorted(f"{b}:{m}" for b, m in refused),
             },
             indent=2, sort_keys=True,
         ),
@@ -135,15 +142,9 @@ def main() -> None:
     )
     print(f"\nwrote {args.out.relative_to(ROOT)}")
 
-    if refused:
-        print(
-            f"\n{len(refused)} pair(s) are at the ceiling or the floor and cannot be "
-            "moved by any strategy. Fix this before running agents: recalibrate the "
-            "item selection against this student, or choose a different student."
-        )
     if args.write_tasks:
         for level in (1, 2):
-            count = _patch_tasks(level, measured, refused)
+            count = _patch_tasks(level, measured)
             print(f"level {level}: patched {count} baseline entries")
 
 
