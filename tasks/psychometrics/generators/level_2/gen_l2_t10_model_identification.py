@@ -232,8 +232,7 @@ SUBMISSION_FORMAT = """A single JSON object:
 
 {
   "assignments": {
-    "dataset_01": ["model_c"],
-    "dataset_02": ["model_b", "model_e"]
+    "<dataset_id>": ["<model_id>", ...]
   }
 }
 

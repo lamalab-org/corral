@@ -55,8 +55,7 @@ A single JSON object:
 
 {
   "classifications": {
-    "case_1": ["population_a"],
-    "case_2": ["population_b", "population_c"]
+    "<case_id>": ["<population_id>", ...]
   }
 }
 

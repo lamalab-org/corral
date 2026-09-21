@@ -20,7 +20,7 @@ Give every item exactly one label: `sound`, `mis_keyed`, `inserted_neutral`,
 `reportable_after_repair` or `not_reportable`.
 
 ```json
-{"model_syntax": "F =~ HSNS1+...+HSNS10\nF ~ gender\nHSNS2 ~ gender", "item_diagnoses": {"HSNS1": "sound"}, "comparison": "reportable_after_repair|not_reportable"}
+{"model_syntax": "<complete model with group paths>", "item_diagnoses": {"<item>": "<label>", "...": "..."}, "comparison": "reportable_after_repair|not_reportable"}
 ```
 
 The model must make the group comparison explicit and represent supported item

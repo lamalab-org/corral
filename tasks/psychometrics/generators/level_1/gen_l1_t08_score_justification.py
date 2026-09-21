@@ -110,7 +110,7 @@ A single JSON object:
 {
   "model_syntax": "<the model you calibrated on the United States, covering both
                     instruments, in lavaan notation>",
-  "scoring": {"<instrument>": "<class>", "<instrument>": "<class>"}
+  "scoring": {"hsns": "<class>", "dirty_dozen": "<class>"}
 }
 
 Name the two instruments `hsns` and `dirty_dozen`. `model_syntax` is re-fitted on the

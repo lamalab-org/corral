@@ -82,7 +82,7 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "F1 =~ ...\\n ...",
+  "model_syntax": "<complete lavaan/semopy model>",
   "loadings": {"<item>": <float>, ...},
   "factor_correlation": <float, or null if your model has no two oblique factors>
 }

@@ -142,8 +142,8 @@ A single JSON object:
   "model_syntax": "<the model you calibrated on the United States, covering both
                     instruments, in lavaan notation>",
   "replication": {
-    "<instrument>": {"<country>": "<class>", ...},
-    "<instrument>": {"<country>": "<class>", ...}
+    "hsns": {"<country>": "<class>", ...},
+    "dirty_dozen": {"<country>": "<class>", ...}
   }
 }
 

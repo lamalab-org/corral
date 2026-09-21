@@ -19,7 +19,7 @@ answer when the rule leaves alternatives.
 ## Output
 
 ```json
-{"classifications": {"case_1": ["population_a"], "case_2": ["population_b", "population_c"]}}
+{"classifications": {"<case_id>": ["<population_id>", "..."]}}
 ```
 
 Include every case exactly once. Candidate order does not matter.

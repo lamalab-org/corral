@@ -92,8 +92,8 @@ Diagnose every item using exactly these labels: `sound`, `mis_keyed`, `inserted_
 SUBMISSION_FORMAT = """A single JSON object:
 
 {
-  "model_syntax": "F =~ HSNS1+...+HSNS10\\nF ~ gender\\nHSNS2 ~ gender",
-  "item_diagnoses": {"HSNS1": "sound", "...": "..."},
+  "model_syntax": "<complete model with the required group paths>",
+  "item_diagnoses": {"<item>": "<label>", ...},
   "comparison": "reportable_after_repair|not_reportable"
 }
 

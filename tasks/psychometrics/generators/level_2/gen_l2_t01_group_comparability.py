@@ -67,9 +67,9 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "F1 =~ ...\\nF2 =~ ...\\nF1 ~ gender\\nF2 ~ gender",
+  "model_syntax": "<complete model with the required group paths>",
   "recommendation": {"status": "supported|not_supported|supported_only_after_reanalysis"},
-  "affected_items": []
+  "affected_items": ["<item>", ...]
 }
 
 The model must include every HSNS item and `gender`. Use lavaan-style syntax

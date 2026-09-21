@@ -82,7 +82,7 @@ Return a final model, a compositional account of the findings, and for each kind
 SUBMISSION_FORMAT = """A single JSON object:
 
 {
-  "model_syntax": "F1 =~ HSNS1+...\\nF2 =~ HSNS2+...\\nF1 ~~ F2\\nF1 ~ gender\\nF2 ~ gender",
+  "model_syntax": "<complete two-factor model with group paths>",
   "findings": {
     "local_dependence": [["item_a", "item_b"]],
     "cross_loadings": ["item_c"],

@@ -77,7 +77,7 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "F1 =~ ...\\nF2 =~ ...\\nF1 ~~ F2",
+  "model_syntax": "<complete frozen measurement model>",
   "holdout_conclusions": {
     "holdout_a": "generalizes|measurement_structure_holds_relations_differ|measurement_structure_fails",
     "holdout_b": "...",

@@ -95,7 +95,7 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "F1 =~ ...\\n F2 =~ ...",
+  "model_syntax": "<complete lavaan/semopy model>",
   "comparisons": {
     "factor_structure": <true|false>, "loadings": <true|false>,
     "factor_variances": <true|false>, "association_with_other_trait": <true|false>,

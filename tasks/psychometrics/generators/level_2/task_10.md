@@ -22,7 +22,7 @@ dataset-to-model mapping is permuted; catalogue order is not evidence.
 ## Output
 
 ```json
-{"assignments": {"dataset_01": ["model_c"], "dataset_02": ["model_b", "model_e"]}}
+{"assignments": {"<dataset_id>": ["<model_id>", "..."]}}
 ```
 
 Include every dataset exactly once and use only candidate IDs from the catalogue.
