@@ -35,6 +35,24 @@ uv run corral bench \
   --list-tasks
 ```
 
+When Modal-backed evaluation is enabled, the deployed evaluation functions are
+hard-capped at 25 active containers per function. For a large benchmark, also
+bound submissions from the Corral process so excess evaluations wait locally
+instead of in Modal's input queue:
+
+```bash
+uv run corral bench \
+  --sandbox local \
+  --agent tool-calling \
+  --environment corral_md \
+  --env-kwargs '{"level": 2}' \
+  --model openai/gpt-5.6 \
+  --max-parallel-evaluations 25 \
+  --max-parallel-evaluations-by-environment '{"corral_md": 25}'
+```
+
+The environment key must be the canonical runtime name `corral_md`.
+
 ## Modal setup and workspace sync
 
 This environment is ready to run its simulation and analysis tools on

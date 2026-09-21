@@ -267,6 +267,7 @@ def test_benchmark_parser_has_safe_docker_defaults():
     assert args.sandbox_network == "bridge"
     assert args.keep_sandboxes == "never"
     assert args.state_dir == ".corral/runs"
+    assert args.max_parallel == 4
     assert args.max_parallel_evaluations is None
     assert args.max_parallel_total is None
     assert args.max_parallel_evaluations_by_environment == {}
@@ -603,6 +604,7 @@ def test_legacy_script_retains_existing_defaults():
     assert args.temperature == 1.0
     assert args.max_iterations == 20
     assert args.trials == 1
+    assert args.max_parallel == 4
 
 
 @pytest.mark.parametrize("agent_class", [SubmitAgent, FailingAgent])

@@ -20,8 +20,6 @@ from ase.io import read
 
 from corral.workspace import confine_workspace_path, workspace_relative_path
 
-SCORING_VERSION = "6"
-
 
 class EvidenceError(ValueError):
     """A required piece of evidence is absent or cannot be interpreted."""
@@ -199,7 +197,7 @@ class Evidence:
         them. Missing/invalid links remain part of the identity; their ordinary
         rubric checks still fail.
         """
-        digest = hashlib.sha256(f"corral_md.workflow.v{SCORING_VERSION}\0".encode())
+        digest = hashlib.sha256(b"corral_md.workflow\0")
         # Direct-dict submissions may contain nonfinite results; those fail the
         # numerical checks, but must still have an identity for pending review.
         digest.update(json.dumps(self.manifest, sort_keys=True).encode())
@@ -337,9 +335,23 @@ class Evidence:
 class Rubric:
     """Independent checks with explicit possible points and failure diagnostics."""
 
-    def __init__(self, task_number: int | None = None):
+    def __init__(
+        self,
+        task_number: int | None = None,
+        *,
+        binary: bool = False,
+        fail_fast: bool = False,
+    ):
         self.task_number = task_number
+        self.binary = binary
+        self.fail_fast = fail_fast
         self.checks: list[dict] = []
+
+    @property
+    def failed(self) -> bool:
+        return any(
+            check["points"] > 0 and check["status"] == "failed" for check in self.checks
+        )
 
     def check(
         self,
@@ -348,6 +360,19 @@ class Rubric:
         condition: bool | Callable | None,
         detail: str = "",
     ) -> bool:
+        if not np.isfinite(points) or points < 0:
+            raise ValueError("Rubric points must be finite and nonnegative")
+        if self.fail_fast and points > 0 and self.failed:
+            self.checks.append(
+                {
+                    "name": name,
+                    "points": float(points),
+                    "earned": 0.0,
+                    "status": "skipped",
+                    "detail": "Not evaluated after an earlier required check failed.",
+                }
+            )
+            return False
         status = "failed"
         try:
             value = condition() if callable(condition) else condition
@@ -363,8 +388,6 @@ class Rubric:
             detail = str(exc)
         except Exception as exc:
             detail = f"{type(exc).__name__}: {exc}"
-        if not np.isfinite(points) or points < 0:
-            raise ValueError("Rubric points must be finite and nonnegative")
         self.checks.append(
             {
                 "name": name,
@@ -388,9 +411,14 @@ class Rubric:
     @property
     def score(self) -> float | None:
         """A verifier limitation must never become an implicit zero or free credit."""
+        if self.binary and self.failed:
+            return 0.0
         if self.pending_checks:
             return None
-        return min(1.0, sum(c["earned"] for c in self.checks) / 100.0)
+        earned = sum(c["earned"] for c in self.checks)
+        if self.binary:
+            return float(earned >= 100.0)
+        return min(1.0, earned / 100.0)
 
     def apply_review(self, review: Mapping, evidence_sha256: str) -> None:
         """Apply explicit evaluator-supplied decisions, never submission metadata.
@@ -429,15 +457,12 @@ class Rubric:
             check["review"] = dict(decision)
 
     def as_dict(self) -> dict:
-        return {
-            "version": SCORING_VERSION,
-            "task_number": self.task_number,
-            "mode": "artifact_only",
-            "score": self.score,
-            "status": "pending_review" if self.pending_checks else "complete",
-            "pending_checks": [c["name"] for c in self.pending_checks],
-            "pending_points": sum(c["points"] for c in self.pending_checks),
-            "score_bounds": [
+        score = self.score
+        pending = self.pending_checks if score is None else []
+        if self.binary:
+            bounds = [score, score] if score is not None else [0.0, 1.0]
+        else:
+            bounds = [
                 min(1.0, sum(c["earned"] for c in self.checks) / 100.0),
                 min(
                     1.0,
@@ -447,7 +472,15 @@ class Rubric:
                     )
                     / 100.0,
                 ),
-            ],
+            ]
+        return {
+            "task_number": self.task_number,
+            "mode": "artifact_only",
+            "score": score,
+            "status": "pending_review" if score is None else "complete",
+            "pending_checks": [c["name"] for c in pending],
+            "pending_points": sum(c["points"] for c in pending),
+            "score_bounds": bounds,
             "earned_points": sum(c["earned"] for c in self.checks),
             "possible_points": 100.0,
             "checks": self.checks,

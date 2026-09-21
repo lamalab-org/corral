@@ -214,7 +214,7 @@ def test_task8_distribution_screen_requests_review_without_changing_other_credit
     write(tmp_path / "train.json", frames)
     report = check_level2_workflow(8).evaluate(path)
     assert report["pending_checks"] == ["distortion_distributions_and_independence"]
-    assert report["score_bounds"] == pytest.approx([0.96, 1])
+    assert report["score_bounds"] == [0, 1]
     assert not [c for c in report["checks"] if c["status"] == "failed"], report
 
 
@@ -259,7 +259,7 @@ def test_task8_alternative_validation_is_reviewed_without_losing_other_credit(tm
         "ridge_coefficient_consistency",
         "validation_predictions_metrics_and_selection",
     }
-    assert report["score_bounds"] == pytest.approx([0.85, 1])
+    assert report["score_bounds"] == [0, 1]
     assert check(report, "in_distribution_metrics")["status"] == "passed"
     assert check(report, "training_partitions_and_label_budget")["status"] == "passed"
 
@@ -286,7 +286,12 @@ def test_task8_alternative_validation_cannot_hide_contradictions(tmp_path, mutat
         if mutation == "wrong_final_fit"
         else "training_partitions_and_label_budget"
     )
-    assert check(report, name)["status"] == "failed", report
+    if mutation == "wrong_final_fit":
+        assert check(report, name)["status"] == "skipped", report
+        assert any(item["status"] == "failed" for item in report["checks"])
+    else:
+        assert check(report, name)["status"] == "failed", report
+    assert report["score"] == 0
 
 
 def test_inconclusive_physical_screen_is_resolved_only_by_evaluator(tmp_path):
@@ -325,4 +330,4 @@ def test_inconclusive_physical_screen_is_resolved_only_by_evaluator(tmp_path):
             }
         },
     }
-    assert grader.score_submission(path, review=review) == pytest.approx(0.91)
+    assert grader.score_submission(path, review=review) == 0

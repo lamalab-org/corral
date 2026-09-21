@@ -107,6 +107,7 @@ volume_struct = modal.Volume.from_name(ASSET_VOLUMES["structures"])
 volume_models = modal.Volume.from_name(ASSET_VOLUMES["models"])
 
 CPUS = 2
+MAX_EVALUATION_CONTAINERS = 25
 RUNS = Path("/results/corral/runs")
 RELEASES = Path("/bases/corral/releases")
 ASSET_DIRECTORIES = frozenset({"models", "potentials", "structures"})
@@ -741,6 +742,7 @@ def _verification_runtime():
 @app.function(
     image=lammps_image,
     cpu=1,
+    max_containers=MAX_EVALUATION_CONTAINERS,
     timeout=7500,
     memory=4096,
     volumes={"/results": volume_sim, "/bases": volume_base.read_only()},
@@ -757,6 +759,7 @@ def verify_calculations(
 @app.function(
     image=lammps_image,
     cpu=1,
+    max_containers=MAX_EVALUATION_CONTAINERS,
     timeout=600,
     memory=2048,
     volumes={"/results": volume_sim, "/bases": volume_base.read_only()},

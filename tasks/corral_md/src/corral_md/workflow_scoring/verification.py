@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import tempfile
 import uuid
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +35,10 @@ TASK5_REFERENCE = {
     "default_dtype": "float64",
     "dispersion": False,
 }
+
+DEFAULT_MAX_PARALLEL_CALCULATIONS = 4
+MAX_PARALLEL_CALCULATIONS = 25
+PALLADIUM_FRAMES_PER_JOB = 50
 
 
 def file_ref(path):
@@ -101,15 +107,21 @@ class Plan:
         parameters=None,
         targets=(),
         tolerance=None,
+        depends_on=(),
     ):
         if name in self.expected:
             raise ValueError("Duplicate verification check")
+        dependencies = list(depends_on)
+        if any(dependency not in self.expected for dependency in dependencies):
+            raise ValueError("Verification dependencies must name earlier jobs")
         job = {
             "id": name,
             "operation": operation,
             **inputs,
             "parameters": parameters or {},
         }
+        if dependencies:
+            job["depends_on"] = dependencies
         json.dumps(job, allow_nan=False)
         self.jobs.append(job)
         self.expected[name] = {
@@ -140,6 +152,8 @@ class Plan:
         reference=None,
         postprocess=None,
         fallback_operation=None,
+        chunk_size=None,
+        depends_on=(),
     ):
         indices = self.sample(len(frames), count, name)
         expected = (
@@ -160,26 +174,50 @@ class Plan:
             )
             return
         expected = [{key: row[key] for key in properties} for row in expected]
-        inputs = {
-            "frames": [geometry(frames[i]) for i in indices],
-            "properties": properties,
-            "sample_indices": indices,
-        }
-        if reference is not None:
-            inputs["reference"] = reference
-        if postprocess is not None:
-            inputs["postprocess"] = [postprocess[i] for i in indices]
-        if fallback_operation is not None:
-            inputs["fallback_operation"] = fallback_operation
-        self.add(
-            name,
-            operation,
-            inputs,
-            {"frames": expected},
-            parameters=parameters,
-            targets=targets,
-            tolerance=tolerance,
-        )
+        if chunk_size is None:
+            chunk_size = len(indices)
+        if type(chunk_size) is not int or chunk_size < 1:
+            raise ValueError("Verification chunk_size must be a positive integer")
+        chunks = [
+            (indices[start : start + chunk_size], expected[start : start + chunk_size])
+            for start in range(0, len(indices), chunk_size)
+        ]
+        for chunk_number, (chunk_indices, chunk_expected) in enumerate(chunks):
+            chunk_name = name if len(chunks) == 1 else f"{name}_{chunk_number:03d}"
+            inputs = {
+                "frames": [geometry(frames[i]) for i in chunk_indices],
+                "properties": properties,
+                "sample_indices": chunk_indices,
+            }
+            if reference is not None:
+                inputs["reference"] = reference
+            if postprocess is not None:
+                inputs["postprocess"] = [postprocess[i] for i in chunk_indices]
+            if fallback_operation is not None:
+                inputs["fallback_operation"] = fallback_operation
+            self.add(
+                chunk_name,
+                operation,
+                inputs,
+                {"frames": chunk_expected},
+                parameters=parameters,
+                targets=targets,
+                tolerance=tolerance,
+                depends_on=depends_on,
+            )
+
+    def subset(self, jobs):
+        """Return an execution view containing only the selected jobs."""
+        selected = list(jobs)
+        plan = object.__new__(Plan)
+        plan.evidence = self.evidence
+        plan.task_number = self.task_number
+        plan.challenge = self.challenge
+        plan.jobs = selected
+        plan.expected = {job["id"]: self.expected[job["id"]] for job in selected}
+        plan.files = self.files
+        plan.notes = []
+        return plan
 
     def checkpoint(self, path):
         path = Path(path)
@@ -371,6 +409,7 @@ def build_plan(e, task_number, challenge):
                 "palladium_forces",
                 e.trajectory("structures", "raw_structures"),
                 count=2000,
+                chunk_size=PALLADIUM_FRAMES_PER_JOB,
                 parameters=model(),
                 targets=targets,
             ),
@@ -760,6 +799,7 @@ class ModalVerifier:
         action_id=None,
         require_provenance=False,
         transport=None,
+        max_parallel_calculations=None,
     ):
         self.release_id, self.app_name, self.volume_name = (
             release_id,
@@ -769,6 +809,29 @@ class ModalVerifier:
         self.run_id, self.action_id = run_id, action_id
         self.require_provenance = require_provenance
         self.transport = transport
+        configured_parallelism = (
+            os.getenv(
+                "CORRAL_MD_MAX_PARALLEL_CALCULATIONS",
+                str(DEFAULT_MAX_PARALLEL_CALCULATIONS),
+            )
+            if max_parallel_calculations is None
+            else max_parallel_calculations
+        )
+        try:
+            self.max_parallel_calculations = int(configured_parallelism)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "max_parallel_calculations must be an integer from 1 to "
+                f"{MAX_PARALLEL_CALCULATIONS}"
+            ) from exc
+        if (
+            isinstance(configured_parallelism, bool)
+            or not 1 <= self.max_parallel_calculations <= MAX_PARALLEL_CALCULATIONS
+        ):
+            raise ValueError(
+                "max_parallel_calculations must be an integer from 1 to "
+                f"{MAX_PARALLEL_CALCULATIONS}"
+            )
 
     def _configuration(self):
         from corral_md.modal_workspace import (
@@ -827,80 +890,178 @@ class ModalVerifier:
             )
         return response
 
+    def _evaluate_job(self, plan, job, fingerprint):
+        spec = plan.expected[job["id"]]
+        check = {
+            "id": job["id"],
+            "status": "unverified",
+            "targets": spec["targets"],
+            "sample_indices": spec["indices"],
+        }
+        try:
+            remote = self._calculate(plan.subset([job]), fingerprint)
+            if (
+                remote.get("evidence_sha256") != fingerprint
+                or remote.get("challenge") != plan.challenge
+            ):
+                raise RuntimeError(
+                    "Verification response is bound to different evidence"
+                )
+            jobs = remote.get("jobs", [])
+            if len(jobs) != 1 or jobs[0].get("id") != job["id"]:
+                raise RuntimeError(
+                    "Verification response has missing or duplicate jobs"
+                )
+            result = jobs[0]
+            if result.get("status") == "complete":
+                check["status"] = (
+                    "passed"
+                    if compare(spec["values"], result.get("value"), spec["tolerance"])
+                    else "failed"
+                )
+            check["detail"] = result.get(
+                "detail", "Compared with independently calculated values"
+            )
+            return check, remote
+        except Exception as exc:
+            check["detail"] = f"Verification unavailable: {type(exc).__name__}: {exc}"
+            return check, None
+
+    @staticmethod
+    def _backend(remotes):
+        backend = {}
+        verification_ids = [
+            remote["verification_id"]
+            for remote in remotes
+            if "verification_id" in remote
+        ]
+        if len(verification_ids) == 1:
+            backend["verification_id"] = verification_ids[0]
+        elif verification_ids:
+            backend["verification_ids"] = verification_ids
+        for key in ("release_id", "model_sha256"):
+            values = [remote[key] for remote in remotes if key in remote]
+            if values and all(value == values[0] for value in values):
+                backend[key] = values[0]
+        caches = [remote["cache"] for remote in remotes if "cache" in remote]
+        if caches:
+            backend["cache"] = {
+                "hits": sum(cache.get("hits", 0) for cache in caches),
+                "misses": sum(cache.get("misses", 0) for cache in caches),
+                "ground_truth": [
+                    name for cache in caches for name in cache.get("ground_truth", [])
+                ],
+            }
+        return backend
+
+    def _evaluate_plan(self, plan, fingerprint):
+        order = {job["id"]: index for index, job in enumerate(plan.jobs)}
+        completed = {}
+        remotes = {}
+        waiting = list(plan.jobs)
+        aborted = any(note.get("status") == "failed" for note in plan.notes)
+
+        def skipped(job, detail):
+            spec = plan.expected[job["id"]]
+            return {
+                "id": job["id"],
+                "status": "skipped",
+                "targets": spec["targets"],
+                "sample_indices": spec["indices"],
+                "detail": detail,
+            }
+
+        with ThreadPoolExecutor(
+            max_workers=self.max_parallel_calculations,
+            thread_name_prefix="corral-md-verifier",
+        ) as executor:
+            running = {}
+            while waiting or running:
+                if not aborted:
+                    ready = []
+                    for job in list(waiting):
+                        dependencies = job.get("depends_on", [])
+                        if not all(name in completed for name in dependencies):
+                            continue
+                        waiting.remove(job)
+                        if any(
+                            completed[name]["status"] != "passed"
+                            for name in dependencies
+                        ):
+                            completed[job["id"]] = skipped(
+                                job, "Dependency did not pass independent verification."
+                            )
+                        else:
+                            ready.append(job)
+                    capacity = self.max_parallel_calculations - len(running)
+                    for job in ready[:capacity]:
+                        future = executor.submit(
+                            self._evaluate_job, plan, job, fingerprint
+                        )
+                        running[future] = job
+                    waiting[:0] = ready[capacity:]
+
+                if not running:
+                    if aborted:
+                        break
+                    if waiting:
+                        raise RuntimeError(
+                            "Verification jobs contain an unresolved dependency cycle"
+                        )
+                    break
+
+                done, _ = wait(running, return_when=FIRST_COMPLETED)
+                for future in sorted(done, key=lambda item: order[running[item]["id"]]):
+                    job = running.pop(future)
+                    check, remote = future.result()
+                    completed[job["id"]] = check
+                    if remote is not None:
+                        remotes[job["id"]] = remote
+                    if check["status"] != "passed":
+                        aborted = True
+
+        if waiting:
+            reason = "Not started after an earlier independent check did not pass."
+            for job in waiting:
+                completed[job["id"]] = skipped(job, reason)
+        checks = list(plan.notes) + [
+            completed[job["id"]] for job in plan.jobs if job["id"] in completed
+        ]
+        return (
+            checks,
+            [remotes[job["id"]] for job in plan.jobs if job["id"] in remotes],
+            aborted,
+        )
+
     def evaluate(self, evidence, task_number):
         fingerprint = evidence.fingerprint()
         challenge = secrets.token_hex(32)
         plan = build_plan(evidence, task_number, challenge)
-        checks, remote = list(plan.notes), None
-        if plan.jobs:
-            try:
-                remote = self._calculate(plan, fingerprint)
-                if (
-                    remote.get("evidence_sha256") != fingerprint
-                    or remote.get("challenge") != challenge
-                ):
-                    raise RuntimeError(
-                        "Verification response is bound to different evidence"
-                    )
-                jobs = remote.get("jobs", [])
-                if len(jobs) != len(plan.jobs) or {j["id"] for j in jobs} != set(
-                    plan.expected
-                ):
-                    raise RuntimeError(
-                        "Verification response has missing or duplicate jobs"
-                    )
-                for job in jobs:
-                    spec = plan.expected[job["id"]]
-                    status = "unverified"
-                    if job.get("status") == "complete":
-                        status = (
-                            "passed"
-                            if compare(
-                                spec["values"], job.get("value"), spec["tolerance"]
-                            )
-                            else "failed"
-                        )
-                    checks.append(
-                        {
-                            "id": job["id"],
-                            "status": status,
-                            "targets": spec["targets"],
-                            "sample_indices": spec["indices"],
-                            "detail": job.get(
-                                "detail",
-                                "Compared with independently calculated values",
-                            ),
-                        }
-                    )
-            except Exception as exc:
-                checks.extend(
-                    {
-                        "id": job["id"],
-                        "status": "unverified",
-                        "targets": plan.expected[job["id"]]["targets"],
-                        "detail": f"Verification unavailable: {type(exc).__name__}: {exc}",
-                    }
-                    for job in plan.jobs
-                )
+        checks, remotes, aborted = self._evaluate_plan(plan, fingerprint)
         if task_number == 10:
-            checks.append(self.provenance(evidence))
+            if aborted:
+                checks.append(
+                    {
+                        "id": "trusted_md_execution",
+                        "status": "skipped",
+                        "targets": [],
+                        "detail": "Not started after an earlier independent check did not pass.",
+                    }
+                )
+            else:
+                checks.append(self.provenance(evidence))
         if evidence.fingerprint() != fingerprint:
             raise RuntimeError(
                 "Submission changed during independent verification; retry with frozen evidence"
             )
-        backend = {
-            k: remote[k]
-            for k in ("verification_id", "release_id", "model_sha256")
-            if remote and k in remote
-        }
-        if remote and "cache" in remote:
-            backend["cache"] = remote["cache"]
         return {
             "mode": "modal",
             "evidence_sha256": fingerprint,
             "challenge": challenge,
             "checks": checks,
-            "backend": backend,
+            "aborted": aborted,
+            "max_parallel_calculations": self.max_parallel_calculations,
+            "backend": self._backend(remotes),
         }
 
     def provenance(self, evidence):

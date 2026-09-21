@@ -16,7 +16,6 @@ from importlib import import_module
 from pathlib import Path
 
 from corral_md.workflow_scoring.common import (
-    SCORING_VERSION,
     Evidence,
     Rubric,
     UnsupportedEvidence,
@@ -43,10 +42,7 @@ class WorkflowScorer:
         if type(task_number) is not int or task_number not in range(1, 11):
             raise ValueError("task_number must be an integer from 1 to 10")
         self.task_number = task_number
-        self.version = f"corral_md.workflow.v{SCORING_VERSION}.task_{task_number}"
         self.verifier = verifier
-        if verifier is not None:
-            self.version += ".modal.v1"
 
     @property
     def module(self):
@@ -64,7 +60,7 @@ class WorkflowScorer:
 
     def evaluate(self, submission, *, review: dict | None = None) -> dict:
         """Inspect evidence; optional review is trusted evaluator input only."""
-        rubric = Rubric(self.task_number)
+        rubric = Rubric(self.task_number, binary=True)
         try:
             evidence = Evidence(submission)
         except Exception as exc:
@@ -77,27 +73,48 @@ class WorkflowScorer:
                     "An unreadable submission cannot receive review credit"
                 ) from exc
             return rubric.as_dict()
-        initial_fingerprint = (
-            evidence.fingerprint() if self.verifier is not None else None
-        )
+        initial_fingerprint = None
         reproducibility(evidence, rubric)
-        try:
-            self.module.evaluate(evidence, rubric)
-        except UnsupportedEvidence as exc:
-            remaining = max(0, 100 - sum(c["points"] for c in rubric.checks))
-            rubric.check("remaining_evidence", remaining, None, str(exc))
-        except Exception as exc:
+        if rubric.failed:
             remaining = max(0, 100 - sum(c["points"] for c in rubric.checks))
             rubric.check(
-                "remaining_evidence", remaining, False, f"{type(exc).__name__}: {exc}"
+                "remaining_evidence",
+                remaining,
+                False,
+                "Task checks were not evaluated after a reproducibility check failed.",
             )
+        else:
+            if self.verifier is not None:
+                initial_fingerprint = evidence.fingerprint()
+            rubric.fail_fast = True
+            try:
+                self.module.evaluate(evidence, rubric)
+            except UnsupportedEvidence as exc:
+                remaining = max(0, 100 - sum(c["points"] for c in rubric.checks))
+                rubric.check("remaining_evidence", remaining, None, str(exc))
+            except Exception as exc:
+                remaining = max(0, 100 - sum(c["points"] for c in rubric.checks))
+                rubric.check(
+                    "remaining_evidence",
+                    remaining,
+                    False,
+                    f"{type(exc).__name__}: {exc}",
+                )
+            remaining = max(0, 100 - sum(c["points"] for c in rubric.checks))
+            if rubric.failed and remaining:
+                rubric.check(
+                    "remaining_evidence",
+                    remaining,
+                    False,
+                    "Remaining task checks were not evaluated after a failure.",
+                )
         if not any(check["name"] == "execution_provenance" for check in rubric.checks):
             rubric.unverified(
                 "execution_provenance",
                 "Only submitted artifacts were inspected. Actual simulator/model calls and absence of undisclosed resets or test-data use are not independently attested.",
             )
         verification = None
-        if self.verifier is not None:
+        if self.verifier is not None and not rubric.failed:
             from corral_md.workflow_scoring.verification import apply_verification
 
             verification = self.verifier.evaluate(evidence, self.task_number)
@@ -116,7 +133,8 @@ class WorkflowScorer:
             )
             evidence_sha256 = hashlib.sha256(
                 (
-                    self.version
+                    f"corral_md.workflow.task_{self.task_number}"
+                    + (".modal" if self.verifier is not None else ".offline")
                     + "\0"
                     + evidence.fingerprint()
                     + "\0"

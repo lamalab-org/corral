@@ -56,7 +56,7 @@ def test_shipped_workflow_contract_and_empty_evidence(number, tmp_path):
     assert sum(check["points"] for check in report["checks"]) == 100
     assert any(check["status"] == "unverified" for check in report["checks"])
     assert result.scorer_version == "corral_md.score:WorkflowScorer"
-    assert report["version"] == "6"
+    assert "version" not in report
     assert report["status"] == "complete"
     assert all("requirement" in check for check in report["checks"] if check["points"])
 
@@ -137,7 +137,21 @@ def test_shared_scorer_propagates_pending_instead_of_recording_zero(
             "Independent metric review",
         ),
     )
-    state = _state("{}")
+    (tmp_path / "settings.json").write_text('{"model": "MACE-MP-0"}')
+    (tmp_path / "run.py").write_text("raise RuntimeError('must never run')")
+    (tmp_path / "data.json").write_text("[1]")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "results": {"value": 1},
+                "settings": "settings.json",
+                "scripts": ["run.py"],
+                "artifacts": {"data": "data.json"},
+            }
+        )
+    )
+    state = _state(str(manifest))
     before = state.model_dump()
     with pytest.raises(PendingReviewError) as pending:
         TaskScorer(task, workspace=tmp_path).evaluate(state)
@@ -173,7 +187,7 @@ def test_partial_manifest_survives_workspace_restoration(tmp_path):
     result = TaskScorer(task, workspace=restored).evaluate(
         _state(str(former / "results/manifest.json"))
     )
-    assert 0 < result.score <= 0.1
+    assert result.score == 0
     assert result.metrics == {"score": result.score}
     assert result.metadata == {}
     assert result.feedback is None

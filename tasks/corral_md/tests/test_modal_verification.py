@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import json
 import shutil
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +17,7 @@ from corral_md.score import WorkflowScorer, check_level2_workflow
 from corral_md.workflow_scoring.common import Evidence, Rubric
 from corral_md.workflow_scoring.verification import (
     ModalVerifier,
+    Plan,
     apply_verification,
     build_plan,
     compare,
@@ -81,6 +83,160 @@ def test_sampling_is_evaluator_controlled(tmp_path):
     assert first.jobs == build_plan(evidence, 10, "first").jobs
     assert first.jobs != build_plan(evidence, 10, "second").jobs
     assert all(len(job["sample_indices"]) == 3 for job in first.jobs)
+
+
+def test_palladium_recalculation_is_split_into_bounded_jobs():
+    plan = Plan(Evidence({"results": {"value": 1}}), 4, "nonce")
+    frames = [bulk("Pd", "fcc", a=3.89) for _ in range(101)]
+    plan.frames(
+        "palladium_forces",
+        frames,
+        count=len(frames),
+        chunk_size=50,
+        values=[{"energy": float(index)} for index in range(len(frames))],
+    )
+    jobs = [job for job in plan.jobs if job["id"].startswith("palladium_forces")]
+    assert len(jobs) == 3
+    assert all(1 <= len(job["frames"]) <= 50 for job in jobs)
+    assert sorted(i for job in jobs for i in job["sample_indices"]) == list(
+        range(len(frames))
+    )
+
+
+def test_verifier_bounds_parallelism_and_stops_launching_after_failure():
+    evidence = Evidence({"results": {"value": 1}})
+    plan = Plan(evidence, 4, "nonce")
+    for index in range(4):
+        plan.add(
+            f"job_{index}",
+            "mace",
+            {"frames": [{"index": index}]},
+            {"frames": [{"energy": 0.0}]},
+            targets=["raw_energy_force_records"],
+            tolerance={"energy": [0, 0]},
+        )
+
+    lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+    launched = []
+
+    def transport(subplan, fingerprint):
+        nonlocal active, maximum_active
+        job = subplan.jobs[0]
+        with lock:
+            launched.append(job["id"])
+            active += 1
+            maximum_active = max(maximum_active, active)
+        value = copy.deepcopy(subplan.expected[job["id"]]["values"])
+        if job["id"] == "job_0":
+            value["frames"][0]["energy"] = 1.0
+        with lock:
+            active -= 1
+        return {
+            "evidence_sha256": fingerprint,
+            "challenge": subplan.challenge,
+            "jobs": [{"id": job["id"], "status": "complete", "value": value}],
+        }
+
+    verifier = ModalVerifier(transport=transport, max_parallel_calculations=1)
+    checks, _, aborted = verifier._evaluate_plan(plan, evidence.fingerprint())
+    by_id = {check["id"]: check for check in checks}
+    assert aborted is True
+    assert maximum_active == 1
+    assert launched == ["job_0"]
+    assert by_id["job_0"]["status"] == "failed"
+    assert by_id["job_1"]["status"] == "skipped"
+    assert by_id["job_2"]["status"] == "skipped"
+    assert by_id["job_3"]["status"] == "skipped"
+
+
+def test_verifier_runs_independent_jobs_with_bounded_parallelism():
+    evidence = Evidence({"results": {"value": 1}})
+    plan = Plan(evidence, 4, "nonce")
+    for index in range(4):
+        plan.add(
+            f"job_{index}",
+            "mace",
+            {"frames": [{"index": index}]},
+            {"frames": [{"energy": 0.0}]},
+            tolerance={"energy": [0, 0]},
+        )
+
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+
+    def transport(subplan, fingerprint):
+        nonlocal active, maximum_active
+        job = subplan.jobs[0]
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        barrier.wait(timeout=2)
+        with lock:
+            active -= 1
+        return {
+            "evidence_sha256": fingerprint,
+            "challenge": subplan.challenge,
+            "jobs": [
+                {
+                    "id": job["id"],
+                    "status": "complete",
+                    "value": copy.deepcopy(subplan.expected[job["id"]]["values"]),
+                }
+            ],
+        }
+
+    verifier = ModalVerifier(transport=transport, max_parallel_calculations=2)
+    checks, _, aborted = verifier._evaluate_plan(plan, evidence.fingerprint())
+    assert aborted is False
+    assert maximum_active == 2
+    assert all(check["status"] == "passed" for check in checks)
+
+
+def test_verifier_waits_for_declared_dependencies():
+    evidence = Evidence({"results": {"value": 1}})
+    plan = Plan(evidence, 4, "nonce")
+    expected = {"frames": [{"energy": 0.0}]}
+    inputs = {"frames": [{"index": 0}]}
+    tolerance = {"energy": [0, 0]}
+    plan.add("first", "mace", inputs, expected, tolerance=tolerance)
+    plan.add(
+        "dependent",
+        "mace",
+        inputs,
+        expected,
+        tolerance=tolerance,
+        depends_on=["first"],
+    )
+    plan.add("independent", "mace", inputs, expected, tolerance=tolerance)
+    first_finished = False
+
+    def transport(subplan, fingerprint):
+        nonlocal first_finished
+        job = subplan.jobs[0]
+        if job["id"] == "dependent":
+            assert first_finished
+        if job["id"] == "first":
+            first_finished = True
+        return {
+            "evidence_sha256": fingerprint,
+            "challenge": subplan.challenge,
+            "jobs": [
+                {
+                    "id": job["id"],
+                    "status": "complete",
+                    "value": copy.deepcopy(subplan.expected[job["id"]]["values"]),
+                }
+            ],
+        }
+
+    verifier = ModalVerifier(transport=transport, max_parallel_calculations=3)
+    checks, _, aborted = verifier._evaluate_plan(plan, evidence.fingerprint())
+    assert aborted is False
+    assert all(check["status"] == "passed" for check in checks)
 
 
 def test_fixed_task3_and_task5_inputs_use_release_ground_truth(tmp_path):

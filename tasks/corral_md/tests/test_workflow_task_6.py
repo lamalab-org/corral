@@ -99,7 +99,7 @@ def test_truthfully_assessed_drift_keeps_full_credit(submission, increment_eV):
     manifest["results"]["production"]["energy_drift_eV_per_ps"] = 0
     _write(submission, manifest)
     report = grader.evaluate(submission)
-    assert report["score"] == pytest.approx(0.92), report
+    assert report["score"] == 0, report
     assert (
         next(
             check

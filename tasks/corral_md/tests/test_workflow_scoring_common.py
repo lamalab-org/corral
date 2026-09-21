@@ -196,6 +196,69 @@ def test_rubric_distinguishes_failure_and_unverified():
     assert "KeyError" in rubric.checks[-1]["detail"]
 
 
+def test_binary_rubric_is_terminal_on_failure_and_keeps_pending_distinct():
+    failed = Rubric(1, binary=True)
+    failed.check("valid", 25, True)
+    failed.check("invalid", 25, False)
+    failed.check("unsupported", 50, None)
+    assert failed.score == 0
+    assert failed.as_dict()["score_bounds"] == [0, 0]
+    assert failed.as_dict()["status"] == "complete"
+
+    pending = Rubric(1, binary=True)
+    pending.check("valid", 50, True)
+    pending.check("unsupported", 50, None)
+    assert pending.score is None
+    assert pending.as_dict()["score_bounds"] == [0, 1]
+
+
+def test_workflow_failure_skips_later_checks_and_modal_verification(
+    manifest, monkeypatch
+):
+    _, path, _ = manifest
+    evaluated = []
+
+    def evaluate(_evidence, rubric):
+        rubric.check("reported_diffusion", 45, False, "first failure")
+        rubric.check(
+            "diffusion_estimator_and_units",
+            45,
+            lambda: evaluated.append("expensive") or True,
+        )
+
+    class Verifier:
+        def evaluate(self, *_args):
+            raise AssertionError("Modal verification must not run after a failure")
+
+    monkeypatch.setattr(
+        WorkflowScorer,
+        "module",
+        property(lambda _self: SimpleNamespace(evaluate=evaluate)),
+    )
+    report = WorkflowScorer(1, verifier=Verifier()).evaluate(path)
+    assert report["score"] == 0
+    assert evaluated == []
+    assert report["checks"][-2]["status"] == "skipped"
+
+
+def test_failed_reproducibility_check_skips_task_evaluation(manifest, monkeypatch):
+    _, path, data = manifest
+    data["artifacts"]["missing"] = "missing.json"
+    path.write_text(json.dumps(data))
+
+    def evaluate(*_args):
+        raise AssertionError("Task checks must not run after reproducibility fails")
+
+    monkeypatch.setattr(
+        WorkflowScorer,
+        "module",
+        property(lambda _self: SimpleNamespace(evaluate=evaluate)),
+    )
+    report = WorkflowScorer(1).evaluate(path)
+    assert report["score"] == 0
+    assert report["checks"][-2]["name"] == "remaining_evidence"
+
+
 @pytest.mark.parametrize(
     ("results", "expected"),
     [
@@ -221,9 +284,7 @@ def test_factory_returns_scalar_and_keeps_json_checks_task_local(manifest, monke
     monkeypatch.setattr(
         WorkflowScorer,
         "module",
-        property(
-            lambda _self: SimpleNamespace(evaluate=evaluate)
-        ),
+        property(lambda _self: SimpleNamespace(evaluate=evaluate)),
     )
     before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
     scorer = check_level2_workflow(1)
@@ -285,7 +346,7 @@ def test_pending_score_is_not_zero_and_trusted_review_completes_it(
     pending = scorer.evaluate(path)
     assert pending["score"] is None
     assert pending["status"] == "pending_review"
-    assert pending["score_bounds"] == [0.1, 1.0]
+    assert pending["score_bounds"] == [0.0, 1.0]
     assert pending["possible_points"] == 100
     assert len(pending["evidence_sha256"]) == 64
     json.dumps(pending, allow_nan=False)
@@ -296,7 +357,7 @@ def test_pending_score_is_not_zero_and_trusted_review_completes_it(
     assert reviewed["score"] == 1
     assert reviewed["status"] == "complete"
     assert reviewed["pending_checks"] == []
-    assert scorer.score_submission(path, review=_review(pending, passed=False)) == 0.1
+    assert scorer.score_submission(path, review=_review(pending, passed=False)) == 0
 
 
 @pytest.mark.parametrize(
@@ -315,16 +376,6 @@ def test_review_is_bound_to_all_evidence_bytes(manifest, monkeypatch, changed):
         data = json.loads(path.read_text())
         data["results"]["value"] = 4
         path.write_text(json.dumps(data))
-    with pytest.raises(ValueError, match="evidence_sha256"):
-        scorer.evaluate(path, review=review)
-
-
-def test_review_is_bound_to_scoring_policy_version(manifest, monkeypatch):
-    _, path, _ = manifest
-    scorer = _pending_scorer(monkeypatch)
-    prior_scorer = _pending_scorer(monkeypatch)
-    prior_scorer.version = "corral_md.workflow.v4.task_1"
-    review = _review(prior_scorer.evaluate(path))
     with pytest.raises(ValueError, match="evidence_sha256"):
         scorer.evaluate(path, review=review)
 
@@ -401,7 +452,8 @@ def test_malformed_direct_manifest_and_nonfinite_pending_result_do_not_crash(
     data = json.loads(resolve_submission(str(path), root))
     data["results"]["value"] = float("nan")
     report = scorer.evaluate(data)
-    assert report["score"] is None
+    assert report["score"] == 0
+    assert report["status"] == "complete"
     assert (
         next(c for c in report["checks"] if c["name"] == "reported_results")["status"]
         == "failed"
