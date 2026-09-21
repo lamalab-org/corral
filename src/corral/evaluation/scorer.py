@@ -44,7 +44,7 @@ class Scorer(Protocol):
 
 
 def _callable_version(task: TaskDefinition) -> str:
-    scorer = task.scoring_fn
+    scorer = task.state_scoring_fn or task.scoring_fn
     module = getattr(scorer, "__module__", type(scorer).__module__)
     name = getattr(scorer, "__qualname__", type(scorer).__qualname__)
     return f"{module}:{name}"
@@ -85,8 +85,11 @@ class TaskScorer:
             )
 
         commit_hash = state.through_commit_hash
-        answer = _resolve_submission(self.task, state.submission, self.workspace)
-        score = float(self.task.scoring_fn(answer))
+        if self.task.state_scoring_fn is not None:
+            score = float(self.task.state_scoring_fn(state))
+        else:
+            answer = _resolve_submission(self.task, state.submission, self.workspace)
+            score = float(self.task.scoring_fn(answer))
 
         # The immutable model already prevents normal mutation. Checking the
         # content hash makes score purity an explicit runtime invariant too.

@@ -53,6 +53,8 @@ class TaskDefinition:
       execution projection.
     - `scoring_fn(answer)` is consumed by an evaluation-layer `TaskScorer`;
       task execution never invokes it.
+    - `state_scoring_fn(state)`, when provided, lets interactive benchmarks
+      score their committed trajectory instead of the final-answer text.
     - `resolve_answer` controls whether the submitted answer is path-resolved
       for evaluation (off for non-file answers such as numbers, SMILES or
       JSON). Runtime outputs always retain the submitted value itself.
@@ -78,6 +80,9 @@ class TaskDefinition:
         Callable[[Environment, ExecutionState], EnvironmentSetup | None] | None
     ) = None
     resolve_answer: bool = True
+    # Interactive benchmarks can score their committed trajectory. The final
+    # answer still closes the Corral lifecycle; evaluation remains read-only.
+    state_scoring_fn: Callable[[ExecutionState], float] | None = None
     # Optional benchmark-specific handling of mixed file/JSON submissions.
     submission_resolver: Callable[[str, str | Path], str] | None = None
 
