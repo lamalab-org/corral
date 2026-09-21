@@ -22,6 +22,7 @@ from corral.observability import NoOpObserver
 from corral.persistence import SQLiteCommitStore
 from corral.persistence.workspace import WorkspaceManager
 from corral.runtime import TaskRuntime
+from corral.runtime.permissions import NODE_WORKSPACE_DIR, SCRATCH_PREFIX
 
 
 def _ref(data: bytes) -> dict[str, str | int]:
@@ -50,7 +51,7 @@ class _Volume:
         self.uploaded: list[str] = []
         self.removed: list[str] = []
 
-    def batch_upload(self, *, force: bool = False) -> _Upload:
+    def batch_upload(self, *, force: bool = False) -> _Upload:  # noqa: ARG002
         return _Upload(self)
 
     def read_file(self, path: str):
@@ -161,7 +162,7 @@ class _Function:
         self.delete_file = delete_file
         self.calls: list[_Call] = []
 
-    def spawn(self, *args, execution_options=None) -> _Call:
+    def spawn(self, *args, execution_options=None) -> _Call:  # noqa: ARG002
         call = _Call(self, args)
         self.calls.append(call)
         self.volume.write_json(
@@ -207,6 +208,101 @@ def test_persistent_modal_workspace_and_delta_sync(tmp_path: Path) -> None:
     assert "/corral/runs/workspace/workspace/structure.data" in volume.removed
     assert len(function.calls) == 2
     assert (workspace / "structure.data").exists() is False
+
+
+def test_modal_sync_preserves_workspace_and_private_runtime_paths(
+    tmp_path: Path,
+) -> None:
+    workspace = _inputs(tmp_path)
+    private_names = (f"{SCRATCH_PREFIX}worker", NODE_WORKSPACE_DIR)
+    for name in private_names:
+        private = workspace / name
+        private.mkdir()
+        (private / "secret").write_text("private runtime data")
+        (private / "alias").symlink_to("secret")
+
+    # Journals are controller-owned siblings. Pre-create that directory so the
+    # parent permissions below exercise only workspace staging and publication.
+    (tmp_path / ".corral-modal").mkdir()
+    original_stat = workspace.stat()
+    volume = _Volume()
+    tmp_path.chmod(0o500)
+    try:
+        bridge.run_lammps_in_modal(
+            workspace,
+            "run.in",
+            action_id="action-1",
+            release_id="release-1",
+            volume=volume,
+            remote_function=_Function(volume),
+            initializer=_Initializer(volume),
+        )
+    finally:
+        tmp_path.chmod(0o700)
+
+    current_stat = workspace.stat()
+    assert current_stat.st_ino == original_stat.st_ino
+    assert current_stat.st_mode == original_stat.st_mode
+    assert all(not _is_private_upload(path) for path in volume.uploaded)
+    assert all(not _is_private_upload(path) for path in bridge._files(workspace))
+    for name in private_names:
+        assert (workspace / name / "secret").read_text() == "private runtime data"
+        assert (workspace / name / "alias").is_symlink()
+    assert {
+        path.name for path in workspace.iterdir() if bridge._is_runtime_name(path.name)
+    } == set(private_names)
+
+
+def _is_private_upload(path: str) -> bool:
+    return any(
+        part.startswith(SCRATCH_PREFIX) or part == NODE_WORKSPACE_DIR
+        for part in PurePosixPath(path).parts
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [f"{SCRATCH_PREFIX}worker/secret", f"{NODE_WORKSPACE_DIR}/secret"],
+)
+def test_modal_rejects_runtime_input_and_output_paths(
+    tmp_path: Path, name: str
+) -> None:
+    workspace = _inputs(tmp_path)
+    private = workspace / name
+    private.parent.mkdir()
+    private.write_text("private runtime data")
+
+    with pytest.raises(ValueError, match="runtime workspace path"):
+        bridge._input(workspace, name)
+    with pytest.raises(ValueError, match="runtime path"):
+        bridge._safe_relative(name)
+
+
+def test_modal_publish_rolls_back_without_replacing_workspace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "original").write_text("old")
+    staging = workspace / f"{SCRATCH_PREFIX}modal-test" / "workspace"
+    staging.mkdir(parents=True)
+    (staging / "published").write_text("new")
+    (staging / "failure").write_text("new")
+    original_stat = workspace.stat()
+    replace = Path.replace
+
+    def fail_publish(source: Path, target: Path) -> Path:
+        if source == staging / "failure":
+            raise OSError("publish interrupted")
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_publish)
+    with pytest.raises(OSError, match="publish interrupted"):
+        bridge._publish_workspace(staging, workspace)
+
+    assert workspace.stat().st_ino == original_stat.st_ino
+    assert (workspace / "original").read_text() == "old"
+    assert not (workspace / "published").exists()
 
 
 def test_gpu_python_uses_same_persistent_protocol(tmp_path: Path) -> None:
@@ -264,7 +360,7 @@ def test_restart_reattaches_to_saved_modal_call(tmp_path: Path) -> None:
     _, downloaded = bridge.run_lammps_in_modal(
         workspace, "run.in", action_id="action-1", release_id="release-1",
         volume=volume, remote_function=function, initializer=initializer,
-        call_factory=lambda call_id: function.calls[0],
+        call_factory=lambda _call_id: function.calls[0],
     )
     assert downloaded == 2
     assert len(function.calls) == 1
@@ -325,12 +421,14 @@ def test_execution_release_pin_rejects_journal_drift(tmp_path: Path) -> None:
             workspace, "run.in", action_id="action-1", volume=volume,
             remote_function=_Function(volume), initializer=_Initializer(volume),
         )
-    with bridge.pinned_release("release-2"):
-        with pytest.raises(RuntimeError, match="pinned to a different"):
-            bridge.run_lammps_in_modal(
-                workspace, "run.in", action_id="action-2", volume=volume,
-                remote_function=_Function(volume), initializer=_Initializer(volume),
-            )
+    with (
+        bridge.pinned_release("release-2"),
+        pytest.raises(RuntimeError, match="pinned to a different"),
+    ):
+        bridge.run_lammps_in_modal(
+            workspace, "run.in", action_id="action-2", volume=volume,
+            remote_function=_Function(volume), initializer=_Initializer(volume),
+        )
 
 
 def test_modal_lammps_rejects_input_outside_workspace(tmp_path: Path) -> None:
@@ -420,8 +518,10 @@ def test_terminal_call_restarts_same_action(tmp_path, monkeypatch, error_type):
         return get(call)
 
     monkeypatch.setattr(_Call, "get", terminated_once)
-    kwargs = dict(action_id="action-1", release_id="release-1", volume=volume,
-                  remote_function=function, initializer=initializer)
+    kwargs = {
+        "action_id": "action-1", "release_id": "release-1", "volume": volume,
+        "remote_function": function, "initializer": initializer,
+    }
     with pytest.raises(ToolRecoveryPending, match="worker stopped"):
         bridge.run_lammps_in_modal(workspace, "run.in", **kwargs)
     journal = json.loads(bridge._journal_path(workspace).read_text())
@@ -447,8 +547,10 @@ def test_uncertain_call_reattaches_and_blocks_other_actions(tmp_path, monkeypatc
     initializer = _Initializer(volume)
     get = _Call.get
     monkeypatch.setattr(_Call, "get", lambda _: (_ for _ in ()).throw(error_type("disconnected")))
-    kwargs = dict(release_id="release-1", volume=volume,
-                  remote_function=function, initializer=initializer)
+    kwargs = {
+        "release_id": "release-1", "volume": volume,
+        "remote_function": function, "initializer": initializer,
+    }
     with pytest.raises(ToolRecoveryPending, match="disconnected"):
         bridge.run_lammps_in_modal(workspace, "run.in", action_id="action-1", **kwargs)
     with pytest.raises(ToolRecoveryPending, match="Resume Modal action action-1"):
@@ -467,8 +569,10 @@ def test_retry_dispatch_does_not_reattach_to_previous_call(tmp_path, monkeypatch
     workspace = _inputs(tmp_path)
     volume = _Volume()
     function = _Function(volume)
-    kwargs = dict(action_id="action-1", release_id="release-1", volume=volume,
-                  remote_function=function, initializer=_Initializer(volume))
+    kwargs = {
+        "action_id": "action-1", "release_id": "release-1", "volume": volume,
+        "remote_function": function, "initializer": _Initializer(volume),
+    }
     get = _Call.get
     monkeypatch.setattr(_Call, "get", lambda _: (_ for _ in ()).throw(bridge.modal.exception.RemoteError("cancelled")))
     with pytest.raises(ToolRecoveryPending):
@@ -509,8 +613,10 @@ def test_result_sync_handles_file_directory_replacements(tmp_path, old_is_direct
     files[name] = _ref(b"new")
     attempt = "/corral/runs/workspace/attempts/action-1/attempt-1/workspace"
     volume.files[f"{attempt}/{name}"] = b"new"
-    result = dict(action_id="action-1", attempt_id="attempt-1", files=files,
-                  workspace="/results" + attempt)
+    result = {
+        "action_id": "action-1", "attempt_id": "attempt-1", "files": files,
+        "workspace": "/results" + attempt,
+    }
     count = bridge._sync_result(volume, workspace, bridge._ROOT / "workspace", result, current)
     assert count == 1
     assert (workspace / name).read_bytes() == b"new"
@@ -624,7 +730,11 @@ def test_runtime_recovers_same_action_after_remote_success(tmp_path, monkeypatch
     async def scenario():
         async with SQLiteCommitStore(tmp_path / "recovery.sqlite3", "execution") as store:
             runtime = TaskRuntime(store, NoOpObserver())
-            kwargs = dict(execution_id="execution", started_at=datetime.now(timezone.utc), max_iterations=3)
+            kwargs = {
+                "execution_id": "execution",
+                "started_at": datetime.now(timezone.utc),
+                "max_iterations": 3,
+            }
             with pytest.raises(ToolRecoveryPending, match="interrupted"):
                 await runtime.run(RecoveringAgent(), environment, **kwargs)
             state = await store.materialize("main")

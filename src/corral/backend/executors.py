@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import cloudpickle
 
+from corral.runtime import permissions
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -166,6 +168,18 @@ class ThreadExecutor(_PooledExecutor):
         if cancel.is_set():
             raise JobCancelled(work.job_id)
         return render_result(work.tool.execute(**work.call_arguments))
+
+
+class RestrictedExecutor(_PooledExecutor):
+    """Apply the same private-input boundary to foreground and background tools."""
+
+    def run_tool(self, work: JobWork, cancel: threading.Event) -> str:
+        if cancel.is_set():
+            raise JobCancelled(work.job_id)
+        result = permissions.execute_job(
+            work.tool, work.call_arguments, work.workspace, cancel=cancel
+        )
+        return render_result(result)
 
 
 def _run_cloudpickled(blob: bytes) -> str:

@@ -456,8 +456,9 @@ class QualitativeAnalysisEnvironment(Environment):
 def create_qualysis_environments(
     level: int = 2,
     subtask: bool = False,
+    work_dir: str = "",
 ) -> dict[str, Environment]:
-    """Create environments for the WetLab (Qualitative Inorganic Analysis) benchmark tasks."""
+    """Create WetLab environments with optional per-execution scratch workspaces."""
     started = perf_counter()
     name = "wetlab"
     event(
@@ -484,6 +485,7 @@ def create_qualysis_environments(
         tasks = load_tasks_from_json(json_path)
         environments = build_environments(
             tasks,
+            base_work_dir=work_dir,
             name=name,
             toolset=Toolset(
                 pool=create_tools(),

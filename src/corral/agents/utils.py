@@ -188,7 +188,7 @@ def _reasoning_tokens(usage: Any) -> int | None:
 async def llm_call(
     model: str,
     messages: list[LiteLLMMessage],
-    temperature: float,
+    temperature: float | None,
     tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
     return_usage: bool = True,
@@ -198,13 +198,16 @@ async def llm_call(
     Call LiteLLM with a streaming transport and reconstruct its final response.
 
     Args:
-        model (str): The model to use.
+        model (str): The LiteLLM model route, passed through unchanged.
         messages (list[LiteLLMMessage]): The messages to send to the model.
-        temperature (float): The temperature to use.
-        tools (dict[str, Any], optional): The tools to use. If provided, will use tool calling.
+        temperature (float | None): The temperature to use, or None for the provider default.
+        tools (list[dict[str, Any]], optional): The tools to make available to the model.
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
         return_usage (bool, optional): If True, includes token usage in metadata. Defaults to True.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
+            Configure provider requirements here (e.g. max_tokens, reasoning_effort,
+            thinking, tool_choice, or additional_drop_params). Caller settings are
+            preserved; LiteLLM handles provider translation and validation.
             Streaming is always enabled, even if `stream=False` is supplied.
             If 'logprobs' is True in kwargs, logprobs will be included in response metadata.
 
@@ -216,39 +219,11 @@ async def llm_call(
             "model": model,
             "messages": messages,
             "temperature": temperature,
+            "tools": tools,
             "api_base": api_endpoint,
             **kwargs,
         }
 
-        # GPT-5.6 rejects chat-completions requests that combine function tools
-        # with reasoning controls. The explicit LiteLLM `responses/` route
-        # keeps the configured provider model unchanged while selecting the
-        # endpoint that supports both features. This is also stable across the
-        # range of LiteLLM versions used by the task-specific environments.
-        use_gpt_5_6_responses = (
-            tools is not None
-            and kwargs.get("reasoning_effort") is not None
-            and model.startswith("openai/gpt-5.6")
-        )
-        if use_gpt_5_6_responses:
-            params["model"] = model.replace("openai/", "openai/responses/", 1)
-
-        if "anthropic" in model:
-            params["max_tokens"] = 8192
-
-        # When extended thinking is on (LiteLLM turns `reasoning_effort` into an
-        # Anthropic `thinking` block), Anthropic rejects any `temperature` other
-        # than 1 with a 400. Force it so a reasoning run is not aborted; this also
-        # covers reasoning calls made through this shared LiteLLM helper.
-        if kwargs.get("reasoning_effort") or kwargs.get("thinking"):
-            params["temperature"] = 1
-
-        if tools is not None:
-            params["tools"] = tools
-            # Responses defaults to automatic tool selection. Older LiteLLM
-            # bridges reject the otherwise redundant chat-completions value.
-            if not use_gpt_5_6_responses:
-                params["tool_choice"] = "auto"
         # Always consume the provider response as a stream. Besides making long
         # generations observable at the transport layer, this keeps an active
         # response from looking idle to gateways with read/idle timeouts. Build

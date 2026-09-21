@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from corral.core.workspace import Artifact, FileRef, WorkspaceState
 from corral.persistence.artifacts import ArtifactStore, LocalArtifactStore
+from corral.runtime import permissions
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
@@ -102,6 +103,8 @@ class WorkspaceManager:
         files: list[tuple[str, Path]] = []
         for entry in sorted(root.rglob("*")):
             relative = entry.relative_to(root).as_posix()
+            if relative.split("/", 1)[0] == permissions.NODE_WORKSPACE_DIR:
+                continue
             if entry.is_symlink():
                 raise WorkspacePathError(
                     f"workspace cannot contain symbolic links: {relative}"
@@ -116,6 +119,31 @@ class WorkspaceManager:
         return tuple(files)
 
     async def snapshot(
+        self,
+        source: str | Path,
+        *,
+        previous: WorkspaceState | None = None,
+        created_by_action: str | None = None,
+        artifacts: Mapping[str, Artifact | Mapping[str, Any]] | None = None,
+    ) -> WorkspaceState:
+        """Capture workspace bytes without allowing workers to race privileged reads."""
+
+        if permissions.enabled():
+            with permissions.snapshot_source(source) as trusted_source:
+                return await self._snapshot(
+                    trusted_source,
+                    previous=previous,
+                    created_by_action=created_by_action,
+                    artifacts=artifacts,
+                )
+        return await self._snapshot(
+            source,
+            previous=previous,
+            created_by_action=created_by_action,
+            artifacts=artifacts,
+        )
+
+    async def _snapshot(
         self,
         source: str | Path,
         *,

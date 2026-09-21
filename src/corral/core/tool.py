@@ -122,10 +122,19 @@ class Tool:
         executor: str | None = None,
         concurrency_key: str | None = None,
         concurrency: "ToolConcurrency | str" = ToolConcurrency.SERIAL,
+        trusted: bool = False,
+        workspace_args: tuple[str, ...] = (),
     ):
         self.name = name
         self.description = description
         self.hidden_args = hidden_args or {}
+        # Docker tools are restricted by default. Only explicitly trusted task
+        # logic may receive private inputs and run in the controller; it must
+        # never evaluate model-supplied code or load workspace executables.
+        self.trusted = trusted
+        self.workspace_args = tuple(workspace_args)
+        if not set(self.workspace_args) <= self.hidden_args.keys():
+            raise ValueError("workspace_args must name hidden arguments")
         # Background-execution metadata (PR 4). A tool marked
         # `background_capable` gets a generated `start_<tool>` variant that runs
         # it as a background job so the agent is not blocked while it runs.
@@ -292,6 +301,8 @@ def tool(
     executor: str | None = None,
     concurrency_key: str | None = None,
     concurrency: "ToolConcurrency | str" = ToolConcurrency.SERIAL,
+    trusted: bool = False,
+    workspace_args: tuple[str, ...] = (),
 ) -> Tool | Callable[[Callable], Tool]:
     """Decorator to convert a function into a Tool.
 
@@ -338,6 +349,12 @@ def tool(
             exclusive (a readers-writer split within one resource).
         concurrency: How this tool may overlap other tool calls in one runtime
             (see :class:`ToolConcurrency`). Defaults to `SERIAL`.
+        trusted: Run task logic with private inputs in the Docker controller.
+            Never enable this for shell, Python, untrusted file-loading, or other tools
+            that execute model-controlled code. Restricted execution is default.
+        workspace_args: Hidden arguments that carry only the assigned workspace
+            path. Docker workers receive a fresh binding from the controller,
+            never the corresponding value from private environment state.
 
     Returns:
         A Tool instance wrapping the function.
@@ -389,6 +406,8 @@ def tool(
                     executor=executor,
                     concurrency_key=concurrency_key,
                     concurrency=concurrency,
+                    trusted=trusted,
+                    workspace_args=workspace_args,
                 )
 
             def execute(self, **kwargs):
@@ -400,7 +419,7 @@ def tool(
                 # complete environment replacement. Preserve that value for
                 # the runtime; ordinary function tools keep their textual tool
                 # result contract.
-                from corral.core.transition import (
+                from corral.core.transition import (  # - avoid import cycle
                     ToolExecutionResult,
                 )
 

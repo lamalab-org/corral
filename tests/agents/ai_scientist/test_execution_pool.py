@@ -123,6 +123,24 @@ def execute_and_commit(pool, branch, experiment_node):
     pool.commit(branch, experiment_node, start)
 
 
+def test_node_workspaces_clone_instead_of_reusing_a_completed_node():
+    sessions = CloneableSessions()
+    sessions.isolated_node_workspaces = True
+    pool = ExecutionPool(sessions=sessions, tools=TOOLS, max_tool_calls=10)
+    tree = ExperimentTree()
+    first = pool.create()
+    parent = node("node_1", first, [action("set", 3)])
+    tree.add(parent)
+    execute_and_commit(pool, first, parent)
+    assert pool.replay_cost(parent, tree, prefer_existing=True) == 0
+    second = pool.acquire(parent, tree, prefer_existing=True)
+    assert second.workspace != first.workspace
+    assert sessions.states[second.execution_id] == 3
+    second.executor.execute_plan([action("set", 7)])
+    assert sessions.states[first.execution_id] == 3
+    assert pool.executions_cloned == 1
+
+
 def test_execution_pool_uses_a_ready_action_native_branch_session():
     sessions = ReadySessions()
     pool = ExecutionPool(

@@ -19,12 +19,16 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import modal
 from corral_md.workspace import ASSET_DIRECTORIES
 
 from corral.core.transition import ToolRecoveryPending
+from corral.runtime.permissions import NODE_WORKSPACE_DIR, SCRATCH_PREFIX
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _ROOT = PurePosixPath("/corral/runs")
 _MOUNT = PurePosixPath("/results")
@@ -126,6 +130,20 @@ def _app_name(release_id: str) -> str:
     return f"{prefix}-{release_id}"
 
 
+def _is_runtime_name(name: str) -> bool:
+    return name.startswith(SCRATCH_PREFIX) or name == NODE_WORKSPACE_DIR
+
+
+def _workspace_entries(workspace: Path, *, recursive: bool = False) -> Iterator[Path]:
+    """Visit task files without entering private worker or node directories."""
+    for entry in workspace.iterdir():
+        if _is_runtime_name(entry.name):
+            continue
+        yield entry
+        if recursive and entry.is_dir() and not entry.is_symlink():
+            yield from entry.rglob("*")
+
+
 def _identifier(value: str, label: str) -> str:
     if (
         not value
@@ -145,7 +163,7 @@ def _workspace(path: str | Path) -> Path:
     if source.is_symlink() or not source.is_dir():
         raise ValueError(f"MD workspace must be a regular directory: {path}")
     root = source.resolve()
-    for entry in root.rglob("*"):
+    for entry in _workspace_entries(root, recursive=True):
         if entry.relative_to(root).parts[0] in ASSET_DIRECTORIES:
             raise ValueError(
                 "Shared asset directories cannot be stored in the writable workspace"
@@ -158,14 +176,26 @@ def _workspace(path: str | Path) -> Path:
 def _input(root: Path, supplied: str, *, require_file: bool = True) -> PurePosixPath:
     candidate = Path(supplied)
     candidate = candidate if candidate.is_absolute() else root / candidate
+    try:
+        lexical_relative = candidate.relative_to(root)
+    except ValueError:
+        pass
+    else:
+        if lexical_relative.parts and _is_runtime_name(lexical_relative.parts[0]):
+            raise ValueError(
+                f"MD input cannot name a runtime workspace path: {supplied}"
+            )
     if candidate.is_symlink():
         raise ValueError(f"MD input cannot be a symlink: {supplied}")
     resolved = candidate.resolve()
     if not resolved.is_relative_to(root):
         raise ValueError(f"MD input must be inside the current workspace: {supplied}")
+    relative = resolved.relative_to(root)
+    if relative.parts and _is_runtime_name(relative.parts[0]):
+        raise ValueError(f"MD input cannot name a runtime workspace path: {supplied}")
     if require_file and not resolved.is_file():
         raise FileNotFoundError(f"MD input file was not found: {supplied}")
-    return PurePosixPath(resolved.relative_to(root).as_posix())
+    return PurePosixPath(relative.as_posix())
 
 
 def _hash_file(path: Path) -> dict[str, str | int]:
@@ -182,7 +212,7 @@ def _files(root: Path) -> dict[str, dict[str, str | int]]:
     _workspace(root)
     return {
         path.relative_to(root).as_posix(): _hash_file(path)
-        for path in sorted(root.rglob("*"))
+        for path in sorted(_workspace_entries(root, recursive=True))
         if path.is_file()
     }
 
@@ -199,7 +229,44 @@ def _safe_relative(path: str) -> Path:
         raise ValueError(f"Unsafe remote workspace path: {path!r}")
     if parsed.parts[0] in ASSET_DIRECTORIES:
         raise ValueError(f"Remote output cannot replace a read-only asset: {path!r}")
+    if _is_runtime_name(parsed.parts[0]):
+        raise ValueError(f"Remote output cannot replace a runtime path: {path!r}")
     return Path(*parsed.parts)
+
+
+def _stage_workspace(workspace: Path, destination: Path) -> None:
+    """Copy task files without copying private runtime directories."""
+    destination.mkdir()
+    for entry in _workspace_entries(workspace):
+        target = destination / entry.name
+        if entry.is_dir():
+            shutil.copytree(entry, target)
+        else:
+            shutil.copy2(entry, target)
+
+
+def _publish_workspace(staged_workspace: Path, workspace: Path) -> None:
+    """Replace task files in place while preserving private runtime state."""
+    _workspace(staged_workspace)
+    staged_entries = list(staged_workspace.iterdir())
+    if any(_is_runtime_name(entry.name) for entry in staged_entries):
+        raise ValueError("Staged workspace contains a private runtime path")
+
+    backup = staged_workspace.parent / "backup"
+    backup.mkdir()
+    published: list[Path] = []
+    try:
+        for entry in list(_workspace_entries(workspace)):
+            entry.replace(backup / entry.name)
+        for entry in staged_entries:
+            target = entry.replace(workspace / entry.name)
+            published.append(target)
+    except Exception:
+        for entry in reversed(published):
+            entry.replace(staged_workspace / entry.name)
+        for entry in list(backup.iterdir()):
+            entry.replace(workspace / entry.name)
+        raise
 
 
 def _read_json(volume: Any, path: PurePosixPath) -> dict[str, Any] | None:
@@ -244,18 +311,12 @@ def _restore_snapshot(root: Path) -> None:
         )
     workspace_state, manager = bound
     temporary_root = Path(
-        tempfile.mkdtemp(prefix=f".{root.name}.restore-", dir=root.parent)
+        tempfile.mkdtemp(prefix=f"{SCRATCH_PREFIX}restore-", dir=root)
     )
     staged = temporary_root / "workspace"
     try:
         asyncio.run(manager.materialize(workspace_state, staged))
-        backup = temporary_root / "previous"
-        root.replace(backup)
-        try:
-            staged.replace(root)
-        except Exception:
-            backup.replace(root)
-            raise
+        _publish_workspace(staged, root)
     finally:
         shutil.rmtree(temporary_root, ignore_errors=True)
 
@@ -362,13 +423,11 @@ def _sync_result(
         return 0
     if expected_local is not None and current != expected_local:
         raise RuntimeError("Local workspace changed during the Modal call")
-    temporary_root = Path(
-        tempfile.mkdtemp(prefix=f".{root.name}.modal-", dir=root.parent)
-    )
+    temporary_root = Path(tempfile.mkdtemp(prefix=f"{SCRATCH_PREFIX}modal-", dir=root))
     staged = temporary_root / "workspace"
     downloaded = 0
     try:
-        shutil.copytree(root, staged)
+        _stage_workspace(root, staged)
         for name in sorted(current.keys() - files.keys()):
             (staged / _safe_relative(name)).unlink()
         for name, ref in sorted(files.items()):
@@ -389,13 +448,7 @@ def _sync_result(
             downloaded += 1
         if _files(root) != current:
             raise RuntimeError("Local workspace changed during Modal download")
-        backup = temporary_root / "previous"
-        root.replace(backup)
-        try:
-            staged.replace(root)
-        except Exception:
-            backup.replace(root)
-            raise
+        _publish_workspace(staged, root)
     finally:
         shutil.rmtree(temporary_root, ignore_errors=True)
     return downloaded

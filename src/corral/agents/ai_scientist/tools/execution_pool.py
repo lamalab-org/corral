@@ -102,6 +102,9 @@ class ExecutionPool:
         replay_equivalence: ReplayEquivalence | None = None,
     ) -> None:
         self.sessions = sessions
+        self.isolated_node_workspaces = getattr(
+            sessions, "isolated_node_workspaces", False
+        )
         self.tools = tools
         self.max_observation_chars = max_observation_chars
         self.stop_on_error = stop_on_error
@@ -205,6 +208,12 @@ class ExecutionPool:
         """Get a runtime at `parent`, cloning or replaying when needed."""
         if parent is None:
             return self.create()
+        if self.isolated_node_workspaces:
+            return (
+                self._clone(parent, tree)
+                if self.can_clone(parent)
+                else self._fork(parent, tree)
+            )
         if prefer_existing and parent.branch_id is not None:
             existing = self.active.get(parent.branch_id)
             if existing is not None and existing.head_node_id == parent.id:
@@ -224,6 +233,12 @@ class ExecutionPool:
         """Return physical calls needed to place a runtime at `parent`."""
         if parent is None:
             return 0
+        if self.isolated_node_workspaces:
+            return (
+                0
+                if self.can_clone(parent)
+                else len(tree.executed_trajectory(parent.id))
+            )
         if prefer_existing and parent.branch_id is not None:
             existing = self.active.get(parent.branch_id)
             if existing is not None and existing.head_node_id == parent.id:

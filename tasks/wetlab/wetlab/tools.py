@@ -170,7 +170,7 @@ def possible_anions() -> str:
     return " ".join(ANIONS)
 
 
-@tool(hidden_args=["wetlab"])
+@tool(hidden_args=["wetlab"], trusted=True)
 def measure_pH(wetlab, label: str) -> str:
     """[BRIEF] Measures the pH of the solution using a pH paper.[/BRIEF]
 
@@ -248,7 +248,7 @@ def measure_pH(wetlab, label: str) -> str:
     return round(pH)
 
 
-@tool(hidden_args=["wetlab"])
+@tool(hidden_args=["wetlab"], trusted=True)
 def perform_flame_test(wetlab, label: str) -> str:
     """[BRIEF] Performs a flame test on the solution. Cost = 1 mL [/BRIEF]
 
@@ -396,7 +396,7 @@ def lookup_flame_colors() -> str:
     return "\n".join(flame_colors)
 
 
-@tool(hidden_args=["wetlab"])
+@tool(hidden_args=["wetlab"], trusted=True)
 def checkout_color(wetlab, label: str) -> str:
     """[BRIEF] Observe the color of a solution or precipitate. [/BRIEF]
 
@@ -614,7 +614,7 @@ def simulate_color_mixture(mixture: list[tuple[str, float]]) -> str:
     return closest_color_names(result_hex, mode="precipitate", max_names=1)
 
 
-@tool(hidden_args=["wetlab"])
+@tool(hidden_args=["wetlab"], trusted=True)
 def get_available_reagents(wetlab) -> str:
     """[BRIEF] Returns the list of available reagent solutions. [/BRIEF]
 
@@ -676,7 +676,7 @@ def get_available_reagents(wetlab) -> str:
         return note + "\n".join(reagent_descriptions)
 
 
-@tool(hidden_args=["wetlab"])
+@tool(hidden_args=["wetlab"], trusted=True)
 def mix_two_solutions(
     wetlab,
     test_label: str,
@@ -837,7 +837,7 @@ def mix_two_solutions(
     return "\n".join(observations)
 
 
-@tool(hidden_args=["wetlab"])
+@tool(hidden_args=["wetlab"], trusted=True)
 def add_a_solution(
     wetlab, test_label: str, sol1_label: str, sol2_label: str, sol2_vol: int
 ) -> str:
@@ -1087,7 +1087,7 @@ def add_a_solution(
     return "\n".join(observations)
 
 
-@tool(hidden_args=["wetlab"])
+@tool(hidden_args=["wetlab"], trusted=True)
 def filter_solution(wetlab, label: str) -> str:
     """[BRIEF] Separates the precipitate from the supernatant solution. [/BRIEF]
 
@@ -1173,7 +1173,7 @@ def filter_solution(wetlab, label: str) -> str:
             return "The target solution has no visible precipitate to filter! No change was made to the Inventory."
 
 
-@tool(hidden_args=["wetlab"])
+@tool(hidden_args=["wetlab"], trusted=True)
 def add_precipitate_to_solution(
     wetlab, test_label: str, prec_label: str, sol_label: str, sol_vol: int
 ) -> str:
@@ -1382,7 +1382,7 @@ def add_precipitate_to_solution(
     return "\n".join(observations)
 
 
-@tool(hidden_args=["wetlab"])
+@tool(hidden_args=["wetlab"], trusted=True)
 def check_inventory(wetlab) -> str:
     """[BRIEF] Returns the current contents of the Inventory [/BRIEF]
 

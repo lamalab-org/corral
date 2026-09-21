@@ -19,6 +19,9 @@ from wetlab.colors import (
 )
 
 WETCHEM_PATH = Path(__file__).with_name("WetChem.yaml")
+# Public chemistry data must be loaded by the trusted bootstrap. Tool workers
+# cannot reopen the private task package after dropping their Unix identity.
+_WETCHEM_CONTENTS = WETCHEM_PATH.read_bytes()
 ZERO = 1e-20
 
 
@@ -84,7 +87,7 @@ def _reaktoro_version() -> str:
 
 
 def _database_sha256() -> str:
-    return hashlib.sha256(WETCHEM_PATH.read_bytes()).hexdigest()
+    return hashlib.sha256(_WETCHEM_CONTENTS).hexdigest()
 
 
 def _json_copy(value: Any) -> Any:
@@ -206,7 +209,7 @@ class WetlabEngine:
     def __init__(self, spec: ChemicalSystemSpec):
         spec.assert_compatible()
         self.spec = spec
-        database = rk.Database.fromFile(str(WETCHEM_PATH))
+        database = rk.Database.fromStringYAML(_WETCHEM_CONTENTS.decode("utf-8"))
         aqueous_phase = rk.AqueousPhase(_speciate(spec.elements))
         try:
             self.system = rk.ChemicalSystem(database, aqueous_phase, rk.MineralPhases())

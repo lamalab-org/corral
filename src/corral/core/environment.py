@@ -231,6 +231,7 @@ class Environment:
         max_job_concurrency: int = DEFAULT_JOB_CONCURRENCY,
         job_executors: dict[str, JobExecutor] | None = None,
         workspace_manager: WorkspaceManager | None = None,
+        workspace_path: str | None = None,
     ):
         self.task_id = task_id
         self.current_task = task
@@ -252,7 +253,7 @@ class Environment:
         # The task orchestrator supplies an opaque execution id solely to
         # namespace materialization. Environment neither derives nor interprets
         # benchmark repetition indices.
-        self.workspace_path = (
+        self.workspace_path = workspace_path or (
             self._create_task_workspace(task_execution_id)
             if task_execution_id is not None and self.base_work_dir
             else None
@@ -403,6 +404,7 @@ class Environment:
         task_execution_id: str,
         *,
         max_job_concurrency: int | None = None,
+        workspace_path: str | None = None,
     ) -> "Environment":
         """Bind this definition to one isolated task execution.
 
@@ -417,6 +419,8 @@ class Environment:
 
         `max_job_concurrency` sizes this task execution's background-job pool;
         `None` falls back to the definition's default.
+        `workspace_path` binds a directory already allocated by the controller,
+        such as a node directory inside the owning trial workspace.
         """
         return type(self)(
             task_id=self.task_id,
@@ -434,6 +438,9 @@ class Environment:
             ),
             job_executors=self.job_executors,
             workspace_manager=self.workspace_manager,
+            **(
+                {"workspace_path": workspace_path} if workspace_path is not None else {}
+            ),
         )
 
     def _create_task_workspace(self, task_execution_id: str) -> str:

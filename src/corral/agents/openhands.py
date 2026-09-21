@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import os
 import platform
 import shutil
@@ -20,8 +21,8 @@ try:
         LLM,
         Agent,
         AgentContext,
-        Conversation,
         LLMConvertibleEvent,
+        LocalConversation,
     )
     from openhands.sdk.conversation.state import ConversationExecutionStatus
     from openhands.sdk.event import (
@@ -32,8 +33,11 @@ try:
     )
     from openhands.sdk.event.conversation_error import ConversationErrorEvent
     from openhands.sdk.mcp import MCPServer
+    from openhands.sdk.mcp.client import MCPClient
+    from openhands.sdk.mcp.config import to_fastmcp_mcp_config
     from openhands.sdk.mcp.exceptions import MCPError
-    from openhands.sdk.mcp.tool import MCP_TOOL_TIMEOUT_SECONDS
+    from openhands.sdk.mcp.tool import MCP_TOOL_TIMEOUT_SECONDS, MCPToolExecutor
+    from openhands.sdk.mcp.utils import _connect_and_list_tools, log_handler
     from openhands.sdk.tool.builtins import BUILT_IN_TOOLS, FinishAction
     from openhands.tools.preset.default import get_default_tools
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
@@ -60,15 +64,47 @@ _MCP_SERVER_NAME = "corral"
 # from `openhands.tools.preset.default.get_default_tools()` at agent build time.
 _INCLUDED_DEFAULT_TOOLS = [tool.__name__ for tool in BUILT_IN_TOOLS]
 
-# OpenHands 1.35.0 caps every MCP tool call at a fixed *executor* timeout and
-# does NOT propagate `MCPServer.timeout` into that executor — the server-level
-# timeout only bounds the HTTP transport, while `MCPToolExecutor` wraps each call
-# in its own `MCP_TOOL_TIMEOUT_SECONDS` deadline and cancels first. So a per-call
-# timeout above this cap cannot actually be honored. The value is read from the
-# installed SDK (rather than hard-coded) so the recorded provenance tracks the
-# pinned version, and `tool_timeout_s` defaults to it so the configured timeout
-# is enforceable end-to-end out of the box.
-_OPENHANDS_EXECUTOR_TIMEOUT_S = float(MCP_TOOL_TIMEOUT_SECONDS)
+# Twice the longest successful silicon_melting_1 tool call (600.556482 s),
+# rounded up. Includes the simulation and workspace synchronization.
+_DEFAULT_TOOL_TIMEOUT_S = 1202.0
+_OPENHANDS_DEFAULT_EXECUTOR_TIMEOUT_S = float(MCP_TOOL_TIMEOUT_SECONDS)
+
+
+class _TimeoutMCPToolProvider:
+    """Apply the per-run deadline to Corral's MCP client and tool executors.
+
+    OpenHands 1.35.0 does not pass MCPServer.timeout into either the FastMCP
+    client or its executors. Use its local-conversation provider hook instead
+    of changing SDK globals, so concurrent agents can have different limits.
+    """
+
+    def __init__(self, tool_timeout_s: float):
+        self.tool_timeout_s = tool_timeout_s
+
+    def create_tools(
+        self, mcp_config: dict[str, MCPServer], timeout: float = 30.0
+    ) -> MCPClient:
+        client = MCPClient(
+            to_fastmcp_mcp_config(mcp_config),
+            timeout=self.tool_timeout_s,
+            log_handler=log_handler,
+        )
+        try:
+            # Keep the SDK's connection/listing deadline separate from the
+            # potentially much longer simulation deadline. This pinned-SDK
+            # helper performs its normal schema conversion and registration.
+            client.call_async_from_sync(
+                _connect_and_list_tools, timeout=timeout, client=client
+            )
+            for tool in client.tools:
+                if not isinstance(tool.executor, MCPToolExecutor):
+                    raise TypeError(f"Unexpected MCP executor for {tool.name}")
+                tool.executor.timeout = self.tool_timeout_s
+        except BaseException:
+            client.sync_close()
+            raise
+        return client
+
 
 # Pinned agent identity, forwarded as `Agent.system_prompt_kwargs["soul_content"]`
 # so the system prompt cannot silently inherit a machine-local
@@ -187,15 +223,10 @@ class OpenHandsAgent(BaseAgent):
             harness `LLM` (`"low"`, `"medium"`, `"high"`, `"xhigh"`, or
             `"none"`). If None, the OpenHands SDK default (`"high"`) applies and
             the value is left unset on the `LLM`. Defaults to None.
-        tool_timeout_s (float, optional): MCP transport (HTTP request) timeout
-            passed to `MCPServer.timeout`. NOTE: OpenHands separately caps each
-            MCP tool *call* at a fixed executor timeout
-            (`MCP_TOOL_TIMEOUT_SECONDS`) that `MCPServer.timeout` does not
-            override, so the effective per-call ceiling is
-            `min(tool_timeout_s, executor cap)`. Values above the cap are honored
-            only at the transport layer and log a warning. Defaults to the
-            executor cap (300) so the configured timeout is enforceable
-            end-to-end.
+        tool_timeout_s (float, optional): Per-tool timeout in seconds, applied
+            to both the MCP client's HTTP/session reads and the SDK tool
+            executor. Must be finite and positive. Defaults to 1202 seconds
+            (twice the longest measured successful silicon MD call, rounded up).
         system_prompt (str, optional): Instructions appended to the OpenHands
             harness system prompt (via `AgentContext.system_message_suffix`). If
             None, uses the default corral system prompt. Tool-usage and
@@ -217,7 +248,7 @@ class OpenHandsAgent(BaseAgent):
         temperature: float = 0.7,
         reasoning_effort: Literal["low", "medium", "high", "xhigh", "none"]
         | None = None,
-        tool_timeout_s: float = _OPENHANDS_EXECUTOR_TIMEOUT_S,
+        tool_timeout_s: float = _DEFAULT_TOOL_TIMEOUT_S,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
         surrender_prompt: str | None = None,
@@ -232,6 +263,8 @@ class OpenHandsAgent(BaseAgent):
             )
         if user_prompt is None:
             user_prompt = "tool_calling/user_prompt"
+        if not math.isfinite(tool_timeout_s) or tool_timeout_s <= 0:
+            raise ValueError("tool_timeout_s must be finite and positive")
 
         super().__init__(
             model=model,
@@ -248,20 +281,7 @@ class OpenHandsAgent(BaseAgent):
         self.api_key = api_key
         self.reasoning_effort = reasoning_effort
         self.tool_timeout_s = tool_timeout_s
-        # OpenHands caps each MCP call at its own executor timeout regardless of
-        # `MCPServer.timeout`, so the value actually enforced per call is the
-        # smaller of the two. Warn loudly when a caller asks for more than the
-        # SDK can honor rather than silently under-delivering.
-        if tool_timeout_s > _OPENHANDS_EXECUTOR_TIMEOUT_S:
-            logger.warning(
-                f"tool_timeout_s={tool_timeout_s}s exceeds the OpenHands MCP "
-                f"executor cap of {_OPENHANDS_EXECUTOR_TIMEOUT_S}s; OpenHands does "
-                "not propagate MCPServer.timeout into its executor, so each MCP "
-                f"call will still be cancelled after {_OPENHANDS_EXECUTOR_TIMEOUT_S}s."
-            )
-        self.effective_tool_timeout_s = min(
-            tool_timeout_s, _OPENHANDS_EXECUTOR_TIMEOUT_S
-        )
+        self.effective_tool_timeout_s = tool_timeout_s
 
     def _system_message_suffix(self, enable_surrender: bool) -> str:
         """Compose the suffix appended to the OpenHands harness system prompt.
@@ -313,14 +333,27 @@ class OpenHandsAgent(BaseAgent):
             llm_kwargs["base_url"] = self.api_endpoint
         return LLM(**llm_kwargs)
 
-    def _build_agent(self, llm: Any, mcp_url: str, enable_surrender: bool) -> Any:
+    def _build_agent(
+        self,
+        llm: Any,
+        mcp_url: str,
+        enable_surrender: bool,
+        mcp_tool_names: set[str] | None = None,
+    ) -> Any:
         """Assemble the reproducible OpenHands `Agent` for a run."""
+        # Docker provides a task-scoped terminal through MCP. The SDK rejects
+        # duplicate tool names, so prefer the task capability when it overlaps
+        # with a native tool, while retaining the rest of the standard preset.
+        task_tools = mcp_tool_names or set()
+        native_tools = [
+            tool for tool in get_default_tools() if tool.name not in task_tools
+        ]
         return Agent(
             llm=llm,
             # Use the SDK-owned standard preset (terminal, file editor, task
             # tracker, and browser) so Corral follows OpenHands defaults as the
             # SDK evolves. Core Finish/Think tools are included by Agent itself.
-            tools=get_default_tools(),
+            tools=native_tools,
             mcp_config={
                 _MCP_SERVER_NAME: MCPServer(
                     url=mcp_url,
@@ -378,13 +411,10 @@ class OpenHandsAgent(BaseAgent):
             "run_limit_policy": "iterations_only",
             "stuck_detection_enabled": False,
             "streaming_enabled": True,
-            # Timeout provenance, named for what OpenHands actually enforces. The
-            # configured value is the MCP transport (HTTP request) timeout passed
-            # to `MCPServer.timeout`; per-call execution is separately capped by
-            # the SDK's fixed executor timeout, which `MCPServer.timeout` does not
-            # override. The effective per-call ceiling is the smaller of the two.
+            # The provider applies the requested value to both timeout layers.
             "configured_mcp_timeout_s": self.tool_timeout_s,
-            "openhands_executor_timeout_s": _OPENHANDS_EXECUTOR_TIMEOUT_S,
+            "openhands_executor_timeout_s": self.tool_timeout_s,
+            "openhands_default_executor_timeout_s": _OPENHANDS_DEFAULT_EXECUTOR_TIMEOUT_S,
             "effective_tool_timeout_s": self.effective_tool_timeout_s,
             "mcp_url": mcp_url,
             "tool_verbosity": verbosity,
@@ -649,9 +679,21 @@ class OpenHandsAgent(BaseAgent):
                 )
 
         llm = self._make_llm()
-        agent = self._build_agent(llm, mcp_url, enable_surrender=enable_surrender)
-        conversation = Conversation(
+        agent = self._build_agent(
+            llm,
+            mcp_url,
+            enable_surrender=enable_surrender,
+            mcp_tool_names={
+                tool["function"]["name"]
+                for tool in run.available_tools
+                if tool.get("function", {}).get("name")
+            },
+        )
+        # The generic Conversation factory in SDK 1.35.0 does not expose the
+        # provider hook. This adapter always uses a local workspace.
+        conversation = LocalConversation(
             agent=agent,
+            mcp_tool_provider=_TimeoutMCPToolProvider(self.tool_timeout_s),
             callbacks=[on_event],
             # OpenHands deliberately falls back to a blocking response when
             # streaming is enabled without a token callback. A no-op callback

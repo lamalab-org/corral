@@ -62,6 +62,7 @@ async def test_openhands_uses_only_the_iteration_run_limit(monkeypatch, tmp_path
             self,
             *,
             agent,
+            mcp_tool_provider,
             callbacks,
             token_callbacks,
             workspace,
@@ -73,6 +74,7 @@ async def test_openhands_uses_only_the_iteration_run_limit(monkeypatch, tmp_path
             captured.update(
                 {
                     "agent": agent,
+                    "mcp_tool_provider": mcp_tool_provider,
                     "callbacks": callbacks,
                     "token_callbacks": token_callbacks,
                     "workspace": workspace,
@@ -96,7 +98,7 @@ async def test_openhands_uses_only_the_iteration_run_limit(monkeypatch, tmp_path
         def close(self):
             captured["closed"] = True
 
-    monkeypatch.setattr(openhands_module, "Conversation", FakeConversation)
+    monkeypatch.setattr(openhands_module, "LocalConversation", FakeConversation)
     monkeypatch.setattr(
         OpenHandsAgent,
         "_make_llm",
@@ -120,6 +122,7 @@ async def test_openhands_uses_only_the_iteration_run_limit(monkeypatch, tmp_path
     )
 
     assert captured["max_iteration_per_run"] == 7
+    assert captured["mcp_tool_provider"].tool_timeout_s == agent.tool_timeout_s
     assert captured["stuck_detection"] is False
     assert len(captured["token_callbacks"]) == 1
     assert captured["token_callbacks"][0](object()) is None

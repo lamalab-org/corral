@@ -76,7 +76,7 @@ class ReflexionAgent(BaseAgent):
 
     def _reflection_module(self, session: AgentSession) -> ReflectionModule:
         """Build a run-local reflection client from projection metadata."""
-        raw_model = session.state.task.model.get("name")
+        raw_model = session.model_name
         if not isinstance(raw_model, str) or not raw_model.strip():
             raise ValueError(
                 "ReflexionAgent requires ExecutionState.task.model.name to be a "
@@ -117,23 +117,7 @@ class ReflexionAgent(BaseAgent):
     @staticmethod
     def _trajectory_from_state(session: AgentSession) -> list[dict[str, Any]]:
         """Read the evaluated attempt's canonical projected transcript."""
-        previous_state = session.previous_state
-        if previous_state is None:
-            return []
-        run = next(
-            (
-                candidate
-                for candidate in previous_state.agent_runs.values()
-                if candidate.actor_id == session.actor.actor_id
-            ),
-            None,
-        )
-        if run is None:
-            return []
-        return [
-            dict(message)
-            for message in previous_state.conversations.get(run.run_id, ())
-        ]
+        return [dict(message) for message in session.previous_messages]
 
     @staticmethod
     async def _store_memory(
@@ -143,18 +127,13 @@ class ReflexionAgent(BaseAgent):
         reflection_model: str,
         actor_status: str | None = None,
     ) -> None:
-        previous_state = session.previous_state
         await session.set_agent_state(
             _REFLEXION_STATE_NAMESPACE,
             {
                 "schema_version": 1,
                 "reflection_model": reflection_model,
                 "memory": memory.to_dict(),
-                "source_commit_hash": (
-                    previous_state.through_commit_hash
-                    if previous_state is not None
-                    else None
-                ),
+                "source_commit_hash": session.previous_commit_hash,
                 "actor_status": actor_status,
             },
         )
