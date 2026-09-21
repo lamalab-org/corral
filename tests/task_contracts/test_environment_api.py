@@ -151,9 +151,7 @@ def test_task_definitions_run_and_restore(
                     assert state.submission == "api-contract-answer"
                     assert state.task.metadata["prompt"]
                     hidden = state.environment.values.get("hidden_arguments", {})  # noqa: PD011
-                    if benchmark == "ml":
-                        assert hidden["work_dir"] == environment.workspace_path
-                    elif benchmark == "spectra_elucidation":
+                    if benchmark == "spectra_elucidation":
                         assert hidden["h_smiles"] == tasks[task_id].scoring_inputs
                     elif benchmark == "wetlab":
                         assert hidden["wetlab"]

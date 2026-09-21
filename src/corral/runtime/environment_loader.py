@@ -26,26 +26,24 @@ class EnvironmentPreset:
 
 EnvironmentName = Literal[
     "afm",
-    "catalyst",
     "corral_md",
-    "ml",
     "resistor_network",
     "retrosynthesis",
     "samplemath",
     "spectra_elucidation",
+    "stargazer",
     "wetlab",
     "psychometrics",
 ]
 
 ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
     "afm",
-    "catalyst",
     "corral_md",
-    "ml",
     "resistor_network",
     "retrosynthesis",
     "samplemath",
     "spectra_elucidation",
+    "stargazer",
     "wetlab",
     "psychometrics",
 )
@@ -54,16 +52,8 @@ ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
     "afm": EnvironmentPreset(
         "env:create_environments", "tasks/afm/src", "task_json_path"
     ),
-    "catalyst": EnvironmentPreset(
-        "catalyst.env:create_environments",
-        "tasks/catalyst/src",
-        "local_dir",
-    ),
     "corral_md": EnvironmentPreset(
         "corral_md.env:create_environments", "tasks/corral_md/src"
-    ),
-    "ml": EnvironmentPreset(
-        "ml.env:create_environments", "tasks/ml/src", "task_json_path"
     ),
     "resistor_network": EnvironmentPreset(
         "resistor_network.env:create_environments",
@@ -83,6 +73,9 @@ ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
     "spectra_elucidation": EnvironmentPreset(
         "spectra_elucidation.env:create_spectra_elu_environments",
         "tasks/spectra_elucidation",
+    ),
+    "stargazer": EnvironmentPreset(
+        "stargazer.env:create_environments", "tasks/stargazer/src"
     ),
     "wetlab": EnvironmentPreset(
         "wetlab.env:create_qualysis_environments", "tasks/wetlab"
@@ -164,12 +157,15 @@ def _factory_kwargs(
         parameter = config_parameter
         if parameter is None:
             candidates = [
-                name for name in ("task_json_path", "local_dir") if name in parameters
+                name
+                for name in ("task_json_path", "local_dir", "selector_path")
+                if name in parameters
             ]
             if len(candidates) != 1:
                 raise ValueError(
                     "task_config requires a factory with exactly one of "
-                    "'task_json_path' or 'local_dir', or a built-in preset"
+                    "'task_json_path', 'local_dir', or 'selector_path', "
+                    "or a built-in preset"
                 )
             parameter = candidates[0]
         kwargs.setdefault(parameter, str(task_config))
