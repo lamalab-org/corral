@@ -47,8 +47,23 @@ result = await runner.run(
     k_values=[1, 2, 3],
     max_parallel=8,
     max_parallel_per_task=2,
+    max_parallel_evaluations=2,
+    max_parallel_total=10,
+    max_parallel_evaluations_by_environment={"wetlab": 1},
 )
 ```
+
+Task execution and evaluation use separate concurrency controls. Evaluation
+parallelism defaults to `max_parallel`, and the runner waits for all queued
+evaluations before returning. Set `max_parallel_evaluations` to override it.
+`max_parallel_total` bounds executions and evaluations together and defaults
+to the sum of their limits (`2 * max_parallel` with the defaults). Use
+`max_parallel_evaluations_by_environment` for additional scorer-specific
+limits; environments without an entry have no additional limit.
+Sequential attempts of the same task wait for the preceding evaluation so
+reflective agents receive its score and state. Opting into
+`max_parallel_per_task > 1` allows those attempts to overlap, in which case
+only evaluations completed before an attempt starts are available to it.
 
 Set `include_dependencies=False` for strict validation instead of automatic
 dependency expansion.

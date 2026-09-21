@@ -31,11 +31,9 @@ def _json_object(raw: str) -> dict[str, Any]:
     try:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise argparse.ArgumentTypeError(
-            f"--env-kwargs must be valid JSON: {exc}"
-        ) from exc
+        raise argparse.ArgumentTypeError(f"expected valid JSON: {exc}") from exc
     if not isinstance(value, dict):
-        raise argparse.ArgumentTypeError("--env-kwargs must be a JSON object")
+        raise argparse.ArgumentTypeError("expected a JSON object")
     return value
 
 
@@ -117,6 +115,15 @@ def build_parser() -> argparse.ArgumentParser:
     execution.add_argument("--trials", type=int, default=1)
     execution.add_argument("--max-parallel", type=int, default=1)
     execution.add_argument("--max-parallel-per-task", type=int, default=1)
+    execution.add_argument("--max-parallel-evaluations", type=int)
+    execution.add_argument("--max-parallel-total", type=int)
+    execution.add_argument(
+        "--max-parallel-evaluations-by-environment",
+        type=_json_object,
+        default={},
+        metavar="JSON",
+        help="JSON object mapping environment names or IDs to evaluation limits.",
+    )
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--run-id")
     execution.add_argument("--max-attempts", type=int, default=3)

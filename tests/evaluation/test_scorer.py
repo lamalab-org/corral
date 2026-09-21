@@ -1,8 +1,9 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from corral.core.state import ExecutionState, RuntimeState
+from corral.core.state import EnvironmentState, ExecutionState, RuntimeState
 from corral.core.task import TaskDefinition
 from corral.evaluation import TaskScorer
 
@@ -104,3 +105,30 @@ def test_scorer_rejects_state_without_runtime_output():
                 branch_id="main",
             )
         )
+
+
+def test_interactive_scorer_reads_committed_state_without_resolving_final_text(
+    tmp_path,
+):
+    def answer_scorer(_answer):
+        raise AssertionError(
+            "interactive scoring must not reinterpret the final answer"
+        )
+
+    def trajectory_scorer(state):
+        return float(state.environment.values["successful_submission"])
+
+    task = replace(
+        _task(answer_scorer, resolve_answer=True), state_scoring_fn=trajectory_scorer
+    )
+    state = ExecutionState.model_validate(
+        {
+            **_submitted_state("../not-a-file").model_dump(),
+            "environment": EnvironmentState(values={"successful_submission": True}),
+        }
+    )
+    before = state.model_dump_json()
+    result = TaskScorer(task, workspace=tmp_path).evaluate(state)
+    assert result.score == 1.0
+    assert "trajectory_scorer" in result.scorer_version
+    assert state.model_dump_json() == before
