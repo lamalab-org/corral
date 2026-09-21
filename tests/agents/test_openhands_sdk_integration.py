@@ -86,7 +86,7 @@ def test_invalid_tool_timeout_is_rejected(timeout):
         OpenHandsAgent(tool_timeout_s=timeout)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"])
 @pytest.mark.parametrize("tool_timeout", [1202, 1800])
 async def test_real_mcp_call_uses_configured_transport_and_executor_timeouts(

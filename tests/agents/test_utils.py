@@ -94,7 +94,7 @@ def setup_mock_litellm(monkeypatch, return_usage=False):
     return mock_litellm, mock_response
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -188,7 +188,7 @@ def test_litellm_message_structure():
     assert msg2["id"] == "msg_123"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_llm_call_basic(monkeypatch):
     """Test basic llm_call without tools."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
@@ -215,7 +215,7 @@ async def test_llm_call_basic(monkeypatch):
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "tool_choice",
     [
@@ -253,7 +253,7 @@ async def test_llm_call_with_tools(monkeypatch, tool_choice):
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_llm_call_anthropic_model(monkeypatch):
     """Leave the default token limit to LiteLLM's provider adapter."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
@@ -278,7 +278,7 @@ async def test_llm_call_anthropic_model(monkeypatch):
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("model", "temperature", "kwargs"),
     [
@@ -332,7 +332,7 @@ async def test_llm_call_preserves_model_configuration(
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_llm_call_with_usage_info(monkeypatch):
     """Test llm_call with return_usage=True."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch, return_usage=True)
@@ -356,7 +356,7 @@ async def test_llm_call_with_usage_info(monkeypatch):
     }
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_llm_call_with_logprobs(monkeypatch):
     """Test llm_call with logprobs=True in kwargs."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
@@ -379,7 +379,7 @@ async def test_llm_call_with_logprobs(monkeypatch):
     assert result.id == "mock_response_id"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_llm_call_without_logprobs(monkeypatch):
     """Test llm_call without logprobs (default behavior)."""
     mock_litellm, mock_response = setup_mock_litellm(monkeypatch)
@@ -394,7 +394,7 @@ async def test_llm_call_without_logprobs(monkeypatch):
     assert result.id == "mock_response_id"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_llm_call_exception_handling(monkeypatch):
     """Test llm_call exception handling."""
     mock_litellm = MockLiteLLM()
@@ -409,7 +409,7 @@ async def test_llm_call_exception_handling(monkeypatch):
     assert str(exc_info.value) == "API Error"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_llm_calls_can_overlap(monkeypatch):
     """Independent provider requests must not be serialized by the helper."""
     active = 0
@@ -438,7 +438,7 @@ async def test_llm_calls_can_overlap(monkeypatch):
     assert max_active == 2
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_llm_call_rejects_an_empty_stream(monkeypatch):
     """An empty stream must fail explicitly instead of causing an index error."""
     mock_litellm = MockLiteLLM()
@@ -451,7 +451,7 @@ async def test_llm_call_rejects_an_empty_stream(monkeypatch):
         await llm_call(model="model", messages=messages, temperature=0.0)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_llm_call_cannot_be_downgraded_to_non_streaming(monkeypatch):
     """The shared helper keeps streaming enabled for every caller."""
     mock_litellm, _ = setup_mock_litellm(monkeypatch)

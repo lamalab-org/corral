@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 import cloudpickle
 
 from corral.runtime import permissions
+from corral.workspace import materialize_local_tool_arguments
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -77,6 +78,8 @@ class JobWork:
     tool: Tool
     call_arguments: dict[str, Any]
     workspace: str | None = None
+    workspace_access: str = "none"
+    resource_mounts: dict[str, tuple[str, str]] | None = None
 
 
 @runtime_checkable
@@ -167,7 +170,10 @@ class ThreadExecutor(_PooledExecutor):
         # honour a cancel that arrived before the call started.
         if cancel.is_set():
             raise JobCancelled(work.job_id)
-        return render_result(work.tool.execute(**work.call_arguments))
+        arguments = materialize_local_tool_arguments(
+            work.tool, work.call_arguments, work.workspace
+        )
+        return render_result(work.tool.execute(**arguments))
 
 
 class RestrictedExecutor(_PooledExecutor):
@@ -177,7 +183,12 @@ class RestrictedExecutor(_PooledExecutor):
         if cancel.is_set():
             raise JobCancelled(work.job_id)
         result = permissions.execute_job(
-            work.tool, work.call_arguments, work.workspace, cancel=cancel
+            work.tool,
+            work.call_arguments,
+            work.workspace,
+            cancel=cancel,
+            resource_mounts=work.resource_mounts,
+            workspace_access=work.workspace_access,
         )
         return render_result(result)
 
@@ -265,7 +276,10 @@ class ProcessExecutor(_PooledExecutor):
             return self._proc_pool
 
     def run_tool(self, work: JobWork, cancel: threading.Event) -> str:
-        blob = cloudpickle.dumps((work.tool, work.call_arguments))
+        arguments = materialize_local_tool_arguments(
+            work.tool, work.call_arguments, work.workspace
+        )
+        blob = cloudpickle.dumps((work.tool, arguments))
         future = self._process_pool().submit(_run_cloudpickled, blob)
         while True:
             try:
@@ -326,8 +340,11 @@ class SubprocessExecutor(_PooledExecutor):
         in_path = tmpdir / "in.pkl"
         out_path = tmpdir / "out.pkl"
         try:
+            arguments = materialize_local_tool_arguments(
+                work.tool, work.call_arguments, work.workspace
+            )
             with in_path.open("wb") as fh:
-                cloudpickle.dump((work.tool, work.call_arguments), fh)
+                cloudpickle.dump((work.tool, arguments), fh)
 
             cwd = (
                 work.workspace

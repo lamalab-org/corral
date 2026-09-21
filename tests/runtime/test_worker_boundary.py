@@ -20,12 +20,12 @@ from corral.runtime.agent_worker import RemoteSession, _snapshot
 from corral.workspace import WorkspaceFilesystem, build_terminal_tool
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_planner_delegates_without_reopening_packaged_prompts(monkeypatch):
     planner = LLMPlanner(model="offline-test")
     payload = permissions.serialize(planner)
@@ -75,7 +75,7 @@ async def test_planner_delegates_without_reopening_packaged_prompts(monkeypatch)
         await session._test_commit_store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_agent_snapshot_contains_no_private_projection():
     secret = str(uuid4())
     task = TaskDefinition(
@@ -113,7 +113,7 @@ async def test_agent_snapshot_contains_no_private_projection():
         await session._test_commit_store.aclose()
 
 
-@pytest.fixture()
+@pytest.fixture
 def private_state():
     return ExecutionState(
         execution_id="private",
@@ -195,13 +195,14 @@ def test_workspace_binding_is_rebuilt_without_private_inputs(tmp_path, monkeypat
 
     def run(kind, payload, workspace, **kwargs):
         assert secret.encode() not in permissions.serialize(payload)
-        assert payload[1] == {"work_dir": str(tmp_path)}
-        return {"content": str(tmp_path)}
+        assert payload[1] == {"work_dir": "/workspace"}
+        return {"content": "/workspace"}
 
     monkeypatch.setattr(permissions, "run_worker", run)
-    assert permissions.execute_job(
-        workspace_tool, {"work_dir": secret}, str(tmp_path)
-    ) == str(tmp_path)
+    assert (
+        permissions.execute_job(workspace_tool, {"work_dir": secret}, str(tmp_path))
+        == "/workspace"
+    )
 
 
 def test_public_schema_rejects_injected_hidden_arguments():

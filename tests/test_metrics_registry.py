@@ -154,13 +154,13 @@ class ErrorProneMetric(Metric):
         raise RuntimeError(f"Intentional error from {self.name_val}")
 
 
-@pytest.fixture()
+@pytest.fixture
 def empty_registry():
     """Create a fresh empty registry for testing."""
     return MetricRegistry()
 
 
-@pytest.fixture()
+@pytest.fixture
 def populated_registry():
     """Create a registry with some metrics registered."""
     registry = MetricRegistry()
@@ -170,7 +170,7 @@ def populated_registry():
     return registry
 
 
-@pytest.fixture()
+@pytest.fixture
 def sample_benchmark_result():
     """Create a sample BenchmarkResult for testing."""
     return BenchmarkResult(
@@ -192,7 +192,7 @@ def sample_benchmark_result():
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def multi_task_benchmark_result():
     """Create a BenchmarkResult with multiple tasks for parallel testing."""
     return BenchmarkResult(

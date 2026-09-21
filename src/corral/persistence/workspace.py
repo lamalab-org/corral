@@ -103,7 +103,10 @@ class WorkspaceManager:
         files: list[tuple[str, Path]] = []
         for entry in sorted(root.rglob("*")):
             relative = entry.relative_to(root).as_posix()
-            if relative.split("/", 1)[0] == permissions.NODE_WORKSPACE_DIR:
+            if relative.split("/", 1)[0] in {
+                permissions.NODE_WORKSPACE_DIR,
+                permissions.RESOURCE_WORKSPACE_DIR,
+            }:
                 continue
             if entry.is_symlink():
                 raise WorkspacePathError(

@@ -23,7 +23,7 @@ from corral.persistence import (
 )
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -53,7 +53,7 @@ def agent_request(root, index=0):
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_reopens_legacy_ledger_without_changing_schema_or_records(tmp_path):
     path = tmp_path / "legacy.sqlite3"
     fixture = Path(__file__).with_name("fixtures") / "legacy_commits.sql"
@@ -107,7 +107,7 @@ async def test_reopens_legacy_ledger_without_changing_schema_or_records(tmp_path
         )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_concurrent_stores_serialize_appends_and_idempotent_retries(tmp_path):
     path = tmp_path / "concurrent.sqlite3"
     first = SQLiteCommitStore(path, "execution")
@@ -150,7 +150,7 @@ async def test_concurrent_stores_serialize_appends_and_idempotent_retries(tmp_pa
         await second.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_retries_a_busy_journal_mode_change(tmp_path, monkeypatch):
     execute = aiosqlite.Connection.execute
     attempts = 0
@@ -172,7 +172,7 @@ async def test_retries_a_busy_journal_mode_change(tmp_path, monkeypatch):
     assert attempts == 2
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancellation"])
 async def test_interrupted_append_rolls_back_all_writes(tmp_path, monkeypatch, cancel):
     path = tmp_path / "atomic.sqlite3"
@@ -225,7 +225,7 @@ async def test_interrupted_append_rolls_back_all_writes(tmp_path, monkeypatch, c
         assert (await reader.materialize("main")).through_commit_hash == committed.hash
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_async_cleanup_closes_stores_and_is_repeatable(tmp_path):
     path = tmp_path / "lifecycle.sqlite3"
     store = SQLiteCommitStore(path, "execution")
@@ -247,7 +247,7 @@ async def test_async_cleanup_closes_stores_and_is_repeatable(tmp_path):
     assert not unused.path.exists()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_shard_cleanup_allows_reopening_the_committed_ledger(tmp_path):
     async with ShardedCommitStore(tmp_path) as store:
         shard = store.for_execution("execution")

@@ -51,14 +51,14 @@ def test_file_submission_is_resolved_only_during_evaluation(tmp_path):
         seen.append(path)
         return float(Path(path).read_text(encoding="utf-8"))
 
-    state = _submitted_state("answer.txt")
+    state = _submitted_state("/workspace/answer.txt")
     result = TaskScorer(_task(score, resolve_answer=True), workspace=tmp_path).evaluate(
         state
     )
 
     assert result.score == 7.0
     assert Path(seen[0]) == answer_path
-    assert state.submission == "answer.txt"
+    assert state.submission == "/workspace/answer.txt"
 
 
 @pytest.mark.parametrize("submission_kind", ["absolute", "traversal", "symlink"])

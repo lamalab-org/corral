@@ -146,14 +146,6 @@ class ExecutionState(FrozenModel):
         return self.task.dependency_outputs
 
     @property
-    def pending_actions(self) -> tuple[ActionState, ...]:
-        return tuple(
-            action
-            for action in self.actions.values()
-            if action.status in {"pending", "running"}
-        )
-
-    @property
     def tool_statistics(self) -> dict[str, int]:
         statistics: dict[str, int] = {}
         for action_state in self.actions.values():

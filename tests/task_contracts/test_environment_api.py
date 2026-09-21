@@ -41,7 +41,7 @@ CONFIGURATIONS = [
 ]
 
 
-@pytest.fixture()
+@pytest.fixture
 def afm_instrument(monkeypatch):
     """Keep the real AFM loader, prompt and reset hook; replace device dependencies."""
     applications = []
@@ -150,7 +150,7 @@ def test_task_definitions_run_and_restore(
                     assert state.runtime.metadata["execution_completed"] is True
                     assert state.submission == "api-contract-answer"
                     assert state.task.metadata["prompt"]
-                    hidden = state.environment.values.get("hidden_arguments", {})  # noqa: PD011
+                    hidden = state.environment.values.get("hidden_arguments", {})
                     if benchmark == "spectra_elucidation":
                         assert hidden["h_smiles"] == tasks[task_id].scoring_inputs
                     elif benchmark == "wetlab":

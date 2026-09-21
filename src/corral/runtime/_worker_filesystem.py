@@ -1,7 +1,8 @@
 """Build a worker-only filesystem before permanently dropping privileges.
 
-The original container root is never mounted in the jail. Runtime mounts live
-under /workspace; conventional runtime paths are aliases into that tree.
+The original container root is never mounted in the jail. The assigned
+controller directory is always presented at the canonical path /workspace;
+runtime and scratch mounts live elsewhere in the worker root.
 """
 
 from __future__ import annotations
@@ -10,11 +11,11 @@ import ctypes
 import os
 import signal
 import sys
-import tempfile
 from contextlib import suppress
 from pathlib import Path
 
-RUNTIME_ROOT = Path("/workspace/.corral-runtime-system")
+RUNTIME_ROOT = Path("/.corral-runtime-system")
+SCRATCH_ROOT = Path("/.corral-scratch")
 
 _CLONE_NEWNS = 0x00020000
 _MS_RDONLY = 1
@@ -77,6 +78,8 @@ def enter_workspace(
     *,
     keep_fds: set[int],
     workspace_fd: int | None = None,
+    workspace_access: str = "read_write",
+    resource_mounts: dict[str, tuple[str, str]] | None = None,
 ) -> str:
     """Relocate the runtime and workspace into a private, read-only root.
 
@@ -131,9 +134,12 @@ def enter_workspace(
     mount(None, "/", flags=_MS_REC | _MS_PRIVATE)
     _directory(jail, 0o700)
     mount("tmpfs", jail, "tmpfs", _MS_NOSUID | _MS_NODEV, "mode=0755,size=16m")
+    if workspace_access not in {"none", "read", "read_write", "scratch"}:
+        raise ValueError(f"invalid workspace access mode: {workspace_access!r}")
     runtime = jail / RUNTIME_ROOT.relative_to("/")
     _directory(runtime)
-    _directory(jail / "workspace", 0o711)
+    target_workspace = jail / "workspace"
+    _directory(target_workspace, 0o755)
 
     # These trees contain the installed OS/Python/SDK dependencies. Corral and
     # task packages are installed privately at /opt/corral, outside every mount.
@@ -159,32 +165,90 @@ def enter_workspace(
                 _directory(parent)
         bind(source.resolve(), target, readonly=True)
 
-    target_workspace = jail / Path(workspace).relative_to("/")
-    for parent in reversed(target_workspace.parents):
-        if parent.is_relative_to(jail / "workspace"):
-            _directory(parent, 0o711)
     # Pin the controller-validated directory across concurrent renames by the
-    # main agent. Mount from a verified descriptor, not a model-writable path.
-    from corral.runtime.permissions import _open_directory
+    # main agent. The physical name is never recreated in the jail.
+    if workspace_access in {"read", "read_write"}:
+        from corral.runtime.permissions import (
+            _open_directory,
+        )
 
-    # Bind sources must belong to the new mount namespace. Reopen with
-    # O_NOFOLLOW and verify the inode against the controller's pinned handle.
-    local_fd = _open_directory(workspace)
-    try:
-        if workspace_fd is not None:
-            expected, actual = os.fstat(workspace_fd), os.fstat(local_fd)
-            if (expected.st_dev, expected.st_ino) != (actual.st_dev, actual.st_ino):
-                raise PermissionError(
-                    "assigned workspace was replaced during bootstrap"
-                )
-        bind(Path(f"/proc/self/fd/{local_fd}"), target_workspace, readonly=False)
-    finally:
-        os.close(local_fd)
-    scratch_path = Path(
-        tempfile.mkdtemp(prefix=".corral-runtime-", dir=target_workspace)
+        local_fd = _open_directory(workspace)
+        try:
+            if workspace_fd is not None:
+                expected, actual = os.fstat(workspace_fd), os.fstat(local_fd)
+                if (expected.st_dev, expected.st_ino) != (actual.st_dev, actual.st_ino):
+                    raise PermissionError(
+                        "assigned workspace was replaced during bootstrap"
+                    )
+            bind(Path(f"/proc/self/fd/{local_fd}"), target_workspace, readonly=False)
+        finally:
+            os.close(local_fd)
+    elif workspace_access == "scratch":
+        mount(
+            "tmpfs",
+            target_workspace,
+            "tmpfs",
+            _MS_NOSUID | _MS_NODEV,
+            f"mode=0700,uid={uid},gid={gid},size=256m",
+        )
+
+    # Explicit immutable resources are nested read-only mounts. Their public
+    # paths are validated by the controller and their source directories are
+    # content-addressed, so the mutable workspace snapshot never includes them.
+    resource_root = target_workspace / "resources"
+    if resource_root.is_symlink() or (
+        resource_root.exists() and not resource_root.is_dir()
+    ):
+        raise PermissionError("reserved resource mountpoint is not a directory")
+    _directory(resource_root)
+    mount(
+        "tmpfs",
+        resource_root,
+        "tmpfs",
+        _MS_NOSUID | _MS_NODEV,
+        "mode=0755,size=16m",
     )
-    os.chown(scratch_path, uid, gid)
-    scratch = str(Path(workspace) / scratch_path.name)
+    for source_name, public_name in (resource_mounts or {}).values():
+        source = Path(source_name)
+        public = Path(public_name)
+        try:
+            relative = public.relative_to("/workspace/resources")
+        except ValueError as exc:
+            raise ValueError(
+                "resource mount must be below /workspace/resources"
+            ) from exc
+        if ".." in relative.parts or not source.is_file() or source.is_symlink():
+            raise ValueError("resource mount source and destination must be regular")
+        target = resource_root / relative
+        _directory(target.parent)
+        # Bind only the declared file. The content-addressed controller parent
+        # may deliberately be mode 0700, and no sibling artifact should become
+        # visible merely because one resource was authorized.
+        bind(source, target, readonly=True)
+
+    mount(
+        None,
+        resource_root,
+        flags=_MS_REMOUNT | _MS_RDONLY | _MS_NOSUID | _MS_NODEV,
+    )
+
+    if workspace_access == "read":
+        mount(
+            None,
+            target_workspace,
+            flags=_MS_BIND | _MS_REMOUNT | _MS_RDONLY | _MS_NOSUID | _MS_NODEV,
+        )
+
+    scratch_path = jail / SCRATCH_ROOT.relative_to("/")
+    _directory(scratch_path, 0o700)
+    mount(
+        "tmpfs",
+        scratch_path,
+        "tmpfs",
+        _MS_NOSUID | _MS_NODEV,
+        f"mode=0700,uid={uid},gid={gid},size=64m",
+    )
+    scratch = str(SCRATCH_ROOT)
     shared_memory = scratch_path / "shm"
     shared_memory.mkdir()
     os.chown(shared_memory, uid, gid)
@@ -250,5 +314,5 @@ def enter_workspace(
                 os.close(number)
     mount(None, jail, flags=_MS_REMOUNT | _MS_RDONLY | _MS_NOSUID | _MS_NODEV)
     os.chroot(jail)
-    os.chdir(workspace)
+    os.chdir("/workspace")
     return scratch

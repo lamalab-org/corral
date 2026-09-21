@@ -35,6 +35,7 @@ class _CallableTool(Tool):
             params_json_schema=params_json_schema,
             concurrency=concurrency,
             hidden_args=hidden_args,
+            trusted=True,
         )
         self._fn = fn
 
@@ -90,7 +91,11 @@ def _make_start_tool(env: Environment, tool: Tool) -> _CallableTool:
         description=_start_description(tool),
         params_json_schema=schema,
         fn=_start,
-        hidden_args=dict(tool.hidden_args),
+        hidden_args={
+            name: value
+            for name, value in tool.hidden_args.items()
+            if name not in set(tool.workspace_args) | set(tool.resources)
+        },
     )
 
 

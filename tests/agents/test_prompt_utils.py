@@ -105,14 +105,14 @@ class TestValidatedPrompt:
 class TestGetPrompt:
     """Test cases for the get_prompt function."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def mock_prompt(self, mocker):
         """Create a mock prompt."""
         mock = mocker.Mock()
         mock.fill = mocker.Mock(return_value="filled content")
         return mock
 
-    @pytest.fixture()
+    @pytest.fixture
     def mock_store(self, mocker, mock_prompt):
         """Create a mock store."""
         mock = mocker.Mock()
@@ -150,12 +150,12 @@ class TestGetPrompt:
 class TestCreatePrompt:
     """Test cases for the create_prompt function."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def mock_system_prompt(self, mocker):
         """Create a mock system prompt."""
         return mocker.Mock()
 
-    @pytest.fixture()
+    @pytest.fixture
     def mock_user_prompt(self, mocker):
         """Create a mock user prompt."""
         mock = mocker.Mock()
@@ -201,7 +201,7 @@ class TestCreatePrompt:
 class TestBuildUserContent:
     """Test cases for the build_user_content function."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def mock_user_prompt(self, mocker):
         """Create a mock user prompt."""
         mock = mocker.Mock()

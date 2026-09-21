@@ -23,7 +23,7 @@ from corral.core.tool import tool
 pytestmark = pytest.mark.usefixtures("session_stores")
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -138,7 +138,7 @@ def _submission_conformance_cases():
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_all_local_agents_expose_the_session_contract_only():
     agents = [
         ReActAgent(system_prompt="system", user_prompt="Task: {{task_guide}}"),
@@ -154,7 +154,7 @@ async def test_all_local_agents_expose_the_session_contract_only():
         assert not hasattr(agent, "run_agent")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(("agent", "response"), _submission_conformance_cases())
 async def test_successful_submission_stops_the_local_agent_loop(
     monkeypatch,
@@ -177,7 +177,7 @@ async def test_successful_submission_stops_the_local_agent_loop(
     assert session.state.tool_statistics == {"submit_answer": 1}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_tool_calling_agent_executes_submission_in_its_session(monkeypatch):
     responses = iter(
         [
@@ -216,7 +216,7 @@ async def test_tool_calling_agent_executes_submission_in_its_session(monkeypatch
     assert session.state.submission == "42"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_react_agent_executes_tools_then_returns_typed_outcome(monkeypatch):
     responses = iter(
         [
@@ -257,7 +257,7 @@ async def test_react_agent_executes_tools_then_returns_typed_outcome(monkeypatch
     assert session.state.submission == "42"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_planner_uses_submit_tool_when_planning_already_solves_task(monkeypatch):
     model_call = AsyncMock(
         return_value=SimpleNamespace(
@@ -286,7 +286,7 @@ async def test_planner_uses_submit_tool_when_planning_already_solves_task(monkey
     assert {"role": "user", "content": "resume from canonical state"} in sent
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_planner_and_executor_share_one_task_interaction_budget(monkeypatch):
     responses = iter(
         [

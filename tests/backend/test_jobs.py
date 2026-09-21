@@ -218,7 +218,8 @@ def test_job_context_redacts_hidden_values():
         workspace="/tmp/ws",
     )
     view = manager.result(record.context.job_id, wait=True, timeout=2.0)
-    assert view["workspace"] == "/tmp/ws"
+    assert view["workspace"] == "/workspace"
+    assert "/tmp/ws" not in json.dumps(view)
     assert view["arguments"] == {"x": 1}
     assert view["hidden_arg_names"] == ["secret"]
     # The secret value must never appear anywhere in the serialised job.

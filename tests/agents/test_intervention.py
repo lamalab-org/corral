@@ -22,7 +22,7 @@ from corral.core.tool import tool
 pytestmark = pytest.mark.usefixtures("session_stores")
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -102,7 +102,7 @@ def test_parse_react_actions_uses_current_action_type():
     assert _parse_react_actions("<action>missing-input</action>") == []
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_text_intervention_is_recorded_in_canonical_state():
     hooks = AgentHooks()
     hooks.register(
@@ -126,7 +126,7 @@ async def test_text_intervention_is_recorded_in_canonical_state():
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_react_intervention_without_execution_strips_actions():
     hooks = AgentHooks()
     hooks.register(
@@ -151,7 +151,7 @@ async def test_react_intervention_without_execution_strips_actions():
     assert "<action>" not in injected
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_react_intervention_executes_through_agent_session():
     calls: list[str] = []
     hooks = AgentHooks()
@@ -180,7 +180,7 @@ async def test_react_intervention_executes_through_agent_session():
     assert intervention_action.metadata == {"source": "hook-intervention"}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_intervention_tool_failure_is_critical():
     hooks = AgentHooks()
     hooks.register(
@@ -202,7 +202,7 @@ async def test_intervention_tool_failure_is_critical():
         await run_test_agent(agent, environment)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_tool_call_trace_replay_uses_new_actions(tmp_path: Path):
     trace = tmp_path / "trace.json"
     trace.write_text(

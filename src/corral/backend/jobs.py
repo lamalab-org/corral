@@ -108,9 +108,16 @@ class JobContext:
     job_id: str
     tool_name: str
     arguments: dict[str, Any]
-    call_arguments: dict[str, Any]
+    call_arguments: dict[str, Any] = field(repr=False)
     hidden_arg_names: tuple[str, ...]
+    # Public namespace only. The physical assignment is controller-private and
+    # excluded from repr/serialization.
     workspace: str | None
+    assigned_workspace: str | None = field(default=None, repr=False)
+    workspace_access: str = "none"
+    resource_mounts: dict[str, tuple[str, str]] = field(
+        default_factory=dict, repr=False
+    )
     concurrency_key: str | None = None
 
 
@@ -147,6 +154,7 @@ class JobRecord:
             "arguments": ctx.arguments,
             "hidden_arg_names": list(ctx.hidden_arg_names),
             "workspace": ctx.workspace,
+            "workspace_access": ctx.workspace_access,
             "concurrency_key": ctx.concurrency_key,
             "submitted_at": self.submitted_at.isoformat(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
@@ -236,6 +244,8 @@ class JobManager:
         call_arguments: dict[str, Any],
         hidden_arg_names: tuple[str, ...] = (),
         workspace: str | None = None,
+        workspace_access: str = "none",
+        resource_mounts: dict[str, tuple[str, str]] | None = None,
         concurrency_key: str | None = None,
     ) -> JobRecord:
         """Register a job and hand its work to the executor immediately.
@@ -252,7 +262,10 @@ class JobManager:
             arguments=dict(visible_arguments),
             call_arguments=dict(call_arguments),
             hidden_arg_names=tuple(hidden_arg_names),
-            workspace=workspace,
+            workspace="/workspace" if workspace else None,
+            assigned_workspace=workspace,
+            workspace_access=workspace_access,
+            resource_mounts=dict(resource_mounts or {}),
             concurrency_key=concurrency_key or getattr(tool, "concurrency_key", None),
         )
         record = JobRecord(context=context)
@@ -317,10 +330,19 @@ class JobManager:
             tool_name=tool.name,
             tool=tool,
             call_arguments=record.context.call_arguments,
-            workspace=record.context.workspace,
+            workspace=record.context.assigned_workspace,
+            workspace_access=record.context.workspace_access,
+            resource_mounts=record.context.resource_mounts,
         )
 
     def _finish_job(self, record: JobRecord, rendered: str) -> None:
+        if record.context.assigned_workspace:
+            rendered = rendered.replace(
+                record.context.assigned_workspace,
+                record.context.workspace or "/workspace",
+            )
+        for physical, public in record.context.resource_mounts.values():
+            rendered = rendered.replace(physical, public)
         with self._lock:
             if record.context.job_id in self._cancelled:
                 return
@@ -339,8 +361,16 @@ class JobManager:
         )
 
     def _fail_job(self, record: JobRecord, exc: Exception) -> None:
+        error = str(exc)
+        if record.context.assigned_workspace:
+            error = error.replace(
+                record.context.assigned_workspace,
+                record.context.workspace or "/workspace",
+            )
+        for physical, public in record.context.resource_mounts.values():
+            error = error.replace(physical, public)
         with self._lock:
-            record.error = str(exc)
+            record.error = error
             if record.context.job_id not in self._cancelled:
                 record.status = JobStatus.FAILED
                 record.ended_at = _utcnow()

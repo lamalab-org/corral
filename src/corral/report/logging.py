@@ -7,7 +7,6 @@ and standard-library interception consistent across the process.
 
 from __future__ import annotations
 
-import json
 import logging as stdlib_logging
 import os
 import re
@@ -377,17 +376,6 @@ def _ignore_missing_handler() -> Iterator[None]:
         yield
 
 
-def disable_logging() -> None:
-    """Remove Corral-owned sinks and the standard-library interception bridge."""
-
-    with _configuration_lock:
-        for handler_id in _handler_ids:
-            with _ignore_missing_handler():
-                _loguru_logger.remove(handler_id)
-        _handler_ids.clear()
-        _install_stdlib_intercept(False)
-
-
 @contextmanager
 def log_context(**fields: Any) -> Iterator[None]:
     """Bind correlation fields for the current thread or async task only."""
@@ -422,12 +410,6 @@ def event(
     )
 
 
-def json_record(record: Mapping[str, Any]) -> str:
-    """Return a stable JSON representation useful to custom sink adapters."""
-
-    return json.dumps(redact_sensitive_data(record), default=str, sort_keys=True)
-
-
 # Public facade used throughout Corral. Configuration happens lazily at module
 # import to preserve the project's historical default of visible INFO logs.
 logger = _loguru_logger
@@ -439,10 +421,8 @@ __all__ = [
     "LogSinkConfig",
     "LoggingConfig",
     "configure_logging",
-    "disable_logging",
     "event",
     "exception_fields",
-    "json_record",
     "log_context",
     "logger",
     "redact_sensitive_data",

@@ -25,7 +25,7 @@ from corral.core.tool import tool
 pytestmark = pytest.mark.usefixtures("session_stores")
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -83,7 +83,7 @@ def test_experiment_manager_is_not_a_second_agent_entrypoint():
     assert not hasattr(ExperimentManager, "run_session")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_ai_scientist_uses_the_session_model_call_budget():
     agent = AIScientistAgent(model="test-model")
     session = await make_session([], max_iterations=7)
@@ -92,7 +92,7 @@ async def test_ai_scientist_uses_the_session_model_call_budget():
     assert session.iteration_limit == 7
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_ai_scientist_opts_into_subagent_inspection_tool():
     agent = AIScientistAgent(model="test-model")
     session = await make_session([], agent=agent)
@@ -101,7 +101,7 @@ async def test_ai_scientist_opts_into_subagent_inspection_tool():
     assert INSPECT_SUBAGENT_TOOL_NAME in names
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_scientist_harness_uses_native_async_llm_call(monkeypatch):
     response = object()
     async_call = AsyncMock(return_value=response)
@@ -116,7 +116,7 @@ async def test_scientist_harness_uses_native_async_llm_call(monkeypatch):
     async_call.assert_awaited_once_with(model="test-model")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_scientist_branches_execute_through_agent_sessions():
     calls = []
     parent = await make_session(calls)
@@ -149,7 +149,7 @@ async def test_scientist_branches_execute_through_agent_sessions():
     assert calls == [1, 2]
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_scientist_branches_inherit_current_hook_state():
     calls = []
     parent = await make_session(calls)
@@ -186,7 +186,7 @@ async def test_scientist_branches_inherit_current_hook_state():
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_ai_scientist_maps_harness_result_to_outcome(monkeypatch):
     agent = AIScientistAgent(model="test-model")
     session = await make_session([])
@@ -212,7 +212,7 @@ async def test_ai_scientist_maps_harness_result_to_outcome(monkeypatch):
     assert scientist_state["status"] == "completed"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_ai_scientist_instance_is_reentrant_across_sessions(monkeypatch):
     agent = AIScientistAgent(model="test-model")
     first = await make_session([])

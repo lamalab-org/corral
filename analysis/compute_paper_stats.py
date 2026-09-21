@@ -129,24 +129,24 @@ all_models = sorted(tokens.keys())
 all_verbosities = sorted({v for m in tokens for v in tokens[m]})
 grand_in, grand_out = agg_all()
 
-logger.info(f"\n{'='*80}")
+logger.info(f"\n{'=' * 80}")
 logger.info(
     "TOKEN COUNTS BY MODEL  (input = all prior msgs per call, output = assistant msg)"
 )
-logger.info(f"{'='*80}")
+logger.info(f"{'=' * 80}")
 for m in all_models:
     inp, out = agg_model(m)
     logger.info(
-        f"  {m:15s}:  input {inp:>14,}  output {out:>14,}  total {inp+out:>14,}"
+        f"  {m:15s}:  input {inp:>14,}  output {out:>14,}  total {inp + out:>14,}"
     )
 logger.info(
-    f"  {'GRAND TOTAL':15s}:  input {grand_in:>14,}  output {grand_out:>14,}  total {grand_in+grand_out:>14,}"
+    f"  {'GRAND TOTAL':15s}:  input {grand_in:>14,}  output {grand_out:>14,}  total {grand_in + grand_out:>14,}"
 )
 logger.info(f"\n  => Total tokens (all models): ~{fmt_tokens(grand_in + grand_out)}")
 
-logger.info(f"\n{'='*80}")
+logger.info(f"\n{'=' * 80}")
 logger.info("TOKEN COUNTS BY VERBOSITY")
-logger.info(f"{'='*80}")
+logger.info(f"{'=' * 80}")
 for verb in all_verbosities:
     inp, out = agg_verbosity(verb)
     logger.info(f"\n  Verbosity: {verb}")
@@ -154,29 +154,29 @@ for verb in all_verbosities:
         vi = tokens[m][verb]["input"]
         vo = tokens[m][verb]["output"]
         logger.info(
-            f"    {m:15s}:  input {vi:>14,}  output {vo:>14,}  total {vi+vo:>14,}"
+            f"    {m:15s}:  input {vi:>14,}  output {vo:>14,}  total {vi + vo:>14,}"
         )
     logger.info(
-        f"    {'SUBTOTAL':15s}:  input {inp:>14,}  output {out:>14,}  total {inp+out:>14,}"
+        f"    {'SUBTOTAL':15s}:  input {inp:>14,}  output {out:>14,}  total {inp + out:>14,}"
     )
 
-logger.info(f"\n{'='*80}")
+logger.info(f"\n{'=' * 80}")
 logger.info("FLAT TABLE: MODEL x VERBOSITY")
-logger.info(f"{'='*80}")
+logger.info(f"{'=' * 80}")
 header = (
     f"  {'Model':15s} {'Verbosity':15s} {'Input':>14s} {'Output':>14s} {'Total':>14s}"
 )
 logger.info(header)
-logger.info(f"  {'-'*15} {'-'*15} {'-'*14} {'-'*14} {'-'*14}")
+logger.info(f"  {'-' * 15} {'-' * 15} {'-' * 14} {'-' * 14} {'-' * 14}")
 for m in all_models:
     for verb in all_verbosities:
         vi = tokens[m][verb]["input"]
         vo = tokens[m][verb]["output"]
-        logger.info(f"  {m:15s} {verb:15s} {vi:>14,} {vo:>14,} {vi+vo:>14,}")
+        logger.info(f"  {m:15s} {verb:15s} {vi:>14,} {vo:>14,} {vi + vo:>14,}")
 
-logger.info(f"\n{'='*80}")
+logger.info(f"\n{'=' * 80}")
 logger.info("ESTIMATED API COST (proprietary models only)")
-logger.info(f"{'='*80}")
+logger.info(f"{'=' * 80}")
 total_cost = 0.0
 for m, prices in PRICING.items():
     inp, out = agg_model(m)
@@ -198,9 +198,9 @@ for verb in all_verbosities:
         verb_cost += vi / 1e6 * prices["input"] + vo / 1e6 * prices["output"]
     logger.info(f"    {verb:15s}: ${verb_cost:>10,.2f}")
 
-logger.info(f"\n{'='*80}")
+logger.info(f"\n{'=' * 80}")
 logger.info("MALFORMED-RESPONSE RATES (ReAct scaffold errors)")
-logger.info(f"{'='*80}")
+logger.info(f"{'=' * 80}")
 react_totals = {}
 for (m, at), val in scaffold_errors.items():
     if at == "react":
@@ -218,9 +218,9 @@ for m in sorted(react_totals.keys()):
         f"  {m:15s} {v['errors']:>8d} {v['total_trials']:>8d} {rate:>10.3f} {pct:>11.1f}%"
     )
 
-logger.info(f"\n{'='*80}")
+logger.info(f"\n{'=' * 80}")
 logger.info("LATEX-READY VALUES")
-logger.info(f"{'='*80}")
+logger.info(f"{'=' * 80}")
 logger.info(f"  Tokens:  ~{fmt_tokens(grand_in + grand_out)}")
 logger.info(f"  N (config--env pairs):  {n_pairs}")
 logger.info(f"  API cost:  ${total_cost:,.0f}")

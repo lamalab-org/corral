@@ -16,12 +16,12 @@ from corral.core.task import TaskDefinition
 from corral.persistence import SQLiteCommitStore
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
 
-@pytest.fixture()
+@pytest.fixture
 async def workspace_session(tmp_path):
     environment = Environment(
         "workspace-task",
@@ -79,7 +79,7 @@ async def workspace_session(tmp_path):
         )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_run_agent_session_restores_nonempty_workspace(workspace_session):
     session = workspace_session
     restored_file = Path(session.workspace) / "notes.txt"
@@ -102,7 +102,7 @@ async def test_run_agent_session_restores_nonempty_workspace(workspace_session):
     assert result.state.workspace == session.state.workspace
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_fork_branch_restores_nonempty_workspace(workspace_session):
     session = workspace_session
 
@@ -116,7 +116,7 @@ async def test_fork_branch_restores_nonempty_workspace(workspace_session):
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_scientist_nodes_have_independent_files_and_promote_the_winner(
     workspace_session, monkeypatch
 ):
@@ -135,7 +135,10 @@ async def test_scientist_nodes_have_independent_files_and_promote_the_winner(
                 lambda: branch.execute(
                     Action(
                         name="write_file",
-                        arguments={"path": "model.txt", "content": content},
+                        arguments={
+                            "path": "/workspace/model.txt",
+                            "content": content,
+                        },
                     )
                 )
             )
@@ -171,7 +174,9 @@ async def test_scientist_nodes_have_independent_files_and_promote_the_winner(
                 Action(
                     name="read_file",
                     arguments={
-                        "path": "../" + Path(second.workspace).name + "/model.txt"
+                        "path": "/workspace/../"
+                        + Path(second.workspace).name
+                        + "/model.txt"
                     },
                 )
             )

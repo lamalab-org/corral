@@ -19,12 +19,11 @@ from wetlab.engine import (
 from wetlab.score import none_checker, score_ion_list, score_salt
 from wetlab.tools import create_tools
 
-from corral.core import ToolExecutionResult
+from corral.core import EnvironmentResourceAdapter
 from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.events import TaskConfigured, WorkspaceDelta
 from corral.core.state import ExecutionState, TaskOutput
 from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
-from corral.core.tool import Tool
 from corral.core.transition import environment_operations
 from corral.report.logging import event, exception_fields
 
@@ -286,6 +285,30 @@ def load_tasks_from_json(
     return tasks
 
 
+class WetlabInventory(dict[str, Any]):
+    """Ephemeral inventory coupled to the engine that reconstructed it."""
+
+    def __init__(self, values: Mapping[str, Any], *, engine: WetlabEngine) -> None:
+        super().__init__(values)
+        self.engine = engine
+
+
+class WetlabResourceAdapter(EnvironmentResourceAdapter):
+    """Restore and capture WetLab's durable JSON chemistry checkpoint."""
+
+    def restore(self, state: Any) -> object:
+        if not isinstance(state, Mapping):
+            raise TypeError("Wetlab resource state must be an object")
+        wetlab_state = WetlabState.from_dict(state)
+        engine = WetlabEngine(wetlab_state.chemical_system)
+        return WetlabInventory(engine.restore(wetlab_state), engine=engine)
+
+    def capture(self, runtime: object) -> Any:
+        if not isinstance(runtime, WetlabInventory):
+            raise TypeError("Wetlab resource runtime must be a WetlabInventory")
+        return runtime.engine.snapshot(runtime).to_dict()
+
+
 class QualitativeAnalysisEnvironment(Environment):
     """Environment for one QualitativeAnalysisTask.
 
@@ -299,6 +322,11 @@ class QualitativeAnalysisEnvironment(Environment):
         base_work_dir (str): Base working directory
         group_tasks (dict[str, TaskDefinition]): All linked task definitions
     """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        adapters = dict(kwargs.pop("resource_adapters", {}) or {})
+        adapters.setdefault("wetlab", WetlabResourceAdapter())
+        super().__init__(*args, resource_adapters=adapters, **kwargs)
 
     def _state_for_configuration(self, state: ExecutionState) -> WetlabState:
         """Resolve the initial or latest upstream inventory from ExecutionState."""
@@ -344,11 +372,11 @@ class QualitativeAnalysisEnvironment(Environment):
             task_id=self.task_id,
             chemical_system=self.current_task.sys,
         )
-        hidden = dict(state.environment.values.get("hidden_arguments", {}))
-        hidden["wetlab"] = wetlab_state.to_dict()
+        resources = dict(state.environment.values.get("resources", {}))
+        resources["wetlab"] = wetlab_state.to_dict()
         environment = {
             **dict(state.environment.values),
-            "hidden_arguments": hidden,
+            "resources": resources,
         }
         next_environment = self.capture_environment(environment)
         operations = environment_operations(state.environment.values, next_environment)
@@ -401,42 +429,14 @@ class QualitativeAnalysisEnvironment(Environment):
             task_id=self.task_id,
             prompt=prompt,
         )
-        return prompt
-
-    def execute_tool(
-        self,
-        state: ExecutionState,
-        tool: Tool,
-        arguments: dict[str, Any],
-    ) -> Any:
-        """Execute against a disposable engine restored from `WetlabState`."""
-        if "wetlab" not in tool.hidden_args:
-            return super().execute_tool(state, tool, arguments)
-
-        serialized = arguments.get("wetlab")
-        if not isinstance(serialized, Mapping):
-            raise TypeError("ExecutionState hidden argument 'wetlab' must be an object")
-        wetlab_state = WetlabState.from_dict(serialized)
-        engine = WetlabEngine(wetlab_state.chemical_system)
-        inventory = engine.restore(wetlab_state)
-        call_arguments = {**arguments, "wetlab": inventory}
-        content = tool.execute(**call_arguments)
-        hidden = dict(state.environment.values.get("hidden_arguments", {}))
-        hidden["wetlab"] = engine.snapshot(inventory).to_dict()
-        return ToolExecutionResult(
-            content=content,
-            environment={
-                **dict(state.environment.values),
-                "hidden_arguments": hidden,
-            },
-        )
+        return self.normalize_public_paths(prompt)
 
     @staticmethod
     def _wetlab_from_state(state: ExecutionState) -> WetlabState:
-        hidden = state.environment.values.get("hidden_arguments", {})
-        if not isinstance(hidden, Mapping):
-            raise TypeError("ExecutionState hidden_arguments must be an object")
-        raw_wetlab = hidden.get("wetlab")
+        resources = state.environment.values.get("resources", {})
+        if not isinstance(resources, Mapping):
+            raise TypeError("ExecutionState resources must be an object")
+        raw_wetlab = resources.get("wetlab")
         if not isinstance(raw_wetlab, Mapping):
             raise TypeError("WetlabState is not configured")
         return WetlabState.from_dict(raw_wetlab)

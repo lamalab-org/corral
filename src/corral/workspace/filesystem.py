@@ -10,7 +10,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from corral.core.tool import Tool, tool
@@ -18,6 +18,107 @@ from corral.core.workspace import normalize_workspace_path
 
 _TERMINAL_MAX_TIMEOUT_SECONDS = 3600
 _TERMINAL_MAX_OUTPUT_CHARS = 100_000
+PUBLIC_WORKSPACE_ROOT = "/workspace"
+
+
+_PUBLIC_WORKSPACE_TOKEN = re.compile(r"/workspace(?=/|$|[\s'\"`;,):\]}&|<>])")
+
+
+def materialize_public_workspace_paths(value: Any, root: str | Path) -> Any:
+    """Translate public workspace tokens for the unconfined local fallback.
+
+    Restricted workers receive a real `/workspace` mount. Host-side local
+    execution cannot create that process-private mount, so tools with declared
+    workspace access receive an ephemeral copy of their arguments in which
+    canonical paths point at the assigned controller directory. Embedded
+    occurrences cover shell and Python snippets as well as plain path fields.
+
+    The reserved resource namespace is deliberately left alone; file resources
+    have their own explicit controller binding and must never be confused with
+    mutable task files.
+    """
+    physical = str(Path(root).expanduser().resolve())
+
+    def replace(item: Any) -> Any:
+        if isinstance(item, str):
+            # Controller-issued path capabilities use `str` subclasses so
+            # ordinary file APIs can consume them without exposing them as
+            # agent-controlled workspace paths. Keep those bindings opaque.
+            if type(item) is not str:
+                return item
+
+            def substitute(match: re.Match[str]) -> str:
+                suffix = item[match.end() :]
+                if suffix == "/resources" or suffix.startswith("/resources/"):
+                    return match.group(0)
+                return physical
+
+            return _PUBLIC_WORKSPACE_TOKEN.sub(substitute, item)
+        if isinstance(item, list):
+            return [replace(child) for child in item]
+        if isinstance(item, tuple):
+            return tuple(replace(child) for child in item)
+        if isinstance(item, dict):
+            return {replace(key): replace(child) for key, child in item.items()}
+        return item
+
+    return replace(value)
+
+
+def materialize_local_tool_arguments(
+    tool: Any,
+    arguments: dict[str, Any],
+    workspace: str | Path | None,
+) -> dict[str, Any]:
+    """Prepare one tool call for host execution without a mount namespace."""
+    if workspace is None or getattr(tool, "trusted", False):
+        return dict(arguments)
+    access = getattr(tool, "workspace_access", "none")
+    access = access.value if hasattr(access, "value") else str(access)
+    operation = getattr(tool, "worker_operation", None)
+    if access == "none" or (
+        isinstance(operation, str) and operation.startswith("workspace:")
+    ):
+        return dict(arguments)
+    return materialize_public_workspace_paths(arguments, workspace)
+
+
+def normalize_public_workspace_path(path: str, *, allow_root: bool = False) -> str:
+    """Validate an agent-visible path and return its portable relative form."""
+    if not isinstance(path, str) or not path or "\x00" in path:
+        raise ValueError("workspace paths cannot be empty or contain NUL bytes")
+    if "\\" in path:
+        raise ValueError("workspace paths must use portable POSIX separators")
+    candidate = PurePosixPath(path)
+    if not candidate.is_absolute():
+        raise ValueError("workspace paths must be absolute under /workspace")
+    if any(part in {".", ".."} for part in candidate.parts):
+        raise ValueError("workspace paths cannot contain '.' or '..'")
+    normalized = candidate.as_posix()
+    if normalized != path:
+        raise ValueError(f"workspace path must be normalized as {normalized!r}")
+    root = PurePosixPath(PUBLIC_WORKSPACE_ROOT)
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("workspace paths must be under /workspace") from exc
+    if relative == PurePosixPath("."):
+        if not allow_root:
+            raise ValueError("workspace path cannot name the workspace root")
+        return "."
+    if relative.parts[0] == "resources":
+        raise ValueError(
+            "/workspace/resources is reserved for declared read-only resources"
+        )
+    return normalize_workspace_path(relative.as_posix())
+
+
+def resolve_public_workspace_path(
+    root: str | Path, path: str, *, allow_root: bool = False
+) -> Path:
+    """Map canonical `/workspace` syntax to one controller materialization."""
+    relative = normalize_public_workspace_path(path, allow_root=allow_root)
+    return confine_workspace_path(root, relative, allow_root=allow_root)
 
 
 def confine_workspace_path(
@@ -30,7 +131,7 @@ def confine_workspace_path(
 
     This helper is for trusted server code that needs a physical path (for
     example, evaluation of a file submission). Agent-facing filesystem tools
-    remain stricter and accept logical relative paths only. Symbolic links are
+    use canonical absolute paths rooted at `/workspace`. Symbolic links are
     rejected even when they currently point back inside the workspace so a
     task cannot turn one workspace path into ambient host-filesystem access.
     """
@@ -236,15 +337,57 @@ class WorkspaceFilesystem:
         return matches
 
 
+class AbsoluteWorkspaceFilesystem(WorkspaceFilesystem):
+    """Workspace filesystem with the canonical agent-facing `/workspace` API.
+
+    The physical `root` remains controller-private. Every accepted and
+    returned path is absolute in the worker namespace, which prevents prompts,
+    observations, and persisted actions from depending on a host path.
+    """
+
+    def _public_relative(self, path: str, *, allow_root: bool) -> str:
+        return normalize_public_workspace_path(path, allow_root=allow_root)
+
+    def _resolve(self, path: str, *, allow_root: bool = False) -> Path:
+        try:
+            relative = self._public_relative(path, allow_root=allow_root)
+            return confine_workspace_path(self.root, relative, allow_root=allow_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Permission denied: operation is not permitted: {exc}"
+            ) from exc
+
+    def _logical_path(self, path: Path) -> str:
+        relative = super()._logical_path(path)
+        return f"{PUBLIC_WORKSPACE_ROOT}/{relative}"
+
+    def list_files(
+        self, path: str = PUBLIC_WORKSPACE_ROOT, *, recursive: bool = False
+    ) -> list[str]:
+        return super().list_files(path, recursive=recursive)
+
+    def file_info(self, path: str) -> dict[str, Any]:
+        info = super().file_info(path)
+        if info["path"] == ".":
+            info["path"] = PUBLIC_WORKSPACE_ROOT
+        return info
+
+
 def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
     """Build local file tools for one materialized v2 workspace."""
 
-    @tool
-    def list_files(path: str = ".", recursive: bool = False) -> str:
+    default_path = (
+        PUBLIC_WORKSPACE_ROOT
+        if isinstance(filesystem, AbsoluteWorkspaceFilesystem)
+        else "."
+    )
+
+    @tool(workspace_access="read")
+    def list_files(path: str = default_path, recursive: bool = False) -> str:
         """List regular files in the workspace.
 
         Args:
-            path: Logical workspace-relative directory, or '.' for the root.
+            path: Workspace directory (canonically rooted at /workspace).
             recursive: Whether to include nested files.
         """
         return json.dumps(
@@ -252,79 +395,79 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
             indent=2,
         )
 
-    @tool
+    @tool(workspace_access="read")
     def read_file(path: str) -> str:
         """Read a text file from the workspace.
 
         Args:
-            path: Logical workspace-relative file path.
+            path: Workspace file path (canonically rooted at /workspace).
         """
         return filesystem.read_file(path)
 
-    @tool
+    @tool(workspace_access="read_write")
     def write_file(path: str, content: str) -> str:
         """Write a text file to the workspace.
 
         Args:
-            path: Logical workspace-relative file path.
+            path: Workspace file path (canonically rooted at /workspace).
             content: Text content to write.
         """
         filesystem.write_file(path, content)
         return f"Successfully wrote to {path}"
 
-    @tool
+    @tool(workspace_access="read")
     def file_info(path: str) -> str:
         """Inspect a workspace file or directory.
 
         Args:
-            path: Logical workspace-relative path.
+            path: Workspace path (canonically rooted at /workspace).
         """
         return json.dumps(filesystem.file_info(path), indent=2)
 
-    @tool
+    @tool(workspace_access="read_write")
     def copy_file(source: str, destination: str) -> str:
         """Copy a file within the workspace.
 
         Args:
-            source: Logical source file path.
-            destination: Logical destination file path.
+            source: Source path in the workspace.
+            destination: Destination path in the workspace.
         """
         filesystem.copy_file(source, destination)
         return f"Copied {source} to {destination}"
 
-    @tool
+    @tool(workspace_access="read_write")
     def move_file(source: str, destination: str) -> str:
         """Move a file within the workspace.
 
         Args:
-            source: Logical source file path.
-            destination: Logical destination file path.
+            source: Source path in the workspace.
+            destination: Destination path in the workspace.
         """
         filesystem.move_file(source, destination)
         return f"Moved {source} to {destination}"
 
-    @tool
+    @tool(workspace_access="read_write")
     def mkdir(path: str, create_parents: bool = False) -> str:
         """Create a directory within the workspace.
 
         Args:
-            path: Logical workspace-relative directory path.
+            path: Workspace directory path (canonically rooted at /workspace).
             create_parents: Whether to create missing parent directories.
         """
         filesystem.mkdir(path, create_parents=create_parents)
         return f"Directory {path} created successfully."
 
-    @tool
+    @tool(workspace_access="read")
     def cat_files(paths: list[str], separator: str = "\n") -> str:
         """Concatenate workspace text files.
 
         Args:
-            paths: Logical workspace-relative file paths.
+            paths: Workspace file paths (canonically rooted at /workspace).
             separator: Text inserted between file contents.
         """
         return filesystem.cat_files(paths, separator=separator)
 
-    @tool
+    @tool(workspace_access="read")
     def grep(
         pattern: str,
         path: str,
@@ -338,7 +481,7 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
 
         Args:
             pattern: Python regular expression to search for.
-            path: Logical workspace-relative file or directory path.
+            path: Workspace file or directory path.
             recursive: Whether to include nested files for a directory.
             ignore_case: Whether matching is case-insensitive.
             line_numbers: Whether results include one-based line numbers.
@@ -358,7 +501,7 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
             indent=2,
         )
 
-    return {
+    tools = {
         item.name: item
         for item in (
             list_files,
@@ -372,12 +515,17 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
             grep,
         )
     }
+    for name, item in tools.items():
+        # Restricted workers rebuild these closures against their canonical
+        # mount instead of serializing a controller-side physical root.
+        item.worker_operation = f"workspace:{name}"
+    return tools
 
 
 def build_terminal_tool(filesystem: WorkspaceFilesystem) -> Tool:
     """Build a bounded shell tool rooted in one execution workspace."""
 
-    @tool
+    @tool(workspace_access="read_write")
     def terminal(
         command: str,
         timeout_seconds: int = 120,

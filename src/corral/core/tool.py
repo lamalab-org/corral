@@ -101,6 +101,19 @@ class ToolConcurrency(str, Enum):
     CONCURRENT_READ = "concurrent_read"
 
 
+class WorkspaceAccess(str, Enum):
+    """Filesystem access granted to a tool worker's `/workspace` mount.
+
+    Tools are filesystem-isolated by default.  Reading or mutating the task
+    workspace is a separate capability from concurrency and trust, and must be
+    declared explicitly by the tool author.
+    """
+
+    NONE = "none"
+    READ = "read"
+    READ_WRITE = "read_write"
+
+
 class Tool:
     """Base class for tools.
 
@@ -123,7 +136,9 @@ class Tool:
         concurrency_key: str | None = None,
         concurrency: "ToolConcurrency | str" = ToolConcurrency.SERIAL,
         trusted: bool = False,
+        workspace_access: "WorkspaceAccess | str" = WorkspaceAccess.NONE,
         workspace_args: tuple[str, ...] = (),
+        resources: tuple[str, ...] = (),
     ):
         self.name = name
         self.description = description
@@ -132,9 +147,17 @@ class Tool:
         # logic may receive private inputs and run in the controller; it must
         # never evaluate model-supplied code or load workspace executables.
         self.trusted = trusted
+        self.workspace_access = WorkspaceAccess(workspace_access)
         self.workspace_args = tuple(workspace_args)
         if not set(self.workspace_args) <= self.hidden_args.keys():
             raise ValueError("workspace_args must name hidden arguments")
+        if len(set(self.workspace_args)) != len(self.workspace_args):
+            raise ValueError("workspace_args cannot contain duplicates")
+        self.resources = tuple(resources)
+        if len(set(self.resources)) != len(self.resources):
+            raise ValueError("resources cannot contain duplicates")
+        if any(not name or not name.strip() for name in self.resources):
+            raise ValueError("resource names cannot be empty")
         # Background-execution metadata (PR 4). A tool marked
         # `background_capable` gets a generated `start_<tool>` variant that runs
         # it as a background job so the agent is not blocked while it runs.
@@ -302,7 +325,9 @@ def tool(
     concurrency_key: str | None = None,
     concurrency: "ToolConcurrency | str" = ToolConcurrency.SERIAL,
     trusted: bool = False,
+    workspace_access: "WorkspaceAccess | str" = WorkspaceAccess.NONE,
     workspace_args: tuple[str, ...] = (),
+    resources: tuple[str, ...] = (),
 ) -> Tool | Callable[[Callable], Tool]:
     """Decorator to convert a function into a Tool.
 
@@ -352,9 +377,15 @@ def tool(
         trusted: Run task logic with private inputs in the Docker controller.
             Never enable this for shell, Python, untrusted file-loading, or other tools
             that execute model-controlled code. Restricted execution is default.
+        workspace_access: Access granted to the assigned task filesystem at the
+            canonical worker path `/workspace`. Defaults to `none`;
+            filesystem tools must opt in to `read` or `read_write`.
         workspace_args: Hidden arguments that carry only the assigned workspace
             path. Docker workers receive a fresh binding from the controller,
             never the corresponding value from private environment state.
+        resources: Named environment resources restored or mounted only for
+            this tool. Resource names are controller policy and are not exposed
+            in the agent-facing JSON schema.
 
     Returns:
         A Tool instance wrapping the function.
@@ -407,7 +438,9 @@ def tool(
                     concurrency_key=concurrency_key,
                     concurrency=concurrency,
                     trusted=trusted,
+                    workspace_access=workspace_access,
                     workspace_args=workspace_args,
+                    resources=resources,
                 )
 
             def execute(self, **kwargs):

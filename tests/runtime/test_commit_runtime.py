@@ -29,7 +29,7 @@ from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -79,7 +79,7 @@ class ParallelAgent:
         return AgentOutcome(status="completed", answer="ok")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_parallel_results_keep_chronology_and_decision_order(tmp_path):
     def slow() -> str:
         """Finish after the fast tool."""
@@ -178,7 +178,7 @@ class ParentAgent:
         return AgentOutcome(status="completed", answer="done")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_subagent_trace_is_private_until_imported(tmp_path):
     store = SQLiteCommitStore(tmp_path / "subagent.sqlite3")
     agent = ParentAgent()
@@ -275,7 +275,7 @@ class SubmitThenRaiseAgent:
         raise RuntimeError("harness cleanup failed")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_accepted_submission_survives_cleanup_failure_and_retry(tmp_path):
     store = SQLiteCommitStore(tmp_path / "accepted.sqlite3")
     environment = environment_with_tools()
@@ -307,7 +307,7 @@ async def test_accepted_submission_survives_cleanup_failure_and_retry(tmp_path):
     await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_running_tool_resumes_with_stable_invocation_id(tmp_path):
     calls: list[int] = []
 
@@ -424,7 +424,7 @@ class FailingObserver:
         raise RuntimeError("observer unavailable")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_observer_failure_never_rolls_back_commits(tmp_path):
     store = SQLiteCommitStore(tmp_path / "observer.sqlite3")
     state = await TaskRuntime(store, FailingObserver()).run(

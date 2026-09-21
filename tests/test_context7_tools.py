@@ -93,7 +93,7 @@ def test_get_library_documentation_error_handling():
         assert data["error_type"] == "RuntimeError"
 
 
-@pytest.mark.integration()
+@pytest.mark.integration
 def test_get_library_documentation_integration():
     """
     Integration test - actually calls Context7 API.
@@ -116,7 +116,7 @@ def test_get_library_documentation_integration():
         assert "error" in data
 
 
-@pytest.mark.integration()
+@pytest.mark.integration
 def test_get_library_documentation_with_library_id():
     """Test using a known library ID directly."""
     result = get_library_documentation.execute(

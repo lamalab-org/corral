@@ -160,9 +160,9 @@ def main(data_dir="data", output_dir=None, samples=2000, tune=1000):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for qa_type in ["knowledge", "reasoning"]:
-        logger.info(f"\n{'='*50}")
+        logger.info(f"\n{'=' * 50}")
         logger.info(f"Fitting {qa_type} IRT model...")
-        logger.info(f"{'='*50}")
+        logger.info(f"{'=' * 50}")
 
         qa_df = load_qa_data(qa_type, data_dir)
         trace, qa_df = fit_irt_model(qa_df, samples=samples, tune=tune)

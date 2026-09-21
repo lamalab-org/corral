@@ -90,6 +90,11 @@ def smart_resolve_path(input_path: str, base_dir: str | None = None) -> str:
     if base_dir is not None:
         from corral.workspace import confine_workspace_path
 
+        if extracted_path == "/workspace":
+            raise ValueError("submission path must name a file below /workspace")
+        if extracted_path.startswith("/workspace/"):
+            extracted_path = extracted_path.removeprefix("/workspace/")
+
         candidate = confine_workspace_path(base_dir, extracted_path)
         if candidate.is_file():
             return str(candidate)

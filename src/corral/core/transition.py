@@ -18,7 +18,6 @@ from corral.core.events import (
     WorkspaceDelta,
 )
 from corral.core.tool import ToolCallStatus
-from corral.runtime import permissions
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -77,15 +76,6 @@ def propose_action(
 
 def _json_copy(value: Any) -> Any:
     return json.loads(json.dumps(value, allow_nan=False, default=str))
-
-
-def _hidden_arguments(state: ExecutionState) -> dict[str, Any]:
-    value = state.environment.values.get(HIDDEN_ARGUMENTS_NAMESPACE, {})
-    if not isinstance(value, Mapping):
-        raise ValueError(
-            f"ExecutionState.environment.{HIDDEN_ARGUMENTS_NAMESPACE} must be an object"
-        )
-    return _json_copy(value)
 
 
 def environment_operations(
@@ -194,67 +184,43 @@ def execute_action(
         if tool is None:
             status = ToolCallStatus.INVALID_TOOL
             content = f"Tool {action.name} not found"
-        elif permissions.enabled() and (
-            error := permissions.visible_argument_error(tool, dict(action.arguments))
-        ):
-            status = ToolCallStatus.INVALID_ARGS
-            content = error
         else:
-            visible_arguments = environment.preprocess_arguments(
-                action.name, dict(action.arguments)
+            from corral.runtime.tool_execution import (
+                ToolArgumentError,
+                ToolExecutor,
             )
-            call_arguments = dict(visible_arguments)
-            hidden_values = _hidden_arguments(state)
-            missing: list[str] = []
-            for hidden_name in tool.hidden_args:
-                if hidden_name == CORRAL_ACTION_ID_ARGUMENT:
-                    call_arguments[hidden_name] = action.id
-                elif hidden_name not in hidden_values:
-                    missing.append(hidden_name)
+
+            try:
+                guard = getattr(environment, "execution_guard", None)
+                context = guard(tool) if guard is not None else nullcontext()
+                with context:
+                    raw_result = ToolExecutor(environment).execute(
+                        state,
+                        tool,
+                        dict(action.arguments),
+                        action_id=action.id,
+                    )
+                if isinstance(raw_result, ToolExecutionResult):
+                    content = raw_result.content
+                    if raw_result.environment is not None:
+                        next_environment = raw_result.environment
                 else:
-                    call_arguments[hidden_name] = hidden_values[hidden_name]
-            if missing:
+                    content = raw_result
+                status = ToolCallStatus.SUCCESS
+            except ToolArgumentError as exc:
                 status = ToolCallStatus.INVALID_ARGS
-                content = (
-                    f"Hidden argument(s) {', '.join(repr(name) for name in missing)} "
-                    f"required by tool {action.name!r} are not configured."
-                )
-            else:
-                valid, validation_error = tool.validate_arguments(call_arguments)
-                if not valid:
-                    status = ToolCallStatus.INVALID_ARGS
-                    content = validation_error or "invalid tool arguments"
-                else:
-                    try:
-                        guard = getattr(environment, "execution_guard", None)
-                        context = guard(tool) if guard is not None else nullcontext()
-                        with context:
-                            raw_result = (
-                                permissions.execute_tool(
-                                    environment, state, tool, call_arguments
-                                )
-                                if permissions.enabled()
-                                else environment.execute_tool(
-                                    state, tool, call_arguments
-                                )
-                            )
-                        if isinstance(raw_result, ToolExecutionResult):
-                            content = raw_result.content
-                            if raw_result.environment is not None:
-                                next_environment = raw_result.environment
-                        else:
-                            content = raw_result
-                        status = ToolCallStatus.SUCCESS
-                    except Exception as exc:  # tool failures remain observations
-                        status = ToolCallStatus.EXECUTION_ERROR
-                        content = str(exc)
+                content = environment.normalize_public_paths(str(exc))
+            except Exception as exc:  # tool failures remain observations
+                status = ToolCallStatus.EXECUTION_ERROR
+                content = environment.normalize_public_paths(str(exc))
 
     capture_environment = getattr(environment, "capture_environment", None)
     if capture_environment is not None:
         next_environment = capture_environment(next_environment)
+    next_environment = environment.normalize_public_paths(next_environment)
     operations = environment_operations(before_environment, next_environment)
     workspace_delta = _capture_workspace(environment, state, action)
-    observation = _json_copy(content)
+    observation = _json_copy(environment.normalize_public_paths(content))
     return ToolEffects(
         observation=observation,
         status=status.value,

@@ -5,7 +5,6 @@ missing root privileges or an incorrectly protected image a failure, not a skip.
 """
 
 # Exercise imports after privilege dropping; SDK extras are optional locally.
-# ruff: noqa: PLC0415
 
 import os
 import threading
@@ -34,14 +33,14 @@ def restricted_runtime(tmp_path):
     permissions._enabled = False
 
 
-@pytest.fixture()
+@pytest.fixture
 def workspace():
     import tempfile
 
     return tempfile.mkdtemp(prefix="permission-test-", dir="/workspace")
 
 
-@tool
+@tool(workspace_access="read_write")
 def permission_probe() -> str:
     """Attempt reads and writes both directly and through detached descendants."""
     import json
@@ -54,6 +53,7 @@ def permission_probe() -> str:
     for target in (
         "/opt/corral/pyproject.toml",
         "/opt/corral/tasks",
+        "/workspace/../opt/corral/pyproject.toml",
         "/corral-state",
         "/etc/passwd",
         "/proc/1/environ",
@@ -102,7 +102,7 @@ def assert_probe(result):
     probe = json.loads(result)
     assert probe["uid"] != 0
     assert probe["gids"] == []
-    assert len(probe["denials"]) == 7
+    assert len(probe["denials"]) == 8
     assert probe["workspace"] == "workspace access"
     assert probe["child_returncode"] != 0
     assert "Permission denied" in probe["child_error"]
@@ -114,6 +114,132 @@ def test_foreground_tool_and_descendants(workspace):
     environment = object.__new__(Environment)
     environment.workspace_path = workspace
     assert_probe(permissions.execute_tool(environment, None, permission_probe, {}))
+
+
+@tool
+def no_workspace_probe() -> str:
+    """Verify the default worker sees an empty, immutable /workspace."""
+    import json
+    import os
+    from pathlib import Path
+
+    result = {"cwd": os.getcwd(), "read": False, "write": False}
+    try:
+        Path("/workspace/task.txt").read_text()
+    except (FileNotFoundError, PermissionError):
+        pass
+    else:
+        result["read"] = True
+    try:
+        Path("/workspace/created.txt").write_text("forbidden")
+    except OSError:
+        pass
+    else:
+        result["write"] = True
+    return json.dumps(result)
+
+
+@tool(workspace_access="read")
+def read_workspace_probe() -> str:
+    """Read the assigned workspace and verify it cannot be mutated."""
+    import json
+    import os
+    from pathlib import Path
+
+    task_file = Path("/workspace/task.txt")
+    result = {"cwd": os.getcwd(), "content": task_file.read_text()}
+    try:
+        task_file.write_text("replacement")
+    except OSError:
+        result["replace_denied"] = True
+    try:
+        Path("/workspace/created.txt").write_text("creation")
+    except OSError:
+        result["create_denied"] = True
+    try:
+        task_file.unlink()
+    except OSError:
+        result["delete_denied"] = True
+    return json.dumps(result)
+
+
+def test_none_and_read_workspace_modes_are_kernel_enforced(workspace):
+    import json
+    from pathlib import Path
+
+    Path(workspace, "task.txt").write_text("task data")
+    environment = object.__new__(Environment)
+    environment.workspace_path = workspace
+
+    isolated = json.loads(
+        permissions.execute_tool(environment, None, no_workspace_probe, {})
+    )
+    assert isolated == {"cwd": "/workspace", "read": False, "write": False}
+
+    readonly = json.loads(
+        permissions.execute_tool(environment, None, read_workspace_probe, {})
+    )
+    assert readonly == {
+        "cwd": "/workspace",
+        "content": "task data",
+        "replace_denied": True,
+        "create_denied": True,
+        "delete_denied": True,
+    }
+    assert Path(workspace, "task.txt").read_text() == "task data"
+
+
+@tool(hidden_args=["database"], resources=("database",))
+def immutable_resource_probe(database: str) -> str:
+    """Read one declared resource and verify its mount is immutable."""
+    import json
+    from pathlib import Path
+
+    resource = Path(database)
+    result = {"content": resource.read_text(), "path": str(resource)}
+    try:
+        resource.write_text("replacement")
+    except OSError:
+        result["replace_denied"] = True
+    try:
+        resource.unlink()
+    except OSError:
+        result["delete_denied"] = True
+    try:
+        resource.with_name("undeclared.txt").read_text()
+    except OSError:
+        result["undeclared_sibling_denied"] = True
+    return json.dumps(result)
+
+
+def test_declared_resource_mount_is_read_only(workspace, tmp_path):
+    import json
+
+    source_root = tmp_path / "resource"
+    source_root.mkdir()
+    source = source_root / "database.txt"
+    source.write_text("immutable data")
+    source.chmod(0o444)
+    (source_root / "undeclared.txt").write_text("must stay private")
+    public = "/workspace/resources/database/database.txt"
+
+    result = json.loads(
+        permissions.execute_restricted_tool(
+            immutable_resource_probe,
+            {"database": public},
+            workspace,
+            resource_mounts={"database": (str(source), public)},
+        )
+    )
+
+    assert result == {
+        "content": "immutable data",
+        "path": public,
+        "replace_denied": True,
+        "delete_denied": True,
+        "undeclared_sibling_denied": True,
+    }
+    assert source.read_text() == "immutable data"
 
 
 def test_terminal_inherits_worker_permissions(workspace):
@@ -131,18 +257,19 @@ def test_terminal_inherits_worker_permissions(workspace):
             None,
             terminal,
             {
-                "command": "id -u; printf 'workspace access' > allowed.txt; cat /opt/corral/pyproject.toml"
+                "command": "id -u; pwd; printf 'workspace access' > allowed.txt; cat /opt/corral/pyproject.toml"
             },
         )
     )
 
     assert int(result["output"].splitlines()[0]) != 0
+    assert result["output"].splitlines()[1] == "/workspace"
     assert result["exit_code"] != 0
     assert "Permission denied" in result["output"]
     assert Path(workspace, "allowed.txt").read_text() == "workspace access"
 
 
-@tool
+@tool(workspace_access="read_write")
 def filesystem_root_probe() -> str:
     """Probe unpublished paths, runtime aliases, and descriptor escapes."""
     import ctypes
@@ -152,7 +279,7 @@ def filesystem_root_probe() -> str:
     import sys
     from pathlib import Path
 
-    runtime = Path("/workspace/.corral-runtime-system")
+    runtime = Path("/.corral-runtime-system")
     for alias in (
         "/usr",
         "/bin/sh",
@@ -198,12 +325,12 @@ def filesystem_root_probe() -> str:
             target = descriptor.readlink()
         except FileNotFoundError:
             continue
-        assert not str(target).startswith(
-            ("/corral-state", "/opt/corral", "/tmp/")
-        ), target
+        assert not str(target).startswith(("/corral-state", "/opt/corral", "/tmp/")), (
+            target
+        )
     for alias in ("/tmp", "/dev/shm"):
         target = Path(alias).resolve(strict=True)
-        assert target.is_relative_to(Path.cwd())
+        assert target.is_relative_to(Path("/.corral-scratch"))
         (target / "scratch-check").write_text("scratch")
     with pytest.raises(OSError) as error:
         Path("/usr/corral-write-check").write_text("forbidden")
@@ -312,9 +439,39 @@ def test_background_executor_preferences_cannot_bypass_permissions(
         tool=permission_probe,
         call_arguments={},
         workspace=workspace,
+        workspace_access=permission_probe.workspace_access.value,
     )
     assert_probe(executor.run_tool(work, threading.Event()))
     manager.shutdown()
+
+
+def test_background_job_uses_the_same_read_only_workspace_policy(workspace):
+    import json
+    from pathlib import Path
+
+    from corral.backend.jobs import JobManager
+
+    Path(workspace, "task.txt").write_text("task data")
+    manager = JobManager()
+    try:
+        record = manager.submit(
+            read_workspace_probe,
+            visible_arguments={},
+            call_arguments={},
+            workspace=workspace,
+            workspace_access="read",
+        )
+        view = manager.result(record.context.job_id, wait=True, timeout=5)
+        assert view["status"] == "succeeded"
+        assert json.loads(view["result"]) == {
+            "cwd": "/workspace",
+            "content": "task data",
+            "replace_denied": True,
+            "create_denied": True,
+            "delete_denied": True,
+        }
+    finally:
+        manager.shutdown()
 
 
 class ProbeAgent:
@@ -485,12 +642,12 @@ class DeserializeProbeAgent:
         return AgentOutcome(status="completed", answer="denied")
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "agent_type",
     [
@@ -536,20 +693,51 @@ async def test_agent_and_subagent_execution(workspace, tmp_path, agent_type):
 
 @tool
 def sdk_permission_probe(sdk: str) -> str:
-    """Start actual SDK runtimes without making a model request."""
+    """Start actual SDK runtimes in scratch without making a model request."""
     import asyncio
     import json
     import os
+    import tempfile
     from pathlib import Path
 
-    workspace = os.getcwd()
+    workspace = tempfile.mkdtemp(prefix="sdk-permission-probe-")
     uid = os.getuid()
 
     def assert_identity(pid):
         status = Path(f"/proc/{pid}/status").read_text()
-        assert int(status.split("Uid:", 1)[1].split()[0]) == uid
+        fields = {
+            line.split(":", 1)[0]: line.split(":", 1)[1].strip()
+            for line in status.splitlines()
+            if ":" in line
+        }
+        assert {int(value) for value in fields["Uid"].split()} == {uid}
+        assert fields["Groups"] == ""
+        assert fields["NoNewPrivs"] == "1"
+        for name in ("CapInh", "CapPrm", "CapEff", "CapAmb"):
+            assert int(fields[name], 16) == 0
+        for target in (
+            "/workspace/task-secret.txt",
+            "/opt/corral/pyproject.toml",
+            "/corral-state/request.json",
+        ):
+            try:
+                Path(f"/proc/{pid}/root{target}").read_bytes()
+            except (FileNotFoundError, PermissionError):
+                pass
+            else:
+                raise AssertionError(f"SDK process can read private path {target}")
 
-    command = ["/bin/sh", "-c", "id -u; cat /opt/corral/pyproject.toml"]
+    command_text = (
+        "id -u; "
+        "grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || "
+        "echo NO_NEW_PRIVS_MISSING; "
+        "for field in CapInh CapPrm CapEff CapAmb; do "
+        'grep -q "^$field:[[:space:]]*0000000000000000$" '
+        "/proc/self/status || echo CAPABILITIES_PRESENT; done; "
+        "if test -e /workspace/task-secret.txt; then echo TASK_SECRET_VISIBLE; fi; "
+        "cat /opt/corral/pyproject.toml"
+    )
+    command = ["/bin/sh", "-c", command_text]
     if sdk == "codex":
         from openai_codex import Codex, CodexConfig
 
@@ -571,6 +759,9 @@ def sdk_permission_probe(sdk: str) -> str:
             )
             assert "Permission denied" in result["stderr"], result
             assert str(uid) in result["stdout"], result
+            assert "NO_NEW_PRIVS_MISSING" not in result["stdout"], result
+            assert "CAPABILITIES_PRESENT" not in result["stdout"], result
+            assert "TASK_SECRET_VISIBLE" not in result["stdout"], result
     elif sdk == "claude":
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
@@ -587,12 +778,15 @@ def sdk_permission_probe(sdk: str) -> str:
 
         executor = TerminalExecutor(working_dir=workspace)
         try:
-            result = executor(
-                TerminalAction(command="id -u; cat /opt/corral/pyproject.toml")
+            result = executor(TerminalAction(command=command_text))
+            output = "\n".join(
+                str(getattr(item, "text", "")) for item in result.content
             )
-            rendered = result.model_dump_json()
-            assert "Permission denied" in rendered, rendered
-            assert str(uid) in rendered, rendered
+            assert "Permission denied" in output, output
+            assert str(uid) in output, output
+            assert "NO_NEW_PRIVS_MISSING" not in output, output
+            assert "CAPABILITIES_PRESENT" not in output, output
+            assert "TASK_SECRET_VISIBLE" not in output, output
         finally:
             executor.close()
     return json.dumps({"sdk": sdk, "uid": uid})
@@ -604,9 +798,20 @@ def sdk_permission_probe(sdk: str) -> str:
 )
 @pytest.mark.parametrize("sdk", ["codex", "claude", "openhands"])
 def test_real_sdk_runtime(workspace, sdk):
+    import json
+    from pathlib import Path
+
+    secret = Path(workspace, "task-secret.txt")
+    secret.write_text("must not reach SDK descendants")
     environment = object.__new__(Environment)
     environment.workspace_path = workspace
-    permissions.execute_tool(environment, None, sdk_permission_probe, {"sdk": sdk})
+    result = permissions.execute_tool(
+        environment, None, sdk_permission_probe, {"sdk": sdk}
+    )
+    payload = json.loads(result)
+    assert payload["sdk"] == sdk
+    assert payload["uid"] != 0
+    assert secret.read_text() == "must not reach SDK descendants"
 
 
 def test_snapshot_rejects_a_symlink_swap(workspace, tmp_path, monkeypatch):
@@ -687,7 +892,7 @@ def test_sdk_scratch_is_not_a_task_artifact(workspace, tmp_path):
     assert not (destination / scratch.name).exists()
 
 
-@tool
+@tool(workspace_access="read")
 def sibling_probe(path: str) -> str:
     """Try to read another assigned workspace."""
     from pathlib import Path
@@ -729,7 +934,7 @@ def test_worker_rejects_replaced_workspace_before_mount(workspace, monkeypatch):
     assert not (original / "allowed.txt").exists()
 
 
-@tool(background_capable=True)
+@tool(background_capable=True, workspace_access="read_write")
 def node_boundary_probe(parent_file: str, sibling_file: str) -> str:
     """Verify native and subprocess access is limited to this node's directory."""
     import json
@@ -807,7 +1012,18 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
         assert os.getuid() != 0
         with pytest.raises(PermissionError):
             Path("/opt/corral/pyproject.toml").read_text()
-        Path(session.workspace, "parent.txt").write_text("parent contents")
+        Path(session.workspace, "scratch-only.txt").write_text("agent scratch")
+        parent_write = portal.call(
+            session.execute,
+            Action(
+                name="write_file",
+                arguments={
+                    "path": "/workspace/parent.txt",
+                    "content": "parent contents",
+                },
+            ),
+        )
+        assert parent_write.success, parent_write
         sessions = _BranchSessionRegistry(session, portal)
         pool = ExecutionPool(
             sessions=sessions, tools=list(session.tools), max_tool_calls=30
@@ -830,23 +1046,38 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
                 return result.result
 
             assert (
-                invoke(first, "read_file", {"path": "parent.txt"}) == "parent contents"
+                invoke(first, "read_file", {"path": "/workspace/parent.txt"})
+                == "parent contents"
             )
             invoke(
-                first, "write_file", {"path": "model.txt", "content": "winning model"}
+                first,
+                "write_file",
+                {"path": "/workspace/model.txt", "content": "winning model"},
             )
             invoke(
-                second, "write_file", {"path": "model.txt", "content": "losing model"}
+                second,
+                "write_file",
+                {"path": "/workspace/model.txt", "content": "losing model"},
             )
             arguments = {
-                "parent_file": str(Path(session.workspace, "parent.txt")),
-                "sibling_file": str(Path(second.workspace, "model.txt")),
+                "parent_file": "/workspace/../parent.txt",
+                "sibling_file": "/workspace/../sibling/model.txt",
             }
             assert json.loads(invoke(first, "node_boundary_probe", arguments))[
                 "confined"
             ]
-            assert Path(first.workspace, "own.txt").read_text() == "node data"
-            assert Path(first.workspace, "results/plot.png").read_text() == "plot data"
+            assert (
+                invoke(first, "read_file", {"path": "/workspace/own.txt"})
+                == "node data"
+            )
+            assert (
+                invoke(
+                    first,
+                    "read_file",
+                    {"path": "/workspace/results/plot.png"},
+                )
+                == "plot data"
+            )
             job = json.loads(invoke(first, "start_node_boundary_probe", arguments))
             finished = json.loads(
                 invoke(first, "get_job_result", {"job_id": job["job_id"], "wait": True})
@@ -868,26 +1099,33 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
                 "No such file" in shell["output"]
                 or "Permission denied" in shell["output"]
             )
-            assert Path(first.workspace, "shell.txt").read_text() == "shell"
+            assert (
+                invoke(first, "read_file", {"path": "/workspace/shell.txt"}) == "shell"
+            )
 
             main_workspace = session.workspace
 
             class NodeAgent:
                 async def run_session(self, child_session):
                     from corral.agents.schema import AgentOutcome
+                    from corral.core.action import Action
 
-                    assert (
-                        Path(child_session.workspace, "model.txt").read_text()
-                        == "winning model"
+                    model = await child_session.execute(
+                        Action(
+                            name="read_file",
+                            arguments={"path": "/workspace/model.txt"},
+                        )
                     )
+                    assert model.success, model
+                    assert model.result == "winning model", model
                     with pytest.raises((PermissionError, FileNotFoundError)):
-                        Path(main_workspace, "parent.txt").read_text()
+                        Path(main_workspace, "scratch-only.txt").read_text()
                     with pytest.raises(RuntimeError, match="calling agent"):
-                        await child_session.fork_branch(workspace_parent=main_workspace)
+                        await child_session.fork_branch(
+                            workspace_parent="/tmp/not-parent"
+                        )
                     nested = await child_session.fork_branch()
-                    assert Path(nested.workspace).is_relative_to(
-                        child_session.workspace
-                    )
+                    assert nested.workspace == "/workspace"
                     return AgentOutcome(
                         status="iteration_limit", error="node agent verified"
                     )
@@ -899,23 +1137,50 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
 
             clone = sessions.clone_branch(first.execution_id)
             try:
-                assert len({branch.workspace for branch in (first, second, clone)}) == 3
-                for branch in (first, second, clone):
-                    assert Path(branch.workspace).parent == Path(
-                        session.workspace, ".corral-nodes"
+                assert {branch.workspace for branch in (first, second, clone)} == {
+                    "/workspace"
+                }
+                for branch in (first, second):
+                    invoke(
+                        branch,
+                        "write_file",
+                        {
+                            "path": "/workspace/from-main.txt",
+                            "content": "main can write",
+                        },
                     )
-                    if branch is not first:
-                        assert not Path(branch.workspace, ".corral-nodes").exists()
-                    Path(branch.workspace, "from-main.txt").write_text("main can write")
-                assert Path(clone.workspace, "model.txt").read_text() == "winning model"
+                clone_write = clone.execute(
+                    Action(
+                        name="write_file",
+                        arguments={
+                            "path": "/workspace/from-main.txt",
+                            "content": "main can write",
+                        },
+                    )
+                )
+                assert clone_write.success, clone_write
+                cloned_model = clone.execute(
+                    Action(
+                        name="read_file",
+                        arguments={"path": "/workspace/model.txt"},
+                    )
+                )
+                assert cloned_model.success, cloned_model
+                assert cloned_model.result == "winning model"
                 response = clone.execute(
                     Action(
                         name="write_file",
-                        arguments={"path": "model.txt", "content": "changed clone"},
+                        arguments={
+                            "path": "/workspace/model.txt",
+                            "content": "changed clone",
+                        },
                     )
                 )
                 assert response.success, response
-                assert Path(first.workspace, "model.txt").read_text() == "winning model"
+                assert (
+                    invoke(first, "read_file", {"path": "/workspace/model.txt"})
+                    == "winning model"
+                )
             finally:
                 sessions.close_branch(clone.execution_id)
 
@@ -927,8 +1192,17 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
                 hypothesis="independent artifacts",
                 rationale="probe",
             )
-            assert not Path(session.workspace, "model.txt").exists()
-            Path(session.workspace, "model.txt").write_text("stale main output")
+            stale = portal.call(
+                session.execute,
+                Action(
+                    name="write_file",
+                    arguments={
+                        "path": "/workspace/model.txt",
+                        "content": "stale main output",
+                    },
+                ),
+            )
+            assert stale.success, stale
             promotion = pool.promote_artifacts(
                 [node],
                 ExperimentTree(),
@@ -938,19 +1212,39 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
             assert promotion.source_workspace == first.workspace
             assert promotion.destination_workspace == session.workspace
             assert "model.txt" in promotion.files
-            assert Path(session.workspace, "model.txt").read_text() == "winning model"
-            assert (
-                Path(session.workspace, "results/plot.png").read_text() == "plot data"
+            promoted_model = portal.call(
+                session.execute,
+                Action(
+                    name="read_file",
+                    arguments={"path": "/workspace/model.txt"},
+                ),
             )
-            assert Path(second.workspace, "model.txt").read_text() == "losing model"
+            assert promoted_model.success, promoted_model
+            assert promoted_model.result == "winning model"
+            promoted_plot = portal.call(
+                session.execute,
+                Action(
+                    name="read_file",
+                    arguments={"path": "/workspace/results/plot.png"},
+                ),
+            )
+            assert promoted_plot.success, promoted_plot
+            assert promoted_plot.result == "plot data"
+            assert (
+                invoke(second, "read_file", {"path": "/workspace/model.txt"})
+                == "losing model"
+            )
             pool.close(first.branch_id)
-            assert invoke(second, "read_file", {"path": "model.txt"}) == "losing model"
+            assert (
+                invoke(second, "read_file", {"path": "/workspace/model.txt"})
+                == "losing model"
+            )
         finally:
             assert pool.close_all() == []
         return "node isolation verified", AgentUsage(), {}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_scientist_node_workspaces_in_docker(workspace, tmp_path):
     from datetime import datetime, timezone
     from pathlib import Path
@@ -1010,7 +1304,7 @@ async def test_scientist_node_workspaces_in_docker(workspace, tmp_path):
             environment.shutdown_jobs()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_internal_entrypoint_protects_a_real_trial(tmp_path):
     from corral.orchestration.internal import run_task_from_files
     from corral.orchestration.models import (
@@ -1063,13 +1357,10 @@ def permission_registry(request):
     )
 
 
-def test_wetlab_stateful_tool_retains_its_environment_update(workspace):
+def test_wetlab_resource_adapter_retains_tool_updates():
     engine_module = pytest.importorskip("wetlab.engine")
-    from wetlab.env import QualitativeAnalysisEnvironment
+    from wetlab.env import WetlabResourceAdapter
     from wetlab.tools import mix_two_solutions
-
-    from corral.core.state import EnvironmentState, ExecutionState
-    from corral.core.transition import ToolExecutionResult
 
     engine = engine_module.WetlabEngine(
         engine_module.ChemicalSystemSpec(elements="K S(+6)")
@@ -1079,37 +1370,24 @@ def test_wetlab_stateful_tool_retains_its_environment_update(workspace):
         "base": engine.stock_solution({"K+": 0.1, "OH-": 0.1}, description="base"),
     }
     initial = engine.snapshot(inventory).to_dict()
-    state = ExecutionState(
-        through_commit_hash="a" * 64,
-        execution_id="wetlab-permission",
-        branch_id="main",
-        environment=EnvironmentState(values={"hidden_arguments": {"wetlab": initial}}),
+    adapter = WetlabResourceAdapter()
+    runtime = adapter.restore(initial)
+    mix_two_solutions.execute(
+        wetlab=runtime,
+        sol1_label="acid",
+        sol2_label="base",
+        sol1_vol=5,
+        sol2_vol=5,
+        test_label="mixture",
     )
-    environment = object.__new__(QualitativeAnalysisEnvironment)
-    environment.workspace_path = workspace
-    result = permissions.execute_tool(
-        environment,
-        state,
-        mix_two_solutions,
-        {
-            "wetlab": initial,
-            "sol1_label": "acid",
-            "sol2_label": "base",
-            "sol1_vol": 5,
-            "sol2_vol": 5,
-            "test_label": "mixture",
-        },
-    )
-    assert isinstance(result, ToolExecutionResult)
-    assert result.environment["hidden_arguments"]["wetlab"] != initial
-    restored = engine_module.WetlabState.from_dict(
-        result.environment["hidden_arguments"]["wetlab"]
-    )
+    captured = adapter.capture(runtime)
+    assert captured != initial
+    restored = engine_module.WetlabState.from_dict(captured)
     restored_engine = engine_module.WetlabEngine(restored.chemical_system)
     assert "mixture" in restored_engine.restore(restored)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_wetlab_agent_can_use_scratch_but_cannot_read_private_state(
     workspace, tmp_path
 ):
@@ -1147,12 +1425,9 @@ async def test_wetlab_agent_can_use_scratch_but_cannot_read_private_state(
                 started_at=datetime.now(timezone.utc),
             )
             assert state.submission is not None, state.runtime.model_dump()
-            assert state.environment.values["hidden_arguments"]["wetlab"]  # noqa: PD011 - EnvironmentState mapping, not pandas
-            assert set(state.workspace.files) == {"notes.txt"}
-            assert (
-                Path(environment.workspace_path, "notes.txt").read_text()
-                == "scratch only"
-            )
+            assert state.environment.values["resources"]["wetlab"]
+            assert not state.workspace.files
+            assert not Path(environment.workspace_path, "notes.txt").exists()
     finally:
         registry.close()
 
@@ -1164,15 +1439,23 @@ class WaitingAgent:
         import os
         import subprocess
         import sys
-        from pathlib import Path
+
+        from corral.core.action import Action
 
         child = subprocess.Popen(  # noqa: ASYNC220 - exercise synchronous SDK spawning
             [sys.executable, "-c", "import time; time.sleep(300)"],
             start_new_session=True,
         )
-        Path(session.workspace, "started.json").write_text(
-            json.dumps([os.getpid(), child.pid])
+        response = await session.execute(
+            Action(
+                name="write_file",
+                arguments={
+                    "path": "/workspace/started.json",
+                    "content": json.dumps([os.getpid(), child.pid]),
+                },
+            )
         )
+        assert response.success, response
         await asyncio.sleep(300)
 
 
@@ -1192,21 +1475,21 @@ def public_python_probe(code: str) -> str:
 
 
 class PrivateProbeEnvironment(Environment):
-    def execute_tool(self, state, selected_tool, arguments):
+    def execute_trusted_tool(self, state, selected_tool, arguments):
         from corral.core.transition import ToolExecutionResult
 
         if selected_tool.name != "trusted_private_probe":
-            return super().execute_tool(state, selected_tool, arguments)
+            return super().execute_trusted_tool(state, selected_tool, arguments)
         assert selected_tool.trusted
         assert os.getuid() == 0
         assert (
             arguments["secret"]
-            == state.environment.values["hidden_arguments"]["secret"]  # noqa: PD011 - EnvironmentState mapping, not pandas
+            == state.environment.values["hidden_arguments"]["secret"]
         )
         return ToolExecutionResult(
             content=selected_tool.execute(**arguments),
             environment={
-                **state.environment.values,  # noqa: PD011 - EnvironmentState mapping, not pandas
+                **state.environment.values,
                 "private_update": arguments["secret"],
             },
         )
@@ -1336,7 +1619,7 @@ class StateBoundaryProbe:
         return AgentOutcome(status="completed", answer="boundary held")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("transport", ["python", "mcp"])
 async def test_private_state_stays_in_controller(
     workspace, tmp_path, monkeypatch, transport
@@ -1399,8 +1682,8 @@ async def test_private_state_stays_in_controller(
             started_at=datetime.now(timezone.utc),
         )
         assert state.submission == "boundary held", state.runtime.model_dump_json()
-        assert state.environment.values["hidden_arguments"]["secret"] == secret  # noqa: PD011 - EnvironmentState mapping, not pandas
-        assert state.environment.values["private_update"] == secret  # noqa: PD011 - EnvironmentState mapping, not pandas
+        assert state.environment.values["hidden_arguments"]["secret"] == secret
+        assert state.environment.values["private_update"] == secret
         assert secret not in state.model_dump_json(include={"conversations"})
         assert {"agent", "tool", "terminal"} <= set(requests)
     finally:
@@ -1408,7 +1691,7 @@ async def test_private_state_stays_in_controller(
         await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_cancelled_agent_stops_its_descendants_before_returning(
     workspace, tmp_path
 ):
@@ -1417,6 +1700,7 @@ async def test_cancelled_agent_stops_its_descendants_before_returning(
     from datetime import datetime, timezone
     from pathlib import Path
 
+    from corral.core.environment import Toolset, default_file_tools
     from corral.core.task import TaskDefinition
     from corral.observability import NoOpObserver
     from corral.persistence import SQLiteCommitStore
@@ -1431,7 +1715,11 @@ async def test_cancelled_agent_stops_its_descendants_before_returning(
         resolve_answer=False,
     )
     environment = Environment(
-        "cancel", task, base_work_dir=workspace, task_execution_id="cancel"
+        "cancel",
+        task,
+        base_work_dir=workspace,
+        task_execution_id="cancel",
+        toolset=Toolset(workspace_factory=default_file_tools),
     )
     store = SQLiteCommitStore(tmp_path / "cancel.sqlite3", execution_id="cancel")
     running = asyncio.create_task(

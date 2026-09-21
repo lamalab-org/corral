@@ -11,7 +11,7 @@ from corral.agents.session import AgentSession, ToolResponse
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -100,7 +100,7 @@ def test_reflexion_requires_a_session_agent():
         ReflexionAgent(actor=object())
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_reflexion_requires_model_metadata_without_requiring_actor_model():
     actor = Actor()
     agent = ReflexionAgent(actor=actor)
@@ -112,7 +112,7 @@ async def test_reflexion_requires_model_metadata_without_requiring_actor_model()
     assert actor.calls == 0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_reflexion_generates_memory_before_next_actor_attempt(monkeypatch):
     actor = Actor()
     agent = ReflexionAgent(
@@ -179,7 +179,7 @@ async def test_reflexion_generates_memory_before_next_actor_attempt(monkeypatch)
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_reflexion_reserves_a_single_available_call_for_the_actor(monkeypatch):
     actor = Actor()
     agent = ReflexionAgent(actor=actor)

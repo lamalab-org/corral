@@ -18,6 +18,7 @@ from retrosynthesis.score import (
 from retrosynthesis.tools import create_tools
 
 from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.resources import declare_file_resource
 from corral.core.state import ExecutionState
 from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
 from corral.report.logging import event, exception_fields
@@ -162,6 +163,12 @@ def create_rethrosynthesis_environments(
             raise ValueError(f"Task file {json_path} does not exist.")
         tasks = load_tasks_from_json(json_path, work_dir=work_dir)
         tool_pool = create_tools()
+        buyables_path = Path(__file__).parent / "data" / "buyables.sqlite"
+        buyables_resource = declare_file_resource(
+            "buyables_database",
+            buyables_path,
+            runtime_version="retrosynthesis-buyables-v1",
+        )
         environments = build_environments(
             tasks,
             base_work_dir=work_dir,
@@ -171,6 +178,8 @@ def create_rethrosynthesis_environments(
                 common={} if subtask_level else tool_pool,
                 workspace_factory=None,
             ),
+            file_resources={"buyables_database": buyables_resource},
+            file_resource_sources={"buyables_database": buyables_path},
         )
     except Exception as exc:
         event(

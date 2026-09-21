@@ -234,9 +234,7 @@ Rules:
             return value
         head = limit // 2
         omitted = len(text) - limit
-        return (
-            f"{text[:head]}\n...[truncated {omitted} chars]...\n{text[-(limit-head):]}"
-        )
+        return f"{text[:head]}\n...[truncated {omitted} chars]...\n{text[-(limit - head) :]}"
 
     async def _call(self, run: _RunState) -> Any:
         kwargs = self._call_kwargs()
