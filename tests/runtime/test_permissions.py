@@ -111,9 +111,7 @@ def assert_probe(result):
 
 
 def test_foreground_tool_and_descendants(workspace):
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
-    assert_probe(permissions.execute_tool(environment, None, permission_probe, {}))
+    assert_probe(permissions.execute_restricted_tool(permission_probe, {}, workspace))
 
 
 @tool
@@ -168,16 +166,13 @@ def test_none_and_read_workspace_modes_are_kernel_enforced(workspace):
     from pathlib import Path
 
     Path(workspace, "task.txt").write_text("task data")
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
-
     isolated = json.loads(
-        permissions.execute_tool(environment, None, no_workspace_probe, {})
+        permissions.execute_restricted_tool(no_workspace_probe, {}, workspace)
     )
     assert isolated == {"cwd": "/workspace", "read": False, "write": False}
 
     readonly = json.loads(
-        permissions.execute_tool(environment, None, read_workspace_probe, {})
+        permissions.execute_restricted_tool(read_workspace_probe, {}, workspace)
     )
     assert readonly == {
         "cwd": "/workspace",
@@ -248,17 +243,14 @@ def test_terminal_inherits_worker_permissions(workspace):
 
     from corral.workspace import WorkspaceFilesystem, build_terminal_tool
 
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
     terminal = build_terminal_tool(WorkspaceFilesystem(workspace))
     result = json.loads(
-        permissions.execute_tool(
-            environment,
-            None,
+        permissions.execute_restricted_tool(
             terminal,
             {
                 "command": "id -u; pwd; printf 'workspace access' > allowed.txt; cat /opt/corral/pyproject.toml"
             },
+            workspace,
         )
     )
 
@@ -345,9 +337,7 @@ def test_original_container_paths_are_not_mounted(workspace):
     # These sentinels are read-only mounts provided by the Docker test runner.
     assert Path("/outside-workspace.txt").is_file()
     assert Path("/opt/unrelated/data.txt").is_file()
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
-    result = permissions.execute_tool(environment, None, filesystem_root_probe, {})
+    result = permissions.execute_restricted_tool(filesystem_root_probe, {}, workspace)
     assert json.loads(result) == {"isolated_root": True}
 
 
@@ -803,10 +793,8 @@ def test_real_sdk_runtime(workspace, sdk):
 
     secret = Path(workspace, "task-secret.txt")
     secret.write_text("must not reach SDK descendants")
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
-    result = permissions.execute_tool(
-        environment, None, sdk_permission_probe, {"sdk": sdk}
+    result = permissions.execute_restricted_tool(
+        sdk_permission_probe, {"sdk": sdk}, workspace
     )
     payload = json.loads(result)
     assert payload["sdk"] == sdk
@@ -853,9 +841,7 @@ def detached_process() -> str:
 def test_detached_descendant_is_stopped(workspace):
     from pathlib import Path
 
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
-    pid = permissions.execute_tool(environment, None, detached_process, {})
+    pid = permissions.execute_restricted_tool(detached_process, {}, workspace)
     try:
         status = Path(f"/proc/{pid}/status").read_text()
     except FileNotFoundError:
@@ -872,10 +858,8 @@ def forbidden_read() -> str:
 
 
 def test_denial_message_reaches_the_tool_caller(workspace):
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
     with pytest.raises(RuntimeError, match="Permission denied:.*not permitted"):
-        permissions.execute_tool(environment, None, forbidden_read, {})
+        permissions.execute_restricted_tool(forbidden_read, {}, workspace)
 
 
 def test_sdk_scratch_is_not_a_task_artifact(workspace, tmp_path):
@@ -907,11 +891,9 @@ def test_workers_cannot_read_a_different_workspace(workspace):
     other = Path(tempfile.mkdtemp(prefix="other-workspace-", dir="/workspace"))
     (other / "answer.txt").write_text("hidden")
     permissions.workspace_identity(other)
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
     with pytest.raises(RuntimeError, match="Permission denied|No such file"):
-        permissions.execute_tool(
-            environment, None, sibling_probe, {"path": str(other / "answer.txt")}
+        permissions.execute_restricted_tool(
+            sibling_probe, {"path": str(other / "answer.txt")}, workspace
         )
 
 

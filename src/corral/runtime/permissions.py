@@ -499,9 +499,9 @@ def run_worker(
             descriptor,
             cancel=cancel,
             workspace_access=(
-                "scratch"
-                if workspace_access is None and kind == "agent"
-                else workspace_access or "read_write"
+                ("scratch" if kind == "agent" else "none")
+                if workspace_access is None
+                else workspace_access
             ),
             resource_mounts=resource_mounts or {},
         )
@@ -619,23 +619,6 @@ def _run_worker(
         finally:
             if writer >= 0:
                 os.close(writer)
-
-
-def execute_tool(
-    environment: Any, state: Any, tool: Any, arguments: dict[str, Any]
-) -> Any:
-    """Keep private task logic here; give code workers only public arguments."""
-    from corral.backend.background_tools import (  # - avoid tool import cycle
-        _CallableTool,
-    )
-
-    # Job controls and explicitly trusted scientific functions never evaluate
-    # model-controlled code. They alone may receive the execution projection.
-    if isinstance(tool, _CallableTool) or getattr(tool, "trusted", False):
-        return environment.execute_trusted_tool(state, tool, arguments)
-    return execute_restricted_tool(
-        tool, arguments, environment.workspace_path, resource_mounts={}
-    )
 
 
 def execute_restricted_tool(

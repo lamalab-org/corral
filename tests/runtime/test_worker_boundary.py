@@ -136,10 +136,31 @@ def test_serialization_rejects_private_objects_in_agent_closures(private_state):
         permissions.serialize({"nested": [private_state]})
 
 
+def test_run_worker_defaults_to_no_workspace_access(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    accesses = []
+
+    def run(kind, payload, assigned_workspace, workspace_fd, **kwargs):
+        del payload, workspace_fd
+        assert assigned_workspace == str(workspace)
+        accesses.append((kind, kwargs["workspace_access"]))
+        return {"kind": kind}
+
+    monkeypatch.setattr(permissions, "_enabled", True)
+    monkeypatch.setattr(permissions, "_root", tmp_path)
+    monkeypatch.setattr(permissions, "_run_worker", run)
+
+    assert permissions.run_worker("tool", object(), str(workspace)) == {"kind": "tool"}
+    assert permissions.run_worker("agent", object(), str(workspace)) == {
+        "kind": "agent"
+    }
+    assert accesses == [("tool", "none"), ("agent", "scratch")]
+
+
 def test_shell_payload_is_only_command_options(tmp_path, private_state, monkeypatch):
     terminal = build_terminal_tool(WorkspaceFilesystem(tmp_path))
     terminal.accidentally_captured_state = private_state
-    environment = SimpleNamespace(workspace_path=str(tmp_path), private=private_state)
     requests = []
 
     def run(kind, payload, workspace, **kwargs):
@@ -148,9 +169,7 @@ def test_shell_payload_is_only_command_options(tmp_path, private_state, monkeypa
 
     monkeypatch.setattr(permissions, "run_worker", run)
     assert (
-        permissions.execute_tool(
-            environment, private_state, terminal, {"command": "pwd"}
-        )
+        permissions.execute_restricted_tool(terminal, {"command": "pwd"}, str(tmp_path))
         == "public output"
     )
     assert requests == [("terminal", {"command": "pwd"}, str(tmp_path))]
@@ -176,11 +195,8 @@ def test_untrusted_tools_with_private_inputs_fail_closed(
         if background:
             permissions.execute_job(private_code_tool, arguments, str(tmp_path))
         else:
-            permissions.execute_tool(
-                SimpleNamespace(workspace_path=str(tmp_path)),
-                None,
-                private_code_tool,
-                arguments,
+            permissions.execute_restricted_tool(
+                private_code_tool, arguments, str(tmp_path)
             )
 
 
