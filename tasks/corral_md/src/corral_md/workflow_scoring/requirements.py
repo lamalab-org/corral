@@ -162,7 +162,7 @@ GROUPS = {
             "derivative_reconstruction",
             "force_constant_transformations",
         ),
-        ("bands", "Report the band path Γ–X–U–L–Γ–K", "band_path_and_signed_energies"),
+        ("bands", "Report the band path Γ-X-U-L-Γ-K", "band_path_and_signed_energies"),
         (
             "dos",
             "Normalize the total DOS to three modes per primitive cell, including imaginary modes.",
@@ -229,7 +229,7 @@ GROUPS = {
         ),
         (
             "initialization",
-            "Initialize Maxwell–Boltzmann velocities at 300 K",
+            "Initialize Maxwell-Boltzmann velocities at 300 K",
             "initialization_and_recorded_settings",
         ),
         (
@@ -309,7 +309,7 @@ GROUPS = {
         ),
         (
             "hysteresis",
-            "Quantify heating–cooling volume differences at 300 and 400 K.",
+            "Quantify heating-cooling volume differences at 300 and 400 K.",
             "heating_cooling_differences",
         ),
         (
