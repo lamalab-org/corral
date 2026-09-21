@@ -35,6 +35,7 @@ def execute_analysis(
         code_executor=_execute_persistent,
         export_names=("_protocol_guide_ack",),
         export_result_names={"_protocol_guide_ack": "protocol_ack"},
+        workspace_access="read_write",
         cancel=cancel,
     )
     return {

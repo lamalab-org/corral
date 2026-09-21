@@ -290,11 +290,11 @@ def _configure_trial(env: Environment, _state: ExecutionState) -> EnvironmentSet
 class StargazerEnvironment(Environment):
     """Run Stargazer tools with committed state and a public-data-only REPL worker."""
 
-    def execute_tool(
+    def execute_trusted_tool(
         self, state: ExecutionState, tool: Tool, arguments: dict[str, Any]
     ) -> Any:
         if tool.name not in {"PythonREPL", "submit_action"}:
-            return super().execute_tool(state, tool, arguments)
+            return super().execute_trusted_tool(state, tool, arguments)
         benchmark_task = self.current_task.scoring_inputs["benchmark_task"]
         environment_values = dict(state.environment.values)
         hidden = json.loads(json.dumps(environment_values["hidden_arguments"]))

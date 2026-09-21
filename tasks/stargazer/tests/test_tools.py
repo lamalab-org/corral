@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 from stargazer.tools import create_analysis_session, create_tools
 
+from corral.core.tool import WorkspaceAccess
+
 
 @pytest.fixture
 def analysis_session(simple_task):
@@ -33,6 +35,8 @@ def test_original_tool_schemas_are_preserved(protocol_reference):
     }
     assert formats[1] == protocol_reference["tools"][1]
     assert all(not tool.hidden_args for tool in actual)
+    assert actual[0].workspace_access is WorkspaceAccess.READ_WRITE
+    assert actual[1].workspace_access is WorkspaceAccess.NONE
 
 
 def test_repl_and_checkpoints_match_original_reference(
@@ -175,7 +179,9 @@ def test_last_line_statements_run_instead_of_being_wrapped(analysis_session):
 
     # An augmented assignment used to become a SyntaxError, discarding every
     # earlier line in the same cell.
-    analysis_session.execute("periods = [10.0, 20.0]\nn_peaks = len(periods)\nn_peaks+=1")
+    analysis_session.execute(
+        "periods = [10.0, 20.0]\nn_peaks = len(periods)\nn_peaks+=1"
+    )
     assert analysis_session.execute("print(periods, n_peaks)") == "[10.0, 20.0] 3\n"
 
     # A variable named after a print keyword argument is an assignment too.
@@ -202,4 +208,6 @@ def test_submission_guide_uses_real_newlines(analysis_session):
     # first thing every agent reads.
     assert "\\n" not in STARGAZER_SUBMISSION_GUIDE
     assert len(STARGAZER_SUBMISSION_GUIDE.splitlines()) == 6
-    assert analysis_session.execute("print(STARGAZER_SUBMISSION_GUIDE)").count("\n") == 7
+    assert (
+        analysis_session.execute("print(STARGAZER_SUBMISSION_GUIDE)").count("\n") == 7
+    )

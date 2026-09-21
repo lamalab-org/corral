@@ -4,7 +4,7 @@ import json
 
 import numpy as np
 
-from corral.core.tool import ToolConcurrency
+from corral.core.tool import ToolConcurrency, WorkspaceAccess
 from corral.runtime import permissions
 from corral.runtime.python_repl import (
     PythonREPLSession,
@@ -76,6 +76,7 @@ def test_repl_tool_factory_is_serial_and_controller_managed():
     repl = create_python_repl_tool(argument_name="code")
     assert repl.trusted is True
     assert repl.concurrency == ToolConcurrency.SERIAL
+    assert repl.workspace_access == WorkspaceAccess.NONE
     assert repl.hidden_args == {}
     assert repl.params_json_schema["required"] == ["code"]
 
@@ -120,6 +121,7 @@ def test_restricted_dispatch_sends_only_public_json_and_opaque_checkpoint(
     assert not worker_tool.hidden_args
     assert workspace == str(tmp_path)
     assert kwargs["cancel"] is None
+    assert kwargs["workspace_access"] == "none"
     assert arguments == {
         "code": "values.sum()",
         "public_data": json.dumps({"values": [1, 2, 3], "status": "updated"}),
