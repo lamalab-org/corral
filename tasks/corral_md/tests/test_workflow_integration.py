@@ -58,7 +58,6 @@ def test_shipped_workflow_contract_and_empty_evidence(number, tmp_path):
     assert result.scorer_version == "corral_md.score:WorkflowScorer"
     assert "version" not in report
     assert report["status"] == "complete"
-    assert all("requirement" in check for check in report["checks"] if check["points"])
 
 
 @pytest.mark.parametrize("number", range(1, 11))

@@ -20,11 +20,6 @@ from corral_md.workflow_scoring.common import (
     UnsupportedEvidence,
     reproducibility,
 )
-from corral_md.workflow_scoring.requirements import (
-    GROUPS,
-    requirement_for,
-    task_definition,
-)
 
 
 @pytest.fixture
@@ -414,17 +409,6 @@ def test_zero_point_provenance_does_not_block_completed_score():
     rubric.unverified("execution", "Saved data cannot establish actual execution")
     assert rubric.score == 1
     assert rubric.as_dict()["status"] == "complete"
-
-
-def test_every_requirement_anchor_is_in_the_shipped_task():
-    for number, groups in GROUPS.items():
-        for _, _, *names in groups:
-            for name in names:
-                requirement = requirement_for(number, name)
-                assert (
-                    requirement["text"]
-                    in task_definition(number)[requirement["source"]]
-                )
 
 
 def test_cli_writes_pending_report_then_resolves_trusted_review(

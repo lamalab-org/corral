@@ -21,7 +21,6 @@ from corral_md.workflow_scoring.common import (
     UnsupportedEvidence,
     reproducibility,
 )
-from corral_md.workflow_scoring.requirements import attach_requirements
 
 
 class PendingReviewError(RuntimeError):
@@ -67,7 +66,6 @@ class WorkflowScorer:
             rubric.check(
                 "readable_manifest", 100, False, f"{type(exc).__name__}: {exc}"
             )
-            attach_requirements(rubric)
             if review is not None:
                 raise ValueError(
                     "An unreadable submission cannot receive review credit"
@@ -123,7 +121,6 @@ class WorkflowScorer:
                     "Submission changed during grading; retry with frozen evidence"
                 )
             apply_verification(rubric, verification)
-        attach_requirements(rubric)
         evidence_sha256 = None
         if rubric.pending_checks or review is not None:
             backend_release = (
