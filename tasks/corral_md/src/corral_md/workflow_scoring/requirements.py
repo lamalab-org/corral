@@ -22,7 +22,7 @@ GROUPS = {
         ),
         (
             "saved_measurements",
-            "Supply production trajectory data",
+            "For the production trajectory, save the time",
             "production_data_integrity",
         ),
         (
@@ -102,7 +102,7 @@ GROUPS = {
         ),
         (
             "models",
-            "Record input checkpoint identities and the provenance of the trained model.",
+            "Record which input checkpoints you used and where the trained model came from.",
             "reference_identities_and_units",
         ),
         (
@@ -131,7 +131,7 @@ GROUPS = {
         ),
         (
             "md_evidence",
-            "Include trajectory data containing cell, positions, momenta, time, potential energies, and forces",
+            "For the MD run, save the cell, positions, momenta, time, potential energy, and forces",
             "md_log_matches_trajectory",
             "md_log_covers_complete_run",
         ),
@@ -157,7 +157,7 @@ GROUPS = {
         ),
         (
             "force_evidence",
-            "raw structures with energies and complete force arrays, and force constants",
+            "Keep the raw structures with their energies and full force arrays, along with the force constants.",
             "raw_energy_force_records",
             "derivative_reconstruction",
             "force_constant_transformations",
@@ -203,7 +203,7 @@ GROUPS = {
         ),
         (
             "derivatives",
-            "Retain evaluated structures, raw forces or analytical derivative outputs, force constants, all mode energies",
+            "Keep the evaluated structures, raw forces or analytical derivative results, force constants, and all mode energies.",
             "force_constants_reconstructed_from_raw_evidence",
             "all_mode_energies_and_imaginary_modes",
         ),
@@ -334,7 +334,7 @@ GROUPS = {
         ),
         (
             "pipeline",
-            "Save a reproducible structure-to-energy prediction pipeline",
+            "Save the final structure-to-energy pipeline",
             "portable_pipeline_and_dimensions",
             "ridge_coefficient_consistency",
         ),
