@@ -17,6 +17,7 @@ from corral.core.task import InputRef, TaskDefinition
 from corral.orchestration import (
     AgentRuntimeDefinition,
     BenchmarkExecutionResult,
+    BenchmarkInput,
     EnvironmentRuntimeDefinition,
     EvaluationRef,
     StateRef,
@@ -212,8 +213,10 @@ def test_runner_builds_dependency_closed_metadata():
         max_parallel=8,
         max_parallel_per_task=2,
         max_parallel_evaluations=3,
+        max_parallel_total=9,
         max_parallel_by_model={"model-a": 1},
         max_parallel_by_environment={"env-downstream": 1},
+        max_parallel_evaluations_by_environment={"env-downstream": 2},
     )
 
     assert request.task_ids == ("upstream", "downstream")
@@ -231,23 +234,73 @@ def test_runner_builds_dependency_closed_metadata():
     assert request.max_parallel == 8
     assert request.max_parallel_per_task == 2
     assert request.max_parallel_evaluations == 3
+    assert request.max_parallel_total == 9
+    assert request.max_parallel_evaluations_by_environment == {"env-downstream": 2}
 
 
-def test_runner_defaults_to_unlimited_evaluation_parallelism():
+def test_runner_defaults_evaluation_parallelism_to_task_execution_limit():
     executor = RecordingExecutor(BenchmarkExecutionResult("benchmark", (), 1, ()))
     runner = _runner(executor, _metadata())
 
-    request = runner.build_input("benchmark")
+    request = runner.build_input("benchmark", max_parallel=4)
 
-    assert request.max_parallel_evaluations is None
+    assert request.max_parallel_evaluations == 4
+    assert request.max_parallel_total == 8
 
 
-def test_runner_rejects_invalid_evaluation_parallelism():
+def test_benchmark_input_defaults_evaluation_parallelism_to_execution_limit():
+    request = BenchmarkInput(
+        benchmark_run_id="benchmark",
+        task_ids=("task",),
+        trials_per_task=1,
+        agent_by_task={"task": "agent"},
+        environment_by_task={"task": "environment"},
+        max_parallel=4,
+    )
+
+    assert request.max_parallel_evaluations == 4
+    assert request.max_parallel_total == 8
+
+
+def test_runner_defaults_total_parallelism_to_sum_of_phase_limits():
+    executor = RecordingExecutor(BenchmarkExecutionResult("benchmark", (), 1, ()))
+    runner = _runner(executor, _metadata())
+
+    request = runner.build_input(
+        "benchmark", max_parallel=4, max_parallel_evaluations=2
+    )
+
+    assert request.max_parallel_total == 6
+
+
+@pytest.mark.parametrize("value", [0, 1.5, True, float("nan")])
+def test_runner_rejects_invalid_evaluation_parallelism(value):
     executor = RecordingExecutor(BenchmarkExecutionResult("benchmark", (), 1, ()))
     runner = _runner(executor, _metadata())
 
     with pytest.raises(ValueError, match="max_parallel_evaluations"):
-        runner.build_input("benchmark", max_parallel_evaluations=0)
+        runner.build_input("benchmark", max_parallel_evaluations=value)
+
+
+@pytest.mark.parametrize("value", [0, 1.5, True, float("nan")])
+def test_runner_rejects_invalid_total_parallelism(value):
+    executor = RecordingExecutor(BenchmarkExecutionResult("benchmark", (), 1, ()))
+    runner = _runner(executor, _metadata())
+
+    with pytest.raises(ValueError, match="max_parallel_total"):
+        runner.build_input("benchmark", max_parallel_total=value)
+
+
+@pytest.mark.parametrize("value", [0, 1.5, True])
+def test_runner_rejects_invalid_environment_evaluation_parallelism(value):
+    executor = RecordingExecutor(BenchmarkExecutionResult("benchmark", (), 1, ()))
+    runner = _runner(executor, _metadata())
+
+    with pytest.raises(ValueError, match="max_parallel_evaluations_by_environment"):
+        runner.build_input(
+            "benchmark",
+            max_parallel_evaluations_by_environment={"env-upstream": value},
+        )
 
 
 def test_runner_rejects_an_incomplete_task_selection():
@@ -384,7 +437,9 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
     }
     assert report.metadata["benchmark"]["trials_per_task"] == 1
     assert report.metadata["benchmark"]["k_values"] == [1]
-    assert report.metadata["benchmark"]["max_parallel_evaluations"] is None
+    assert report.metadata["benchmark"]["max_parallel_evaluations"] == 1
+    assert report.metadata["benchmark"]["max_parallel_total"] == 2
+    assert report.metadata["benchmark"]["max_parallel_evaluations_by_environment"] == {}
 
 
 @pytest.mark.anyio()

@@ -59,6 +59,17 @@ class PreviousStateAgent(SubmitAgent):
         return await super().run_session(session)
 
 
+class RecordingPreviousAttemptAgent(SubmitAgent):
+    def __init__(self):
+        self.previous_evaluations = []
+        self.previous_states = []
+
+    async def run_session(self, session):
+        self.previous_evaluations.append(session.previous_evaluation)
+        self.previous_states.append(session.previous_state)
+        return await super().run_session(session)
+
+
 class FileSubmitAgent:
     model = "test-model"
 
@@ -201,6 +212,43 @@ async def test_execution_restores_prior_projection_for_reflective_agents(tmp_pat
 
     assert result.submission == "42"
     assert agent.seen_previous_hash == prior.through_commit_hash
+
+
+@pytest.mark.anyio()
+async def test_benchmark_evaluates_prior_attempt_before_starting_the_next(tmp_path):
+    store = SQLiteCommitStore(tmp_path / "prior-attempt-commits.sqlite3")
+    agent = RecordingPreviousAttemptAgent()
+    registry = RuntimeRegistry(
+        agents={"agent": agent},
+        environments={"reflective": _environment("reflective")},
+    )
+    runner = CorralRunner(
+        registry,
+        {
+            "reflective": BenchmarkTaskMetadata(
+                agent_id="agent",
+                environment_id="reflective",
+                max_iterations=1,
+            )
+        },
+        state_store=store,
+        observer=NoOpObserver(),
+    )
+
+    try:
+        report = await runner.run("reflective-benchmark", trials_per_task=2)
+    finally:
+        registry.close()
+        await store.aclose()
+
+    assert [trial.score for trial in report.all_results] == [1.0, 1.0]
+    assert agent.previous_evaluations[0] is None
+    assert agent.previous_states[0] is None
+    assert agent.previous_evaluations[1]["score"] == 1.0
+    assert agent.previous_evaluations[1]["trial_id"] == (
+        "reflective-benchmark:reflective:0"
+    )
+    assert agent.previous_states[1].submission == "42"
 
 
 @pytest.mark.anyio()
@@ -551,7 +599,7 @@ async def test_dependency_execution_does_not_wait_for_upstream_evaluation(
 @pytest.mark.anyio()
 @pytest.mark.parametrize(
     ("max_parallel_evaluations", "expected_peak"),
-    [(None, 4), (2, 2)],
+    [(None, 2), (1, 1)],
 )
 async def test_benchmark_enforces_evaluation_concurrency_limit(
     monkeypatch, max_parallel_evaluations, expected_peak
@@ -584,13 +632,118 @@ async def test_benchmark_enforces_evaluation_concurrency_limit(
     report = await runner.run(
         "evaluation-limit",
         trials_per_task=4,
-        max_parallel=4,
+        max_parallel=2,
         max_parallel_per_task=4,
         max_parallel_evaluations=max_parallel_evaluations,
     )
 
     assert len(report.all_results) == 4
     assert peak == expected_peak
+    assert active == 0
+
+
+@pytest.mark.anyio()
+async def test_benchmark_enforces_environment_evaluation_concurrency_limit(
+    monkeypatch,
+):
+    active = 0
+    peak = 0
+
+    async def launch(*, task, **kwargs):
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.01)
+            return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {
+            task_id: BenchmarkTaskMetadata(
+                "agent",
+                f"{task_id}-environment",
+                environment_runtime=EnvironmentRuntimeDefinition("shared"),
+            )
+            for task_id in ("first", "second")
+        },
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+
+    report = await runner.run(
+        "environment-evaluation-limit",
+        trials_per_task=2,
+        max_parallel=4,
+        max_parallel_per_task=2,
+        max_parallel_evaluations=4,
+        max_parallel_evaluations_by_environment={"shared": 1},
+    )
+
+    assert len(report.all_results) == 4
+    assert peak == 1
+    assert active == 0
+
+
+@pytest.mark.anyio()
+async def test_benchmark_enforces_total_concurrency_limit(monkeypatch):
+    active = 0
+    peak = 0
+    evaluation_started = asyncio.Event()
+
+    async def launch(*, task, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            if task.task_id == "second":
+                await evaluation_started.wait()
+            return await RecordingDockerLauncher().run(task)
+        finally:
+            active -= 1
+
+    async def evaluate(request, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        evaluation_started.set()
+        try:
+            await asyncio.sleep(0.01)
+            return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {
+            task_id: BenchmarkTaskMetadata("agent", task_id)
+            for task_id in ("first", "second")
+        },
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+
+    report = await asyncio.wait_for(
+        runner.run(
+            "total-limit",
+            max_parallel=2,
+            max_parallel_evaluations=2,
+            max_parallel_total=2,
+        ),
+        timeout=2,
+    )
+
+    assert len(report.all_results) == 2
+    assert peak == 2
     assert active == 0
 
 
@@ -754,7 +907,7 @@ async def test_benchmark_cancellation_drains_active_evaluation(monkeypatch):
             "cancel-evaluation",
             trials_per_task=2,
             max_parallel=2,
-            max_parallel_per_task=2,
+            max_parallel_per_task=1,
             max_parallel_evaluations=1,
         )
     )

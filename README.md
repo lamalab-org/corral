@@ -316,13 +316,12 @@ result = await runner.run(
     max_parallel=4,
     max_parallel_per_task=2,
     max_parallel_evaluations=2,
+    max_parallel_total=6,
 )
 ```
 
 `CorralRunner` handles concurrency, task retries, and dependency readiness.
-Scoring overlaps with later task executions and has no concurrency limit by
-default; set `max_parallel_evaluations` to bound it independently.
-Task state remains persisted in the commit store. Tool verbosity is fixed to Corral's default (`brief`) on this path.
+Task execution and evaluation are split into two separate processes in corral.
 
 ## 🏗️ Available Environments
 

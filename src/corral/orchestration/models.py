@@ -262,8 +262,12 @@ class BenchmarkInput:
     max_parallel: int = 1
     max_parallel_per_task: int = 1
     max_parallel_evaluations: int | None = None
+    max_parallel_total: int | None = None
     max_parallel_by_model: dict[str, int] = field(default_factory=dict)
     max_parallel_by_environment: dict[str, int] = field(default_factory=dict)
+    max_parallel_evaluations_by_environment: dict[str, int] = field(
+        default_factory=dict
+    )
     enable_surrender: bool = False
     evaluate: bool = True
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
@@ -284,11 +288,26 @@ class BenchmarkInput:
             raise ValueError("trials_per_task must be at least 1")
         if self.max_parallel < 1 or self.max_parallel_per_task < 1:
             raise ValueError("parallelism limits must be at least 1")
+        evaluation_limit = self.max_parallel_evaluations
+        if evaluation_limit is None:
+            evaluation_limit = self.max_parallel
         if (
-            self.max_parallel_evaluations is not None
-            and self.max_parallel_evaluations < 1
+            isinstance(evaluation_limit, bool)
+            or not isinstance(evaluation_limit, int)
+            or evaluation_limit < 1
         ):
-            raise ValueError("max_parallel_evaluations must be at least 1")
+            raise ValueError("max_parallel_evaluations must be a positive integer")
+        object.__setattr__(self, "max_parallel_evaluations", evaluation_limit)
+        total_limit = self.max_parallel_total
+        if total_limit is None:
+            total_limit = self.max_parallel + evaluation_limit
+        if (
+            isinstance(total_limit, bool)
+            or not isinstance(total_limit, int)
+            or total_limit < 1
+        ):
+            raise ValueError("max_parallel_total must be a positive integer")
+        object.__setattr__(self, "max_parallel_total", total_limit)
         missing_agents = set(self.task_ids) - self.agent_by_task.keys()
         missing_environments = set(self.task_ids) - self.environment_by_task.keys()
         if missing_agents or missing_environments:
@@ -304,6 +323,12 @@ class BenchmarkInput:
             if limit < 1:
                 raise ValueError(
                     f"max_parallel_by_environment[{environment!r}] must be at least 1"
+                )
+        for environment, limit in self.max_parallel_evaluations_by_environment.items():
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+                raise ValueError(
+                    "max_parallel_evaluations_by_environment"
+                    f"[{environment!r}] must be a positive integer"
                 )
         if self.sandbox.mode == SandboxMode.DOCKER.value:
             docker = self.sandbox.docker
