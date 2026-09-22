@@ -10,6 +10,7 @@ import pytest
 from ase import units
 from ase.build import bulk
 from ase.calculators.singlepoint import SinglePointCalculator
+from corral_md.score import check_level1_workflow, check_level2_workflow
 from corral_md.workflow_scoring.common import Evidence, Rubric
 from corral_md.workflow_scoring.task_3 import evaluate
 
@@ -173,6 +174,41 @@ def _score(path):
 
 def _check(rubric, name):
     return next(check for check in rubric.checks if check["name"] == name)
+
+
+def test_level1_scores_only_the_shared_teacher_dataset(submission):
+    manifest = json.loads(submission.read_text())
+    manifest["artifacts"] = {"dataset": manifest["artifacts"]["dataset"]}
+    manifest["results"] = {}
+    settings_path = submission.parent / "level1-settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "teacher_model": "teacher.model",
+                "teacher_sha256": "a" * 64,
+                "dispersion": True,
+                "energy_unit": "eV",
+                "force_unit": "eV/Angstrom",
+                "calculator": {"default_dtype": "float64"},
+            }
+        )
+    )
+    manifest["settings"] = str(settings_path)
+    level1_manifest = submission.parent / "level1-manifest.json"
+    level1_manifest.write_text(json.dumps(manifest))
+
+    report = check_level1_workflow(3).evaluate(level1_manifest)
+    assert report["score"] == 1
+    assert report["level"] == 1
+    assert {check["name"] for check in report["checks"] if check["points"]} == {
+        "manifest_and_linked_artifacts",
+        "recorded_settings",
+        "saved_scripts",
+        "dimer_separation_dataset",
+        "teacher_energy_and_force_labels",
+        "teacher_identity_dispersion_and_units",
+    }
+    assert check_level2_workflow(3).evaluate(level1_manifest)["score"] == 0
 
 
 def test_task3_diagnostic_scope_does_not_require_a_report(submission):

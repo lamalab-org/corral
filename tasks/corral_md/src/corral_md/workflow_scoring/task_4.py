@@ -280,7 +280,26 @@ def _summary(w, energy, tolerance=0):
     )
 
 
-def evaluate(e: Evidence, r: Rubric) -> None:
+def evaluate(e: Evidence, r: Rubric, *, level: int = 2) -> None:
+    if level not in (1, 2):
+        raise ValueError("level must be 1 or 2")
+
+    level1_points = (
+        {
+            "fcc_supercell_and_mapping": 15,
+            "recorded_model_and_settings": 10,
+            "raw_energy_force_records": 15,
+            "derivative_reconstruction": 20,
+            "force_constant_transformations": 20,
+            "symmetry_and_acoustic_diagnostics": 10,
+        }
+        if level == 1
+        else {}
+    )
+
+    def shared_check(name, points, condition, detail=""):
+        return r.check(name, level1_points.get(name, points), condition, detail)
+
     @lru_cache(None)
     def data():
         return e.json("force_constants")
@@ -306,28 +325,37 @@ def evaluate(e: Evidence, r: Rubric) -> None:
 
     def identities():
         s = e.settings
-        return (
+        shared = (
             isinstance(s.get("checkpoint"), str)
             and bool(s["checkpoint"].strip())
+            and isinstance(s.get("force_constant_method"), str)
+            and bool(s["force_constant_method"].strip())
+        )
+        if level == 1:
+            return shared
+        return (
+            shared
             and isinstance(s.get("checkpoint_sha256"), str)
             and re.fullmatch(r"[0-9a-fA-F]{64}", s["checkpoint_sha256"]) is not None
             and isinstance(s.get("software_versions"), dict)
             and bool(s["software_versions"])
-            and isinstance(s.get("force_constant_method"), str)
-            and bool(s["force_constant_method"].strip())
         )
 
-    r.check(
+    shared_check(
         "fcc_supercell_and_mapping",
         10,
         lambda: bool(geometry()),
         "Fixed primitive FCC a=3.89 A, 125 Pd atoms, cell/atom map and recorded masses",
     )
-    r.check(
+    shared_check(
         "recorded_model_and_settings",
         5,
         identities,
-        "Recorded checkpoint identity and digest, software versions, numerical method",
+        (
+            "Recorded checkpoint identity and numerical method"
+            if level == 1
+            else "Recorded checkpoint identity and digest, software versions, numerical method"
+        ),
     )
 
     def raw_records():
@@ -341,19 +369,19 @@ def evaluate(e: Evidence, r: Rubric) -> None:
     def reconstructed():
         return _reconstruct(e, frames(), data())
 
-    records_ok = r.check(
+    records_ok = shared_check(
         "raw_energy_force_records",
         10,
         raw_records,
         "Complete stored force and energy arrays; no calculator evaluation",
     )
-    r.check(
+    shared_check(
         "derivative_reconstruction",
         12,
         lambda: supported(lambda: reconstructed()[0].shape == (125, 3, 3)),
         "Displacements and derivative weights/Hessian agree with the recorded geometry",
     )
-    r.check(
+    shared_check(
         "force_constant_transformations",
         12,
         lambda: supported(lambda: result_close(reconstructed()[1], phi(), atol=1e-7)),
@@ -362,6 +390,53 @@ def evaluate(e: Evidence, r: Rubric) -> None:
     # An unsupported adapter is distinct from evidence that contradicts a
     # supported calculation. The latter cannot support downstream observables.
     force_evidence_ok = records_ok and r.checks[-1]["status"] != "failed"
+
+    def diagnostics():
+        values = phi()
+        cells = _translations(data())
+        claimed = e.results["validation"]
+        norm = claimed.get("residual_norm", "max")
+        norms = {
+            "max": lambda value: np.max(np.abs(value)),
+            "rms": lambda value: np.sqrt(np.mean(value**2)),
+            "frobenius": lambda value: np.linalg.norm(value.ravel()),
+        }
+        if norm not in norms:
+            raise UnsupportedMethod(f"Unsupported residual norm {norm!r}")
+        residual = norms[norm]
+        return (
+            result_close(
+                claimed["pair_symmetry_residual_eV_A2"],
+                residual(values - values[_opposites(cells)].swapaxes(1, 2)),
+                atol=1e-07,
+            )
+            and result_close(
+                claimed["acoustic_residual_eV_A2"],
+                residual(values.sum(axis=0)),
+                atol=1e-07,
+            )
+            and (
+                "gamma_energies_eV" not in claimed
+                or result_close(
+                    claimed["gamma_energies_eV"],
+                    _energies(data(), values, [[0, 0, 0]])[0],
+                    atol=1e-07,
+                )
+            )
+        )
+
+    if level == 1:
+        shared_check(
+            "symmetry_and_acoustic_diagnostics",
+            10,
+            lambda: force_evidence_ok and diagnostics(),
+            "Recomputed residual norms and signed Gamma modes; no hidden stability threshold",
+        )
+        r.unverified(
+            "execution_provenance",
+            "Self-produced records cannot establish checkpoint execution or authentic force evaluations.",
+        )
+        return
 
     def bands():
         band = e.json("bands")
@@ -498,40 +573,6 @@ def evaluate(e: Evidence, r: Rubric) -> None:
         lambda: force_evidence_ok and supported(zpe),
         "Weighted energy, imaginary weight, and honest stable/residual/real-mode-only label",
     )
-
-    def diagnostics():
-        values = phi()
-        cells = _translations(data())
-        claimed = e.results["validation"]
-        norm = claimed.get("residual_norm", "max")
-        norms = {
-            "max": lambda value: np.max(np.abs(value)),
-            "rms": lambda value: np.sqrt(np.mean(value**2)),
-            "frobenius": lambda value: np.linalg.norm(value.ravel()),
-        }
-        if norm not in norms:
-            raise UnsupportedMethod(f"Unsupported residual norm {norm!r}")
-        residual = norms[norm]
-        return (
-            result_close(
-                claimed["pair_symmetry_residual_eV_A2"],
-                residual(values - values[_opposites(cells)].swapaxes(1, 2)),
-                atol=1e-07,
-            )
-            and result_close(
-                claimed["acoustic_residual_eV_A2"],
-                residual(values.sum(axis=0)),
-                atol=1e-07,
-            )
-            and (
-                "gamma_energies_eV" not in claimed
-                or result_close(
-                    claimed["gamma_energies_eV"],
-                    _energies(data(), values, [[0, 0, 0]])[0],
-                    atol=1e-07,
-                )
-            )
-        )
 
     r.check(
         "symmetry_and_acoustic_diagnostics",

@@ -10,7 +10,11 @@ from corral_md.modal_workspace import (
     pinned_release,
     recovery_snapshot,
 )
-from corral_md.score import WorkflowScorer, check_level2_workflow
+from corral_md.score import (
+    WorkflowScorer,
+    check_level1_workflow,
+    check_level2_workflow,
+)
 from corral_md.submission import resolve_submission
 from corral_md.submission_examples import example_prompt, seed_examples
 from corral_md.tools import (
@@ -44,6 +48,7 @@ BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/corral_md"
 PACKAGE_DATA_ROOT = Path(__file__).resolve().parents[2] / "environments"
 
 SCORING_FUNCTIONS = {
+    "check_level1_workflow": check_level1_workflow,
     "check_level2_workflow": check_level2_workflow,
 }
 

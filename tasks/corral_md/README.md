@@ -76,6 +76,11 @@ Level 1 prepares the structures, datasets, and initial simulation stages. Level
 2 turns them into complete workflows with saved results and reproducible
 evidence. The ten task pairs cover:
 
+Each level has its own rubric. Level 1 evaluates only the preparation work in
+its prompt and permits the Level-2-only fields in the shared submission example
+to remain empty. Checks for work common to both levels use the same underlying
+evidence validation; the later Level 2 stages are scored only at Level 2.
+
 - silicon diffusion and sodium-silicate glass transition;
 - silver model fine-tuning plus silicon and copper energy regression;
 - palladium and strained-silicon phonons, and aluminum vibrational density of states;

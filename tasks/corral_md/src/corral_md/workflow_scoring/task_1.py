@@ -138,7 +138,7 @@ class Unsupported(UnsupportedEvidence):
     pass
 
 
-def _thermo(e):
+def _thermo(e, end_time_ps=1500):
     table = e.table("thermo", "thermodynamics")
     cols = [
         "step",
@@ -156,7 +156,7 @@ def _thermo(e):
     if not (
         np.all(np.diff(values[:, 1]) >= 0)
         and values[0, 1] == 0
-        and _close(values[-1, 1], 1500)
+        and _close(values[-1, 1], end_time_ps)
     ):
         raise ValueError(
             "Evidence check failed: np.all(np.diff(values[:, 1]) >= 0) and values[0, 1] == 0 and _close(values[-1, 1], 1500)"
@@ -174,8 +174,8 @@ def _thermo(e):
     return table
 
 
-def _logged_thermo(e):
-    table = _thermo(e)
+def _logged_thermo(e, end_time_ps=1500):
+    table = _thermo(e, end_time_ps)
     # Parse numeric thermo sections only; never evaluate log content as code.
     logged, header = {}, None
     for line in _texts(e, "lammps_log").splitlines():
@@ -204,8 +204,8 @@ def _logged_thermo(e):
     return table
 
 
-def _protocol(e):
-    table = _logged_thermo(e)
+def _protocol(e, end_time_ps=1500):
+    table = _logged_thermo(e, end_time_ps)
     commands = list(_saved_commands(e))
     if not (["units", "metal"] in commands and ["atom_style", "full"] in commands):
         raise ValueError(
@@ -309,8 +309,10 @@ def _protocol(e):
                 raise ValueError("Detected velocity modification after dynamics began")
     if first_run is None or (creates and creates[0] >= first_run):
         raise ValueError("Velocity preparation must precede dynamics")
-    if not _close(elapsed, 1500):
-        raise ValueError("Run commands must cover the full 1500 ps cycle")
+    if not _close(elapsed, end_time_ps):
+        raise ValueError(
+            f"Run commands must cover the full {end_time_ps:g} ps requested stage"
+        )
     for row in table.itertuples(index=False):
         if not any(
             first <= row.step <= last

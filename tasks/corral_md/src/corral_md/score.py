@@ -19,6 +19,7 @@ from corral_md.workflow_scoring.common import (
     Evidence,
     Rubric,
     UnsupportedEvidence,
+    level1_reproducibility,
     reproducibility,
 )
 
@@ -29,7 +30,7 @@ class PendingReviewError(RuntimeError):
     def __init__(self, report: dict):
         self.report = report
         super().__init__(
-            "Level 2 evidence requires review before scoring: "
+            "Workflow evidence requires review before scoring: "
             + ", ".join(report["pending_checks"])
         )
 
@@ -37,10 +38,13 @@ class PendingReviewError(RuntimeError):
 class WorkflowScorer:
     """Score one Corral MD workflow from its retained evidence."""
 
-    def __init__(self, task_number: int, *, verifier=None):
+    def __init__(self, task_number: int, *, level: int = 2, verifier=None):
         if type(task_number) is not int or task_number not in range(1, 11):
             raise ValueError("task_number must be an integer from 1 to 10")
+        if type(level) is not int or level not in (1, 2):
+            raise ValueError("level must be 1 or 2")
         self.task_number = task_number
+        self.level = level
         self.verifier = verifier
 
     @property
@@ -70,9 +74,14 @@ class WorkflowScorer:
                 raise ValueError(
                     "An unreadable submission cannot receive review credit"
                 ) from exc
-            return rubric.as_dict()
+            report = rubric.as_dict()
+            report["level"] = self.level
+            return report
         initial_fingerprint = None
-        reproducibility(evidence, rubric)
+        if self.level == 1:
+            level1_reproducibility(evidence, rubric)
+        else:
+            reproducibility(evidence, rubric)
         if rubric.failed:
             remaining = max(0, 100 - sum(c["points"] for c in rubric.checks))
             rubric.check(
@@ -86,7 +95,14 @@ class WorkflowScorer:
                 initial_fingerprint = evidence.fingerprint()
             rubric.fail_fast = True
             try:
-                self.module.evaluate(evidence, rubric)
+                if self.level == 1:
+                    from corral_md.workflow_scoring.level1 import (
+                        evaluate as evaluate_level1,
+                    )
+
+                    evaluate_level1(evidence, rubric, self.task_number)
+                else:
+                    self.module.evaluate(evidence, rubric)
             except UnsupportedEvidence as exc:
                 remaining = max(0, 100 - sum(c["points"] for c in rubric.checks))
                 rubric.check("remaining_evidence", remaining, None, str(exc))
@@ -113,7 +129,9 @@ class WorkflowScorer:
             )
         verification = None
         if self.verifier is not None and not rubric.failed:
-            from corral_md.workflow_scoring.verification import apply_verification
+            from corral_md.workflow_scoring.verification import (
+                apply_verification,
+            )
 
             verification = self.verifier.evaluate(evidence, self.task_number)
             if verification["evidence_sha256"] != initial_fingerprint:
@@ -130,7 +148,7 @@ class WorkflowScorer:
             )
             evidence_sha256 = hashlib.sha256(
                 (
-                    f"corral_md.workflow.task_{self.task_number}"
+                    f"corral_md.workflow.level_{self.level}.task_{self.task_number}"
                     + (".modal" if self.verifier is not None else ".offline")
                     + "\0"
                     + evidence.fingerprint()
@@ -141,6 +159,7 @@ class WorkflowScorer:
         if review is not None:
             rubric.apply_review(review, evidence_sha256)
         report = rubric.as_dict()
+        report["level"] = self.level
         report["evidence_sha256"] = evidence_sha256
         if verification is not None:
             report["mode"] = "artifact_and_modal"
@@ -154,18 +173,38 @@ def check_level2_workflow(
     """Construct a workflow scorer with optional independent verification."""
     backend = verification_backend or os.getenv("CORRAL_MD_VERIFICATION", "offline")
     if backend == "offline":
-        return WorkflowScorer(task_number)
+        return WorkflowScorer(task_number, level=2)
     if backend != "modal":
         raise ValueError("verification_backend must be 'offline' or 'modal'")
 
     from corral_md.workflow_scoring.verification import ModalVerifier
 
-    return WorkflowScorer(task_number, verifier=ModalVerifier(require_provenance=True))
+    return WorkflowScorer(
+        task_number, level=2, verifier=ModalVerifier(require_provenance=True)
+    )
+
+
+def check_level1_workflow(
+    task_number: int, verification_backend: str | None = None
+) -> WorkflowScorer:
+    """Construct the artifact-only scorer for one preparatory workflow."""
+    # The current Modal verification plans cover the complete Level 2 workflow.
+    # Do not let a process-wide Level 2 deployment setting make Level 1 tasks
+    # un-loadable or accidentally verify later-stage artifacts.
+    backend = verification_backend or "offline"
+    if backend != "offline":
+        if backend == "modal":
+            raise ValueError(
+                "Level 1 scoring is artifact-only; verification_backend must be 'offline'"
+            )
+        raise ValueError("verification_backend must be 'offline'")
+    return WorkflowScorer(task_number, level=1)
 
 
 __all__ = [
     "PendingReviewError",
     "WorkflowScorer",
+    "check_level1_workflow",
     "check_level2_workflow",
     "main",
 ]
@@ -176,6 +215,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("task_number", type=int, choices=range(1, 11))
     parser.add_argument("manifest", type=Path)
+    parser.add_argument("--level", type=int, choices=(1, 2), default=2)
     parser.add_argument("--review", type=Path, help="Trusted evaluator review JSON")
     parser.add_argument("--output", type=Path, help="Write the evaluation report here")
     parser.add_argument(
@@ -192,9 +232,8 @@ def main() -> int:
     )
     args = parser.parse_args()
     review = json.loads(args.review.read_text()) if args.review else None
-    scorer = check_level2_workflow(
-        args.task_number, verification_backend=args.verification
-    )
+    factory = check_level1_workflow if args.level == 1 else check_level2_workflow
+    scorer = factory(args.task_number, verification_backend=args.verification)
     if args.release_id or args.run_id or args.action_id:
         if scorer.verifier is None:
             parser.error("--release-id/--run-id/--action-id require Modal verification")

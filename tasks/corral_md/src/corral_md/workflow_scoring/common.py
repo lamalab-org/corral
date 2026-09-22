@@ -530,6 +530,72 @@ def reproducibility(e: Evidence, r: Rubric) -> None:
     )
 
 
+def level1_reproducibility(e: Evidence, r: Rubric) -> None:
+    """Score the shared evidence contract for a preparatory Level 1 task.
+
+    The submission templates describe the complete paired workflow, so a Level 1
+    submission legitimately leaves the Level-2-only artifact roles empty.  Only
+    nonempty links are therefore interpreted as submitted evidence here.  The
+    task-specific Level 1 evaluator remains responsible for requiring every
+    artifact needed by its own prompt.
+
+    Level 1 tasks do not all have a standalone numerical result (for example,
+    some prepare a dataset or a restartable state), so the shared ten points are
+    assigned to retained artifacts, settings, and scripts rather than to the
+    Level 2 result object.
+    """
+
+    def linked_values(value: Any) -> list[Any]:
+        if isinstance(value, Mapping):
+            return [item for child in value.values() for item in linked_values(child)]
+        if isinstance(value, list):
+            return [item for child in value for item in linked_values(child)]
+        if value in (None, ""):
+            return []
+        return [value]
+
+    def linked_files() -> bool:
+        # The submission resolver maps an empty relative placeholder to the
+        # manifest directory.  Treat that directory spelling like the original
+        # empty value; a real submitted artifact must resolve to a file.
+        values = [
+            value
+            for value in linked_values(e._artifacts)
+            if e.base is None or Path(value).resolve() != e.base
+        ]
+        return bool(values) and all(
+            e._path(value).stat().st_size > 0 for value in values
+        )
+
+    r.check(
+        "manifest_and_linked_artifacts",
+        6,
+        linked_files,
+        "Every nonempty artifact link must exist and contain evidence; unused Level 2 roles may remain empty.",
+    )
+    r.check(
+        "recorded_settings",
+        2,
+        lambda: bool(e.settings)
+        and e._path(e.manifest.get("settings")).stat().st_size > 0,
+    )
+
+    def scripts() -> bool:
+        values = e.manifest.get("scripts", [])
+        return (
+            isinstance(values, list)
+            and bool(values)
+            and all(e._path(path).stat().st_size > 0 for path in values)
+        )
+
+    r.check(
+        "saved_scripts",
+        2,
+        scripts,
+        "Scripts are retained for reproducibility and are never executed by the scorer.",
+    )
+
+
 def _finite_json(value: Any) -> bool:
     if isinstance(value, dict):
         return all(_finite_json(v) for v in value.values())

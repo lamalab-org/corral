@@ -16,6 +16,8 @@ def test_all_shipped_tasks_load_from_unrelated_cwd(source, count, tmp_path, monk
     tasks = env.load_tasks_from_json(env.PACKAGE_DATA_ROOT / source, str(tmp_path))
     assert len(tasks) == count
     assert all(callable(task.scoring_fn) for task in tasks.values())
+    expected_level = int(source.split("/")[0].removeprefix("level_"))
+    assert all(task.scoring_fn.level == expected_level for task in tasks.values())
 
 
 def test_removed_subtasks_create_no_environments(tmp_path, monkeypatch):

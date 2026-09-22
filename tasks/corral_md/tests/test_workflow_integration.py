@@ -61,6 +61,21 @@ def test_shipped_workflow_contract_and_empty_evidence(number, tmp_path):
 
 
 @pytest.mark.parametrize("number", range(1, 11))
+def test_shipped_level1_contract_uses_only_level1_scorer(number, tmp_path):
+    task = env.load_tasks_from_json(
+        env.PACKAGE_DATA_ROOT / f"level_1/tasks_json/task_{number}.json", str(tmp_path)
+    )[f"level_1_task_{number}"]
+    assert isinstance(task.scoring_fn, WorkflowScorer)
+    assert task.scoring_fn.task_number == number
+    assert task.scoring_fn.level == 1
+    report = task.scoring_fn.evaluate("{}")
+    assert report["score"] == 0
+    assert report["level"] == 1
+    assert report["possible_points"] == 100
+    assert sum(check["points"] for check in report["checks"]) == 100
+
+
+@pytest.mark.parametrize("number", range(1, 11))
 def test_examples_are_readable_and_survive_workspace_restoration(number, tmp_path):
     task_id = f"level_2_task_{number}"
     task = env.load_tasks_from_json(

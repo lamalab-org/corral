@@ -208,6 +208,27 @@ def test_task4_complete_synthetic_evidence_and_no_execution(submission, monkeypa
     assert _check(result, "execution_provenance")["status"] == "unverified"
 
 
+def test_task4_level1_stops_before_level2_observables(submission, monkeypatch):
+    original_json = Evidence.json
+
+    def reject_level2_artifacts(self, *names):
+        if names[0] in {"bands", "bz_samples", "dos"}:
+            raise AssertionError(f"Level 1 read Level-2-only artifact {names[0]!r}")
+        return original_json(self, *names)
+
+    monkeypatch.setattr(Evidence, "json", reject_level2_artifacts)
+    rubric = Rubric(4, fail_fast=True)
+    evaluate(Evidence(submission), rubric, level=1)
+
+    assert rubric.score == pytest.approx(0.9), rubric.checks
+    assert sum(check["points"] for check in rubric.checks) == 90
+    assert {
+        "band_path_and_signed_energies",
+        "dos_from_signed_bz_samples",
+        "zpe_and_imaginary_mode_accounting",
+    }.isdisjoint(check["name"] for check in rubric.checks)
+
+
 @pytest.mark.parametrize(
     ("change", "check"),
     [

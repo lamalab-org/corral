@@ -9,6 +9,7 @@ import pytest
 from corral_md.score import (
     PendingReviewError,
     WorkflowScorer,
+    check_level1_workflow,
     check_level2_workflow,
     main,
 )
@@ -18,6 +19,7 @@ from corral_md.workflow_scoring.common import (
     EvidenceError,
     Rubric,
     UnsupportedEvidence,
+    level1_reproducibility,
     reproducibility,
 )
 
@@ -75,6 +77,23 @@ def test_shared_credit_does_not_require_a_narrative_report(manifest, report):
     assert sum(check["points"] for check in rubric.checks) == 10
     assert sum(check["earned"] for check in rubric.checks) == 10
     assert all(check["name"] != "analysis_report" for check in rubric.checks)
+
+
+def test_level1_reproducibility_ignores_unused_level2_slots(manifest):
+    root, path, data = manifest
+    data["results"] = {}
+    data["artifacts"].update(
+        {
+            "later_scalar": "",
+            "later_list": [],
+            "later_nested": {"level2_only": ""},
+        }
+    )
+    path.write_text(json.dumps(data))
+    rubric = Rubric()
+    level1_reproducibility(Evidence(resolve_submission(str(path), root)), rubric)
+    assert sum(check["points"] for check in rubric.checks) == 10
+    assert sum(check["earned"] for check in rubric.checks) == 10
 
 
 def test_missing_link_preserves_independent_evidence(manifest):
@@ -302,6 +321,17 @@ def test_factory_returns_scalar_and_keeps_json_checks_task_local(manifest, monke
 def test_invalid_task_number(number):
     with pytest.raises(ValueError):
         check_level2_workflow(number)
+    with pytest.raises(ValueError):
+        check_level1_workflow(number)
+
+
+def test_level1_factory_is_distinct_and_artifact_only():
+    scorer = check_level1_workflow(3)
+    assert scorer.task_number == 3
+    assert scorer.level == 1
+    assert scorer.verifier is None
+    with pytest.raises(ValueError, match="artifact-only"):
+        check_level1_workflow(3, verification_backend="modal")
 
 
 def _pending_scorer(monkeypatch):

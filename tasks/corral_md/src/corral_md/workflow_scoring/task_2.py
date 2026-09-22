@@ -40,7 +40,7 @@ def _verified(function):
         return None, str(exc)
 
 
-def _trace(e):
+def _trace(e, required_stages=None):
     table = e.table("thermal_trace", "thermal_traces", "trace").copy()
     table = table.rename(columns={"measured_temperature_K": "temperature_K"})
     columns = [
@@ -55,9 +55,20 @@ def _trace(e):
         raise ValueError("Thermal trace contains nonfinite values")
     if not (table.temperature_K.gt(0).all() and table.density_g_cm3.gt(0).all()):
         raise ValueError("Measured temperature and density must be positive")
-    table["stage"] = table.stage.astype(str).str.lower()
-    if set(table.stage) != {"cooling", "hold", "reheating"}:
-        raise ValueError("Trace must contain cooling, hold and reheating stages")
+    expected = (
+        {"cooling", "hold", "reheating"}
+        if required_stages is None
+        else set(required_stages)
+    )
+    if "stage" not in table:
+        if expected != {"cooling"}:
+            raise ValueError("Trace must identify each thermal stage")
+        table["stage"] = "cooling"
+    else:
+        table["stage"] = table.stage.astype(str).str.lower()
+    if set(table.stage) != expected:
+        names = ", ".join(sorted(expected))
+        raise ValueError(f"Trace must contain exactly these stages: {names}")
     return table
 
 
@@ -142,7 +153,7 @@ def _commands(e):
             yield from read(path)
 
 
-def _input_cycle(e):
+def _input_cycle(e, end_time_ps=700):
     timestep, step, elapsed = 1.0, 0, 0.0
     active = {}
     for c in _commands(e):
@@ -204,8 +215,8 @@ def _input_cycle(e):
             elapsed += duration
             step += count
     return _close(
-        elapsed, 700, atol=1e-7, rtol=0
-    ), "Run commands must cover the full 700 ps cycle"
+        elapsed, end_time_ps, atol=1e-7, rtol=0
+    ), f"Run commands must cover the full {end_time_ps:g} ps requested cycle"
 
 
 def _potential(e):
@@ -296,8 +307,8 @@ def _physics(e):
     return _potential(e)
 
 
-def _logged_trace(e):
-    t = _trace(e)
+def _logged_trace(e, required_stages=None):
+    t = _trace(e, required_stages)
     rows = {}
     header = None
     for line in _text(e, "raw_logs", "logs", "lammps_logs").splitlines():
