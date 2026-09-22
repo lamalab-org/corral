@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -181,13 +182,24 @@ def _task_prompt(env: Environment, state: ExecutionState) -> str:
     return prompt
 
 
-def _scoring_function(name: str, params: dict[str, Any], root: Path) -> Callable[[Any], dict]:
-    """Bind a scorer to its task's rules and the root its paths resolve against."""
+def _scoring_function(name: str, params: dict[str, Any], root: Path) -> Callable[[Any], float]:
+    """Bind a scorer to its task's rules and the root its paths resolve against.
+
+    The scorers report a dict, but a task's `scoring_fn` is a float to corral's
+    evaluation layer, so only the binary score reaches it. `build.py` and the
+    scoring tests call the scorers directly and read the whole report.
+    """
     try:
         fn = SCORING_FUNCTIONS[name]
     except KeyError as exc:
         raise ValueError(f"unknown psychometrics scoring function: {name}") from exc
-    return with_fixed_inputs(fn, params=params, base_dir=root)
+    bound = with_fixed_inputs(fn, params=params, base_dir=root)
+
+    @functools.wraps(fn)
+    def score(answer: Any) -> float:
+        return float(bound(answer)["score_binary"])
+
+    return score
 
 
 def load_tasks_from_json(
