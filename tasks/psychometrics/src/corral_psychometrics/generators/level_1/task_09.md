@@ -6,6 +6,8 @@ You are given responses from an online personality survey collected in several c
 
 Before estimating the correlations, assess response quality. In particular, consider respondents whose item answers show no variation. The self-rated `accuracy` field is available but should be evaluated as evidence rather than treated as a guaranteed indicator of careless responding. Responses are five-point ratings and `0` denotes a missing response.
 
+`codebook.md` gives the response coding and the text of every item.
+
 ## What to report
 
 Submit one complete lavaan/semopy model covering both instruments and one latent

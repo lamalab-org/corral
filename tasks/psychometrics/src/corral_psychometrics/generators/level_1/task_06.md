@@ -6,6 +6,8 @@ You are given responses from an online personality survey containing two instrum
 
 Estimate the correlation between every cross-instrument dimension pair while accounting for measurement error. Also decide which pairs should not be treated as distinct constructs: use a correlation of `0.80` or above as the threshold for indistinguishability. Responses are five-point ratings and `0` denotes a missing response.
 
+`codebook.md` gives the response coding and the text of every item.
+
 ## What to report
 
 Submit one complete lavaan/semopy model covering both instruments, one latent correlation for every cross-instrument pair, and the pair or pairs that meet the indistinguishability threshold.

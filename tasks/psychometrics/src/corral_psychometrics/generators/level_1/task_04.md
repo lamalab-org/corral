@@ -8,6 +8,8 @@ For the instrument that supports the comparison, estimate the standardised laten
 
 Use US respondents who reported male or female only (`gender` 1 or 2). Responses are five-point ratings and `0` denotes a missing response.
 
+`codebook.md` gives the response coding and the text of every item.
+
 ## What to report
 
 Submit the measurement model for the selected instrument, the standardised latent difference, and the biased item names in the other instrument.

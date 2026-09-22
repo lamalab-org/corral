@@ -14,6 +14,8 @@ total;
 
 Responses are five-point ratings and `0` denotes a missing response.
 
+`codebook.md` gives the response coding and the text of every item.
+
 ## What to report
 
 Submit one complete model covering both instruments, one scoring classification for each instrument, and the item grouping implied by the model.

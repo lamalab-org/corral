@@ -12,6 +12,8 @@ You are given responses from an online personality survey collected in several c
 
 The Dirty Dozen items are present but are not part of this task. Responses are five-point ratings and `0` denotes a missing response.
 
+`codebook.md` gives the response coding and the text of every item.
+
 ## What to report
 
 Submit a complete lavaan/semopy model for the HSNS and a classification for every HSNS item.

@@ -8,6 +8,8 @@ The analysis should also identify pairs of items whose responses share additiona
 
 Responses are five-point ratings and `0` denotes a missing response. The target population is respondents from the United States.
 
+`codebook.md` gives the response coding and the text of every item.
+
 ## What to report
 
 Submit a complete lavaan/semopy model for the 10 HSNS items, including correlated residuals where justified, plus the item loadings and any factor correlation.

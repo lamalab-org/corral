@@ -15,6 +15,8 @@ Give a defensibility judgement for each of these comparisons:
 
 Also estimate the correlation between the HSNS trait and the Dirty Dozen narcissism trait separately for men and women. Responses are five-point ratings and `0` denotes a missing response.
 
+`codebook.md` gives the response coding and the text of every item.
+
 ## What to report
 
 Submit a complete measurement model for the HSNS and Dirty Dozen narcissism items, a Boolean judgement for every comparison, and the two group-specific trait correlations.
