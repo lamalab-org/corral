@@ -141,7 +141,7 @@ def _md_file_tools(workspace: str) -> dict[str, Tool]:
                 "grep",
             )
         },
-        "library_docs": get_library_documentation,
+        "get_library_documentation": get_library_documentation,
         "execute_python_script": execute_python_script,
         # Overrides the statically selected tool with a workspace-aware variant
         # that handles Modal upload and download internally.
