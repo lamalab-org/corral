@@ -69,9 +69,9 @@ PROMPT = """\
 You are given responses from an online personality survey. The codebook describes \
 every column.
 
-Read the data and select participants from the United States. Identify the \
-theoretically plausible psychometric models for the Hypersensitive Narcissism Scale \
-(HSNS).
+Read the data and select participants from the United States. Report the one \
+model for the Hypersensitive Narcissism Scale (HSNS) you would defend to a \
+reviewer.
 
 Items are five-point ordinal ratings and 0 denotes a missing response.
 """

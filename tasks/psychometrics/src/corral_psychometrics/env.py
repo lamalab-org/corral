@@ -160,6 +160,12 @@ class PsychometricsEnvironment(Environment):
         )
 
 
+#: Closes every task prompt, identically.
+CLOSING_INSTRUCTION = (
+    "Before you answer, make sure nothing in the data would change your conclusions."
+)
+
+
 def _task_prompt(env: Environment, state: ExecutionState) -> str:
     """The task text the agent sees, with its workspace file list."""
     del state
@@ -168,7 +174,9 @@ def _task_prompt(env: Environment, state: ExecutionState) -> str:
     prompt = (
         f"Task: {task.name}\n\n{task.description}\n\n"
         f"Required submission format:\n{task.submission_format}\n\n"
-        "Available workspace files:\n" + "\n".join(f"- {name}" for name in files)
+        "Available workspace files:\n"
+        + "\n".join(f"- {name}" for name in files)
+        + f"\n\n{CLOSING_INSTRUCTION}"
     )
     return prompt
 

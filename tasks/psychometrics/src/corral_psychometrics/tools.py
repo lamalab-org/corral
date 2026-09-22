@@ -21,12 +21,7 @@ from corral.workspace import WorkspaceFilesystem, build_workspace_tools
 MAX_CODE_CHARS = 50_000
 MAX_OUTPUT_CHARS = 10_000
 
-REPL_DESCRIPTION = (
-    "A persistent Python session. Variables, dataframes and fitted models "
-    "survive between calls. Use print(...) to see results; a trailing "
-    "expression is echoed. NumPy, pandas, SciPy, factor-analyzer and semopy "
-    "are installed, and `np` is already imported."
-)
+REPL_DESCRIPTION = "Execute Python code in the task's persistent public-data-only session."
 
 
 def _namespace(initial_data: Mapping[str, Any]) -> Namespace:

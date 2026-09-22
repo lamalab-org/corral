@@ -90,8 +90,8 @@ PROMPT = """\
 You are given responses from an online personality survey. The codebook describes \
 every column.
 
-Read the data and select participants from the United States. Identify the \
-theoretically plausible psychometric models for the Dirty Dozen.\
+Read the data and select participants from the United States. Report the one \
+model for the Dirty Dozen you would defend to a reviewer.\
 """
 
 SUBMISSION_FORMAT = """\
