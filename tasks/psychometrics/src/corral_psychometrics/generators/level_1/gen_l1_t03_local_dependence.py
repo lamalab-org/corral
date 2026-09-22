@@ -91,8 +91,7 @@ A single JSON object:
 
 {
   "model_syntax": "<complete lavaan/semopy model>",
-  "loadings": {"<item>": <float>, ...},
-  "factor_correlation": <float, or null if your model has no two oblique factors>
+  "loadings": {"<item>": <float>, ...}
 }
 
 `model_syntax` uses lavaan notation (`=~` loadings, `~~` (co)variances, `0*` to fix a
@@ -264,14 +263,6 @@ def build_task_json(data_sha):
                         "derive_from": "refit_residual_covariances",
                         "truth_key": "scored.residual_pairs",
                         "criterion": "local_dependence",
-                    },
-                    {
-                        "key": "factor_correlation",
-                        "fn": "score_scalar",
-                        "truth_key": "scored.factor_correlation",
-                        "tol": 0.06,
-                        "applicable_if": "model_has_two_oblique_factors",
-                        "criterion": "parameter_quality",
                     },
                 ],
             ),
