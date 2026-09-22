@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 01 artifacts and scoring metadata."""
+"""Generate Level 2 Task 01 artifacts and scoring metadata.
+
+Generating model: two correlated HSNS factors (phi 0.35), with HSNS9 also
+loading 0.15 on the first and HSNS5 and HSNS10 agreeing 0.10 beyond them.
+
+The two groups are identical on both traits - the latent difference is exactly
+zero. Four items, two on each factor, are cleared more easily by group 2, so
+every point of the visible gap is item bias. A model that frees those four
+items recovers a difference of zero; the memo's model, which frees nothing,
+does not.
+"""
 
 from __future__ import annotations
 

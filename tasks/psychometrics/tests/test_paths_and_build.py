@@ -52,6 +52,19 @@ def test_truth_updates_meaningful_provenance(tmp_path, field, value):
     assert not write_json(path, payload)
 
 
+def test_truth_ignores_tuple_and_list_difference(tmp_path):
+    path = tmp_path / "truth.json"
+    payload = {
+        "scored": {"cross_loading": ("HSNS9", 0.15)},
+        "provenance": {"git_rev": "old", "seed": 1},
+    }
+    assert write_json(path, payload)
+    payload["provenance"]["git_rev"] = "new"
+    # The tuple comes back from JSON as a list; that is not a change.
+    assert not write_json(path, payload)
+    assert json.loads(path.read_text())["provenance"]["git_rev"] == "old"
+
+
 def test_corrupt_data_rejected(tmp_path):
     task = copy_task(tmp_path)
     assert len(load_tasks_from_json(task.definition.parent, data_root=tmp_path)) == 1

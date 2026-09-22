@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Generate Task 03 artifacts and scoring metadata."""
+"""Generate Task 03 artifacts and scoring metadata.
+
+Generating model, HSNS in the United States: one factor over all ten items,
+plus two pairs that agree beyond it - HSNS2 with HSNS7 at 0.38 and HSNS5 with
+HSNS10 at 0.33. Both pairs read as near-paraphrases.
+
+HSNS1 and HSNS8 are the decoy: they load highest (0.82, 0.80), so they are the
+most correlated pair in the raw data, but nothing is planted between them.
+Outside the United States no pair agrees beyond the factor and every item is
+measured worse.
+"""
 
 from __future__ import annotations
 
@@ -121,7 +131,10 @@ def build_dataset(rng):
         for (a, b), v in DD_PHI.items():
             phi[names.index(a), names.index(b)] = v
             phi[names.index(b), names.index(a)] = v
-        dd = C.correlated_block(n, rng, DD_LOADINGS, phi, names, C.THRESHOLDS)
+        # Three correlated traits, the same everywhere: filler for this task.
+        dd = C.correlated_block(
+            n, rng, loadings=DD_LOADINGS, phi_matrix=phi, factor_names=names, taus=C.THRESHOLDS
+        )
         frames.append(pd.concat([hsns, dd, C.demographics(n, rng, country)], axis=1))
     return C.finalize(frames, rng, SEED)
 

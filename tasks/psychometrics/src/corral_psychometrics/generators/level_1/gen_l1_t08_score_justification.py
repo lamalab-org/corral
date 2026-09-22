@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Generate Task 08 artifacts and scoring metadata."""
+"""Generate Task 08 artifacts and scoring metadata.
+
+Two instruments, each entitling its user to a different kind of score.
+
+    HSNS          one factor, modest and fairly even loadings, plus one small
+                  residual covariance. A sound total score, no subscales.
+    Dirty Dozen   bifactor with a weak broad trait under three strong narrow
+                  ones. Defensible subscales, no defensible total.
+
+Outside the United States both instruments behave the other way round - the
+HSNS splits into two factors and the Dirty Dozen gains a dominant general
+factor - so pooling the countries reverses both verdicts.
+"""
 
 from __future__ import annotations
 
@@ -122,18 +134,22 @@ United States sample during evaluation, so it must be complete and runnable.
 def simulate_hsns(n, rng, us):
     """One factor in the United States; two weakly correlated factors elsewhere."""
     if us:
+        # One factor over all ten items: a defensible total score.
         return C.correlated_block(
             n,
             rng,
-            {i: ("F", HSNS_LOADINGS[i]) for i in HSNS},
-            np.array([[1.0]]),
-            ["F"],
-            C.THRESHOLDS,
+            loadings={i: ("F", HSNS_LOADINGS[i]) for i in HSNS},
+            phi_matrix=np.array([[1.0]]),
+            factor_names=["F"],
+            taus=C.THRESHOLDS,
             resid_corr=HSNS_RESIDUAL_CORR,
         )[HSNS]
     phi = np.array([[1.0, NON_US_HSNS_PHI], [NON_US_HSNS_PHI, 1.0]])
     loadings = {i: ("A" if i in NON_US_HSNS_F1 else "B", NON_US_HSNS_LOADING) for i in HSNS}
-    return C.correlated_block(n, rng, loadings, phi, ["A", "B"], C.THRESHOLDS)[HSNS]
+    # Two weakly correlated factors instead: no total score to defend.
+    return C.correlated_block(
+        n, rng, loadings=loadings, phi_matrix=phi, factor_names=["A", "B"], taus=C.THRESHOLDS
+    )[HSNS]
 
 
 def simulate_dd(n, rng, us):
@@ -141,7 +157,15 @@ def simulate_dd(n, rng, us):
     dominant general factor with little left over elsewhere."""
     general = DD_GENERAL if us else {i: NON_US_DD_GENERAL for i in DD}
     specific = DD_SPECIFIC if us else {i: NON_US_DD_SPECIFIC for i in DD}
-    return C.bifactor_block(n, rng, general, specific, SPECIFIC_OF, DD, C.THRESHOLDS)
+    return C.bifactor_block(
+        n,
+        rng,
+        general=general,
+        specific=specific,
+        specific_of=SPECIFIC_OF,
+        items=DD,
+        taus=C.THRESHOLDS,
+    )
 
 
 def build_dataset(rng):

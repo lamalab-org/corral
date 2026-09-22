@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Generate Task 09 artifacts and scoring metadata."""
+"""Generate Task 09 artifacts and scoring metadata.
+
+Generating model, United States: five correlated factors, two from the HSNS
+(E, V) and three from the Dirty Dozen (M, P, N).
+
+Within an instrument the dimensions are moderately related; across the two they
+are barely related at all (0.12 to 0.30), and that is the finding the task is
+after. It is hidden by respondents who were not reading: 8% answer every item
+identically and a further 4% click at random, which inflates every correlation
+that spans the two instruments. Outside the United States the instruments
+really are related (0.45), so pooling inflates the same correlations again.
+"""
 
 from __future__ import annotations
 

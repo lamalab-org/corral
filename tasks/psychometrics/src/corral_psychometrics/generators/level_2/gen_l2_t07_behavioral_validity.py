@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 07 artifacts and scoring metadata."""
+"""Generate Level 2 Task 07 artifacts and scoring metadata.
+
+Generating model: one HSNS factor, with an outcome driven by both the trait and
+the group.
+
+    behavior ~ 0.18 * trait + 0.40 * gender
+
+The groups also differ by 0.80 on the trait itself, so a pooled coefficient
+overstates the trait's contribution and the association has to be read within
+groups. HSNS7 carries a direct 0.28 association with the outcome in the training
+sample and none in the holdout, which is the item the task asks for.
+"""
 
 from __future__ import annotations
 

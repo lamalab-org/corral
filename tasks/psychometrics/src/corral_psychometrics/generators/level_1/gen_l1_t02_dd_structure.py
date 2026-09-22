@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Generate Task 02 artifacts and scoring metadata."""
+"""Generate Task 02 artifacts and scoring metadata.
+
+Generating model, Dirty Dozen in the United States: bifactor.
+
+    broad    one trait under all 12 items
+    narrow   one per subscale - M, P, N - uncorrelated with the broad trait
+
+Outside the United States there is no broad trait at all, only the three
+subscales, correlated 0.20 to 0.35 and all measured worse. Analysing the
+countries together recovers neither picture. The HSNS items sit in the file
+as two correlated factors and belong to no part of this task.
+"""
 
 from __future__ import annotations
 
@@ -114,14 +125,15 @@ def build_dataset(rng):
     for country, n in C.N_BY_COUNTRY.items():
         demo = C.demographics(n, rng, country)
         if country == "US":
+            # One broad trait plus a narrow one per subscale.
             dd = C.bifactor_block(
                 n,
                 rng,
-                GENERAL_LOADINGS,
-                SPECIFIC_LOADINGS,
-                SPECIFIC_OF,
-                ITEMS,
-                C.THRESHOLDS,
+                general=GENERAL_LOADINGS,
+                specific=SPECIFIC_LOADINGS,
+                specific_of=SPECIFIC_OF,
+                items=ITEMS,
+                taus=C.THRESHOLDS,
             )
         else:
             names = ["M", "P", "N"]
@@ -129,21 +141,23 @@ def build_dataset(rng):
             for (a, b), v in NON_US_PHI.items():
                 phi[names.index(a), names.index(b)] = v
                 phi[names.index(b), names.index(a)] = v
+            # The same three subscales, merely correlated: no broad trait.
             dd = C.correlated_block(
                 n,
                 rng,
-                {i: (SPECIFIC_OF[i], NON_US_LOADING[SPECIFIC_OF[i]]) for i in ITEMS},
-                phi,
-                names,
-                C.THRESHOLDS,
+                loadings={i: (SPECIFIC_OF[i], NON_US_LOADING[SPECIFIC_OF[i]]) for i in ITEMS},
+                phi_matrix=phi,
+                factor_names=names,
+                taus=C.THRESHOLDS,
             )[ITEMS]
+        # Two correlated traits, the same everywhere: filler for this task.
         hsns = C.correlated_block(
             n,
             rng,
-            HSNS_LOADINGS,
-            np.array([[1.0, HSNS_PHI], [HSNS_PHI, 1.0]]),
-            ["ego", "sens"],
-            C.THRESHOLDS,
+            loadings=HSNS_LOADINGS,
+            phi_matrix=np.array([[1.0, HSNS_PHI], [HSNS_PHI, 1.0]]),
+            factor_names=["ego", "sens"],
+            taus=C.THRESHOLDS,
         )
         frames.append(pd.concat([hsns, dd, demo], axis=1))
     return C.finalize(frames, rng, SEED)
@@ -177,11 +191,11 @@ def population_correlation_matrix():
     big = C.bifactor_block(
         POP_REFERENCE_N,
         rng,
-        GENERAL_LOADINGS,
-        SPECIFIC_LOADINGS,
-        SPECIFIC_OF,
-        ITEMS,
-        C.THRESHOLDS,
+        general=GENERAL_LOADINGS,
+        specific=SPECIFIC_LOADINGS,
+        specific_of=SPECIFIC_OF,
+        items=ITEMS,
+        taus=C.THRESHOLDS,
     )
     return C.population_matrix(big, list(big.columns))
 

@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Generate Task 07 artifacts and scoring metadata."""
+"""Generate Task 07 artifacts and scoring metadata.
+
+Generating model, United States: HSNS as two correlated factors (phi 0.35) and
+the Dirty Dozen as a bifactor model.
+
+Each other country perturbs that in one named way, which fixes how far the US
+model carries over: Great Britain reproduces it, Canada and India measure the
+items worse, Australia and Canada weaken the Dirty Dozen general factor, Brazil
+pushes the HSNS factors to 0.95 so they stop being distinct, and Germany both
+loses the general factor and moves three items to the wrong subscale.
+"""
 
 from __future__ import annotations
 

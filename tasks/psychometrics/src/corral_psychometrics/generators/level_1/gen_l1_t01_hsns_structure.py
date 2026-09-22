@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Generate Task 01 artifacts and scoring metadata."""
+"""Generate Task 01 artifacts and scoring metadata.
+
+Generating model, HSNS in the United States: two correlated factors.
+
+    egocentrism      HSNS1 HSNS4 HSNS5 HSNS6 HSNS8 HSNS10
+    oversensitivity  HSNS2 HSNS3 HSNS7 HSNS9
+    phi 0.35
+
+On top of that: HSNS9 also loads 0.15 on egocentrism, HSNS5 and HSNS10 agree
+0.10 beyond the factors, and two items carry small gender DIF. Outside the
+United States the same two factors are measured worse and correlate 0.68, so
+pooling the countries blurs the structure the task asks for.
+"""
 
 from __future__ import annotations
 
@@ -95,13 +107,14 @@ def build_dataset(rng):
         is_us = country == "US"
         demo = C.demographics(n, rng, country)
         phi = PHI if is_us else PHI_NON_US
+        # Two correlated traits; the extras are planted in the US sample only.
         hsns = C.correlated_block(
             n,
             rng,
-            LOADINGS,
-            np.array([[1.0, phi], [phi, 1.0]]),
-            [F1, F2],
-            C.THRESHOLDS,
+            loadings=LOADINGS,
+            phi_matrix=np.array([[1.0, phi], [phi, 1.0]]),
+            factor_names=[F1, F2],
+            taus=C.THRESHOLDS,
             scale=1.0 if is_us else LOADING_SCALE_NON_US,
             cross=CROSS_LOADING if is_us else None,
             resid_corr=RESIDUAL_CORR if is_us else None,
@@ -113,7 +126,10 @@ def build_dataset(rng):
         for (a, b), v in DD_PHI.items():
             phi_dd[names.index(a), names.index(b)] = v
             phi_dd[names.index(b), names.index(a)] = v
-        dd = C.correlated_block(n, rng, DD_LOADINGS, phi_dd, names, C.THRESHOLDS)
+        # Three correlated traits, the same everywhere: filler for this task.
+        dd = C.correlated_block(
+            n, rng, loadings=DD_LOADINGS, phi_matrix=phi_dd, factor_names=names, taus=C.THRESHOLDS
+        )
         frames.append(pd.concat([hsns, dd, demo], axis=1))
     return C.finalize(frames, rng, SEED)
 
@@ -152,10 +168,10 @@ def population_correlation_matrix():
     big = C.correlated_block(
         POP_REFERENCE_N,
         rng,
-        LOADINGS,
-        np.array([[1.0, PHI], [PHI, 1.0]]),
-        [F1, F2],
-        C.THRESHOLDS,
+        loadings=LOADINGS,
+        phi_matrix=np.array([[1.0, PHI], [PHI, 1.0]]),
+        factor_names=[F1, F2],
+        taus=C.THRESHOLDS,
         cross=CROSS_LOADING,
         resid_corr=RESIDUAL_CORR,
     )[ITEMS]

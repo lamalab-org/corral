@@ -127,13 +127,30 @@ def correlated_block(
 ):
     """Answers from respondents whose traits are correlated with each other.
 
+    Each item scores a respondent out of sight, then the cut points turn that
+    score into a 1-5 answer:
+
+        ystar = lam * eta + noise
+
+    ystar  the unobserved score, before cut points make it a 1-5 answer
+    eta    where the respondent stands on the trait the item measures, drawn so
+           the traits correlate the way `phi_matrix` says
+    lam    the item's loading: how much of the score the trait accounts for
+    noise  everything else about the item, drawn with the variance the loading
+           leaves over
+    tau    the item's four cut points, from `taus`
+
+    An item carries one unit of variance, which `lam` and `noise` divide: a
+    `lam` of 0.7 accounts for 0.49 of it and leaves 0.51 to `noise`. `cross`
+    and `resid_corr` add further terms, each paid for out of `noise` in turn.
+    Every generator in this package uses these names.
+
     n            how many respondents
     rng          random generator
-    loadings     {item: (factor, loading)}; loading is how strongly the item
-                 tracks that factor, 0 to 1
+    loadings     {item: (factor, lam)}
     phi_matrix   correlations between the factors
     factor_names names in the order phi_matrix uses
-    taus         {item: cut points}
+    taus         {item: tau}
     scale        multiplies every loading, to make a worse-measured group
     cross        (item, factor, loading): give one item a second loading
     resid_corr   ((item, item), covariance): let two items agree beyond the
@@ -169,26 +186,36 @@ def correlated_block(
 def bifactor_block(n, rng, general, specific, specific_of, items, taus):
     """Answers driven by one broad trait plus a narrow one per subscale.
 
-    The broad and narrow traits are uncorrelated, so an item's explainable
-    variance splits between them.
+        ystar = broad_lam * broad + narrow_lam * narrow + noise
 
-    general      {item: loading on the broad trait}
-    specific     {item: loading on its narrow trait}
-    specific_of  {item: which narrow trait}
+    ystar       the unobserved score, before cut points make it a 1-5 answer
+    broad       the one trait every item measures
+    narrow      the trait of the item's own subscale
+    broad_lam   the item's loading on `broad`, from `general`
+    narrow_lam  the item's loading on `narrow`, from `specific`
+    noise       everything else about the item, drawn with `left_over`
+
+    `broad` and `narrow` are uncorrelated, so they claim separate shares of the
+    item's one unit of variance and `noise` takes `left_over`, the rest.
+
+    general      {item: broad_lam}
+    specific     {item: narrow_lam}
+    specific_of  {item: which narrow trait it belongs to}
     items        column order of the result
-    taus         {item: cut points}
+    taus         {item: tau}
     """
-    g = rng.normal(size=n)
+    broad = rng.normal(size=n)
     # dict.fromkeys keeps first-appearance order; iterating a set here would
     # shuffle the draws between processes, because string hashing is randomised.
-    s = {name: rng.normal(size=n) for name in dict.fromkeys(specific_of.values())}
+    narrow = {name: rng.normal(size=n) for name in dict.fromkeys(specific_of.values())}
     out = {}
     for item in items:
-        gl, sl = general[item], specific[item]
+        broad_lam, narrow_lam = general[item], specific[item]
+        left_over = 1 - broad_lam**2 - narrow_lam**2
         ystar = (
-            gl * g
-            + sl * s[specific_of[item]]
-            + rng.normal(0, np.sqrt(max(1 - gl**2 - sl**2, 1e-6)), n)
+            broad_lam * broad
+            + narrow_lam * narrow[specific_of[item]]
+            + rng.normal(0, np.sqrt(max(left_over, 1e-6)), n)
         )
         out[item] = categorize(ystar, taus[item])
     return pd.DataFrame(out)[items]
@@ -460,14 +487,17 @@ def write_json(path, payload):
     """
 
     def stable(value):
-        if not isinstance(value, dict):
-            return value
-        value = dict(value)
-        if "provenance" in value:
+        """The payload as JSON, without the fields that change on every build.
+
+        Comparing the serialised form, rather than the objects, keeps a tuple in
+        the payload equal to the list it was last written as.
+        """
+        if isinstance(value, dict) and "provenance" in value:
+            value = dict(value)
             value["provenance"] = {
                 k: v for k, v in value["provenance"].items() if k not in {"generated", "git_rev"}
             }
-        return value
+        return json.dumps(value, indent=2, sort_keys=True, default=str)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.is_file():

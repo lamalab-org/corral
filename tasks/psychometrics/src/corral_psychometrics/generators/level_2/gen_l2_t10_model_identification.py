@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 10 artifacts and scoring metadata."""
+"""Generate Level 2 Task 10 artifacts and scoring metadata.
+
+Six datasets of twelve items, each drawn from one of six candidate structures
+and then given one data-quality problem on top.
+
+    model_a   one general factor
+    model_b   two correlated factors, Q01-Q06 and Q07-Q12
+    model_c   bifactor - a general factor plus one narrow factor per subscale
+    model_d   three correlated factors, Q01-Q03, Q04-Q07 and Q08-Q12
+    model_e   two correlated factors, Q06 also loading on the second
+    model_f   one general factor plus a method effect shared by Q03 and Q10
+
+The complications - missingness, local dependence, a shifted subgroup, repeated
+rows, a weak item, a response style - are what make several structures fit a
+dataset equally well, so an answer is a list of candidates within the stated BIC
+margin rather than one name.
+"""
 
 from __future__ import annotations
 

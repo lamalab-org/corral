@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 09 artifacts and scoring metadata."""
+"""Generate Level 2 Task 09 artifacts and scoring metadata.
+
+Generating model: a two-parameter logistic item response model over 20 binary
+items, difficulties evenly spaced from -2 to +2.
+
+    P(correct) = 1 / (1 + exp(-slope * (theta - difficulty)))
+
+Three items should leave the bank, and the vendor's review finds only one of
+them. CAT06 and CAT07 are redundant with each other and the vendor flags them;
+CAT13 and CAT14 are equally redundant and it misses them; CAT12's
+discrimination collapses from 1.15 to 0.30 in the holdout. CAT03 is flagged and
+is fine. All four dependent items have high discrimination, so an adaptive test
+reaches for them first.
+"""
 
 from __future__ import annotations
 

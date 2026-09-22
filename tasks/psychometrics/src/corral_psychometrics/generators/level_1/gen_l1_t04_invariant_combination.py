@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Generate Task 04 artifacts and scoring metadata."""
+"""Generate Task 04 artifacts and scoring metadata.
+
+Two instruments, only one of which supports a gender comparison.
+
+    HSNS          one factor. Women really are 0.45 higher on the trait, but
+                  four items are also biased against them, so the observed gap
+                  mixes trait and bias and the comparison is not defensible.
+    Dirty Dozen   bifactor - one broad trait plus a narrow one per subscale.
+                  No item is biased; women are simply 0.30 higher. This is the
+                  instrument that supports the comparison.
+
+Outside the United States no item is biased and the Dirty Dozen difference runs
+the other way, so pooling the countries moves the answer out of tolerance
+rather than merely diluting it.
+"""
 
 from __future__ import annotations
 

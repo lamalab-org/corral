@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Generate Task 05 artifacts and scoring metadata."""
+"""Generate Task 05 artifacts and scoring metadata.
+
+Generating model, United States: one HSNS factor plus a second trait carried by
+the four Dark-Triad narcissism items.
+
+The items load identically in both genders, so structure, loadings, variances
+and the correlation between the two traits are all comparable. But six of the
+ten HSNS items are answered differently at the same trait level, in both
+directions, and nothing in the data says which four are clean - so no reference
+set can be defended and the latent means are not identified. The real latent
+difference, 0.30, is deliberately unrecoverable. The two traits correlate 0.50
+in men and 0.30 in women, and that contrast is recoverable.
+"""
 
 from __future__ import annotations
 
@@ -143,13 +155,14 @@ def build_dataset(rng):
         block = simulate(
             n, rng, (demo.gender == 2).to_numpy(), 1.0 if us else LOADING_SCALE_NON_US, us
         )
+        # One throwaway trait behind the Dark Triad items this task ignores.
         filler = C.correlated_block(
             n,
             rng,
-            {i: ("x", 0.6) for i in C.DD_ITEMS if i not in OTHER},
-            np.array([[1.0]]),
-            ["x"],
-            C.THRESHOLDS,
+            loadings={i: ("x", 0.6) for i in C.DD_ITEMS if i not in OTHER},
+            phi_matrix=np.array([[1.0]]),
+            factor_names=["x"],
+            taus=C.THRESHOLDS,
         )
         frames.append(pd.concat([block, filler, demo], axis=1))
     return C.finalize(frames, rng, SEED)

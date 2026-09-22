@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 02 artifacts and scoring metadata."""
+"""Generate Level 2 Task 02 artifacts and scoring metadata.
+
+Generating model, training sample: two correlated HSNS factors (phi 0.35) plus
+a residual covariance between HSNS5 and HSNS10, which are worded alike.
+
+Each holdout changes one thing, which fixes the right verdict for it:
+
+    holdout_a   the same population                    generalizes
+    holdout_b   the factors correlate 0.78, not 0.35   relations differ
+    holdout_c   an extra 0.45 cross-loading            structure fails
+"""
 
 from __future__ import annotations
 

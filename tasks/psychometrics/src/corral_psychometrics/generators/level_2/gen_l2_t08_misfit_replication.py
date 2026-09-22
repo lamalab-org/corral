@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 08 artifacts and scoring metadata."""
+"""Generate Level 2 Task 08 artifacts and scoring metadata.
+
+Generating model: two correlated HSNS factors (phi 0.28), with four problems
+planted in both samples and one planted in the development sample alone.
+
+    HSNS5 ~~ HSNS7      residual covariance 0.22        replicates
+    HSNS9 -> F1         cross-loading 0.38              replicates
+    HSNS3               differential item functioning   replicates
+    HSNS6               loading 0.30, too weak to keep  replicates
+    HSNS1 ~~ HSNS2      residual covariance 0.30        development only
+
+The development-only pair is the largest single improvement to development fit
+and is absent from the replication sample, so chasing fit alone gets it wrong.
+Both replicating covariances cross the two factors; a pair inside one factor
+would be absorbed by it and leave nothing to find.
+"""
 
 from __future__ import annotations
 

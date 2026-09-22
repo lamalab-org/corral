@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Generate Task 10 artifacts and scoring metadata."""
+"""Generate Task 10 artifacts and scoring metadata.
+
+Generating model, HSNS in the United States: one factor over all ten items,
+with four planted faults.
+
+    HSNS4   mis-keyed - stored with the scale reversed
+    HSNS7   missing answers written as the scale midpoint, 45% of the time
+    HSNS2   truncated - the top of the scale was never recorded
+    HSNS6   no recording fault at all; the item simply measures poorly
+
+The first three are damage to the data, the fourth is a property of the item,
+and telling them apart is the task. Outside the United States every item is
+measured worse and HSNS9 was mistranslated and runs backwards, so pooling makes
+that item, rather than the real one, look like the weak link.
+"""
 
 from __future__ import annotations
 

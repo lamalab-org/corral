@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 05 artifacts and scoring metadata."""
+"""Generate Level 2 Task 05 artifacts and scoring metadata.
+
+Generating model: two correlated HSNS factors (phi 0.35).
+
+The correlation in the delivered file is inflated by two mechanisms at once,
+and the task is to find both. Respondents are re-delivered with a probability
+rising in the sum of their two traits, so the repeated rows are the high-scoring
+end of the sample; separately, distinct respondents collide on identical answer
+patterns by chance. A re-delivered row keeps its answers, age and accuracy, and
+is given a fresh participant id, session id and date, so the identifying key is
+the responses rather than the ids.
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 06 artifacts and scoring metadata."""
+"""Generate Level 2 Task 06 artifacts and scoring metadata.
+
+Generating model: one HSNS factor, with group 2 genuinely 0.25 higher on the
+trait, and five kinds of item planted on top.
+
+    HSNS2 HSNS3   export wrote a middle response over the real answer, group 2
+    HSNS5 HSNS9   real differential item functioning - the trait is the same,
+                  the response function is not
+    HSNS7         mis-keyed
+    HSNS6         no fault; the item simply measures poorly
+    the rest      sound
+
+The delivery audit flags the re-sent batch as HSNS2, HSNS3 and HSNS4 - HSNS4
+rode along undamaged, and neither genuinely biased item was in that batch, so
+the audit alone gives the wrong answer.
+"""
 
 from __future__ import annotations
 

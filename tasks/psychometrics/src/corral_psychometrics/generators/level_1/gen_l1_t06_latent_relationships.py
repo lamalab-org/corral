@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Generate Task 06 artifacts and scoring metadata."""
+"""Generate Task 06 artifacts and scoring metadata.
+
+Generating model, United States: five correlated factors, two from the HSNS and
+three from the Dirty Dozen.
+
+    VULN   HSNS2 HSNS3 HSNS7 HSNS9
+    EGO    HSNS1 HSNS4 HSNS5 HSNS6 HSNS8 HSNS10
+    MACH   PSYCH   NARC          one per Dirty Dozen subscale
+
+EGO and NARC correlate 0.86, above the 0.80 the prompt gives as the point where
+two dimensions cannot be told apart; every other pair sits well below it. EGO is
+measured poorly on purpose, so relating the instruments through scale scores
+instead of latent variables shrinks exactly the correlation that decides the
+answer.
+"""
 
 from __future__ import annotations
 

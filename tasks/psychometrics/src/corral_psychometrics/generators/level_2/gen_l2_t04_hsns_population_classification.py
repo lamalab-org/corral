@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 04 artifacts and scoring metadata."""
+"""Generate Level 2 Task 04 artifacts and scoring metadata.
+
+Six HSNS populations, each with its own structure, and five case samples drawn
+from some of them.
+
+    population_a   two correlated factors
+    population_b   one factor
+    population_c   bifactor
+    population_d   two factors, stronger loadings, phi 0.72, HSNS9 cross-loads
+    population_e   two correlated factors, all but identical to a
+    population_f   two correlated factors plus a residual covariance
+
+a and e differ too little to separate, so a case from either is compatible with
+both. The rest are separable.
+"""
 
 from __future__ import annotations
 

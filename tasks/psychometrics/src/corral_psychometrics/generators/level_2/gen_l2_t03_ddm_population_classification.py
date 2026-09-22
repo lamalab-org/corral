@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 03 artifacts and scoring metadata."""
+"""Generate Level 2 Task 03 artifacts and scoring metadata.
+
+Six Dirty Dozen populations, each with its own structure, and five case samples
+drawn from some of them.
+
+    population_a   three correlated factors, loadings .68, r .25
+    population_b   one factor, loadings .62
+    population_c   bifactor, general .62, specific .38
+    population_d   two factors, loadings .70, r .30
+    population_e   three correlated factors, loadings .66, r .29
+    population_f   population_a plus a residual covariance on DDP1, DDP2
+
+a and e are deliberately close, so a case from either is compatible with both
+and the answer for it is a list, not one name. The rest are separable.
+"""
 
 from __future__ import annotations
 
