@@ -74,7 +74,8 @@ def test_local_session_supports_initial_state_updates_and_exports():
 
 def test_repl_tool_factory_is_serial_and_controller_managed():
     repl = create_python_repl_tool(argument_name="code")
-    assert repl.trusted is True
+    assert repl.trusted is False
+    assert repl.controller_dispatch is True
     assert repl.concurrency == ToolConcurrency.SERIAL
     assert repl.workspace_access == WorkspaceAccess.NONE
     assert repl.hidden_args == {}

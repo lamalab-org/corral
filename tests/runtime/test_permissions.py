@@ -16,6 +16,7 @@ from corral.agents.session import AgentSessionCapabilities
 from corral.core.environment import Environment
 from corral.core.tool import tool
 from corral.runtime import permissions
+from corral.runtime.tool_execution import PreparedToolCall
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("CORRAL_PERMISSION_TESTS") != "1",
@@ -421,16 +422,10 @@ def test_background_executor_preferences_cannot_bypass_permissions(
 
     permission_probe.executor = executor_name
     manager = JobManager()
-    executor = manager._resolve_executor(permission_probe)
+    prepared = PreparedToolCall.capture(permission_probe, {}, workspace=workspace)
+    executor = manager._resolve_executor(prepared)
     assert isinstance(executor, RestrictedExecutor)
-    work = JobWork(
-        job_id="probe",
-        tool_name=permission_probe.name,
-        tool=permission_probe,
-        call_arguments={},
-        workspace=workspace,
-        workspace_access=permission_probe.workspace_access.value,
-    )
+    work = JobWork(job_id="probe", prepared=prepared)
     assert_probe(executor.run_tool(work, threading.Event()))
     manager.shutdown()
 
@@ -445,11 +440,7 @@ def test_background_job_uses_the_same_read_only_workspace_policy(workspace):
     manager = JobManager()
     try:
         record = manager.submit(
-            read_workspace_probe,
-            visible_arguments={},
-            call_arguments={},
-            workspace=workspace,
-            workspace_access="read",
+            PreparedToolCall.capture(read_workspace_probe, {}, workspace=workspace)
         )
         view = manager.result(record.context.job_id, wait=True, timeout=5)
         assert view["status"] == "succeeded"
@@ -1457,12 +1448,14 @@ def public_python_probe(code: str) -> str:
 
 
 class PrivateProbeEnvironment(Environment):
-    def execute_trusted_tool(self, state, selected_tool, arguments):
+    def execute_controller_tool(self, state, prepared):
         from corral.core.transition import ToolExecutionResult
 
+        selected_tool = prepared.tool
+        arguments = prepared.arguments
         if selected_tool.name != "trusted_private_probe":
-            return super().execute_trusted_tool(state, selected_tool, arguments)
-        assert selected_tool.trusted
+            return super().execute_controller_tool(state, prepared)
+        assert prepared.trusted
         assert os.getuid() == 0
         assert (
             arguments["secret"]

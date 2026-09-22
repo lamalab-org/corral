@@ -22,12 +22,11 @@ from corral.backend.executors import (
     build_executor,
 )
 from corral.report.logging import event, exception_fields
-from corral.runtime import permissions
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from corral.core.tool import Tool
+    from corral.runtime.tool_execution import PreparedToolCall
 
 # Re-exported for backwards compatibility: callers historically imported
 # `JobExecutor` / `ThreadExecutor` / `DEFAULT_JOB_CONCURRENCY` from this
@@ -98,27 +97,45 @@ class JobStatus(str, Enum):
 class JobContext:
     """Immutable execution inputs a job is bound to at submit time.
 
-    `arguments` are the *visible* arguments the agent supplied and are safe to
-    surface in reports. `call_arguments` additionally carry any injected hidden
-    arguments (scoring secrets, fixed paths) and are used only to execute the
-    tool — they are **never** serialised. `hidden_arg_names` records *which*
-    arguments were injected without leaking their values.
+    The prepared call contains both report-safe public arguments and private
+    execution inputs. It is excluded from repr/serialization; accessors expose
+    only the safe provenance needed by job APIs.
     """
 
     job_id: str
-    tool_name: str
-    arguments: dict[str, Any]
-    call_arguments: dict[str, Any] = field(repr=False)
-    hidden_arg_names: tuple[str, ...]
-    # Public namespace only. The physical assignment is controller-private and
-    # excluded from repr/serialization.
-    workspace: str | None
-    assigned_workspace: str | None = field(default=None, repr=False)
-    workspace_access: str = "none"
-    resource_mounts: dict[str, tuple[str, str]] = field(
-        default_factory=dict, repr=False
-    )
-    concurrency_key: str | None = None
+    prepared: PreparedToolCall = field(repr=False)
+
+    @property
+    def tool_name(self) -> str:
+        return self.prepared.tool_name
+
+    @property
+    def arguments(self) -> dict[str, Any]:
+        return self.prepared.visible_arguments
+
+    @property
+    def hidden_arg_names(self) -> tuple[str, ...]:
+        return self.prepared.hidden_arg_names
+
+    @property
+    def workspace(self) -> str | None:
+        return "/workspace" if self.prepared.workspace else None
+
+    @property
+    def assigned_workspace(self) -> str | None:
+        return self.prepared.workspace
+
+    @property
+    def workspace_access(self) -> str:
+        return self.prepared.workspace_access
+
+    @property
+    def resource_mounts(self) -> dict[str, tuple[str, str]]:
+        return self.prepared.resource_mounts
+
+    @property
+    def concurrency_key(self) -> str | None:
+        return self.prepared.concurrency_key
 
 
 @dataclass
@@ -141,8 +158,8 @@ class JobRecord:
     def to_dict(self, include_result: bool = True) -> dict[str, Any]:
         """Serialise a job for a tool response or a report.
 
-        The hidden argument *values* in `call_arguments` are deliberately
-        excluded; only the visible arguments and the names of injected hidden
+        Hidden argument values in the prepared call are deliberately excluded;
+        only the visible arguments and the names of injected hidden
         arguments are reported, matching the committed environment projection
         redacts `hidden_args`.
         """
@@ -213,23 +230,23 @@ class JobManager:
         self._key_lock_factory = key_lock_factory
         self._key_locks: dict[str, ExclusiveLock] = {}
 
-    def _resolve_executor(self, tool: Tool) -> JobExecutor:
+    def _resolve_executor(self, prepared: PreparedToolCall) -> JobExecutor:
         """Return the executor a tool's work should run on, building it lazily.
 
-        The name comes from `tool.executor` (default `thread`). Instances are
+        The name comes from the frozen executor selection (default `thread`). Instances are
         cached so every job of the same kind shares one pool; an injected or
         previously-built executor is reused.
         """
 
         name = (
             "restricted"
-            if permissions.enabled()
-            else getattr(tool, "executor", None) or DEFAULT_EXECUTOR
+            if prepared.execution_kind == "restricted"
+            else prepared.executor or DEFAULT_EXECUTOR
         )
         with self._executors_guard:
             executor = self._executors.get(name)
             if executor is None:
-                if permissions.enabled():
+                if prepared.execution_kind == "restricted":
                     executor = RestrictedExecutor(self._max_concurrency)
                 else:
                     executor = build_executor(name, self._max_concurrency)
@@ -238,15 +255,7 @@ class JobManager:
 
     def submit(
         self,
-        tool: Tool,
-        *,
-        visible_arguments: dict[str, Any],
-        call_arguments: dict[str, Any],
-        hidden_arg_names: tuple[str, ...] = (),
-        workspace: str | None = None,
-        workspace_access: str = "none",
-        resource_mounts: dict[str, tuple[str, str]] | None = None,
-        concurrency_key: str | None = None,
+        prepared: PreparedToolCall,
     ) -> JobRecord:
         """Register a job and hand its work to the executor immediately.
 
@@ -256,20 +265,9 @@ class JobManager:
         :class:`JobContext` here, at submit time.
         """
         job_id = f"job_{uuid.uuid4().hex[:16]}"
-        context = JobContext(
-            job_id=job_id,
-            tool_name=tool.name,
-            arguments=dict(visible_arguments),
-            call_arguments=dict(call_arguments),
-            hidden_arg_names=tuple(hidden_arg_names),
-            workspace="/workspace" if workspace else None,
-            assigned_workspace=workspace,
-            workspace_access=workspace_access,
-            resource_mounts=dict(resource_mounts or {}),
-            concurrency_key=concurrency_key or getattr(tool, "concurrency_key", None),
-        )
+        context = JobContext(job_id=job_id, prepared=prepared)
         record = JobRecord(context=context)
-        executor = self._resolve_executor(tool)
+        executor = self._resolve_executor(prepared)
         cancel_event = threading.Event()
         with self._lock:
             self._jobs[job_id] = record
@@ -279,13 +277,11 @@ class JobManager:
             "job.submitted",
             subsystem="tool",
             job_id=job_id,
-            tool_name=tool.name,
-            executor=getattr(tool, "executor", None) or DEFAULT_EXECUTOR,
+            tool_name=prepared.tool_name,
+            executor=prepared.executor or DEFAULT_EXECUTOR,
             status=record.status.value,
         )
-        future = executor.submit(
-            partial(self._run, tool, record, executor, cancel_event)
-        )
+        future = executor.submit(partial(self._run, record, executor, cancel_event))
         with self._lock:
             self._futures[job_id] = future
             cancelled = job_id in self._cancelled
@@ -296,7 +292,6 @@ class JobManager:
 
     def _run(
         self,
-        tool: Tool,
         record: JobRecord,
         executor: JobExecutor,
         cancel_event: threading.Event,
@@ -308,7 +303,7 @@ class JobManager:
         if key_lock is not None:
             key_lock.acquire()
         try:
-            work = self._start_job(tool, record)
+            work = self._start_job(record)
             if work is not None:
                 self._finish_job(record, executor.run_tool(work, cancel_event))
         except JobCancelled:
@@ -319,7 +314,7 @@ class JobManager:
             if key_lock is not None:
                 key_lock.release()
 
-    def _start_job(self, tool: Tool, record: JobRecord) -> JobWork | None:
+    def _start_job(self, record: JobRecord) -> JobWork | None:
         with self._lock:
             if record.context.job_id in self._cancelled:
                 return None
@@ -327,12 +322,7 @@ class JobManager:
             record.started_at = _utcnow()
         return JobWork(
             job_id=record.context.job_id,
-            tool_name=tool.name,
-            tool=tool,
-            call_arguments=record.context.call_arguments,
-            workspace=record.context.assigned_workspace,
-            workspace_access=record.context.workspace_access,
-            resource_mounts=record.context.resource_mounts,
+            prepared=record.context.prepared,
         )
 
     def _finish_job(self, record: JobRecord, rendered: str) -> None:

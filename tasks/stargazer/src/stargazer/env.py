@@ -24,7 +24,6 @@ from stargazer.tools import create_tools
 
 if TYPE_CHECKING:
     from corral.core.state import ExecutionState
-    from corral.core.tool import Tool
 
 TASK_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = TASK_ROOT / "data"
@@ -290,11 +289,11 @@ def _configure_trial(env: Environment, _state: ExecutionState) -> EnvironmentSet
 class StargazerEnvironment(Environment):
     """Run Stargazer tools with committed state and a public-data-only REPL worker."""
 
-    def execute_trusted_tool(
-        self, state: ExecutionState, tool: Tool, arguments: dict[str, Any]
-    ) -> Any:
+    def execute_controller_tool(self, state: ExecutionState, prepared) -> Any:
+        tool = prepared.tool
+        arguments = prepared.arguments
         if tool.name not in {"PythonREPL", "submit_action"}:
-            return super().execute_trusted_tool(state, tool, arguments)
+            return super().execute_controller_tool(state, prepared)
         benchmark_task = self.current_task.scoring_inputs["benchmark_task"]
         environment_values = dict(state.environment.values)
         hidden = json.loads(json.dumps(environment_values["hidden_arguments"]))

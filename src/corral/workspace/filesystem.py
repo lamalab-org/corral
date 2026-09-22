@@ -69,13 +69,32 @@ def materialize_local_tool_arguments(
     tool: Any,
     arguments: dict[str, Any],
     workspace: str | Path | None,
+    *,
+    prepared: Any | None = None,
 ) -> dict[str, Any]:
-    """Prepare one tool call for host execution without a mount namespace."""
-    if workspace is None or getattr(tool, "trusted", False):
+    """Prepare host execution without pretending it is OS-isolated.
+
+    Local execution translates canonical paths for compatibility, but unlike a
+    restricted worker it cannot enforce read-only access at the kernel level.
+    A prepared call supplies frozen policy so queued execution never consults
+    mutable tool metadata.
+    """
+    trusted = (
+        prepared.trusted if prepared is not None else getattr(tool, "trusted", False)
+    )
+    if workspace is None or trusted:
         return dict(arguments)
-    access = getattr(tool, "workspace_access", "none")
+    access = (
+        prepared.workspace_access
+        if prepared is not None
+        else getattr(tool, "workspace_access", "none")
+    )
     access = access.value if hasattr(access, "value") else str(access)
-    operation = getattr(tool, "worker_operation", None)
+    operation = (
+        prepared.worker_operation
+        if prepared is not None
+        else getattr(tool, "worker_operation", None)
+    )
     if access == "none" or (
         isinstance(operation, str) and operation.startswith("workspace:")
     ):

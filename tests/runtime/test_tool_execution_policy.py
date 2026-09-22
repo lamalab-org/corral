@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,7 @@ from corral.core.tool_catalog import (
     ToolPolicyMismatchError,
 )
 from corral.core.transition import ToolExecutionResult
-from corral.runtime.tool_execution import ToolExecutor
+from corral.runtime.tool_execution import PreparedToolCall, ToolExecutor
 from corral.workspace import AbsoluteWorkspaceFilesystem
 
 
@@ -182,7 +183,10 @@ def test_local_background_job_materializes_public_workspace_paths(tmp_path):
     )
     try:
         submitted = environment.submit_job(
-            "background_read", {"path": "/workspace/input.txt"}
+            _state(environment),
+            "background_read",
+            {"path": "/workspace/input.txt"},
+            action_id="background-action",
         )
         assert environment.job_manager is not None
         result = environment.job_manager.result(
@@ -195,6 +199,42 @@ def test_local_background_job_materializes_public_workspace_paths(tmp_path):
     assert result["result"] == "background data at /workspace/input.txt"
     assert result["arguments"] == {"path": "/workspace/input.txt"}
     assert str(workspace) not in str(result)
+
+
+def test_background_start_uses_the_same_preparation_path():
+    @tool(background_capable=True, hidden_args=["secret"])
+    def background_echo(value: str, secret: str) -> str:
+        """Echo a public value with a configured private suffix."""
+        return f"{value}:{secret}"
+
+    environment = Environment(
+        "policy",
+        _task("background_echo"),
+        toolset=Toolset(
+            pool={"background_echo": background_echo}, workspace_factory=None
+        ),
+    )
+    state = _state(
+        environment,
+        values={"hidden_arguments": {"secret": "configured"}},
+    )
+    try:
+        handle = json.loads(
+            ToolExecutor(environment).execute(
+                state,
+                environment.tools["start_background_echo"],
+                {"value": "public"},
+                action_id="background-action",
+            )
+        )
+        assert environment.job_manager is not None
+        result = environment.job_manager.result(handle["job_id"], wait=True, timeout=2)
+    finally:
+        environment.shutdown_jobs()
+
+    assert result["result"] == "public:configured"
+    assert result["arguments"] == {"value": "public"}
+    assert result["hidden_arg_names"] == ["secret"]
 
 
 def test_public_path_normalization_is_recursive_and_normalizes_keys(tmp_path):
@@ -225,6 +265,26 @@ def test_changed_private_policy_prevents_resumption():
     )
     state = _state(environment)
     calculate.workspace_access = WorkspaceAccess.READ
+
+    with pytest.raises(ToolPolicyMismatchError, match="different permissions"):
+        ToolExecutor(environment).execute(
+            state, calculate, {"value": 1}, action_id="action"
+        )
+
+
+def test_changed_worker_operation_prevents_resumption():
+    @tool
+    def calculate(value: int) -> str:
+        """Calculate one value."""
+        return str(value)
+
+    environment = Environment(
+        "policy",
+        _task("calculate"),
+        toolset=Toolset(pool={"calculate": calculate}, workspace_factory=None),
+    )
+    state = _state(environment)
+    calculate.worker_operation = "terminal"
 
     with pytest.raises(ToolPolicyMismatchError, match="different permissions"):
         ToolExecutor(environment).execute(
@@ -440,11 +500,7 @@ def test_job_records_expose_only_the_public_workspace(tmp_path):
     manager = JobManager()
     try:
         record = manager.submit(
-            background_probe,
-            visible_arguments={},
-            call_arguments={},
-            workspace=str(tmp_path),
-            workspace_access="none",
+            PreparedToolCall.capture(background_probe, {}, workspace=str(tmp_path))
         )
         view = manager.result(record.context.job_id, wait=True, timeout=2)
         assert view["workspace"] == "/workspace"

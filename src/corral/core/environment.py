@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import hashlib
@@ -8,7 +10,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
 from corral.backend.background_tools import attach_background_tools
@@ -30,7 +32,6 @@ from corral.core.resources import (
     RESOURCE_STATE_NAMESPACE,
     EnvironmentResourceAdapter,
     FileResourceDescriptor,
-    MaterializedResourcePath,
     ResourceCatalogMismatchError,
     ResourceHandle,
     resource_file_matches,
@@ -62,12 +63,14 @@ from corral.core.transition import environment_operations
 from corral.core.workspace import WorkspaceState
 from corral.persistence.workspace import WorkspaceManager
 from corral.report.logging import logger
-from corral.runtime import permissions
 from corral.workspace import (
     PUBLIC_WORKSPACE_ROOT,
     AbsoluteWorkspaceFilesystem,
     build_workspace_tools,
 )
+
+if TYPE_CHECKING:
+    from corral.runtime.tool_execution import PreparedToolCall
 
 
 class _ReadWriteLock:
@@ -471,7 +474,7 @@ class Environment:
         *,
         max_job_concurrency: int | None = None,
         workspace_path: str | None = None,
-    ) -> "Environment":
+    ) -> Environment:
         """Bind this definition to one isolated task execution.
 
         The returned definition shares immutable task/tool configuration and is
@@ -836,19 +839,29 @@ class Environment:
 
         return {key: parse_value(key, val) for key, val in args.items()}
 
-    def execute_trusted_tool(
+    def execute_controller_tool(
         self,
         state: ExecutionState,
-        tool: Tool,
-        arguments: dict[str, Any],
+        prepared: PreparedToolCall,
     ) -> Any:
-        """Narrow hook for explicitly trusted, controller-side task logic.
+        """Dispatch framework-managed or explicitly trusted controller logic.
 
         Generic validation, workspace policy, resources, and result
         normalization have already been applied by `ToolExecutor`.
         """
-        del state
-        return tool.execute(**arguments)
+        tool = prepared.tool
+        if prepared.controller_dispatch:
+            dispatch = getattr(tool, "execute_controller", None)
+            if dispatch is None:
+                raise RuntimeError(
+                    f"Tool {prepared.tool_name!r} has no controller dispatcher"
+                )
+            return dispatch(self, state, prepared)
+        if not prepared.trusted:
+            raise PermissionError(
+                f"Tool {prepared.tool_name!r} is not trusted for controller execution"
+            )
+        return tool.execute(**prepared.arguments)
 
     def _resource_lock(self, key: str) -> _ReadWriteLock:
         """Return the shared readers-writer lock guarding one named resource.
@@ -924,13 +937,20 @@ class Environment:
         )
         attach_background_tools(self)
 
-    def submit_job(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def submit_job(
+        self,
+        state: ExecutionState,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        action_id: str,
+    ) -> dict[str, Any]:
         """Submit a background-capable tool as a job and return its handle.
 
-        Receives hidden arguments injected from the projection by `execute_action`
-        and resolves the workspace **now** (at submit time), so a later commit can
-        never redirect a running job at a different task's workspace. Returns a
-        job handle the agent polls with the generated control tools.
+        The same authorization path used by foreground calls resolves hidden
+        values, resources, and the workspace now. The manager receives only the
+        resulting immutable call, so queued execution cannot gain authority by
+        observing later mutations to the Environment or Tool.
         """
         if self.job_manager is None:
             return {"error": "Background jobs are not enabled for this task."}
@@ -938,66 +958,33 @@ class Environment:
         tool = self.tools.get(tool_name)
         if tool is None:
             return {"error": f"Tool {tool_name!r} not found."}
+        if not tool.background_capable:
+            return {"error": f"Tool {tool_name!r} is not background-capable."}
 
-        if set(tool.resources) & set(self.resource_adapters):
+        from corral.runtime.tool_execution import ToolArgumentError, ToolExecutor
+
+        try:
+            prepared = ToolExecutor(self).prepare(
+                state, tool, arguments, action_id=action_id
+            )
+        except ToolArgumentError as exc:
+            return {"error": str(exc)}
+        if prepared.stateful:
             return {
                 "error": (
                     "Stateful resource tools must execute in the foreground so "
                     "their state transition can be committed atomically."
                 )
             }
-        undeclared = set(tool.resources) - set(self.file_resources)
-        if undeclared:
-            return {"error": f"Unconfigured resource(s): {sorted(undeclared)}"}
-        file_handles = self.materialize_file_resources(tool.resources)
-        call_args = self.preprocess_arguments(tool_name, arguments)
-        for name in tool.workspace_args:
-            call_args[name] = (
-                self.workspace_path
-                if tool.trusted or not permissions.enabled()
-                else PUBLIC_WORKSPACE_ROOT
-            )
-        for name, handle in file_handles.items():
-            if name in tool.hidden_args:
-                call_args[name] = (
-                    handle
-                    if tool.trusted
-                    else (
-                        handle.public_path
-                        if permissions.enabled()
-                        else MaterializedResourcePath(str(handle.controller_path))
-                    )
-                )
-        hidden_names = list(tool.hidden_args)
-        missing = [name for name in hidden_names if name not in call_args]
-        if missing:
+        if prepared.controller_dispatch:
             return {
                 "error": (
-                    f"Hidden argument(s) {missing!r} required by tool "
-                    f"{tool_name!r} are not configured."
+                    f"Tool {tool_name!r} requires state-aware controller dispatch "
+                    "and cannot execute as a background job."
                 )
             }
-        visible_arguments = {
-            name: value for name, value in call_args.items() if name not in hidden_names
-        }
 
-        is_valid, error_message = tool.validate_arguments(call_args)
-        if not is_valid:
-            return {"error": error_message}
-
-        record = self.job_manager.submit(
-            tool,
-            visible_arguments=visible_arguments,
-            call_arguments=call_args,
-            hidden_arg_names=tuple(hidden_names),
-            workspace=self.workspace_path or "",
-            workspace_access=tool.workspace_access.value,
-            resource_mounts={
-                name: (str(handle.controller_path), handle.public_path)
-                for name, handle in file_handles.items()
-            },
-            concurrency_key=getattr(tool, "concurrency_key", None),
-        )
+        record = self.job_manager.submit(prepared)
         return {
             "job_id": record.context.job_id,
             "tool_name": tool_name,

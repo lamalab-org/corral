@@ -16,6 +16,7 @@ from corral.backend import executors
 from corral.backend.executors import SubprocessExecutor
 from corral.backend.jobs import JobManager, JobStatus
 from corral.core.tool import tool
+from corral.runtime.tool_execution import PreparedToolCall
 
 
 def _wait_until(predicate, timeout=10):
@@ -97,7 +98,7 @@ time.sleep(60)
 
     monkeypatch.setattr(executor, "run_tool", run_and_notify)
     manager = JobManager(executors={"subprocess": executor})
-    record = manager.submit(spawn_sleeper, visible_arguments={}, call_arguments={})
+    record = manager.submit(PreparedToolCall.capture(spawn_sleeper, {}))
     worker_pid = grandchild_pid = None
     try:
         # The grandchild publishes its PID only after installing its handler.

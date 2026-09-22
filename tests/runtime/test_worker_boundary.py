@@ -17,6 +17,10 @@ from corral.core.tool import tool
 from corral.core.transition import ToolExecutionResult
 from corral.runtime import permissions
 from corral.runtime.agent_worker import RemoteSession, _snapshot
+from corral.runtime.tool_execution import (
+    PreparedToolCall,
+    execute_prepared_background_call,
+)
 from corral.workspace import WorkspaceFilesystem, build_terminal_tool
 
 
@@ -193,7 +197,14 @@ def test_untrusted_tools_with_private_inputs_fail_closed(
     arguments = {"code": "print('public')", "secret": str(uuid4())}
     with pytest.raises(PermissionError, match="cannot receive hidden arguments"):
         if background:
-            permissions.execute_job(private_code_tool, arguments, str(tmp_path))
+            execute_prepared_background_call(
+                PreparedToolCall.capture(
+                    private_code_tool,
+                    arguments,
+                    workspace=str(tmp_path),
+                    execution_kind="restricted",
+                )
+            )
         else:
             permissions.execute_restricted_tool(
                 private_code_tool, arguments, str(tmp_path)
@@ -216,7 +227,14 @@ def test_workspace_binding_is_rebuilt_without_private_inputs(tmp_path, monkeypat
 
     monkeypatch.setattr(permissions, "run_worker", run)
     assert (
-        permissions.execute_job(workspace_tool, {"work_dir": secret}, str(tmp_path))
+        execute_prepared_background_call(
+            PreparedToolCall.capture(
+                workspace_tool,
+                {"work_dir": secret},
+                workspace=str(tmp_path),
+                execution_kind="restricted",
+            )
+        )
         == "/workspace"
     )
 
@@ -240,7 +258,9 @@ def test_background_result_cannot_publish_private_state(tmp_path):
         )
 
     with pytest.raises(ValueError, match="must execute in the foreground"):
-        permissions.execute_job(private_result, {}, str(tmp_path))
+        execute_prepared_background_call(
+            PreparedToolCall.capture(private_result, {}, workspace=str(tmp_path))
+        )
 
 
 def test_node_creation_and_copy_reject_symlink_ancestors(tmp_path):

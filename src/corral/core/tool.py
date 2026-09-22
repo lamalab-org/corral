@@ -106,7 +106,10 @@ class WorkspaceAccess(str, Enum):
 
     Tools are filesystem-isolated by default.  Reading or mutating the task
     workspace is a separate capability from concurrency and trust, and must be
-    declared explicitly by the tool author.
+    declared explicitly by the tool author. Restricted workers enforce these
+    modes with OS mounts; the unconfined local-development fallback only
+    translates canonical paths and cannot enforce read-only access at the
+    kernel level.
     """
 
     NONE = "none"
@@ -136,9 +139,11 @@ class Tool:
         concurrency_key: str | None = None,
         concurrency: "ToolConcurrency | str" = ToolConcurrency.SERIAL,
         trusted: bool = False,
+        controller_dispatch: bool = False,
         workspace_access: "WorkspaceAccess | str" = WorkspaceAccess.NONE,
         workspace_args: tuple[str, ...] = (),
         resources: tuple[str, ...] = (),
+        worker_operation: str | None = None,
     ):
         self.name = name
         self.description = description
@@ -147,6 +152,10 @@ class Tool:
         # logic may receive private inputs and run in the controller; it must
         # never evaluate model-supplied code or load workspace executables.
         self.trusted = trusted
+        # Controller dispatch is distinct from trust. It asks the Environment
+        # to route the invocation through a state-aware handler, but does not
+        # by itself permit Tool.execute() to run in the controller.
+        self.controller_dispatch = controller_dispatch
         self.workspace_access = WorkspaceAccess(workspace_access)
         self.workspace_args = tuple(workspace_args)
         if not set(self.workspace_args) <= self.hidden_args.keys():
@@ -158,6 +167,7 @@ class Tool:
             raise ValueError("resources cannot contain duplicates")
         if any(not name or not name.strip() for name in self.resources):
             raise ValueError("resource names cannot be empty")
+        self.worker_operation = worker_operation
         # Background-execution metadata (PR 4). A tool marked
         # `background_capable` gets a generated `start_<tool>` variant that runs
         # it as a background job so the agent is not blocked while it runs.
@@ -325,9 +335,11 @@ def tool(
     concurrency_key: str | None = None,
     concurrency: "ToolConcurrency | str" = ToolConcurrency.SERIAL,
     trusted: bool = False,
+    controller_dispatch: bool = False,
     workspace_access: "WorkspaceAccess | str" = WorkspaceAccess.NONE,
     workspace_args: tuple[str, ...] = (),
     resources: tuple[str, ...] = (),
+    worker_operation: str | None = None,
 ) -> Tool | Callable[[Callable], Tool]:
     """Decorator to convert a function into a Tool.
 
@@ -377,6 +389,9 @@ def tool(
         trusted: Run task logic with private inputs in the Docker controller.
             Never enable this for shell, Python, untrusted file-loading, or other tools
             that execute model-controlled code. Restricted execution is default.
+        controller_dispatch: Route this tool through the Environment's
+            state-aware controller handler without granting Tool.execute()
+            permission to run there. Intended for framework-managed tools.
         workspace_access: Access granted to the assigned task filesystem at the
             canonical worker path `/workspace`. Defaults to `none`;
             filesystem tools must opt in to `read` or `read_write`.
@@ -386,6 +401,8 @@ def tool(
         resources: Named environment resources restored or mounted only for
             this tool. Resource names are controller policy and are not exposed
             in the agent-facing JSON schema.
+        worker_operation: Optional built-in restricted-worker operation. This
+            is private execution policy and is never exposed to the agent.
 
     Returns:
         A Tool instance wrapping the function.
@@ -438,9 +455,11 @@ def tool(
                     concurrency_key=concurrency_key,
                     concurrency=concurrency,
                     trusted=trusted,
+                    controller_dispatch=controller_dispatch,
                     workspace_access=workspace_access,
                     workspace_args=workspace_args,
                     resources=resources,
+                    worker_operation=worker_operation,
                 )
 
             def execute(self, **kwargs):

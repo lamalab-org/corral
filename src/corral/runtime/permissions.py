@@ -628,6 +628,7 @@ def execute_restricted_tool(
     *,
     resource_mounts: dict[str, tuple[str, str]] | None = None,
     cancel: threading.Event | None = None,
+    prepared: Any | None = None,
 ) -> Any:
     """Execute an untrusted tool with exactly its declared OS capabilities."""
     return _run_public_tool(
@@ -636,11 +637,12 @@ def execute_restricted_tool(
         workspace,
         resource_mounts=resource_mounts or {},
         cancel=cancel,
+        prepared=prepared,
     )
 
 
 def visible_argument_error(tool: Any, arguments: dict[str, Any]) -> str | None:
-    """Validate the public schema before preprocessing or injecting private data."""
+    """Validate normalized public arguments before injecting private data."""
     from jsonschema import Draft202012Validator
 
     schema = {
@@ -659,27 +661,47 @@ def _run_public_tool(
     *,
     cancel: threading.Event | None = None,
     resource_mounts: dict[str, tuple[str, str]] | None = None,
-    workspace_access: str | None = None,
+    prepared: Any | None = None,
 ) -> Any:
-    workspace_args = set(getattr(tool, "workspace_args", ()))
-    resource_args = set(getattr(tool, "resources", ())) & set(tool.hidden_args)
-    if set(tool.hidden_args) - workspace_args - resource_args:
+    hidden_arg_names = set(
+        prepared.hidden_arg_names
+        if prepared is not None
+        else getattr(tool, "hidden_args", ())
+    )
+    workspace_args = set(
+        prepared.workspace_args
+        if prepared is not None
+        else getattr(tool, "workspace_args", ())
+    )
+    resources = set(
+        prepared.resources if prepared is not None else getattr(tool, "resources", ())
+    )
+    resource_args = resources & hidden_arg_names
+    if hidden_arg_names - workspace_args - resource_args:
         raise PermissionError(
             "restricted tools cannot receive hidden arguments; "
             "private inputs require explicitly trusted task logic"
         )
     public = {
-        name: value for name, value in arguments.items() if name not in tool.hidden_args
+        name: value for name, value in arguments.items() if name not in hidden_arg_names
     }
-    if error := visible_argument_error(tool, public):
+    if prepared is None and (error := visible_argument_error(tool, public)):
         raise ValueError(error)
     public.update(dict.fromkeys(workspace_args, "/workspace"))
     public.update(
         {name: arguments[name] for name in resource_args if name in arguments}
     )
-    access: Any = workspace_access or getattr(tool, "workspace_access", "none")
+    access: Any = (
+        prepared.workspace_access
+        if prepared is not None
+        else getattr(tool, "workspace_access", "none")
+    )
     access = access.value if hasattr(access, "value") else str(access)
-    operation = getattr(tool, "worker_operation", None)
+    operation = (
+        prepared.worker_operation
+        if prepared is not None
+        else getattr(tool, "worker_operation", None)
+    )
     if operation == "terminal":
         result = run_worker(
             "terminal",
@@ -708,35 +730,6 @@ def _run_public_tool(
             resource_mounts=resource_mounts,
         )
     return result["content"]
-
-
-def execute_job(
-    tool: Any,
-    arguments: dict[str, Any],
-    workspace: str,
-    *,
-    cancel: threading.Event | None = None,
-    resource_mounts: dict[str, tuple[str, str]] | None = None,
-    workspace_access: str | None = None,
-) -> Any:
-    """Background jobs obey the same trust classification as foreground tools."""
-    if getattr(tool, "trusted", False):
-        from corral.core.transition import ToolExecutionResult
-
-        result = tool.execute(**arguments)
-        if isinstance(result, ToolExecutionResult):
-            if result.environment is not None:
-                raise ValueError("stateful task tools must execute in the foreground")
-            return result.content
-        return result
-    return _run_public_tool(
-        tool,
-        arguments,
-        workspace,
-        cancel=cancel,
-        resource_mounts=resource_mounts,
-        workspace_access=workspace_access,
-    )
 
 
 if __name__ == "__main__":

@@ -12,19 +12,20 @@ import time
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import cloudpickle
 
-from corral.runtime import permissions
+from corral.runtime.tool_execution import (
+    PreparedToolCall,
+    execute_prepared_background_call,
+)
 from corral.workspace import materialize_local_tool_arguments
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from corral.core.tool import Tool
 
 # Default per-execution background-job concurrency. Bounds how many jobs actually
 # execute at once inside one execution runtime; jobs beyond it queue. Kept modest
@@ -74,12 +75,28 @@ class JobWork:
     """
 
     job_id: str
-    tool_name: str
-    tool: Tool
-    call_arguments: dict[str, Any]
-    workspace: str | None = None
-    workspace_access: str = "none"
-    resource_mounts: dict[str, tuple[str, str]] | None = None
+    prepared: PreparedToolCall = field(repr=False)
+
+    @property
+    def tool_name(self) -> str:
+        return self.prepared.tool_name
+
+    @property
+    def tool(self):
+        return self.prepared.tool
+
+    @property
+    def call_arguments(self) -> dict[str, Any]:
+        return self.prepared.arguments
+
+    @property
+    def workspace(self) -> str | None:
+        return self.prepared.workspace
+
+
+def _run_prepared_work(work: JobWork, cancel: threading.Event) -> str:
+    """Execute one immutable job call and enforce the background result contract."""
+    return render_result(execute_prepared_background_call(work.prepared, cancel=cancel))
 
 
 @runtime_checkable
@@ -170,10 +187,7 @@ class ThreadExecutor(_PooledExecutor):
         # honour a cancel that arrived before the call started.
         if cancel.is_set():
             raise JobCancelled(work.job_id)
-        arguments = materialize_local_tool_arguments(
-            work.tool, work.call_arguments, work.workspace
-        )
-        return render_result(work.tool.execute(**arguments))
+        return _run_prepared_work(work, cancel)
 
 
 class RestrictedExecutor(_PooledExecutor):
@@ -182,15 +196,7 @@ class RestrictedExecutor(_PooledExecutor):
     def run_tool(self, work: JobWork, cancel: threading.Event) -> str:
         if cancel.is_set():
             raise JobCancelled(work.job_id)
-        result = permissions.execute_job(
-            work.tool,
-            work.call_arguments,
-            work.workspace,
-            cancel=cancel,
-            resource_mounts=work.resource_mounts,
-            workspace_access=work.workspace_access,
-        )
-        return render_result(result)
+        return _run_prepared_work(work, cancel)
 
 
 def _run_cloudpickled(blob: bytes) -> str:
@@ -277,7 +283,10 @@ class ProcessExecutor(_PooledExecutor):
 
     def run_tool(self, work: JobWork, cancel: threading.Event) -> str:
         arguments = materialize_local_tool_arguments(
-            work.tool, work.call_arguments, work.workspace
+            work.tool,
+            work.call_arguments,
+            work.workspace,
+            prepared=work.prepared,
         )
         blob = cloudpickle.dumps((work.tool, arguments))
         future = self._process_pool().submit(_run_cloudpickled, blob)
@@ -341,7 +350,10 @@ class SubprocessExecutor(_PooledExecutor):
         out_path = tmpdir / "out.pkl"
         try:
             arguments = materialize_local_tool_arguments(
-                work.tool, work.call_arguments, work.workspace
+                work.tool,
+                work.call_arguments,
+                work.workspace,
+                prepared=work.prepared,
             )
             with in_path.open("wb") as fh:
                 cloudpickle.dump((work.tool, arguments), fh)

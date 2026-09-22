@@ -32,7 +32,8 @@ class PythonREPLTool(Tool):
 
     An environment owns the checkpoint in its projected state and calls
     `execute_repl`.  This object never evaluates model code in the
-    controller even though it is marked trusted for stateful dispatch.
+    controller. `controller_dispatch` routes it through the owning
+    Environment without granting direct controller execution.
     """
 
     def __init__(
@@ -65,9 +66,9 @@ class PythonREPLTool(Tool):
                 },
                 "required": [argument_name],
             },
-            # Stateful dispatch runs in the controller, but execute() below can
-            # only reject direct calls. Model Python always runs in a worker.
-            trusted=True,
+            # Model Python always runs in a worker. The controller only manages
+            # the durable checkpoint and public-data dispatch.
+            controller_dispatch=True,
             concurrency=ToolConcurrency.SERIAL,
             workspace_access=workspace_access,
         )

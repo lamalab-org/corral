@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 TOOL_CATALOG_METADATA_KEY = "tool_catalog"
 TOOL_CATALOG_SCHEMA_VERSION = 1
 TOOL_POLICY_METADATA_KEY = "tool_policy"
-TOOL_POLICY_SCHEMA_VERSION = 1
+TOOL_POLICY_SCHEMA_VERSION = 2
 
 
 class ToolCatalogBindingError(RuntimeError):
@@ -171,10 +171,12 @@ class ToolPolicy(FrozenModel):
     """
 
     trusted: bool = False
+    controller_dispatch: bool = False
     workspace_access: Literal["none", "read", "read_write"] = "none"
     hidden_args: tuple[str, ...] = ()
     workspace_args: tuple[str, ...] = ()
     resources: tuple[str, ...] = ()
+    worker_operation: str | None = None
 
     @model_validator(mode="after")
     def _validate_bindings(self) -> ToolPolicy:
@@ -208,7 +210,7 @@ def tool_policy_fingerprint(policies: Mapping[str, Any]) -> str:
 class ToolPolicySnapshot(FrozenModel):
     """Versioned private policy persisted with an execution's tool catalog."""
 
-    schema_version: Literal[1] = TOOL_POLICY_SCHEMA_VERSION
+    schema_version: Literal[2] = TOOL_POLICY_SCHEMA_VERSION
     policies: Mapping[str, ToolPolicy]
     fingerprint: str
 
@@ -234,6 +236,7 @@ class ToolPolicySnapshot(FrozenModel):
                 raise ValueError(f"tool policy key {name!r} does not match tool name")
             policies[name] = ToolPolicy(
                 trusted=bool(getattr(tool, "trusted", False)),
+                controller_dispatch=bool(getattr(tool, "controller_dispatch", False)),
                 workspace_access=str(
                     getattr(tool, "workspace_access", "none").value
                     if hasattr(getattr(tool, "workspace_access", "none"), "value")
@@ -242,6 +245,7 @@ class ToolPolicySnapshot(FrozenModel):
                 hidden_args=tuple(sorted(getattr(tool, "hidden_args", {}))),
                 workspace_args=tuple(sorted(getattr(tool, "workspace_args", ()))),
                 resources=tuple(sorted(getattr(tool, "resources", ()))),
+                worker_operation=getattr(tool, "worker_operation", None),
             ).model_dump(mode="json")
         return cls(policies=policies, fingerprint=tool_policy_fingerprint(policies))
 
