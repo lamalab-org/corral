@@ -81,7 +81,7 @@ ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
         "wetlab.env:create_qualysis_environments", "tasks/wetlab"
     ),
     "psychometrics": EnvironmentPreset(
-        "psychometrics.env:create_environments", "tasks/psychometrics"
+        "corral_psychometrics.env:create_environments", "tasks/psychometrics/src"
     ),
 }
 

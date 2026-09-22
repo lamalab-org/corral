@@ -1,6 +1,6 @@
 from tempfile import TemporaryDirectory
 
-from psychometrics.tools import validate_model_syntax, workspace_tools
+from corral_psychometrics.tools import validate_model_syntax, workspace_tools
 
 
 def test_validate_model_syntax_only_parses() -> None:

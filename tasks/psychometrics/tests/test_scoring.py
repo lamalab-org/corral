@@ -10,156 +10,52 @@ which stage it failed at, and malformed or dishonest submissions are rejected.
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import logging
-import subprocess
-import sys
 import warnings
-from pathlib import Path
 
 import pandas as pd
 import semopy
+
+from corral_psychometrics import paths
+from corral_psychometrics.score import score_model_criteria
 
 warnings.filterwarnings("ignore")
 logging.disable(logging.WARNING)
 
 _BIASED = ["HSNS1", "HSNS10", "HSNS5", "HSNS8"]
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "generators"))
+ROOT = paths.task_root()
 
-from psychometrics.score import score_model_criteria  # noqa: E402
-
+# (level, task, the submission that must score 1.0). Every file a task needs
+# follows from that numbering -- see corral_psychometrics.paths.
 TASKS = [
-    (
-        "generators/level_1/gen_l1_t01_hsns_structure.py",
-        "environments/level_1/tasks_json/task_01.json",
-        "artifacts/level_1/task_01/data.csv",
-        "two_correlated_factors",
-    ),
-    (
-        "generators/level_1/gen_l1_t02_dd_structure.py",
-        "environments/level_1/tasks_json/task_02.json",
-        "artifacts/level_1/task_02/data.csv",
-        "bifactor_general_plus_specifics",
-    ),
-    (
-        "generators/level_1/gen_l1_t03_local_dependence.py",
-        "environments/level_1/tasks_json/task_03.json",
-        "artifacts/level_1/task_03/data.csv",
-        "unidimensional_with_correlated_residuals",
-    ),
-    (
-        "generators/level_1/gen_l1_t04_invariant_combination.py",
-        "environments/level_1/tasks_json/task_04.json",
-        "artifacts/level_1/task_04/data.csv",
-        "DD, bifactor (CORRECT)",
-    ),
-    (
-        "generators/level_1/gen_l1_t05_defensible_comparisons.py",
-        "environments/level_1/tasks_json/task_05.json",
-        "artifacts/level_1/task_05/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_1/gen_l1_t06_latent_relationships.py",
-        "environments/level_1/tasks_json/task_06.json",
-        "artifacts/level_1/task_06/data.csv",
-        "joint latent model (CORRECT)",
-    ),
-    (
-        "generators/level_1/gen_l1_t07_cross_country_replication.py",
-        "environments/level_1/tasks_json/task_07.json",
-        "artifacts/level_1/task_07/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_1/gen_l1_t08_score_justification.py",
-        "environments/level_1/tasks_json/task_08.json",
-        "artifacts/level_1/task_08/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_1/gen_l1_t09_careless_responding.py",
-        "environments/level_1/tasks_json/task_09.json",
-        "artifacts/level_1/task_09/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_1/gen_l1_t10_item_integrity.py",
-        "environments/level_1/tasks_json/task_10.json",
-        "artifacts/level_1/task_10/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t01_group_comparability.py",
-        "environments/level_2/tasks_json/task_01.json",
-        "artifacts/level_2/task_01/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t02_out_of_sample_generalization.py",
-        "environments/level_2/tasks_json/task_02.json",
-        "artifacts/level_2/task_02/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t03_ddm_population_classification.py",
-        "environments/level_2/tasks_json/task_03.json",
-        "artifacts/level_2/task_03/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t04_hsns_population_classification.py",
-        "environments/level_2/tasks_json/task_04.json",
-        "artifacts/level_2/task_04/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t05_duplicate_records.py",
-        "environments/level_2/tasks_json/task_05.json",
-        "artifacts/level_2/task_05/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t06_gender_item_integrity.py",
-        "environments/level_2/tasks_json/task_06.json",
-        "artifacts/level_2/task_06/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t07_behavioral_validity.py",
-        "environments/level_2/tasks_json/task_07.json",
-        "artifacts/level_2/task_07/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t08_misfit_replication.py",
-        "environments/level_2/tasks_json/task_08.json",
-        "artifacts/level_2/task_08/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t09_adaptive_model_choice.py",
-        "environments/level_2/tasks_json/task_09.json",
-        "artifacts/level_2/task_09/data.csv",
-        "correct",
-    ),
-    (
-        "generators/level_2/gen_l2_t10_model_identification.py",
-        "environments/level_2/tasks_json/task_10.json",
-        "artifacts/level_2/task_10/dataset_01.csv",
-        "correct",
-    ),
+    (1, 1, "two_correlated_factors"),
+    (1, 2, "bifactor_general_plus_specifics"),
+    (1, 3, "unidimensional_with_correlated_residuals"),
+    (1, 4, "DD, bifactor (CORRECT)"),
+    (1, 5, "correct"),
+    (1, 6, "joint latent model (CORRECT)"),
+    (1, 7, "correct"),
+    (1, 8, "correct"),
+    (1, 9, "correct"),
+    (1, 10, "correct"),
+    (2, 1, "correct"),
+    (2, 2, "correct"),
+    (2, 3, "correct"),
+    (2, 4, "correct"),
+    (2, 5, "correct"),
+    (2, 6, "correct"),
+    (2, 7, "correct"),
+    (2, 8, "correct"),
+    (2, 9, "correct"),
+    (2, 10, "correct"),
 ]
 
 
-def load_generator(path):
-    spec = importlib.util.spec_from_file_location(Path(path).stem, ROOT / path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def load_generator(level, number):
+    """Import the generator that produced one task's data."""
+    return importlib.import_module(paths.find(level, number).generator)
 
 
 def build_submission(spec, X, items):
@@ -201,9 +97,9 @@ def _group_submission(spec, X, items, truth=None):
     }
 
 
-def run_task(gen_path, task_path, data_path, expected_winner):
-    gen = load_generator(gen_path)
-    params = json.loads((ROOT / task_path).read_text())[0]["scoring_params"]
+def run_task(level, number, expected_winner):
+    gen = load_generator(level, number)
+    params = json.loads(paths.find(level, number).definition.read_text())[0]["scoring_params"]
     if params.get("task_type") == "population_classification":
         return run_population_task(gen, params, expected_winner)
     if params.get("task_type") == "gender_item_integrity":
@@ -217,7 +113,8 @@ def run_task(gen_path, task_path, data_path, expected_winner):
     if params.get("task_type") == "model_identification":
         return run_model_identification_task(gen, params, expected_winner)
     items = params["items"]
-    data = pd.read_csv(ROOT / data_path, sep="\t")
+    data_path = paths.resolve(params["data_dir"]) / params["dataset"]
+    data = pd.read_csv(data_path, sep="\t")
     keep = params["syntax_whitelist"]["items"]
     for col, val in params.get("subset", {}).items():
         data = data[data[col].isin(val)] if isinstance(val, list) else data[data[col] == val]
@@ -245,7 +142,7 @@ def run_task(gen_path, task_path, data_path, expected_winner):
         )
 
     good = cases.get("correct") or build_submission(gen.reference_syntax(), X, items)
-    pooled_X = pd.read_csv(ROOT / data_path, sep="\t")
+    pooled_X = pd.read_csv(data_path, sep="\t")
     if "gender" in items:
         pooled_X = pooled_X[pooled_X.gender.isin([1, 2])]
     pooled_X = pooled_X[items]
@@ -502,29 +399,9 @@ def run_model_identification_task(gen, params, expected_winner):
     return failures
 
 
-def ensure_generated():
-    """Build ignored task artifacts when pytest is run from a clean checkout."""
-    required = [ROOT / task_path for _, task_path, _, _ in TASKS]
-    if all(path.exists() for path in required):
-        return
-    result = subprocess.run(
-        [sys.executable, "build.py"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode:
-        raise RuntimeError(
-            "could not generate task artifacts before scoring tests:\n"
-            + result.stdout
-            + result.stderr
-        )
-
-
-def main():
-    ensure_generated()
+def main(tasks=TASKS):
     failures = []
-    for task in TASKS:
+    for task in tasks:
         failures += run_task(*task)
     print()
     if failures:
@@ -541,4 +418,16 @@ def test_all_tasks_score_as_intended():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--level", type=int)
+    parser.add_argument("--tasks", type=int, nargs="+")
+    args = parser.parse_args()
+    selected = [
+        task
+        for task in TASKS
+        if (args.level is None or task[0] == args.level)
+        and (args.tasks is None or task[1] in args.tasks)
+    ]
+    raise SystemExit(main(selected))
