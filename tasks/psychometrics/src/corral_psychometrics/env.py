@@ -1,9 +1,4 @@
-"""Corral environment for the synthetic psychometrics tasks.
-
-A task gives the agent its public input files, workspace tools and a
-checkpointed Python session. Generators, scorers and answer keys stay outside
-the workspace.
-"""
+"""Corral environment for the psychometrics tasks."""
 
 from __future__ import annotations
 
@@ -47,8 +42,7 @@ def _verify_checksums(
 ) -> None:
     """Check a task's files against the checksums recorded for them.
 
-    Verifies that every public input hashes to its recorded value, and that the
-    definition and the answer key were built from the same dataset.
+    Verifies that every public input hashes to its recorded value, and that the definition and the answer key were built from the same dataset.
     """
     declared = task_info.get("initial_input", {}).get("data_sha256")
     data_dir = paths.resolve(scoring_params["data_dir"], root=root)
@@ -94,7 +88,7 @@ def _verify_checksums(
 def _copy_public_inputs(
     env: Environment, data_dir: Path, declared: tuple[str, ...]
 ) -> EnvironmentSetup:
-    """Copy a task's public inputs into its isolated workspace.
+    """Copy a task's public inputs into its isolated workspace (usually the dataset and codebook).
 
     Fails unless `data_dir` holds exactly the declared files.
     """
@@ -174,9 +168,7 @@ def _task_prompt(env: Environment, state: ExecutionState) -> str:
     prompt = (
         f"Task: {task.name}\n\n{task.description}\n\n"
         f"Required submission format:\n{task.submission_format}\n\n"
-        "Available workspace files:\n"
-        + "\n".join(f"- {name}" for name in files)
-        + "\n\nYou may write analysis scripts and intermediate results there."
+        "Available workspace files:\n" + "\n".join(f"- {name}" for name in files)
     )
     return prompt
 
@@ -211,6 +203,7 @@ def load_tasks_from_json(
                 raise ValueError(f"duplicate psychometrics task id: {task_id}")
             scoring_params = task_info.get("scoring_params", {})
             data_dir = paths.resolve(scoring_params["data_dir"], root=root)
+            declared = tuple(task_info["initial_input"]["public_inputs"])
             _verify_checksums(task_id, task_info, scoring_params, root)
             tasks[task_id] = TaskDefinition(
                 name=task_info["name"],
@@ -221,11 +214,8 @@ def load_tasks_from_json(
                 input_map={dep: InputRef(dep) for dep in task_info.get("input_from_tasks", [])},
                 initial_input=task_info.get("initial_input", {}),
                 prompt_fn=_task_prompt,
-                setup_fn=lambda env,
-                state,
-                path=data_dir,
-                names=tuple(task_info["initial_input"]["public_inputs"]): (
-                    _copy_public_inputs(env, path, names)
+                setup_fn=lambda env, state, path=data_dir, names=declared: _copy_public_inputs(
+                    env, path, names
                 ),
                 resolve_answer=False,
             )

@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Check that each task scores the way it is meant to.
-
-For every task: the right answer scores 1.0, every wrong one scores 0.0 and says
-which stage it failed at, and malformed or dishonest submissions are rejected.
+"""Check the expected scoring results for every task.
 
     uv run --with numpy --with pandas --with scipy --with semopy \
       python tests/test_scoring.py

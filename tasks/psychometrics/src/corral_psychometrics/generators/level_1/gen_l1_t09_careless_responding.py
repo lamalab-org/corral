@@ -359,7 +359,7 @@ def verify(df, targets):
         label: latent_correlations(X)
         for label, X in [("unscreened", raw), ("accuracy", by_accuracy), ("screened", clean)]
     }
-    print(f"\n{'pair':14s} {'truth':>7s} {'unscreened':>11s} {'accuracy':>9s} " f"{'screened':>9s}")
+    print(f"\n{'pair':14s} {'truth':>7s} {'unscreened':>11s} {'accuracy':>9s} {'screened':>9s}")
     worst = {k: 0.0 for k in got}
     for a, b in CROSS_PAIRS:
         key = frozenset((a, b))

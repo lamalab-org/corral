@@ -67,7 +67,7 @@ def factor_syntax(model):
     if model == "model_b":
         return f"F1 =~ {join(ITEMS[:6])}\nF2 =~ {join(ITEMS[6:])}\nF1 ~~ F2"
     if model == "model_c":
-        blocks = "\n".join(f"S{i + 1} =~ {join(ITEMS[i * 4:(i + 1) * 4])}" for i in range(3))
+        blocks = "\n".join(f"S{i + 1} =~ {join(ITEMS[i * 4 : (i + 1) * 4])}" for i in range(3))
         zeros = "\n".join(
             f"{a} ~~ 0*{b}"
             for a, b in [

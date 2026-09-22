@@ -306,8 +306,7 @@ def verify(df, targets, pop):
     scores = scale_score_correlations(X)
     print(f"US complete-case N = {len(X):,}\n")
     print(
-        f"  {'pair':14s} {'true':>6s} {'joint model':>12s} {'scale scores':>13s}"
-        f" {'shrinkage':>10s}"
+        f"  {'pair':14s} {'true':>6s} {'joint model':>12s} {'scale scores':>13s} {'shrinkage':>10s}"
     )
     worst_latent, worst_scores = 0.0, 0.0
     for a, b in CROSS_PAIRS:

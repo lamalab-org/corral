@@ -375,7 +375,7 @@ def naive(df, pop):
             f"  {item:8s} {loads[item]:8.3f}  {verdict:>20s}  {TRUTH[item]}"
             f"{'   <- wrong' if verdict != TRUTH[item] else ''}"
         )
-    print(f"\n  the loadings alone misclassify {len(wrong)} of {len(ITEMS)} " f"items: {wrong}")
+    print(f"\n  the loadings alone misclassify {len(wrong)} of {len(ITEMS)} items: {wrong}")
     return C.report(
         [
             ("a corrupted item is mistaken for a weak one", NEUTRAL_CODED in wrong),

@@ -373,11 +373,8 @@ def verify(df, pop):
     a_hsns, a_dd = C.alpha(us[HSNS]), C.alpha(us[DD])
     w_hsns = hsns_omega()
     w_dd_h, w_dd_total = omega(DD_GENERAL, DD_SPECIFIC, DD)
-    print(
-        f"{'instrument':14s} {'alpha':>7s} {'omega_h':>9s} {'omega_total':>12s} "
-        f"{'verdict':>20s}"
-    )
-    print(f"{'HSNS':14s} {a_hsns:7.3f} {w_hsns:9.3f} {w_hsns:12.3f} " f"{TRUTH['hsns']:>20s}")
+    print(f"{'instrument':14s} {'alpha':>7s} {'omega_h':>9s} {'omega_total':>12s} {'verdict':>20s}")
+    print(f"{'HSNS':14s} {a_hsns:7.3f} {w_hsns:9.3f} {w_hsns:12.3f} {TRUTH['hsns']:>20s}")
     print(
         f"{'Dirty Dozen':14s} {a_dd:7.3f} {w_dd_h:9.3f} {w_dd_total:12.3f} "
         f"{TRUTH['dirty_dozen']:>20s}"
@@ -406,7 +403,7 @@ def verify(df, pop):
                 ("unidimensional", hsns_syntax()),
                 (
                     "two_correlated",
-                    f"A =~ {'+'.join(NON_US_HSNS_F1)}\n" f"B =~ {'+'.join(NON_US_HSNS_F2)}",
+                    f"A =~ {'+'.join(NON_US_HSNS_F1)}\nB =~ {'+'.join(NON_US_HSNS_F2)}",
                 ),
             ],
         ),

@@ -1,12 +1,4 @@
-"""Score submissions against the generated evidence.
-
-Model submissions pass three gates: usable syntax and parameters, adequate
-fit, and correct reported claims. Structured submissions are checked against
-quantities derived from the public data and hidden construction.
-
-Each result contains ``score_binary``, ``score_partial``, and a named check
-vector. The binary score is one only when all required checks pass.
-"""
+"""Score model and structured submissions against a task definition."""
 
 from __future__ import annotations
 
@@ -521,7 +513,7 @@ def score_model_criteria(
                 0.0,
                 {"instrument": "FAIL"},
                 {},
-                "TIER3 instrument: the model does not analyse the " "expected set of variables",
+                "TIER3 instrument: the model does not analyse the expected set of variables",
             )
         criteria, model = evaluate_model(spec, X, items, pop)
     except InvalidSubmission as exc:

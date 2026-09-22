@@ -135,7 +135,7 @@ def candidate_models():
         "two_correlated_factors": reference_syntax(),
         "two_orthogonal_factors": f"F1 =~ {f1}\nF2 =~ {f2}\nF1 ~~ 0*F2",
         "three_correlated_factors": (
-            "F1 =~ HSNS1+HSNS8+HSNS6\n" "F2 =~ HSNS4+HSNS5+HSNS10\n" "F3 =~ HSNS2+HSNS3+HSNS7+HSNS9"
+            "F1 =~ HSNS1+HSNS8+HSNS6\nF2 =~ HSNS4+HSNS5+HSNS10\nF3 =~ HSNS2+HSNS3+HSNS7+HSNS9"
         ),
         "unidimensional_with_correlated_residuals": (
             f"G =~ {every}\nHSNS2 ~~ HSNS7\nHSNS5 ~~ HSNS10\nHSNS1 ~~ HSNS8"

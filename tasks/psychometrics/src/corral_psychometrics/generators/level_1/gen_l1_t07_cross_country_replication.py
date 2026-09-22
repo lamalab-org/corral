@@ -495,7 +495,7 @@ def naive(df, pop):
         truth = TRUTH["dirty_dozen"][country]
         if (verdict == "replicates") != (truth == "exact"):
             wrong += 1
-        print(f"{country:8s} {hcfi:9.4f} {dcfi:8.4f}  Dirty Dozen {verdict}" f"   (truth: {truth})")
+        print(f"{country:8s} {hcfi:9.4f} {dcfi:8.4f}  Dirty Dozen {verdict}   (truth: {truth})")
     print(
         f"\n  fit alone misclassifies {wrong} of {len(REPLICATION_COUNTRIES)} "
         f"countries for the Dirty Dozen"

@@ -164,7 +164,7 @@ def comparison_sample(df):
 
 def reference_syntax():
     """The joint measurement model: the two traits, correlated."""
-    return f"F1 =~ {'+'.join(HSNS)}\n" f"F2 =~ {'+'.join(OTHER)}"
+    return f"F1 =~ {'+'.join(HSNS)}\nF2 =~ {'+'.join(OTHER)}"
 
 
 def trait_correlation(X):
@@ -362,8 +362,7 @@ def verify(df, targets, pop):
 
     r_men, r_women = trait_correlation(men), trait_correlation(women)
     print(
-        f"  trait correlation, men                     {r_men:+.3f} "
-        f"(target {targets['men']:+.3f})"
+        f"  trait correlation, men                     {r_men:+.3f} (target {targets['men']:+.3f})"
     )
     print(
         f"  trait correlation, women                   {r_women:+.3f} "

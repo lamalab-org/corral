@@ -1,4 +1,4 @@
-"""The tools an agent gets: workspace files, a Python session, a syntax check."""
+"""Workspace, Python, and model-syntax tools for agents."""
 
 from __future__ import annotations
 

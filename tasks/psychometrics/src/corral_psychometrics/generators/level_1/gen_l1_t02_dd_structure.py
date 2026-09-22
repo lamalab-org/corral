@@ -360,7 +360,7 @@ def naive(df, pop):
         fitted = {k: abs(v) for k, v in C.loadings(C.fit(spec, X, ITEMS)).items()}
         worst = max(abs(fitted[i] - truth[i]) for i in ITEMS)
         outcome[label] = worst <= 0.08
-        print(f"{label:22s} {len(X):7,} {worst:14.3f}  " f"{'yes' if outcome[label] else 'NO'}")
+        print(f"{label:22s} {len(X):7,} {worst:14.3f}  {'yes' if outcome[label] else 'NO'}")
     return C.report(
         [
             (

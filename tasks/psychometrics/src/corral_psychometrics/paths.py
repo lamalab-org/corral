@@ -1,17 +1,4 @@
-"""Where each task's generated files live.
-
-``build.py`` writes three committed trees into a data root:
-
-    artifacts/level_1/task_01/               the files the agent is given
-    truth/level_1/task_01.json               the answer key
-    environments/level_1/tasks_json/         the task definitions
-
-A task is identified by its level and number, which name its generator file.
-Every path follows from that pair.
-
-The data root is taken from an explicit argument, else
-``CORRAL_PSYCHOMETRICS_ROOT``, else the source checkout.
-"""
+"""Resolve task identities and data-root-relative paths."""
 
 from __future__ import annotations
 
@@ -24,7 +11,8 @@ from pathlib import Path
 #: ``gen_l<level>_t<number>_<slug>.py``
 GENERATOR_NAME = re.compile(r"gen_l(?P<level>\d+)_t(?P<number>\d+)_(?P<slug>.+)\.py")
 
-#: Names a data root when there is no checkout to infer one from.
+#: Optional data-root override. this is useful if we install without the generated data.
+# we can also think about moving all data to HF
 ROOT_VARIABLE = "CORRAL_PSYCHOMETRICS_ROOT"
 
 _GENERATORS = "generators"
@@ -32,14 +20,14 @@ _GENERATORS = "generators"
 
 @cache
 def _checkout_root() -> Path | None:
-    """The task root this package was installed from, if it was editable."""
+    """Return the source checkout when available."""
     # src/corral_psychometrics/paths.py -> src/corral_psychometrics -> src -> root
     candidate = Path(__file__).resolve().parents[2]
     return candidate if (candidate / "pyproject.toml").is_file() else None
 
 
 def task_root(explicit: str | Path | None = None) -> Path:
-    """Select a data location; readers validate files, builders may create it."""
+    """Select an explicit, configured, or checkout data root."""
     if explicit is not None:
         return Path(explicit).expanduser().resolve()
     if configured := os.environ.get(ROOT_VARIABLE):
@@ -57,7 +45,7 @@ def task_root(explicit: str | Path | None = None) -> Path:
 
 @dataclass(frozen=True)
 class Task:
-    """One task, and every file that belongs to it under a given data root."""
+    """A task and its files under one data root."""
 
     level: int
     number: int
