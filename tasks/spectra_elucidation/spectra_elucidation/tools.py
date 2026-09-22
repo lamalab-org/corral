@@ -19,6 +19,11 @@ from spectra_elucidation.spectra_utils import (
 from corral.core.resources import extracted_resource_archive
 from corral.core.tool import Tool, tool
 from corral.utils.rag import vector_database_search
+from corral.utils.tool_helpers import DEFAULT_CHEMICAL_EMBEDDING_MODEL
+
+NMRSHIFTDB2_DATABASE_PATH = (
+    Path(__file__).resolve().parents[3] / "scripts" / "vector_databases" / "nmrshiftdb2"
+)
 
 
 @tool
@@ -169,18 +174,12 @@ def search_by_smiles(
 
     try:
         if nmr_database_archive is None:
-            db_path = (
-                Path(__file__).resolve().parents[3]
-                / "scripts"
-                / "vector_databases"
-                / "nmrshiftdb2"
-            )
             return vector_database_search(
                 query=smiles,
                 collection_name=collection_name,
-                path=db_path,
+                path=NMRSHIFTDB2_DATABASE_PATH,
                 top_k=top_k,
-                chemical_model="ibm-research/MoLFormer-XL-both-10pct",
+                chemical_model=DEFAULT_CHEMICAL_EMBEDDING_MODEL,
             )
         with extracted_resource_archive(nmr_database_archive) as db_path:
             return vector_database_search(
@@ -188,7 +187,7 @@ def search_by_smiles(
                 collection_name=collection_name,
                 path=db_path,
                 top_k=top_k,
-                chemical_model="ibm-research/MoLFormer-XL-both-10pct",
+                chemical_model=DEFAULT_CHEMICAL_EMBEDDING_MODEL,
             )
     except Exception as e:
         error_details = traceback.format_exc()

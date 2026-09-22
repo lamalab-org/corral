@@ -13,6 +13,7 @@ from corral.core.resources import (
     RESOURCE_CATALOG_METADATA_KEY,
     ResourceCatalogMismatchError,
     ResourceHandle,
+    UnmaterializedResourceError,
     declare_directory_resource,
     declare_file_resource,
     extracted_resource_archive,
@@ -421,6 +422,38 @@ def test_directory_resource_archive_is_safe_and_deterministic(tmp_path):
     assert str(archive) not in repr(handle)
     with extracted_resource_archive(handle) as extracted:
         assert (extracted / "nested" / "data.txt").read_text() == "tree data"
+
+
+def test_file_resource_rejects_unmaterialized_git_lfs_pointer(tmp_path):
+    pointer = tmp_path / "database.sqlite3"
+    pointer.write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        f"oid sha256:{'0' * 64}\n"
+        "size 123456\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(UnmaterializedResourceError, match="git lfs pull"):
+        declare_file_resource("database", pointer, runtime_version="database-v1")
+
+
+def test_directory_resource_rejects_unmaterialized_git_lfs_pointer(tmp_path):
+    source = tmp_path / "tree"
+    source.mkdir()
+    (source / "database.sqlite3").write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        f"oid sha256:{'0' * 64}\n"
+        "size 123456\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(UnmaterializedResourceError, match="git lfs pull"):
+        declare_directory_resource(
+            "dataset",
+            source,
+            cache_root=tmp_path / "resource-cache",
+            runtime_version="dataset-v1",
+        )
 
 
 def test_local_executor_extracts_declared_directory_resource(tmp_path):

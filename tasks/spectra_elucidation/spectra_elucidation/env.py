@@ -19,6 +19,7 @@ from spectra_elucidation.score import (
     validate_dbe_consistency,
 )
 from spectra_elucidation.tools import (
+    NMRSHIFTDB2_DATABASE_PATH,
     create_tools,
 )
 
@@ -174,15 +175,9 @@ def create_spectra_elu_environments(
         if not json_path.exists():
             raise ValueError(f"Task file {json_path} does not exist.")
         tasks = load_tasks_from_json(json_path, work_dir=work_dir)
-        database_path = (
-            Path(__file__).resolve().parents[3]
-            / "scripts"
-            / "vector_databases"
-            / "nmrshiftdb2"
-        )
         database_resource, database_archive = declare_directory_resource(
             "nmr_database_archive",
-            database_path,
+            NMRSHIFTDB2_DATABASE_PATH,
             cache_root=Path(work_dir) / ".corral" / "resource-sources",
             runtime_version="nmrshiftdb2-v1",
         )

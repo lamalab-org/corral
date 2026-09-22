@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections.abc as collections_abc
 import hashlib
 import os
+import re
 import tarfile
 import tempfile
 from contextlib import contextmanager
@@ -26,6 +27,28 @@ RESOURCE_CATALOG_METADATA_KEY = "resource_catalog"
 
 class ResourceCatalogMismatchError(RuntimeError):
     """Persisted immutable resources differ from the bound Environment."""
+
+
+class UnmaterializedResourceError(ValueError):
+    """A declared resource is still a Git LFS pointer, not its real bytes."""
+
+
+_GIT_LFS_POINTER = re.compile(
+    rb"version https://git-lfs\.github\.com/spec/v1\r?\n"
+    rb"oid sha256:[0-9a-f]{64}\r?\n"
+    rb"size [0-9]+\r?\n?"
+)
+
+
+def _reject_git_lfs_pointer(path: Path) -> None:
+    """Fail closed instead of hashing or archiving an unresolved LFS pointer."""
+    if path.stat().st_size > 1024:
+        return
+    if _GIT_LFS_POINTER.fullmatch(path.read_bytes()):
+        raise UnmaterializedResourceError(
+            f"resource source is an unresolved Git LFS pointer: {path}. "
+            "Run `git lfs pull` before creating the environment."
+        )
 
 
 @runtime_checkable
@@ -121,7 +144,11 @@ async def ingest_file_resource(
     filename: str | None = None,
 ) -> FileResourceDescriptor:
     """Ingest a local file and return a durable descriptor without its path."""
-    selected_name = filename or Path(source).name
+    path = Path(source)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"resource source must be a regular file: {source}")
+    _reject_git_lfs_pointer(path)
+    selected_name = filename or path.name
     stored = await artifact_store.put_file(source)
     return FileResourceDescriptor(
         name=name,
@@ -144,6 +171,7 @@ def declare_file_resource(
     path = Path(source)
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"resource source must be a regular file: {source}")
+    _reject_git_lfs_pointer(path)
     digest = hashlib.sha256()
     size = 0
     with path.open("rb") as stream:
@@ -204,6 +232,7 @@ def declare_directory_resource(
             raise ValueError(
                 f"resource directories can contain regular files only: {relative}"
             )
+        _reject_git_lfs_pointer(path)
         digest.update(relative.encode("utf-8") + b"\0")
         with path.open("rb") as stream:
             while chunk := stream.read(1024 * 1024):
@@ -293,6 +322,7 @@ __all__ = [
     "MaterializedResourcePath",
     "ResourceCatalogMismatchError",
     "ResourceHandle",
+    "UnmaterializedResourceError",
     "declare_directory_resource",
     "declare_file_resource",
     "extracted_resource_archive",
