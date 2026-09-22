@@ -161,9 +161,13 @@ def analysis_sample(df):
 
 
 def population_matrix(rng):
-    """Correlations a correctly specified model reproduces, from a large draw."""
+    """Correlations a correctly specified model reproduces, from a large draw.
+
+    Read from complete responses, as every fitted model is: `simulate` writes a
+    missing answer as 0, and leaving those in attenuates every correlation.
+    """
     big = simulate(rng, POP_REFERENCE_N)
-    return np.corrcoef(big[ITEMS].values.T.astype(float)).round(3)
+    return np.corrcoef(analysis_sample(big).values.T).round(3)
 
 
 def standardised(X, syntax=None):
