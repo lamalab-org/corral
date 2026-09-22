@@ -7,7 +7,7 @@ import logging
 import re
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -21,11 +21,51 @@ logging.disable(logging.WARNING)
 # Submitted-syntax validation
 # --------------------------------------------------------------------------
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: Longest first, so `=~` and `~~` are recognised before plain `~`.
 _ALLOWED_OPS = ("=~", "~~", "~")
 
 
 class InvalidSubmission(ValueError):
     """The submitted model cannot be accepted as input."""
+
+
+class Statement(NamedTuple):
+    """One parsed line of a model specification.
+
+    op     one of `=~`, `~~`, `~`
+    left   the name to the left of the operator
+    right  the names to its right, with any `value*` fixing dropped
+    """
+
+    op: str
+    left: str
+    right: list[str]
+
+
+def parse_statement(line: str) -> Statement | None:
+    """One line of a submitted model, or None if it states nothing.
+
+    Submitters choose their own factor names, spacing and line order, so
+    everything that reads a submitted model parses it here instead of matching
+    text against an assumed spelling.
+    """
+    stripped = line.strip()
+    for op in _ALLOWED_OPS:
+        if op in stripped:
+            left, rhs = stripped.split(op, 1)
+            names = [part.split("*")[-1] for part in rhs.replace("+", " ").split()]
+            return Statement(op, left.strip(), [name for name in names if name])
+    return None
+
+
+def statements(spec: str) -> list[Statement]:
+    """Every statement a specification makes, in order."""
+    return [parsed for parsed in map(parse_statement, spec.splitlines()) if parsed]
+
+
+def latent_names(spec: str) -> set[str]:
+    """The factors a specification defines."""
+    return {statement.left for statement in statements(spec) if statement.op == "=~"}
 
 
 def validate_syntax(spec: str, items: list[str], max_factors: int = 6) -> str:
@@ -48,10 +88,11 @@ def validate_syntax(spec: str, items: list[str], max_factors: int = 6) -> str:
 
     latents: set[str] = set()
     for line in lines:
-        if not any(op in line for op in _ALLOWED_OPS):
+        parsed = parse_statement(line)
+        if parsed is None:
             raise InvalidSubmission(f"line has no permitted operator: {line!r}")
-        if "=~" in line:
-            latents.add(line.split("=~")[0].strip())
+        if parsed.op == "=~":
+            latents.add(parsed.left)
     if len(latents) > max_factors:
         raise InvalidSubmission(
             f"{len(latents)} latent variables exceeds the limit of {max_factors}"
@@ -572,7 +613,7 @@ def score_model_criteria(
         derived["repeats_remaining"] = repeats
         derived["corrected_factor_correlation"] = phi
 
-    n_latents = len({ln.split("=~")[0].strip() for ln in spec.splitlines() if "=~" in ln})
+    n_latents = len(latent_names(spec))
     claims = check_claims(
         submission,
         truth,
@@ -653,13 +694,11 @@ def _measurement_only(spec: str, outcome: str) -> str:
     """Keep the submitted measurement/residual structure for subgroup refits."""
     kept = []
     for line in spec.splitlines():
-        stripped = line.strip()
-        if not stripped or "=~" in stripped or "~~" in stripped:
-            kept.append(stripped)
-        elif "~" in stripped and stripped.split("~", 1)[0].strip() != outcome:
-            # Structural paths for the outcome are replaced for each check;
-            # other paths are not needed for the within-group measurement refit.
-            continue
+        parsed = parse_statement(line)
+        # Structural paths are dropped: the outcome's are replaced for each
+        # check, and the rest are not needed for a measurement refit.
+        if parsed and parsed.op in ("=~", "~~"):
+            kept.append(line.strip())
     return "\n".join(line for line in kept if line)
 
 
@@ -668,10 +707,9 @@ def _within_outcome_syntax(spec: str, outcome: str, group: str) -> str:
     measurement = _measurement_only(spec, outcome)
     predictors = []
     for line in spec.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(f"{outcome} ~"):
-            predictors = [token.strip() for token in stripped.split("~", 1)[1].split("+")]
-            predictors = [token for token in predictors if token and token != group]
+        parsed = parse_statement(line)
+        if parsed and parsed.op == "~" and parsed.left == outcome:
+            predictors = [name for name in parsed.right if name != group]
     if not predictors:
         raise InvalidSubmission("outcome has no predictors for within-group refit")
     return f"{measurement}\n{outcome} ~ {' + '.join(predictors)}"
@@ -692,8 +730,14 @@ def _item_outcome_effect(
     outcome: str,
     group: str,
     item: str,
+    latent: str,
 ) -> float | None:
-    spec = f"{measurement}\n{outcome} ~ F + {group} + {item}"
+    """What `item` adds to the outcome once the trait and the group are in.
+
+    `latent` is the factor's name in the submitted model, which is the
+    submitter's to choose.
+    """
+    spec = f"{measurement}\n{outcome} ~ {latent} + {group} + {item}"
     model = _fit_outcome_model(spec, frame, items, outcome, group)
     return _outcome_coefficient(model, outcome, item)
 
@@ -735,14 +779,12 @@ def score_behavioral_validity(
         observed = observed_in_spec(spec, known)
         if set(known) - observed:
             return _result(0.0, {"model_coverage": "FAIL"}, {}, "model omits required variables")
-        latent_names = {
-            line.split("=~", 1)[0].strip() for line in spec.splitlines() if "=~" in line
-        }
-        if len(latent_names) != 1:
+        latents = latent_names(spec)
+        if len(latents) != 1:
             return _result(
                 0.0, {"one_latent_factor": "FAIL"}, {}, "task requires one latent factor"
             )
-        latent = next(iter(latent_names))
+        latent = next(iter(latents))
         model = _fit_outcome_model(spec, train, items, outcome, group)
         if _outcome_coefficient(model, outcome, latent) is None:
             return _result(
@@ -809,10 +851,10 @@ def score_behavioral_validity(
         unstable = []
         for item in items:
             train_item = _item_outcome_effect(
-                measurement, complete_train, items, outcome, group, item
+                measurement, complete_train, items, outcome, group, item, latent
             )
             holdout_item = _item_outcome_effect(
-                measurement, complete_holdout, items, outcome, group, item
+                measurement, complete_holdout, items, outcome, group, item, latent
             )
             if (
                 train_item is not None
@@ -862,15 +904,43 @@ def score_behavioral_validity(
 def _measurement_item_map(spec: str) -> dict[str, set[str]]:
     """Map observed items to the latent factors named in a specification."""
     mapping: dict[str, set[str]] = {}
-    for line in spec.splitlines():
-        if "=~" not in line:
+    for statement in statements(spec):
+        if statement.op != "=~":
             continue
-        factor, rhs = line.split("=~", 1)
-        for item in rhs.replace("*", " ").split("+"):
-            item = item.strip().split()[0] if item.strip() else ""
-            if item:
-                mapping.setdefault(item, set()).add(factor.strip())
+        for item in statement.right:
+            mapping.setdefault(item, set()).add(statement.left)
     return mapping
+
+
+def _restore_items(spec: str, omitted: list[str], factor_items: dict[str, list[str]]) -> str:
+    """Put omitted items back on the measurement line they belong to.
+
+    A submission may name its factors anything and spread them over any number
+    of lines, so an omitted item cannot be placed by factor name. Each one
+    rejoins the line already carrying most of the items that share its factor in
+    the generating model, or the first measurement line if none of them does.
+    """
+    lines = spec.splitlines()
+    parsed = [parse_statement(line) for line in lines]
+    measurement = [i for i, statement in enumerate(parsed) if statement and statement.op == "=~"]
+    if not measurement:
+        raise InvalidSubmission("no measurement line to restore an omitted item to")
+
+    same_factor = {item: members for members in factor_items.values() for item in members}
+    carries = {index: list(parsed[index].right) for index in measurement}
+    added: dict[int, list[str]] = {}
+    for item in omitted:
+        siblings = set(same_factor.get(item, ())) - {item}
+        home = max(measurement, key=lambda index: len(siblings.intersection(carries[index])))
+        carries[home].append(item)
+        added.setdefault(home, []).append(item)
+
+    # Only the chosen lines are rewritten, and the rest of each one is kept
+    # verbatim, so any parameter the submitter fixed survives.
+    for index, items in added.items():
+        left, right = lines[index].split("=~", 1)
+        lines[index] = f"{left}=~ {'+'.join(items)}+{right.strip()}"
+    return "\n".join(lines)
 
 
 def _model_fit_summary(spec: str, frame: pd.DataFrame, variables: list[str]) -> dict:
@@ -886,9 +956,21 @@ def _model_fit_summary(spec: str, frame: pd.DataFrame, variables: list[str]) -> 
     }
 
 
-def _drop_line(spec: str, line: str) -> str:
-    """The same model without one line."""
-    return "\n".join(ln for ln in spec.splitlines() if ln.strip() != line.strip())
+def _drop_path(spec: str, left: str, right: str) -> str:
+    """The same model without the regression of `left` on `right`.
+
+    A path sharing its line with other predictors loses only `right`.
+    """
+    kept = []
+    for line in spec.splitlines():
+        parsed = parse_statement(line)
+        if parsed and parsed.op == "~" and parsed.left == left and right in parsed.right:
+            remaining = [name for name in parsed.right if name != right]
+            if remaining:
+                kept.append(f"{left} ~ {' + '.join(remaining)}")
+            continue
+        kept.append(line)
+    return "\n".join(kept)
 
 
 def _drop_residual_pair(spec: str, pair: list[str] | tuple[str, str]) -> str:
@@ -896,10 +978,9 @@ def _drop_residual_pair(spec: str, pair: list[str] | tuple[str, str]) -> str:
     wanted = set(pair)
     kept = []
     for line in spec.splitlines():
-        if "~~" in line:
-            left, right = (part.strip() for part in line.split("~~", 1))
-            if {left, right} == wanted:
-                continue
+        parsed = parse_statement(line)
+        if parsed and parsed.op == "~~" and {parsed.left, *parsed.right} == wanted:
+            continue
         kept.append(line)
     return "\n".join(kept)
 
@@ -916,12 +997,11 @@ def _drop_cross_loading(spec: str, item: str, item_map: dict, model=None) -> str
             keep = [str(rows.loc[rows["abs_std"].idxmax(), "rval"])]
     out = []
     for line in spec.splitlines():
-        if "=~" in line:
-            factor, rhs = line.split("=~", 1)
-            factor = factor.strip()
-            members = [m.strip() for m in rhs.replace("+", " ").split()]
+        parsed = parse_statement(line)
+        if parsed and parsed.op == "=~":
+            factor, members = parsed.left, parsed.right
             if item in members and factor not in keep:
-                members = [m for m in members if m != item]
+                members = [name for name in members if name != item]
                 if not members:
                     continue
                 line = f"{factor} =~ {'+'.join(members)}"
@@ -964,6 +1044,10 @@ def score_misfit_replication(
     replicate = pd.read_csv(folder / params["replication_dataset"], sep="\t")
     items, group = params["items"], params["covariate"]
     known = items + [group]
+    # Which factor each item belongs to in the generating model. An item the
+    # submission leaves out has to be restored to the right one, and the
+    # submitted model cannot say where it belongs.
+    factor_items = params["factor_items"]
     checks = {}
     try:
         spec = validate_syntax(submission.get("model_syntax", ""), known, params["max_factors"])
@@ -983,9 +1067,7 @@ def score_misfit_replication(
         variables = [item for item in items if item in model_items] + [group]
         fitted_dev = _model_fit_summary(spec, dev, variables)
         fitted_rep = _model_fit_summary(spec, rep, variables)
-        factor_names = {
-            line.split("=~", 1)[0].strip() for line in spec.splitlines() if "=~" in line
-        }
+        factor_names = latent_names(spec)
         estimates = fitted_dev["model"].inspect(std_est=True)
         factor_group_paths = set(
             estimates.loc[
@@ -1032,7 +1114,7 @@ def score_misfit_replication(
             "cross_loadings": [
                 _drop_cross_loading(spec, item, item_map, fitted_dev["model"]) for item in cross
             ],
-            "dif_items": [_drop_line(spec, f"{item} ~ {group}") for item in dif],
+            "dif_items": [_drop_path(spec, item, group) for item in dif],
         }
         derived_replication = {}
         worth = {}
@@ -1047,7 +1129,7 @@ def score_misfit_replication(
         # A poor item replicates as poor when it is still weak in the other sample.
         weak_cut = params.get("weak_loading", 0.30)
         if reported_poor:
-            with_weak = spec.replace("F1 =~ ", "F1 =~ " + "+".join(reported_poor) + "+", 1)
+            with_weak = _restore_items(spec, reported_poor, factor_items)
             try:
                 restored = _model_fit_summary(with_weak, rep, ordered + reported_poor + [group])
                 estimated, _ = _standardised(restored["model"], ordered + reported_poor)
@@ -1316,8 +1398,8 @@ def score_gender_item_integrity(
         else:
             checks["model_coverage"] = "PASS"
         has_covariate_path = any(
-            "~" in line and params["covariate"] in line.split("~", 1)[1].split()
-            for line in spec.splitlines()
+            statement.op == "~" and params["covariate"] in statement.right
+            for statement in statements(spec)
         )
         checks["gender_path"] = "PASS" if has_covariate_path else "FAIL"
         folder = base / params["data_dir"]

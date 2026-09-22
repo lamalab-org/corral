@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import logging
 import warnings
 
@@ -16,7 +17,7 @@ import pandas as pd
 import semopy
 
 from corral_psychometrics import paths
-from corral_psychometrics.score import score_model_criteria
+from corral_psychometrics.score import latent_names, score_model_criteria
 
 warnings.filterwarnings("ignore")
 logging.disable(logging.WARNING)
@@ -92,6 +93,61 @@ def _group_submission(spec, X, items, truth=None):
         "latent_difference": round(value, 4),
         "biased_items": list(truth or []),
     }
+
+
+def _renamed(value, renames):
+    """A submission with every factor renamed, wherever its name appears.
+
+    Some tasks name their factors in the answer as well as in the model, and
+    the two have to agree.
+    """
+    if isinstance(value, str):
+        for old, new in renames.items():
+            value = re.sub(rf"\b{re.escape(old)}\b", new, value)
+        return value
+    if isinstance(value, dict):
+        return {key: _renamed(item, renames) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_renamed(item, renames) for item in value]
+    return value
+
+
+def cosmetic_variants(submission):
+    """The same answer, written the other ways a submitter might write it.
+
+    Factor names, spacing and line order are all the submitter's choice, so
+    none of these may change what the answer scores.
+    """
+    spec = submission["model_syntax"]
+    renames = {name: f"Latent{i}" for i, name in enumerate(sorted(latent_names(spec)))}
+
+    def respelled(rewrite):
+        return {**submission, "model_syntax": rewrite(spec)}
+
+    return {
+        "factors renamed": _renamed(submission, renames),
+        "no space after operators": respelled(
+            lambda text: text.replace("=~ ", "=~").replace(" ~ ", " ~")
+        ),
+        "spaces around +": respelled(lambda text: text.replace("+", " + ")),
+        "lines reversed": respelled(lambda text: "\n".join(reversed(text.splitlines()))),
+    }
+
+
+def cosmetic_failures(cases, params, expected_winner):
+    """A correct answer keeps its score however its model is spelled."""
+    good = cases.get(expected_winner)
+    if not isinstance(good, dict) or not good.get("model_syntax"):
+        return []
+    failures = []
+    for name, variant in cosmetic_variants(good).items():
+        result = score_model_criteria(variant, params, base_dir=ROOT)
+        if result["score_binary"] != 1.0:
+            failures.append(f"correct answer rewritten ({name}) scored {result['score_binary']}")
+        print(
+            f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
+        )
+    return failures
 
 
 def run_task(level, number, expected_winner):
@@ -194,6 +250,7 @@ def run_task(level, number, expected_winner):
         if key == "latent_difference"
         else {k: 0.55 for k in items}
     )
+    failures += cosmetic_failures(cases, params, expected_winner)
     adversarial = {
         **(
             {}
@@ -236,6 +293,7 @@ def run_population_task(gen, params, expected_winner):
             f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
         )
     good = cases["correct"]
+    failures += cosmetic_failures(cases, params, expected_winner)
     adversarial = {
         "missing classifications": {},
         "unknown population": {
@@ -270,6 +328,7 @@ def run_gender_integrity_task(gen, params, expected_winner):
             f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
         )
     good = cases["correct"]
+    failures += cosmetic_failures(cases, params, expected_winner)
     adversarial = {
         "item diagnoses omitted": {k: v for k, v in good.items() if k != "item_diagnoses"},
         "comparison omitted": {k: v for k, v in good.items() if k != "comparison"},
@@ -300,6 +359,7 @@ def run_behavioral_validity_task(gen, params, expected_winner):
             f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
         )
     good = cases["correct"]
+    failures += cosmetic_failures(cases, params, expected_winner)
     adversarial = {
         "association omitted": {k: v for k, v in good.items() if k != "association"},
         "unstable items omitted": {k: v for k, v in good.items() if k != "unstable_items"},
@@ -330,6 +390,7 @@ def run_misfit_replication_task(gen, params, expected_winner):
             f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
         )
     good = cases["correct"]
+    failures += cosmetic_failures(cases, params, expected_winner)
     adversarial = {
         "findings omitted": {k: v for k, v in good.items() if k != "findings"},
         "replication omitted": {k: v for k, v in good.items() if k != "replication"},
@@ -360,6 +421,7 @@ def run_adaptive_bank_choice_task(gen, params, expected_winner):
             f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
         )
     good = cases["correct"]
+    failures += cosmetic_failures(cases, params, expected_winner)
     adversarial = {
         "bank choice omitted": {k: v for k, v in good.items() if k != "bank_choice"},
         "dependent pairs omitted": {k: v for k, v in good.items() if k != "dependent_pairs"},

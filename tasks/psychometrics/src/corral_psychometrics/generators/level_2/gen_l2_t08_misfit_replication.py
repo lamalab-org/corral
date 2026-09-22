@@ -288,6 +288,7 @@ def build_task_json(data_sha):
                 "dataset": "data.csv",
                 "replication_dataset": "replication.csv",
                 "items": ITEMS,
+                "factor_items": {"F1": F1_ITEMS, "F2": F2_ITEMS},
                 "covariate": GROUP,
                 "max_factors": 3,
                 "replication_gain": REPLICATION_GAIN,
