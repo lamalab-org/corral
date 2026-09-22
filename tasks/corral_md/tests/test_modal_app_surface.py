@@ -14,7 +14,24 @@ def test_lammps_modal_app_exports_simulation_workers() -> None:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     }
 
-    assert {"prepare_workspace", "run_lammps", "run_python_gpu"} <= app_functions
+    assert {
+        "prepare_workspace",
+        "run_lammps",
+        "run_python_gpu",
+    } <= app_functions
+    assert "release_metadata" not in app_functions
+    assert {"run_python_cpu", "run_shell"}.isdisjoint(app_functions)
+
+    app_name = next(
+        ast.literal_eval(node.value)
+        for node in app_tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "APP_NAME"
+            for target in node.targets
+        )
+    )
+    assert app_name == "simagent"
 
 
 def test_evaluation_workers_cap_parallel_modal_calls() -> None:

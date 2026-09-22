@@ -1,10 +1,3 @@
-"""Durable, action-keyed synchronization with the Modal MD worker.
-
-The local journal is kept beside (not inside) the Corral workspace so its
-protocol state does not become an agent-visible workspace artifact. The remote
-run and its successful attempts are retained for recovery and later pruning.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -33,8 +26,8 @@ if TYPE_CHECKING:
 _ROOT = PurePosixPath("/corral/runs")
 _MOUNT = PurePosixPath("/results")
 _SCHEMA = 1
+APP_NAME = "simagent"
 _PINNED_RELEASE: ContextVar[str | None] = ContextVar("corral_md_release", default=None)
-_PINNED_APP: ContextVar[str | None] = ContextVar("corral_md_app", default=None)
 _PINNED_VOLUME: ContextVar[str | None] = ContextVar("corral_md_volume", default=None)
 _RECOVERY_SNAPSHOT: ContextVar[tuple[Any, Any] | None] = ContextVar(
     "corral_md_recovery_snapshot", default=None
@@ -45,71 +38,58 @@ class _RemoteToolFailed(RuntimeError):
     """A completed simulation error, as opposed to interrupted recovery."""
 
 
-def configured_release_id() -> str | None:
-    """Read the selected release when an execution is first committed."""
+def configured_runtime() -> tuple[str, str]:
+    """Read the explicitly configured internal MD release and Volume."""
     release = os.getenv("CORRAL_MD_RELEASE_ID")
+    volume = os.getenv("CORRAL_MD_MODAL_VOLUME")
     if not release:
-        release_file = Path(__file__).with_name("release.json")
-        if release_file.is_file():
-            release = json.loads(release_file.read_text())["release_id"]
-    return _identifier(release, "release ID") if release else None
+        raise RuntimeError(
+            "CORRAL_MD_RELEASE_ID must identify the deployed internal SimAgent release"
+        )
+    return _identifier(release, "release ID"), volume or "simulations"
 
 
-def configured_app_name(release_id: str) -> str:
-    release_file = Path(__file__).with_name("release.json")
-    if release_file.is_file():
-        record = json.loads(release_file.read_text())
-        if record.get("release_id") == release_id and record.get("app_name"):
-            return record["app_name"]
-    return _app_name(release_id)
+def configured_release_id() -> str:
+    """Read the explicitly configured SimAgent release."""
+    return configured_runtime()[0]
 
 
-def configured_volume_name(release_id: str) -> str:
-    release_file = Path(__file__).with_name("release.json")
-    if release_file.is_file():
-        record = json.loads(release_file.read_text())
-        if record.get("release_id") == release_id and record.get("volume_name"):
-            return record["volume_name"]
+def configured_app_name() -> str:
+    """Return the single Modal app used by Corral MD."""
+    return APP_NAME
+
+
+def configured_volume_name() -> str:
+    """Return the default Volume used for explicit low-level calls."""
     return os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations")
 
 
 def configured_asset_volume_name(name: str) -> str:
     """Resolve catalog validation against the selected release's asset Volumes."""
     release = _PINNED_RELEASE.get() or configured_release_id()
-    release_file = Path(__file__).with_name("release.json")
-    if release_file.is_file():
-        record = json.loads(release_file.read_text())
-        if record.get("release_id") == release:
-            return record.get("asset_volumes", {}).get(name, name)
-    if _PINNED_RELEASE.get():
-        base = _read_json(
-            modal.Volume.from_name("corral-md-bases"),
-            PurePosixPath("/corral/releases")
-            / _identifier(release, "release ID")
-            / "base.json",
-        )
-        if base is None or base.get("release_id") != release:
-            raise RuntimeError("Cannot resolve assets for the pinned MD release")
-        return base.get("asset_volumes", {}).get(name, name)
-    # Releases predating asset versioning used these literal Volume names.
-    return name
+    base = _read_json(
+        modal.Volume.from_name("corral-md-bases"),
+        PurePosixPath("/corral/releases")
+        / _identifier(release, "release ID")
+        / "base.json",
+    )
+    if base is None or base.get("release_id") != release:
+        raise RuntimeError("Cannot resolve assets for the current MD release")
+    return base.get("asset_volumes", {}).get(name, name)
 
 
 @contextmanager
 def pinned_release(
     release_id: str | None,
-    app_name: str | None = None,
     volume_name: str | None = None,
 ):
     """Bind a release from Corral's durable ExecutionStarted metadata."""
     token = _PINNED_RELEASE.set(release_id)
-    app_token = _PINNED_APP.set(app_name)
     volume_token = _PINNED_VOLUME.set(volume_name)
     try:
         yield
     finally:
         _PINNED_RELEASE.reset(token)
-        _PINNED_APP.reset(app_token)
         _PINNED_VOLUME.reset(volume_token)
 
 
@@ -121,13 +101,6 @@ def recovery_snapshot(workspace_state: Any, workspace_manager: Any):
         yield
     finally:
         _RECOVERY_SNAPSHOT.reset(token)
-
-
-def _app_name(release_id: str) -> str:
-    override = os.getenv("CORRAL_MD_MODAL_APP")
-    suffix = os.getenv("SIMAGENT_NAME", "").strip("-")
-    prefix = override or ("simagent" + (f"-{suffix}" if suffix else ""))
-    return f"{prefix}-{release_id}"
 
 
 def _is_runtime_name(name: str) -> bool:
@@ -324,7 +297,6 @@ def _restore_snapshot(root: Path) -> None:
 def _load_journal(
     root: Path,
     requested_release: str | None,
-    requested_app: str | None,
     requested_volume: str | None,
 ) -> tuple[Path, dict[str, Any]]:
     path = _journal_path(root)
@@ -336,21 +308,20 @@ def _load_journal(
             raise RuntimeError(f"Invalid Modal journal: {path}")
         if requested_release and requested_release != journal["release_id"]:
             raise RuntimeError("Active execution is pinned to a different MD release")
-        if requested_app and requested_app != journal.get("app_name"):
-            raise RuntimeError("Active execution is pinned to a different MD app")
         if requested_volume and requested_volume != journal.get("volume_name"):
             raise RuntimeError("Active execution is pinned to a different MD Volume")
         return path, journal
-    release_id = requested_release or _PINNED_RELEASE.get() or configured_release_id()
+    release_id = requested_release or _PINNED_RELEASE.get()
+    volume_name = requested_volume or _PINNED_VOLUME.get()
     if not release_id:
-        raise RuntimeError("No MD release selected; deploy with modal_app/release.py")
+        release_id, current_volume = configured_runtime()
+        volume_name = volume_name or current_volume
     _identifier(release_id, "release ID")
     journal = {
         "schema": _SCHEMA,
         "workspace": str(root),
         "release_id": release_id,
-        "app_name": requested_app or configured_app_name(release_id),
-        "volume_name": requested_volume or configured_volume_name(release_id),
+        "volume_name": volume_name or configured_volume_name(),
         "actions": {},
     }
     _save_journal(path, journal)
@@ -473,11 +444,9 @@ def _execute_impl(
     journal_path, journal = _load_journal(
         root,
         release_id or _PINNED_RELEASE.get(),
-        _PINNED_APP.get(),
         _PINNED_VOLUME.get(),
     )
     release = journal["release_id"]
-    app_name = journal["app_name"]
     run_id = _identifier(root.name, "run ID")
     remote_run = _ROOT / run_id
     action_manifest = remote_run / "actions" / f"{action}.json"
@@ -488,13 +457,11 @@ def _execute_impl(
         function_name = {
             "lammps": "run_lammps",
             "python": "run_python_gpu",
-            "python_cpu": "run_python_cpu",
-            "shell": "run_shell",
             "verified_md": "run_verified_md",
         }[kind]
-        remote_function = modal.Function.from_name(app_name, function_name)
+        remote_function = modal.Function.from_name(APP_NAME, function_name)
     if initializer is None:
-        initializer = modal.Function.from_name(app_name, "prepare_workspace")
+        initializer = modal.Function.from_name(APP_NAME, "prepare_workspace")
     call_factory = call_factory or modal.FunctionCall.from_id
     actions = journal["actions"]
     for other_action, other_record in actions.items():
@@ -694,7 +661,7 @@ def run_lammps_in_modal(
     )
 
 
-def run_python_in_modal(
+def run_python_gpu_in_modal(
     workspace: str | Path,
     script_file: str,
     args: list[str] | None = None,
@@ -706,15 +673,14 @@ def run_python_in_modal(
     initializer: Any | None = None,
     call_factory: Any | None = None,
     job_id: str | None = None,
-    use_gpu: bool = True,
     timeout: int = 600,
     working_dir: str = "/workspace",
 ) -> int:
-    """Run isolated CPU/GPU Python and recover its committed outputs."""
+    """Run isolated GPU Python and recover its committed outputs."""
     _, count = _execute(
         workspace,
         script_file,
-        kind="python" if use_gpu else "python_cpu",
+        kind="python",
         args=[str(arg) for arg in args or []],
         action_id=action_id or job_id,
         release_id=release_id,
@@ -723,31 +689,6 @@ def run_python_in_modal(
         initializer=initializer,
         call_factory=call_factory,
         execution_options={"timeout": timeout, "working_dir": working_dir},
-    )
-    return count
-
-
-def run_shell_in_modal(
-    workspace: str | Path,
-    command: str,
-    *,
-    timeout: int = 120,
-    max_output_chars: int = 20_000,
-    action_id: str | None = None,
-) -> int:
-    """Run a shell action without creating or mutating an input script."""
-    _, count = _execute(
-        workspace,
-        str(Path(workspace).resolve() / "__terminal__"),
-        kind="shell",
-        args=[command],
-        action_id=action_id,
-        release_id=None,
-        volume=None,
-        remote_function=None,
-        initializer=None,
-        call_factory=None,
-        execution_options={"timeout": timeout, "max_output_chars": max_output_chars},
     )
     return count
 
@@ -770,7 +711,6 @@ def run_verified_md_in_modal(workspace, config_file, *, action_id=None):
 
 __all__ = [
     "run_lammps_in_modal",
-    "run_python_in_modal",
-    "run_shell_in_modal",
+    "run_python_gpu_in_modal",
     "run_verified_md_in_modal",
 ]

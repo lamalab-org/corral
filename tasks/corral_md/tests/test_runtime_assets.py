@@ -154,27 +154,49 @@ def test_prompts_use_provisioned_checkpoint_names(tmp_path):
         assert "/workspace/models" in prompt
 
 
-def test_catalog_uses_release_asset_volumes(tmp_path, monkeypatch):
-    from corral_md import modal_workspace as bridge
-
-    monkeypatch.setattr(bridge, "__file__", str(tmp_path / "modal_workspace.py"))
-    monkeypatch.delenv("CORRAL_MD_RELEASE_ID", raising=False)
-    record = {"release_id": "release-1", "asset_volumes": {"potentials": "corral-md-potentials-version1"}}
-    (tmp_path / "release.json").write_text(json.dumps(record))
-    assert bridge.configured_asset_volume_name("potentials") == "corral-md-potentials-version1"
-    monkeypatch.setenv("CORRAL_MD_RELEASE_ID", "legacy-release")
-    assert bridge.configured_asset_volume_name("potentials") == "potentials"
-
-
-def test_asset_catalog_follows_execution_pin_after_a_new_release(tmp_path, monkeypatch):
+def test_catalog_uses_release_asset_volumes(monkeypatch):
     from types import SimpleNamespace
 
     from corral_md import modal_workspace as bridge
 
-    monkeypatch.setattr(bridge, "__file__", str(tmp_path / "modal_workspace.py"))
-    (tmp_path / "release.json").write_text(json.dumps({
-        "release_id": "new", "asset_volumes": {"models": "models-new"},
-    }))
+    monkeypatch.setenv("CORRAL_MD_RELEASE_ID", "release-1")
+
+    def read(path):
+        assert path == "/corral/releases/release-1/base.json"
+        yield json.dumps({
+            "release_id": "release-1",
+            "asset_volumes": {"potentials": "corral-md-potentials-version1"},
+        }).encode()
+
+    monkeypatch.setattr(
+        bridge.modal.Volume,
+        "from_name",
+        lambda name: SimpleNamespace(read_file=read),
+    )
+    assert bridge.configured_asset_volume_name("potentials") == "corral-md-potentials-version1"
+
+
+def test_runtime_configuration_is_explicit(monkeypatch):
+    from corral_md import modal_workspace as bridge
+
+    monkeypatch.setenv("CORRAL_MD_RELEASE_ID", "release-1")
+    monkeypatch.setenv("CORRAL_MD_MODAL_VOLUME", "internal-simulations")
+    assert bridge.configured_runtime() == ("release-1", "internal-simulations")
+
+
+def test_runtime_configuration_requires_release_id(monkeypatch):
+    from corral_md import modal_workspace as bridge
+
+    monkeypatch.delenv("CORRAL_MD_RELEASE_ID", raising=False)
+    with pytest.raises(RuntimeError, match="CORRAL_MD_RELEASE_ID"):
+        bridge.configured_runtime()
+
+
+def test_asset_catalog_follows_execution_pin_after_a_new_release(monkeypatch):
+    from types import SimpleNamespace
+
+    from corral_md import modal_workspace as bridge
+
     paths = []
 
     def read(path):

@@ -102,12 +102,15 @@ def test_assets_cannot_be_written_or_shadowed(kind, tmp_path):
 
 
 def test_assets_are_read_remotely_without_materializing_catalog(tmp_path, monkeypatch):
-    from corral_md import workspace
+    from corral_md import modal_workspace, workspace
 
     entry = SimpleNamespace(path="SW/Si.sw", type=FileEntryType.FILE, size=9)
     volume = SimpleNamespace(
         read_file=lambda path: iter([b"potential"]),
         listdir=lambda path, **kwargs: [entry],
+    )
+    monkeypatch.setattr(
+        modal_workspace, "configured_asset_volume_name", lambda name: name
     )
     monkeypatch.setattr(workspace.modal.Volume, "from_name", lambda name: volume)
     fs = MDWorkspaceFilesystem(tmp_path)
@@ -125,28 +128,73 @@ def test_assets_are_read_remotely_without_materializing_catalog(tmp_path, monkey
     assert not (tmp_path / "potentials").exists()
 
 
-@pytest.mark.parametrize("use_gpu", [False, True])
-def test_python_always_uses_isolated_backend_and_checks_working_dir(
-    tmp_path, monkeypatch, use_gpu
+def test_cpu_python_runs_in_local_workspace_and_checks_working_dir(tmp_path):
+    (tmp_path / "script.py").write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "Path(sys.argv[1]).write_text(str(Path.cwd()))\n"
+        "print('local cpu')\n"
+    )
+    (tmp_path / "output").mkdir()
+    tool = md_tools.build_execute_python_script_tool(tmp_path)
+    with pytest.raises(ValueError):
+        tool.execute(script_path="/workspace/script.py", working_dir=".")
+    result = json.loads(
+        tool.execute(
+            script_path="/workspace/script.py",
+            args=["/workspace/output/result.txt"],
+        )
+    )
+    assert result["success"]
+    assert result["backend"] == "local_cpu"
+    assert (tmp_path / "output/result.txt").read_text() == str(tmp_path.resolve())
+    assert (tmp_path / "output/script.stdout.txt").read_text() == "local cpu\n"
+    assert "use_gpu" in tool.params_json_schema["properties"]
+    assert tool.trusted is True
+
+
+def test_cpu_python_dispatches_through_restricted_local_worker(tmp_path, monkeypatch):
+    (tmp_path / "script.py").write_text("print('run')")
+    calls = []
+
+    def run_worker(operation, payload, workspace):
+        calls.append((operation, payload, workspace))
+        return {"content": json.dumps({"success": True, "backend": "local_cpu"})}
+
+    monkeypatch.setattr(md_tools.permissions, "enabled", lambda: True)
+    monkeypatch.setattr(md_tools.permissions, "run_worker", run_worker)
+    result = json.loads(
+        md_tools.build_execute_python_script_tool(tmp_path).execute(
+            script_path="/workspace/script.py"
+        )
+    )
+
+    assert result["backend"] == "local_cpu"
+    assert calls[0][0] == "tool"
+    assert calls[0][1][0].name == "_corral_md_local_python"
+    assert calls[0][1][1]["script_path"] == "/workspace/script.py"
+    assert calls[0][2] == str(tmp_path)
+
+
+def test_gpu_python_uses_only_modal_backend_and_checks_working_dir(
+    tmp_path, monkeypatch
 ):
     (tmp_path / "script.py").write_text("print('run')")
     calls = []
     monkeypatch.setattr(
         md_tools,
-        "run_python_in_modal",
+        "run_python_gpu_in_modal",
         lambda *args, **kwargs: calls.append((args, kwargs)) or 1,
     )
     tool = md_tools.build_execute_python_script_tool(tmp_path)
     with pytest.raises(ValueError):
-        tool.execute(
-            script_path="/workspace/script.py", working_dir=".", use_gpu=use_gpu
-        )
+        tool.execute(script_path="/workspace/script.py", working_dir=".")
     assert not calls
     result = json.loads(
-        tool.execute(script_path="/workspace/script.py", use_gpu=use_gpu)
+        tool.execute(script_path="/workspace/script.py", use_gpu=True)
     )
     assert result["success"]
-    assert calls[0][1]["use_gpu"] is use_gpu
+    assert result["backend"] == "modal_a100"
     assert calls[0][1]["working_dir"] == "/workspace"
 
 
@@ -208,20 +256,12 @@ def test_public_submission_paths_map_exactly_to_restored_files(tmp_path):
         workspace_relative_path("/workspace/../output/result.csv")
 
 
-def test_terminal_dispatches_without_creating_or_overwriting_a_script(tmp_path, monkeypatch):
-    calls = []
-
-    def run(workspace, command, **options):
-        calls.append((workspace, command, options))
-        output = tmp_path / "output"
-        output.mkdir()
-        (output / "terminal.json").write_text(json.dumps({"exit_code": 0, "output": "42"}))
-        return 1
-
-    monkeypatch.setattr(md_tools, "run_shell_in_modal", run)
-    terminal = _md_file_tools(str(tmp_path))["terminal"]
-    result = json.loads(terminal.execute(command="echo 42", corral_action_id="action-1"))
-    assert result["output"] == "42"
-    assert calls[0][1] == "echo 42"
-    assert calls[0][2]["action_id"] == "action-1"
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["output"]
+def test_terminal_runs_in_local_workspace(tmp_path):
+    tools = _md_file_tools(str(tmp_path))
+    assert "execute_python_script_gpu" not in tools
+    terminal = tools["terminal"]
+    result = json.loads(terminal.execute(command="pwd; printf 42 > result.txt"))
+    assert result["exit_code"] == 0
+    assert str(tmp_path.resolve()) in result["output"]
+    assert (tmp_path / "result.txt").read_text() == "42"
+    assert terminal.worker_operation == "terminal"

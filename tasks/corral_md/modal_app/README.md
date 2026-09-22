@@ -6,7 +6,6 @@ The Modal app allows you to run computationally intensive simulation functions o
 
 1. **Create a Modal account** at [modal.com](https://modal.com)
 2. **Authenticate**: Run `modal setup` (Modal is already in project dependencies)
-3. **Optional**: Set app name via `SIMAGENT_NAME` environment variable
 
 For detailed Modal setup instructions, see the [Modal documentation](https://modal.com/docs/guide).
 
@@ -22,8 +21,10 @@ This one command verifies the bundled ZIP archives and the exact MACE
 checkpoints in [assets.json](assets.json), checks SHA-256, uploads missing
 assets, publishes a versioned workspace seed in the `corral-md-bases` Volume,
 mounts that Volume read-only in workers, deploys the worker under a
-release-specific app name, and runs LAMMPS plus CPU/GPU Python smoke tests that check asset permissions and workspace isolation. It writes
-`src/corral_md/release.json` only after all steps pass. Repeating the command
+single stable `simagent` app, and runs LAMMPS plus GPU Python smoke tests that
+check asset permissions and workspace isolation. The release command prints the
+internal release ID after all steps pass; set it as `CORRAL_MD_RELEASE_ID` when
+running Corral. Repeating the command
 skips identical assets and refuses to overwrite conflicting ones. Assets are
 stored in `corral-md-<asset-kind>-<content-hash>` Volumes, mounted read-only at
 the same paths in every worker. Changing a checkpoint or potential creates a
@@ -33,15 +34,15 @@ legacy `models`, `potentials`, and `structures` Volumes for older deployments.
 Use
 `uv run python modal_app/release.py --print-id` to inspect the release ID
 without deployment. A release ID covers the asset manifest, dependency lock,
-worker source, client protocol, and workspace seed. Keep old deployed apps and
-their shared asset files while their runs remain recoverable.
+worker source, client protocol, and workspace seed. Redeploying `simagent`
+replaces the development worker, so discard active development runs before a
+redeploy and freeze the app while real runs are in progress.
 Deployment also calculates and publishes the fixed Task 3 dimer and Task 5
 strained-silicon references under the release ID. Live verification results are
 cached by their complete scientific inputs and release, so repeated scoring does
 not rerun identical calculator, descriptor, or checkpoint-prediction jobs.
-If using `SIMAGENT_NAME`, `CORRAL_MD_MODAL_APP`, or
-`CORRAL_MD_MODAL_VOLUME`, set them for deployment; the resulting app and
-Volume names are recorded with each execution for restart.
+If using `CORRAL_MD_MODAL_VOLUME`, set it for deployment. The app reports the
+resulting Volume name and each execution records it for restart.
 
 Each execution has a persistent directory under `/corral/runs/<run_id>/` in the
 `simulations` Volume. The initializer creates it from the pinned release base

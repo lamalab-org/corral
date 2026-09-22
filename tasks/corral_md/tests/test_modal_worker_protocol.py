@@ -231,7 +231,7 @@ def test_sandbox_gets_only_current_task_and_read_only_assets(worker, tmp_path, m
     command, options = calls[0]
     assert command[-2:] == ("python", "/workspace/script.py")
     assert options["workdir"] == "/workspace"
-    assert options["gpu"] == ("A100" if gpu else None)
+    assert options["gpu"] == (module.GPU_TYPE if gpu else None)
     assert options.get("secrets", ()) == ()
     assert set(options["volumes"]) == {
         "/workspace", "/assets/potentials", "/assets/models", "/assets/structures",
@@ -273,34 +273,12 @@ def test_python_and_lammps_use_stable_absolute_paths_without_rewriting(worker, t
     script.write_text(original)
     calls = []
     monkeypatch.setattr(module, "_run_sandbox", lambda *args, **kwargs: calls.append((args, kwargs)))
-    module._run_python(script, ["/workspace/input/data.json"], "/local", working, gpu=False)
+    module._run_python(script, ["/workspace/input/data.json"], "/local", working)
     assert calls[0][0][0] == ["python", "/workspace/scripts/analyze.py", "/workspace/input/data.json"]
     assert script.read_text() == original
-    assert calls[0][1]["gpu"] is False
+    assert calls[0][1]["gpu"] is True
     input_file = working / "run.in"
     input_file.write_text("log /workspace/custom.log\nrun 0\n")
     module._run_lammps(input_file, "run.log", "/local", working)
     assert calls[1][0][0][-4:] == ["-in", "/workspace/run.in", "-log", "/workspace/output/run.log"]
     assert input_file.read_text() == "log /workspace/custom.log\nrun 0\n"
-
-
-def test_shell_action_needs_no_input_file_and_replays_its_saved_result(worker, monkeypatch):
-    module, _ = worker
-    state = module._prepare("run-1", "release-1")
-    calls = []
-
-    def execute(command, working, **options):
-        calls.append((command, options))
-        (working / "output/data.txt").write_text("retained")
-        return {"exit_code": 7, "output": "0123456789"}
-
-    monkeypatch.setattr(module, "_run_sandbox", execute)
-    args = ("shell", "run-1", "action-1", "__terminal__", "/local", ["exit 7"],
-            "release-1", state["head"], {}, {"timeout": 5, "max_output_chars": 4})
-    result = module._execute(*args)
-    assert module._execute(*args) == result
-    assert len(calls) == 1
-    assert calls[0][0] == ["/bin/sh", "-lc", "exit 7"]
-    saved = json.loads((Path(result["workspace"]) / "output/terminal.json").read_text())
-    assert saved == {"exit_code": 7, "output": "6789", "truncated": True, "timed_out": False}
-    assert "output/data.txt" in result["files"]

@@ -312,7 +312,7 @@ def test_gpu_python_uses_same_persistent_protocol(tmp_path: Path) -> None:
     (workspace / "old.dat").write_text("delete me")
     volume = _Volume()
     function = _Function(volume, kind="python", delete_file="old.dat")
-    downloaded = bridge.run_python_in_modal(
+    downloaded = bridge.run_python_gpu_in_modal(
         workspace, "script.py", action_id="python-1", release_id="release-1",
         volume=volume, remote_function=function, initializer=_Initializer(volume),
     )
@@ -468,7 +468,7 @@ def test_md_prompt_requires_absolute_workspace_paths(tmp_path: Path, monkeypatch
     prompt = started.task["prompt"]
     assert "accept only absolute POSIX paths under /workspace" in prompt
     assert str(environment.workspace_path) not in prompt
-    assert started.runtime.metadata["corral_md_release_id"] == "release-1"
+    assert "corral_md_release_id" not in started.runtime.metadata
     assert (Path(environment.workspace_path) / "input").is_dir()
     assert (Path(environment.workspace_path) / "output").is_dir()
 
@@ -684,13 +684,13 @@ def test_runtime_recovers_same_action_after_remote_success(tmp_path, monkeypatch
     volume = _Volume()
     function = _Function(volume, kind=kind)
     initializer = _Initializer(volume)
-    bridge_function = bridge.run_lammps_in_modal if kind == "lammps" else bridge.run_python_in_modal
+    bridge_function = bridge.run_lammps_in_modal if kind == "lammps" else bridge.run_python_gpu_in_modal
 
     def run(*args, **kwargs):
         return bridge_function(*args, **kwargs, volume=volume,
                                remote_function=function, initializer=initializer)
 
-    monkeypatch.setattr(md_tools, "run_lammps_in_modal" if kind == "lammps" else "run_python_in_modal", run)
+    monkeypatch.setattr(md_tools, "run_lammps_in_modal" if kind == "lammps" else "run_python_gpu_in_modal", run)
     if interruption == "download":
         original = bridge._sync_result
         monkeypatch.setattr(bridge, "_sync_result", lambda *_: (_ for _ in ()).throw(OSError("download interrupted")))

@@ -28,6 +28,8 @@ ASSETS = json.loads((APP_DIR / "assets.json").read_text())
 os.environ["MODAL_IMAGE_BUILDER_VERSION"] = ASSETS["image_builder_version"]
 ASSET_VOLUMES = asset_volume_names(ASSETS)
 RELEASE_ID = os.getenv("CORRAL_MD_RELEASE_ID", "")
+APP_NAME = "simagent"
+VOLUME_NAME = os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations")
 
 lammps_image = (
     # The account's legacy debian_slim builder uses retired Bullseye security
@@ -93,20 +95,16 @@ for _source in (
         APP_DIR / _source, f"/opt/corral-md/{_source}", copy=True
     )
 
-suffix = os.getenv("SIMAGENT_NAME", "").strip("-")
-app_name = "simagent" + (f"-{suffix}" if suffix else "")
-app_name = os.getenv("CORRAL_MD_MODAL_APP") or app_name
-app = App(f"{app_name}-{RELEASE_ID}" if RELEASE_ID else app_name)
+app = App(APP_NAME)
 
 volume_potential = modal.Volume.from_name(ASSET_VOLUMES["potentials"])
-volume_sim = modal.Volume.from_name(
-    os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations"), create_if_missing=True
-)
+volume_sim = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 volume_base = modal.Volume.from_name("corral-md-bases", create_if_missing=True)
 volume_struct = modal.Volume.from_name(ASSET_VOLUMES["structures"])
 volume_models = modal.Volume.from_name(ASSET_VOLUMES["models"])
 
 CPUS = 2
+GPU_TYPE = "A100"
 MAX_EVALUATION_CONTAINERS = 25
 RUNS = Path("/results/corral/runs")
 RELEASES = Path("/bases/corral/releases")
@@ -344,7 +342,7 @@ def _run_sandbox(
             app=app,
             image=lammps_image,
             workdir="/workspace",
-            gpu="A100" if gpu else None,
+            gpu=GPU_TYPE if gpu else None,
             cpu=CPUS,
             memory=10240 if gpu else 5120,
             timeout=timeout,
@@ -420,7 +418,6 @@ def _run_python(
     _local_root: str,
     remote_root: Path,
     *,
-    gpu: bool = True,
     execution_options: dict | None = None,
 ) -> None:
     options = execution_options or {}
@@ -441,7 +438,7 @@ def _run_python(
             *args,
         ],
         remote_root,
-        gpu=gpu,
+        gpu=True,
         timeout=timeout,
         working_dir=directory,
         log_stem=script_path.stem,
@@ -509,39 +506,20 @@ def _execute(
     input_path = working / relative
     trusted_md_record = None
     try:
-        if kind != "shell" and (not input_path.is_file() or input_path.is_symlink()):
+        if not input_path.is_file() or input_path.is_symlink():
             raise FileNotFoundError(f"Modal input not found: {relative_input}")
         if kind == "lammps":
             _run_lammps(
                 input_path, relative.with_suffix(".log").name, local_workspace, working
             )
-        elif kind in {"python", "python_cpu"}:
+        elif kind == "python":
             _run_python(
                 input_path,
                 args,
                 local_workspace,
                 working,
-                gpu=kind == "python",
                 execution_options=execution_options,
             )
-        elif kind == "shell":
-            options = execution_options or {}
-            timeout = options.get("timeout", 120)
-            limit = options.get("max_output_chars", 20_000)
-            if len(args) != 1 or not 1 <= timeout <= 3600 or not 1 <= limit <= 100_000:
-                raise ValueError("Invalid shell arguments")
-            shell_result = _run_sandbox(
-                ["/bin/sh", "-lc", args[0]],
-                working,
-                timeout=timeout,
-                log_stem="terminal",
-                check_exit=False,
-            )
-            output = shell_result["output"]
-            shell_result.update(
-                output=output[-limit:], truncated=len(output) > limit, timed_out=False
-            )
-            _write(working / "output/terminal.json", shell_result)
         elif kind == "verified_md":
             if args:
                 raise ValueError("Controlled MD accepts only a JSON configuration")
@@ -656,72 +634,6 @@ def run_python_gpu(
         run_id,
         action_id,
         script_file,
-        local_workspace,
-        args,
-        release_id,
-        base_head,
-        expected_files,
-        execution_options,
-    )
-
-
-@app.function(
-    image=lammps_image,
-    cpu=1,
-    timeout=7500,
-    memory=2048,
-    volumes={"/results": volume_sim, "/bases": volume_base.read_only()},
-)
-def run_python_cpu(
-    run_id: str,
-    action_id: str,
-    script_file: str,
-    local_workspace: str,
-    args: list[str],
-    release_id: str,
-    base_head: str,
-    expected_files: dict,
-    execution_options: dict | None = None,
-) -> dict:
-    """Coordinate isolated CPU Python using the same workspace contract."""
-    return _execute(
-        "python_cpu",
-        run_id,
-        action_id,
-        script_file,
-        local_workspace,
-        args,
-        release_id,
-        base_head,
-        expected_files,
-        execution_options,
-    )
-
-
-@app.function(
-    image=lammps_image,
-    cpu=1,
-    timeout=3900,
-    memory=2048,
-    volumes={"/results": volume_sim, "/bases": volume_base.read_only()},
-)
-def run_shell(
-    run_id: str,
-    action_id: str,
-    input_file: str,
-    local_workspace: str,
-    args: list[str],
-    release_id: str,
-    base_head: str,
-    expected_files: dict,
-    execution_options: dict | None = None,
-) -> dict:
-    """Coordinate shell execution in a CPU Sandbox without controller access."""
-    return _execute(
-        "shell",
-        run_id,
-        action_id,
-        input_file,
         local_workspace,
         args,
         release_id,

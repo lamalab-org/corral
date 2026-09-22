@@ -793,7 +793,6 @@ class ModalVerifier:
         self,
         *,
         release_id=None,
-        app_name=None,
         volume_name=None,
         run_id=None,
         action_id=None,
@@ -801,11 +800,7 @@ class ModalVerifier:
         transport=None,
         max_parallel_calculations=None,
     ):
-        self.release_id, self.app_name, self.volume_name = (
-            release_id,
-            app_name,
-            volume_name,
-        )
+        self.release_id, self.volume_name = release_id, volume_name
         self.run_id, self.action_id = run_id, action_id
         self.require_provenance = require_provenance
         self.transport = transport
@@ -836,19 +831,21 @@ class ModalVerifier:
     def _configuration(self):
         from corral_md.modal_workspace import (
             configured_app_name,
-            configured_release_id,
-            configured_volume_name,
+            configured_runtime,
         )
 
-        release = self.release_id or configured_release_id()
-        if not release:
+        if self.release_id and self.volume_name:
+            return self.release_id, configured_app_name(), self.volume_name
+        current_release, current_volume = configured_runtime()
+        release = self.release_id or current_release
+        if release != current_release:
             raise RuntimeError(
-                "No verifier release selected; deploy modal_app/release.py"
+                "The requested verifier release is not served by SimAgent"
             )
         return (
             release,
-            self.app_name or configured_app_name(release),
-            self.volume_name or configured_volume_name(release),
+            configured_app_name(),
+            self.volume_name or current_volume,
         )
 
     def _calculate(self, plan, fingerprint):

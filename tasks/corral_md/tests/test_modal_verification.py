@@ -982,7 +982,6 @@ def test_provenance_evaluator_uses_controller_record_not_submitted_copy(
     )
     verifier = ModalVerifier(
         release_id="release-1",
-        app_name="trusted-app",
         volume_name="simulations",
         run_id="run-1",
     )

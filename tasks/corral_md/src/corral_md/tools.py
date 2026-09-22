@@ -1,27 +1,28 @@
-"""
-MD Tutorials Tools Module
-
-This module provides a comprehensive set of tools for molecular dynamics (MD) simulations
-using LAMMPS. It includes functionality for structure preparation, simulation execution,
-and results analysis in materials science workflows.
-"""
-
 import base64
+import contextlib
 import json
 import os
+import signal
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 from corral_md.modal_workspace import (
     run_lammps_in_modal,
-    run_python_in_modal,
-    run_shell_in_modal,
+    run_python_gpu_in_modal,
     run_verified_md_in_modal,
 )
 from corral_md.workspace import local_path
 
-from corral.core.tool import tool
+from corral.core.tool import Tool, tool
 from corral.core.transition import ToolRecoveryPending
-from corral.workspace import workspace_relative_path
+from corral.runtime import permissions
+from corral.workspace import (
+    WorkspaceFilesystem,
+    build_terminal_tool,
+    workspace_relative_path,
+)
 
 
 def build_run_verified_md_tool(workspace: str | Path):
@@ -89,88 +90,12 @@ def build_run_verified_md_tool(workspace: str | Path):
 
 
 def build_md_terminal_tool(workspace: str | Path):
-    """Keep shell execution behind the same boundary as MD Python."""
-
-    @tool(hidden_args=["corral_action_id"])
-    def terminal(
-        command: str,
-        timeout_seconds: int = 120,
-        max_output_chars: int = 20_000,
-        corral_action_id: str | None = None,
-    ) -> str:
-        """[BRIEF] Run a shell command in the isolated MD CPU sandbox. [/BRIEF]
-
-        [DETAILED] The command runs from /workspace with the task files and read-only shared assets. Changed task files are synchronized back after the command finishes. [/DETAILED]
-
-        [PROCEDURAL] When to use this tool:
-        - Use it for shell operations that need the MD runtime.
-        - Use absolute /workspace paths when naming task files in tool arguments.
-        [/PROCEDURAL]
-
-        [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. [PREREQUISITE] Prepare any input files in the task workspace. [/PREREQUISITE]
-        2. [CURRENT] Run one non-interactive shell command. [/CURRENT]
-        3. [FOLLOW_UP] Inspect the returned output and any files saved under /workspace/output. [/FOLLOW_UP]
-        [/WORKFLOW_INTEGRATION]
-
-        [CONTEXTUAL] How this tool works:
-        - Starts an isolated CPU sandbox at /workspace.
-        - Captures combined standard output and standard error.
-        - Saves the command result to /workspace/output/terminal.json.
-        [/CONTEXTUAL]
-
-        [SYNTACTICAL] Usage example:
-        `terminal("ls -la /workspace/output", timeout_seconds=120)`
-        [/SYNTACTICAL]
-
-        Args:
-            command: [ARGS_BRIEF] Shell command to run. [/ARGS_BRIEF]
-                [ARGS_DETAILED] The command must be non-empty and must not require interactive input. [/ARGS_DETAILED]
-                [ARGS_SYNTACTICAL] Non-empty shell command string. [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] "ls -la /workspace/output" [/ARGS_EXAMPLES]
-            timeout_seconds: [ARGS_BRIEF] Maximum run time in seconds. Defaults to 120. [/ARGS_BRIEF]
-                [ARGS_DETAILED] The value must be between 1 and 3600. [/ARGS_DETAILED]
-                [ARGS_SYNTACTICAL] Integer from 1 to 3600. [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] 120, 600 [/ARGS_EXAMPLES]
-            max_output_chars: [ARGS_BRIEF] Maximum number of output characters to return. Defaults to 20000. [/ARGS_BRIEF]
-                [ARGS_DETAILED] Older output is removed when the combined output exceeds this limit. [/ARGS_DETAILED]
-                [ARGS_SYNTACTICAL] Integer from 1 to 100000. [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] 20000, 50000 [/ARGS_EXAMPLES]
-
-        Returns:
-            str: [RETURNS_BRIEF] JSON with the exit code and captured output. [/RETURNS_BRIEF]
-                [RETURNS_DETAILED] The JSON also states whether the returned output was truncated. [/RETURNS_DETAILED]
-                [RETURNS_EXAMPLES] `{"exit_code": 0, "output": "...", "truncated": false}` [/RETURNS_EXAMPLES]
-
-        [RAISES] Exceptions:
-            ValueError:
-                [ERROR_WHEN] The command or a limit is invalid. [/ERROR_WHEN]
-                [ERROR_DETAILS] The command is empty or a numeric value is outside its accepted range. [/ERROR_DETAILS]
-                [ERROR_RECOVERY] Provide a command and valid limits. [/ERROR_RECOVERY]
-            Exception:
-                [ERROR_WHEN] The sandbox cannot complete the command. [/ERROR_WHEN]
-                [ERROR_DETAILS] The backend reports the execution or synchronization failure. [/ERROR_DETAILS]
-                [ERROR_RECOVERY] Read the error, correct the command or inputs, and try again. [/ERROR_RECOVERY]
-        [/RAISES]
-
-        [LIMITATIONS] Known limitations:
-        - Commands cannot access controller files or other task workspaces.
-        - Interactive commands are not supported.
-        [/LIMITATIONS]
-        """
-        if not command.strip():
-            raise ValueError("command cannot be empty")
-        if not 1 <= timeout_seconds <= 3600 or not 1 <= max_output_chars <= 100_000:
-            raise ValueError("Invalid terminal timeout or output limit")
-        run_shell_in_modal(
-            workspace,
-            command,
-            timeout=timeout_seconds,
-            max_output_chars=max_output_chars,
-            action_id=corral_action_id,
-        )
-        return local_path(workspace, "/workspace/output/terminal.json").read_text()
-
+    """Run shell commands in Corral's local restricted workspace worker."""
+    terminal = build_terminal_tool(WorkspaceFilesystem(workspace))
+    terminal.description += (
+        " Commands execute locally with the task workspace as the current "
+        "directory; use relative paths such as output/result.json inside commands."
+    )
     return terminal
 
 
@@ -326,10 +251,169 @@ def keyword_log_extractor(path: str, keyword: str) -> str:
         return json.dumps({"error": f"Error processing keyword {keyword!r}: {e}"})
 
 
-def build_execute_python_script_tool(workspace: str | Path):
-    """Build a Python tool whose code executes only in an isolated MD sandbox."""
+def _local_python_argument(workspace: str | Path, argument: str) -> str:
+    if argument == "/workspace" or argument.startswith("/workspace/"):
+        return str(local_path(workspace, argument, allow_root=argument == "/workspace"))
+    return argument
 
-    @tool(hidden_args=["corral_action_id"])
+
+def _run_python_locally(
+    workspace: str | Path,
+    script_path: str,
+    args: list[str] | None,
+    timeout: int,
+    working_dir: str | None,
+) -> str:
+    """Execute CPU Python after Corral has entered the restricted tool worker."""
+    root = Path(workspace).resolve()
+    script = local_path(root, script_path)
+    public_directory = working_dir if working_dir is not None else "/workspace"
+    directory = local_path(root, public_directory, allow_root=True)
+    if not script.is_file():
+        raise FileNotFoundError(f"Script not found: {script_path}")
+    if not directory.is_dir():
+        raise NotADirectoryError(f"Working directory not found: {public_directory}")
+    if type(timeout) is not int or not 1 <= timeout <= 7200:
+        raise ValueError("timeout must be between 1 and 7200 seconds")
+
+    output = local_path(root, "/workspace/output", allow_root=True)
+    output.mkdir(exist_ok=True)
+    command = [
+        sys.executable,
+        str(script),
+        *[_local_python_argument(root, str(argument)) for argument in args or []],
+    ]
+    scratch = Path(tempfile.gettempdir()).resolve()
+    environment = {
+        "CORRAL_WORKSPACE": str(root),
+        "HOME": str(root),
+        "LANG": "C.UTF-8",
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUNBUFFERED": "1",
+        "TMPDIR": str(scratch),
+        "XDG_CACHE_HOME": str(scratch / "cache"),
+    }
+    timed_out = False
+    with (
+        tempfile.TemporaryFile() as stdout_stream,
+        tempfile.TemporaryFile() as stderr_stream,
+    ):
+        process = subprocess.Popen(
+            command,
+            cwd=directory,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_stream,
+            stderr=stderr_stream,
+            start_new_session=True,
+        )
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+        stdout_stream.seek(0)
+        stderr_stream.seek(0)
+        stdout = stdout_stream.read()
+        stderr = stderr_stream.read()
+
+    stdout_path = local_path(root, f"/workspace/output/{script.stem}.stdout.txt")
+    stderr_path = local_path(root, f"/workspace/output/{script.stem}.stderr.txt")
+    stdout_path.write_bytes(stdout)
+    stderr_path.write_bytes(stderr)
+    if timed_out:
+        raise TimeoutError(f"Python script exceeded its {timeout}-second timeout")
+    if process.returncode:
+        details = stderr.decode("utf-8", errors="replace")[-4000:]
+        raise ValueError(
+            f"Python script failed with exit code {process.returncode}:\n{details}"
+        )
+    return json.dumps(
+        {
+            "success": True,
+            "backend": "local_cpu",
+            "return_code": process.returncode,
+            "stdout": f"/workspace/output/{script.stem}.stdout.txt",
+            "stderr": f"/workspace/output/{script.stem}.stderr.txt",
+        }
+    )
+
+
+class _LocalPythonScriptTool(Tool):
+    """Internal worker-only tool; it is never included in the agent catalog."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="_corral_md_local_python",
+            description="Run one Python script in the assigned workspace.",
+            params_json_schema={
+                "type": "object",
+                "properties": {
+                    "workspace": {"type": "string"},
+                    "script_path": {"type": "string"},
+                    "args": {
+                        "anyOf": [
+                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "null"},
+                        ]
+                    },
+                    "timeout": {"type": "integer"},
+                    "working_dir": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                },
+                "required": [
+                    "workspace",
+                    "script_path",
+                    "args",
+                    "timeout",
+                    "working_dir",
+                ],
+            },
+        )
+
+    def execute(
+        self,
+        *,
+        workspace: str,
+        script_path: str,
+        args: list[str] | None,
+        timeout: int,
+        working_dir: str | None,
+    ) -> str:
+        return _run_python_locally(workspace, script_path, args, timeout, working_dir)
+
+
+def _run_python_in_local_worker(
+    workspace: str | Path,
+    script_path: str,
+    args: list[str] | None,
+    timeout: int,
+    working_dir: str | None,
+) -> str:
+    arguments = {
+        "workspace": str(Path(workspace).resolve()),
+        "script_path": script_path,
+        "args": args,
+        "timeout": timeout,
+        "working_dir": working_dir,
+    }
+    worker_tool = _LocalPythonScriptTool()
+    if permissions.enabled():
+        return permissions.run_worker("tool", (worker_tool, arguments), str(workspace))[
+            "content"
+        ]
+    return worker_tool.execute(**arguments)
+
+
+def build_execute_python_script_tool(workspace: str | Path):
+    """Build one Python interface with local CPU and Modal GPU routing."""
+
+    @tool(hidden_args=["corral_action_id"], trusted=True)
     def execute_python_script(
         script_path: str,
         args: list[str] | None = None,
@@ -338,29 +422,29 @@ def build_execute_python_script_tool(workspace: str | Path):
         use_gpu: bool = False,
         corral_action_id: str | None = None,
     ) -> str:
-        """[BRIEF] Run a saved Python script in an isolated MD CPU or GPU sandbox. [/BRIEF]
+        """[BRIEF] Run a saved Python script with the appropriate CPU or GPU backend. [/BRIEF]
 
-        [DETAILED] The script runs in the task workspace with read-only access to shared models, potentials, and structures. Changed task files are synchronized back after a successful run. [/DETAILED]
+        [DETAILED] CPU scripts run in Corral's restricted local task workspace. When use_gpu is true, the same interface synchronizes the script and task files to an env with an A100 GPU. [/DETAILED]
 
         [PROCEDURAL] When to use this tool:
-        - Use it for saved analysis or simulation scripts.
-        - Request a GPU only when the script needs GPU computation.
+        - Leave use_gpu false for lightweight analysis, plotting, and conversion.
+        - Set use_gpu true for MACE inference, training, or molecular dynamics.
         [/PROCEDURAL]
 
         [WORKFLOW_INTEGRATION] Typical workflow integration:
-        1. [PREREQUISITE] Save the Python script and its inputs under /workspace. [/PREREQUISITE]
-        2. [CURRENT] Run the script with its arguments and resource choice. [/CURRENT]
-        3. [FOLLOW_UP] Inspect the saved outputs and captured stdout and stderr. [/FOLLOW_UP]
+        1. [PREREQUISITE] Save the script and inputs under /workspace. [/PREREQUISITE]
+        2. [CURRENT] Run the script with its required compute resource. [/CURRENT]
+        3. [FOLLOW_UP] Inspect synchronized outputs and captured logs. [/FOLLOW_UP]
         [/WORKFLOW_INTEGRATION]
 
         [CONTEXTUAL] How this tool works:
         - Validates the script and working-directory paths.
-        - Runs the script in an isolated CPU or GPU sandbox.
-        - Synchronizes changed task files and saves captured output under /workspace/output.
+        - Runs CPU work locally and GPU work on an A100 in Modal.
+        - Saves or synchronizes captured logs under /workspace/output.
         [/CONTEXTUAL]
 
-        [SYNTACTICAL] Usage examples:
-        `execute_python_script("/workspace/scripts/analyze.py", ["--input", "/workspace/output/data.json"])`
+        [SYNTACTICAL] Usage example:
+        `execute_python_script("/workspace/scripts/analyze.py")`
         `execute_python_script("/workspace/scripts/mace_md.py", use_gpu=True, timeout=3600)`
         [/SYNTACTICAL]
 
@@ -368,37 +452,37 @@ def build_execute_python_script_tool(workspace: str | Path):
             script_path: [ARGS_BRIEF] Absolute path to the Python script. [/ARGS_BRIEF]
                 [ARGS_DETAILED] The script must be a file under /workspace. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Absolute /workspace path to a Python file. [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] "/workspace/scripts/analyze.py" [/ARGS_EXAMPLES]
+                [ARGS_EXAMPLES] "/workspace/scripts/mace_md.py" [/ARGS_EXAMPLES]
             args: [ARGS_BRIEF] Optional command-line arguments for the script. [/ARGS_BRIEF]
-                [ARGS_DETAILED] The strings are passed to the script in the given order. [/ARGS_DETAILED]
+                [ARGS_DETAILED] The strings are passed to the script in order. Absolute /workspace arguments are translated for local CPU execution. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] List of strings or null. [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] ["--input", "/workspace/output/data.json"], null [/ARGS_EXAMPLES]
+                [ARGS_EXAMPLES] ["--steps", "1000"], null [/ARGS_EXAMPLES]
             timeout: [ARGS_BRIEF] Maximum run time in seconds. Defaults to 600. [/ARGS_BRIEF]
                 [ARGS_DETAILED] The value must be between 1 and 7200. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Integer from 1 to 7200. [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] 600, 3600 [/ARGS_EXAMPLES]
-            working_dir: [ARGS_BRIEF] Directory in which to run the script. Defaults to /workspace. [/ARGS_BRIEF]
+            working_dir: [ARGS_BRIEF] Working directory. Defaults to /workspace. [/ARGS_BRIEF]
                 [ARGS_DETAILED] The directory must be under /workspace. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Absolute /workspace directory path or null. [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] "/workspace", "/workspace/output" [/ARGS_EXAMPLES]
-            use_gpu: [ARGS_BRIEF] Whether to request a GPU. Defaults to false. [/ARGS_BRIEF]
-                [ARGS_DETAILED] Use true for scripts that need GPU computation; otherwise use the CPU sandbox. [/ARGS_DETAILED]
+            use_gpu: [ARGS_BRIEF] Whether the script requires a GPU. Defaults to false. [/ARGS_BRIEF]
+                [ARGS_DETAILED] False runs locally on CPU; true runs on an A100 in Modal. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Boolean. [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] true, false [/ARGS_EXAMPLES]
+                [ARGS_EXAMPLES] false, true [/ARGS_EXAMPLES]
 
         Returns:
-            str: [RETURNS_BRIEF] JSON confirming successful script execution. [/RETURNS_BRIEF]
-                [RETURNS_DETAILED] The result reports success, synchronization, and where stdout and stderr were saved. [/RETURNS_DETAILED]
-                [RETURNS_EXAMPLES] `{"success": true, "stdout": "Script completed.", "stderr": "", "return_code": 0}` [/RETURNS_EXAMPLES]
+            str: [RETURNS_BRIEF] JSON confirming successful execution. [/RETURNS_BRIEF]
+                [RETURNS_DETAILED] The result reports the selected backend and captured-log locations. [/RETURNS_DETAILED]
+                [RETURNS_EXAMPLES] `{"success": true, "backend": "local_cpu", "return_code": 0}` [/RETURNS_EXAMPLES]
 
         [RAISES] Exceptions:
             FileNotFoundError:
                 [ERROR_WHEN] The script does not exist. [/ERROR_WHEN]
-                [ERROR_DETAILS] The supplied script path does not name a workspace file. [/ERROR_DETAILS]
+                [ERROR_DETAILS] The supplied path does not name a workspace file. [/ERROR_DETAILS]
                 [ERROR_RECOVERY] Check the path and save the script first. [/ERROR_RECOVERY]
             NotADirectoryError:
                 [ERROR_WHEN] The working directory does not exist. [/ERROR_WHEN]
-                [ERROR_DETAILS] The supplied working-directory path is not a directory. [/ERROR_DETAILS]
+                [ERROR_DETAILS] The path does not name a workspace directory. [/ERROR_DETAILS]
                 [ERROR_RECOVERY] Use an existing workspace directory. [/ERROR_RECOVERY]
             ValueError:
                 [ERROR_WHEN] The timeout or a workspace path is invalid. [/ERROR_WHEN]
@@ -407,8 +491,7 @@ def build_execute_python_script_tool(workspace: str | Path):
         [/RAISES]
 
         [LIMITATIONS] Known limitations:
-        - Scripts cannot access controller files or other task workspaces.
-        - Interactive input and live output streaming are not supported.
+            - Interactive input and live output streaming are not supported.
         [/LIMITATIONS]
         """
         script = local_path(workspace, script_path)
@@ -420,22 +503,25 @@ def build_execute_python_script_tool(workspace: str | Path):
             raise NotADirectoryError(f"Working directory not found: {directory}")
         if type(timeout) is not int or not 1 <= timeout <= 7200:
             raise ValueError("timeout must be between 1 and 7200 seconds")
-        downloaded = run_python_in_modal(
+        if not use_gpu:
+            return _run_python_in_local_worker(
+                workspace, script_path, args, timeout, directory
+            )
+        downloaded = run_python_gpu_in_modal(
             workspace,
             str(script),
             args or [],
             action_id=corral_action_id,
-            use_gpu=use_gpu,
             timeout=timeout,
             working_dir=directory,
         )
         return json.dumps(
             {
                 "success": True,
-                "stdout": f"Script completed. Synchronized {downloaded} workspace file(s). "
-                "Captured stdout/stderr are in /workspace/output/.",
-                "stderr": "",
+                "backend": "modal_a100",
                 "return_code": 0,
+                "stdout": f"Script completed on an A100. Synchronized {downloaded} workspace file(s).",
+                "stderr": "Captured logs are in /workspace/output/.",
             }
         )
 

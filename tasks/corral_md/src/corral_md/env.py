@@ -7,9 +7,6 @@ from time import perf_counter
 from typing import Any, ClassVar
 
 from corral_md.modal_workspace import (
-    configured_app_name,
-    configured_release_id,
-    configured_volume_name,
     pinned_release,
     recovery_snapshot,
 )
@@ -164,21 +161,9 @@ class MolecularDynamicsEnvironment(Environment):
                 seed_examples(self.workspace_path, scorer.task_number)
 
     def initial_event(self, **kwargs: Any) -> ExecutionStarted:
-        """Start the local workspace from the same seed as the Modal release."""
+        """Create the standard local MD workspace before the first tool call."""
         self._ensure_seed_directories()
-        started = super().initial_event(**kwargs)
-        release = configured_release_id()
-        if release is None:
-            return started
-        payload = started.model_dump(mode="python")
-        payload["runtime"]["metadata"]["corral_md_release_id"] = release
-        payload["runtime"]["metadata"]["corral_md_app_name"] = configured_app_name(
-            release
-        )
-        payload["runtime"]["metadata"]["corral_md_volume_name"] = (
-            configured_volume_name(release)
-        )
-        return type(started).model_validate(payload)
+        return super().initial_event(**kwargs)
 
     def prepare_workspace(self, workspace: WorkspaceState) -> None:
         super().prepare_workspace(workspace)
@@ -189,12 +174,10 @@ class MolecularDynamicsEnvironment(Environment):
         self, state: ExecutionState, tool: Tool, arguments: dict[str, Any]
     ) -> Any:
         release = state.runtime.metadata.get("corral_md_release_id")
-        app_name = state.runtime.metadata.get("corral_md_app_name")
         volume_name = state.runtime.metadata.get("corral_md_volume_name")
         with (
             pinned_release(
                 release if isinstance(release, str) else None,
-                app_name if isinstance(app_name, str) else None,
                 volume_name if isinstance(volume_name, str) else None,
             ),
             recovery_snapshot(state.workspace, self.workspace_manager),
@@ -244,15 +227,6 @@ Required submission format:
     scorer = env.current_task.scoring_fn
     if isinstance(scorer, WorkflowScorer):
         prompt += example_prompt(scorer.task_number, workspace=bool(env.workspace_path))
-        if scorer.task_number == 10:
-            prompt += (
-                "\nFor independently verifiable execution, run_verified_md accepts a JSON "
-                "configuration for the continuous aluminum Langevin cycle and saves its "
-                "states and thermal traces. You choose the timestep, friction, phase "
-                "durations and sampling. Include its run_id and action_id in your manifest, "
-                "then analyze the saved data. Other simulation methods remain allowed; "
-                "their execution provenance may need independent review.\n"
-            )
 
     prompt += "\nAvailable input data:\n"
 
@@ -289,17 +263,24 @@ Required submission format:
             "Shared assets in /workspace/structures, /workspace/models and "
             "/workspace/potentials are read-only. You may copy a supplied structure "
             "into /workspace/input to work on it. Models are available to Python "
-            "at /workspace/models/teacher.model and /workspace/models/student.model.\n\n"
+            "in the Modal GPU runtime at /workspace/models/teacher.model and "
+            "/workspace/models/student.model. Copy any structure or potential needed "
+            "by a local CPU script into the writable workspace first.\n\n"
             "### Choosing a Simulation Engine ###\n"
             "If the task calls for a MACE-family potential/model, always conduct the "
-            "MD simulation via an ASE Python script (execute_python_script), not LAMMPS. "
+            "MD simulation via an ASE Python script (execute_python_script with "
+            "use_gpu=True), not LAMMPS. "
             "For all other potentials (SW, Tersoff, EAM, BKS, etc.), always use LAMMPS "
             "via run_lammps.\n\n"
-            "### GPU Execution ###\n"
-            "Set `use_gpu=True` in execute_python_script only for scripts that construct "
-            "an ASE Calculator backed by a MACE model. Leave it False (default) for "
-            "everything else, including analysis and plotting. CPU and GPU scripts "
-            "both run in isolated Modal sandboxes with /workspace as their working directory.\n\n"
+            "### Local and GPU Execution ###\n"
+            "The single execute_python_script tool routes lightweight analysis, plotting, "
+            "and file conversion to the local CPU by default. Set use_gpu=True only for "
+            "scripts that construct an ASE Calculator backed by a MACE model or otherwise "
+            "require CUDA; those calls run on an A100 in Modal. Inside local CPU scripts "
+            "and terminal commands, use paths "
+            "relative to the current workspace (for example `output/results.json`). "
+            "Structured tool path arguments still require absolute /workspace paths. "
+            "Modal GPU calls use /workspace as their working directory.\n\n"
             "### Simulation Logging Requirements ###\n"
             "For every simulation run involving any ensemble (e.g., NVT, NPT, NVE, etc.), if applicable, the log file **must** record the following quantities:\n"
             "   - Step\n"

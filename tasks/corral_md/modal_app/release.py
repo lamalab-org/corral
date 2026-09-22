@@ -25,7 +25,7 @@ from verification_smoke import smoke_verification
 
 TASK_ROOT = Path(__file__).resolve().parents[1]
 SEED = TASK_ROOT / "src/corral_md/base_workspace.json"
-RELEASE_RECORD = TASK_ROOT / "src/corral_md/release.json"
+APP_NAME = "simagent"
 SOURCES = (
     TASK_ROOT / "modal_app/assets.json",
     TASK_ROOT / "modal_app/requirements.txt",
@@ -56,13 +56,6 @@ def release_id() -> str:
         digest.update(path.relative_to(TASK_ROOT).as_posix().encode() + b"\0")
         digest.update(hashlib.sha256(path.read_bytes()).digest())
     return digest.hexdigest()[:24]
-
-
-def _app_name(identifier: str) -> str:
-    override = os.getenv("CORRAL_MD_MODAL_APP")
-    suffix = os.getenv("SIMAGENT_NAME", "").strip("-")
-    prefix = override or ("simagent" + (f"-{suffix}" if suffix else ""))
-    return f"{prefix}-{identifier}"
 
 
 def publish_base(volume: modal.Volume, identifier: str) -> None:
@@ -109,10 +102,9 @@ def publish_base(volume: modal.Volume, identifier: str) -> None:
 
 
 def smoke_test(identifier: str, volume: modal.Volume) -> None:
-    """Exercise LAMMPS, CPU/GPU Python, asset permissions and result recovery."""
-    app_name = _app_name(identifier)
-    initializer = modal.Function.from_name(app_name, "prepare_workspace")
-    worker = modal.Function.from_name(app_name, "run_lammps")
+    """Exercise LAMMPS, GPU Python, asset permissions and result recovery."""
+    initializer = modal.Function.from_name(APP_NAME, "prepare_workspace")
+    worker = modal.Function.from_name(APP_NAME, "run_lammps")
     run_id = f"smoke-{uuid.uuid4().hex}"
     action_id = f"smoke-{uuid.uuid4().hex}"
     remote = f"/corral/runs/{run_id}"
@@ -186,40 +178,36 @@ for name in ('models', 'potentials', 'structures'):
         raise AssertionError(f'Asset mount is writable: {root}')
 assert Path('/workspace/models/teacher.model').is_file()
 assert Path('/workspace/models/student.model').is_file()
-if sys.argv[1] == 'gpu':
-    import torch
-    assert torch.cuda.is_available()
-    assert (torch.tensor([2.0], device='cuda') * 3).cpu().item() == 6
-Path('/workspace/output/' + sys.argv[1] + '.json').write_text(json.dumps({'ok': True}))
+import torch
+assert torch.cuda.is_available()
+assert (torch.tensor([2.0], device='cuda') * 3).cpu().item() == 6
+Path('/workspace/output/gpu.json').write_text(json.dumps({'ok': True}))
 """
-        for mode in ("cpu", "gpu"):
-            state = initializer.remote(run_id, identifier)
-            action = f"smoke-{uuid.uuid4().hex}"
-            name = f"scripts/smoke_{mode}.py"
-            with volume.batch_upload() as upload:
-                upload.put_file(BytesIO(python_script), f"{remote}/workspace/{name}")
-            worker = modal.Function.from_name(app_name, f"run_python_{mode}")
-            result = worker.spawn(
-                run_id,
-                action,
-                name,
-                "/workspace",
-                [mode],
-                identifier,
-                state["head"],
-                {
-                    **state["files"],
-                    name: {
-                        "sha256": hashlib.sha256(python_script).hexdigest(),
-                        "size": len(python_script),
-                    },
+        state = initializer.remote(run_id, identifier)
+        action = f"smoke-{uuid.uuid4().hex}"
+        name = "scripts/smoke_gpu.py"
+        with volume.batch_upload() as upload:
+            upload.put_file(BytesIO(python_script), f"{remote}/workspace/{name}")
+        worker = modal.Function.from_name(APP_NAME, "run_python_gpu")
+        result = worker.spawn(
+            run_id,
+            action,
+            name,
+            "/workspace",
+            [],
+            identifier,
+            state["head"],
+            {
+                **state["files"],
+                name: {
+                    "sha256": hashlib.sha256(python_script).hexdigest(),
+                    "size": len(python_script),
                 },
-                execution_options={"timeout": 300, "working_dir": "/workspace"},
-            ).get()
-            if f"output/{mode}.json" not in result.get("files", {}):
-                raise RuntimeError(
-                    f"MD {mode} sandbox smoke test did not publish its result"
-                )
+            },
+            execution_options={"timeout": 300, "working_dir": "/workspace"},
+        ).get()
+        if "output/gpu.json" not in result.get("files", {}):
+            raise RuntimeError("MD GPU sandbox smoke test did not publish its result")
     finally:
         with suppress(FileNotFoundError, modal.exception.NotFoundError):
             volume.remove_file(remote, recursive=True)
@@ -245,27 +233,26 @@ def deploy() -> str:
         volume = modal.Volume.from_name(
             os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations"), create_if_missing=True
         )
-        print("Running LAMMPS and CPU/GPU sandbox smoke tests", flush=True)
+        print("Running LAMMPS and GPU sandbox smoke tests", flush=True)
         smoke_test(identifier, volume)
         print(
             "Running independent calculator and controlled MD smoke tests", flush=True
         )
         verification_smoke = smoke_verification(
-            _app_name(identifier), identifier, volume, source / "models"
+            APP_NAME, identifier, volume, source / "models"
         )
         print("Publishing fixed Task 3 and Task 5 numerical references", flush=True)
         ground_truth = publish_ground_truth(
-            _app_name(identifier),
+            APP_NAME,
             identifier,
             volume,
             json.loads((TASK_ROOT / "modal_app/assets.json").read_text()),
         )
-    temporary = RELEASE_RECORD.with_suffix(".json.tmp")
-    temporary.write_text(
+    print(
         json.dumps(
             {
                 "release_id": identifier,
-                "app_name": _app_name(identifier),
+                "app_name": APP_NAME,
                 "volume_name": os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations"),
                 "verification_smoke": verification_smoke,
                 "ground_truth": ground_truth,
@@ -274,10 +261,9 @@ def deploy() -> str:
                 ),
             },
             indent=2,
-        )
-        + "\n"
+        ),
+        flush=True,
     )
-    temporary.replace(RELEASE_RECORD)
     return identifier
 
 
