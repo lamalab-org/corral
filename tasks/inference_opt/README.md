@@ -23,6 +23,25 @@ The environment binds these values into the task at startup, so probes, dry runs
 The committed tasks use placeholder baseline values until `scripts/measure_baselines.py` has been run.
 Private labels are supplied separately through `CORRAL_INFERENCE_LABELS_PATH`.
 
+### Student models
+
+Task JSON pins each benchmark/model pair's zero-shot baseline
+(`baselines`/`baselines_train`/`baseline_items`) to a specific deployment.
+Deploy the same model under `vllm/` for each student ID below (the current
+values live in `inference_opt/data/baselines/v1.json`); deploying a different
+checkpoint under an existing student ID invalidates its committed baseline
+and requires re-running `scripts/measure_baselines.py`.
+
+| student | model | env var |
+| --- | --- | --- |
+| `student_a` | `Qwen/Qwen3.5-9B` | `CORRAL_VLLM_URL_STUDENT_A` |
+| `student_b` | `Qwen/Qwen3-8B` | `CORRAL_VLLM_URL_STUDENT_B` |
+| `student_c` | `google/gemma-4-12B-it` | `CORRAL_VLLM_URL_STUDENT_C` |
+| `student_d` | `nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16` | `CORRAL_VLLM_URL_STUDENT_D` |
+
+`student_a`/`student_b` are used in level 1 and level 2 (`*_ab`) tasks;
+`student_c`/`student_d` are used in level 2 (`*_cd`) tasks.
+
 ## Agent tools
 
 The domain tools are trusted Corral tools and use Corral's committed environment state. Workspace file tools create and edit the submitted policy.
