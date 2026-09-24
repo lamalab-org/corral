@@ -688,7 +688,12 @@ def _task_8(e: Evidence, r: Rubric) -> None:
         "aligned_teacher_energy_labels", 20, lambda: np.isfinite(dataset()[2]).all()
     )
     r.check("recorded_rng_teacher_digest_and_units", 15, settings)
-    r.check("independent_gaussian_distortions", 10, random_distribution)
+    r.check(
+        "gaussian_displacement_plausibility",
+        10,
+        random_distribution,
+        "Saved displacement statistics are compatible with Gaussian draws; they do not prove how samples were generated.",
+    )
     r.unverified(
         "execution_and_teacher_provenance",
         "Saved labels, seeds, and a digest cannot prove teacher or RNG execution or absence of relaxation.",

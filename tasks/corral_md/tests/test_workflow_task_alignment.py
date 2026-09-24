@@ -213,7 +213,7 @@ def test_task8_distribution_screen_requests_review_without_changing_other_credit
         ).tolist()
     write(tmp_path / "train.json", frames)
     report = check_level2_workflow(8).evaluate(path)
-    assert report["pending_checks"] == ["distortion_distributions_and_independence"]
+    assert report["pending_checks"] == ["distortion_statistical_plausibility"]
     assert report["score_bounds"] == [0, 1]
     assert not [c for c in report["checks"] if c["status"] == "failed"], report
 

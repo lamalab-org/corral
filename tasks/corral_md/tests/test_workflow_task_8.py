@@ -338,6 +338,10 @@ def test_task8_consistent_artifacts_full_task_points_no_execution(
     assert result.score == pytest.approx(0.9), result.checks
     assert sum(c["points"] for c in result.checks) == 90
     assert _check(result, "execution_and_teacher_provenance")["status"] == "unverified"
+    assert (
+        "does not prove independent RNG draws"
+        in _check(result, "distortion_statistical_plausibility")["detail"]
+    )
     assert json.loads(submission.read_text())["results"]["id_test"]["r2"] < 0
 
 
@@ -359,7 +363,7 @@ def test_task8_consistent_artifacts_full_task_points_no_execution(
         ("curve_coef", "learning_curve_training_only_models"),
         ("curve_size", "reported_learning_curve"),
         ("same_seed", "aligned_labels_recorded_inputs_and_rng"),
-        ("not_gaussian", "distortion_distributions_and_independence"),
+        ("not_gaussian", "distortion_statistical_plausibility"),
         ("missing", "validation_predictions_metrics_and_selection"),
     ],
 )

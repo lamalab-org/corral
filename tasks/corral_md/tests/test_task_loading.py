@@ -11,7 +11,9 @@ from corral_md import env
         ("level_2/tasks_json", 10),
     ],
 )
-def test_all_shipped_tasks_load_from_unrelated_cwd(source, count, tmp_path, monkeypatch):
+def test_all_shipped_tasks_load_from_unrelated_cwd(
+    source, count, tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     tasks = env.load_tasks_from_json(env.PACKAGE_DATA_ROOT / source, str(tmp_path))
     assert len(tasks) == count
@@ -33,6 +35,23 @@ def test_removed_subtasks_create_no_environments(tmp_path, monkeypatch):
     )
 
     assert environments == {}
+
+
+@pytest.mark.parametrize("level", ["level_1", "level_2"])
+def test_expansion_prompt_constructs_its_aluminum_cell(level):
+    path = env.PACKAGE_DATA_ROOT / level / "tasks_json/task_7.json"
+    description = json.loads(path.read_text())[0]["description"]
+    assert (
+        "conventional cubic FCC cell with lattice parameter 4.05 Å 3 x 3 x 3"
+        in description
+    )
+    assert "supplied periodic 108-atom FCC aluminum cell" not in description
+
+
+def test_regression_prompt_requires_replayable_generation_script():
+    path = env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_8.json"
+    description = json.loads(path.read_text())[0]["description"]
+    assert "generation script needed to replay the structures" in description
 
 
 @pytest.mark.parametrize(

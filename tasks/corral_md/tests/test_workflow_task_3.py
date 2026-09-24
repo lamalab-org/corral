@@ -10,7 +10,12 @@ import pytest
 from ase import units
 from ase.build import bulk
 from ase.calculators.singlepoint import SinglePointCalculator
-from corral_md.score import check_level1_workflow, check_level2_workflow
+from corral_md.score import (
+    PendingReviewError,
+    WorkflowScorer,
+    check_level1_workflow,
+    check_level2_workflow,
+)
 from corral_md.workflow_scoring.common import Evidence, Rubric
 from corral_md.workflow_scoring.task_3 import evaluate
 
@@ -173,7 +178,8 @@ def _score(path):
 
 
 def _check(rubric, name):
-    return next(check for check in rubric.checks if check["name"] == name)
+    checks = rubric["checks"] if isinstance(rubric, dict) else rubric.checks
+    return next(check for check in checks if check["name"] == name)
 
 
 def test_level1_scores_only_the_shared_teacher_dataset(submission):
@@ -236,6 +242,62 @@ def test_task3_consistent_artifacts_receive_all_task_points_without_execution(
     assert sum(check["points"] for check in result.checks) == 90
     assert _check(result, "execution_provenance")["status"] == "unverified"
     assert _check(result, "checkpoint_loadability")["status"] == "unverified"
+
+
+def test_silver_checkpoint_requires_isolated_inference_for_full_score(submission):
+    offline = check_level2_workflow(3, verification_backend="offline")
+    pending = offline.evaluate(submission)
+    assert pending["score"] is None
+    assert pending["pending_checks"] == ["checkpoint_container_and_digest"]
+    with pytest.raises(PendingReviewError):
+        offline(submission)
+
+    class Verifier:
+        def __init__(self, statuses):
+            self.statuses = statuses
+
+        def evaluate(self, evidence, task_number):
+            assert task_number == 3
+            return {
+                "evidence_sha256": evidence.fingerprint(),
+                "checks": [
+                    {"id": name, "status": status, "targets": [], "detail": status}
+                    for name, status in self.statuses.items()
+                ],
+            }
+
+    for statuses, expected, score in (
+        ({"student_after": "passed", "trained_bulk_model": "passed"}, "complete", 1),
+        (
+            {"student_after": "unverified", "trained_bulk_model": "passed"},
+            "pending_review",
+            None,
+        ),
+        ({"student_after": "failed", "trained_bulk_model": "passed"}, "complete", 0),
+        ({"student_after": "passed"}, "pending_review", None),
+    ):
+        report = WorkflowScorer(3, verifier=Verifier(statuses)).evaluate(submission)
+        assert report["status"] == expected
+        assert (
+            _check(report, "checkpoint_loadability")["status"]
+            == _check(report, "checkpoint_container_and_digest")["status"]
+        )
+        assert report["score"] == score
+
+
+def test_silver_uses_modal_verifier_by_default(submission, monkeypatch):
+    monkeypatch.delenv("CORRAL_MD_VERIFICATION", raising=False)
+    grader = check_level2_workflow(3)
+    assert grader.verifier is not None
+    assert check_level2_workflow(3, verification_backend="offline").verifier is None
+
+    def unavailable(*_args):
+        raise RuntimeError("verifier unavailable")
+
+    monkeypatch.setattr(grader.verifier, "_calculate", unavailable)
+    report = grader.evaluate(submission)
+    assert report["score"] is None
+    assert "checkpoint_container_and_digest" in report["pending_checks"]
 
 
 @pytest.mark.parametrize(

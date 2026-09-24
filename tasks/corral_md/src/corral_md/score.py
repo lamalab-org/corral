@@ -129,16 +129,19 @@ class WorkflowScorer:
             )
         verification = None
         if self.verifier is not None and not rubric.failed:
-            from corral_md.workflow_scoring.verification import (
-                apply_verification,
-            )
-
             verification = self.verifier.evaluate(evidence, self.task_number)
             if verification["evidence_sha256"] != initial_fingerprint:
                 raise RuntimeError(
                     "Submission changed during grading; retry with frozen evidence"
                 )
-            apply_verification(rubric, verification)
+        if not rubric.failed and (verification is not None or self.level == 2):
+            from corral_md.workflow_scoring.verification import apply_verification
+
+            apply_verification(
+                rubric,
+                verification,
+                task_number=self.task_number if self.level == 2 else None,
+            )
         evidence_sha256 = None
         if rubric.pending_checks or review is not None:
             backend_release = (
@@ -170,8 +173,10 @@ class WorkflowScorer:
 def check_level2_workflow(
     task_number: int, verification_backend: str | None = None
 ) -> WorkflowScorer:
-    """Construct a workflow scorer with optional independent verification."""
-    backend = verification_backend or os.getenv("CORRAL_MD_VERIFICATION", "offline")
+    """Use isolated verification by default for Level 2 silver; allow overrides."""
+    backend = verification_backend or os.getenv(
+        "CORRAL_MD_VERIFICATION", "modal" if task_number == 3 else "offline"
+    )
     if backend == "offline":
         return WorkflowScorer(task_number, level=2)
     if backend != "modal":

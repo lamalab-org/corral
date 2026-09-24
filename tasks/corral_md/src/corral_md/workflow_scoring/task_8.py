@@ -436,7 +436,12 @@ def evaluate(e, r):
     r.check(
         "strained_geometry", 6, lambda: geometry("strained_test").shape == (100, 64, 3)
     )
-    r.check("distortion_distributions_and_independence", 4, gaussian_compatibility)
+    r.check(
+        "distortion_statistical_plausibility",
+        4,
+        gaussian_compatibility,
+        "Saved displacement distributions and distinct structures are statistically plausible; this does not prove independent RNG draws.",
+    )
     r.check("aligned_labels_recorded_inputs_and_rng", 4, recorded_inputs)
 
     @lru_cache(None)

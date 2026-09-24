@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from corral_md.score import check_level2_workflow
+from corral_md.score import WorkflowScorer, check_level2_workflow
 from corral_md.workflow_scoring.common import EvidenceError, close, result_close
 
 
@@ -103,7 +103,22 @@ def test_full_credit_without_statistics_and_numerical_allowance(
     tmp_path, number, keys, check_name
 ):
     path = _submission(number, tmp_path)
-    grader = check_level2_workflow(number)
+    if number == 3:
+        # This test covers numerical reporting, not remote checkpoint loading.
+        class VerifiedCheckpoint:
+            def evaluate(self, evidence, task_number):
+                assert task_number == 3
+                return {
+                    "evidence_sha256": evidence.fingerprint(),
+                    "checks": [
+                        {"id": name, "status": "passed", "targets": []}
+                        for name in ("student_after", "trained_bulk_model")
+                    ],
+                }
+
+        grader = WorkflowScorer(3, verifier=VerifiedCheckpoint())
+    else:
+        grader = check_level2_workflow(number)
     baseline = grader.evaluate(path)
     assert baseline["score"] == pytest.approx(1), baseline
     assert sum(c["points"] for c in baseline["checks"]) == 100

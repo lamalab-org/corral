@@ -1204,10 +1204,10 @@ def _check_provenance(verifier, e):
     }
 
 
-def apply_verification(rubric, report):
-    """Gate affected existing checks without changing the 100-point denominator."""
+def apply_verification(rubric, report, *, task_number=None):
+    """Gate affected checks, including task-specific requirements when offline."""
     by_name = {check["name"]: check for check in rubric.checks}
-    for verification in report["checks"]:
+    for verification in report["checks"] if report is not None else ():
         if (
             verification["id"] == "trusted_md_execution"
             and verification["status"] == "passed"
@@ -1227,3 +1227,33 @@ def apply_verification(rubric, report):
             check["detail"] = (
                 f"Independent check {verification['id']}: {verification['detail']}"
             )
+    if task_number != 3:
+        return
+
+    # Container metadata cannot establish semantic loadability. Task 3 needs
+    # both isolated inference jobs, even when no verifier is configured.
+    checkpoint = by_name.get("checkpoint_container_and_digest")
+    if checkpoint is None or checkpoint["status"] != "passed":
+        return
+    statuses = {c["id"]: c["status"] for c in (report or {}).get("checks", [])}
+    required = ("student_after", "trained_bulk_model")
+    if any(statuses.get(name) == "failed" for name in required):
+        checkpoint.update(
+            status="failed",
+            earned=0.0,
+            detail="The isolated verifier could not load or use the saved model for inference.",
+        )
+    elif not all(statuses.get(name) == "passed" for name in required):
+        checkpoint.update(
+            status="unverified",
+            earned=0.0,
+            detail="Saved checkpoint needs isolated load and inference checks on dimer and bulk structures; unavailable checks require review.",
+        )
+    else:
+        checkpoint["detail"] = (
+            "Container and digest checked; isolated verifier loaded the model "
+            "and matched saved dimer and bulk predictions."
+        )
+    loadability = by_name.get("checkpoint_loadability")
+    if loadability is not None:
+        loadability.update(status=checkpoint["status"], detail=checkpoint["detail"])
