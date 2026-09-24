@@ -33,6 +33,7 @@ EnvironmentName = Literal[
     "spectra_elucidation",
     "stargazer",
     "wetlab",
+    "inference_opt",
 ]
 
 ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
@@ -44,6 +45,7 @@ ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
     "spectra_elucidation",
     "stargazer",
     "wetlab",
+    "inference_opt",
 )
 
 ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
@@ -77,6 +79,9 @@ ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
     ),
     "wetlab": EnvironmentPreset(
         "wetlab.env:create_qualysis_environments", "tasks/wetlab"
+    ),
+    "inference_opt": EnvironmentPreset(
+        "inference_opt.env:create_environments", "tasks/inference_opt", "local_dir"
     ),
 }
 
