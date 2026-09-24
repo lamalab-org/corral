@@ -14,10 +14,11 @@ from typing import TYPE_CHECKING, Any
 from corral.core import ToolExecutionResult
 from corral.core.environment import (
     Environment,
+    EnvironmentSetup,
     Toolset,
     default_file_tools,
 )
-from corral.core.task import EnvironmentSetup, TaskDefinition
+from corral.core.task import TaskDefinition
 from corral.report.logging import event, exception_fields
 from inference_opt.task_prompts import task_prompt
 from inference_opt.score import policy_score
