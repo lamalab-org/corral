@@ -76,7 +76,13 @@ def _bind_endpoints(models: list[str], configured: Any) -> dict[str, str]:
     for model in models:
         key = "CORRAL_VLLM_URL_" + re.sub(r"[^A-Z0-9]+", "_", model.upper()).strip("_")
         base_urls.setdefault(model, os.environ.get(key, default))
-    return base_urls
+    # The eval runner hands these to Inspect, which expects the ``/v1`` root.
+    return {model: _v1_root(url) for model, url in base_urls.items()}
+
+
+def _v1_root(url: str) -> str:
+    url = url.rstrip("/")
+    return url if url.endswith("/v1") else f"{url}/v1"
 
 
 def _seed_workspace(root: Path, policy_api: str = "primitive") -> None:

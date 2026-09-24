@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from inference_opt import datasets
 from inference_opt.outcomes import read_outcomes
 from inference_opt.eval_runner import PolicyEvaluator
-from inference_opt.eval_runner.spec import RunSpec
+from inference_opt.eval_runner.spec import DEFAULT_STUDENT_CONCURRENCY, RunSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -177,8 +177,8 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
             evaluator = PolicyEvaluator()
             deltas: dict[str, float] = {}
 
-            for model in models:
-                spec = RunSpec(
+            specs = [
+                RunSpec(
                     run_id=f"final-{benchmark}-{model}",
                     policy_dir=str(policy_dir),
                     questions_path=str(questions),
@@ -195,9 +195,16 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                     benchmark=benchmark,
                     split="test",
                     policy_api=str(config.get("policy_api", "primitive")),
+                    max_connections=int(
+                        config.get("student_concurrency", DEFAULT_STUDENT_CONCURRENCY)
+                    ),
                 )
-                summary = evaluator.run(spec, targets=targets)
+                for model in models
+            ]
+            # Each model has its own student server, so evaluate them side by side.
+            summaries = evaluator.run_many([(spec, targets) for spec in specs])
 
+            for model, spec, summary in zip(models, specs, summaries, strict=True):
                 if summary.error and not summary.ok and summary.n_answered == 0:
                     lowered = summary.error.lower()
                     if "timeout" in lowered:

@@ -132,3 +132,79 @@ class TestSubmissionResolution:
         resolved, notes = resolve_submission("nope", tmp_path)
         assert resolved is None
         assert any("no policy.py" in note for note in notes)
+
+
+class TestQueryStudent:
+    def test_a_cut_off_answer_is_explained_not_shown_as_none(
+        self, environments, monkeypatch
+    ):
+        from inference_opt.client import StudentCompletion
+
+        monkeypatch.setattr(
+            "inference_opt.tools.probe_student",
+            lambda *a, **k: [
+                StudentCompletion("", "length", "...so 3/5 of 50 is"),
+                StudentCompletion("30", "stop"),
+            ],
+        )
+        query = environments["gsm8k_a"].tools["query_student"]._func
+        out = query(prompt="3/5 of 50?", max_tokens=256, n=2, work_dir="", inference_state={})
+        summary, payload = out.split("\n")[:2]
+        data = json.loads(payload)
+        assert data["completions"] == ["", "30"]
+        assert data["finish_reasons"] == ["length", "stop"]
+        assert "None" not in data["completions"]
+        assert "1 hit max_tokens=256" in summary
+        assert data["reasoning_tail"] == ["...so 3/5 of 50 is", ""]
+
+
+GROUPED_TRACEBACK = """  + Exception Group Traceback (most recent call last):
+  |   File "/usr/local/lib/python3.12/site-packages/inspect_ai/_eval/eval.py", line 657, in eval_async
+  |     async with anyio.create_task_group() as tg:
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/opt/corral/tasks/inference_opt/inference_opt/eval_runner/solver.py", line 95, in solve
+    |     raw = await _invoke(policy.solve, question, context)
+    | KeyError: 'choices'
+    +------------------------------------
+"""
+
+
+class TestToolErrors:
+    def test_the_real_exception_is_named_not_the_group(self):
+        from inference_opt.tools import _error_line
+
+        assert _error_line(GROUPED_TRACEBACK) == "KeyError: 'choices'"
+
+    def test_the_tail_of_a_long_traceback_is_kept(self):
+        from inference_opt.tools import _error_tail
+
+        long = "noise\n" * 1000 + GROUPED_TRACEBACK
+        tail = _error_tail(long, 500)
+        assert tail.startswith("...")
+        assert "KeyError: 'choices'" in tail
+        assert "solver.py" in tail
+
+    def test_a_failed_dry_run_names_the_real_exception(
+        self, environments, monkeypatch, tmp_path
+    ):
+        from inference_opt.eval_runner.spec import RunSummary
+
+        monkeypatch.setattr(
+            "inference_opt.tools.PolicyEvaluator.run",
+            lambda self, spec, targets=None: RunSummary(
+                run_id=spec.run_id, ok=False, error=GROUPED_TRACEBACK
+            ),
+        )
+        dry = environments["gsm8k_a"].tools["dry_run_policy"]._func
+        workspace = tmp_path / "workspace"
+        (workspace / "policy").mkdir(parents=True)
+        (workspace / "policy" / "policy.py").write_text(
+            "class Policy:\n    def solve(self, q, ctx): return 'A'\n"
+        )
+        out = dry(policy_path="policy", work_dir=str(workspace), inference_state={})
+        headline, payload = out.split("\n")[:2]
+        assert headline == "Dry run FAILED: KeyError: 'choices'"
+        assert "solver.py" in json.loads(payload)["error"]

@@ -25,6 +25,6 @@ class Policy:
         )
         prompt += f"\n\nExplain briefly, then finish with {marker}."
 
-        answer = ctx.student.generate(prompt, temperature=0.0, max_tokens=512)
+        answer = ctx.student.generate(prompt, temperature=0.0)
         ctx.log(f"one call, {len(answer)} chars back")
         return answer

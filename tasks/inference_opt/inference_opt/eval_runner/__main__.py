@@ -100,6 +100,8 @@ def _to_sample(
                 else None
             ),
             "category": record.get("category"),
+            # inspect_evals' chembench scorer groups its accuracy by subset.
+            "subset_name": record.get("category") or record.get("benchmark", ""),
             "index": index,
             "total": total,
         },
@@ -168,9 +170,9 @@ def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
     manifest = policy.manifest
     summary.manifest = {
         "name": manifest.name,
-        "execution": "sequential",
-        "memory": manifest.memory,
+        "concurrent": manifest.concurrent,
         "max_calls_per_question": manifest.max_calls_per_question,
+        "max_tokens_per_call": manifest.max_tokens_per_call,
         "setup_calls": manifest.setup_calls,
         "components": [component.name for component in manifest.components],
     }
@@ -189,7 +191,13 @@ def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
     model = get_model(
         spec.model_spec,
         **(
-            {"base_url": spec.base_url, "api_key": spec.api_key or "none"}
+            {
+                "base_url": spec.base_url,
+                "api_key": spec.api_key or "none",
+                # The OpenAI client otherwise gives up after 600 s, and Inspect
+                # regenerates the whole answer; long reasoning under load needs more.
+                "client_timeout": float(spec.time_limit_s),
+            }
             if spec.base_url
             else {}
         ),
@@ -201,8 +209,11 @@ def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
         questions=total,
         total_calls=max(0, spec.total_calls - spec.setup_calls),
         max_calls_per_question=per_question_cap,
-        max_tokens_per_call=min(manifest.max_tokens_per_call, spec.max_tokens_per_call),
-        memory_enabled=manifest.memory == "shared",
+        max_tokens_per_call=(
+            manifest.max_tokens_per_call
+            if spec.max_tokens_per_call is None
+            else min(manifest.max_tokens_per_call, spec.max_tokens_per_call)
+        ),
         predictions_path=Path(spec.predictions_path),
         benchmark=spec.benchmark,
         split=spec.split,
@@ -263,15 +274,16 @@ def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
             )
         )
 
-    # Sequential by default so memory, budgets, and artifacts are stable; the
-    # stateless zero-shot baseline opts into concurrency via spec.max_connections.
-    summary.execution = "sequential" if spec.max_connections <= 1 else "concurrent"
+    # The budget allocator, meters, and predictions are lock-protected, so
+    # questions can run side by side unless the policy opts out.
+    max_samples = spec.max_connections if manifest.concurrent else 1
+    summary.execution = "sequential" if max_samples <= 1 else "concurrent"
 
     try:
         inspect_eval(
             tasks,
             model=model,
-            max_samples=spec.max_connections,
+            max_samples=max_samples,
             max_connections=spec.max_connections,
             max_tasks=1,
             log_dir=spec.log_dir,
@@ -312,14 +324,19 @@ def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        print("usage: python -m inference_opt.eval_runner <spec.json>", file=sys.stderr)
+        print(
+            "usage: python -m inference_opt.eval_runner <spec.json> [--targets-stdin]",
+            file=sys.stderr,
+        )
         return 2
     spec = RunSpec.read(argv[0])
+    # Gold labels arrive on stdin so they never touch the disk the policy can read.
+    targets = json.loads(sys.stdin.read()) if "--targets-stdin" in argv[1:] else None
     api_key = spec.api_key or os.environ.get("VLLM_API_KEY")
     spec = replace(spec, api_key=api_key)
     try:
         with scrubbed_environment():
-            summary = run(spec)
+            summary = run(spec, targets=targets)
     except Exception:
         summary = RunSummary(run_id=spec.run_id, ok=False, error=traceback.format_exc())
         summary.write(spec.summary_path)

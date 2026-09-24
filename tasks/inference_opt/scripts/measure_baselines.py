@@ -36,7 +36,7 @@ def _parse_models(pairs: list[str]) -> dict[str, str]:
     return models
 
 
-def _patch_tasks(level: int, measured: dict) -> int:
+def _patch_tasks(level: int, measured: dict, specs: dict[str, str]) -> int:
     directory = ROOT / "environments" / f"level_{level}" / "tasks_json"
     paths = sorted(directory.glob("task_*.json"))
     tasks = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
@@ -45,6 +45,9 @@ def _patch_tasks(level: int, measured: dict) -> int:
         config = task["initial_input"]
         benchmark = config["benchmark"]
         for model in config["models"]:
+            # The baselines are only valid against the deployment they measured.
+            if model in specs:
+                config.setdefault("model_specs", {})[model] = specs[model]
             entry = measured.get(model, {}).get(benchmark)
             if not entry:
                 continue
@@ -144,7 +147,7 @@ def main() -> None:
 
     if args.write_tasks:
         for level in (1, 2):
-            count = _patch_tasks(level, measured)
+            count = _patch_tasks(level, measured, models)
             print(f"level {level}: patched {count} baseline entries")
 
 

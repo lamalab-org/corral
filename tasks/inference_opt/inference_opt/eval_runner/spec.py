@@ -7,7 +7,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["RunSpec", "RunSummary"]
+__all__ = ["DEFAULT_STUDENT_CONCURRENCY", "RunSpec", "RunSummary"]
+
+
+#: Concurrent student requests per run when the task config does not set
+#: ``student_concurrency``.
+DEFAULT_STUDENT_CONCURRENCY = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,21 +34,23 @@ class RunSpec:
 
     total_calls: int = 250
     max_calls_per_question: int = 8
-    max_tokens_per_call: int = 2048
+    #: Optional ceiling over the policy's own limit; ``None`` leaves it to the policy.
+    max_tokens_per_call: int | None = None
     setup_calls: int = 0
 
     #: Labeled train examples for ``Policy.setup`` when this is a train run.
     revealed_path: str | None = None
     #: Overrides the policy manifest, for the dry-run path.
-    time_limit_s: int = 1800
+    #: Per-question wall clock. Generous, so a loaded server cannot kill questions;
+    #: the call budget is what bounds a policy's work.
+    time_limit_s: int = 7200
     epochs: int = 1
     seed: int = 0
     benchmark: str = ""
     split: str = "train"
     policy_api: str = "primitive"
-    #: Concurrent samples/model-connections. Kept at 1 for real policy runs, where
-    #: memory, budgets, and artifacts must stay stable across questions; the
-    #: stateless zero-shot baseline is free to raise this.
+    #: Concurrent questions and student connections. A policy whose manifest sets
+    #: ``concurrent: False`` still solves one question at a time.
     max_connections: int = 1
 
     @property

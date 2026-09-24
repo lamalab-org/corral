@@ -21,7 +21,6 @@ __all__ = [
     "ComponentSpec",
     "LabeledExample",
     "Memory",
-    "MemoryMode",
     "Message",
     "PolicyManifest",
     "PolicyApiMode",
@@ -42,7 +41,6 @@ Message = Mapping[str, str]
 Prompt = str | Sequence[Message]
 
 AnswerType = Literal["mcq", "numeric", "text"]
-MemoryMode = Literal["none", "shared"]
 PolicyApiMode = Literal["primitive", "enhanced"]
 
 
@@ -111,12 +109,12 @@ class StudentClient(Protocol):
         *,
         system: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
         stop: Sequence[str] | None = None,
         seed: int | None = None,
         component: str | None = None,
     ) -> str:
-        """Complete one prompt. Charges one call."""
+        """Complete one prompt. Charges one call. ``max_tokens=None`` uses the manifest's ``max_tokens_per_call``."""
         ...
 
     def sample(
@@ -147,7 +145,7 @@ class StudentClient(Protocol):
 
 @runtime_checkable
 class Memory(Protocol):
-    """State shared across questions when enabled by the policy manifest."""
+    """State shared across all questions of a run."""
 
     def get(self, key: str, default: Any = None) -> Any: ...
     def set(self, key: str, value: Any) -> None: ...
@@ -203,14 +201,19 @@ class PolicyManifest:
 
     name: str = "policy"
     version: int = 1
-    memory: MemoryMode = "none"
     max_calls_per_question: int = 8
     setup_calls: int = 0
-    max_tokens_per_call: int = 2048
+    max_tokens_per_call: int = 8192
+    #: Whether questions may be solved concurrently. Set False when a question
+    #: depends on earlier ones, e.g. through ``ctx.memory`` or state kept on the
+    #: policy across calls.
+    concurrent: bool = True
     components: tuple[ComponentSpec, ...] = ()
     config: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.concurrent, bool):
+            raise ValueError("concurrent must be true or false")
         if self.max_calls_per_question < 1:
             raise ValueError("max_calls_per_question must be at least 1")
         if self.setup_calls < 0:

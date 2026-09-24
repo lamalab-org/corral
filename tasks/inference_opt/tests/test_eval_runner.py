@@ -93,7 +93,7 @@ class TestEndToEnd:
         assert list(__import__("pathlib").Path(spec.log_dir).glob("*.json"))
 
     def test_sampling_charges_every_draw(self, tmp_path, questions_file):
-        """`num_choices=n` is one request but n generations, so it costs n."""
+        """Each of the n draws is billed as a call, so self-consistency is not free."""
         spec = make_spec(
             tmp_path,
             questions_file,
@@ -105,21 +105,51 @@ class TestEndToEnd:
         summary = run_in_process(spec)
         assert summary.calls_used == 9
 
-    def test_shared_memory_forces_sequential_execution(self, tmp_path, questions_file):
+    def test_shared_memory_policy_can_run_in_order(self, tmp_path, questions_file):
         spec = make_spec(
             tmp_path,
             questions_file,
-            "MANIFEST = {'memory': 'shared'}\n"
+            "MANIFEST = {'concurrent': False}\n"
             "class Policy:\n"
             "    def solve(self, q, ctx):\n"
             "        ctx.memory.append('seen', q.id)\n"
             "        return str(len(ctx.memory.get('seen', [])))\n",
             policy_api="enhanced",
+            max_connections=8,
         )
         summary = run_in_process(spec)
         assert summary.execution == "sequential"
 
-    def test_memory_is_read_only_without_the_manifest_flag(
+    def test_policies_run_concurrently_by_default(self, tmp_path, questions_file):
+        spec = make_spec(
+            tmp_path,
+            questions_file,
+            "class Policy:\n"
+            "    def solve(self, q, ctx):\n"
+            "        return ctx.student.generate(q.text)\n",
+            max_connections=8,
+        )
+        summary = run_in_process(spec)
+        assert summary.ok, summary.error
+        assert summary.execution == "concurrent"
+        assert summary.n_answered == 3
+        assert summary.calls_used == 3
+
+    def test_a_policy_can_opt_out_of_concurrency(self, tmp_path, questions_file):
+        spec = make_spec(
+            tmp_path,
+            questions_file,
+            "MANIFEST = {'concurrent': False}\n"
+            "class Policy:\n"
+            "    def solve(self, q, ctx):\n"
+            "        return ctx.student.generate(q.text)\n",
+            max_connections=8,
+        )
+        summary = run_in_process(spec)
+        assert summary.ok, summary.error
+        assert summary.execution == "sequential"
+
+    def test_batch_keeps_prompt_order_and_charges_each_prompt(
         self, tmp_path, questions_file
     ):
         spec = make_spec(
@@ -127,12 +157,32 @@ class TestEndToEnd:
             questions_file,
             "class Policy:\n"
             "    def solve(self, q, ctx):\n"
-            "        ctx.memory.set('x', 1)\n"
+            "        outs = ctx.student.batch([q.text, q.text, q.text])\n"
+            "        assert len(outs) == 3\n"
+            "        return outs[0]\n",
+            policy_api="enhanced",
+            max_connections=8,
+        )
+        summary = run_in_process(spec)
+        assert summary.ok, summary.error
+        assert summary.n_crashed == 0
+        assert summary.calls_used == 9
+
+    def test_memory_is_writable_without_a_manifest_flag(
+        self, tmp_path, questions_file
+    ):
+        spec = make_spec(
+            tmp_path,
+            questions_file,
+            "class Policy:\n"
+            "    def solve(self, q, ctx):\n"
+            "        ctx.memory.append('seen', q.id)\n"
             "        return 'ANSWER: A'\n",
             policy_api="enhanced",
         )
         summary = run_in_process(spec)
-        assert summary.n_crashed == 3
+        assert summary.ok, summary.error
+        assert summary.n_crashed == 0
 
     def test_setup_runs_once_and_sees_revealed_answers(self, tmp_path, questions_file):
         revealed = tmp_path / "revealed.jsonl"
@@ -151,7 +201,7 @@ class TestEndToEnd:
         spec = make_spec(
             tmp_path,
             questions_file,
-            "MANIFEST = {'memory': 'shared', 'setup_calls': 2}\n"
+            "MANIFEST = {'setup_calls': 2}\n"
             "class Policy:\n"
             "    def setup(self, ctx):\n"
             "        ctx.memory.set('n', len(ctx.train_examples))\n"
@@ -257,3 +307,83 @@ class TestEnvironmentScrubbing:
             if line.strip()
         ]
         assert {row["answer"] for row in rows} == {"missing"}
+
+
+class TestTokenLimits:
+    def test_omitted_max_tokens_uses_the_policy_limit(self):
+        from inference_opt.eval_runner.runtime import StudentClientImpl
+
+        client = StudentClientImpl(None, None, max_tokens_cap=8192)
+        assert client._config(max_tokens=None).max_tokens == 8192
+        assert client._config(max_tokens=300).max_tokens == 300
+        assert client._config(max_tokens=20000).max_tokens == 8192
+
+
+class TestParallelModels:
+    def test_each_model_gets_its_own_process_and_labels(
+        self, tmp_path, questions_file
+    ):
+        from inference_opt.eval_runner import PolicyEvaluator
+
+        source = (
+            "class Policy:\n"
+            "    def solve(self, q, ctx):\n"
+            "        return ctx.student.generate(q.text)\n"
+        )
+        specs = [
+            make_spec(tmp_path / name, questions_file, source, run_id=name,
+                      out_dir=str(tmp_path / name / "out"))
+            for name in ("student_a", "student_b")
+        ]
+        targets = {q["item_id"]: q["target"] for q in QUESTIONS}
+        summaries = PolicyEvaluator().run_many([(spec, targets) for spec in specs])
+        assert [s.run_id for s in summaries] == ["student_a", "student_b"]
+        for summary in summaries:
+            assert summary.ok, summary.error
+            assert summary.n_answered == 3
+        # Labels were piped in, never written beside the run.
+        for spec in specs:
+            assert not list(Path(spec.out_dir).rglob("*targets*"))
+
+    def test_a_crashed_process_is_reported_not_hidden(self, tmp_path, questions_file):
+        from inference_opt.eval_runner import PolicyEvaluator
+
+        specs = [
+            make_spec(tmp_path / name, questions_file, "answer = 1\n", run_id=name,
+                      out_dir=str(tmp_path / name / "out"))
+            for name in ("a", "b")
+        ]
+        summaries = PolicyEvaluator().run_many([(spec, None) for spec in specs])
+        assert all(not s.ok for s in summaries)
+
+
+class TestChemBench:
+    def test_chembench_scoring_finishes_without_a_metric_crash(self, tmp_path):
+        """inspect_evals groups ChemBench accuracy by `subset_name` metadata."""
+        questions = tmp_path / "chem.jsonl"
+        write_jsonl(
+            questions,
+            [
+                {
+                    "item_id": "chembench:q1",
+                    "benchmark": "chembench",
+                    "question": "Which is a noble gas?",
+                    "answer_format": "mcq_single",
+                    "options": ["Neon", "Iron"],
+                    "category": "general_chemistry",
+                    "target": "A",
+                    "index": 0,
+                }
+            ],
+        )
+        spec = make_spec(
+            tmp_path,
+            questions,
+            "class Policy:\n    def solve(self, q, ctx): return '[ANSWER]A[/ANSWER]'\n",
+            benchmark="chembench",
+        )
+        summary = run_in_process(spec)
+        assert summary.ok, summary.error
+        logs = list(Path(spec.log_dir).glob("*.json"))
+        assert logs
+        assert all(json.loads(p.read_text())["status"] == "success" for p in logs)

@@ -120,7 +120,10 @@ task-specific data preparation.
 
 The environment has no persistent policy process, background policy
 jobs, file-backed active ledger, or restricted policy worker. Policy questions
-run sequentially so shared memory, budgets, and artifacts are deterministic.
+run concurrently (`student_concurrency`, default 16) unless the manifest sets
+`concurrent: False`. Budgets, memory, and predictions are lock-protected, and
+predictions are written in question order. With several students, each model is
+evaluated in its own process at the same time.
 
 ## Source map
 

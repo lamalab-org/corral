@@ -37,34 +37,21 @@ __all__ = [
 
 
 class SharedMemory(Memory):
-    """Cross-question state. Mutating it requires ``memory="shared"``.
+    """Cross-question state. The lock keeps it safe when questions run concurrently."""
 
-    The lock keeps the public memory object safe for policy code that manages its
-    own threads, while question execution itself is sequential.
-    """
-
-    def __init__(self, *, enabled: bool) -> None:
-        self._enabled = enabled
+    def __init__(self) -> None:
         self._data: dict[str, Any] = {}
         self._lock = threading.RLock()
-
-    def _require(self) -> None:
-        if not self._enabled:
-            raise RuntimeError(
-                """this policy declared memory='none', so cross-question memory is read-only. Set MANIFEST['memory'] = 'shared' to enable it."""
-            )
 
     def get(self, key: str, default: Any = None) -> Any:
         with self._lock:
             return self._data.get(key, default)
 
     def set(self, key: str, value: Any) -> None:
-        self._require()
         with self._lock:
             self._data[key] = value
 
     def append(self, key: str, value: Any) -> None:
-        self._require()
         with self._lock:
             self._data.setdefault(key, []).append(value)
 
@@ -185,6 +172,22 @@ class StudentClientImpl:
 
         return self._run(call)
 
+    def _generate_many(self, conversations: list[list[Any]], config: Any) -> list[Any]:
+        """Send one request per conversation, side by side, and keep their order."""
+        outputs: list[Any] = [None] * len(conversations)
+
+        async def call_all() -> None:
+            # The model's max_connections still bounds how many are in flight.
+            async def one(index: int, messages: list[Any]) -> None:
+                outputs[index] = await self._model.generate(messages, config=config)
+
+            async with anyio.create_task_group() as group:
+                for index, messages in enumerate(conversations):
+                    group.start_soon(one, index, messages)
+
+        self._run(call_all)
+        return outputs
+
     # -- public API -------------------------------------------------------
 
     def generate(
@@ -193,7 +196,7 @@ class StudentClientImpl:
         *,
         system: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
         stop: Sequence[str] | None = None,
         seed: int | None = None,
         component: str | None = None,
@@ -216,25 +219,23 @@ class StudentClientImpl:
         n: int,
         temperature: float = 0.8,
         system: str | None = None,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
         component: str | None = None,
         **_ignored: Any,
     ) -> list[str]:
-        """Draw ``n`` completions. Charged as ``n`` calls, not one. ``num_choices=n`` is one HTTP request but ``n`` generations of compute, so billing it as a single call would make self-consistency free."""
+        """Draw ``n`` completions. Charged as ``n`` calls, not one.
+
+        Each draw is its own request, sent side by side: some servers reject
+        ``n > 1`` (``num_choices``) in a single request.
+        """
         count = max(1, int(n))
         self._meter.reserve(count)
-        config = self._config(
-            temperature=temperature, max_tokens=max_tokens, num_choices=count
-        )
-        output = self._generate(_as_messages(prompt, system), config)
-        self._meter.record(_output_tokens(output), component)
-        completions = [(choice.message.text or "") for choice in (output.choices or [])]
-        if not completions:
-            completions = [output.completion or ""]
-        # Do not issue unmetered fallback requests when a server ignores
-        # ``num_choices``. Empty slots preserve the hard call budget.
-        completions.extend([""] * max(0, count - len(completions)))
-        return completions[:count]
+        config = self._config(temperature=temperature, max_tokens=max_tokens)
+        messages = _as_messages(prompt, system)
+        outputs = self._generate_many([messages] * count, config)
+        for output in outputs:
+            self._meter.record(_output_tokens(output), component)
+        return [output.completion or "" for output in outputs]
 
     def batch(
         self,
@@ -242,24 +243,22 @@ class StudentClientImpl:
         *,
         system: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 1024,
+        max_tokens: int | None = None,
         component: str | None = None,
         **_ignored: Any,
     ) -> list[str]:
-        """Complete several prompts sequentially. Charges ``len(prompts)`` calls."""
+        """Complete several prompts concurrently. Charges ``len(prompts)`` calls."""
         items = list(prompts)
         if not items:
             return []
         self._meter.reserve(len(items))
         config = self._config(temperature=temperature, max_tokens=max_tokens)
-        results: list[str] = []
-        for prompt in items:
-            output = self._run(
-                self._model.generate, _as_messages(prompt, system), config=config
-            )
-            results.append(output.completion or "")
+        outputs = self._generate_many(
+            [_as_messages(prompt, system) for prompt in items], config
+        )
+        for output in outputs:
             self._meter.record(_output_tokens(output), component)
-        return results
+        return [output.completion or "" for output in outputs]
 
     @property
     def calls_used(self) -> int:
@@ -304,7 +303,6 @@ class RunRuntime:
         total_calls: int,
         max_calls_per_question: int,
         max_tokens_per_call: int,
-        memory_enabled: bool,
         predictions_path: Path,
         benchmark: str = "",
         split: str = "train",
@@ -322,9 +320,7 @@ class RunRuntime:
             questions=max(1, questions),
             per_question_cap=max_calls_per_question,
         )
-        self.memory = SharedMemory(
-            enabled=memory_enabled and policy_api == "enhanced"
-        )
+        self.memory = SharedMemory()
         self.predictions_path = predictions_path
         self.predictions_path.parent.mkdir(parents=True, exist_ok=True)
         self._predictions: list[dict[str, Any]] = []

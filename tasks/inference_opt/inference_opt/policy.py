@@ -35,10 +35,10 @@ _MANIFEST_FIELDS = frozenset(
     {
         "name",
         "version",
-        "memory",
         "max_calls_per_question",
         "setup_calls",
         "max_tokens_per_call",
+        "concurrent",
         "components",
         "config",
     }
@@ -84,12 +84,6 @@ def manifest_from_mapping(raw: Mapping[str, Any] | None) -> PolicyManifest:
                 f"MANIFEST components must be strings or dicts, got {type(entry).__name__}"
             )
     values["components"] = tuple(parsed)
-
-    for key in ("memory",):
-        if key in values:
-            values[key] = str(values[key])
-    if values.get("memory") not in (None, "none", "shared"):
-        raise PolicyError("MANIFEST memory must be 'none' or 'shared'")
 
     try:
         return PolicyManifest(**values)

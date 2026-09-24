@@ -88,12 +88,24 @@ class TestDiscovery:
 class TestManifest:
     def test_defaults(self):
         manifest = manifest_from_mapping(None)
-        assert manifest.memory == "none"
+        assert manifest.concurrent is True
+        assert manifest.max_tokens_per_call == 8192
 
     def test_unknown_key_is_an_error_not_a_silent_noop(self):
-        # Execution is always sequential; unsupported knobs fail loudly.
+        # `concurrent` is the only execution knob; look-alikes fail loudly.
         with pytest.raises(PolicyError, match="unknown key"):
             manifest_from_mapping({"sequential": True})
+
+    def test_memory_is_no_longer_a_manifest_key(self):
+        with pytest.raises(PolicyError, match="unknown key"):
+            manifest_from_mapping({"memory": "shared"})
+
+    def test_concurrent_can_be_disabled(self):
+        assert manifest_from_mapping({"concurrent": False}).concurrent is False
+
+    def test_concurrent_must_be_a_bool(self):
+        with pytest.raises(PolicyError, match="concurrent"):
+            manifest_from_mapping({"concurrent": "disable"})
 
     def test_components_accept_strings_and_dicts(self):
         manifest = manifest_from_mapping(

@@ -17,12 +17,29 @@ from inference_opt.client import probe_student
 from inference_opt.outcomes import read_outcomes
 from inference_opt.policy import PolicyError, discover_policy
 from inference_opt.eval_runner import PolicyEvaluator
-from inference_opt.eval_runner.spec import RunSpec
+from inference_opt.eval_runner.spec import DEFAULT_STUDENT_CONCURRENCY, RunSpec
 
 __all__ = ["create_tools"]
 
 #: Below this fraction of any budget, every tool result carries a submit reminder.
 NAG_THRESHOLD = 0.2
+
+
+def _error_tail(error: str, limit: int) -> str:
+    """Keep the end of a traceback: the actual exception is at the bottom."""
+    error = error.strip()
+    return error if len(error) <= limit else "..." + error[-limit:]
+
+
+def _error_line(error: str) -> str:
+    """The final ``SomeError: message`` line, even inside an ExceptionGroup."""
+    lines = [line.strip().lstrip("|").strip() for line in error.splitlines()]
+    lines = [line for line in lines if line and not line.startswith(("+-", "^"))]
+    for line in reversed(lines):
+        name = line.split(":", 1)[0]
+        if name.endswith(("Error", "Exception", "Exhausted")) and " " not in name:
+            return line[:300]
+    return lines[-1][:300] if lines else ""
 
 
 def _compact(payload: dict[str, Any], summary: str, ledger: StateLedger) -> str:
@@ -120,6 +137,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
     spec = BudgetSpec.from_mapping(config.get("budget"))
     model_specs = dict(config.get("model_specs") or {})
     base_urls = dict(config.get("base_urls") or {})
+    concurrency = int(config.get("student_concurrency", DEFAULT_STUDENT_CONCURRENCY))
 
     def _ledger(inference_state: Any) -> StateLedger:
         return StateLedger(inference_state or {}, spec)
@@ -149,6 +167,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             benchmark=benchmark,
             split=split,
             policy_api=str(config.get("policy_api", "primitive")),
+            max_connections=concurrency,
         )
 
     # -- trusted tools: they read gold answers, so they never run policy code ----
@@ -260,7 +279,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         prompt: str,
         system: str = "",
         temperature: float = 0.0,
-        max_tokens: int = 512,
+        max_tokens: int = 8192,
         n: int = 1,
         work_dir: str = "",
         inference_state: Any = None,
@@ -271,12 +290,13 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             prompt: The user message to send.
             system: Optional system message.
             temperature: Sampling temperature; 0.0 is deterministic.
-            max_tokens: Maximum tokens to generate.
+            max_tokens: Maximum tokens to generate, reasoning included.
             n: How many samples to draw.
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON with the completions the student produced.
+            JSON with the completions and why each ended ("stop", or "length"
+            when max_tokens ran out; then the completion may be empty).
         """
         ledger = _ledger(inference_state)
         count = max(1, min(int(n), 8))
@@ -288,13 +308,27 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             temperature=temperature,
             max_tokens=max_tokens,
             n=count,
-            served_name=model_specs.get(models[0], "").split("/")[-1] or None,
+            # Drop only the provider prefix: "vllm/Qwen/X" is served as "Qwen/X".
+            served_name=model_specs.get(models[0], "").partition("/")[2] or None,
         )
-        return _compact(
-            {"model": "student", "completions": completions},
-            f"Student returned {len(completions)} completion(s).",
-            ledger,
-        )
+        payload: dict[str, Any] = {
+            "model": "student",
+            "completions": [c.text for c in completions],
+            "finish_reasons": [c.finish_reason for c in completions],
+        }
+        summary = f"Student returned {len(completions)} completion(s)."
+        truncated = [c for c in completions if c.finish_reason == "length"]
+        if truncated:
+            summary += (
+                f" {len(truncated)} hit max_tokens={max_tokens} before finishing; an "
+                "empty completion means the student was still reasoning (reasoning "
+                "counts toward max_tokens). Raise max_tokens to see the answer."
+            )
+            # The end of the cut-off reasoning shows how far the student got.
+            payload["reasoning_tail"] = [
+                c.reasoning[-300:] if not c.text and c.reasoning else "" for c in completions
+            ]
+        return _compact(payload, summary, ledger)
 
     @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
     def dry_run_policy(
@@ -387,13 +421,13 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 policy_dir=policy_path,
                 n_items=n_items,
                 calls_used=summary.calls_used,
-                error=summary.error[:300],
+                error=_error_line(summary.error),
             )
         )
         headline = (
             f"Dry run OK on {len(traces)} question(s); the policy runs end to end."
             if summary.ok and not summary.error
-            else f"Dry run FAILED: {summary.error[:300]}"
+            else f"Dry run FAILED: {_error_line(summary.error)}"
         )
         return _compact(
             {
@@ -403,7 +437,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "traces": traces,
                 "calls_used": summary.calls_used,
                 "artifacts": str(out.relative_to(Path(work_dir))),
-                "error": summary.error[:600],
+                "error": _error_tail(summary.error, 2000),
             },
             headline,
             ledger,
@@ -438,12 +472,14 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         results: dict[str, Any] = {}
         deltas = []
         calls_used = 0
-        for model in models:
-            run_spec = _spec_for(
-                work_dir, run_id, policy_dir, questions, model, model_budget, "train"
-            )
-            targets = datasets.load_targets(benchmark, "train")
-            summary = PolicyEvaluator().run(run_spec, targets=targets)
+        targets = datasets.load_targets(benchmark, "train")
+        run_specs = [
+            _spec_for(work_dir, run_id, policy_dir, questions, model, model_budget, "train")
+            for model in models
+        ]
+        # Each model has its own student server, so evaluate them side by side.
+        summaries = PolicyEvaluator().run_many([(s, targets) for s in run_specs])
+        for model, run_spec, summary in zip(models, run_specs, summaries, strict=True):
             calls_used += summary.calls_used + summary.setup_calls_used
             predictions_path = Path(run_spec.predictions_path)
             predictions = (
@@ -474,7 +510,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "n_crashed": summary.n_crashed,
                 "n_unparseable": summary.n_unparseable,
                 "budget_exhausted_at": summary.budget_exhausted_at,
-                "error": summary.error[:300],
+                "error": _error_tail(summary.error, 1000),
                 "by_topic": outcome.by_category(),
             }
 
@@ -663,7 +699,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             policy_dir,
             {
                 "name": loaded.manifest.name,
-                "memory": loaded.manifest.memory,
+                "concurrent": loaded.manifest.concurrent,
             },
             best,
             "agent",
