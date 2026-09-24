@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Generate and validate psychometrics task data.
+
+    python build.py                  # regenerate every task
+    python build.py --verify         # check every task is solvable as intended
+    python build.py --naive          # check the default analysis fails on each
+    python build.py --check          # build, verify, naive, then the scoring tests
+    python build.py --tasks 3 7      # limit any of the above to these tasks
+    python build.py --level 2        # limit it to one level instead
+    python build.py --data-root DIR  # build into DIR instead of the checkout
+
+Needs the package installed (``uv sync --group dev``); runs from any
+directory:
+
+    uv run python build.py --check
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from corral_psychometrics import paths
+
+SOURCE_ROOT = Path(__file__).resolve().parent
+
+
+def run(task, flag=None):
+    """Run one generator. Returns (succeeded, seconds, last line of output)."""
+    started = time.monotonic()
+    task.root.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".psychometrics-build-", dir=task.root) as temporary:
+        staged = task.at(temporary) if flag is None else task
+        # Retain the old build stamp when the substantive truth is unchanged.
+        if flag is None and task.truth.is_file():
+            staged.truth.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(task.truth, staged.truth)
+        result = subprocess.run(
+            [sys.executable, "-m", task.generator] + ([flag] if flag else []),
+            capture_output=True,
+            text=True,
+            cwd=SOURCE_ROOT,
+            env={**os.environ, paths.ROOT_VARIABLE: str(staged.root)},
+        )
+        if result.returncode == 0 and flag is None:
+            publish(staged, task)
+    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    tail = lines[-1].strip() if lines else (result.stderr.strip().splitlines() or ["no output"])[-1]
+    return result.returncode == 0, time.monotonic() - started, tail
+
+
+def publish(staged, task):
+    """Record the public checksums, validate the staged build, then move it into place.
+
+    A marker file is left in the definitions directory for the duration of the
+    move, so an interrupted publication is detected on the next load.
+    """
+    from corral_psychometrics.env import load_tasks_from_json
+
+    definitions = json.loads(staged.definition.read_text())
+    for definition in definitions:
+        names = definition["initial_input"]["public_inputs"]
+        if set(names) != {p.name for p in staged.artifacts.iterdir()}:
+            raise ValueError(f"{task.label}: generated files do not match public_inputs")
+        definition["public_sha256"] = {
+            name: hashlib.sha256(
+                paths.resolve(name, root=staged.artifacts).read_bytes()
+            ).hexdigest()
+            for name in names
+        }
+    staged.definition.write_text(json.dumps(definitions, indent=2) + "\n")
+    load_tasks_from_json(staged.definition.parent, data_root=staged.root)
+    task.definition.parent.mkdir(parents=True, exist_ok=True)
+    task.truth.parent.mkdir(parents=True, exist_ok=True)
+    task.artifacts.parent.mkdir(parents=True, exist_ok=True)
+    marker = task.definition.with_suffix(".building")
+    marker.write_text("Task publication incomplete; rebuild this task.\n")
+    if task.artifacts.exists():
+        task.artifacts.rename(staged.root / "previous-artifacts")
+    staged.artifacts.rename(task.artifacts)
+    staged.truth.replace(task.truth)
+    staged.definition.replace(task.definition)
+    marker.unlink()
+
+
+def stage(label, scripts, flag):
+    """Run one flag across every generator and print a table. Returns failures."""
+    print(f"\n{label}")
+    print(f"  {'task':34s} {'time':>7s}  result")
+    failures = []
+    for task in scripts:
+        ok, seconds, tail = run(task, flag)
+        if not ok:
+            failures.append(task.label)
+        print(
+            f"  {task.label:33s} {seconds:6.1f}s  "
+            f"{'ok' if ok else 'FAILED'}  {'' if ok else tail[:70]}"
+        )
+    return failures
+
+
+def scoring_tests(root, level=None, numbers=None):
+    """Run the scorer's test suite. Returns failures."""
+    print("\nScoring tests")
+    result = subprocess.run(
+        [sys.executable, str(SOURCE_ROOT / "tests" / "test_scoring.py")]
+        + (["--level", str(level)] if level is not None else [])
+        + (["--tasks", *map(str, numbers)] if numbers else []),
+        capture_output=True,
+        text=True,
+        cwd=SOURCE_ROOT,
+        env={**os.environ, paths.ROOT_VARIABLE: str(root)},
+    )
+    tail = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    print(f"  {tail[-1] if tail else 'no output'}")
+    return [] if result.returncode == 0 else ["scoring tests"]
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--verify", action="store_true", help="check the intended answer wins on every task"
+    )
+    parser.add_argument(
+        "--naive", action="store_true", help="check the default analysis fails on every task"
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="build, then verify, naive and the scoring tests"
+    )
+    parser.add_argument(
+        "--clean", action="store_true", help="rebuild selected tasks (every build does)"
+    )
+    parser.add_argument(
+        "--tasks", type=int, nargs="+", metavar="N", help="limit to these task numbers"
+    )
+    parser.add_argument("--level", type=int, metavar="N", help="limit to this level")
+    parser.add_argument("--data-root", help="output directory; defaults to the checkout")
+    args = parser.parse_args()
+    root = paths.task_root(args.data_root)
+
+    scripts = paths.tasks(
+        numbers=set(args.tasks) if args.tasks else None, level=args.level, root=root
+    )
+    if not scripts:
+        print("no generators matched")
+        return 1
+
+    failures = []
+
+    # The scoring tests read the built datasets, so --check builds first.
+    if args.clean or args.check or not (args.verify or args.naive):
+        failures += stage("Building", scripts, None)
+    if args.check or args.verify:
+        failures += stage("Verifying (the intended answer wins)", scripts, "--verify")
+    if args.check or args.naive:
+        failures += stage("Checking the obvious analysis fails", scripts, "--naive")
+    if args.check:
+        failures += scoring_tests(root, args.level, args.tasks)
+
+    print()
+    if failures:
+        for item in failures:
+            print(f"FAILED  {item}")
+        return 1
+    print(f"{len(scripts)} task(s) ok")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
