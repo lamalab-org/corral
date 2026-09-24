@@ -41,9 +41,9 @@ class RunSpec:
     #: Labeled train examples for ``Policy.setup`` when this is a train run.
     revealed_path: str | None = None
     #: Overrides the policy manifest, for the dry-run path.
-    #: Per-question wall clock. Generous, so a loaded server cannot kill questions;
-    #: the call budget is what bounds a policy's work.
-    time_limit_s: int = 7200
+    #: Per-question wall clock; a question still running at the limit is scored
+    #: as unanswered, so policies must fit their sampling within it.
+    time_limit_s: int = 1800
     epochs: int = 1
     seed: int = 0
     benchmark: str = ""

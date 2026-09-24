@@ -38,7 +38,9 @@ def test_python_literals_inside_strings_are_left_alone(agent):
     """Code written through a tool must keep Python's True/False/None."""
     code = 'MANIFEST = {"concurrent": True, "x": False, "y": None}\n'
     # Bare True in the same input forces the Python-literal fallback path.
-    raw = '{"path": "policy.py", "overwrite": True, "content": ' + json.dumps(code) + "}"
+    raw = (
+        '{"path": "policy.py", "overwrite": True, "content": ' + json.dumps(code) + "}"
+    )
     _thoughts, actions = agent.parse_llm_response(
         f"<action>write_file</action><action_input>{raw}</action_input>"
     )

@@ -123,7 +123,8 @@ class StudentEndpoint:
 
     def _request(self, body: dict[str, Any]) -> list[StudentCompletion]:
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        timeout = self.timeout or 120.0 + int(body["max_tokens"]) / 20
+        # Assume a slow floor of 5 tokens/s: a busy server can drop well below 20.
+        timeout = self.timeout or min(1800.0, 120.0 + int(body["max_tokens"]) / 5)
         try:
             response = requests.post(
                 self.completions_url, json=body, timeout=timeout, headers=headers

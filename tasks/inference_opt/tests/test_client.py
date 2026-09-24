@@ -113,4 +113,8 @@ def test_timeout_grows_with_max_tokens(monkeypatch):
     endpoint.complete("hi", max_tokens=256)
     endpoint.complete("hi", max_tokens=8192)
     assert seen[1] > seen[0] >= 120
-    assert seen[1] >= 8192 / 20
+    # A 8192-token answer at 5 tokens/s must still fit.
+    assert seen[1] >= 8192 / 5
+    # Never longer than the per-question limit.
+    endpoint.complete("hi", max_tokens=100_000)
+    assert seen[2] == 1800
