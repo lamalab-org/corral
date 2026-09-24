@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
 from corral.backend.background_tools import attach_background_tools
@@ -50,6 +50,18 @@ from corral.core.workspace import WorkspaceState
 from corral.persistence.workspace import WorkspaceManager
 from corral.report.logging import logger
 from corral.workspace import WorkspaceFilesystem, build_workspace_tools
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
+
+
+@dataclass(frozen=True)
+class EnvironmentSetup:
+    """Serializable values produced while configuring one task execution."""
+
+    hidden_arguments: Mapping[str, "JsonValue"] = field(default_factory=dict)
+    values: Mapping[str, "JsonValue"] = field(default_factory=dict)
+    status: str = "Additional apps/services configured for this task."
 
 
 class _ReadWriteLock:
