@@ -1,4 +1,4 @@
-"""Blank Level 2 submission examples, separate from evaluator policy."""
+"""Level-specific blank submission examples, separate from evaluator policy."""
 
 from __future__ import annotations
 
@@ -11,20 +11,23 @@ EXAMPLE_DIRECTORY = "submission_examples"
 TEMPLATE_ROOT = Path(__file__).with_name("submission_templates")
 
 
-def load_example(task_number: int) -> dict:
+def load_example(task_number: int, *, level: int = 2) -> dict:
     """Read fresh objects so callers cannot mutate a later task's examples."""
     if type(task_number) is not int or task_number not in range(1, 11):
         raise ValueError("task_number must be an integer from 1 to 10")
-    return json.loads((TEMPLATE_ROOT / f"task_{task_number}.json").read_text())
+    if type(level) is not int or level not in (1, 2):
+        raise ValueError("level must be 1 or 2")
+    root = TEMPLATE_ROOT / "level_1" if level == 1 else TEMPLATE_ROOT
+    return json.loads((root / f"task_{task_number}.json").read_text())
 
 
 def _json_block(value: object) -> str:
     return "```json\n" + json.dumps(value, indent=2, ensure_ascii=False) + "\n```"
 
 
-def example_files(task_number: int) -> dict[str, str]:
+def example_files(task_number: int, *, level: int = 2) -> dict[str, str]:
     """Files copied into a task workspace."""
-    example = load_example(task_number)
+    example = load_example(task_number, level=level)
     templates = {"manifest.json": example["manifest"], **example["files"]}
     guide = (
         f"# Task {task_number}: submission examples\n\n"
@@ -53,9 +56,9 @@ def example_files(task_number: int) -> dict[str, str]:
     }
 
 
-def example_prompt(task_number: int, *, workspace: bool) -> str:
+def example_prompt(task_number: int, *, workspace: bool, level: int = 2) -> str:
     """Show the manifest first; load supporting layouts on demand in a workspace."""
-    example = load_example(task_number)
+    example = load_example(task_number, level=level)
     prompt = "Blank manifest example:\n\n" + _json_block(example["manifest"]) + "\n"
     if workspace:
         return prompt + (
@@ -63,19 +66,19 @@ def example_prompt(task_number: int, *, workspace: bool) -> str:
             f"Read /workspace/{EXAMPLE_DIRECTORY}/README.md before writing your output files.\n"
         )
     # Unbound environments have no filesystem in which to expose the templates.
-    files = example_files(task_number)
+    files = example_files(task_number, level=level)
     prompt += "\n" + files["README.md"]
     for name, value in example["files"].items():
         prompt += f"\n### {name}\n\n" + _json_block(value) + "\n"
     return prompt
 
 
-def seed_examples(workspace: str | Path, task_number: int) -> None:
+def seed_examples(workspace: str | Path, task_number: int, *, level: int = 2) -> None:
     """Seed before the initial snapshot, preserving any existing user edits."""
     root = Path(workspace)
     directory = confine_workspace_path(root, EXAMPLE_DIRECTORY)
     directory.mkdir(parents=True, exist_ok=True)
-    for name, content in example_files(task_number).items():
+    for name, content in example_files(task_number, level=level).items():
         path = confine_workspace_path(root, directory / name)
         if not path.exists():
             path.write_text(content)

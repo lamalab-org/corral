@@ -163,7 +163,9 @@ class MolecularDynamicsEnvironment(Environment):
                 (Path(self.workspace_path) / name).mkdir(parents=True, exist_ok=True)
             scorer = self.current_task.scoring_fn
             if isinstance(scorer, WorkflowScorer):
-                seed_examples(self.workspace_path, scorer.task_number)
+                seed_examples(
+                    self.workspace_path, scorer.task_number, level=scorer.level
+                )
 
     def initial_event(self, **kwargs: Any) -> ExecutionStarted:
         """Create the standard local MD workspace before the first tool call."""
@@ -231,7 +233,9 @@ Required submission format:
 
     scorer = env.current_task.scoring_fn
     if isinstance(scorer, WorkflowScorer):
-        prompt += example_prompt(scorer.task_number, workspace=bool(env.workspace_path))
+        prompt += example_prompt(
+            scorer.task_number, workspace=bool(env.workspace_path), level=scorer.level
+        )
 
     prompt += "\nAvailable input data:\n"
 

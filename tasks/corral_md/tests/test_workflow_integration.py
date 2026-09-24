@@ -43,6 +43,8 @@ def test_shipped_workflow_contract_and_empty_evidence(number, tmp_path):
     prompt = env._md_task_prompt(current, _state("{}"))
     manifest = json.loads(re.search(r"```json\n(.*?)\n```", prompt, re.S)[1])
     assert manifest == load_example(number)["manifest"]
+    assert "Level_2" not in prompt
+    assert "Level 2" not in prompt
     assert "submission_examples/README.md" in prompt
     assert "Narrative reports are optional" not in prompt
     assert set(load_example(number)) == {"manifest", "files"}
@@ -68,6 +70,18 @@ def test_shipped_level1_contract_uses_only_level1_scorer(number, tmp_path):
     assert isinstance(task.scoring_fn, WorkflowScorer)
     assert task.scoring_fn.task_number == number
     assert task.scoring_fn.level == 1
+    current = SimpleNamespace(
+        current_task=task,
+        task_id=f"level_1_task_{number}",
+        workspace_path=str(tmp_path),
+        resolve_inputs=lambda _state: {},
+    )
+    prompt = env._md_task_prompt(current, _state("{}"))
+    manifest = json.loads(re.search(r"```json\n(.*?)\n```", prompt, re.S)[1])
+    assert manifest == load_example(number, level=1)["manifest"]
+    assert "Level_1" not in prompt
+    assert "Level 1" not in prompt
+    assert "Leave the Level 2 parts empty" not in prompt
     report = task.scoring_fn.evaluate("{}")
     assert report["score"] == 0
     assert report["level"] == 1
@@ -76,10 +90,13 @@ def test_shipped_level1_contract_uses_only_level1_scorer(number, tmp_path):
 
 
 @pytest.mark.parametrize("number", range(1, 11))
-def test_examples_are_readable_and_survive_workspace_restoration(number, tmp_path):
-    task_id = f"level_2_task_{number}"
+@pytest.mark.parametrize("level", [1, 2])
+def test_examples_are_readable_and_survive_workspace_restoration(
+    number, level, tmp_path
+):
+    task_id = f"level_{level}_task_{number}"
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / f"level_2/tasks_json/task_{number}.json", str(tmp_path)
+        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_{number}.json", str(tmp_path)
     )[task_id]
     environment = env.MolecularDynamicsEnvironment(
         task_id,
@@ -91,10 +108,15 @@ def test_examples_are_readable_and_survive_workspace_restoration(number, tmp_pat
     started = environment.initial_event(execution_id="examples")
     root = Path(environment.workspace_path)
     read_file = environment.toolset.resolve(task, str(root))["read_file"]
-    for name, expected in example_files(number).items():
+    assert {path.name for path in (root / "submission_examples").iterdir()} == set(
+        example_files(number, level=level)
+    )
+    for name, expected in example_files(number, level=level).items():
         relative = f"submission_examples/{name}"
         assert relative in started.workspace.files
         assert read_file.execute(path="/workspace/" + relative) == expected
+        if name == "README.md":
+            assert f"Level {level}" not in expected
         if name.endswith(".json"):
             json.loads(expected)
     # Edited templates are part of the run's snapshot, not regenerated on resume.
@@ -112,18 +134,33 @@ def test_examples_are_readable_and_survive_workspace_restoration(number, tmp_pat
     assert (root / "submission_examples/settings.json").is_file()
 
 
-def test_unbound_prompt_includes_linked_file_examples(tmp_path):
+def test_level1_examples_omit_later_workflow_fields():
+    examples = {number: load_example(number, level=1) for number in range(1, 11)}
+    assert "diffusion_data" not in examples[1]["manifest"]["artifacts"]
+    assert "reheating_end" not in examples[2]["files"]["boundary_states.json"]
+    assert "trained_checkpoint" not in examples[3]["manifest"]["artifacts"]
+    assert "bands" not in examples[4]["manifest"]["artifacts"]
+    assert "fit" not in examples[5]["manifest"].get("results", {})
+    assert "spectrum" not in examples[6]["manifest"]["artifacts"]
+    assert "pressure_fit" not in examples[7]["files"]["settings.json"]
+    assert "id_test" not in examples[8]["files"]["regression_data.json"]
+    assert set(examples[9]["manifest"]["artifacts"]["runs"]) == {"main"}
+    assert "heat_capacity" not in examples[10]["manifest"]["results"]
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_unbound_prompt_includes_linked_file_examples(level, tmp_path):
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_1.json", str(tmp_path)
-    )["level_2_task_1"]
+        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_1.json", str(tmp_path)
+    )[f"level_{level}_task_1"]
     environment = env.MolecularDynamicsEnvironment("task", task)
     prompt = env._md_task_prompt(environment, _state("{}"))
     examples = [
         json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", prompt, re.S)
     ]
-    bundle = load_example(1)
+    bundle = load_example(1, level=level)
     assert examples == [bundle["manifest"], *bundle["files"].values()]
-    assert "unwrapped_positions_A" in prompt
+    assert ("unwrapped_positions_A" in prompt) == (level == 2)
     assert "Fields and data layouts" not in prompt
 
 

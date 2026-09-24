@@ -533,11 +533,9 @@ def reproducibility(e: Evidence, r: Rubric) -> None:
 def level1_reproducibility(e: Evidence, r: Rubric) -> None:
     """Score the shared evidence contract for a preparatory Level 1 task.
 
-    The submission templates describe the complete paired workflow, so a Level 1
-    submission legitimately leaves the Level-2-only artifact roles empty.  Only
-    nonempty links are therefore interpreted as submitted evidence here.  The
-    task-specific Level 1 evaluator remains responsible for requiring every
-    artifact needed by its own prompt.
+    Level 1 examples contain only the preparatory workflow. Only nonempty links
+    are interpreted as submitted evidence here. The task-specific Level 1
+    evaluator remains responsible for requiring every artifact in its prompt.
 
     Level 1 tasks do not all have a standalone numerical result (for example,
     some prepare a dataset or a restartable state), so the shared ten points are
@@ -571,7 +569,7 @@ def level1_reproducibility(e: Evidence, r: Rubric) -> None:
         "manifest_and_linked_artifacts",
         6,
         linked_files,
-        "Every nonempty artifact link must exist and contain evidence; unused Level 2 roles may remain empty.",
+        "Every linked artifact must exist and contain evidence.",
     )
     r.check(
         "recorded_settings",
