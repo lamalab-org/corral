@@ -25,13 +25,19 @@ from corral.core.tool import Tool
 from corral.report.logging import event, exception_fields
 from corral.utils.code_tools import execute_python_code
 from score import (
-    check_acquisition_function,
     check_file_exists,
     check_image_quality,
-    check_mathematical_eq,
     check_numerical,
     check_params_function,
     check_roughness_function,
+    score_single_average_friction,
+    score_single_lateral_roughness,
+    score_single_mean_roughness,
+    score_single_rms_friction,
+    score_single_rms_roughness,
+    score_single_roughness_and_friction,
+    score_single_topography,
+    score_single_topography_roughness,
 )
 from tools import (
     Code_Executor,
@@ -55,13 +61,19 @@ TASK_TYPE = "subtasks_1"  # "single_task" or "subtasks"
 BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\{TASK_TYPE}"
 
 SCORING_FUNCTIONS = {
-    "check_acquisition_function": check_acquisition_function,
     "check_numerical": check_numerical,
     "check_image_quality": check_image_quality,
     "check_params_function": check_params_function,
     "check_file_exists": check_file_exists,
     "check_roughness_function": check_roughness_function,
-    "check_mathematical_eq": check_mathematical_eq,
+    "score_single_topography": score_single_topography,
+    "score_single_rms_roughness": score_single_rms_roughness,
+    "score_single_mean_roughness": score_single_mean_roughness,
+    "score_single_topography_roughness": score_single_topography_roughness,
+    "score_single_average_friction": score_single_average_friction,
+    "score_single_rms_friction": score_single_rms_friction,
+    "score_single_lateral_roughness": score_single_lateral_roughness,
+    "score_single_roughness_and_friction": score_single_roughness_and_friction,
 }
 
 
@@ -195,6 +207,12 @@ class AFMEnvironment(Environment):
         safe_set(zcontrol, "DGain", "dgain")
         # safe_set(zcontrol, "SetPoint", "setpoint")  # Uncomment if needed
         safe_set(opmode, "OperatingMode", "mode")
+        # Set the mode first: changing mode restores its previous setpoint.
+        if "setpoint_v" in params:
+            zcontrol.SetPointForceUnitMode = 0  # DefUnitMode_V
+            zcontrol.SetPoint = params["setpoint_v"]
+        elif "setpoint_p" in params:
+            zcontrol.SetPoint = params["setpoint_p"]
 
         # Head and operating mode
         safe_set(head, "CantileverByGUID", "tip")

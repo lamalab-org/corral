@@ -1,3 +1,10 @@
+"""AFM submission scoring and measurement helpers.
+
+Scorer factories return a callable that evaluates a submitted result.
+File helpers inspect NID data; instrument helpers read live Nanosurf settings.
+RMS roughness is returned in the original data units without conversion.
+"""
+
 import gc
 import json
 import math
@@ -21,16 +28,23 @@ else:
     pythoncom = None
 
 
+# ----------------------------------------------------------------------------
+# Submission scorers: numeric and text answers
+# ----------------------------------------------------------------------------
+
+
 def check_numerical(target: float, tolerance: float, final_params):
     """
-    Returns a scoring function that checks if a result is within a percentage-based tolerance of the target.
+    Returns a scoring function that checks if a result is within a
+    percentage-based tolerance of the target.
 
     Args:
         target (float): The target value.
         tolerance (float): Fractional tolerance (e.g., 0.1 means ±10% of target).
 
     Returns:
-        score_fn (function): A function that accepts a result and returns 1.0 if it's within tolerance, else 0.0.
+        score_fn (function): A function that accepts a result and returns 1.0
+            if it's within tolerance, else 0.0.
     """
 
     def score_fn(result: str) -> float:
@@ -63,17 +77,110 @@ def check_numerical(target: float, tolerance: float, final_params):
     return score_fn
 
 
+def check_indentation(target: str):
+    """Build a scorer that compares stripped text to the target, ignoring case."""
+
+    def score_fn(result: str) -> float:
+        try:
+            isinstance(result, str)
+            result = result.strip()
+            if result.lower() == target.lower():
+                return 1.0
+            else:
+                return 0.0
+        except (ValueError, TypeError):
+            return 0.0
+
+    return score_fn
+
+
+# ----------------------------------------------------------------------------
+# Submission scorers: instrument settings and files
+# ----------------------------------------------------------------------------
+
+
+def check_params_function(final_params):
+    """Build a scorer that checks live instrument settings, ignoring the answer."""
+
+    def score_fn(_result: str) -> float:
+        try:
+            logger.info(f"Checking params with final_params: {final_params}")
+            # Validate against the live settings via check_params below
+            score = check_params(final_params)
+            logger.info(f"check params score: {score}")
+            return float(score)  # Ensure the returned score is a float
+        except Exception as e:
+            logger.error(f"Error during scoring: {e}")
+            return 0.0  # Return 0.0 in case of an error
+
+    return score_fn  # Return the scoring function itself
+
+
+def check_file_exists(final_params):
+    """Build a scorer requiring both matching instrument settings and a NID path."""
+
+    def score_fn(result: str) -> float:
+        try:
+            logger.info(f"Checking params with final_params: {final_params}")
+            # Validate against the live settings via check_params below
+            score = check_params(final_params)
+            score2 = check_nid_file_exists(result)
+            logger.info(f"check params score: {score}")
+            return float(score * score2)  # Ensure the returned score is a float
+        except Exception as e:
+            logger.error(f"Error during scoring: {e}")
+            return 0.0  # Return 0.0 in case of an error
+
+    return score_fn  # Return the scoring function itself
+
+
+# ----------------------------------------------------------------------------
+# Submission scorers: image measurements
+# ----------------------------------------------------------------------------
+
+
+def check_image_quality(tolerance, final_params):
+    """Build a scorer requiring trace/retrace similarity and matching settings."""
+
+    def score_fn(result):
+        try:
+            if isinstance(result, str):
+                result = result.strip()
+                afm = read(result)
+                data = afm.data
+                im_file_fw = data["Image"]["Forward"]["Z-Axis"]
+                im_file_bw = data["Image"]["Backward"]["Z-Axis"]
+                similarity_index, _diff = ssim(
+                    im_file_bw,
+                    im_file_fw,
+                    full=True,
+                    data_range=im_file_bw.max() - im_file_bw.min(),
+                )
+                if similarity_index >= tolerance:
+                    score = check_params(final_params)
+                    logger.info(f"check params score : {score}")
+                    return 1.0 * score
+                return 0.0
+        except (ValueError, TypeError):
+            return 0.0
+
+    return score_fn
+
+
 def check_roughness_function(tolerance: float, final_params):
     """
     Parses a submission_format string from the LLM, handling minor formatting issues.
     Runs check_roughness(path) for each valid pair of (rms_roughness_n, path_n).
-    Returns 1 if all RMS values pass the tolerance check AND check_params(final_params)==1, else 0.
+    Submitted RMS values must use the original data units; no scaling is applied.
+    Returns 1 if all RMS values pass the tolerance check AND
+    check_params(final_params)==1, else 0.
     """
 
     def score_fn(result: str) -> float:
         try:
-            # Fix common LLM formatting mistakes
-            cleaned = result.replace(";", ",").strip()
+            cleaned = result.replace(
+                ";", ","
+            ).strip()  # Fix common LLM formatting mistakes
 
             # Ensure JSON braces are balanced
             if not cleaned.startswith("{"):
@@ -81,9 +188,7 @@ def check_roughness_function(tolerance: float, final_params):
             if not cleaned.endswith("}"):
                 cleaned = cleaned + "}"
 
-            # Try parsing JSON
-            data = json.loads(cleaned)
-
+            data = json.loads(cleaned)  # Try parsing JSON
             # Detect all indices dynamically (e.g., 1, 2, 3, ...)
             indices = sorted(
                 {
@@ -98,7 +203,6 @@ def check_roughness_function(tolerance: float, final_params):
                 return 0
 
             all_passed = True  # Track if all checks pass
-
             for i in indices:
                 rough_key = f"rms_roughness_{i}"
                 path_key = f"path_{i}"
@@ -114,9 +218,9 @@ def check_roughness_function(tolerance: float, final_params):
                     path = data[path_key]
                     logger.info(f"Entry {i}: RMS={rms}, Path={path}")
 
-                    # Run user-defined check function
-                    check_output = check_roughness(path, rms)
-
+                    check_output = check_roughness(
+                        path
+                    )  # Run user-defined check function
                     abs_tol = tolerance * rms
                     logger.info(
                         f"Tolerance: ±{tolerance}, Check Output: {check_output}"
@@ -145,98 +249,172 @@ def check_roughness_function(tolerance: float, final_params):
     return score_fn
 
 
-def auto_match_unit(rms_meters: float, llm_value: float) -> float:
+# ----------------------------------------------------------------------------
+# Level 1 scorers: one acquisition and its reported measurements
+# ----------------------------------------------------------------------------
+
+
+def score_single_topography(tolerance: float, final_params):
+    """Score an absolute NID path and the requested topography settings."""
+    return _single_image_scorer(tolerance, final_params)
+
+
+def score_single_rms_roughness(tolerance: float, final_params):
+    """Score path_1 and rms_roughness_1 in the original image units."""
+    return _single_image_scorer(tolerance, final_params, ("rms_roughness",))
+
+
+def score_single_mean_roughness(tolerance: float, final_params):
+    """Score path_1 and mean_roughness_1 (mean absolute height deviation)."""
+    return _single_image_scorer(tolerance, final_params, ("mean_roughness",))
+
+
+def score_single_topography_roughness(tolerance: float, final_params):
+    """Score both roughness metrics; check the derived line time via final_params."""
+    return _single_image_scorer(
+        tolerance, final_params, ("rms_roughness", "mean_roughness")
+    )
+
+
+def score_single_average_friction(tolerance: float, final_params):
+    """Score average_friction_1 from half the trace/retrace difference."""
+    return _single_image_scorer(
+        tolerance, final_params, ("average_friction",), lateral=True
+    )
+
+
+def score_single_rms_friction(tolerance: float, final_params):
+    """Score rms_friction_1, without subtracting the friction signal's mean."""
+    return _single_image_scorer(
+        tolerance, final_params, ("rms_friction",), lateral=True
+    )
+
+
+def score_single_lateral_roughness(tolerance: float, final_params):
+    """Require lateral channels and score both roughness metrics from height."""
+    return _single_image_scorer(
+        tolerance, final_params, ("rms_roughness", "mean_roughness"), lateral=True
+    )
+
+
+def score_single_roughness_and_friction(tolerance: float, final_params):
+    """Score both height roughness metrics and signed average friction."""
+    return _single_image_scorer(
+        tolerance,
+        final_params,
+        ("rms_roughness", "mean_roughness", "average_friction"),
+        lateral=True,
+    )
+
+
+def _single_image_scorer(tolerance, final_params, metrics=(), *, lateral=False):
+    """Build a fail-closed scorer for the Level 1 path or numbered JSON format.
+
+    tolerance is the fractional error allowed in reported metrics. Instrument
+    settings use check_params' own tolerances. Settings are checked live, not
+    reconstructed from acquisition history. No metric unit conversion is applied.
     """
-    Scale rms_meters to match the order-of-magnitude of llm_value.
+    tolerance = _finite_number(tolerance)
+    if tolerance < 0:
+        raise ValueError("Scoring tolerance must be nonnegative")
+    final_params = dict(final_params)
 
-    """
-    if llm_value == 0 or rms_meters == 0:
-        return rms_meters
-
-    scale = llm_value / rms_meters
-    exponent = int(np.round(np.log10(abs(scale))))
-
-    # safety (prevents absurd scaling)
-    exponent = max(-15, min(15, exponent))
-
-    return rms_meters * (10**exponent)
-
-
-def check_params_function(final_params):
-    def score_fn(_result: str) -> float:
+    def score_fn(result) -> float:
         try:
-            logger.info(f"Checking params with final_params: {final_params}")
-            score = check_params(
-                final_params
-            )  # Assuming check_params is defined elsewhere
-            logger.info(f"check params score: {score}")
-            return float(score)  # Ensure the returned score is a float
-        except Exception as e:
-            logger.error(f"Error during scoring: {e}")
-            return 0.0  # Return 0.0 in case of an error
-
-    return score_fn  # Return the scoring function itself
-
-
-def check_file_exists(final_params):
-    def score_fn(result: str) -> float:
-        try:
-            logger.info(f"Checking params with final_params: {final_params}")
-            score = check_params(
-                final_params
-            )  # Assuming check_params is defined elsewhere
-            score2 = check_nid_file_exists(result)
-            logger.info(f"check params score: {score}")
-            return float(score * score2)  # Ensure the returned score is a float
-        except Exception as e:
-            logger.error(f"Error during scoring: {e}")
-            return 0.0  # Return 0.0 in case of an error
-
-    return score_fn  # Return the scoring function itself
-
-
-def check_image_quality(tolerance, final_params):
-    def score_fn(result):
-        try:
-            if isinstance(result, str):
-                result = result.strip()
-                afm = read(result)
-                data = afm.data
-                im_file_fw = data["Image"]["Forward"]["Z-Axis"]
-                im_file_bw = data["Image"]["Backward"]["Z-Axis"]
-                similarity_index, _diff = ssim(
-                    im_file_bw,
-                    im_file_fw,
-                    full=True,
-                    data_range=im_file_bw.max() - im_file_bw.min(),
-                )
-                if similarity_index >= tolerance:
-                    score = check_params(final_params)
-                    logger.info(f"check params score : {score}")
-                    return 1.0 * score
-                return 0.0
-        except (ValueError, TypeError):
-            return 0.0
-
-    return score_fn
-
-
-def check_indentation(target: str):
-    def score_fn(result: str) -> float:
-        try:
-            isinstance(result, str)
-            result = result.strip()
-            if result.lower() == target.lower():
-                return 1.0
+            if metrics:
+                report = json.loads(result) if isinstance(result, str) else result
+                expected_keys = {"path_1", *(f"{metric}_1" for metric in metrics)}
+                if not isinstance(report, dict) or set(report) != expected_keys:
+                    raise ValueError(
+                        f"Expected submission fields: {sorted(expected_keys)}"
+                    )
+                submitted = {
+                    metric: _finite_number(report[f"{metric}_1"]) for metric in metrics
+                }
+                path = report["path_1"]
             else:
-                return 0.0
-        except (ValueError, TypeError):
+                submitted = {}
+                path = result
+
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("An absolute NID file path is required")
+            path = Path(path.strip())
+            if (
+                not path.is_absolute()
+                or path.suffix.lower() != ".nid"
+                or not path.is_file()
+            ):
+                raise ValueError("Expected an existing absolute .nid file path")
+
+            shape = (final_params["lines_per_frame"], final_params["points_per_line"])
+            image = read(str(path)).data["Image"]
+            height = _image_array(image["Forward"]["Z-Axis"], shape)
+            measured = {}
+            if "rms_roughness" in metrics or "mean_roughness" in metrics:
+                centered = height - np.mean(height)
+                rows, columns = height.shape
+                measured["rms_roughness"] = float(
+                    np.sqrt(np.sum(centered**2) / (rows * columns))
+                )
+                measured["mean_roughness"] = float(
+                    np.sum(np.abs(centered)) / (rows * columns)
+                )
+            if lateral:
+                friction = _friction_signal(image, shape)
+                measured["average_friction"] = float(np.mean(friction))
+                measured["rms_friction"] = float(np.sqrt(np.mean(friction**2)))
+
+            for metric, answer in submitted.items():
+                expected = _finite_number(measured[metric])
+                # A relative comparison keeps small, unconverted signals meaningful.
+                if not math.isclose(answer, expected, rel_tol=tolerance, abs_tol=0.0):
+                    logger.warning(f"{metric}: submitted {answer}, measured {expected}")
+                    return 0.0
+            return float(check_params(final_params))
+        except Exception as exc:
+            logger.warning(f"Level 1 scoring failed: {exc}")
             return 0.0
 
     return score_fn
+
+
+def _finite_number(value):
+    """Accept numeric values/strings, rejecting booleans, NaN, and infinity."""
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("Boolean values are not measurements")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("Measurements must be finite")
+    return number
+
+
+def _image_array(values, shape):
+    """Require a finite, complete image matching the configured resolution."""
+    array = np.asarray(values, dtype=float)
+    if array.ndim != 2 or array.size == 0 or array.shape != shape:
+        raise ValueError(f"Expected image shape {shape}, got {array.shape}")
+    if not np.isfinite(array).all():
+        raise ValueError("Image contains non-finite values")
+    return array
+
+
+def _friction_signal(image, shape):
+    """Match Image_Analyzer: half the forward/backward Friction force difference.
+
+    Preserve the reader's array orientation and units; do not take absolute values.
+    """
+    trace = _image_array(image["Forward"]["Friction force"], shape)
+    retrace = _image_array(image["Backward"]["Friction force"], shape)
+    return 0.5 * (trace - retrace)
+
+
+# ----------------------------------------------------------------------------
+# NID file and roughness helpers
+# ----------------------------------------------------------------------------
 
 
 def check_nid_file_exists(path):
+    """Return 1 for a .nid file or a directory containing a .nid entry; else 0."""
     p = Path(path)
     if p.is_dir():
         # Path is a directory → check for any .nid files inside it
@@ -259,7 +437,57 @@ def check_nid_file_exists(path):
         return 0
 
 
+def check_roughness(path):
+    """
+    Calculate RMS roughness from the latest .nid file in a directory
+    or from a specified .nid file.
+
+    Parameters:
+        path (str): Path to a .nid file or a directory containing .nid files.
+
+    Returns:
+        float: RMS roughness value in the original data units (no conversion).
+    """
+
+    p = Path(path).resolve()  # Normalize path
+    # Case 1: If path is a directory
+    if p.is_dir():
+        nid_files = list(p.glob("*.nid"))
+        if not nid_files:
+            raise FileNotFoundError(f"No .nid files found in directory: {p}")
+        p = max(nid_files, key=lambda x: x.stat().st_mtime)
+
+    # Case 2: If path is a file
+    elif p.is_file():
+        if p.suffix.lower() != ".nid":
+            raise ValueError(f"The specified file is not a .nid file: {p}")
+    else:
+        # Path exists neither as a file nor a directory
+        raise FileNotFoundError(f"The specified path is not valid: {p}")
+
+    afm = read(str(p))  # At this point, `p` is a valid .nid file
+    # Extract data and parameters
+    data = afm.data
+    _param = afm.param
+
+    try:
+        z = data["Image"]["Forward"]["Z-Axis"]
+    except KeyError as e:
+        raise KeyError(f"Missing key in AFM data: {e}") from e
+
+    # Calculate RMS roughness
+    z_mean = np.mean(z)
+    rms_m = np.sqrt(np.mean((z - z_mean) ** 2))
+    return float(rms_m)
+
+
+# ----------------------------------------------------------------------------
+# Live instrument settings
+# ----------------------------------------------------------------------------
+
+
 def get_params():
+    """Read live settings; image dimensions and center coordinates are in nanometers."""
     if pythoncom:
         pythoncom.CoInitialize()
     _tip_guid_map = {
@@ -317,12 +545,18 @@ def get_params():
         "points_per_line": scan.Points,
         "lines_per_frame": scan.Lines,
         "rotation": scan.rotation,
-        "centre_x": scan.CenterPosX,
-        "centre_y": scan.CenterPosY,
+        "centre_x": scan.CenterPosX * 1e9,
+        "centre_y": scan.CenterPosY * 1e9,
         "setpoint": zcontrol.SetPoint,
         "tip": tip,
         "mode": opmode.OperatingMode,
     }
+    # Nanosurf: dynamic/phase-contrast setpoints are percentages; contact
+    # setpoints are volts only when SetPointForceUnitMode is DefUnitMode_V (0).
+    if params["mode"] in (3, 4):
+        params["setpoint_p"] = params["setpoint"]
+    elif params["mode"] == 2 and zcontrol.SetPointForceUnitMode == 0:
+        params["setpoint_v"] = params["setpoint"]
     del zcontrol
     del scan
     del application
@@ -334,20 +568,33 @@ def get_params():
 
 
 def check_params(gt_params, rel_tol=1e-2, abs_tol=1e-3):
+    """Compare expected settings with live values, allowing numeric tolerances."""
     current_params = get_params()
 
     for key in gt_params:
         logger.info(f"param {key}")
-        current_val = current_params.get(key)
+        if key not in current_params:
+            logger.warning(f"Missing instrument parameter: {key}")
+            return 0.0
+        current_val = current_params[key]
         logger.info(f"current {current_val}")
         gt_val = gt_params[key]
         logger.info(f"gt val {gt_val}")
 
+        # Counts and operating modes must match exactly, even if the SDK uses floats.
+        if key in {"points_per_line", "lines_per_frame", "mode"}:
+            if isinstance(current_val, bool) or current_val != gt_val:
+                return 0.0
+            continue
+
         # Use math.isclose for floats
         if isinstance(gt_val, float) or isinstance(current_val, float):
-            if not math.isclose(
-                float(current_val), float(gt_val), rel_tol=rel_tol, abs_tol=abs_tol
-            ):
+            try:
+                current_val = _finite_number(current_val)
+                gt_val = _finite_number(gt_val)
+            except (ValueError, TypeError):
+                return 0.0
+            if not math.isclose(current_val, gt_val, rel_tol=rel_tol, abs_tol=abs_tol):
                 logger.warning(f"Mismatch in {key}: {current_val} != {gt_val}")
                 return 0.0
         else:
@@ -359,6 +606,7 @@ def check_params(gt_params, rel_tol=1e-2, abs_tol=1e-3):
 
 
 def check_gain():
+    """Return the live proportional, integral, and derivative gains."""
     spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
     application = spm.application
     _scan = application.Scan
@@ -369,10 +617,10 @@ def check_gain():
 
 
 def check_image_size():
+    """Return the live image height and width in nanometers."""
     # load application
     spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
     application = spm.application
-
     # all variables
     scan = application.Scan
     _opmode = application.OperatingMode
@@ -382,6 +630,7 @@ def check_image_size():
 
 
 def check_scan_mode():
+    """Return whether the instrument is currently scanning."""
     spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreA FM()
     application = spm.application
     scan = application.Scan
@@ -389,9 +638,9 @@ def check_scan_mode():
 
 
 def check_tip():
+    """Return the selected cantilever GUID."""
     spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
     application = spm.application
-
     # all variables
     _scan = application.Scan
     _opmode = application.OperatingMode
@@ -400,248 +649,21 @@ def check_tip():
     return head.CantileverByGUID
 
 
+# ----------------------------------------------------------------------------
+# Scalar comparison helper
+# ----------------------------------------------------------------------------
+
+
 def check_scalar(gt, ag):
     """
-    Check if 'ag' is within ±10% of 'gt'.
+    Check if 'ag' is within ±20% of 'gt'.
 
     Parameters:
         gt (float): Ground truth value
         ag (float): Agent-predicted or measured value
 
     Returns:
-        bool: True if ag is within 10% of gt, False otherwise
+        bool: True if ag is within 20% of gt, False otherwise
     """
     tolerance = 0.20 * abs(gt)
     return abs(ag - gt) <= tolerance
-
-
-def check_roughness(path, llm_rms):
-    """
-    Calculate RMS roughness from the latest .nid file in a directory
-    or from a specified .nid file.
-
-    Parameters:
-        path (str): Path to a .nid file or a directory containing .nid files.
-
-    Returns:
-        float: RMS roughness value.
-    """
-
-    # Normalize path
-    p = Path(path).resolve()
-
-    # Case 1: If path is a directory
-    if p.is_dir():
-        nid_files = list(p.glob("*.nid"))
-        if not nid_files:
-            raise FileNotFoundError(f"No .nid files found in directory: {p}")
-        p = max(nid_files, key=lambda x: x.stat().st_mtime)
-
-    # Case 2: If path is a file
-    elif p.is_file():
-        if p.suffix.lower() != ".nid":
-            raise ValueError(f"The specified file is not a .nid file: {p}")
-    else:
-        # Path exists neither as a file nor a directory
-        raise FileNotFoundError(f"The specified path is not valid: {p}")
-
-    # At this point, `p` is a valid .nid file
-    afm = read(str(p))
-
-    # Extract data and parameters
-    data = afm.data
-    _param = afm.param
-
-    try:
-        z = data["Image"]["Forward"]["Z-Axis"]
-    except KeyError as e:
-        raise KeyError(f"Missing key in AFM data: {e}") from e
-
-    # Calculate RMS roughness
-    z_mean = np.mean(z)
-    rms_m = np.sqrt(np.mean((z - z_mean) ** 2))
-    return float(auto_match_unit(rms_m, llm_rms))
-
-
-def fit_power_law(area, roughness):
-    area = np.array(area, dtype=float)
-    roughness = np.array(roughness, dtype=float)
-
-    def power_func(A, C, k):
-        return C * A**k
-
-    popt, _ = curve_fit(power_func, area, roughness, maxfev=10000)
-    C, k = popt
-    return C, k
-
-
-def check_mathematical_eq(final_params, tolerance):
-    def score_fn(result: str) -> float:
-        try:
-            data = json.loads(result)
-            logger.info(f"Checking params with final_params: {final_params}")
-            logger.info(f"Raw submission {result}")
-            logger.info(f"Parsed data: {data['equation']}, {data['Rb']}, {data['A']}")
-            # Fit power law
-            C, k = fit_power_law(data["A"], data["Rb"])
-            fitted_eq = f"Rb = {C:.4f} * A**{k:.4f}"
-            logger.info(f"Fitted power law: {fitted_eq}")
-            match = re.search(
-                r"Rb\s*=\s*(?:([0-9.]+)\s*\*\s*)?A\s*\*\*\s*([0-9.]+)", data["equation"]
-            )
-            if match:
-                C_orig = float(match.group(1) if match.group(1) else 1)
-                k_orig = float(match.group(2))
-                return (
-                    1
-                    if (abs(C - C_orig) <= tolerance and abs(k - k_orig) <= tolerance)
-                    and (check_params(final_params) == 1)
-                    else 0
-                )
-            else:
-                raise ValueError("Equation format not recognized")
-        except Exception as e:
-            logger.error(f"Error during scoring: {e}")
-            return 0.0  # Return 0.0 in case of an error
-
-    return score_fn  # Return the scoring function itself
-
-
-# Acquisition benchmarks intentionally validate saved data and per-image records,
-# not the live controller state after the experiment has finished.
-def _close_record(actual, expected, tolerance):
-    if isinstance(expected, dict):
-        return isinstance(actual, dict) and all(
-            key in actual and _close_record(actual[key], value, tolerance)
-            for key, value in expected.items()
-        )
-    if isinstance(expected, (list, tuple)):
-        return isinstance(actual, (list, tuple)) and len(actual) == len(expected) and all(
-            _close_record(a, b, tolerance) for a, b in zip(actual, expected)
-        )
-    if expected is None:
-        return actual is None
-    return (
-        isinstance(actual, (int, float)) and not isinstance(actual, bool)
-        and math.isfinite(actual)
-        and math.isclose(actual, expected, rel_tol=tolerance, abs_tol=1e-9)
-    )
-
-
-def _ratio(numerator, denominator):
-    return float(numerator / denominator) if denominator != 0 else None
-
-
-def _acquisition_metrics(image, expected, question):
-    """Recompute metrics in explicit units; never infer units from the answer."""
-    path = Path(image['path'])
-    if not path.is_absolute() or not path.is_file() or path.suffix.lower() != '.nid':
-        raise ValueError('Expected an absolute path to a raw NID file')
-    data = read(str(path)).data['Image']
-    channels = image['channels']
-    shape = (expected['params']['lines_per_frame'], expected['params']['points_per_line'])
-
-    def channel(direction, name):
-        values = np.asarray(data[direction][channels[name]], dtype=float)
-        if values.shape != shape or not np.isfinite(values).all():
-            raise ValueError('Invalid channel dimensions or non-finite pixels')
-        return values
-
-    z = channel('Forward', 'topography')
-    metrics = {}
-    if question in (4, 5, 6, 9, 10):
-        y, x = np.indices(z.shape, dtype=float)
-        design = np.column_stack((x.ravel(), y.ravel(), np.ones(z.size)))
-        residual = z.ravel() - design @ np.linalg.lstsq(design, z.ravel(), rcond=None)[0]
-        residual -= residual.mean()
-        metrics.update(ra_nm=float(np.mean(np.abs(residual)) * 1e9),
-                       rq_nm=float(np.sqrt(np.mean(residual ** 2)) * 1e9))
-    if question >= 7:
-        trace = channel('Forward', 'lateral_trace')
-        retrace = channel('Backward', 'lateral_retrace')
-        if not isinstance(image['retrace_reversed'], bool):
-            raise ValueError('Specify retrace alignment')
-        if image['retrace_reversed']:
-            retrace = retrace[:, ::-1]
-        friction = np.abs((trace - retrace) / 2)
-        metrics.update(friction_mean_v=float(friction.mean()),
-                       friction_std_v=float(friction.std(ddof=0)))
-    return metrics
-
-
-def check_acquisition_function(acquisition_sequence, question, level, tolerance=0.05):
-    """All-or-nothing validation of ordered artifacts, reports and calculations.
-
-    Parameter records and channel/alignment declarations are submitted evidence,
-    not authenticated telemetry. Extra acquisitions outside the report and the
-    time at which a calculation was performed cannot be established here.
-    """
-    def score_fn(result):
-        try:
-            submission = json.loads(result) if isinstance(result, str) else result
-            images = submission['images']
-            if not isinstance(images, list) or len(images) != len(acquisition_sequence):
-                return 0.0
-            paths = [Path(item['path']).resolve() for item in images]
-            if len(set(paths)) != len(paths):
-                return 0.0
-            # Detect hard links as well as repeated paths/symlinks.
-            identities = [(p.stat().st_dev, p.stat().st_ino) for p in paths]
-            if len(set(identities)) != len(identities):
-                return 0.0
-            measured = []
-            previous = [0, 0]
-            for image, expected in zip(images, acquisition_sequence):
-                for field, target in (
-                    ('sequence_number', expected['sequence_number']),
-                    ('recorded_params', expected['params']),
-                    ('physical_settings', expected['physical_settings']),
-                ):
-                    if not _close_record(image[field], target, 1e-6):
-                        return 0.0
-                if question in (5, 6):
-                    field = 'nominal_sampling_interval_nm' if question == 5 else 'nominal_duration_seconds'
-                    if not _close_record(image[field], expected[field], 1e-6):
-                        return 0.0
-                if question == 10:
-                    center = [expected['params'][key] for key in ('centre_x', 'centre_y')]
-                    if not _close_record(image['commanded_center_nm'], center, 1e-6):
-                        return 0.0
-                    if not _close_record(image['displacement_nm'], [a-b for a,b in zip(center, previous)], 1e-6):
-                        return 0.0
-                    previous = center
-                metrics = _acquisition_metrics(image, expected, question)
-                if not _close_record(image, metrics, tolerance):
-                    return 0.0
-                measured.append(metrics)
-            if level == 2:
-                keys = [key for key in measured[0] if key != 'friction_std_v']
-                if question in (4, 9, 10):
-                    summary = {}
-                    for key in keys:
-                        values = np.array([row[key] for row in measured])
-                        mean, std = float(values.mean()), float(values.std(ddof=1))
-                        summary[key] = dict(mean=mean, sample_std=std)
-                        if question != 10:
-                            summary[key]['cv_percent'] = _ratio(100 * std, mean)
-                    if not _close_record(submission['summary'], summary, tolerance):
-                        return 0.0
-                if question in (5, 6, 8):
-                    for image, metrics in zip(images, measured):
-                        changes = {key: _ratio(100 * (metrics[key] - measured[1][key]), measured[1][key]) for key in keys}
-                        if not _close_record(image['percent_change'], changes, tolerance):
-                            return 0.0
-                if question == 7:
-                    x = np.array([entry['physical_settings']['normal_force_setpoint_nn'] for entry in acquisition_sequence])
-                    y = np.array([row['friction_mean_v'] for row in measured])
-                    slope = float(np.sum((x-x.mean()) * (y-y.mean())) / np.sum((x-x.mean())**2))
-                    intercept = float(y.mean() - slope*x.mean())
-                    total = float(np.sum((y-y.mean())**2))
-                    r_squared = 1 - float(np.sum((y-(slope*x+intercept))**2)) / total if total else None
-                    if not _close_record(submission['fit'], dict(slope=slope, intercept=intercept, r_squared=r_squared), tolerance):
-                        return 0.0
-            return 1.0
-        except Exception as exc:
-            logger.warning(f'Acquisition scoring failed: {exc}')
-            return 0.0
-    return score_fn
