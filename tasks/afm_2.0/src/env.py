@@ -118,6 +118,8 @@ def load_tasks_from_json(
         raise FileNotFoundError(f"Task definition file not found: {json_path}")
 
     json_path = Path(json_path)
+    if json_path.is_dir() and (json_path / "tasks_json").is_dir():
+        json_path = json_path / "tasks_json"
     task_files = sorted(json_path.glob("*.json")) if json_path.is_dir() else [json_path]
     task_data = {}
     for task_file in task_files:

@@ -23,7 +23,7 @@ exec(compile(ast.Module(body=functions, type_ignores=[]), 'score.py', 'exec'), n
 class AcquisitionTests(unittest.TestCase):
     def test_all_environments_and_rejections(self):
         with tempfile.TemporaryDirectory() as directory:
-            for file in sorted((ROOT / 'environments').glob('*/*.json')):
+            for file in sorted((ROOT / 'environments').glob('*/tasks_json/*.json')):
                 task = json.loads(file.read_text())[0]
                 config = task['scoring_params']
                 sequence = config['acquisition_sequence']

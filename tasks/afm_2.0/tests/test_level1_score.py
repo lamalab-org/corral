@@ -16,8 +16,10 @@ score = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(score)
 TASKS = [
     json.loads(p.read_text())[0]
-    for p in sorted((ROOT / "environments/level_1").glob("*.json"))
+    for p in sorted((ROOT / "environments/level_1/tasks_json").glob("*.json"))
 ]
+
+assert len(TASKS) == 10, "Expected all 10 Level 1 task definitions"
 
 
 @pytest.fixture
@@ -355,3 +357,32 @@ def test_friction_uses_named_channel_even_when_other_channels_exist(acquisition)
     assert fn(submission(acquisition.path, average_friction=1.5)) == 1.0
     del acquisition.image["Forward"]["Friction force"]
     assert fn(submission(acquisition.path, average_friction=1.5)) == 0.0
+
+
+@pytest.mark.parametrize("source_kind", ["level", "tasks_json", "file"])
+def test_task_loader_accepts_standard_layout(tmp_path, source_kind):
+    tree = ast.parse((ROOT / "src/env.py").read_text())
+    loader = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name == "load_tasks_from_json"
+    )
+    folder = tmp_path / "level_1" / "tasks_json"
+    folder.mkdir(parents=True)
+    task_file = folder / "task_1.json"
+    task_file.write_text(json.dumps([TASKS[0]]))
+    ns = {
+        "Path": Path,
+        "json": json,
+        "TaskDefinition": SimpleNamespace,
+        "InputRef": lambda value: value,
+        "event": lambda *args, **kwargs: None,
+        "get_scoring_function": lambda name, params: getattr(score, name)(**params),
+    }
+    exec(compile(ast.Module(body=[loader], type_ignores=[]), "env.py", "exec"), ns)
+    source = {"level": folder.parent, "tasks_json": folder, "file": task_file}[
+        source_kind
+    ]
+    tasks = ns["load_tasks_from_json"](source, "test-workspace")
+    assert list(tasks) == [TASKS[0]["id"]]
+    assert callable(tasks[TASKS[0]["id"]].scoring_fn)

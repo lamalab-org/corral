@@ -16,7 +16,6 @@ import nanosurf
 import numpy as np
 from loguru import logger
 from NSFopen.read import read
-from scipy.optimize import curve_fit
 from skimage.metrics import structural_similarity as ssim
 
 # ----------------------------------------------------------
@@ -380,7 +379,7 @@ def _single_image_scorer(tolerance, final_params, metrics=(), *, lateral=False):
 
 def _finite_number(value):
     """Accept numeric values/strings, rejecting booleans, NaN, and infinity."""
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, bool | np.bool_):
         raise ValueError("Boolean values are not measurements")
     number = float(value)
     if not math.isfinite(number):

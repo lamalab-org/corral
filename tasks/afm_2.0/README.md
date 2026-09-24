@@ -43,8 +43,7 @@ The script reads these environment variables:
 
 ## Task Layout
 
-- Benchmark task definitions are stored under `environments/level_1` through `environments/level_4`.
-- Both `tasks_json` and `subtasks_json` variants are included in the repository.
+- Benchmark task definitions are stored under `environments/level_1/tasks_json/` and `environments/level_2/tasks_json/`.
 - The current `src/env.py` entrypoint uses an internal workstation-specific configuration rather than a portable CLI for selecting level or mode.
 
 ## Notes
