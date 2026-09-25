@@ -1,7 +1,6 @@
 """Trusted bootstrap. No model-controlled callable runs before dropping UID."""
 
 # Optional agent imports must occur only in agent bootstraps.
-# ruff: noqa: PLC0415
 
 from __future__ import annotations
 
@@ -25,7 +24,16 @@ def main() -> None:
     request, descriptor = sys.argv[1:]
     # This file is written by the root controller in its private directory.
     with Path(request).open("rb") as stream:
-        kind, payload, uid, gid, workspace, workspace_fd = cloudpickle.load(stream)
+        (
+            kind,
+            payload,
+            uid,
+            gid,
+            workspace,
+            workspace_fd,
+            workspace_access,
+            resource_mounts,
+        ) = cloudpickle.load(stream)
     Path(request).unlink()
     output = os.fdopen(int(descriptor), "w")
     os.set_inheritable(output.fileno(), False)
@@ -57,10 +65,19 @@ def main() -> None:
     elif kind == "tool":
         tool, arguments = payload
     elif kind == "terminal":
-        from corral.workspace import WorkspaceFilesystem, build_terminal_tool
+        from corral.workspace import AbsoluteWorkspaceFilesystem, build_terminal_tool
 
-        tool = build_terminal_tool(WorkspaceFilesystem(workspace))
+        tool = build_terminal_tool(AbsoluteWorkspaceFilesystem("/workspace"))
         arguments = payload
+    elif kind == "workspace_tool":
+        from corral.workspace import AbsoluteWorkspaceFilesystem, build_workspace_tools
+
+        name, arguments = payload
+        tools = build_workspace_tools(AbsoluteWorkspaceFilesystem("/workspace"))
+        try:
+            tool = tools[name]
+        except KeyError as exc:
+            raise ValueError(f"unknown workspace operation: {name!r}") from exc
     else:
         raise ValueError("unknown restricted worker kind")
     private_controller_types()
@@ -83,8 +100,22 @@ def main() -> None:
         gid,
         keep_fds={0, 1, 2, output.fileno()},
         workspace_fd=workspace_fd,
+        workspace_access=workspace_access,
+        resource_mounts=resource_mounts,
     )
-    drop_privileges(uid, gid, workspace, scratch=scratch)
+    # Erase controller-only path capabilities before model-controlled code can
+    # inspect this frame. The mount namespace now provides the complete view.
+    workspace = "/workspace"
+    workspace_fd = -1
+    resource_mounts = {}
+    request = "/.corral-request"
+    drop_privileges(
+        uid,
+        gid,
+        workspace,
+        scratch=scratch,
+        preserve_environment=kind == "agent",
+    )
     # Linux clears the parent-death signal when credentials change.
     bind_bootstrap_parent(parent_pid)
     try:

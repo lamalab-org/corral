@@ -32,7 +32,7 @@ from corral.run import BenchmarkTaskMetadata, CorralRunner
 from corral.runtime import TaskRuntime
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -77,18 +77,21 @@ class FileSubmitAgent:
         written = await session.execute(
             Action(
                 name="write_file",
-                arguments={"path": "answer.txt", "content": "durable"},
+                arguments={
+                    "path": "/workspace/answer.txt",
+                    "content": "durable",
+                },
             )
         )
         assert written.success is True
         submitted = await session.execute(
             Action(
                 name=SUBMIT_ANSWER_TOOL_NAME,
-                arguments={"answer": "answer.txt"},
+                arguments={"answer": "/workspace/answer.txt"},
             )
         )
         assert submitted.success is True
-        return AgentOutcome(status="completed", answer="answer.txt")
+        return AgentOutcome(status="completed", answer="/workspace/answer.txt")
 
 
 class ConcurrentAgent(SubmitAgent):
@@ -171,7 +174,7 @@ def _environment(task_id: str, dependency: str | None = None) -> Environment:
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_execution_restores_prior_projection_for_reflective_agents(tmp_path):
     store = SQLiteCommitStore(tmp_path / "prior-commits.sqlite3")
     environment = _environment("reflective")
@@ -214,7 +217,7 @@ async def test_execution_restores_prior_projection_for_reflective_agents(tmp_pat
     assert agent.seen_previous_hash == prior.through_commit_hash
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_benchmark_evaluates_prior_attempt_before_starting_the_next(tmp_path):
     store = SQLiteCommitStore(tmp_path / "prior-attempt-commits.sqlite3")
     agent = RecordingPreviousAttemptAgent()
@@ -251,7 +254,7 @@ async def test_benchmark_evaluates_prior_attempt_before_starting_the_next(tmp_pa
     assert agent.previous_states[1].submission == "42"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_executions_do_not_serialize_requests_by_agent_id(tmp_path):
     store = SQLiteCommitStore(tmp_path / "concurrent-commits.sqlite3")
     agent = ConcurrentAgent()
@@ -292,7 +295,7 @@ async def test_executions_do_not_serialize_requests_by_agent_id(tmp_path):
     assert agent.peak_active == 2
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_evaluation_uses_durable_snapshot_after_live_workspace_is_deleted(
     tmp_path,
 ):
@@ -351,7 +354,7 @@ async def test_evaluation_uses_durable_snapshot_after_live_workspace_is_deleted(
     assert evaluation.score == 1.0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_direct_task_and_benchmark_lifecycle(tmp_path):
     store = SQLiteCommitStore(tmp_path / "commits.sqlite3")
     registry = RuntimeRegistry(
@@ -418,7 +421,7 @@ async def test_direct_task_and_benchmark_lifecycle(tmp_path):
         await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_execution_forwards_docker_runtime_definitions(tmp_path):
     store = SQLiteCommitStore(tmp_path / "docker-payload.sqlite3")
     registry = RuntimeRegistry(
@@ -459,7 +462,7 @@ async def test_execution_forwards_docker_runtime_definitions(tmp_path):
     assert context.execution_id == "docker-payload"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("limits", "expected_peak"),
     [
@@ -504,7 +507,7 @@ async def test_benchmark_enforces_concurrency_limits(
     assert active == 0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_evaluation_does_not_consume_execution_capacity(monkeypatch):
     evaluation_started = asyncio.Event()
     second_started = asyncio.Event()
@@ -554,7 +557,7 @@ async def test_evaluation_does_not_consume_execution_capacity(monkeypatch):
     assert [trial.score for trial in report.all_results] == [1.0, 1.0]
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_dependency_execution_does_not_wait_for_upstream_evaluation(
     monkeypatch,
 ):
@@ -596,7 +599,7 @@ async def test_dependency_execution_does_not_wait_for_upstream_evaluation(
     assert all(trial.score == 1.0 for trial in report.all_results)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("max_parallel_evaluations", "expected_peak"),
     [(None, 2), (1, 1)],
@@ -642,7 +645,7 @@ async def test_benchmark_enforces_evaluation_concurrency_limit(
     assert active == 0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_benchmark_enforces_environment_evaluation_concurrency_limit(
     monkeypatch,
 ):
@@ -692,7 +695,7 @@ async def test_benchmark_enforces_environment_evaluation_concurrency_limit(
     assert active == 0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_benchmark_enforces_total_concurrency_limit(monkeypatch):
     active = 0
     peak = 0
@@ -747,7 +750,7 @@ async def test_benchmark_enforces_total_concurrency_limit(monkeypatch):
     assert active == 0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_failed_trial_blocks_only_its_own_descendants(monkeypatch):
     requests = []
 
@@ -779,7 +782,7 @@ async def test_failed_trial_blocks_only_its_own_descendants(monkeypatch):
     assert downstream[0].dependency_outputs == {"upstream": {"answer": "42"}}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_evaluation_failure_preserves_downstream_output(monkeypatch):
     async def launch(*, task, **kwargs):
         return await RecordingDockerLauncher().run(task)
@@ -808,7 +811,7 @@ async def test_evaluation_failure_preserves_downstream_output(monkeypatch):
     assert all(trial.error_message is None for trial in report.all_results)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_task_retries_failed_launches(monkeypatch):
     attempts = 0
     requests = []
@@ -834,7 +837,7 @@ async def test_task_retries_failed_launches(monkeypatch):
     assert all(request is requests[0] for request in requests)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_benchmark_cancellation_finishes_active_trials(monkeypatch):
     started = asyncio.Event()
     active = 0
@@ -873,7 +876,7 @@ async def test_benchmark_cancellation_finishes_active_trials(monkeypatch):
     assert active == 0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_benchmark_cancellation_drains_active_evaluation(monkeypatch):
     started = asyncio.Event()
     release = asyncio.Event()

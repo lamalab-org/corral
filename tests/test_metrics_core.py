@@ -27,7 +27,7 @@ from corral.report.metrics.core import (
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 
 
-@pytest.fixture()
+@pytest.fixture
 def sample_benchmark_result():
     """Create a sample BenchmarkResult for testing."""
     # Task 1: 3 trials, 2 successful

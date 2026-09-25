@@ -21,7 +21,7 @@
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/_static/corral_logo_final.png">
-  <img alt="Corral logo" src="docs/_static/definitive.png" width='300px'>
+  <img alt="Corral logo" src="docs/_static/corral_logo_final.png" width='300px'>
 </picture>
 </p>
 
@@ -263,9 +263,9 @@ uv run --project tasks/samplemath python run_scripts/run_tool_calling.py \
   --report .corral/samplemath-report.json
 ```
 
-The built-in presets are `afm`, `catalyst`, `corral_md`, `ml`,
-`resistor_network`, `retrosynthesis`, `samplemath`, `spectra_elucidation`, and
-`wetlab`. These are fixed choices for `--environment`. Use `--env-kwargs` for
+The built-in presets are `afm`, `corral_md`, `resistor_network`,
+`retrosynthesis`, `samplemath`, `spectra_elucidation`, and `wetlab`. These are
+fixed choices for `--environment`. Use `--env-kwargs` for
 environment-specific configuration, including the common `level`, `subtasks`,
 `task_config`, and `work_dir` keys. Environment dependencies and credentials
 still need to be configured as described in each task package's README.
@@ -329,12 +329,13 @@ The framework includes several pre-built environments:
 
 | Environment | Description |
 |-------------|-------------|
-| `samplemath` | Basic mathematical operations |
-| `spectra_elucidation` | Spectroscopy/NMR spectra elucidation tasks |
-| `corral_md` | LAMMPS molecular dynamics simulation setup |
-| `catalyst` | Catalysis research and material design tasks |
-| `afm` | Atomic force microscopy image analysis |
-| `ml` | Machine learning model training and evaluation |
+| `afm` | Hardware-in-the-loop atomic force microscopy tasks |
+| `corral_md` | LAMMPS molecular dynamics simulation setup and analysis |
+| `resistor_network` | Hidden resistor-topology inference from measurements |
+| `retrosynthesis` | Reaction-template-based synthesis planning |
+| `samplemath` | Lightweight mathematical operations |
+| `spectra_elucidation` | Spectroscopy-based organic structure elucidation |
+| `wetlab` | Simulated qualitative inorganic ion analysis |
 
 ## 🤖 Available Agents
 
@@ -609,7 +610,7 @@ for task_id, task_result in result.task_results.items():
 
 - **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/corral/issues)
 - **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/corral/discussions)
-- **Contributing**: See our [Contributing Guide](CONTRIBUTING.md)
+- **Community standards**: See our [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## 📄 License
 

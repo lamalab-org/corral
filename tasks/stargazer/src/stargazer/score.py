@@ -919,7 +919,7 @@ def make_stargazer_scorer(
 
 def score_execution(state) -> float:
     """Score committed Stargazer submissions; Corral's final text only closes the run."""
-    session = state.environment.values.get("hidden_arguments", {}).get(  # noqa: PD011 - EnvironmentState mapping, not pandas
+    session = state.environment.values.get("hidden_arguments", {}).get(
         "submission_session", {}
     )
     return float(

@@ -9,12 +9,12 @@ import pytest
 from corral.agents.react import ReActAgent
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
 
-@pytest.fixture()
+@pytest.fixture
 def agent():
     return ReActAgent(
         model="test-model",
@@ -66,7 +66,7 @@ def test_parse_llm_response_rejects_missing_action_input(agent):
     assert actions is None
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_iteration_limit_is_a_typed_outcome(monkeypatch, agent):
     model_call = AsyncMock(
         return_value=SimpleNamespace(content="not an action", usage=None, id=None)
@@ -100,7 +100,7 @@ async def test_iteration_limit_is_a_typed_outcome(monkeypatch, agent):
     assert {"role": "user", "content": "resume from canonical state"} in sent
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_model_failure_keeps_only_the_final_error_message(monkeypatch, agent):
     async def fail_model(**_kwargs):
         try:

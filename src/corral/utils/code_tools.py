@@ -8,6 +8,7 @@ from pathlib import Path
 
 from corral.core.tool import tool
 from corral.report.logging import logger
+from corral.workspace import normalize_public_workspace_path
 
 
 def ensure_directory_exists(file_path: str) -> None:
@@ -181,7 +182,7 @@ def parse_execution_output(stdout: str) -> tuple[dict, list[str]]:
     return execution_result, output_lines
 
 
-@tool
+@tool(workspace_access="read_write")
 def execute_python_code(
     python_code: str,
     input_data: str | None = None,
@@ -219,7 +220,7 @@ def execute_python_code(
 
     [SYNTACTICAL] Usage examples:
     `execute_python_code("result = sum([1, 2, 3, 4, 5])", None, None, 30)`,
-    `execute_python_code("filtered_data = [x for x in input_data if x > 0.5]", json_data, "output.json")`,
+    `execute_python_code("filtered_data = [x for x in input_data if x > 0.5]", json_data, "/workspace/output/results.json")`,
     `execute_python_code("import numpy as np; result = np.mean(input_data)", array_data, None, 60)`,
     [/SYNTACTICAL]
 
@@ -242,7 +243,7 @@ def execute_python_code(
                        If provided and execution is successful, the results will be written to this file for persistence and later use.
                        The directory will be created if it doesn't exist. [/ARGS_DETAILED]
                        [ARGS_SYNTACTICAL] "Valid file path or None" [/ARGS_SYNTACTICAL]
-                       [ARGS_EXAMPLES] "results.json", "output/analysis_results.json", "data/processed_output.json" [/ARGS_EXAMPLES]
+                       [ARGS_EXAMPLES] "/workspace/output/results.json", "/workspace/output/analysis_results.json" [/ARGS_EXAMPLES]
         timeout: [ARGS_BRIEF] Maximum execution time in seconds. Defaults to 300. [/ARGS_BRIEF]
                 [ARGS_DETAILED] The maximum time in seconds the subprocess is allowed to run before being terminated.
                 This prevents infinite loops and runaway processes from consuming system resources.
@@ -283,6 +284,7 @@ def execute_python_code(
 
         # Create directory if needed
         if save_output_to:
+            normalize_public_workspace_path(save_output_to)
             ensure_directory_exists(save_output_to)
 
         # Create temporary file for the code

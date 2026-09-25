@@ -18,7 +18,7 @@ from corral.orchestration.models import RunTaskInput
 from corral.persistence import ShardedCommitStore
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -74,7 +74,7 @@ def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
     assert ownership_changes == [(result, 501, 20), (checkpoint, 501, 20)]
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("cached", [False, True])
 async def test_preflight_builds_selected_task_and_extra_only_when_image_is_missing(
     monkeypatch, tmp_path, cached
@@ -116,7 +116,7 @@ async def test_preflight_builds_selected_task_and_extra_only_when_image_is_missi
         assert commands[-1][1:3] == ("image", "inspect")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_docker_launcher_uses_one_hardened_container_and_host_shard(
     monkeypatch, tmp_path
 ):

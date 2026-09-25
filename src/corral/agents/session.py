@@ -27,7 +27,6 @@ from corral.core.events import (
     AgentStateUpdated,
     AgentTurnRecorded,
     ContextImported,
-    EnvironmentOperation,
     ParallelGroupCompleted,
     SubmissionAccepted,
     TaskConfigured,
@@ -317,10 +316,6 @@ class AgentSession:
     @property
     def messages(self) -> tuple[Mapping[str, JsonValue], ...]:
         return self._context.messages
-
-    @property
-    def hook_manager(self) -> AgentHooks | None:
-        return self._hooks
 
     @property
     def examples(self) -> tuple[Any, ...]:
@@ -1203,12 +1198,12 @@ class AgentSession:
             == "terminal"
         ):
             from corral.workspace import (
-                WorkspaceFilesystem,
+                AbsoluteWorkspaceFilesystem,
                 build_terminal_tool,
             )
 
             environment.tools["terminal"] = build_terminal_tool(
-                WorkspaceFilesystem(environment.workspace_path)
+                AbsoluteWorkspaceFilesystem(environment.workspace_path)
             )
         branch_state = await self.state_store.materialize(selected)
         if node_workspace is None:
@@ -1234,25 +1229,11 @@ class AgentSession:
             workspace = await environment.workspace_manager.snapshot(
                 node_workspace, previous=branch_state.workspace
             )
-            workspace_args = {
-                name
-                for tool in environment.tools.values()
-                for name in getattr(tool, "workspace_args", ())
-            }
             commit = await branch._append_runtime(
                 TaskConfigured(
                     status="Node workspace prepared",
                     workspace_delta=WorkspaceDelta.from_workspace(workspace),
                     expected_workspace_revision=branch_state.workspace.revision,
-                    environment_operations=tuple(
-                        EnvironmentOperation(
-                            operation="set",
-                            path=("hidden_arguments", name),
-                            value=node_workspace,
-                        )
-                        for name in sorted(workspace_args)
-                    ),
-                    expected_environment_revision=branch_state.environment.revision,
                 ),
                 f"branch:{selected}:workspace",
             )

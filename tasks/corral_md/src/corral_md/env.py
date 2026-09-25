@@ -27,7 +27,6 @@ from corral_md.tools import (
     get_potential_metadata,
     get_structure_from_mp_text,
     keyword_log_extractor,
-    run_lammps,
     visualisation_tool,
 )
 from corral_md.workspace import MDWorkspaceFilesystem, local_path
@@ -39,6 +38,7 @@ from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
 from corral.core.workspace import WorkspaceState
 from corral.report.logging import event, exception_fields
+from corral.runtime.tool_execution import PreparedToolCall
 from corral.utils.context7_tools import get_library_documentation
 from corral.workspace import (
     build_workspace_tools,
@@ -71,7 +71,7 @@ def get_scoring_function(name: str, params: dict | None = None) -> Callable:
         ) from e
 
 
-def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefinition]:
+def load_tasks_from_json(json_path: Path) -> dict[str, TaskDefinition]:
     json_path = Path(json_path)
     if not json_path.exists():
         raise FileNotFoundError(f"Task definition path not found: {json_path}")
@@ -107,10 +107,6 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
                 raise ValueError(
                     f"Invalid task '{task_id}' in {task_file}: {exc}"
                 ) from exc
-            # Add work_dir to initial input if not already present
-            initial_input = task_info.get("initial_input", {}).copy()
-            if "work_dir" not in initial_input:
-                initial_input["work_dir"] = work_dir
             tasks[task_id] = TaskDefinition(
                 name=task_info["name"],
                 description=task_info["description"],
@@ -120,7 +116,7 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
                 input_map={
                     dep: InputRef(dep) for dep in task_info.get("input_from_tasks", [])
                 },
-                initial_input=initial_input,
+                initial_input=task_info.get("initial_input", {}),
                 prompt_fn=_md_task_prompt,
                 resolve_answer=False,
                 submission_resolver=resolve_submission,
@@ -132,11 +128,13 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
 def _md_file_tools(workspace: str) -> dict[str, Tool]:
     """MD filesystem and LAMMPS tools bound to one local workspace."""
     tools = build_workspace_tools(MDWorkspaceFilesystem(workspace))
-    # Asset catalogs use Modal and cannot run in the source-isolated worker.
-    # These path-confined file operations do not execute workspace code.
+    # Preserve MD's read-only asset namespace in every file operation. Generic
+    # worker filesystem tools do not know about MD's virtual asset catalogs.
+    # These confined operations only read/write data; they never execute it.
     for name in (
         "list_files",
         "read_file",
+        "write_file",
         "file_info",
         "copy_file",
         "cat_files",
@@ -156,11 +154,10 @@ def _md_file_tools(workspace: str) -> dict[str, Tool]:
                 "grep",
             )
         },
-        "library_docs": get_library_documentation,
+        "get_library_documentation": get_library_documentation,
         "terminal": build_md_terminal_tool(workspace),
         "execute_python_script": build_execute_python_script_tool(workspace),
-        # Overrides the statically selected tool with a workspace-aware variant
-        # that handles Modal upload and download internally.
+        # Simulation tools manage Modal upload and download for this workspace.
         "run_lammps": build_run_lammps_tool(workspace),
         "run_verified_md": build_run_verified_md_tool(workspace),
     }
@@ -192,8 +189,8 @@ class MolecularDynamicsEnvironment(Environment):
         if not workspace.files:
             self._ensure_seed_directories()
 
-    def execute_tool(
-        self, state: ExecutionState, tool: Tool, arguments: dict[str, Any]
+    def execute_controller_tool(
+        self, state: ExecutionState, prepared: PreparedToolCall
     ) -> Any:
         release = state.runtime.metadata.get("corral_md_release_id")
         volume_name = state.runtime.metadata.get("corral_md_volume_name")
@@ -204,12 +201,15 @@ class MolecularDynamicsEnvironment(Environment):
             ),
             recovery_snapshot(state.workspace, self.workspace_manager),
         ):
-            result = super().execute_tool(state, tool, arguments)
-            if isinstance(result, str) and self.workspace_path:
-                return result.replace(
-                    str(Path(self.workspace_path).resolve()), "/workspace"
-                )
-            return result
+            if prepared.trusted and prepared.tool_name in self._PATH_ARGUMENTS:
+                arguments = prepared.arguments
+                for argument in self._PATH_ARGUMENTS[prepared.tool_name]:
+                    if arguments.get(argument) is not None:
+                        arguments[argument] = str(
+                            local_path(self.workspace_path, arguments[argument])
+                        )
+                return prepared.tool.execute(**arguments)
+            return super().execute_controller_tool(state, prepared)
 
     _PATH_ARGUMENTS: ClassVar[dict[str, tuple[str, ...]]] = {
         "get_structure_from_mp_text": ("file_path",),
@@ -226,25 +226,16 @@ class MolecularDynamicsEnvironment(Environment):
         for argument in self._PATH_ARGUMENTS.get(tool_name, ()):
             value = parsed.get(argument)
             if value is not None:
-                parsed[argument] = str(
-                    local_path(
-                        self.workspace_path,
-                        value,
-                        allow_root=argument == "working_dir",
-                    )
-                )
+                # Keep the public path in prepared calls and durable actions.
+                # Restricted workers mount /workspace; the shared executor
+                # translates these values only for the local fallback.
+                local_path(self.workspace_path, value)
         return parsed
 
 
 def _md_task_prompt(env: Environment, state: ExecutionState) -> str:
     """Generate the MD task prompt with resource and logging guidance."""
-    prompt = f"""\nTask: {env.current_task.name}
-Description: {env.current_task.description}
-
-Required submission format:
-{env.current_task.submission_format}
-
-"""
+    prompt = env._default_task_prompt(state)
 
     scorer = env.current_task.scoring_fn
     if isinstance(scorer, WorkflowScorer):
@@ -252,67 +243,25 @@ Required submission format:
             scorer.task_number, workspace=bool(env.workspace_path), level=scorer.level
         )
 
-    prompt += "\nAvailable input data:\n"
-
-    prompt += ""
-
-    # Display resolved inputs from dependencies
-    resolved = env.resolve_inputs(state)
-    for input_name, ref in env.current_task.input_map.items():
-        prompt += f"- {input_name} (from {ref.task_id}): {resolved[input_name]}\n"
-
-    # Display initial input data
-    for key, value in env.current_task.initial_input.items():
-        if key != "work_dir":
-            prompt += f"- {key}: {value}\n"
-
-    # Add workspace info
     if env.workspace_path:
         prompt += (
-            "\nYou have an isolated task workspace. Filesystem and domain tools "
-            "accept only absolute POSIX paths under /workspace, such as "
-            "`/workspace/input/run.in`. Relative paths (including `input/run.in`), "
-            "parent traversal, symbolic links and controller paths are forbidden. "
-            "Use /workspace/input for inputs, /workspace/scripts for code and "
-            "/workspace/output for results.\n\n"
-            "### Important Resource and File Access Guidelines ###\n"
-            "1. **Potential Files**:\n"
-            "   - Potential assets are available at absolute paths below /workspace/potentials/ (for example /workspace/potentials/SW/Si.sw). Use the workspace file tools to list or copy them; they are not mounted in the local terminal. Modal simulations resolve these paths in their own runtime.\n"
-            "   - These files are *fully verified and correct*.\n"
-            "   - You must **not attempt to read or parse them directly**.\n"
-            "   - Reading them is unnecessary and will waste important computational resources.\n\n"
-            "2. **Simulation Log Files**:\n"
-            "   - These files are *very large* and should **not be directly parsed**.\n"
-            "   - Direct parsing would cause excessive cost and resource usage.\n\n"
-            "Shared assets in /workspace/structures, /workspace/models and "
-            "/workspace/potentials are read-only virtual paths for the workspace file "
-            "tools, not local terminal paths. Use copy_file to copy a supplied "
-            "structure into /workspace/input before local work. Models are available to Python "
-            "in the Modal GPU runtime at /workspace/models/teacher.model and "
-            "/workspace/models/student.model. Copy any structure or potential needed "
-            "by a local CPU script into the writable workspace first.\n\n"
-            "### Choosing a Simulation Engine ###\n"
-            "If the task calls for a MACE-family potential/model, always conduct the "
-            "MD simulation via an ASE Python script (execute_python_script with "
-            "use_gpu=True), not LAMMPS. "
-            "For all other potentials (SW, Tersoff, EAM, BKS, etc.), always use LAMMPS "
-            "via run_lammps.\n\n"
-            "### Local and GPU Execution ###\n"
-            "The single execute_python_script tool routes lightweight analysis, plotting, "
-            "and file conversion to the local CPU by default. Set use_gpu=True only for "
-            "scripts that construct an ASE Calculator backed by a MACE model or otherwise "
-            "require CUDA; those calls run on an A100 in Modal. Inside local CPU scripts "
-            "and terminal commands, use paths "
-            "relative to the current workspace (for example `output/results.json`). "
-            "Structured tool path arguments still require absolute /workspace paths. "
-            "Modal GPU calls use /workspace as their working directory.\n\n"
-            "### Simulation Logging Requirements ###\n"
-            "For every simulation run involving any ensemble (e.g., NVT, NPT, NVE, etc.), if applicable, the log file **must** record the following quantities:\n"
-            "   - Step\n"
-            "   - Temperature\n"
-            "   - Pressure\n"
-            "   - Density\n"
-            "These quantities should be written at an appropriate, user-configurable frequency (typically 1000 timesteps) suitable for monitoring equilibration and production behavior.\n"
+            "\nShared MD assets in /workspace/structures, /workspace/potentials, "
+            "and /workspace/models are read-only catalogs available through the "
+            "file tools and Modal runtime. They are not mounted in the local "
+            "terminal or CPU runtime. Use copy_file to copy structures and "
+            "potentials into /workspace/input before local analysis. GPU scripts "
+            "can use /workspace/models/teacher.model and "
+            "/workspace/models/student.model directly.\n\n"
+            "Run MACE simulations with ASE through execute_python_script(use_gpu=True) "
+            "on Modal's A100. Use run_lammps for other potentials, including SW, "
+            "Tersoff, EAM, and BKS. Leave use_gpu=False for CPU analysis, plotting, "
+            "and conversion. Inside local scripts and terminal commands, use paths "
+            "relative to the current workspace, such as output/results.json. "
+            "Modal GPU scripts start in /workspace.\n\n"
+            "Record Step, Temperature, Pressure, and Density for each simulation "
+            "where applicable, at a sampling interval suitable for the task "
+            "(typically 1000 timesteps). Use get_nth_run_log and "
+            "keyword_log_extractor to inspect large LAMMPS logs.\n"
         )
 
     event(
@@ -333,6 +282,9 @@ def create_environments(
     level: int = 1,
     taskgroup_common_tools: dict[str, Tool] | None = None,
 ) -> dict[str, Environment]:
+    # The shared environment loader can still pass the legacy selector.
+    if subtask_level:
+        raise ValueError("Corral MD has no subtasks; select level 1 or 2.")
     started = perf_counter()
     name = f"MD-level_{level}"
     event(
@@ -342,54 +294,32 @@ def create_environments(
         benchmark=name,
         operation="create",
     )
-    # Modal path rewriting needs one stable spelling of the local workspace.
-    # Advertising an absolute path also keeps paths written into LAMMPS inputs
-    # directly mappable to the isolated /results/corral/jobs/... directory.
+    # Keep controller storage stable even when callers change their directory.
     work_dir = str(Path(work_dir).expanduser().resolve())
-
-    if subtask_level:
-        event(
-            "DEBUG",
-            "environment.subtasks_enabled",
-            subsystem="runtime",
-            benchmark=name,
-        )
-        json_path = PACKAGE_DATA_ROOT / f"level_{level}" / "subtasks_json"
-    else:
-        json_path = PACKAGE_DATA_ROOT / f"level_{level}" / "tasks_json"
+    json_path = PACKAGE_DATA_ROOT / f"level_{level}" / "tasks_json"
 
     # Create environments for all tasks
-    subtask_specific_tools = {
+    domain_tools = {
         "convert_structure_to_lammps_data": convert_structure_to_lammps_data,
         "get_potential_metadata": get_potential_metadata,
         "get_structure_from_mp_text": get_structure_from_mp_text,
-        "run_lammps": run_lammps,
         "get_nth_run_log": get_nth_run_log,
         "keyword_log_extractor": keyword_log_extractor,
         "visualisation_tool": visualisation_tool,
     }
 
     try:
-        if not json_path.exists():
-            if not subtask_level:
-                raise FileNotFoundError(f"Task config not found: {json_path}")
-            tasks = {}
-        else:
-            tasks = load_tasks_from_json(json_path, work_dir)
-        environments = (
-            build_environments(
-                tasks,
-                base_work_dir=work_dir,
-                name=name,
-                toolset=Toolset(
-                    pool=subtask_specific_tools,
-                    common=taskgroup_common_tools or {},
-                    workspace_factory=_md_file_tools,
-                ),
-                env_cls=MolecularDynamicsEnvironment,
-            )
-            if tasks
-            else {}
+        tasks = load_tasks_from_json(json_path)
+        environments = build_environments(
+            tasks,
+            base_work_dir=work_dir,
+            name=name,
+            toolset=Toolset(
+                pool=domain_tools,
+                common=taskgroup_common_tools or {},
+                workspace_factory=_md_file_tools,
+            ),
+            env_cls=MolecularDynamicsEnvironment,
         )
     except Exception as exc:
         event(
@@ -425,12 +355,6 @@ if __name__ == "__main__":
         default=1,
         help="Level of the benchmark to run",
     )
-    parser.add_argument(
-        "--subtask_level",
-        type=bool,
-        default=False,
-        help="Whether to use subtask level",
-    )
     args = parser.parse_args()
 
     Path(BASE_WORK_DIR).mkdir(parents=True, exist_ok=True)
@@ -438,7 +362,6 @@ if __name__ == "__main__":
     # Create all environments with file system tools
     environments = create_environments(
         work_dir=BASE_WORK_DIR,
-        subtask_level=args.subtask_level,
         level=args.level,
     )
 

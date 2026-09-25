@@ -8,20 +8,23 @@ import os
 import tempfile
 import threading
 from dataclasses import asdict
-from types import SimpleNamespace
 
 import cloudpickle
 import pytest
 from stargazer.docker import execute_analysis
 from stargazer.env import create_environments
 
+from corral.core.state import EnvironmentState, ExecutionState, TaskState
 from corral.runtime import permissions
+from corral.runtime.tool_execution import ToolExecutor
 
 
 def test_docker_dispatch_sends_only_public_data_and_opaque_checkpoint(
     tmp_path, monkeypatch
 ):
-    environment = create_environments(level=1, work_dir=tmp_path)["seed15_diff5"]
+    environment = create_environments(level=1, work_dir=tmp_path)[
+        "seed15_diff5"
+    ].for_task("docker-dispatch")
     task = environment.current_task.scoring_inputs["benchmark_task"]
     hidden = {
         "benchmark_task": task.task_id,
@@ -35,8 +38,16 @@ def test_docker_dispatch_sends_only_public_data_and_opaque_checkpoint(
         },
         "analysis_history_revision": 0,
     }
-    state = SimpleNamespace(
-        environment=SimpleNamespace(values={"hidden_arguments": hidden})
+    started = environment.initial_event(execution_id="docker-dispatch")
+    state = ExecutionState(
+        through_commit_hash="0" * 64,
+        execution_id="docker-dispatch",
+        branch_id="main",
+        task=TaskState(environment=started.environment_metadata),
+        environment=EnvironmentState(
+            values={**dict(started.environment), "hidden_arguments": hidden}
+        ),
+        workspace=started.workspace,
     )
     requests = []
 
@@ -44,6 +55,7 @@ def test_docker_dispatch_sends_only_public_data_and_opaque_checkpoint(
         assert kind == "tool"
         assert workspace == environment.workspace_path
         assert kwargs["cancel"] is None
+        assert kwargs["workspace_access"] == "read_write"
         step, arguments = payload
         assert not step.trusted
         assert not step.hidden_args
@@ -61,11 +73,11 @@ def test_docker_dispatch_sends_only_public_data_and_opaque_checkpoint(
 
     monkeypatch.setattr(permissions, "enabled", lambda: True)
     monkeypatch.setattr(permissions, "run_worker", run)
-    result = permissions.execute_tool(
-        environment,
+    result = ToolExecutor(environment).execute(
         state,
         environment.tools["PythonREPL"],
         {"input_code": "print(6 * 7)"},
+        action_id="repl-action",
     )
     assert requests == [
         {

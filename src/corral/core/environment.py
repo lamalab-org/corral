@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import hashlib
@@ -25,6 +27,15 @@ from corral.core.events import (
     TaskConfigured,
     WorkspaceDelta,
 )
+from corral.core.resources import (
+    RESOURCE_CATALOG_METADATA_KEY,
+    RESOURCE_STATE_NAMESPACE,
+    EnvironmentResourceAdapter,
+    FileResourceDescriptor,
+    ResourceCatalogMismatchError,
+    ResourceHandle,
+    resource_file_matches,
+)
 from corral.core.state import (
     EnvironmentState,
     ExecutionState,
@@ -42,14 +53,24 @@ from corral.core.task import (
 from corral.core.tool import Tool, ToolConcurrency
 from corral.core.tool_catalog import (
     TOOL_CATALOG_METADATA_KEY,
+    TOOL_POLICY_METADATA_KEY,
     ToolCatalogSnapshot,
+    ToolPolicySnapshot,
     validate_tool_catalog_binding,
+    validate_tool_policy_binding,
 )
 from corral.core.transition import environment_operations
 from corral.core.workspace import WorkspaceState
 from corral.persistence.workspace import WorkspaceManager
 from corral.report.logging import logger
-from corral.workspace import WorkspaceFilesystem, build_workspace_tools
+from corral.workspace import (
+    PUBLIC_WORKSPACE_ROOT,
+    AbsoluteWorkspaceFilesystem,
+    build_workspace_tools,
+)
+
+if TYPE_CHECKING:
+    from corral.runtime.tool_execution import PreparedToolCall
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -59,8 +80,8 @@ if TYPE_CHECKING:
 class EnvironmentSetup:
     """Serializable values produced while configuring one task execution."""
 
-    hidden_arguments: Mapping[str, "JsonValue"] = field(default_factory=dict)
-    values: Mapping[str, "JsonValue"] = field(default_factory=dict)
+    hidden_arguments: Mapping[str, JsonValue] = field(default_factory=dict)
+    values: Mapping[str, JsonValue] = field(default_factory=dict)
     status: str = "Additional apps/services configured for this task."
 
 
@@ -155,7 +176,7 @@ def _ensure_local_workspace_root(workspace: str | Path) -> Path:
 def default_file_tools(workspace: str) -> dict[str, Tool]:
     """Build the standard filesystem tools bound to a task workspace."""
     root = _ensure_local_workspace_root(workspace)
-    tools = build_workspace_tools(WorkspaceFilesystem(root))
+    tools = build_workspace_tools(AbsoluteWorkspaceFilesystem(root))
     return {
         name: tools[name]
         for name in (
@@ -244,6 +265,11 @@ class Environment:
         job_executors: dict[str, JobExecutor] | None = None,
         workspace_manager: WorkspaceManager | None = None,
         workspace_path: str | None = None,
+        resource_adapters: Mapping[str, EnvironmentResourceAdapter] | None = None,
+        resource_states: Mapping[str, Any] | None = None,
+        file_resources: Mapping[str, FileResourceDescriptor | Mapping[str, Any]]
+        | None = None,
+        file_resource_sources: Mapping[str, str | Path] | None = None,
     ):
         self.task_id = task_id
         self.current_task = task
@@ -274,6 +300,36 @@ class Environment:
         if self.workspace_manager is None and self.workspace_path is not None:
             artifact_root = Path(self.base_work_dir) / ".corral" / "artifacts"
             self.workspace_manager = WorkspaceManager(artifact_root=artifact_root)
+        self.resource_adapters = dict(resource_adapters or {})
+        self.resource_states = dict(resource_states or {})
+        self.file_resources = {
+            name: FileResourceDescriptor.model_validate(descriptor)
+            for name, descriptor in (file_resources or {}).items()
+        }
+        self.file_resource_sources = {
+            name: Path(source).expanduser().resolve()
+            for name, source in (file_resource_sources or {}).items()
+        }
+        unknown_sources = set(self.file_resource_sources) - set(self.file_resources)
+        if unknown_sources:
+            raise ValueError(
+                "file resource sources require matching descriptors: "
+                f"{sorted(unknown_sources)}"
+            )
+        for name, descriptor in self.file_resources.items():
+            if descriptor.name != name:
+                raise ValueError(
+                    f"file resource key {name!r} does not match descriptor name"
+                )
+        overlap = set(self.resource_adapters) & set(self.file_resources)
+        if overlap:
+            raise ValueError(
+                f"resource names cannot be both stateful and file-backed: {sorted(overlap)}"
+            )
+        if self.workspace_manager is None and self.file_resources:
+            artifact_root = Path(self.base_work_dir or ".") / ".corral" / "artifacts"
+            self.workspace_manager = WorkspaceManager(artifact_root=artifact_root)
+        self._resource_materialization_lock = threading.Lock()
         # Templates resolve workspace tools against the configured root only to
         # expose their schemas. Mutable calls are accepted exclusively by a
         # bound task execution.
@@ -308,7 +364,9 @@ class Environment:
         scaffold_metadata: Mapping[str, Any] | None = None,
     ) -> ExecutionStarted:
         """Build the small event that initializes an execution projection."""
+        self.ensure_file_resources_durable()
         tool_catalog = self.tool_catalog_snapshot()
+        tool_policy = self.tool_policy_snapshot()
         workspace = WorkspaceState(
             id=str(uuid5(NAMESPACE_URL, f"corral:workspace:{execution_id}"))
         )
@@ -318,7 +376,13 @@ class Environment:
             "hidden_arguments": {},
             "jobs": self.job_manager.snapshot() if self.job_manager else {},
             "values": {},
+            **(
+                {RESOURCE_STATE_NAMESPACE: dict(self.resource_states)}
+                if self.resource_states
+                else {}
+            ),
         }
+        environment_state = dict(self.normalize_public_paths(environment_state))
         runtime = RuntimeUpdate(
             status="running",
             started_at=started_at or datetime.now(timezone.utc),
@@ -343,6 +407,11 @@ class Environment:
                 environment={
                     "name": self.component_id or type(self).__name__,
                     TOOL_CATALOG_METADATA_KEY: tool_catalog.model_dump(mode="json"),
+                    TOOL_POLICY_METADATA_KEY: tool_policy.model_dump(mode="json"),
+                    RESOURCE_CATALOG_METADATA_KEY: {
+                        name: descriptor.model_dump(mode="json")
+                        for name, descriptor in sorted(self.file_resources.items())
+                    },
                 },
                 dependency_outputs={
                     key: TaskOutput.model_validate(value)
@@ -417,7 +486,7 @@ class Environment:
         *,
         max_job_concurrency: int | None = None,
         workspace_path: str | None = None,
-    ) -> "Environment":
+    ) -> Environment:
         """Bind this definition to one isolated task execution.
 
         The returned definition shares immutable task/tool configuration and is
@@ -450,10 +519,98 @@ class Environment:
             ),
             job_executors=self.job_executors,
             workspace_manager=self.workspace_manager,
+            resource_adapters=self.resource_adapters,
+            resource_states=self.resource_states,
+            file_resources=self.file_resources,
+            file_resource_sources=self.file_resource_sources,
             **(
                 {"workspace_path": workspace_path} if workspace_path is not None else {}
             ),
         )
+
+    def ensure_file_resources_durable(
+        self, names: tuple[str, ...] | None = None
+    ) -> None:
+        """Ingest declared bytes before their descriptors enter durable state."""
+        requested = tuple(self.file_resources) if names is None else names
+        selected = tuple(name for name in requested if name in self.file_resources)
+        if not selected:
+            return
+        if self.workspace_manager is None:
+            raise RuntimeError("file-backed resources require a WorkspaceManager")
+        with self._resource_materialization_lock:
+            for name in selected:
+                descriptor = self.file_resources[name]
+                store = self.workspace_manager.artifact_store
+                if not asyncio.run(store.contains(descriptor.blob_ref)):
+                    source = self.file_resource_sources.get(name)
+                    if source is None:
+                        raise RuntimeError(
+                            f"resource {name!r} is absent from the artifact store "
+                            "and has no controller source binding"
+                        )
+                    stored = asyncio.run(store.put_file(source))
+                    if (
+                        stored.blob_ref != descriptor.blob_ref
+                        or stored.sha256 != descriptor.sha256
+                        or stored.size != descriptor.size
+                    ):
+                        raise ResourceCatalogMismatchError(
+                            f"resource source for {name!r} no longer matches its "
+                            "persisted descriptor"
+                        )
+
+    def materialize_file_resources(
+        self, names: tuple[str, ...]
+    ) -> dict[str, ResourceHandle]:
+        """Materialize declared immutable resources outside the task workspace."""
+        selected = tuple(name for name in names if name in self.file_resources)
+        if not selected:
+            return {}
+        self.ensure_file_resources_durable(selected)
+        assert self.workspace_manager is not None
+        root = Path(self.base_work_dir or ".").expanduser().resolve()
+        resource_root = root / ".corral" / "resources"
+        if resource_root.is_symlink():
+            raise RuntimeError("resource materialization root cannot be a symlink")
+        resource_root.mkdir(parents=True, exist_ok=True)
+        if not resource_root.is_dir():
+            raise RuntimeError("resource materialization root must be a directory")
+        handles: dict[str, ResourceHandle] = {}
+        with self._resource_materialization_lock:
+            for name in selected:
+                descriptor = self.file_resources[name]
+                directory = resource_root / descriptor.sha256
+                if directory.is_symlink():
+                    raise RuntimeError(
+                        f"resource {name!r} materialization cannot use a symlink"
+                    )
+                destination = directory / descriptor.filename
+                directory.mkdir(parents=True, exist_ok=True)
+                if not directory.is_dir():
+                    raise RuntimeError(
+                        f"resource {name!r} materialization must be a directory"
+                    )
+                store = self.workspace_manager.artifact_store
+                if destination.is_symlink():
+                    raise RuntimeError(
+                        f"resource {name!r} materialization cannot be a symlink"
+                    )
+                if not resource_file_matches(destination, descriptor):
+                    asyncio.run(store.materialize(descriptor.blob_ref, destination))
+                    destination.chmod(0o444)
+                if destination.is_symlink() or not destination.is_file():
+                    raise RuntimeError(
+                        f"resource {name!r} did not materialize as a regular file"
+                    )
+                destination.chmod(0o444)
+                handles[name] = ResourceHandle(
+                    name=name,
+                    public_path=descriptor.public_path,
+                    descriptor=descriptor,
+                    controller_path=str(destination),
+                )
+        return handles
 
     def _create_task_workspace(self, task_execution_id: str) -> str:
         """Create an unambiguous local materialization for one execution.
@@ -516,8 +673,45 @@ class Environment:
     def get_task_prompt(self, state: ExecutionState) -> str | list[dict]:
         """Return the task prompt computed from an immutable projection."""
         if self.current_task.prompt_fn is not None:
-            return self.current_task.prompt_fn(self, state)
-        return self._default_task_prompt(state)
+            prompt = self.current_task.prompt_fn(self, state)
+        else:
+            prompt = self._default_task_prompt(state)
+        return self.normalize_public_paths(prompt)
+
+    def normalize_public_paths(self, value: Any) -> Any:
+        """Remove controller path capabilities from public data recursively."""
+        replacements: dict[str, str] = {}
+        if self.workspace_path:
+            replacements[str(self.workspace_path)] = PUBLIC_WORKSPACE_ROOT
+        root = Path(self.base_work_dir or ".").expanduser().resolve()
+        for name, descriptor in self.file_resources.items():
+            public = descriptor.public_path
+            source = self.file_resource_sources.get(name)
+            if source is not None:
+                replacements[str(source)] = public
+            materialized = (
+                root / ".corral" / "resources" / descriptor.sha256 / descriptor.filename
+            )
+            replacements[str(materialized)] = public
+
+        def replace(item: Any) -> Any:
+            if isinstance(item, str):
+                for physical, public in sorted(
+                    replacements.items(), key=lambda pair: len(pair[0]), reverse=True
+                ):
+                    item = item.replace(physical, public)
+                return item
+            if isinstance(item, list):
+                return [replace(child) for child in item]
+            if isinstance(item, tuple):
+                return tuple(replace(child) for child in item)
+            if isinstance(item, Mapping):
+                return {
+                    str(replace(key)): replace(child) for key, child in item.items()
+                }
+            return item
+
+        return replace(value)
 
     def _default_task_prompt(self, state: ExecutionState) -> str:
         """Render description + submission format + resolved inputs.
@@ -550,7 +744,11 @@ class Environment:
 
         # Add workspace info
         if self.workspace_path:
-            prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
+            prompt += (
+                "\nIMPORTANT: You have access to filesystem tools. Use only "
+                "canonical absolute paths under `/workspace`; relative paths and "
+                "other absolute roots are rejected.\n"
+            )
 
         return prompt
 
@@ -572,9 +770,25 @@ class Environment:
             with_submit_answer_tool(self.get_available_tools())
         )
 
+    def tool_policy_snapshot(self) -> ToolPolicySnapshot:
+        """Capture controller-only authorization independently of tool schemas."""
+        return ToolPolicySnapshot.capture(self.tools)
+
     def validate_state_tool_catalog(self, state: ExecutionState) -> ToolCatalogSnapshot:
         """Refuse to bind `state` when its executable tool catalog has drifted."""
-        return validate_tool_catalog_binding(state, self.tool_catalog_snapshot())
+        catalog = validate_tool_catalog_binding(state, self.tool_catalog_snapshot())
+        validate_tool_policy_binding(state, self.tool_policy_snapshot())
+        stored_resources = state.task.environment.get(RESOURCE_CATALOG_METADATA_KEY, {})
+        current_resources = {
+            name: descriptor.model_dump(mode="json")
+            for name, descriptor in sorted(self.file_resources.items())
+        }
+        if stored_resources != current_resources:
+            raise ResourceCatalogMismatchError(
+                f"Resource catalog mismatch for execution {state.execution_id!r}; "
+                "refusing to resume with different immutable resource bytes or versions"
+            )
+        return catalog
 
     def preprocess_arguments(
         self, tool_name: str, args: dict[str, Any]
@@ -637,21 +851,29 @@ class Environment:
 
         return {key: parse_value(key, val) for key, val in args.items()}
 
-    def execute_tool(
+    def execute_controller_tool(
         self,
-        _state: ExecutionState,
-        tool: Tool,
-        arguments: dict[str, Any],
+        state: ExecutionState,
+        prepared: PreparedToolCall,
     ) -> Any:
-        """Execute a tool against values materialized from the supplied projection.
+        """Dispatch framework-managed or explicitly trusted controller logic.
 
-        The default tool contract is stateless. Environments with structured
-        domain state may override this hook to decode an explicit environment
-        namespace, call the tool, and return a `ToolExecutionResult` carrying
-        the complete updated namespace. The Environment must never retain the
-        supplied projection or decoded values.
+        Generic validation, workspace policy, resources, and result
+        normalization have already been applied by `ToolExecutor`.
         """
-        return tool.execute(**arguments)
+        tool = prepared.tool
+        if prepared.controller_dispatch:
+            dispatch = getattr(tool, "execute_controller", None)
+            if dispatch is None:
+                raise RuntimeError(
+                    f"Tool {prepared.tool_name!r} has no controller dispatcher"
+                )
+            return dispatch(self, state, prepared)
+        if not prepared.trusted:
+            raise PermissionError(
+                f"Tool {prepared.tool_name!r} is not trusted for controller execution"
+            )
+        return tool.execute(**prepared.arguments)
 
     def _resource_lock(self, key: str) -> _ReadWriteLock:
         """Return the shared readers-writer lock guarding one named resource.
@@ -727,13 +949,20 @@ class Environment:
         )
         attach_background_tools(self)
 
-    def submit_job(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def submit_job(
+        self,
+        state: ExecutionState,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        action_id: str,
+    ) -> dict[str, Any]:
         """Submit a background-capable tool as a job and return its handle.
 
-        Receives hidden arguments injected from the projection by `execute_action`
-        and resolves the workspace **now** (at submit time), so a later commit can
-        never redirect a running job at a different task's workspace. Returns a
-        job handle the agent polls with the generated control tools.
+        The same authorization path used by foreground calls resolves hidden
+        values, resources, and the workspace now. The manager receives only the
+        resulting immutable call, so queued execution cannot gain authority by
+        observing later mutations to the Environment or Tool.
         """
         if self.job_manager is None:
             return {"error": "Background jobs are not enabled for this task."}
@@ -741,33 +970,33 @@ class Environment:
         tool = self.tools.get(tool_name)
         if tool is None:
             return {"error": f"Tool {tool_name!r} not found."}
+        if not tool.background_capable:
+            return {"error": f"Tool {tool_name!r} is not background-capable."}
 
-        call_args = self.preprocess_arguments(tool_name, arguments)
-        hidden_names = list(tool.hidden_args)
-        missing = [name for name in hidden_names if name not in call_args]
-        if missing:
+        from corral.runtime.tool_execution import ToolArgumentError, ToolExecutor
+
+        try:
+            prepared = ToolExecutor(self).prepare(
+                state, tool, arguments, action_id=action_id
+            )
+        except ToolArgumentError as exc:
+            return {"error": str(exc)}
+        if prepared.stateful:
             return {
                 "error": (
-                    f"Hidden argument(s) {missing!r} required by tool "
-                    f"{tool_name!r} are not configured."
+                    "Stateful resource tools must execute in the foreground so "
+                    "their state transition can be committed atomically."
                 )
             }
-        visible_arguments = {
-            name: value for name, value in call_args.items() if name not in hidden_names
-        }
+        if prepared.controller_dispatch:
+            return {
+                "error": (
+                    f"Tool {tool_name!r} requires state-aware controller dispatch "
+                    "and cannot execute as a background job."
+                )
+            }
 
-        is_valid, error_message = tool.validate_arguments(call_args)
-        if not is_valid:
-            return {"error": error_message}
-
-        record = self.job_manager.submit(
-            tool,
-            visible_arguments=visible_arguments,
-            call_arguments=call_args,
-            hidden_arg_names=tuple(hidden_names),
-            workspace=self.workspace_path or "",
-            concurrency_key=getattr(tool, "concurrency_key", None),
-        )
+        record = self.job_manager.submit(prepared)
         return {
             "job_id": record.context.job_id,
             "tool_name": tool_name,
@@ -800,12 +1029,22 @@ class Environment:
                 environment = dict(state.environment.values)
             else:
                 status = setup.status
+                workspace_bindings = {
+                    name for item in self.tools.values() for name in item.workspace_args
+                }
                 environment = {
                     **dict(state.environment.values),
-                    "hidden_arguments": dict(setup.hidden_arguments),
+                    "hidden_arguments": {
+                        name: value
+                        for name, value in setup.hidden_arguments.items()
+                        if name not in workspace_bindings
+                    },
                     "values": dict(setup.values),
                 }
-        environment = dict(self.capture_environment(environment))
+        environment = dict(
+            self.normalize_public_paths(self.capture_environment(environment))
+        )
+        status = str(self.normalize_public_paths(status))
         workspace = self.capture_workspace(state.workspace)
         operations = environment_operations(state.environment.values, environment)
         workspace_delta = (

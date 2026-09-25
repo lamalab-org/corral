@@ -126,18 +126,18 @@ def print_table(summary: dict) -> None:
         "other",
     ]
 
-    logger.info(f"\n{'='*62}")
+    logger.info(f"\n{'=' * 62}")
     logger.info(f"  QC warning summary across {summary['total_files']} annotated files")
     logger.info(f"  Files with ≥1 warning: {summary['files_with_warnings']}")
     logger.info(f"  Total warning instances: {total_warnings}")
-    logger.info(f"{'='*62}")
+    logger.info(f"{'=' * 62}")
     logger.info(f"  {'Category':<30}  {'Count':>7}  {'%':>6}")
-    logger.info(f"  {'-'*30}  {'-'*7}  {'-'*6}")
+    logger.info(f"  {'-' * 30}  {'-' * 7}  {'-' * 6}")
     for cat in ORDER:
         n = gc.get(cat, 0)
         pct = 100.0 * n / total_warnings if total_warnings else 0.0
         logger.info(f"  {cat:<30}  {n:>7,}  {pct:>5.1f}%")
-    logger.info(f"{'='*62}")
+    logger.info(f"{'=' * 62}")
 
     if summary["per_model_counts"]:
         logger.info("\nPer-model breakdown:")
@@ -145,7 +145,7 @@ def print_table(summary: dict) -> None:
         col_w = max(len(m) for m in models) + 2
         header = f"  {'Category':<30}" + "".join(f"  {m:>{col_w}}" for m in models)
         logger.info(header)
-        logger.info(f"  {'-'*30}" + "".join(f"  {'-'*col_w}" for _ in models))
+        logger.info(f"  {'-' * 30}" + "".join(f"  {'-' * col_w}" for _ in models))
         for cat in ORDER:
             row = f"  {cat:<30}"
             for m in models:

@@ -19,6 +19,7 @@ from spectra_elucidation.score import (
     validate_dbe_consistency,
 )
 from spectra_elucidation.tools import (
+    NMRSHIFTDB2_DATABASE_PATH,
     create_tools,
 )
 
@@ -28,6 +29,7 @@ from corral.core.environment import (
     Toolset,
     build_environments,
 )
+from corral.core.resources import declare_directory_resource
 from corral.core.state import ExecutionState
 from corral.core.task import (
     InputRef,
@@ -177,11 +179,19 @@ def create_spectra_elu_environments(
         if not json_path.exists():
             raise ValueError(f"Task file {json_path} does not exist.")
         tasks = load_tasks_from_json(json_path, work_dir=work_dir)
+        database_resource, database_archive = declare_directory_resource(
+            "nmr_database_archive",
+            NMRSHIFTDB2_DATABASE_PATH,
+            cache_root=Path(work_dir) / ".corral" / "resource-sources",
+            runtime_version="nmrshiftdb2-v1",
+        )
         environments = build_environments(
             tasks,
             base_work_dir=work_dir,
             name=name,
             toolset=Toolset(pool=create_tools(), workspace_factory=None),
+            file_resources={"nmr_database_archive": database_resource},
+            file_resource_sources={"nmr_database_archive": database_archive},
         )
     except Exception as exc:
         event(

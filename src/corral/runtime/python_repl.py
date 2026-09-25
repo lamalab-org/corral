@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 import cloudpickle
 import numpy as np
 
-from corral.core.tool import Tool
+from corral.core.tool import Tool, WorkspaceAccess
 from corral.runtime import permissions
 
 if TYPE_CHECKING:
@@ -696,6 +696,7 @@ def execute_python_repl(
     max_code_chars: int = DEFAULT_MAX_CODE_CHARS,
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
     address_space_bytes: int = DEFAULT_WORKER_ADDRESS_SPACE_BYTES,
+    workspace_access: WorkspaceAccess | str = WorkspaceAccess.NONE,
 ) -> PythonREPLResult:
     """Execute and checkpoint Python in Corral's restricted worker.
 
@@ -752,6 +753,7 @@ def execute_python_repl(
         ),
         workspace,
         cancel=cancel,
+        workspace_access=WorkspaceAccess(workspace_access).value,
     )["content"]
     result = json.loads(response)
     expected = (

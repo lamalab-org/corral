@@ -213,7 +213,7 @@ async def _get_docs_text(
     raise RuntimeError("No textual documentation content returned.")
 
 
-@tool
+@tool(trusted=True)
 def get_library_documentation(
     package_name: str,
     topic: str | None = None,

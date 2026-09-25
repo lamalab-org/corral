@@ -12,14 +12,12 @@ from corral.agents.ai_scientist.state import (
 )
 
 
-def scientist_with_tree() -> (
-    tuple[
-        ScientistState,
-        list[dict[str, str]],
-        ExperimentNode,
-        ExperimentNode,
-    ]
-):
+def scientist_with_tree() -> tuple[
+    ScientistState,
+    list[dict[str, str]],
+    ExperimentNode,
+    ExperimentNode,
+]:
     state = ScientistState(
         task_prompt="Find the answer",
         tools=[],

@@ -1,13 +1,11 @@
 import asyncio
 import json
 import os
-import re
 import shutil
 import subprocess
 import textwrap
 import threading
 import time
-from collections import Counter
 from itertools import combinations
 from pathlib import Path
 from typing import ClassVar
@@ -17,49 +15,6 @@ import backoff
 from loguru import logger
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
-
-_ELEMENT_PAT = re.compile(r"([A-Z][a-z]?)(\d*)")
-_PAREN_PAT = re.compile(r"\(([^()]*)\)(\d*)")
-_DOT_PAT = re.compile(r"·|\.")
-
-
-def _parse_simple(formula: str) -> dict[str, int]:
-    """
-    Parse an already-expanded, dot-free formula into {element: count}.
-    """
-    counts = Counter()
-    for el, cnt in _ELEMENT_PAT.findall(formula):
-        counts[el] += int(cnt or 1)
-    return counts
-
-
-def _expand_parentheses(formula: str) -> str:
-    """
-    Recursively expand parentheses so that C6H5(CH3) becomes C6H5C1H3 etc.
-    """
-    while True:
-        m = _PAREN_PAT.search(formula)
-        if not m:
-            return formula
-        inner, mult = m.groups()
-        mult = int(mult or 1)
-        expanded = "".join(
-            f"{el}{int(cnt or 1) * mult}" for el, cnt in _ELEMENT_PAT.findall(inner)
-        )
-        formula = formula[: m.start()] + expanded + formula[m.end() :]
-
-
-def parse_molecular_formula(formula: str) -> dict[str, int]:
-    """
-    Parse molecular formula into an element-count mapping, handling
-    parentheses and dot adducts.
-    """
-    parts = _DOT_PAT.split(formula.replace(" ", ""))
-    total = Counter()
-    for part in parts:
-        expanded = _expand_parentheses(part)
-        total += _parse_simple(expanded)
-    return dict(total)
 
 
 def enumerate_fragments_from_smiles(

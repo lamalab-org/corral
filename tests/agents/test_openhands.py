@@ -20,7 +20,7 @@ from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -53,7 +53,7 @@ class Session:
         self.messages.append(message)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_openhands_uses_only_the_iteration_run_limit(monkeypatch, tmp_path):
     captured = {"arun_calls": 0}
 
@@ -162,7 +162,7 @@ def test_openhands_counts_each_sdk_completion_as_one_llm_call():
     assert agent._usage(metrics, llm_calls=3).llm_calls == 3
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_openhands_uses_session_mcp_and_returns_typed_outcome(monkeypatch):
     captured = {}
 
@@ -206,7 +206,7 @@ async def test_openhands_uses_session_mcp_and_returns_typed_outcome(monkeypatch)
     assert not hasattr(agent, "arun_agent")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_openhands_plain_text_answer_is_not_a_submission(monkeypatch):
     async def fake_run(self, *, run, **_kwargs):
         run.result = HarnessRunResult(status="success", answer="42")
@@ -221,7 +221,7 @@ async def test_openhands_plain_text_answer_is_not_a_submission(monkeypatch):
     assert "without calling submit_answer" in outcome.error
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_openhands_maps_tool_failure(monkeypatch):
     async def fake_run(self, *, run, **_kwargs):
         run.result = HarnessRunResult(status="tool_failure", error="MCP unavailable")
@@ -236,7 +236,7 @@ async def test_openhands_maps_tool_failure(monkeypatch):
     assert outcome.error == "MCP unavailable"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_openhands_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
     async def fake_run(self, *, mcp_url, run, **_kwargs):
         async with (

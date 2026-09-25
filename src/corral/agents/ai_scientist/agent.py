@@ -128,8 +128,13 @@ class _BranchSessionRegistry:
         if destination_execution_id != self.execution_id:
             raise ValueError("artifacts must be promoted to the owning execution")
         source = self.session(source_execution_id)
+        reference = (
+            source._workspace_reference()
+            if hasattr(source, "_workspace_reference")
+            else source.workspace
+        )
         files = self.portal.call(
-            partial(self.parent.promote_artifacts, source_workspace=source.workspace)
+            partial(self.parent.promote_artifacts, source_workspace=reference)
         )
         return {"files": files}
 

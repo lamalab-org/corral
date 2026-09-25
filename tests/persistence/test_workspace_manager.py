@@ -44,6 +44,23 @@ def test_workspace_snapshot_restores_under_a_completely_different_path(tmp_path)
     assert workspace.artifacts["dataset"].path == "results/data.bin"
 
 
+def test_snapshot_excludes_reserved_resource_mounts(tmp_path):
+    source = tmp_path / "working"
+    source.mkdir()
+    (source / "result.txt").write_text("result", encoding="utf-8")
+    resource = source / "resources" / "database" / "database.txt"
+    resource.parent.mkdir(parents=True)
+    resource.write_text("immutable", encoding="utf-8")
+    manager = WorkspaceManager(artifact_root=tmp_path / "objects")
+
+    workspace = run(manager.snapshot(source))
+    restored = run(manager.materialize(workspace, tmp_path / "restored"))
+
+    assert set(workspace.files) == {"result.txt"}
+    assert (restored / "result.txt").read_text() == "result"
+    assert not (restored / "resources").exists()
+
+
 def test_snapshot_tracks_changes_deletions_and_reuses_unchanged_blobs(tmp_path):
     source = tmp_path / "working"
     source.mkdir()

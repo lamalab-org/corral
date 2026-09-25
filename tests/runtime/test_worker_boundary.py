@@ -17,15 +17,19 @@ from corral.core.tool import tool
 from corral.core.transition import ToolExecutionResult
 from corral.runtime import permissions
 from corral.runtime.agent_worker import RemoteSession, _snapshot
+from corral.runtime.tool_execution import (
+    PreparedToolCall,
+    execute_prepared_background_call,
+)
 from corral.workspace import WorkspaceFilesystem, build_terminal_tool
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_planner_delegates_without_reopening_packaged_prompts(monkeypatch):
     planner = LLMPlanner(model="offline-test")
     payload = permissions.serialize(planner)
@@ -75,7 +79,7 @@ async def test_planner_delegates_without_reopening_packaged_prompts(monkeypatch)
         await session._test_commit_store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_agent_snapshot_contains_no_private_projection():
     secret = str(uuid4())
     task = TaskDefinition(
@@ -113,7 +117,7 @@ async def test_agent_snapshot_contains_no_private_projection():
         await session._test_commit_store.aclose()
 
 
-@pytest.fixture()
+@pytest.fixture
 def private_state():
     return ExecutionState(
         execution_id="private",
@@ -136,10 +140,31 @@ def test_serialization_rejects_private_objects_in_agent_closures(private_state):
         permissions.serialize({"nested": [private_state]})
 
 
+def test_run_worker_defaults_to_no_workspace_access(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    accesses = []
+
+    def run(kind, payload, assigned_workspace, workspace_fd, **kwargs):
+        del payload, workspace_fd
+        assert assigned_workspace == str(workspace)
+        accesses.append((kind, kwargs["workspace_access"]))
+        return {"kind": kind}
+
+    monkeypatch.setattr(permissions, "_enabled", True)
+    monkeypatch.setattr(permissions, "_root", tmp_path)
+    monkeypatch.setattr(permissions, "_run_worker", run)
+
+    assert permissions.run_worker("tool", object(), str(workspace)) == {"kind": "tool"}
+    assert permissions.run_worker("agent", object(), str(workspace)) == {
+        "kind": "agent"
+    }
+    assert accesses == [("tool", "none"), ("agent", "scratch")]
+
+
 def test_shell_payload_is_only_command_options(tmp_path, private_state, monkeypatch):
     terminal = build_terminal_tool(WorkspaceFilesystem(tmp_path))
     terminal.accidentally_captured_state = private_state
-    environment = SimpleNamespace(workspace_path=str(tmp_path), private=private_state)
     requests = []
 
     def run(kind, payload, workspace, **kwargs):
@@ -148,9 +173,7 @@ def test_shell_payload_is_only_command_options(tmp_path, private_state, monkeypa
 
     monkeypatch.setattr(permissions, "run_worker", run)
     assert (
-        permissions.execute_tool(
-            environment, private_state, terminal, {"command": "pwd"}
-        )
+        permissions.execute_restricted_tool(terminal, {"command": "pwd"}, str(tmp_path))
         == "public output"
     )
     assert requests == [("terminal", {"command": "pwd"}, str(tmp_path))]
@@ -174,13 +197,17 @@ def test_untrusted_tools_with_private_inputs_fail_closed(
     arguments = {"code": "print('public')", "secret": str(uuid4())}
     with pytest.raises(PermissionError, match="cannot receive hidden arguments"):
         if background:
-            permissions.execute_job(private_code_tool, arguments, str(tmp_path))
+            execute_prepared_background_call(
+                PreparedToolCall.capture(
+                    private_code_tool,
+                    arguments,
+                    workspace=str(tmp_path),
+                    execution_kind="restricted",
+                )
+            )
         else:
-            permissions.execute_tool(
-                SimpleNamespace(workspace_path=str(tmp_path)),
-                None,
-                private_code_tool,
-                arguments,
+            permissions.execute_restricted_tool(
+                private_code_tool, arguments, str(tmp_path)
             )
 
 
@@ -195,13 +222,21 @@ def test_workspace_binding_is_rebuilt_without_private_inputs(tmp_path, monkeypat
 
     def run(kind, payload, workspace, **kwargs):
         assert secret.encode() not in permissions.serialize(payload)
-        assert payload[1] == {"work_dir": str(tmp_path)}
-        return {"content": str(tmp_path)}
+        assert payload[1] == {"work_dir": "/workspace"}
+        return {"content": "/workspace"}
 
     monkeypatch.setattr(permissions, "run_worker", run)
-    assert permissions.execute_job(
-        workspace_tool, {"work_dir": secret}, str(tmp_path)
-    ) == str(tmp_path)
+    assert (
+        execute_prepared_background_call(
+            PreparedToolCall.capture(
+                workspace_tool,
+                {"work_dir": secret},
+                workspace=str(tmp_path),
+                execution_kind="restricted",
+            )
+        )
+        == "/workspace"
+    )
 
 
 def test_public_schema_rejects_injected_hidden_arguments():
@@ -223,7 +258,9 @@ def test_background_result_cannot_publish_private_state(tmp_path):
         )
 
     with pytest.raises(ValueError, match="must execute in the foreground"):
-        permissions.execute_job(private_result, {}, str(tmp_path))
+        execute_prepared_background_call(
+            PreparedToolCall.capture(private_result, {}, workspace=str(tmp_path))
+        )
 
 
 def test_node_creation_and_copy_reject_symlink_ancestors(tmp_path):

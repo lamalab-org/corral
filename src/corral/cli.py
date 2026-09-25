@@ -410,7 +410,9 @@ async def run_benchmark(
     if harness == "reflexion":
         harness = normalise_agent_name(runtime_options.get("actor", "tool-calling"))
     extra = AGENT_DEFINITIONS[harness].extra or ""
-    image_kind = "wetlab" if args.environment == "wetlab" else "benchmark"
+    image_kind = (
+        args.environment if args.environment in {"stargazer", "wetlab"} else "benchmark"
+    )
     sandbox = _sandbox_profile(
         args, default_image=f"corral-{args.environment}:{extra or 'latest'}"
     )

@@ -66,10 +66,10 @@ def compute_metrics(model_dir: str = "results/irt_category_task"):
         n_very_bad = np.sum(pareto_k > 1.0)
 
         logger.info(
-            f"  Pareto k > 0.7:  {n_bad}/{len(pareto_k)} ({100*n_bad/len(pareto_k):.1f}%)"
+            f"  Pareto k > 0.7:  {n_bad}/{len(pareto_k)} ({100 * n_bad / len(pareto_k):.1f}%)"
         )
         logger.info(
-            f"  Pareto k > 1.0:  {n_very_bad}/{len(pareto_k)} ({100*n_very_bad/len(pareto_k):.1f}%)"
+            f"  Pareto k > 1.0:  {n_very_bad}/{len(pareto_k)} ({100 * n_very_bad / len(pareto_k):.1f}%)"
         )
 
         if n_very_bad > 0:
@@ -136,7 +136,7 @@ def compute_metrics(model_dir: str = "results/irt_category_task"):
             actual_rate = y_obs[mask].mean()
             n_samples = mask.sum()
             logger.info(
-                f"    [{bins[i-1]:.1f}-{bins[i]:.1f}]: pred={pred_prob:.3f}, actual={actual_rate:.3f}, n={n_samples}"
+                f"    [{bins[i - 1]:.1f}-{bins[i]:.1f}]: pred={pred_prob:.3f}, actual={actual_rate:.3f}, n={n_samples}"
             )
 
     # Save in-sample metrics

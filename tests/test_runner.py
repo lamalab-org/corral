@@ -26,7 +26,7 @@ from corral.orchestration import (
 from corral.run import BenchmarkTaskMetadata, CorralRunner
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -328,7 +328,7 @@ def test_runner_includes_dependencies_by_default():
     assert request.task_ids == ("upstream", "downstream")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_invalid_reporting_metadata_does_not_start_benchmark():
     result = BenchmarkExecutionResult("benchmark", ("upstream",), 1, ())
     executor = RecordingExecutor(result)
@@ -343,7 +343,7 @@ async def test_invalid_reporting_metadata_does_not_start_benchmark():
     assert executor.requests == []
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_runner_delegates_once_and_projects_state_for_reporting():
     state = _submitted_state()
     state_ref = StateRef(
@@ -444,7 +444,7 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
     assert report.metadata["benchmark"]["max_parallel_evaluations_by_environment"] == {}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_unreachable_trials_project_without_loading_state():
     workflow_result = BenchmarkExecutionResult(
         benchmark_run_id="benchmark-2",

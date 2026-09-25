@@ -164,18 +164,22 @@ KNOWN_QA_MODELS: set[str] = {"claude", "gpt", "gpt_oss"}
 # MODEL_DISPLAY; without it _build_record silently stores the raw underscore
 # key in the 'model' column, breaking dataset grouping and UI display.
 _missing_display = set(MODEL_CANONICAL.values()) - set(MODEL_DISPLAY)
-assert not _missing_display, f"MODEL_CANONICAL values not found in MODEL_DISPLAY — add entries for: {_missing_display}"
+assert not _missing_display, (
+    f"MODEL_CANONICAL values not found in MODEL_DISPLAY — add entries for: {_missing_display}"
+)
 
 # Same requirement for the v2 top-level directory map.
 _missing_v2_display = set(MODEL_DIR_MAP.values()) - set(MODEL_DISPLAY)
-assert not _missing_v2_display, f"MODEL_DIR_MAP values not found in MODEL_DISPLAY — add entries for: {_missing_v2_display}"
+assert not _missing_v2_display, (
+    f"MODEL_DIR_MAP values not found in MODEL_DISPLAY — add entries for: {_missing_v2_display}"
+)
 
 # Every Title-Case name that METRICS_KEY_MAP produces must be declared in
 # ALL_COLUMNS; an undeclared column causes unpredictable type inference.
 _unmapped_metrics = set(METRICS_KEY_MAP.values()) - set(ALL_COLUMNS)
-assert (
-    not _unmapped_metrics
-), f"METRICS_KEY_MAP targets missing from ALL_COLUMNS — add: {_unmapped_metrics}"
+assert not _unmapped_metrics, (
+    f"METRICS_KEY_MAP targets missing from ALL_COLUMNS — add: {_unmapped_metrics}"
+)
 
 # AGENT_CLASS_NAMES must cover all AGENT_TYPES.
 assert set(AGENT_TYPES) == set(AGENT_CLASS_NAMES.keys()), (
@@ -184,11 +188,11 @@ assert set(AGENT_TYPES) == set(AGENT_CLASS_NAMES.keys()), (
 )
 
 # rstrip('s') is only safe for the two known section names.
-assert (
-    "tasks".rstrip("s") == "task"
-), "rstrip('s') no longer produces expected singular form for 'tasks'."
-assert (
-    "subtasks".rstrip("s") == "subtask"
-), "rstrip('s') no longer produces expected singular form for 'subtasks'."
+assert "tasks".rstrip("s") == "task", (
+    "rstrip('s') no longer produces expected singular form for 'tasks'."
+)
+assert "subtasks".rstrip("s") == "subtask", (
+    "rstrip('s') no longer produces expected singular form for 'subtasks'."
+)
 
 del _missing_display, _missing_v2_display, _unmapped_metrics

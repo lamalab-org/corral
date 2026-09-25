@@ -511,6 +511,7 @@ def create_tools() -> dict[str, Tool]:
         export_names=("_protocol_guide_ack",),
         # Preserve the Stargazer worker wire format during migration.
         export_result_names={"_protocol_guide_ack": "protocol_ack"},
+        workspace_access="read_write",
     )
     return {
         repl_tool.name: repl_tool,

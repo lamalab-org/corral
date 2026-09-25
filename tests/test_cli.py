@@ -303,7 +303,7 @@ def test_benchmark_selects_image_task_and_extra_for_environment_and_harness(
     args = cli.build_parser().parse_args(
         ["bench", "--agent", agent, "--environment", environment]
     )
-    image_kind = "wetlab" if environment == "wetlab" else "benchmark"
+    image_kind = environment if environment in {"stargazer", "wetlab"} else "benchmark"
 
     class PreflightChecked(Exception):
         pass
@@ -330,7 +330,7 @@ def test_benchmark_selects_image_task_and_extra_for_environment_and_harness(
 
 
 @pytest.mark.parametrize("build", [False, True])
-@pytest.mark.parametrize("environment", ["samplemath", "wetlab"])
+@pytest.mark.parametrize("environment", ["samplemath", "stargazer", "wetlab"])
 def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environment):
     monkeypatch.setattr(
         cli,
@@ -356,7 +356,9 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
     async def preflight(spec, **kwargs):
         assert spec.image == "custom:test"
         if build:
-            image_kind = "wetlab" if environment == "wetlab" else "benchmark"
+            image_kind = (
+                environment if environment in {"stargazer", "wetlab"} else "benchmark"
+            )
             assert kwargs["dockerfile"].name == f"{image_kind}.Dockerfile"
             assert kwargs["build_context"] == kwargs["dockerfile"].parent.parent
             assert kwargs["build_args"] == {

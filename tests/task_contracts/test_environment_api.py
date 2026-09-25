@@ -18,7 +18,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from corral.agents.schema import AgentOutcome
-from corral.core import Action, ExecutionState
+from corral.core import RESOURCE_STATE_NAMESPACE, Action, ExecutionState
 from corral.core.task import topological_order
 from corral.core.tool import Tool
 from corral.observability import NoOpObserver
@@ -41,7 +41,7 @@ CONFIGURATIONS = [
 ]
 
 
-@pytest.fixture()
+@pytest.fixture
 def afm_instrument(monkeypatch):
     """Keep the real AFM loader, prompt and reset hook; replace device dependencies."""
     applications = []
@@ -150,11 +150,14 @@ def test_task_definitions_run_and_restore(
                     assert state.runtime.metadata["execution_completed"] is True
                     assert state.submission == "api-contract-answer"
                     assert state.task.metadata["prompt"]
-                    hidden = state.environment.values.get("hidden_arguments", {})  # noqa: PD011
                     if benchmark == "spectra_elucidation":
+                        hidden = state.environment.values.get("hidden_arguments", {})
                         assert hidden["h_smiles"] == tasks[task_id].scoring_inputs
                     elif benchmark == "wetlab":
-                        assert hidden["wetlab"]
+                        resources = state.environment.values.get(
+                            RESOURCE_STATE_NAMESPACE, {}
+                        )
+                        assert resources["wetlab"]
                     output = environment.get_task_output(state)
                     assert output is not None, task_id
                     outputs[task_id] = output

@@ -19,7 +19,7 @@ from corral.orchestration.models import RUNTIME_PROTOCOL_VERSION, RunTaskInput
 from corral.orchestration.registry import RuntimeRegistry
 from corral.persistence import SQLiteCommitStore, WorkspaceManager
 from corral.runtime import permissions
-from corral.workspace import WorkspaceFilesystem, build_terminal_tool
+from corral.workspace import AbsoluteWorkspaceFilesystem, build_terminal_tool
 
 
 def _registry_from_module(specification: str, request: RunTaskInput) -> RuntimeRegistry:
@@ -165,7 +165,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
                 )
             if "terminal" not in environment.tools:
                 environment.tools["terminal"] = build_terminal_tool(
-                    WorkspaceFilesystem(workspace_path)
+                    AbsoluteWorkspaceFilesystem(workspace_path)
                 )
         head = await store.for_execution(request.execution_id).head("main")
         if head is not None:
