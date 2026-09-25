@@ -25,10 +25,10 @@ from corral.core.tool import Tool
 from corral.report.logging import event, exception_fields
 from corral.utils.code_tools import execute_python_code
 from score import (
-    score_topography,
-    score_roughness,
     score_friction,
+    score_roughness,
     score_roughness_and_friction,
+    score_topography,
 )
 from tools import (
     Code_Executor,

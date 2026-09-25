@@ -15,7 +15,6 @@ from typing import Any
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import nanosurf
-import numpy as np
 from loguru import logger
 from NSFopen.read import read
 from pymoo.algorithms.soo.nonconvex.ga import GA
@@ -650,7 +649,7 @@ def Image_Analyzer(
         return_units = {
             metric: "V" if "friction" in metric else "nm" for metric in measured
         }
-        result = {
+        return {
             "status": "Success",
             "message": f"Raw Image {path} processed successfully.",
             "image_data": image_data,
@@ -658,7 +657,6 @@ def Image_Analyzer(
             "metric_units": return_units,
         }
 
-        return result
     except Exception as e:
         raise Exception(f"An error occurred during image processing: {e}") from e
 

@@ -25,7 +25,7 @@ NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 
 
 def _finite_number(value):
-    if isinstance(value, (bool, np.bool_)):
+    if isinstance(value, bool | np.bool_):
         raise ValueError("Booleans are not measurements")
     number = float(value)
     if not math.isfinite(number):
