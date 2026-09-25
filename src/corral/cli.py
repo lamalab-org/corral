@@ -714,7 +714,7 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
 
     execution = parser.add_argument_group("execution")
     execution.add_argument("--trials", type=int, default=1)
-    execution.add_argument("--max-parallel", type=int, default=1)
+    execution.add_argument("--max-parallel", type=int, default=4)
     execution.add_argument("--max-parallel-per-task", type=int, default=1)
     execution.add_argument("--max-parallel-evaluations", type=int)
     execution.add_argument("--max-parallel-total", type=int)

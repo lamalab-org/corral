@@ -73,6 +73,7 @@ from corral.core.transition import (
     CORRAL_ACTION_ID_ARGUMENT,
     ToolEffects,
     ToolExecutionResult,
+    ToolRecoveryPending,
     execute_action,
     propose_action,
 )
@@ -138,6 +139,7 @@ __all__ = [
     "ToolExecutionResult",
     "ToolFailed",
     "ToolInvocationState",
+    "ToolRecoveryPending",
     "ToolStarted",
     "TraceAccessError",
     "UsageDelta",

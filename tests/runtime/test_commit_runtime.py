@@ -24,6 +24,7 @@ from corral.core import (
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
 from corral.core.tool import tool
+from corral.core.transition import ToolRecoveryPending
 from corral.observability import NoOpObserver
 from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
@@ -440,3 +441,48 @@ async def test_observer_failure_never_rolls_back_commits(tmp_path):
         state.through_commit_hash
     )
     await store.aclose()
+
+
+@pytest.mark.anyio()
+async def test_adapter_cannot_close_execution_with_recoverable_tool_pending(tmp_path):
+    attempts = []
+
+    def remote_tool() -> str:
+        """Recover a remote result on the next invocation."""
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise ToolRecoveryPending("download interrupted")
+        return "recovered"
+
+    class SwallowingAdapter:
+        async def run_session(self, session):
+            if "remote" not in session.state.actions:
+                try:
+                    await session.execute(Action(id="remote", name="remote_tool"))
+                except ToolRecoveryPending:
+                    return AgentOutcome(
+                        status="agent_failure", error="adapter caught error"
+                    )
+            await session.execute(
+                Action(id="submit", name="submit_answer", arguments={"answer": "ok"})
+            )
+            return AgentOutcome(status="completed", answer="ok")
+
+    async with SQLiteCommitStore(tmp_path / "adapter.sqlite3", "adapter") as store:
+        runtime = TaskRuntime(store, NoOpObserver())
+        environment = environment_with_tools(remote_tool=remote_tool)
+        kwargs = {
+            "execution_id": "adapter",
+            "started_at": datetime.now(timezone.utc),
+            "max_iterations": 3,
+        }
+        with pytest.raises(ToolRecoveryPending, match="pending tool work"):
+            await runtime.run(SwallowingAdapter(), environment, **kwargs)
+        state = await store.materialize("main")
+        assert not state.is_terminal
+        assert state.actions["remote"].status == "running"
+        assert all(run.status == "running" for run in state.agent_runs.values())
+        recovered = await runtime.run(SwallowingAdapter(), environment, **kwargs)
+        assert recovered.is_terminal
+        assert recovered.actions["remote"].status == "completed"
+        assert len(attempts) == 2
