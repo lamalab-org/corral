@@ -519,6 +519,7 @@ def Image_Analyzer(
     calculate_friction: bool = False,
     calculate_mean_roughness: bool = False,
     calculate_rms_roughness: bool = False,
+    friction_absolute: bool = False,
 ) -> dict[str, Any]:
     """
     [BRIEF] Analyzes AFM `.nid` image files from Nanosurf instruments and optionally computes surface metrics such as average friction, mean roughness, and RMS roughness. [/BRIEF]
@@ -527,6 +528,7 @@ def Image_Analyzer(
     - Average friction signal in V (half the forward/backward difference),
     - Mean roughness (Ra) in nm,
     - Root-mean-square roughness (Rq) in nm.
+    For tasks requesting average friction magnitude, use calculate_friction=True and friction_absolute=True to compute mean(abs(friction)). The default returns signed mean friction.
     Channel units are read from the NID header and converted before calculating these metrics. Raw image_data retains the reader units.
     It supports custom logic through the `dynamic_code` parameter, allowing flexible access to alternate scan channels or directions such as 'Deflection', 'Friction Force', or 'Backward' images. The tool is well-suited for automated AFM workflows in surface characterization and materials research.
     [/DETAILED]
@@ -556,6 +558,7 @@ def Image_Analyzer(
     [
         `Image_Analyzer(path="sample1.nid")`,
         `Image_Analyzer(path="scan_02.nid", calculate_friction=True)`,
+        `Image_Analyzer(path="scan_02.nid", calculate_friction=True, friction_absolute=True)`,
         `Image_Analyzer(path="scan_03.nid", dynamic_code='image_data = data["Image"]["Backward"]["Deflection"]', calculate_mean_roughness=True)`,
         `Image_Analyzer(path="friction_test.nid", calculate_friction=True, calculate_rms_roughness=True)`,
         `Image_Analyzer(path="surface_scan.nid", dynamic_code='image_data = data["Image"]["Forward"]["Friction force"]')`
@@ -576,8 +579,8 @@ def Image_Analyzer(
             [ARGS_EXAMPLES] 'image_data = data["Image"]["Backward"]["Deflection"]' [/ARGS_EXAMPLES]
 
         calculate_friction (bool):
-            [ARGS_BRIEF] If True, computes the average friction force. [/ARGS_BRIEF]
-            [ARGS_DETAILED] Computes the signed mean of half the Forward/Backward friction-signal difference, in V. [/ARGS_DETAILED]
+            [ARGS_BRIEF] If True, computes the average friction signal in V. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Computes the signed mean of half the Forward/Backward friction-signal difference, or mean magnitude when friction_absolute=True. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: Boolean flag. Default is `False`. Set to `True` to trigger friction force computation. [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "True" [/ARGS_EXAMPLES]
 
@@ -592,6 +595,12 @@ def Image_Analyzer(
             [ARGS_DETAILED] Measures the standard deviation of the surface height distribution. Useful for quantifying surface texture. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: Boolean flag. Default is `False`. Set to `True` to enable RMS roughness computation. [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "False" [/ARGS_EXAMPLES]
+
+        friction_absolute (bool):
+            [ARGS_BRIEF] Return mean friction magnitude when True. [/ARGS_BRIEF]
+            [ARGS_DETAILED] With calculate_friction=True, computes mean(abs((forward - backward) / 2)) in V. Use for tasks requesting average friction magnitude. False returns the signed mean. This does not change roughness or raw image data. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Boolean flag; default is False. Has no effect when calculate_friction=False. [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] True [/ARGS_EXAMPLES]
 
     Returns:
         Dict[str, Any]:
@@ -645,7 +654,11 @@ def Image_Analyzer(
             metrics.append("mean_roughness")
         if calculate_rms_roughness:
             metrics.append("rms_roughness")
-        measured = measure_image(afm, metrics) if metrics else {}
+        measured = (
+            measure_image(afm, metrics, friction_absolute=friction_absolute)
+            if metrics
+            else {}
+        )
         return_units = {
             metric: "V" if "friction" in metric else "nm" for metric in measured
         }

@@ -129,6 +129,9 @@ for `mean_roughness`, both reported in nm. No plane fitting or filtering is
 applied. Friction uses half the forward/backward `Friction force` difference,
 retaining NSFopen's orientation, in V. Average friction is the signed mean;
 `friction_absolute: true` selects mean magnitude where the task requests it.
+For those tasks, call `Image_Analyzer(calculate_friction=True,
+friction_absolute=True)` to obtain the matching mean magnitude in V. Omitting
+`friction_absolute` preserves the signed-mean behavior for other tasks.
 RMS friction is the root mean square without mean subtraction. Channel units
 are read from NID headers, and unsupported units fail scoring.
 

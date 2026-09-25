@@ -329,7 +329,6 @@ def test_registry_and_loader_cover_all_tasks(tmp_path):
 
 
 def test_real_nid_reader():
-
     path = Path(NSFopen.__file__).parent / "example/Plotting_Data/MoS2.nid"
     if not path.is_file():
         pytest.skip("NSFopen distribution does not include its sample NID")
@@ -505,7 +504,12 @@ def test_time_units(value, seconds):
     assert score.to_seconds(value) == pytest.approx(seconds)
 
 
-def test_image_analyzer_returns_task_units(acquisition):
+@pytest.mark.parametrize("friction_absolute", [None, False, True])
+def test_image_analyzer_returns_task_units(acquisition, friction_absolute):
+    # Half-difference is [-2, 1]: signed mean=-0.5, mean magnitude=1.5.
+    acquisition.afm.data["Image"]["Forward"]["Friction force"] = np.array(
+        [[-4.0, 2.0], [-4.0, 2.0]]
+    )
     tree = ast.parse((ROOT / "src/tools.py").read_text())
     fn = next(
         n
@@ -519,15 +523,29 @@ def test_image_analyzer_returns_task_units(acquisition):
         "measure_image": score.measure_image,
     }
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "tools.py", "exec"), ns)
+    options = (
+        {} if friction_absolute is None else {"friction_absolute": friction_absolute}
+    )
     output = ns["Image_Analyzer"](
         str(acquisition.path),
+        **options,
         calculate_friction=True,
         calculate_mean_roughness=True,
         calculate_rms_roughness=True,
     )
     assert output["mean_roughness"] == pytest.approx(1)
     assert output["rms_roughness"] == pytest.approx(1)
-    assert output["average_friction"] == pytest.approx(1)
+    assert output["average_friction"] == pytest.approx(
+        1.5 if friction_absolute else -0.5
+    )
+    scorer = score.score_roughness_and_friction(
+        0.01, acquisition.params, friction_absolute=bool(friction_absolute)
+    )
+    report = {
+        "path_1": str(acquisition.path),
+        **{f"{metric}_1": output[metric] for metric in output["metric_units"]},
+    }
+    assert scorer(report) == 1
     assert output["metric_units"] == {
         "mean_roughness": "nm",
         "rms_roughness": "nm",
