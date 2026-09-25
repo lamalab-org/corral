@@ -6,6 +6,7 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import Self
 
 import pytest
@@ -21,7 +22,7 @@ from corral.core.transition import ToolRecoveryPending
 from corral.observability import NoOpObserver
 from corral.persistence import SQLiteCommitStore
 from corral.persistence.workspace import WorkspaceManager
-from corral.runtime import TaskRuntime
+from corral.runtime import TaskRuntime, permissions
 from corral.runtime.permissions import NODE_WORKSPACE_DIR, SCRATCH_PREFIX
 
 
@@ -452,10 +453,44 @@ def test_md_io_tools_are_bound_to_local_workspace(tmp_path: Path) -> None:
     assert tools["run_lammps"].name == "run_lammps"
     assert "corral_action_id" in tools["run_lammps"].hidden_args
     assert "corral_action_id" in tools["execute_python_script"].hidden_args
+    assert tools["run_lammps"].trusted
+    assert tools["run_verified_md"].trusted
+    assert tools["list_files"].trusted
+    assert tools["copy_file"].trusted
+    assert not tools["write_file"].trusted
 
 
-def test_md_prompt_requires_absolute_workspace_paths(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("CORRAL_MD_RELEASE_ID", "release-1")
+def test_md_lammps_tool_receives_private_action_id(tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    script = workspace / "input" / "run.in"
+    script.parent.mkdir()
+    script.write_text("run 0\n")
+    seen = []
+
+    def run(workspace_path, input_file, *, action_id):
+        seen.append((workspace_path, input_file, action_id))
+        return "simulation completed"
+
+    monkeypatch.setattr(md_tools, "_run_lammps_for_workspace", run)
+    tool = _md_file_tools(str(workspace))["run_lammps"]
+    environment = SimpleNamespace(
+        workspace_path=str(workspace),
+        execute_tool=lambda _state, selected, arguments: selected.execute(**arguments),
+    )
+
+    result = permissions.execute_tool(
+        environment,
+        None,
+        tool,
+        {"input_file": "/workspace/input/run.in", "corral_action_id": "action-1"},
+    )
+
+    assert result == "simulation completed"
+    assert seen == [(str(workspace), str(script), "action-1")]
+
+
+def test_md_prompt_requires_absolute_workspace_paths(tmp_path: Path) -> None:
     task = TaskDefinition(
         name="md", description="md", tools=[], scoring_fn=lambda _answer: 1.0,
         submission_format={}, prompt_fn=_md_task_prompt, resolve_answer=False,
@@ -671,7 +706,20 @@ def test_input_sync_handles_file_directory_replacements(tmp_path, old_kind):
 @pytest.mark.parametrize("kind", ["lammps", "python"])
 @pytest.mark.parametrize("interruption", ["download", "snapshot"])
 def test_runtime_recovers_same_action_after_remote_success(tmp_path, monkeypatch, kind, interruption):
-    monkeypatch.setenv("CORRAL_MD_RELEASE_ID", "release-1")
+    monkeypatch.delenv("CORRAL_MD_RELEASE_ID", raising=False)
+    def deployed_function(app_name, function_name):
+        assert (app_name, function_name) == ("simagent", "runtime_info")
+        return SimpleNamespace(remote=lambda: {
+            "schema": 1,
+            "app_name": "simagent",
+            "release_id": "release-1",
+            "volume_name": "simulations",
+            "asset_volumes": {
+                "models": "models-v1", "potentials": "potentials-v1",
+                "structures": "structures-v1",
+            },
+        })
+    monkeypatch.setattr(bridge.modal.Function, "from_name", deployed_function)
     task = TaskDefinition(name="md", description="md", tools=[],
                           scoring_fn=lambda _: 1.0, submission_format={}, resolve_answer=False)
     environment = MolecularDynamicsEnvironment(

@@ -83,10 +83,24 @@ class VerificationRuntime:
                 for job in payload["jobs"]
             )
         )
+        restart_only = (
+            program == "verification_worker.py"
+            and bool(payload.get("jobs"))
+            and all(
+                job.get("operation") == "lammps_restart"
+                and isinstance(job.get("parameters"), dict)
+                and set(job["parameters"])
+                == {"checkpoint", "checkpoint_sha256"}
+                for job in payload["jobs"]
+            )
+        )
         # Open MPI's local PMIx listener cannot start with all sockets disabled.
-        # Only a separate, data-only SW batch gets loopback access, never checkpoints.
+        # Only fixed, data-only LAMMPS operations get loopback access. They
+        # remain isolated from submitted executable checkpoints and scripts.
         network = (
-            {"cidr_allowlist": ["127.0.0.0/8"]} if sw_only else {"block_network": True}
+            {"cidr_allowlist": ["127.0.0.0/8"]}
+            if sw_only or restart_only
+            else {"block_network": True}
         )
         with modal.Volume.ephemeral() as inputs, modal.Volume.ephemeral() as outputs:
             with inputs.batch_upload() as upload:
@@ -137,7 +151,7 @@ class VerificationRuntime:
                 w._collect_workspace(outputs, root)
                 yield_result = {
                     "sandbox_id": sandbox.object_id,
-                    "network": "loopback_only" if sw_only else "disabled",
+                    "network": "loopback_only" if sw_only or restart_only else "disabled",
                     "files": w._manifest(root),
                     "stdout": stdout[-2000:],
                     "stderr": stderr[-2000:],
@@ -297,7 +311,7 @@ class VerificationRuntime:
             trusted, sw, isolated = [], [], []
             for job in prepared:
                 if (
-                    job["operation"] == "pipeline"
+                    job["operation"] in {"pipeline", "lammps_restart"}
                     or job.get("parameters", {}).get("model") == "submitted"
                 ):
                     isolated.append([job])

@@ -144,6 +144,19 @@ def test_sensitivity_credit_does_not_require_a_report(submission):
     assert result.score == pytest.approx(0.9), result.checks
 
 
+def test_named_dof_order_and_transpose_average_are_equivalent(submission):
+    for name in ("calculations.json", "sensitivity.json"):
+        path = submission.parent / name
+        records = load(path)
+        for record in records:
+            record["dof_order"] = [f"Si{atom}_{'xyz'[axis]}" for atom, axis in record["dof_order"]]
+            record["symmetrization"] = "Hessian transpose average"
+            record["acoustic_sum_rule"] = "orthogonal translational projection"
+        write(path, records)
+
+    assert score(submission).score == pytest.approx(0.9)
+
+
 def score(path):
     rubric = Rubric(5)
     evaluate(Evidence(path), rubric)

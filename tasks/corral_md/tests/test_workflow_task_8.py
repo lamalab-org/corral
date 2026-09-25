@@ -10,6 +10,7 @@ import pytest
 from ase.build import bulk
 from ase.calculators.singlepoint import SinglePointCalculator
 from corral_md.workflow_scoring.common import Evidence, Rubric
+from corral_md.workflow_scoring.level1 import evaluate as evaluate_level1
 from corral_md.workflow_scoring.regression import metrics, predict
 from corral_md.workflow_scoring.task_8 import evaluate
 from sklearn.decomposition import PCA
@@ -343,6 +344,44 @@ def test_task8_consistent_artifacts_full_task_points_no_execution(
         in _check(result, "distortion_statistical_plausibility")["detail"]
     )
     assert json.loads(submission.read_text())["results"]["id_test"]["r2"] < 0
+
+
+def test_level1_accepts_row_aligned_energy_table_without_duplicate_frame_energy(submission):
+    manifest = json.loads(submission.read_text())
+    path = Path(manifest["artifacts"]["train_structures"])
+    frames = json.loads(path.read_text())
+    for frame in frames:
+        frame.pop("energy")
+    _write(path, frames)
+
+    rubric = Rubric(8, fail_fast=True)
+    evaluate_level1(Evidence(submission), rubric, 8)
+    assert _check(rubric, "training_structure_geometry")["status"] == "passed"
+
+    frames[0]["energy"] = 0.0
+    _write(path, frames)
+    rubric = Rubric(8, fail_fast=True)
+    evaluate_level1(Evidence(submission), rubric, 8)
+    assert _check(rubric, "training_structure_geometry")["status"] == "failed"
+
+
+def test_level1_accepts_ordered_frames_without_duplicate_row_ids(submission):
+    manifest = json.loads(submission.read_text())
+    path = Path(manifest["artifacts"]["train_structures"])
+    frames = json.loads(path.read_text())
+    for frame in frames:
+        frame["info"].pop("row_id")
+    _write(path, frames)
+
+    rubric = Rubric(8, fail_fast=True)
+    evaluate_level1(Evidence(submission), rubric, 8)
+    assert _check(rubric, "training_structure_geometry")["status"] == "passed"
+
+    frames[0], frames[1] = frames[1], frames[0]
+    _write(path, frames)
+    rubric = Rubric(8, fail_fast=True)
+    evaluate_level1(Evidence(submission), rubric, 8)
+    assert _check(rubric, "training_structure_geometry")["status"] == "failed"
 
 
 @pytest.mark.parametrize(

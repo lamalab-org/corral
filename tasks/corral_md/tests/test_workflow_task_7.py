@@ -10,6 +10,7 @@ import pytest
 from ase import Atoms, units
 from ase.build import bulk
 from corral_md.workflow_scoring.common import Evidence, Rubric, reproducibility
+from corral_md.workflow_scoring.level1 import evaluate as evaluate_level1
 from corral_md.workflow_scoring.task_7 import evaluate
 from scipy.stats import theilslopes
 
@@ -46,6 +47,101 @@ def _write(path, value):
 
 def _read(path):
     return json.loads(path.read_text())
+
+
+def test_level1_accepts_untimed_production_only_trajectory(tmp_path):
+    atoms = bulk("Al", "fcc", a=4.05, cubic=True).repeat((3, 3, 3))
+    initial = {
+        "symbols": atoms.get_chemical_symbols(),
+        "positions": atoms.positions.tolist(),
+        "cell": atoms.cell.array.tolist(),
+        "pbc": [True] * 3,
+    }
+    rng = np.random.default_rng(7)
+    momenta = rng.normal(size=(108, 3))
+    momenta -= momenta.mean(axis=0)
+    momenta *= np.sqrt(
+        324 * units.kB * 300
+        / np.sum(momenta**2 / atoms.get_masses()[:, None])
+    )
+    frames, rows = [], []
+    for index, step in enumerate((200, 300, 400)):
+        scale = 1 + index * 0.001
+        frame = {
+            **initial,
+            "positions": (atoms.positions * scale).tolist(),
+            "cell": (atoms.cell.array * scale).tolist(),
+            "momenta": momenta.tolist(),
+        }
+        frames.append(frame)
+        rows.append(
+            {
+                "stage": "reference",
+                "phase": "production",
+                "step": step,
+                "time_fs": float(step),
+                "temperature_K": 300.0,
+                "volume_A3": float(atoms.get_volume() * scale**3),
+                "pressure_GPa": 0.01 + index * 0.001,
+            }
+        )
+    settings = {
+        "model": "/workspace/models/teacher.model",
+        "input_structure": "initial.json",
+        "temperature_dof": 321,
+        "random_seed": 7,
+        "velocity_initializations": 1,
+        "remove_com": True,
+        "timestep_fs": 1,
+        "thermostat": "NPT thermostat",
+        "barostat": "isotropic barostat",
+        "target_pressure_bar": 1.01325,
+        "isotropic": True,
+        "equilibration_steps": 100,
+        "production_steps": 300,
+        "trajectory_interval_steps": 100,
+    }
+    manifest = {
+        "artifacts": {
+            "initial_structure": _write(tmp_path / "initial.json", [initial]),
+            "stages": _write(
+                tmp_path / "stages.json",
+                [{"id": "reference", "ensemble": "NPT", "target_temperature_K": 300,
+                  "production": [200, 300, 400]}],
+            ),
+            "trajectories": {"reference": _write(tmp_path / "production.json", frames)},
+            "thermal_trace": _write(tmp_path / "trace.json", rows),
+            "final_state": _write(tmp_path / "final.json", [frames[-1]]),
+        },
+        "settings": _write(tmp_path / "settings.json", settings),
+        "results": {
+            "stages": {
+                "reference": {
+                    "temperature_K": 300.0,
+                    "volume_A3": float(np.mean([row["volume_A3"] for row in rows])),
+                    "pressure_GPa": 0.011,
+                }
+            }
+        },
+    }
+    path = tmp_path / "manifest.json"
+    _write(path, manifest)
+    rubric = Rubric(7, fail_fast=False)
+    evaluate_level1(Evidence(path), rubric, 7)
+    for name in (
+        "initial_fcc_geometry",
+        "continuous_isotropic_npt_state",
+        "measured_thermal_trace_and_means",
+    ):
+        assert next(c for c in rubric.checks if c["name"] == name)["status"] == "passed"
+
+    rows[-1]["temperature_K"] += 100
+    _write(tmp_path / "trace.json", rows)
+    rubric = Rubric(7, fail_fast=False)
+    evaluate_level1(Evidence(path), rubric, 7)
+    assert next(
+        c for c in rubric.checks if c["name"] == "measured_thermal_trace_and_means"
+    )["status"] == "failed"
 
 
 def _reference(averages, local_method="linear", pressure_method="linear"):

@@ -17,6 +17,7 @@ from corral_md.score import (
     check_level2_workflow,
 )
 from corral_md.workflow_scoring.common import Evidence, Rubric
+from corral_md.workflow_scoring.level1_trusted import PINNED_TEACHER_SHA256
 from corral_md.workflow_scoring.task_3 import evaluate
 
 
@@ -27,6 +28,60 @@ def _write(path, value):
 
 def _digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_level1_accepts_unit_labeled_dataset_records(submission):
+    settings_path = submission.parent / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["teacher_sha256"] = PINNED_TEACHER_SHA256
+    _write(settings_path, settings)
+    dataset_path = submission.parent / "dataset.json"
+    records = json.loads(dataset_path.read_text())
+    for record in records:
+        record["positions_angstrom"] = record.pop("positions")
+        record["energy_eV"] = record.pop("energy")
+        record["forces_eV_per_angstrom"] = record.pop("forces")
+    _write(dataset_path, {"records": records})
+
+    result = check_level1_workflow(3, verification_backend="offline").evaluate(submission)
+    assert result["status"] == "pending_review", result["checks"]
+    assert _check(result, "teacher_energy_and_force_labels")["status"] == "passed"
+    assert _check(result, "independent_model_calculation")["status"] == "unverified"
+
+    records[0]["energy"] = records[0]["energy_eV"] + 1
+    _write(dataset_path, {"records": records})
+    result = check_level1_workflow(3, verification_backend="offline").evaluate(submission)
+    assert result["score"] == 0
+
+
+def test_level1_binary_score_waits_for_independent_model_result(submission):
+    settings_path = submission.parent / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["teacher_sha256"] = PINNED_TEACHER_SHA256
+    _write(settings_path, settings)
+
+    class StubVerifier:
+        def __init__(self, status):
+            self.status = status
+
+        def evaluate(self, evidence, task_number):
+            assert task_number == 3
+            return {
+                "evidence_sha256": evidence.fingerprint(),
+                "backend": {"release_id": "test-release"},
+                "checks": [
+                    {
+                        "id": "teacher_dimer_labels",
+                        "status": self.status,
+                        "targets": ["independent_model_calculation"],
+                        "detail": "Controlled test response",
+                    }
+                ],
+            }
+
+    for status, expected in (("passed", 1.0), ("failed", 0.0), ("unverified", None)):
+        result = WorkflowScorer(3, level=1, verifier=StubVerifier(status)).evaluate(submission)
+        assert result["score"] == expected
 
 
 @pytest.fixture
@@ -191,7 +246,7 @@ def test_level1_scores_only_the_shared_teacher_dataset(submission):
         json.dumps(
             {
                 "teacher_model": "teacher.model",
-                "teacher_sha256": "a" * 64,
+                "teacher_sha256": PINNED_TEACHER_SHA256,
                 "dispersion": True,
                 "energy_unit": "eV",
                 "force_unit": "eV/Angstrom",
@@ -203,8 +258,8 @@ def test_level1_scores_only_the_shared_teacher_dataset(submission):
     level1_manifest = submission.parent / "level1-manifest.json"
     level1_manifest.write_text(json.dumps(manifest))
 
-    report = check_level1_workflow(3).evaluate(level1_manifest)
-    assert report["score"] == 1
+    report = check_level1_workflow(3, verification_backend="offline").evaluate(level1_manifest)
+    assert report["status"] == "pending_review"
     assert report["level"] == 1
     assert {check["name"] for check in report["checks"] if check["points"]} == {
         "manifest_and_linked_artifacts",
@@ -213,6 +268,8 @@ def test_level1_scores_only_the_shared_teacher_dataset(submission):
         "dimer_separation_dataset",
         "teacher_energy_and_force_labels",
         "teacher_identity_dispersion_and_units",
+        "pinned_teacher_digest",
+        "independent_model_calculation",
     }
     assert check_level2_workflow(3).evaluate(level1_manifest)["score"] == 0
 

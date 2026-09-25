@@ -1,7 +1,12 @@
 import json
+import subprocess
+import sys
+from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 from corral_md import env
+from hatchling.builders.wheel import WheelBuilder
 
 
 @pytest.mark.parametrize(
@@ -20,6 +25,55 @@ def test_all_shipped_tasks_load_from_unrelated_cwd(
     assert all(callable(task.scoring_fn) for task in tasks.values())
     expected_level = int(source.split("/")[0].removeprefix("level_"))
     assert all(task.scoring_fn.level == expected_level for task in tasks.values())
+
+
+def test_wheel_loads_both_levels_without_editable_source(tmp_path):
+    task_root = Path(__file__).resolve().parents[1]
+    wheel = next(WheelBuilder(str(task_root)).build(directory=str(tmp_path)))
+    installed = tmp_path / "installed"
+    with ZipFile(wheel) as archive:
+        archive.extractall(installed)
+
+    # Reuse installed dependencies, but remove the editable package and run
+    # outside the repository so task data cannot leak in from the checkout.
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            """
+import sys
+from pathlib import Path
+
+installed, source = map(Path, sys.argv[1:])
+sys.path = [str(installed)] + [
+    path for path in sys.path if Path(path).resolve() != source
+]
+from corral_md import env
+from corral_md.submission_examples import load_example
+from corral_md.workflow_scoring.lammps_checks import supplied_cu32_cell
+
+assert Path(env.__file__).is_relative_to(installed)
+assert env.PACKAGE_DATA_ROOT.is_relative_to(installed)
+for level in (1, 2):
+    environments = env.create_environments(
+        work_dir=str(installed.parent / "work"), level=level
+    )
+    assert len(environments) == 10
+    for number in range(1, 11):
+        assert load_example(number, level=level)["manifest"]
+assert len(supplied_cu32_cell()) == 32
+""",
+            str(installed),
+            str(task_root / "src"),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_removed_subtasks_create_no_environments(tmp_path, monkeypatch):

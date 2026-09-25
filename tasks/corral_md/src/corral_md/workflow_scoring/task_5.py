@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from itertools import product
 from typing import TYPE_CHECKING
@@ -48,7 +49,16 @@ def _order(record):
     if not isinstance(order, list) or len(order) != 6:
         raise EvidenceError("dof_order must enumerate six Cartesian degrees of freedom")
     ids = []
-    for atom, supplied_axis in order:
+    for entry in order:
+        if isinstance(entry, str):
+            match = re.fullmatch(r"(?:Si)?([01])_([xyz])", entry)
+            if match is None:
+                raise EvidenceError("Invalid atom/axis in dof_order")
+            atom, supplied_axis = int(match[1]), match[2]
+        elif isinstance(entry, list | tuple) and len(entry) == 2:
+            atom, supplied_axis = entry
+        else:
+            raise EvidenceError("Invalid atom/axis in dof_order")
         axis = axes.get(supplied_axis, supplied_axis)
         if (
             type(atom) is not int
@@ -145,12 +155,16 @@ def _reconstruct(e, record):
             f"Cannot reconstruct the saved numerical method {method!r}"
         )
     symmetry = record["symmetrization"]
-    if symmetry == "average_transpose":
+    if symmetry in (
+        "average_transpose",
+        "transpose_average",
+        "Hessian transpose average",
+    ):
         matrix = (matrix + matrix.T) / 2
     elif symmetry != "none":
         raise UnsupportedMethod(f"Unsupported symmetrization: {symmetry!r}")
     acoustic = record["acoustic_sum_rule"]
-    if acoustic == "projection":
+    if acoustic in ("projection", "orthogonal translational projection"):
         translations = np.tile(np.eye(3), (2, 1))[order]
         projection = np.eye(6) - translations @ translations.T / 2
         matrix = projection @ matrix @ projection

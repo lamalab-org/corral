@@ -1,7 +1,7 @@
 """Read-only evidence access and diagnostic partial-credit scoring.
 
-Nothing in this module executes submitted code, loads executable model formats,
-contacts a service, or attaches a calculator to a saved structure.
+Nothing in this module executes submitted code or loads executable model
+formats. An evaluator may inject a trusted reader for opaque LAMMPS restarts.
 """
 
 from __future__ import annotations
@@ -117,7 +117,12 @@ def _lookup(mapping: Mapping, names: tuple[str, ...]) -> Any:
 class Evidence:
     """A submission's data and artifacts, with paths confined when contextualized."""
 
-    def __init__(self, submission: Any):
+    def __init__(
+        self,
+        submission: Any,
+        *,
+        restart_reader: Callable[[Path], Atoms] | None = None,
+    ):
         workspace = getattr(submission, "workspace", None)
         base = getattr(submission, "manifest_dir", None)
         self.root = Path(workspace).resolve() if workspace is not None else None
@@ -150,6 +155,7 @@ class Evidence:
         self.settings = self._document(value.get("settings"))
         self.report = self._document(value.get("report"))
         self._cache: dict[tuple, Any] = {}
+        self._restart_reader = restart_reader
 
     def _path(self, value: Any) -> Path:
         if not isinstance(value, str | Path) or not str(value):
@@ -274,11 +280,39 @@ class Evidence:
             return self._cache[key]
         if path.suffix.lower() == ".json":
             data = read_json(path)
-            records = data.get("frames", [data]) if isinstance(data, dict) else data
-            if isinstance(records, list) and records and "positions" in records[0]:
+            records = (
+                data.get("frames", data.get("records", [data]))
+                if isinstance(data, dict)
+                else data
+            )
+            if (
+                isinstance(records, list)
+                and records
+                and isinstance(records[0], dict)
+                and any(
+                    name in records[0]
+                    for name in ("positions", "positions_A", "positions_angstrom")
+                )
+            ):
                 images = []
                 for record in records:
-                    pbc = record.get("pbc")
+
+                    def stored_value(name: str, *aliases: str, record=record):
+                        present = [key for key in (name, *aliases) if key in record]
+                        if not present:
+                            return None
+                        value = record[present[0]]
+                        if any(
+                            not np.array_equal(
+                                np.asarray(value), np.asarray(record[key])
+                            )
+                            for key in present[1:]
+                        ):
+                            raise EvidenceError(f"Conflicting JSON fields: {present}")
+                        return value
+
+                    shared = data if isinstance(data, dict) else {}
+                    pbc = record.get("pbc", shared.get("pbc"))
                     if not (
                         isinstance(pbc, bool)
                         or (
@@ -289,25 +323,50 @@ class Evidence:
                     ):
                         raise EvidenceError("JSON frames require explicit boolean pbc")
                     atoms = Atoms(
-                        symbols=record.get("symbols"),
+                        symbols=record.get("symbols", shared.get("symbols")),
                         numbers=record.get("numbers"),
-                        positions=record["positions"],
-                        cell=record.get("cell"),
+                        positions=stored_value(
+                            "positions", "positions_A", "positions_angstrom"
+                        ),
+                        cell=stored_value("cell", "cell_A", "cell_angstrom"),
                         pbc=pbc,
                     )
                     if "masses" in record:
                         atoms.set_masses(record["masses"])
-                    if "momenta" in record:
-                        atoms.set_momenta(record["momenta"])
+                    momenta = stored_value("momenta", "momenta_ase_units")
+                    if momenta is not None:
+                        atoms.set_momenta(momenta)
                     atoms.info.update(record.get("info", {}))
                     for field in ("time_fs", "time_ps", "step", "stage"):
                         if field in record:
                             atoms.info[field] = record[field]
+                    energy = stored_value("energy", "energy_eV", "potential_energy_eV")
+                    if (
+                        energy is None
+                        and "total_energy_eV" in record
+                        and "kinetic_energy_eV" not in record
+                        and momenta is None
+                    ):
+                        # A static structure's total energy is its potential
+                        # energy. MD records can contain a different total.
+                        energy = record["total_energy_eV"]
                     stored = {
-                        k: record[k]
-                        for k in ("energy", "forces", "stress")
-                        if k in record
+                        name: value
+                        for name, value in (
+                            ("energy", energy),
+                            (
+                                "forces",
+                                stored_value(
+                                    "forces",
+                                    "forces_eV_per_A",
+                                    "forces_eV_per_angstrom",
+                                ),
+                            ),
+                        )
+                        if value is not None
                     }
+                    if "stress" in record:
+                        stored["stress"] = record["stress"]
                     if stored:
                         atoms.calc = SinglePointCalculator(atoms, **stored)
                     images.append(atoms)
@@ -318,14 +377,23 @@ class Evidence:
                 ".traj": "traj",
                 ".extxyz": "extxyz",
                 ".xyz": "extxyz",
+                ".cif": "cif",
+                ".data": "lammps-data",
                 ".dump": "lammps-dump-text",
                 ".lammpstrj": "lammps-dump-text",
             }
-            if path.suffix.lower() not in formats:
+            if path.suffix.lower() == ".restart":
+                if self._restart_reader is None:
+                    raise UnsupportedEvidence(
+                        "A LAMMPS binary restart needs a trusted external reader for state verification"
+                    )
+                images = [self._restart_reader(path)]
+            elif path.suffix.lower() not in formats:
                 raise EvidenceError(
                     "Use a documented trajectory data format, not an executable object"
                 )
-            images = read(path, index=":", format=formats[path.suffix.lower()])
+            else:
+                images = read(path, index=":", format=formats[path.suffix.lower()])
         if not images:
             raise EvidenceError("Trajectory is empty")
         self._cache[key] = images
@@ -443,6 +511,10 @@ class Rubric:
                 or type(decision.get("passed")) is not bool
             ):
                 raise ValueError(f"Review decision for {name} requires boolean passed")
+            if name == "independent_model_calculation" and decision["passed"]:
+                raise ValueError(
+                    "Independent model calculation can pass only through trusted verification"
+                )
             if any(
                 not isinstance(decision.get(k), str) or not decision[k].strip()
                 for k in ("reviewer", "reason")
@@ -530,7 +602,9 @@ def reproducibility(e: Evidence, r: Rubric) -> None:
     )
 
 
-def level1_reproducibility(e: Evidence, r: Rubric) -> None:
+def level1_reproducibility(
+    e: Evidence, r: Rubric, *, independent_model_required: bool = False
+) -> None:
     """Score the shared evidence contract for a preparatory Level 1 task.
 
     Level 1 examples contain only the preparatory workflow. Only nonempty links
@@ -573,7 +647,7 @@ def level1_reproducibility(e: Evidence, r: Rubric) -> None:
     )
     r.check(
         "recorded_settings",
-        2,
+        1 if independent_model_required else 2,
         lambda: bool(e.settings)
         and e._path(e.manifest.get("settings")).stat().st_size > 0,
     )

@@ -850,6 +850,31 @@ def test_verification_cannot_upgrade_failed_artifacts():
     [
         ([{"operation": "mace"}], False),
         ([{"operation": "sw"}], True),
+        (
+            [
+                {
+                    "operation": "lammps_restart",
+                    "parameters": {
+                        "checkpoint": "state.restart",
+                        "checkpoint_sha256": "0" * 64,
+                    },
+                }
+            ],
+            True,
+        ),
+        (
+            [
+                {
+                    "operation": "lammps_restart",
+                    "parameters": {
+                        "checkpoint": "state.restart",
+                        "checkpoint_sha256": "0" * 64,
+                    },
+                },
+                {"operation": "mace"},
+            ],
+            False,
+        ),
         ([{"operation": "pipeline"}], False),
         ([{"operation": "sw", "parameters": {"checkpoint": "untrusted.pkl"}}], False),
         ([{"operation": "sw"}, {"operation": "mace"}], False),

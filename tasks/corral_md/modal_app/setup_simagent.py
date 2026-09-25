@@ -1,6 +1,7 @@
-"""Verify assets, publish a versioned base, deploy the worker, and smoke test it.
+"""Prepare the stable SimAgent app, its assets, and deployment smoke tests.
 
-Run from the task root with ``uv run python modal_app/release.py``.
+Use ``setup_simagent.py`` for the one-time app setup. No release setting is
+needed for deployment or for normal scoring.
 """
 
 from __future__ import annotations
@@ -11,98 +12,56 @@ import json
 import os
 import subprocess
 import sys
+import time
 import uuid
 from contextlib import suppress
 from io import BytesIO
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import modal
 from asset_versions import asset_volume_names
 from ground_truth import publish_ground_truth
+from runtime_identity import runtime_id, source_paths
 from setup_assets import prepare_assets, upload_assets
 from verification_smoke import smoke_verification
 
 TASK_ROOT = Path(__file__).resolve().parents[1]
-SEED = TASK_ROOT / "src/corral_md/base_workspace.json"
 APP_NAME = "simagent"
-SOURCES = (
-    TASK_ROOT / "modal_app/assets.json",
-    TASK_ROOT / "modal_app/requirements.txt",
-    TASK_ROOT / "modal_app/lammps_app.py",
-    TASK_ROOT / "modal_app/asset_versions.py",
-    TASK_ROOT / "modal_app/verification_worker.py",
-    TASK_ROOT / "modal_app/verification_runtime.py",
-    TASK_ROOT / "modal_app/ground_truth.py",
-    TASK_ROOT / "modal_app/trusted_md.py",
-    TASK_ROOT / "modal_app/verification_requirements.txt",
-    TASK_ROOT / "src/corral_md/workflow_scoring/verification.py",
-    TASK_ROOT / "src/corral_md/modal_workspace.py",
-    TASK_ROOT / "src/corral_md/workspace.py",
-    TASK_ROOT / "src/corral_md/tools.py",
-    SEED,
-)
+SOURCES = source_paths(TASK_ROOT)
 
 
 def release_id() -> str:
-    """Name the complete assets, worker image recipe, and workspace seed."""
-    digest = hashlib.sha256()
-    digest.update(
-        b"simulations-volume\0"
-        + os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations").encode()
-        + b"\0"
-    )
-    for path in SOURCES:
-        digest.update(path.relative_to(TASK_ROOT).as_posix().encode() + b"\0")
-        digest.update(hashlib.sha256(path.read_bytes()).digest())
-    return digest.hexdigest()[:24]
+    """Return the app's automatically computed content identity."""
+    return runtime_id(TASK_ROOT, SOURCES)
 
 
-def publish_base(volume: modal.Volume, identifier: str) -> None:
-    seed = json.loads(SEED.read_text())
-    if seed.get("schema") != 1 or not isinstance(seed.get("directories"), list):
-        raise ValueError("Invalid MD base workspace seed")
-    for name in seed["directories"]:
-        if not isinstance(name, str) or not name or "\\" in name:
-            raise ValueError(f"Invalid MD base directory: {name!r}")
-        path = PurePosixPath(name)
-        if (
-            path.is_absolute()
-            or path.as_posix() != name
-            or any(part in {"", ".", ".."} for part in path.parts)
-        ):
-            raise ValueError(f"Invalid MD base directory: {name!r}")
-    manifest = {
-        **seed,
+def wait_for_active_app(identifier: str) -> None:
+    """Wait until Modal discovery serves the build that was just deployed."""
+    expected_runtime = {
+        "schema": 1,
+        "app_name": APP_NAME,
         "release_id": identifier,
+        "volume_name": os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations"),
         "asset_volumes": asset_volume_names(
             json.loads((TASK_ROOT / "modal_app/assets.json").read_text())
         ),
-        "source_sha256": {
-            path.relative_to(TASK_ROOT).as_posix(): hashlib.sha256(
-                path.read_bytes()
-            ).hexdigest()
-            for path in SOURCES
-        },
     }
-    payload = (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()
-    remote = f"/corral/releases/{identifier}/base.json"
-    try:
-        existing = b"".join(volume.read_file(remote))
-    except (FileNotFoundError, modal.exception.NotFoundError):
-        existing = None
-    if existing is not None:
-        if existing != payload:
-            raise ValueError(
-                f"Refusing to replace a different MD base release: {remote}"
-            )
-        return
-    with volume.batch_upload() as upload:
-        upload.put_file(BytesIO(payload), remote)
+    # Modal may briefly route discovery to the preceding deployment after
+    # `modal deploy` returns. Wait for the active app before starting smoke.
+    for attempt in range(18):
+        runtime = modal.Function.from_name(APP_NAME, "runtime_info").remote()
+        if runtime == expected_runtime:
+            break
+        if attempt < 17:
+            time.sleep(5)
+    else:
+        raise RuntimeError("SimAgent runtime discovery disagrees with deployment")
 
 
 def smoke_test(identifier: str, volume: modal.Volume) -> None:
     """Exercise LAMMPS, GPU Python, asset permissions and result recovery."""
+    wait_for_active_app(identifier)
     initializer = modal.Function.from_name(APP_NAME, "prepare_workspace")
     worker = modal.Function.from_name(APP_NAME, "run_lammps")
     run_id = f"smoke-{uuid.uuid4().hex}"
@@ -215,19 +174,23 @@ Path('/workspace/output/gpu.json').write_text(json.dumps({'ok': True}))
 
 def deploy() -> str:
     identifier = release_id()
-    print(f"Preparing MD release {identifier}", flush=True)
+    print("Preparing the stable simagent app", flush=True)
     with TemporaryDirectory(prefix=".corral-md-assets-", dir=TASK_ROOT) as temporary:
         source = Path(temporary)
         prepare_assets(source)
         upload_assets(source)
-        base_volume = modal.Volume.from_name("corral-md-bases", create_if_missing=True)
-        publish_base(base_volume, identifier)
         print("Assets verified; deploying worker", flush=True)
-        environment = {**os.environ, "CORRAL_MD_RELEASE_ID": identifier}
         subprocess.run(
-            [sys.executable, "-m", "modal", "deploy", "modal_app/lammps_app.py"],
+            [
+                sys.executable,
+                "-m",
+                "modal",
+                "deploy",
+                "--strategy",
+                "recreate",
+                "modal_app/lammps_app.py",
+            ],
             cwd=TASK_ROOT,
-            env=environment,
             check=True,
         )
         volume = modal.Volume.from_name(
@@ -251,7 +214,7 @@ def deploy() -> str:
     print(
         json.dumps(
             {
-                "release_id": identifier,
+                "build_id": identifier,
                 "app_name": APP_NAME,
                 "volume_name": os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations"),
                 "verification_smoke": verification_smoke,
@@ -270,7 +233,9 @@ def deploy() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--print-id", action="store_true", help="Print release ID without deploying"
+        "--print-id",
+        action="store_true",
+        help="Print internal build identity without deploying",
     )
     args = parser.parse_args()
     identifier = release_id() if args.print_id else deploy()

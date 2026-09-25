@@ -11,6 +11,7 @@ from ase import units
 
 from .common import (
     Evidence,
+    EvidenceError,
     Rubric,
     UnsupportedEvidence,
     close,
@@ -64,14 +65,16 @@ def _values(e, data):
 
 def _translations(data):
     cells = _integers(data["cell_translations"], (125, 3))
-    if np.max(np.abs(cells)) > 2 or len(set(map(tuple, cells))) != 125:
-        raise ValueError("Translations must cover the centered 5x5x5 primitive grid")
+    # A repeated cell can be indexed by centered representatives (-2..2) or
+    # by the natural ASE repeat indices (0..4). Both name the same 125 sites.
+    if np.max(np.abs(cells)) > 4 or len(set(map(tuple, cells % 5))) != 125:
+        raise ValueError("Translations must cover each 5x5x5 primitive site once")
     return cells
 
 
 def _opposites(cells):
-    lookup = {tuple(cell): i for i, cell in enumerate(cells)}
-    return np.array([lookup[tuple(-cell)] for cell in cells])
+    lookup = {tuple(cell % 5): i for i, cell in enumerate(cells)}
+    return np.array([lookup[tuple(-cell % 5)] for cell in cells])
 
 
 def _basis(data):
@@ -88,9 +91,6 @@ def _basis(data):
 def _geometry(frames, data):
     cell, _ = _basis(data)
     cells = _translations(data)
-    indices = _integers(data["atom_indices"], (125,))
-    if sorted(indices.tolist()) != list(range(125)):
-        raise ValueError("atom_indices must be a permutation")
     reference_index = data["reference_frame"]
     source = data["source_atom_index"]
     if type(reference_index) is not int or not 0 <= reference_index < len(frames):
@@ -113,6 +113,28 @@ def _geometry(frames, data):
                 "Raw frames must retain the specified cell, species, and masses"
             )
         finite_array(frame.positions, shape=(125, 3))
+    supplied_indices = data.get("atom_indices")
+    if supplied_indices is not None:
+        supplied_indices = _integers(supplied_indices, (125,))
+    if supplied_indices is not None and sorted(supplied_indices.tolist()) == list(
+        range(125)
+    ):
+        indices = supplied_indices
+    elif supplied_indices is None or np.all(supplied_indices == 0):
+        # For a one-atom primitive cell, all-zero basis indices are valid.
+        # Infer the supercell atom order from the saved undisplaced geometry.
+        all_fractional = (
+            reference.positions - reference.positions[source]
+        ) @ np.linalg.inv(cell)
+        rounded = np.rint(all_fractional).astype(int)
+        if np.max(np.abs(all_fractional - rounded)) > 1e-6:
+            raise ValueError("Undisplaced atoms do not occupy primitive sites")
+        lookup = {tuple(value % 5): index for index, value in enumerate(rounded)}
+        if len(lookup) != 125:
+            raise ValueError("Undisplaced atoms do not cover the 5x5x5 grid")
+        indices = np.array([lookup[tuple(value % 5)] for value in cells])
+    else:
+        raise ValueError("atom_indices must be a permutation or primitive basis labels")
     fractional = (
         reference.positions[indices] - reference.positions[source]
     ) @ np.linalg.inv(cell)
@@ -133,7 +155,49 @@ def _reconstruct(e, frames, data):
     cell, cells, indices, reference, source = _geometry(frames, data)
     derivative = data["derivative"]
     method = derivative["method"]
-    if method == "finite_difference":
+    if method == "central_finite_difference":
+        pairs = _integers(derivative["frame_indices"], (3, 2))
+        if (
+            len(set(pairs.ravel())) != 6
+            or np.any(pairs < 0)
+            or np.any(pairs >= len(frames))
+        ):
+            raise ValueError("Central differences need six distinct saved frames")
+        displacement_data = finite_array(derivative["displacements_A"])
+        if displacement_data.shape == (3, 2):
+            displacements = np.zeros((len(frames), 3))
+            for axis, (plus, minus) in enumerate(pairs):
+                displacements[[plus, minus], axis] = displacement_data[axis]
+        elif displacement_data.shape == (len(frames), 3):
+            displacements = displacement_data
+        else:
+            raise EvidenceError(
+                "Central displacements need frame vectors or pair scalars"
+            )
+        directions = displacements[pairs[:, 0]] - displacements[pairs[:, 1]]
+        if (
+            not _close(displacements[pairs[:, 0]], -displacements[pairs[:, 1]])
+            or np.linalg.matrix_rank(directions) != 3
+        ):
+            raise ValueError("Central displacement pairs must span three directions")
+        force_differences = []
+        for plus, minus in pairs:
+            pair_forces = []
+            for frame_id in (plus, minus):
+                frame = frames[frame_id]
+                delta = frame.positions - reference.positions
+                delta[source] -= displacements[frame_id]
+                scaled = delta @ np.linalg.inv(5 * cell)
+                scaled -= np.rint(scaled)
+                if np.max(np.abs(scaled @ (5 * cell))) > 1e-6:
+                    raise ValueError("Saved frame disagrees with its displacement")
+                pair_forces.append(_stored(frame, "forces")[indices])
+            force_differences.append(pair_forces[0] - pair_forces[1])
+        derivative_forces = np.linalg.solve(
+            directions, np.asarray(force_differences).reshape(3, -1)
+        )
+        phi = -derivative_forces.reshape(3, 125, 3).transpose(1, 2, 0)
+    elif method == "finite_difference":
         frame_ids = _integers(
             derivative["frame_indices"], (len(derivative["frame_indices"]),)
         )
@@ -190,9 +254,14 @@ def _reconstruct(e, frames, data):
     raw = phi.copy()
     origin = np.where(np.all(cells == 0, axis=1))[0][0]
     for operation in data.get("corrections", []):
-        if operation == "pair_symmetry":
+        label = operation.lower() if isinstance(operation, str) else ""
+        if operation in ("pair_symmetry", "inversion-transpose pair average") or (
+            "average" in label and "pair-interchanged" in label
+        ):
             phi = (phi + phi[_opposites(cells)].swapaxes(1, 2)) / 2
-        elif operation == "acoustic_sum_rule":
+        elif operation in ("acoustic_sum_rule", "acoustic on-site subtraction") or all(
+            word in label for word in ("subtract", "onsite", "acoustic")
+        ):
             phi[origin] -= phi.sum(axis=0)
         elif isinstance(operation, dict) and set(operation) == {"cutoff_A"}:
             cutoff = float(operation["cutoff_A"])
@@ -280,14 +349,16 @@ def _summary(w, energy, tolerance=0):
     )
 
 
-def evaluate(e: Evidence, r: Rubric, *, level: int = 2) -> None:
+def evaluate(
+    e: Evidence, r: Rubric, *, level: int = 2, reserve_digest_point: bool = False
+) -> None:
     if level not in (1, 2):
         raise ValueError("level must be 1 or 2")
 
     level1_points = (
         {
             "fcc_supercell_and_mapping": 15,
-            "recorded_model_and_settings": 10,
+            "recorded_model_and_settings": 9 if reserve_digest_point else 10,
             "raw_energy_force_records": 15,
             "derivative_reconstruction": 20,
             "force_constant_transformations": 20,

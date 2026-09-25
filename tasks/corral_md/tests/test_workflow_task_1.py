@@ -9,11 +9,34 @@ from ase import units
 from ase.build import bulk
 from ase.io import read, write
 from corral_md.workflow_scoring import task_1 as scoring
-from corral_md.workflow_scoring.common import Evidence, Rubric
+from corral_md.workflow_scoring.common import Evidence, Rubric, UnsupportedEvidence
 
 
 def _dump(path, value):
     path.write_text(json.dumps(value))
+
+
+def test_lammps_data_and_cif_are_readable_but_binary_restart_needs_review(tmp_path):
+    atoms = bulk("Si", "diamond", a=5.43, cubic=True)
+    write(tmp_path / "reference.cif", atoms)
+    write(tmp_path / "prepared.data", atoms, format="lammps-data")
+    (tmp_path / "final.restart").write_bytes(b"binary restart")
+    manifest = tmp_path / "manifest.json"
+    _dump(
+        manifest,
+        {
+            "artifacts": {
+                "reference_cell": "reference.cif",
+                "prepared_state": "prepared.data",
+                "heating_end_state": "final.restart",
+            }
+        },
+    )
+    evidence = Evidence(manifest)
+    assert len(evidence.trajectory("reference_cell")) == 1
+    assert len(evidence.trajectory("prepared_state")) == 1
+    with pytest.raises(UnsupportedEvidence, match="binary restart"):
+        evidence.trajectory("heating_end_state")
 
 
 def _correlation_time(t, p):

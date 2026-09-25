@@ -9,6 +9,7 @@ from ase import Atoms, units
 from ase.build import bulk
 from ase.calculators.singlepoint import SinglePointCalculator
 from corral_md.workflow_scoring.common import Evidence, Rubric
+from corral_md.workflow_scoring.level1 import evaluate as evaluate_level1
 from corral_md.workflow_scoring.task_10 import evaluate
 from scipy.stats import theilslopes
 
@@ -30,6 +31,116 @@ def _score(path):
 
 def _check(rubric, name):
     return next(item for item in rubric.checks if item["name"] == name)
+
+
+def test_level1_accepts_energyless_initial_and_one_final_boundary(tmp_path):
+    atoms = bulk("Al", "fcc", a=4.05, cubic=True).repeat((3, 3, 3))
+    rng = np.random.default_rng(10)
+    momenta = rng.normal(size=(108, 3))
+    dof = 324
+    momenta *= np.sqrt(
+        300 * dof * units.kB / np.sum(momenta**2 / atoms.get_masses()[:, None])
+    )
+    frame = {
+        "symbols": atoms.get_chemical_symbols(),
+        "positions": atoms.positions.tolist(),
+        "cell": atoms.cell.array.tolist(),
+        "pbc": [True] * 3,
+        "masses": atoms.get_masses().tolist(),
+        "momenta": momenta.tolist(),
+        "time_fs": 0.0,
+    }
+    production = [
+        {
+            **frame,
+            "positions": (atoms.positions + fraction * momenta * 0.001).tolist(),
+            "time_fs": time,
+            "energy": -300.0,
+        }
+        for fraction, time in ((1, 1000.0), (2, 2000.0))
+    ]
+    boundary = {**production[-1]}
+    boundary.pop("energy")
+    settings = {
+        "model": "/workspace/models/teacher.model",
+        "model_settings": {},
+        "md": {
+            "temperature_dof": dof,
+            "thermostat": "Langevin",
+            "timestep_fs": 1.0,
+            "random_seed": 10,
+            "initial_temperature_K": 300,
+            "velocity_initializations": 1,
+            "manual_velocity_resets": 0,
+            "ensemble": "NVT (fixed cell)",
+        },
+        "stages": [
+            {
+                "id": "300K",
+                "target_temperature_K": 300,
+                "start_time_fs": 0,
+                "end_time_fs": 2000,
+                "production_start_time_fs": 1000,
+                "production_end_time_fs": 2000,
+            }
+        ],
+    }
+    manifest = {
+        "artifacts": {
+            "initial_state": _write(tmp_path / "initial.json", [frame]),
+            "boundary_states": _write(tmp_path / "boundary.json", [boundary]),
+            "production_trajectory": _write(tmp_path / "production.json", production),
+        },
+        "settings": _write(tmp_path / "settings.json", settings),
+    }
+    path = tmp_path / "manifest.json"
+    _write(path, manifest)
+
+    rubric = Rubric(10, fail_fast=False)
+    evaluate_level1(Evidence(path), rubric, 10)
+    for name in (
+        "initial_fcc_and_temperature",
+        "recorded_nvt_model_and_initialization",
+        "fixed_cell_and_ordered_atoms",
+        "initial_stage_timing_and_continuity",
+    ):
+        assert _check(rubric, name)["status"] == "passed", rubric.checks
+
+    # The single stage and recorded stride identify the untimed trajectory.
+    settings["md"]["trajectory_sample_steps"] = 500
+    _write(tmp_path / "settings.json", settings)
+    frame.pop("time_fs")
+    boundary.pop("time_fs")
+    for saved in production:
+        saved.pop("time_fs")
+    _write(tmp_path / "initial.json", [frame])
+    _write(tmp_path / "boundary.json", [boundary])
+    _write(tmp_path / "production.json", production)
+    masses = atoms.get_masses()[:, None]
+    directional = np.sum(momenta**2 / masses, axis=0) / ((dof / 3) * units.kB)
+    kinetic = np.sum(momenta**2 / masses) / 2
+    trace_row = {
+        "stage": "300K",
+        "temperature_K": float(directional.mean()),
+        **{f"temperature_{axis}_K": float(value) for axis, value in zip("xyz", directional)},
+        "total_energy_eV": float(-300 + kinetic),
+    }
+    trace = [{**trace_row, "time_fs": time} for time in (0, 1500, 2000)]
+    manifest["artifacts"]["thermal_trace"] = _write(tmp_path / "trace.json", trace)
+    manifest["results"] = {
+        "stages": {
+            "300K": {
+                "temperature_mean_K": float(directional.mean()),
+                "directional_temperature_mean_K": directional.tolist(),
+                "energy_mean_eV_per_atom": float((-300 + kinetic) / 108),
+            }
+        }
+    }
+    _write(path, manifest)
+    rubric = Rubric(10, fail_fast=True)
+    evaluate_level1(Evidence(path), rubric, 10)
+    assert _check(rubric, "thermal_trace_and_reported_means")["status"] == "passed"
+    assert _check(rubric, "production_temperature_sanity")["status"] == "passed"
 
 
 def _thermal(frame):

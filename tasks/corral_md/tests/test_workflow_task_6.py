@@ -10,6 +10,7 @@ from ase.build import bulk
 from ase.calculators.singlepoint import SinglePointCalculator
 from corral_md.score import check_level2_workflow
 from corral_md.workflow_scoring.common import Evidence, Rubric
+from corral_md.workflow_scoring.level1 import evaluate as evaluate_level1
 from corral_md.workflow_scoring.task_6 import evaluate
 from scipy import signal
 
@@ -31,6 +32,42 @@ def _score(path):
 
 def _check(rubric, name):
     return next(c for c in rubric.checks if c["name"] == name)
+
+
+def test_level1_accepts_untimed_sampled_trajectory_and_sparse_trace(submission):
+    equilibration_path = submission.parent / "eq.json"
+    frames = _read(equilibration_path)
+    for frame in frames:
+        frame.pop("time_fs")
+    frames.insert(1, dict(frames[0]))
+    _write(equilibration_path, frames)
+    settings_path = submission.parent / "settings.json"
+    settings = _read(settings_path)
+    settings["md"].update(steps=1000, trajectory_interval_steps=250)
+    _write(settings_path, settings)
+    trace_path = submission.parent / "trace.json"
+    rows = _read(trace_path)
+    equilibrium_rows = [row for row in rows if row["stage"] == "equilibration"]
+    equilibrium_rows[0]["stage"] = "initialized"
+    equilibrium_rows.insert(1, dict(equilibrium_rows[0]))
+    equilibrium_rows = [equilibrium_rows[i] for i in (0, 1, 3, 5)]
+    _write(trace_path, equilibrium_rows)
+
+    rubric = Rubric(6, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 6)
+    for name in (
+        "initial_fcc_geometry",
+        "initialization_and_equilibration_settings",
+        "thermal_trace_from_saved_momenta",
+    ):
+        assert _check(rubric, name)["status"] == "passed", rubric.checks
+
+    rows = _read(trace_path)
+    rows[-1]["temperature_K"] += 100
+    _write(trace_path, rows)
+    rubric = Rubric(6, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 6)
+    assert _check(rubric, "thermal_trace_from_saved_momenta")["status"] == "failed"
 
 
 def test_off_target_production_temperature_requires_independent_review(submission):

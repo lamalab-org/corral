@@ -45,7 +45,11 @@ from corral.workspace import (
 )
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", "../CORRAL_WORK_DIR/corral_md")
-PACKAGE_DATA_ROOT = Path(__file__).resolve().parents[2] / "environments"
+# Wheels bundle task definitions inside the package; editable checkouts keep
+# their canonical copies at the project root.
+PACKAGE_DATA_ROOT = Path(__file__).with_name("environments")
+if not PACKAGE_DATA_ROOT.is_dir():
+    PACKAGE_DATA_ROOT = Path(__file__).resolve().parents[2] / "environments"
 
 SCORING_FUNCTIONS = {
     "check_level1_workflow": check_level1_workflow,
@@ -128,6 +132,17 @@ def load_tasks_from_json(json_path: Path, work_dir: str) -> dict[str, TaskDefini
 def _md_file_tools(workspace: str) -> dict[str, Tool]:
     """MD filesystem and LAMMPS tools bound to one local workspace."""
     tools = build_workspace_tools(MDWorkspaceFilesystem(workspace))
+    # Asset catalogs use Modal and cannot run in the source-isolated worker.
+    # These path-confined file operations do not execute workspace code.
+    for name in (
+        "list_files",
+        "read_file",
+        "file_info",
+        "copy_file",
+        "cat_files",
+        "grep",
+    ):
+        tools[name].trusted = True
     return {
         **{
             name: tools[name]
@@ -262,7 +277,7 @@ Required submission format:
             "/workspace/output for results.\n\n"
             "### Important Resource and File Access Guidelines ###\n"
             "1. **Potential Files**:\n"
-            "   - All potentials are mounted read-only below /workspace/potentials/. Hence whenever working with potential files, always use absolute paths (eg. /workspace/potentials/SW/Si.sw) as all potential files are mounted at fixed locations. Otherwise, the simulation will fail due to wrong path for the potential.\n"
+            "   - Potential assets are available at absolute paths below /workspace/potentials/ (for example /workspace/potentials/SW/Si.sw). Use the workspace file tools to list or copy them; they are not mounted in the local terminal. Modal simulations resolve these paths in their own runtime.\n"
             "   - These files are *fully verified and correct*.\n"
             "   - You must **not attempt to read or parse them directly**.\n"
             "   - Reading them is unnecessary and will waste important computational resources.\n\n"
@@ -270,8 +285,9 @@ Required submission format:
             "   - These files are *very large* and should **not be directly parsed**.\n"
             "   - Direct parsing would cause excessive cost and resource usage.\n\n"
             "Shared assets in /workspace/structures, /workspace/models and "
-            "/workspace/potentials are read-only. You may copy a supplied structure "
-            "into /workspace/input to work on it. Models are available to Python "
+            "/workspace/potentials are read-only virtual paths for the workspace file "
+            "tools, not local terminal paths. Use copy_file to copy a supplied "
+            "structure into /workspace/input before local work. Models are available to Python "
             "in the Modal GPU runtime at /workspace/models/teacher.model and "
             "/workspace/models/student.model. Copy any structure or potential needed "
             "by a local CPU script into the writable workspace first.\n\n"

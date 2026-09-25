@@ -26,7 +26,7 @@ from corral.workspace import (
 
 
 def build_run_verified_md_tool(workspace: str | Path):
-    @tool(hidden_args=["corral_action_id"])
+    @tool(hidden_args=["corral_action_id"], trusted=True)
     def run_verified_md(config_file: str, corral_action_id: str | None = None) -> str:
         """[BRIEF] Run the verified aluminum heat-capacity cycle and save its simulation artifacts. [/BRIEF]
 
@@ -966,7 +966,7 @@ def _run_lammps_for_workspace(
 def build_run_lammps_tool(workspace: str | Path):
     """Build the LAMMPS tool bound to one local Corral workspace."""
 
-    @tool(hidden_args=["corral_action_id"])
+    @tool(hidden_args=["corral_action_id"], trusted=True)
     def run_lammps(input_file: str, corral_action_id: str | None = None) -> str:
         """[BRIEF] Run a LAMMPS input file in the isolated MD sandbox. [/BRIEF]
 

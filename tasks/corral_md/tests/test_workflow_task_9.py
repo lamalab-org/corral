@@ -3,6 +3,7 @@
 import copy
 import json
 import pickle
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -10,6 +11,7 @@ from ase import units
 from ase.build import bulk
 from ase.calculators.singlepoint import SinglePointCalculator
 from corral_md.workflow_scoring.common import Evidence, Rubric
+from corral_md.workflow_scoring.level1 import evaluate as evaluate_level1
 from corral_md.workflow_scoring.regression import metrics, predict
 from corral_md.workflow_scoring.task_9 import RUNS, evaluate
 
@@ -31,6 +33,155 @@ def score(path):
 
 def check(r, name):
     return next(item for item in r.checks if item["name"] == name)
+
+
+def test_level1_accepts_one_saved_equilibration_boundary_state(submission):
+    manifest = read(submission)
+    artifacts = manifest["artifacts"]["runs"]["main"]
+    equilibration_path = Path(artifacts["equilibration"])
+    boundary_path = Path(artifacts["boundary"])
+    last = read(equilibration_path)[-1]
+    last.pop("energy")
+    last.pop("time_fs")
+    write(equilibration_path, [last])
+    boundary = copy.deepcopy(last)
+    write(boundary_path, [boundary])
+    settings_path = submission.parent / "settings.json"
+    settings = read(settings_path)
+    settings["runs"]["main"]["equilibration_steps"] = 300
+    write(settings_path, settings)
+
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    for name in (
+        "fixed_cell_cu32_chronological_frames",
+        "recorded_initialization_and_teacher",
+        "equilibration_to_production_continuity",
+    ):
+        assert check(rubric, name)["status"] == "passed", rubric.checks
+
+    changed = read(boundary_path)
+    changed[0]["momenta"][0][0] += 1
+    write(boundary_path, changed)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "equilibration_to_production_continuity")["status"] == "failed"
+
+
+@pytest.mark.parametrize("link_asset", [False, True])
+def test_level1_uses_mounted_cu32_without_a_local_copy(submission, link_asset):
+    manifest = read(submission)
+    if link_asset:
+        manifest["artifacts"]["input_structure"] = (
+            "/workspace/structures/cu/cu32.extxyz"
+        )
+    else:
+        manifest["artifacts"].pop("input_structure")
+    write(submission, manifest)
+
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "fixed_cell_cu32_chronological_frames")["status"] == "passed"
+
+
+def test_level1_accepts_sparse_raw_log_with_matching_samples(submission):
+    manifest = read(submission)
+    artifacts = manifest["artifacts"]["runs"]["main"]
+    log_path = Path(artifacts["log"])
+    log = read(log_path)
+    production_log = log[4:]
+    write(log_path, production_log[::20] + [production_log[-1]])
+
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "thermal_log_and_production_temperature")["status"] == "passed"
+
+    changed = read(log_path)
+    changed[-1]["temperature_K"] += 100
+    write(log_path, changed)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "thermal_log_and_production_temperature")["status"] == "failed"
+
+
+def test_level1_accepts_ase_temperature_reporting_and_unit_labeled_frames(submission):
+    manifest = read(submission)
+    artifacts = manifest["artifacts"]["runs"]["main"]
+    trajectory_path = Path(artifacts["trajectory"])
+    frames = read(trajectory_path)
+    for frame in frames:
+        for key, alias in (
+            ("positions", "positions_A"),
+            ("cell", "cell_A"),
+            ("momenta", "momenta_ase_units"),
+            ("energy", "potential_energy_eV"),
+            ("forces", "forces_eV_per_A"),
+        ):
+            frame[alias] = frame.pop(key)
+        frame.pop("symbols")
+        frame.pop("pbc")
+    write(
+        trajectory_path,
+        {"symbols": ["Cu"] * 32, "pbc": [True] * 3, "frames": frames},
+    )
+    log_path = Path(artifacts["log"])
+    production_log = read(log_path)[4:]
+    sparse_log = production_log[::20] + [production_log[-1]]
+    for row in sparse_log:
+        row["temperature_K"] *= 93 / 96
+    write(log_path, sparse_log)
+    manifest["results"]["runs"]["main"]["production_temperature_mean_K"] *= 93 / 96
+    write(submission, manifest)
+
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "fixed_cell_cu32_chronological_frames")["status"] == "passed"
+    assert check(rubric, "thermal_log_and_production_temperature")["status"] == "passed"
+
+    conflicting = read(trajectory_path)
+    conflicting["frames"][0]["positions"] = copy.deepcopy(
+        conflicting["frames"][0]["positions_A"]
+    )
+    conflicting["frames"][0]["positions"][0][0] += 1
+    write(trajectory_path, conflicting)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "fixed_cell_cu32_chronological_frames")["status"] == "failed"
+
+
+def test_level1_accepts_unbiased_interpolated_correlation(submission):
+    manifest = read(submission)
+    correlation_path = Path(manifest["artifacts"]["correlation"])
+    doc = read(correlation_path)
+    lags = np.asarray(doc["lag_indices"])
+    values = np.asarray(doc["values"]) * 200 / (200 - lags)
+    doc["values"] = values.tolist()
+    doc["estimator"] = (
+        "mean-subtracted potential-energy autocorrelation, "
+        "unbiased covariance at each lag"
+    )
+    doc["normalization"] = (
+        "C(k)/C(0); C(k)=sum((E_i-mean(E))*(E_(i+k)-mean(E)))/(N-k)"
+    )
+    characteristic = doc["characteristic"]
+    characteristic["method"] = "first 1/e crossing, linearly interpolated"
+    crossing = int(np.flatnonzero(values <= characteristic["threshold"])[0])
+    fraction = (characteristic["threshold"] - values[crossing - 1]) / (
+        values[crossing] - values[crossing - 1]
+    )
+    characteristic["value"] = float((crossing - 1 + fraction) * 5)
+    characteristic["bound"] = None
+    write(correlation_path, doc)
+
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "temporal_correlation_and_characteristic_time")["status"] == "passed"
+
+    doc["characteristic"]["value"] += 20
+    write(correlation_path, doc)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "temporal_correlation_and_characteristic_time")["status"] == "failed"
 
 
 def fit(x, y, alpha):
@@ -57,7 +208,7 @@ def temp(frame):
 
 @pytest.fixture
 def submission(tmp_path):
-    atoms = bulk("Cu", "fcc", a=3.61, cubic=True).repeat((2, 2, 2))
+    atoms = bulk("Cu", "fcc", a=3.615, cubic=True).repeat((2, 2, 2))
     masses = atoms.get_masses()
     base = {
         "symbols": ["Cu"] * 32,

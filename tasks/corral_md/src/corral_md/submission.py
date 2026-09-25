@@ -1,6 +1,7 @@
 """Resolve MD result files inside the workspace restored for evaluation."""
 
 import json
+import posixpath
 from pathlib import Path
 
 from corral.workspace import confine_workspace_path, workspace_relative_path
@@ -9,7 +10,7 @@ from corral.workspace import confine_workspace_path, workspace_relative_path
 class _ResolvedManifest(str):
     """Carry trusted path context without inserting it into agent JSON."""
 
-    __slots__ = ("workspace", "manifest_dir")
+    __slots__ = ("manifest_dir", "workspace")
 
     def __new__(cls, value: str, workspace: Path, manifest_dir: Path):
         result = super().__new__(cls, value)
@@ -22,6 +23,13 @@ def resolve_submission(submission: str, workspace: str | Path) -> str:
     """Handle numeric answers, result paths, JSON objects, and JSON manifests."""
     root = Path(workspace).resolve()
 
+    def confine_link(path: Path) -> Path:
+        # Linked paths are relative to the manifest. A sibling such as
+        # ../scripts/run.py is valid when it stays within the workspace.
+        # Normalize parent segments first, then apply the usual confinement
+        # and symlink checks to the resulting path.
+        return confine_workspace_path(root, Path(posixpath.normpath(path.as_posix())))
+
     def find_file(value: str, base: Path) -> Path:
         supplied = Path(value)
         if supplied.is_relative_to("/workspace"):
@@ -31,11 +39,9 @@ def resolve_submission(submission: str, workspace: str | Path) -> str:
                     f"Submitted file is missing from the workspace: {value}"
                 )
             return candidate
-        if ".." in supplied.parts:
-            raise ValueError(f"Submitted path cannot traverse its workspace: {value}")
         if not supplied.is_absolute() or supplied.is_relative_to(root):
             for directory in (base, root):
-                candidate = confine_workspace_path(root, directory / supplied)
+                candidate = confine_link(directory / supplied)
                 if candidate.is_file():
                     return candidate
             if supplied.is_absolute() or len(supplied.parts) > 1:
@@ -110,10 +116,6 @@ def resolve_submission(submission: str, workspace: str | Path) -> str:
             supplied = Path(item)
             if supplied.is_relative_to("/workspace"):
                 return str(confine_workspace_path(root, workspace_relative_path(item)))
-            if ".." in supplied.parts:
-                raise ValueError(
-                    f"Submitted path cannot traverse its workspace: {item}"
-                )
             if not supplied.is_absolute():
                 candidate = base / supplied
             elif supplied.is_relative_to(root):
@@ -127,7 +129,7 @@ def resolve_submission(submission: str, workspace: str | Path) -> str:
                 return str(supplied)
             # Preserve safe missing paths for per-check partial credit. An
             # explicit runA/file must never resolve to runB/file by basename.
-            return str(confine_workspace_path(root, candidate))
+            return str(confine_link(candidate))
 
         resolved = dict(value)
         for key in ("artifacts", "settings", "scripts", "report"):

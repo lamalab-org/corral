@@ -38,7 +38,14 @@ class PendingReviewError(RuntimeError):
 class WorkflowScorer:
     """Score one Corral MD workflow from its retained evidence."""
 
-    def __init__(self, task_number: int, *, level: int = 2, verifier=None):
+    def __init__(
+        self,
+        task_number: int,
+        *,
+        level: int = 2,
+        verifier=None,
+        restart_reader=None,
+    ):
         if type(task_number) is not int or task_number not in range(1, 11):
             raise ValueError("task_number must be an integer from 1 to 10")
         if type(level) is not int or level not in (1, 2):
@@ -46,6 +53,7 @@ class WorkflowScorer:
         self.task_number = task_number
         self.level = level
         self.verifier = verifier
+        self.restart_reader = restart_reader
 
     @property
     def module(self):
@@ -65,7 +73,7 @@ class WorkflowScorer:
         """Inspect evidence; optional review is trusted evaluator input only."""
         rubric = Rubric(self.task_number, binary=True)
         try:
-            evidence = Evidence(submission)
+            evidence = Evidence(submission, restart_reader=self.restart_reader)
         except Exception as exc:
             rubric.check(
                 "readable_manifest", 100, False, f"{type(exc).__name__}: {exc}"
@@ -78,8 +86,13 @@ class WorkflowScorer:
             report["level"] = self.level
             return report
         initial_fingerprint = None
+        independent_model_required = self.level == 1 and self.task_number >= 3
         if self.level == 1:
-            level1_reproducibility(evidence, rubric)
+            level1_reproducibility(
+                evidence,
+                rubric,
+                independent_model_required=independent_model_required,
+            )
         else:
             reproducibility(evidence, rubric)
         if rubric.failed:
@@ -113,6 +126,12 @@ class WorkflowScorer:
                     remaining,
                     False,
                     f"{type(exc).__name__}: {exc}",
+                )
+            if independent_model_required and not rubric.failed:
+                rubric.unverified(
+                    "independent_model_calculation",
+                    "Saved model values require independent energy and force checks on sampled structures.",
+                    points=1,
                 )
             remaining = max(0, 100 - sum(c["points"] for c in rubric.checks))
             if rubric.failed and remaining:
@@ -192,18 +211,25 @@ def check_level2_workflow(
 def check_level1_workflow(
     task_number: int, verification_backend: str | None = None
 ) -> WorkflowScorer:
-    """Construct the artifact-only scorer for one preparatory workflow."""
-    # The current Modal verification plans cover the complete Level 2 workflow.
-    # Do not let a process-wide Level 2 deployment setting make Level 1 tasks
-    # un-loadable or accidentally verify later-stage artifacts.
-    backend = verification_backend or "offline"
-    if backend != "offline":
-        if backend == "modal":
-            raise ValueError(
-                "Level 1 scoring is artifact-only; verification_backend must be 'offline'"
-            )
-        raise ValueError("verification_backend must be 'offline'")
-    return WorkflowScorer(task_number, level=1)
+    """Construct the Level 1 scorer with independent MACE checks by default."""
+    if type(task_number) is not int or task_number not in range(1, 11):
+        raise ValueError("task_number must be an integer from 1 to 10")
+    backend = verification_backend or (
+        "modal" if task_number == 1 or task_number >= 3 else "offline"
+    )
+    if backend == "offline":
+        return WorkflowScorer(task_number, level=1)
+    if backend != "modal":
+        raise ValueError("verification_backend must be 'offline' or 'modal'")
+    if task_number == 1:
+        from corral_md.workflow_scoring.restart_reader import ModalRestartReader
+
+        return WorkflowScorer(task_number, level=1, restart_reader=ModalRestartReader())
+    if task_number < 3:
+        raise ValueError("Level 1 Modal verification applies to task 1 or tasks 3-10")
+    from corral_md.workflow_scoring.level1_trusted import Level1ModalVerifier
+
+    return WorkflowScorer(task_number, level=1, verifier=Level1ModalVerifier())
 
 
 __all__ = [
@@ -228,9 +254,6 @@ def main() -> int:
         choices=("offline", "modal"),
         help="Independent Modal calculator and provenance checks",
     )
-    parser.add_argument(
-        "--release-id", help="Evaluator-selected pinned verifier release"
-    )
     parser.add_argument("--run-id", help="Bind provenance to the evaluated execution")
     parser.add_argument(
         "--action-id", help="Bind provenance to its controlled MD action"
@@ -239,10 +262,9 @@ def main() -> int:
     review = json.loads(args.review.read_text()) if args.review else None
     factory = check_level1_workflow if args.level == 1 else check_level2_workflow
     scorer = factory(args.task_number, verification_backend=args.verification)
-    if args.release_id or args.run_id or args.action_id:
+    if args.run_id or args.action_id:
         if scorer.verifier is None:
-            parser.error("--release-id/--run-id/--action-id require Modal verification")
-        scorer.verifier.release_id = args.release_id
+            parser.error("--run-id/--action-id require Modal verification")
         scorer.verifier.run_id = args.run_id
         scorer.verifier.action_id = args.action_id
     report = scorer.evaluate(args.manifest, review=review)

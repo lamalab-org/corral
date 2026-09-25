@@ -17,7 +17,7 @@ def load_example(task_number: int, *, level: int = 2) -> dict:
         raise ValueError("task_number must be an integer from 1 to 10")
     if type(level) is not int or level not in (1, 2):
         raise ValueError("level must be 1 or 2")
-    root = TEMPLATE_ROOT / "level_1" if level == 1 else TEMPLATE_ROOT
+    root = TEMPLATE_ROOT / f"level_{level}"
     return json.loads((root / f"task_{task_number}.json").read_text())
 
 

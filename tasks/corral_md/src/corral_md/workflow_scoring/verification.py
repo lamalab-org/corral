@@ -1207,6 +1207,31 @@ def _check_provenance(verifier, e):
 def apply_verification(rubric, report, *, task_number=None):
     """Gate affected checks, including task-specific requirements when offline."""
     by_name = {check["name"]: check for check in rubric.checks}
+    independent = by_name.get("independent_model_calculation")
+    if independent is not None:
+        relevant = [
+            check
+            for check in (report or {}).get("checks", [])
+            if "independent_model_calculation" in check.get("targets", [])
+        ]
+        if any(check.get("status") == "failed" for check in relevant):
+            independent.update(
+                status="failed",
+                earned=0.0,
+                detail="An independent model energy or force calculation disagreed with the saved evidence.",
+            )
+        elif relevant and all(check.get("status") == "passed" for check in relevant):
+            independent.update(
+                status="passed",
+                earned=independent["points"],
+                detail="Independent model calculations matched sampled saved energies and forces.",
+            )
+        else:
+            independent.update(
+                status="unverified",
+                earned=0.0,
+                detail="Required independent model calculation is unavailable or incomplete.",
+            )
     for verification in report["checks"] if report is not None else ():
         if (
             verification["id"] == "trusted_md_execution"
@@ -1221,6 +1246,8 @@ def apply_verification(rubric, report, *, task_number=None):
         for name in verification.get("targets", []):
             check = by_name.get(name)
             if check is None or check["status"] == "failed":
+                continue
+            if name == "independent_model_calculation":
                 continue
             check["status"] = verification["status"]
             check["earned"] = 0.0

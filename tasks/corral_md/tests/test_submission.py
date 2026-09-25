@@ -50,3 +50,50 @@ def test_submission_paths_cannot_escape_workspace(tmp_path):
     for answer in ("../secret.csv", "link.csv", '{"result": "link.csv"}'):
         with pytest.raises(ValueError, match="workspace"):
             resolve_submission(answer, workspace)
+
+
+def test_manifest_can_link_sibling_workspace_files(tmp_path):
+    workspace = tmp_path / "workspace"
+    output = workspace / "output"
+    scripts = workspace / "scripts"
+    output.mkdir(parents=True)
+    scripts.mkdir()
+    script = scripts / "run.py"
+    script.write_text("print('ok')")
+    (output / "manifest.json").write_text(
+        json.dumps({"scripts": {"run": "../scripts/run.py"}})
+    )
+
+    resolved = json.loads(resolve_submission("/workspace/output/manifest.json", workspace))
+
+    assert resolved["scripts"]["run"] == str(script)
+
+
+def test_manifest_sibling_path_cannot_escape_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    output = workspace / "output"
+    output.mkdir(parents=True)
+    (tmp_path / "secret.csv").write_text("secret")
+    (output / "manifest.json").write_text(
+        json.dumps({"artifacts": {"secret": "../../secret.csv"}})
+    )
+
+    with pytest.raises(ValueError, match="workspace"):
+        resolve_submission("/workspace/output/manifest.json", workspace)
+
+
+def test_manifest_sibling_symlink_is_rejected(tmp_path):
+    workspace = tmp_path / "workspace"
+    output = workspace / "output"
+    scripts = workspace / "scripts"
+    output.mkdir(parents=True)
+    scripts.mkdir()
+    secret = tmp_path / "secret.py"
+    secret.write_text("secret")
+    (scripts / "run.py").symlink_to(secret)
+    (output / "manifest.json").write_text(
+        json.dumps({"scripts": {"run": "../scripts/run.py"}})
+    )
+
+    with pytest.raises(ValueError, match="workspace"):
+        resolve_submission("/workspace/output/manifest.json", workspace)

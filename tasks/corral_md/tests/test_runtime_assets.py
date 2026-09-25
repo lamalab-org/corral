@@ -5,9 +5,11 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import modal
 import pytest
+from corral_md import modal_workspace as bridge
 from corral_md.env import create_environments
 
 APP_DIR = Path(__file__).resolve().parents[1] / "modal_app"
@@ -44,6 +46,9 @@ def test_prepare_shipped_archives_and_cache_verified_models(
     assert (tmp_path / "potentials/SW/Si.sw").is_file()
     assert (tmp_path / "potentials/BKS/pot.mod").is_file()
     assert (tmp_path / "structures/melt/liq4000.dat").is_file()
+    assert (tmp_path / "structures/melt/liq1300.dat").is_file()
+    assert (tmp_path / "structures/cu/cu32.extxyz").is_file()
+    assert not (tmp_path / "structures/si/mp-149-conventional.extxyz").exists()
     assert (tmp_path / "models/test.model").read_bytes() == small_model
     assert not (tmp_path / "__MACOSX").exists()
 
@@ -154,56 +159,73 @@ def test_prompts_use_provisioned_checkpoint_names(tmp_path):
         assert "/workspace/models" in prompt
 
 
-def test_catalog_uses_release_asset_volumes(monkeypatch):
-    from types import SimpleNamespace
-
-    from corral_md import modal_workspace as bridge
-
-    monkeypatch.setenv("CORRAL_MD_RELEASE_ID", "release-1")
-
-    def read(path):
-        assert path == "/corral/releases/release-1/base.json"
-        yield json.dumps({
-            "release_id": "release-1",
-            "asset_volumes": {"potentials": "corral-md-potentials-version1"},
-        }).encode()
-
+def test_catalog_uses_deployed_asset_volumes(monkeypatch):
+    monkeypatch.delenv("CORRAL_MD_RELEASE_ID", raising=False)
     monkeypatch.setattr(
-        bridge.modal.Volume,
+        bridge.modal.Function,
         "from_name",
-        lambda name: SimpleNamespace(read_file=read),
+        lambda app, function: SimpleNamespace(remote=lambda: {
+            "schema": 1, "app_name": app, "release_id": "release-1",
+            "volume_name": "internal-simulations",
+            "asset_volumes": {
+                "models": "corral-md-models-version1",
+                "potentials": "corral-md-potentials-version1",
+                "structures": "corral-md-structures-version1",
+            },
+        }) if (app, function) == ("simagent", "runtime_info") else None,
     )
     assert bridge.configured_asset_volume_name("potentials") == "corral-md-potentials-version1"
 
 
-def test_runtime_configuration_is_explicit(monkeypatch):
-    from corral_md import modal_workspace as bridge
-
-    monkeypatch.setenv("CORRAL_MD_RELEASE_ID", "release-1")
-    monkeypatch.setenv("CORRAL_MD_MODAL_VOLUME", "internal-simulations")
+def test_runtime_configuration_follows_deployed_simagent(monkeypatch):
+    monkeypatch.setenv("CORRAL_MD_RELEASE_ID", "stale-release")
+    monkeypatch.setattr(
+        bridge.modal.Function,
+        "from_name",
+        lambda app, function: SimpleNamespace(remote=lambda: {
+            "schema": 1, "app_name": app, "release_id": "release-1",
+            "volume_name": "internal-simulations",
+            "asset_volumes": {
+                "models": "models-v1", "potentials": "potentials-v1",
+                "structures": "structures-v1",
+            },
+        }) if (app, function) == ("simagent", "runtime_info") else None,
+    )
     assert bridge.configured_runtime() == ("release-1", "internal-simulations")
 
 
-def test_runtime_configuration_requires_release_id(monkeypatch):
-    from corral_md import modal_workspace as bridge
-
+@pytest.mark.parametrize("invalid", [
+    None,
+    {"schema": 2, "app_name": "simagent", "release_id": "release-1", "volume_name": "simulations"},
+    {"schema": 1, "app_name": "other", "release_id": "release-1", "volume_name": "simulations"},
+    {"schema": 1, "app_name": "simagent", "release_id": "../bad", "volume_name": "simulations"},
+    {"schema": 1, "app_name": "simagent", "release_id": "release-1", "volume_name": ""},
+])
+def test_runtime_configuration_rejects_invalid_worker_metadata(monkeypatch, invalid):
     monkeypatch.delenv("CORRAL_MD_RELEASE_ID", raising=False)
-    with pytest.raises(RuntimeError, match="CORRAL_MD_RELEASE_ID"):
+    monkeypatch.setattr(
+        bridge.modal.Function,
+        "from_name",
+        lambda _app, _function: SimpleNamespace(remote=lambda: invalid),
+    )
+    with pytest.raises((RuntimeError, ValueError)):
         bridge.configured_runtime()
 
 
 def test_asset_catalog_follows_execution_pin_after_a_new_release(monkeypatch):
-    from types import SimpleNamespace
-
-    from corral_md import modal_workspace as bridge
-
-    paths = []
-
-    def read(path):
-        paths.append(path)
-        yield json.dumps({"release_id": "old", "asset_volumes": {"models": "models-old"}}).encode()
-
-    monkeypatch.setattr(bridge.modal.Volume, "from_name", lambda _name: SimpleNamespace(read_file=read))
+    monkeypatch.setattr(
+        bridge.modal.Function,
+        "from_name",
+        lambda _app, _function: SimpleNamespace(remote=lambda: {
+            "schema": 1, "app_name": "simagent", "release_id": "current",
+            "volume_name": "simulations",
+            "asset_volumes": {
+                "models": "models-current", "potentials": "potentials-current",
+                "structures": "structures-current",
+            },
+        }),
+    )
     with bridge.pinned_release("old"):
-        assert bridge.configured_asset_volume_name("models") == "models-old"
-    assert paths == ["/corral/releases/old/base.json"]
+        with pytest.raises(RuntimeError, match="different SimAgent build"):
+            bridge.configured_asset_volume_name("models")
+    assert bridge.configured_asset_volume_name("models") == "models-current"

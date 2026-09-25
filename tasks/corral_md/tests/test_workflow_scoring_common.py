@@ -156,7 +156,7 @@ def test_result_strings_are_not_paths_even_when_they_look_like_paths(manifest):
     assert Evidence(resolve_submission(str(path), root)).result("unit") == "m2/s"
 
 
-@pytest.mark.parametrize("link", ["../outside.json", "/external/missing.json"])
+@pytest.mark.parametrize("link", ["../../outside.json", "/external/missing.json"])
 def test_workspace_confinement(manifest, link):
     root, path, data = manifest
     data["artifacts"]["data"] = link
@@ -325,13 +325,14 @@ def test_invalid_task_number(number):
         check_level1_workflow(number)
 
 
-def test_level1_factory_is_distinct_and_artifact_only():
+def test_level1_factory_uses_independent_model_verification():
     scorer = check_level1_workflow(3)
     assert scorer.task_number == 3
     assert scorer.level == 1
-    assert scorer.verifier is None
-    with pytest.raises(ValueError, match="artifact-only"):
-        check_level1_workflow(3, verification_backend="modal")
+    assert scorer.verifier is not None
+    assert check_level1_workflow(3, verification_backend="modal").verifier is not None
+    assert check_level1_workflow(3, verification_backend="offline").verifier is None
+    assert check_level1_workflow(2).verifier is None
 
 
 def _pending_scorer(monkeypatch):

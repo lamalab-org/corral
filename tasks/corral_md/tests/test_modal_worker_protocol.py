@@ -28,15 +28,11 @@ def worker(tmp_path: Path, monkeypatch):
     volume = Volume()
     monkeypatch.setattr(module, "volume_sim", volume)
     monkeypatch.setattr(module, "RUNS", tmp_path / "runs")
-    monkeypatch.setattr(module, "RELEASES", tmp_path / "releases")
     monkeypatch.setattr(module, "RELEASE_ID", "release-1")
+    monkeypatch.setattr(module, "BASE_SEED", {
+        "schema": 1, "directories": ["input", "output"],
+    })
     monkeypatch.setattr(module.modal, "current_function_call_id", lambda: "fc-1")
-    base = tmp_path / "releases/release-1/base.json"
-    base.parent.mkdir(parents=True)
-    base.write_text(json.dumps({
-        "schema": 1, "release_id": "release-1",
-        "directories": ["input", "output"],
-    }))
     return module, volume
 
 

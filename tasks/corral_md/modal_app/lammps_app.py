@@ -21,15 +21,28 @@ APP_DIR = (
 )
 sys.path.insert(0, str(APP_DIR))
 from asset_versions import asset_volume_names  # noqa: E402 — image-local helper
+from runtime_identity import runtime_id  # noqa: E402 — deployment-local helper
 
 ASSETS = json.loads((APP_DIR / "assets.json").read_text())
 # Pin this app's builder; older account defaults inject Python-3.12-incompatible
 # dependencies. This also applies when a controller constructs a sandbox image.
 os.environ["MODAL_IMAGE_BUILDER_VERSION"] = ASSETS["image_builder_version"]
 ASSET_VOLUMES = asset_volume_names(ASSETS)
-RELEASE_ID = os.getenv("CORRAL_MD_RELEASE_ID", "")
+# The deployment itself supplies this internal fingerprint to its image. No
+# operator-provided release setting is needed, including for a plain Modal deploy.
+RELEASE_ID = (
+    runtime_id(APP_DIR.parent)
+    if modal.is_local()
+    else os.environ["CORRAL_MD_RUNTIME_ID"]
+)
 APP_NAME = "simagent"
 VOLUME_NAME = os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations")
+SEED_FILE = (
+    APP_DIR.parent / "src/corral_md/base_workspace.json"
+    if modal.is_local()
+    else APP_DIR / "base_workspace.json"
+)
+BASE_SEED = json.loads(SEED_FILE.read_text())
 
 lammps_image = (
     # The account's legacy debian_slim builder uses retired Bullseye security
@@ -52,6 +65,14 @@ lammps_image = (
     )
     .add_local_file(
         APP_DIR / "asset_versions.py", "/opt/corral-md/asset_versions.py", copy=True
+    )
+    .add_local_file(
+        APP_DIR / "runtime_identity.py", "/opt/corral-md/runtime_identity.py", copy=True
+    )
+    .add_local_file(
+        SEED_FILE,
+        "/opt/corral-md/base_workspace.json",
+        copy=True,
     )
     .run_commands(
         "git init /root/lammps",
@@ -80,7 +101,8 @@ lammps_image = lammps_image.pip_install_from_requirements(
 ).run_commands("python -m pip freeze > /opt/corral-md/installed-packages.txt")
 lammps_image = lammps_image.env(
     {
-        "CORRAL_MD_RELEASE_ID": RELEASE_ID,
+        "CORRAL_MD_RUNTIME_ID": RELEASE_ID,
+        "CORRAL_MD_MODAL_VOLUME": VOLUME_NAME,
         "MODAL_IMAGE_BUILDER_VERSION": ASSETS["image_builder_version"],
     }
 )
@@ -97,9 +119,20 @@ for _source in (
 
 app = App(APP_NAME)
 
+
+@app.function(image=lammps_image, cpu=1)
+def runtime_info() -> dict:
+    """Let clients discover the active SimAgent deployment without local pins."""
+    return {
+        "schema": 1,
+        "app_name": APP_NAME,
+        "release_id": RELEASE_ID,
+        "volume_name": VOLUME_NAME,
+        "asset_volumes": ASSET_VOLUMES,
+    }
+
 volume_potential = modal.Volume.from_name(ASSET_VOLUMES["potentials"])
 volume_sim = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
-volume_base = modal.Volume.from_name("corral-md-bases", create_if_missing=True)
 volume_struct = modal.Volume.from_name(ASSET_VOLUMES["structures"])
 volume_models = modal.Volume.from_name(ASSET_VOLUMES["models"])
 
@@ -107,7 +140,6 @@ CPUS = 2
 GPU_TYPE = "A100"
 MAX_EVALUATION_CONTAINERS = 25
 RUNS = Path("/results/corral/runs")
-RELEASES = Path("/bases/corral/releases")
 ASSET_DIRECTORIES = frozenset({"models", "potentials", "structures"})
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
@@ -173,11 +205,18 @@ def _manifest(root: Path) -> dict[str, dict[str, str | int]]:
 def _release_base(release_id: str) -> dict:
     _id(release_id)
     if release_id != RELEASE_ID:
-        raise ValueError("Worker image does not match the pinned release")
-    base = _load(RELEASES / release_id / "base.json")
-    if base.get("release_id") != release_id or base.get("schema") != 1:
-        raise ValueError("Modal base release is invalid")
-    return base
+        raise ValueError("Worker image does not match the pinned SimAgent build")
+    if BASE_SEED.get("schema") != 1 or not isinstance(
+        BASE_SEED.get("directories"), list
+    ):
+        raise ValueError("Invalid bundled SimAgent workspace seed")
+    for name in BASE_SEED["directories"]:
+        _relative(name)
+    return {
+        **BASE_SEED,
+        "release_id": RELEASE_ID,
+        "asset_volumes": ASSET_VOLUMES,
+    }
 
 
 def _prepare(run_id: str, release_id: str) -> dict:
@@ -189,7 +228,7 @@ def _prepare(run_id: str, release_id: str) -> dict:
     if state_path.exists():
         state = _load(state_path)
         if state.get("release_id") != release_id:
-            raise ValueError("Existing run is pinned to a different release")
+            raise ValueError("Existing run is pinned to a different SimAgent build")
         if state.get("closed_at"):
             raise ValueError("MD run is closed")
     else:
@@ -229,10 +268,10 @@ def _prepare(run_id: str, release_id: str) -> dict:
     image=lammps_image,
     cpu=1,
     timeout=600,
-    volumes={"/results": volume_sim, "/bases": volume_base.read_only()},
+    volumes={"/results": volume_sim},
 )
 def prepare_workspace(run_id: str, release_id: str) -> dict:
-    """Initialize or restore one run from its pinned release base."""
+    """Initialize or restore a run from the bundled SimAgent workspace seed."""
     return _prepare(run_id, release_id)
 
 
@@ -582,7 +621,7 @@ def _execute(
     cpu=1,
     timeout=7500,
     memory=2048,
-    volumes={"/results": volume_sim, "/bases": volume_base.read_only()},
+    volumes={"/results": volume_sim},
 )
 def run_lammps(
     run_id: str,
@@ -615,7 +654,7 @@ def run_lammps(
     cpu=1,
     timeout=7500,
     memory=2048,
-    volumes={"/results": volume_sim, "/bases": volume_base.read_only()},
+    volumes={"/results": volume_sim},
 )
 def run_python_gpu(
     run_id: str,
@@ -657,7 +696,7 @@ def _verification_runtime():
     max_containers=MAX_EVALUATION_CONTAINERS,
     timeout=7500,
     memory=4096,
-    volumes={"/results": volume_sim, "/bases": volume_base.read_only()},
+    volumes={"/results": volume_sim},
 )
 def verify_calculations(
     verification_id: str, release_id: str, expected_files: dict
@@ -674,7 +713,7 @@ def verify_calculations(
     max_containers=MAX_EVALUATION_CONTAINERS,
     timeout=600,
     memory=2048,
-    volumes={"/results": volume_sim, "/bases": volume_base.read_only()},
+    volumes={"/results": volume_sim},
 )
 def verify_md_provenance(
     run_id: str, action_id: str, release_id: str, expected_files: dict
@@ -690,7 +729,7 @@ def verify_md_provenance(
     cpu=1,
     timeout=7500,
     memory=2048,
-    volumes={"/results": volume_sim, "/bases": volume_base.read_only()},
+    volumes={"/results": volume_sim},
 )
 def run_verified_md(
     run_id: str,

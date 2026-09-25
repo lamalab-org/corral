@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from ase.data import atomic_masses, atomic_numbers
 from corral_md.workflow_scoring.common import Evidence, Rubric
+from corral_md.workflow_scoring.level1 import _task_2 as evaluate_level1_task_2
 from corral_md.workflow_scoring.task_2 import _estimate, evaluate
 
 
@@ -21,9 +22,9 @@ def write_json(path, data):
 def submission(tmp_path):
     rows = []
     for stage, start, end, low, high, tg in [
-        ("cooling", 0, 370, 4000, 300, 1500),
-        ("hold", 370, 470, 300, 300, 1500),
-        ("reheating", 470, 700, 300, 2600, 1650),
+        ("cooling", 0, 20, 1300, 300, 750),
+        ("hold", 20, 30, 300, 300, 750),
+        ("reheating", 30, 50, 300, 1300, 850),
     ]:
         for index, time in enumerate(np.linspace(start, end, 41)):
             target = low + (high - low) * (time - start) / (end - start)
@@ -56,10 +57,10 @@ def submission(tmp_path):
     }
     for stage in ["cooling", "reheating"]:
         low_idx = list(
-            trace.index[(trace.stage == stage) & (trace.temperature_K < 1100)]
+            trace.index[(trace.stage == stage) & (trace.temperature_K < 500)]
         )
         high_idx = list(
-            trace.index[(trace.stage == stage) & (trace.temperature_K > 2000)]
+            trace.index[(trace.stage == stage) & (trace.temperature_K > 1050)]
         )
 
         def estimator(low_indices, high_indices):
@@ -105,11 +106,11 @@ def submission(tmp_path):
         results[f"{stage}_uncertainty_K"] = float(
             np.std([rec["estimate_K"] for rec in replicates], ddof=1)
         )
-    hold = trace.index[(trace.stage == "hold") & (trace.time_ps >= 390)].tolist()
+    hold = trace.index[(trace.stage == "hold") & (trace.time_ps >= 22)].tolist()
     report["hold"] = {
         "indices": hold,
         "drift_indices": hold,
-        "window_rationale": "Discard the first 20 ps.",
+        "window_rationale": "Discard the first 2 ps.",
         "drift_method": "linear_slope",
     }
     selected = trace.iloc[hold]
@@ -126,11 +127,11 @@ def submission(tmp_path):
     mass = sum(atomic_masses[atomic_numbers[symbol]] for symbol in species)
     for name, time, row in [
         ("initial", 0, 0),
-        ("cooling_end", 370, 40),
-        ("hold_start", 370, 40),
-        ("hold_end", 470, 81),
-        ("reheating_start", 470, 81),
-        ("reheating_end", 700, 122),
+        ("cooling_end", 20, 40),
+        ("hold_start", 20, 40),
+        ("hold_end", 30, 81),
+        ("reheating_start", 30, 81),
+        ("reheating_end", 50, 122),
     ]:
         length = (mass * 1.66053906660 / trace.iloc[row].density_g_cm3) ** (1 / 3)
         states[name] = {
@@ -146,21 +147,21 @@ def submission(tmp_path):
     (tmp_path / "in.lammps").write_text("""units real
 atom_style charge
 boundary p p p
-read_data liq4000.dat
+read_data liq1300.dat
 pair_style buck/coul/long 8 12
 pair_coeff * * 0 1 0
 pair_coeff 1 3 101093.3472 0.243838 707.96963
 pair_coeff 2 3 316001.3219145 0.193817 1260.9930729
 pair_coeff 3 3 42541.49842 0.343645 4441.068122
 kspace_style pppm 1e-5
-fix ramp all npt temp 4000 300 100 iso 0 0 1000
-run 370000
+fix ramp all npt temp 1300 300 100 iso 0 0 1000
+run 20000
 unfix ramp
 fix hold all npt temp 300 300 100 iso 0 0 1000
-run 100000
+run 10000
 unfix hold
-fix heat all npt temp 300 2600 100 iso 0 0 1000
-run 230000
+fix heat all npt temp 300 1300 100 iso 0 0 1000
+run 20000
 """)
     (tmp_path / "log.lammps").write_text(
         "Step Temp Press Density\n"
@@ -199,6 +200,26 @@ def test_valid_evidence_and_signed_hysteresis(submission):
     assert rubric.score == pytest.approx(0.9), rubric.checks
     assert sum(c["points"] for c in rubric.checks) == 90
     assert check(rubric, "execution_provenance")["status"] == "unverified"
+
+
+def test_level1_accepts_the_20_ps_cooling_stage(submission):
+    manifest, _, trace, root = submission
+    trace[trace.stage == "cooling"].to_csv(root / "thermal.csv", index=False)
+    states = json.loads((root / "boundaries.json").read_text())
+    write_json(
+        root / "boundaries.json",
+        {name: states[name] for name in ("initial", "cooling_end")},
+    )
+    inputs = (root / "in.lammps").read_text().split("unfix ramp", 1)[0]
+    (root / "in.lammps").write_text(inputs)
+    log_rows = (root / "log.lammps").read_text().splitlines()
+    (root / "log.lammps").write_text("\n".join(log_rows[:42]) + "\n")
+    rubric = Rubric(2)
+    evaluate_level1_task_2(Evidence(manifest), rubric)
+    assert check(rubric, "cooling_schedule_and_observables")["status"] == "passed"
+    assert check(rubric, "supplied_silicate_source_state")["status"] == "failed"
+    assert check(rubric, "cooled_endpoint_temperature")["status"] == "failed"
+    assert rubric.score == pytest.approx(0.80), rubric.checks
 
 
 @pytest.mark.parametrize(
@@ -314,7 +335,7 @@ def test_unknown_method_is_explicitly_unverified(submission):
 @pytest.mark.parametrize("method", ["endpoint_slope", "theil_sen"])
 def test_complete_alternative_estimator_and_drift_submission(submission, method):
     manifest, report, trace, root = submission
-    for stage, expected in [("cooling", 1500), ("reheating", 1650)]:
+    for stage, expected in [("cooling", 750), ("reheating", 850)]:
         report["transitions"][stage] = {
             "method": "change_point",
             "indices": trace.index[trace.stage == stage].tolist(),
@@ -323,7 +344,7 @@ def test_complete_alternative_estimator_and_drift_submission(submission, method)
             "estimate_K": expected,
         }
         manifest["results"][f"{stage}_tg_K"] = expected
-    manifest["results"]["delta_tg_K"] = 150
+    manifest["results"]["delta_tg_K"] = 100
     report["hold"]["drift_method"] = method
     part = trace.iloc[report["hold"]["drift_indices"]].sort_values("time_ps")
     x, y = part.time_ps.to_numpy(), part.density_g_cm3.to_numpy()
@@ -381,7 +402,7 @@ def test_periodic_default_does_not_need_an_explicit_boundary_command(submission)
     rubric = grade(manifest)
     assert rubric.score == pytest.approx(0.9), rubric.checks
     path.write_text(
-        text.replace("read_data liq4000.dat", "boundary f p p\nread_data liq4000.dat")
+        text.replace("read_data liq1300.dat", "boundary f p p\nread_data liq1300.dat")
     )
     assert check(grade(manifest), "saved_physics_and_logs")["status"] == "failed"
 
@@ -393,10 +414,10 @@ def test_alternative_change_point_estimator(submission):
         "method": "change_point",
         "indices": indices,
         "temperature_coordinate": "temperature_K",
-        "candidates_K": [1550, 1600, 1650, 1700, 1750],
-        "estimate_K": 1650,
+        "candidates_K": [750, 800, 850, 900, 950],
+        "estimate_K": 850,
     }
-    assert _estimate(trace, "reheating", record) == 1650
+    assert _estimate(trace, "reheating", record) == 850
 
 
 def test_periodic_wrapping_and_atom_reordering_are_accepted(submission):
@@ -421,21 +442,17 @@ def test_input_runs_must_support_the_thermal_cycle(submission, change):
         text = "\n".join(
             line for line in text.splitlines() if not line.startswith("run ")
         )
-        text += "\n# run 370000\n# run 100000\n# run 230000\n"
+        text += "\n# run 20000\n# run 10000\n# run 20000\n"
     elif change == "zero":
-        text = (
-            text.replace("run 370000", "run 0")
-            .replace("run 100000", "run 0")
-            .replace("run 230000", "run 0")
-        )
+        text = text.replace("run 20000", "run 0").replace("run 10000", "run 0")
     elif change == "duration":
-        text = text.replace("run 370000", "run 370")
+        text = text.replace("run 20000", "run 20", 1)
     elif change == "timestep":
         text = "timestep 2\n" + text
     elif change == "temperature":
-        text = text.replace("temp 4000 300", "temp 300 300")
+        text = text.replace("temp 1300 300", "temp 300 300")
     else:
-        text = text.replace("run 370000", "unfix ramp\nrun 370000")
+        text = text.replace("run 20000", "unfix ramp\nrun 20000", 1)
     path.write_text(text)
     assert check(grade(manifest), "thermal_cycle")["status"] == "failed"
 
@@ -454,7 +471,7 @@ def test_runs_must_use_supplied_potential(submission, change):
     elif change == "cutoff":
         text = text.replace("8 12", "10 10")
     else:
-        text = text.replace("run 100000", "pair_coeff * * 0 1 0\nrun 100000")
+        text = text.replace("run 10000", "pair_coeff * * 0 1 0\nrun 10000")
     path.write_text(text)
     assert check(grade(manifest), "saved_physics_and_logs")["status"] == "failed"
 
@@ -484,14 +501,20 @@ def test_supplied_include_literal_variables_and_split_runs(submission):
         if not line.startswith(("pair_style", "pair_coeff", "kspace_style"))
     ]
     text = "\n".join(lines).replace(
-        "read_data liq4000.dat",
-        "read_data liq4000.dat\ninclude /workspace/potentials/BKS/pot.mod",
+        "read_data liq1300.dat",
+        "read_data liq1300.dat\ninclude /workspace/potentials/BKS/pot.mod",
     )
     text = "variable dt equal 0.5\ntimestep ${dt}\n" + text
     text = text.replace(
-        "run 370000", "run 370000 start 0 stop 740000\nrun 370000 start 0 stop 740000"
+        "run 20000", "run 20000 start 0 stop 40000\nrun 20000 start 0 stop 40000", 1
     )
-    text = text.replace("run 100000", "run 200000").replace("run 230000", "run 460000")
+    text = text.replace(
+        "fix hold all npt temp 300 300 100 iso 0 0 1000\nrun 10000",
+        "fix hold all npt temp 300 300 100 iso 0 0 1000\nrun 20000",
+    ).replace(
+        "fix heat all npt temp 300 1300 100 iso 0 0 1000\nrun 20000",
+        "fix heat all npt temp 300 1300 100 iso 0 0 1000\nrun 40000",
+    )
     path.write_text(text)
     log = root / "log.lammps"
     rows = [line.split() for line in log.read_text().splitlines()[1:]]
@@ -501,3 +524,36 @@ def test_supplied_include_literal_variables_and_split_runs(submission):
     )
     rubric = grade(manifest)
     assert rubric.score == pytest.approx(0.9), rubric.checks
+
+
+def test_supplied_bks_include_and_output_expressions_need_no_potential_copy(submission):
+    manifest, _, _, root = submission
+    path = root / "in.lammps"
+    lines = [
+        line
+        for line in path.read_text().splitlines()
+        if not line.startswith(("pair_style", "pair_coeff", "kspace_style"))
+    ]
+    text = "\n".join(lines).replace(
+        "read_data liq1300.dat",
+        "read_data liq1300.dat\ninclude /workspace/potentials/BKS/pot.mod",
+    )
+    text = text.replace(
+        "fix ramp all npt",
+        'variable t equal 1300-0.05*step\nfix trace all print 1000 "${t}" file trace.dat screen no\nfix ramp all npt',
+    )
+    path.write_text(text)
+    assert grade(manifest).score == pytest.approx(0.9)
+
+
+def test_nonliteral_variable_in_npt_schedule_remains_unverified(submission):
+    manifest, _, _, root = submission
+    path = root / "in.lammps"
+    text = path.read_text().replace(
+        "fix ramp all npt temp 1300 300",
+        "variable hot equal 1300+step\nfix ramp all npt temp ${hot} 300",
+    )
+    path.write_text(text)
+    rubric = grade(manifest)
+    assert check(rubric, "thermal_cycle")["status"] == "unverified"
+    assert rubric.score is None

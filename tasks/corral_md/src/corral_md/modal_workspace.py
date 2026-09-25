@@ -38,19 +38,39 @@ class _RemoteToolFailed(RuntimeError):
     """A completed simulation error, as opposed to interrupted recovery."""
 
 
-def configured_runtime() -> tuple[str, str]:
-    """Read the explicitly configured internal MD release and Volume."""
-    release = os.getenv("CORRAL_MD_RELEASE_ID")
-    volume = os.getenv("CORRAL_MD_MODAL_VOLUME")
-    if not release:
+def _deployed_runtime_info() -> dict[str, Any]:
+    """Read the single stable SimAgent app's own runtime configuration."""
+    runtime = modal.Function.from_name(APP_NAME, "runtime_info").remote()
+    if not isinstance(runtime, dict) or runtime.get("schema") != 1:
+        raise RuntimeError("SimAgent returned invalid runtime information")
+    if runtime.get("app_name") != APP_NAME:
+        raise RuntimeError("SimAgent runtime information names a different app")
+    release = runtime.get("release_id")
+    volume = runtime.get("volume_name")
+    if not isinstance(release, str) or not isinstance(volume, str):
         raise RuntimeError(
-            "CORRAL_MD_RELEASE_ID must identify the deployed internal SimAgent release"
+            "SimAgent runtime information lacks build identity or Volume"
         )
-    return _identifier(release, "release ID"), volume or "simulations"
+    _identifier(release, "build identity")
+    _identifier(volume, "Volume name")
+    assets = runtime.get("asset_volumes")
+    if not isinstance(assets, dict) or set(assets) != ASSET_DIRECTORIES:
+        raise RuntimeError("SimAgent runtime information lacks asset Volumes")
+    for name in ASSET_DIRECTORIES:
+        if not isinstance(assets[name], str):
+            raise RuntimeError("SimAgent runtime information has invalid asset Volumes")
+        _identifier(assets[name], "asset Volume name")
+    return runtime
+
+
+def configured_runtime() -> tuple[str, str]:
+    """Discover the currently deployed SimAgent worker and its storage Volume."""
+    runtime = _deployed_runtime_info()
+    return runtime["release_id"], runtime["volume_name"]
 
 
 def configured_release_id() -> str:
-    """Read the explicitly configured SimAgent release."""
+    """Read the internal content identity of the deployed SimAgent worker."""
     return configured_runtime()[0]
 
 
@@ -65,17 +85,14 @@ def configured_volume_name() -> str:
 
 
 def configured_asset_volume_name(name: str) -> str:
-    """Resolve catalog validation against the selected release's asset Volumes."""
-    release = _PINNED_RELEASE.get() or configured_release_id()
-    base = _read_json(
-        modal.Volume.from_name("corral-md-bases"),
-        PurePosixPath("/corral/releases")
-        / _identifier(release, "release ID")
-        / "base.json",
-    )
-    if base is None or base.get("release_id") != release:
-        raise RuntimeError("Cannot resolve assets for the current MD release")
-    return base.get("asset_volumes", {}).get(name, name)
+    """Resolve asset Volumes from the deployed app, with build pin checking."""
+    if name not in ASSET_DIRECTORIES:
+        raise ValueError(f"Unknown SimAgent asset kind: {name!r}")
+    runtime = _deployed_runtime_info()
+    pinned = _PINNED_RELEASE.get()
+    if pinned is not None and runtime["release_id"] != pinned:
+        raise RuntimeError("Active execution belongs to a different SimAgent build")
+    return runtime["asset_volumes"][name]
 
 
 @contextmanager

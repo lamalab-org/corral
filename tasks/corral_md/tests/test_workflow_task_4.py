@@ -229,6 +229,32 @@ def test_task4_level1_stops_before_level2_observables(submission, monkeypatch):
     }.isdisjoint(check["name"] for check in rubric.checks)
 
 
+def test_level1_accepts_ase_repeat_indices_and_central_pairs(submission):
+    path = submission.parent / "force_constants.json"
+    fc = json.loads(path.read_text())
+    fc["cell_translations"] = (np.asarray(fc["cell_translations"]) % 5).tolist()
+    fc["atom_indices"] = [0] * 125  # One primitive Pd atom per cell.
+    fc["derivative"]["method"] = "central_finite_difference"
+    fc["derivative"]["frame_indices"] = [[1, 4], [2, 5], [3, 6]]
+    fc["derivative"]["displacements_A"] = [[0.01, -0.01]] * 3
+    fc["corrections"] = [
+        "Average translationally equivalent pair-interchanged blocks K(R) and K(-R)^T",
+        "Subtract sum of symmetrized blocks from onsite block to impose acoustic sum rule",
+    ]
+    _write(path, fc)
+
+    rubric = Rubric(4, fail_fast=True)
+    evaluate(Evidence(submission), rubric, level=1)
+
+    assert rubric.score == pytest.approx(0.9), rubric.checks
+
+    fc["cell_translations"][1] = fc["cell_translations"][0]
+    _write(path, fc)
+    rubric = Rubric(4, fail_fast=True)
+    evaluate(Evidence(submission), rubric, level=1)
+    assert _check(rubric, "fcc_supercell_and_mapping")["status"] == "failed"
+
+
 @pytest.mark.parametrize(
     ("change", "check"),
     [

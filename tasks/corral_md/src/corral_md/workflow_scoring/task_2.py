@@ -11,8 +11,17 @@ from ase.data import atomic_masses, atomic_numbers
 
 from .common import UnsupportedEvidence, result_close
 
-# From potentials.zip/potentials/BKS/pot.mod and the supplied liq4000.dat.
+# From potentials.zip/potentials/BKS/pot.mod and the supplied liq1300.dat.
 _CHARGES = {"Na": 0.6, "Si": 2.4, "O": -1.2}
+_COOLING_DURATION_PS = 20
+_HOLD_DURATION_PS = 10
+_REHEATING_DURATION_PS = 20
+_START_TEMPERATURE_K = 1300
+_END_TEMPERATURE_K = 300
+_RAMP_RATE_K_PS = 50
+_HOLD_END_PS = _COOLING_DURATION_PS + _HOLD_DURATION_PS
+_CYCLE_END_PS = _HOLD_END_PS + _REHEATING_DURATION_PS
+_SUPPLIED_BKS_PATH = "/workspace/potentials/BKS/pot.mod"
 _PAIR_COEFFICIENTS = {
     (1, 1): (0, 1, 0),
     (1, 2): (0, 1, 0),
@@ -75,9 +84,21 @@ def _trace(e, required_stages=None):
 def _schedule(e):
     t = _trace(e)
     expected = [
-        ("cooling", 0, 370, 4000, 300),
-        ("hold", 370, 470, 300, 300),
-        ("reheating", 470, 700, 300, 2600),
+        ("cooling", 0, _COOLING_DURATION_PS, _START_TEMPERATURE_K, _END_TEMPERATURE_K),
+        (
+            "hold",
+            _COOLING_DURATION_PS,
+            _HOLD_END_PS,
+            _END_TEMPERATURE_K,
+            _END_TEMPERATURE_K,
+        ),
+        (
+            "reheating",
+            _HOLD_END_PS,
+            _CYCLE_END_PS,
+            _END_TEMPERATURE_K,
+            _START_TEMPERATURE_K,
+        ),
     ]
     origin = float(t.time_ps.iloc[0])
     if np.any(np.diff(t.time_ps) < 0):
@@ -113,7 +134,20 @@ def _commands(e):
             raise ValueError("Recursive LAMMPS include")
         for raw in path.read_text().replace("&\n", " ").splitlines():
             line = raw.split("#", 1)[0]
+            preview = shlex.split(line)
+            if len(preview) > 3 and preview[:1] == ["fix"] and preview[3] == "print":
+                # Output-only expressions may reference step, time, or thermo
+                # variables without changing the NPT protocol being checked.
+                continue
             for name, value in variables.items():
+                if value is None and (
+                    "${" + name + "}" in line or (len(name) == 1 and "$" + name in line)
+                ):
+                    raise UnsupportedEvidence(
+                        "LAMMPS expressions used by simulation commands are unverified"
+                    )
+                if value is None:
+                    continue
                 line = line.replace("${" + name + "}", value)
                 if len(name) == 1:
                     line = line.replace("$" + name, value)
@@ -132,13 +166,42 @@ def _commands(e):
                 if c[2] == "equal":
                     try:
                         float(c[3])
-                    except ValueError as exc:
-                        raise UnsupportedEvidence(
-                            "Nonliteral LAMMPS expressions are unverified"
-                        ) from exc
+                    except ValueError:
+                        variables[c[1]] = None
+                        continue
                 variables[c[1]] = c[3]
             elif c[0] == "include":
                 candidates = [p for p in linked if p.name == Path(c[1]).name]
+                if not candidates and c[1] == _SUPPLIED_BKS_PATH:
+                    # This read-only asset is mounted in every MD workspace.
+                    # Its exact coefficients are fixed by the benchmark.
+                    yield [
+                        "pair_style",
+                        "hybrid/overlay",
+                        "buck/coul/long",
+                        "8.0",
+                        "12.0",
+                    ]
+                    yield [
+                        "pair_coeff",
+                        "*",
+                        "*",
+                        "buck/coul/long",
+                        "0.0",
+                        "1.0",
+                        "0.0",
+                    ]
+                    for (first, last), values in _PAIR_COEFFICIENTS.items():
+                        if values != (0, 1, 0):
+                            yield [
+                                "pair_coeff",
+                                str(first),
+                                str(last),
+                                "buck/coul/long",
+                                *map(str, values),
+                            ]
+                    yield ["kspace_style", "pppm", "1.0e-4"]
+                    continue
                 if len(candidates) != 1:
                     raise ValueError(
                         "Link each included input/potential file unambiguously"
@@ -153,8 +216,11 @@ def _commands(e):
             yield from read(path)
 
 
-def _input_cycle(e, end_time_ps=700):
+def _input_cycle(
+    e, end_time_ps=_CYCLE_END_PS, *, required_timestep_fs=None, required_steps=None
+):
     timestep, step, elapsed = 1.0, 0, 0.0
+    advanced_steps = 0
     active = {}
     for c in _commands(e):
         if c[0] == "timestep":
@@ -177,6 +243,14 @@ def _input_cycle(e, end_time_ps=700):
                 return False, "Negative run duration"
             if count == 0:
                 continue
+            if required_timestep_fs is not None and (
+                not _close(timestep, required_timestep_fs, atol=1e-12, rtol=0)
+                or any(f[3] == "dt/reset" for f in active.values())
+            ):
+                return (
+                    False,
+                    f"Every advancing run requires a {required_timestep_fs:g} fs timestep",
+                )
             fixes = [f for f in active.values() if f[3] in {"npt", "nvt", "nve"}]
             if len(fixes) != 1 or fixes[0][2:4] != ["all", "npt"]:
                 return False, "Each run must advance all atoms under NPT"
@@ -199,14 +273,19 @@ def _input_cycle(e, end_time_ps=700):
                 np.array([step, step + count]) - start
             ) / (stop - start)
             duration = count * timestep / 1000
-            if elapsed < 370 - 1e-7:
-                end, expected = 370, 4000 - 10 * np.array([elapsed, elapsed + duration])
-            elif elapsed < 470 - 1e-7:
-                end, expected = 470, [300, 300]
+            if elapsed < _COOLING_DURATION_PS - 1e-7:
+                end = _COOLING_DURATION_PS
+                expected = _START_TEMPERATURE_K - _RAMP_RATE_K_PS * np.array(
+                    [elapsed, elapsed + duration]
+                )
+            elif elapsed < _HOLD_END_PS - 1e-7:
+                end, expected = _HOLD_END_PS, [_END_TEMPERATURE_K, _END_TEMPERATURE_K]
             else:
                 end, expected = (
-                    700,
-                    300 + 10 * (np.array([elapsed, elapsed + duration]) - 470),
+                    _CYCLE_END_PS,
+                    _END_TEMPERATURE_K
+                    + _RAMP_RATE_K_PS
+                    * (np.array([elapsed, elapsed + duration]) - _HOLD_END_PS),
                 )
             if elapsed + duration > end + 1e-7 or not _close(
                 actual, expected, atol=1e-5, rtol=0
@@ -214,6 +293,9 @@ def _input_cycle(e, end_time_ps=700):
                 return False, "Run commands contradict the requested thermal cycle"
             elapsed += duration
             step += count
+            advanced_steps += count
+    if required_steps is not None and advanced_steps != required_steps:
+        return False, f"Cooling requires exactly {required_steps:,} advancing steps"
     return _close(
         elapsed, end_time_ps, atol=1e-7, rtol=0
     ), f"Run commands must cover the full {end_time_ps:g} ps requested cycle"
@@ -307,7 +389,7 @@ def _physics(e):
     return _potential(e)
 
 
-def _logged_trace(e, required_stages=None):
+def _logged_trace(e, required_stages=None, *, required_timestep_fs=None):
     t = _trace(e, required_stages)
     rows = {}
     header = None
@@ -340,6 +422,16 @@ def _logged_trace(e, required_stages=None):
                 "Include trace step values when changing the integration timestep"
             )
         steps = (t.time_ps.to_numpy() - t.time_ps.iloc[0]) * 1000 / dt[0] + min(rows)
+    if required_timestep_fs is not None and not _close(
+        steps - steps[0],
+        (t.time_ps.to_numpy() - t.time_ps.iloc[0]) * 1000 / required_timestep_fs,
+        atol=1e-5,
+        rtol=0,
+    ):
+        return (
+            False,
+            "Trace step values disagree with the required timestep and elapsed time",
+        )
     for position, step in enumerate(steps):
         if not _close(step, round(step), atol=1e-4, rtol=0):
             return False, "Trace sample time does not correspond to an integration step"
@@ -442,7 +534,19 @@ def _boundaries(e):
         if not _close(initial["charges"], s["charges"], atol=1e-7, rtol=0):
             return False, "Atomic charges change between saved states"
     times = np.asarray([data[name]["time_ps"] for name in names]) - initial["time_ps"]
-    if not _close(times, [0, 370, 370, 470, 470, 700], atol=0.5, rtol=0.01):
+    if not _close(
+        times,
+        [
+            0,
+            _COOLING_DURATION_PS,
+            _COOLING_DURATION_PS,
+            _HOLD_END_PS,
+            _HOLD_END_PS,
+            _CYCLE_END_PS,
+        ],
+        atol=0.5,
+        rtol=0.01,
+    ):
         return False, "Boundary times contradict the thermal cycle"
     for left, right in [("cooling_end", "hold_start"), ("hold_end", "reheating_start")]:
         a, b = data[left], data[right]
