@@ -7,9 +7,11 @@ import shlex
 from pathlib import Path
 
 import numpy as np
+from ase import units
 from ase.data import atomic_masses, atomic_numbers
+from ase.io import read
 
-from .common import UnsupportedEvidence, result_close
+from .common import EvidenceError, UnsupportedEvidence, aliased_value, result_close
 
 # From potentials.zip/potentials/BKS/pot.mod and the supplied liq1300.dat.
 _CHARGES = {"Na": 0.6, "Si": 2.4, "O": -1.2}
@@ -452,7 +454,7 @@ def _logged_trace(e, required_stages=None, *, required_timestep_fs=None):
 
 def _boundary_density(e):
     t = _trace(e)
-    states = e.json("boundary_states", "stage_boundaries")
+    states = _boundary_states(e)
     for name, stage, location in [
         ("initial", "cooling", 0),
         ("cooling_end", "cooling", -1),
@@ -461,7 +463,7 @@ def _boundary_density(e):
         ("reheating_start", "reheating", 0),
         ("reheating_end", "reheating", -1),
     ]:
-        state = _state(states[name])
+        state = states[name]
         mass = sum(
             atomic_masses[atomic_numbers[str(symbol)]] for symbol in state["species"]
         )
@@ -478,6 +480,19 @@ def _boundary_density(e):
 
 
 def _state(s):
+    s = {
+        **s,
+        **{
+            key: aliased_value(s, key, alias)
+            for key, alias in (
+                ("ids", "atom_ids"),
+                ("cell", "cell_A"),
+                ("positions", "positions_A"),
+                ("velocities", "velocities_A_fs"),
+                ("charges", "charges_e"),
+            )
+        },
+    }
     ids = np.asarray(s["ids"])
     order = np.argsort(ids)
     if len(ids) < 3 or len(np.unique(ids)) != len(ids):
@@ -514,8 +529,60 @@ def _state(s):
     return state
 
 
+def _boundary_states(e):
+    """Read inline states or explicitly linked, restartable LAMMPS data files."""
+    document = e.artifact("boundary_states", "stage_boundaries")
+    result = {}
+    for name, record in e.json("boundary_states", "stage_boundaries").items():
+        if "lammps_data" not in record:
+            result[name] = _state(record)
+            continue
+        path = e.linked_path(record["lammps_data"], document)
+        species = record.get("atom_type_species")
+        mapping = (
+            {int(key): atomic_numbers[value] for key, value in species.items()}
+            if species is not None
+            else None
+        )
+        atoms = read(
+            path,
+            format="lammps-data",
+            units="real",
+            atom_style=record.get("atom_style", "charge"),
+            Z_of_type=mapping,
+        )
+        if not {"id", "initial_charges", "momenta"} <= atoms.arrays.keys():
+            raise EvidenceError(
+                f"Boundary {name} must save atom IDs, charges and velocities"
+            )
+        exported = {
+            "time_ps": record["time_ps"],
+            "ids": atoms.arrays["id"],
+            "species": atoms.get_chemical_symbols(),
+            "positions": atoms.positions,
+            "cell": atoms.cell.array,
+            "charges": atoms.get_initial_charges(),
+            "velocities": atoms.get_velocities() * units.fs,
+        }
+        state = _state(exported)
+        if "ids" in record or "atom_ids" in record:
+            inline = _state(record)
+            for key in state:
+                same = (
+                    np.array_equal(inline[key], state[key])
+                    if key in ("ids", "species")
+                    else _close(inline[key], state[key], atol=1e-7, rtol=1e-7)
+                )
+                if not same:
+                    raise EvidenceError(
+                        f"Inline and LAMMPS boundary evidence disagree on {key}"
+                    )
+        result[name] = state
+    return result
+
+
 def _boundaries(e):
-    states = e.json("boundary_states", "stage_boundaries")
+    states = _boundary_states(e)
     names = [
         "initial",
         "cooling_end",
@@ -524,7 +591,7 @@ def _boundaries(e):
         "reheating_start",
         "reheating_end",
     ]
-    data = {name: _state(states[name]) for name in names}
+    data = {name: states[name] for name in names}
     initial = data["initial"]
     for s in data.values():
         if not np.array_equal(initial["ids"], s["ids"]) or not np.array_equal(

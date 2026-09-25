@@ -14,6 +14,7 @@ from .common import (
     EvidenceError,
     Rubric,
     UnsupportedEvidence,
+    aliased_value,
     close,
     finite_array,
     result_close,
@@ -561,7 +562,12 @@ def evaluate(
                 or grid[-1] < values.max()
             ):
                 return False
-            density = finite_array(doc["density_per_eV"], shape=(len(grid) - 1,))
+            density = finite_array(
+                aliased_value(
+                    doc, "density_per_eV", "density_modes_per_eV_per_primitive_cell"
+                ),
+                shape=(len(grid) - 1,),
+            )
             expected = np.histogram(values, grid, weights=weights)[0] / np.diff(grid)
             return result_close(density, expected, atol=1e-07) and result_close(
                 np.sum(density * np.diff(grid)), 3, atol=1e-07
@@ -578,7 +584,12 @@ def evaluate(
                 or grid[-1] < values.max()
             ):
                 return False
-            density = finite_array(doc["density_per_eV"], shape=grid.shape)
+            density = finite_array(
+                aliased_value(
+                    doc, "density_per_eV", "density_modes_per_eV_per_primitive_cell"
+                ),
+                shape=grid.shape,
+            )
             # Stream over modes to avoid an N_modes x N_grid allocation.
             expected = np.zeros(len(grid))
             normalization = doc.get("normalization", "none")

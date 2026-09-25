@@ -33,6 +33,23 @@ def _check(rubric, name):
     return next(item for item in rubric.checks if item["name"] == name)
 
 
+def test_teacher_path_and_descriptive_frame_times_preserve_checks(submission):
+    settings_path = submission.parent / "settings.json"
+    settings = _read(settings_path)
+    settings["model"] = "/workspace/models/teacher.model"
+    _write(settings_path, settings)
+    for role in ("initial_state", "boundary_states", "production_trajectory"):
+        path = Evidence(submission).artifact(role)
+        frames = _read(path)
+        for frame in frames:
+            frame["elapsed_time_fs"] = frame.pop("time_fs")
+        _write(path, frames)
+    r = _score(submission)
+    assert _check(r, "recorded_nvt_model_and_initialization")["status"] == "passed"
+    assert _check(r, "eight_stage_cycle_and_cumulative_time")["status"] == "passed"
+    assert _check(r, "boundary_position_momentum_continuity")["status"] == "passed"
+
+
 def test_level1_accepts_energyless_initial_and_one_final_boundary(tmp_path):
     atoms = bulk("Al", "fcc", a=4.05, cubic=True).repeat((3, 3, 3))
     rng = np.random.default_rng(10)
@@ -122,7 +139,10 @@ def test_level1_accepts_energyless_initial_and_one_final_boundary(tmp_path):
     trace_row = {
         "stage": "300K",
         "temperature_K": float(directional.mean()),
-        **{f"temperature_{axis}_K": float(value) for axis, value in zip("xyz", directional)},
+        **{
+            f"temperature_{axis}_K": float(value)
+            for axis, value in zip("xyz", directional)
+        },
         "total_energy_eV": float(-300 + kinetic),
     }
     trace = [{**trace_row, "time_fs": time} for time in (0, 1500, 2000)]

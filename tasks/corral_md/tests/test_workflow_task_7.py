@@ -61,8 +61,7 @@ def test_level1_accepts_untimed_production_only_trajectory(tmp_path):
     momenta = rng.normal(size=(108, 3))
     momenta -= momenta.mean(axis=0)
     momenta *= np.sqrt(
-        324 * units.kB * 300
-        / np.sum(momenta**2 / atoms.get_masses()[:, None])
+        324 * units.kB * 300 / np.sum(momenta**2 / atoms.get_masses()[:, None])
     )
     frames, rows = [], []
     for index, step in enumerate((200, 300, 400)):
@@ -106,8 +105,14 @@ def test_level1_accepts_untimed_production_only_trajectory(tmp_path):
             "initial_structure": _write(tmp_path / "initial.json", [initial]),
             "stages": _write(
                 tmp_path / "stages.json",
-                [{"id": "reference", "ensemble": "NPT", "target_temperature_K": 300,
-                  "production": [200, 300, 400]}],
+                [
+                    {
+                        "id": "reference",
+                        "ensemble": "NPT",
+                        "target_temperature_K": 300,
+                        "production": [200, 300, 400],
+                    }
+                ],
             ),
             "trajectories": {"reference": _write(tmp_path / "production.json", frames)},
             "thermal_trace": _write(tmp_path / "trace.json", rows),
@@ -139,9 +144,12 @@ def test_level1_accepts_untimed_production_only_trajectory(tmp_path):
     _write(tmp_path / "trace.json", rows)
     rubric = Rubric(7, fail_fast=False)
     evaluate_level1(Evidence(path), rubric, 7)
-    assert next(
-        c for c in rubric.checks if c["name"] == "measured_thermal_trace_and_means"
-    )["status"] == "failed"
+    assert (
+        next(
+            c for c in rubric.checks if c["name"] == "measured_thermal_trace_and_means"
+        )["status"]
+        == "failed"
+    )
 
 
 def _reference(averages, local_method="linear", pressure_method="linear"):
@@ -914,3 +922,31 @@ def test_other_declared_volume_line_estimator_gets_review(tmp_path):
         for check in result.checks
         if check["points"] and check["name"] != "interval_expansion_fit"
     )
+
+
+def test_stage_dictionary_preserves_ids_and_production_selection(tmp_path):
+    path = _fixture(tmp_path)
+    stage_path = Evidence(path).artifact("stages")
+    records = _read(stage_path)
+    if isinstance(records, dict):
+        records = records["stages"]
+    mapped = {row["id"]: row for row in records}
+    _write(stage_path, mapped)
+    assert _score(path).score == 1
+    for row in mapped.values():
+        (
+            row["production_start_frame_index"],
+            row["production_stop_frame_index_exclusive"],
+        ) = row.pop("production")
+    _write(stage_path, mapped)
+    assert _score(path).score == 1
+    first = next(iter(mapped))
+    mapped[first]["production"] = [0, 1]
+    _write(stage_path, mapped)
+    failure = _check(_score(path), "initial_fcc_geometry")
+    assert failure["status"] == "failed"
+    assert "Conflicting" in failure["detail"]
+    del mapped[first]["production"]
+    mapped[first]["id"] = "different_id"
+    _write(stage_path, mapped)
+    assert _check(_score(path), "initial_fcc_geometry")["status"] == "failed"

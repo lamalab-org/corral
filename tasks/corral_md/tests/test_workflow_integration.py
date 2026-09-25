@@ -51,8 +51,8 @@ def test_shipped_workflow_contract_and_empty_evidence(number, tmp_path):
     result = TaskScorer(task, workspace=tmp_path).evaluate(_state("{}"))
     assert result.score == 0
     assert result.metrics == {"score": 0}
-    assert result.metadata == {}
-    assert result.feedback is None
+    assert result.metadata["workflow_evaluation"]["score"] == 0
+    assert "manifest_and_artifacts" in result.feedback
     report = task.scoring_fn.evaluate("{}")
     assert report["task_number"] == number
     assert sum(check["points"] for check in report["checks"]) == 100
@@ -96,7 +96,8 @@ def test_examples_are_readable_and_survive_workspace_restoration(
 ):
     task_id = f"level_{level}_task_{number}"
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_{number}.json", str(tmp_path)
+        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_{number}.json",
+        str(tmp_path),
     )[task_id]
     environment = env.MolecularDynamicsEnvironment(
         task_id,
@@ -240,6 +241,6 @@ def test_partial_manifest_survives_workspace_restoration(tmp_path):
     )
     assert result.score == 0
     assert result.metrics == {"score": result.score}
-    assert result.metadata == {}
-    assert result.feedback is None
+    assert result.metadata["workflow_evaluation"]["score"] == 0
+    assert "reported_results" in result.feedback
     assert not former.exists()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,113 @@ def _lookup(mapping: Mapping, names: tuple[str, ...]) -> Any:
         else:
             return value
     raise EvidenceError(f"Missing evidence: {' / '.join(names)}")
+
+
+def aliased_value(mapping: Mapping, *names: str, required: bool = True) -> Any:
+    """Read equivalent spellings without silently accepting contradictory data."""
+    present = [name for name in names if name in mapping]
+    if not present:
+        if required:
+            raise EvidenceError(f"Missing evidence field: {' / '.join(names)}")
+        return None
+    value = mapping[present[0]]
+    if any(
+        not np.array_equal(np.asarray(value), np.asarray(mapping[name]))
+        for name in present[1:]
+    ):
+        raise EvidenceError(f"Conflicting evidence fields: {', '.join(present)}")
+    return value
+
+
+def is_teacher_model(value: Any) -> bool:
+    """Recognize the supplied checkpoint declaration, not execution provenance."""
+    if isinstance(value, Mapping):
+        declarations = [
+            value[key]
+            for key in ("identity", "name", "model", "checkpoint", "path")
+            if key in value
+        ]
+        return bool(declarations) and all(
+            is_teacher_model(item) for item in declarations
+        )
+    if not isinstance(value, str):
+        return False
+    return Path(value).name == "teacher.model" or bool(
+        re.search(r"\bmace-mp-0(?![a-z0-9])", value.lower().replace("_", "-"))
+    )
+
+
+def stored_potential_energy(atoms: Atoms) -> float:
+    """Inspect saved labels only; never ask a calculator to evaluate a structure."""
+    values = {
+        name: atoms.info[name]
+        for name in ("energy", "energy_eV", "potential_energy_eV", "teacher_energy_eV")
+        if name in atoms.info
+    }
+    cached = getattr(getattr(atoms, "calc", None), "results", {})
+    if "energy" in cached:
+        values["calculator_energy"] = cached["energy"]
+    if not values:
+        raise EvidenceError("Missing stored potential-energy label on structure")
+    values = [float(finite_array(value, shape=())) for value in values.values()]
+    if not all(close(value, values[0]) for value in values[1:]):
+        raise EvidenceError("Conflicting stored potential-energy labels on structure")
+    return values[0]
+
+
+def _json_frames(data):
+    """Accept row records or explicit frame-major arrays with shared cell/species."""
+    if not isinstance(data, dict) or "frames" in data or "records" in data:
+        return data
+    positions = aliased_value(
+        data, "positions", "positions_A", "positions_angstrom", required=False
+    )
+    if positions is None or np.asarray(positions).ndim != 3:
+        return data
+    count = len(positions)
+    dimensions = {
+        "positions": 3,
+        "positions_A": 3,
+        "positions_angstrom": 3,
+        "cell": 3,
+        "cell_A": 3,
+        "cell_angstrom": 3,
+        "symbols": 2,
+        "numbers": 2,
+        "pbc": 2,
+        "masses": 2,
+        "momenta": 3,
+        "momenta_ase_units": 3,
+        "forces": 3,
+        "forces_eV_per_A": 3,
+        "forces_eV_per_angstrom": 3,
+        "forces_eV_A": 3,
+        "energy": 1,
+        "energy_eV": 1,
+        "potential_energy_eV": 1,
+        "teacher_energy_eV": 1,
+        "total_energy_eV": 1,
+        "time_fs": 1,
+        "time_ps": 1,
+        "elapsed_time_fs": 1,
+        "step": 1,
+        "stage": 1,
+        "info": 1,
+    }
+    records = [{} for _ in range(count)]
+    for name, dimension in dimensions.items():
+        if name not in data:
+            continue
+        value = data[name]
+        if np.asarray(value).ndim == dimension:
+            if len(value) != count:
+                raise EvidenceError(f"{name} must have one entry per frame ({count})")
+            for record, item in zip(records, value, strict=True):
+                record[name] = item
+        else:
+            for record in records:
+                record[name] = value
+    return {"frames": records}
 
 
 class Evidence:
@@ -234,6 +342,19 @@ class Evidence:
     def artifact(self, *names: str) -> Path:
         return self._path(_lookup(self._artifacts, names))
 
+    def linked_path(self, value: str, document: Path) -> Path:
+        """Resolve a document's sidecar and require it in the fingerprinted manifest."""
+        path = Path(value)
+        if not path.is_absolute():
+            path = (document.parent / path).resolve()
+        path = self._path(path)
+        declared = {item for role in self._artifacts for item in self.artifacts(role)}
+        if path not in declared:
+            raise EvidenceError(
+                f"Linked evidence {path.name} must also be listed in manifest.artifacts"
+            )
+        return path
+
     def artifacts(self, *names: str) -> list[Path]:
         value = _lookup(self._artifacts, names)
 
@@ -279,7 +400,7 @@ class Evidence:
         if key in self._cache:
             return self._cache[key]
         if path.suffix.lower() == ".json":
-            data = read_json(path)
+            data = _json_frames(read_json(path))
             records = (
                 data.get("frames", data.get("records", [data]))
                 if isinstance(data, dict)
@@ -337,10 +458,21 @@ class Evidence:
                     if momenta is not None:
                         atoms.set_momenta(momenta)
                     atoms.info.update(record.get("info", {}))
-                    for field in ("time_fs", "time_ps", "step", "stage"):
+                    for field in (
+                        "time_fs",
+                        "time_ps",
+                        "elapsed_time_fs",
+                        "step",
+                        "stage",
+                    ):
                         if field in record:
                             atoms.info[field] = record[field]
-                    energy = stored_value("energy", "energy_eV", "potential_energy_eV")
+                    energy = stored_value(
+                        "energy",
+                        "energy_eV",
+                        "potential_energy_eV",
+                        "teacher_energy_eV",
+                    )
                     if (
                         energy is None
                         and "total_energy_eV" in record
@@ -360,6 +492,7 @@ class Evidence:
                                     "forces",
                                     "forces_eV_per_A",
                                     "forces_eV_per_angstrom",
+                                    "forces_eV_A",
                                 ),
                             ),
                         )
@@ -396,6 +529,12 @@ class Evidence:
                 images = read(path, index=":", format=formats[path.suffix.lower()])
         if not images:
             raise EvidenceError("Trajectory is empty")
+        for atoms in images:
+            time = aliased_value(
+                atoms.info, "time_fs", "elapsed_time_fs", required=False
+            )
+            if time is not None:
+                atoms.info["time_fs"] = time
         self._cache[key] = images
         return images
 

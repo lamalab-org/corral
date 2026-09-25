@@ -8,7 +8,9 @@ import numpy as np
 from ase import units
 
 from .common import (
+    EvidenceError,
     UnsupportedEvidence,
+    aliased_value,
     optional_results_match,
     result_close,
     scientific_screen,
@@ -326,9 +328,50 @@ def _protocol(e, end_time_ps=1500):
 
 
 def _data(e):
-    data = e.json("diffusion_data", "production_data")
+    data = dict(e.json("diffusion_data", "production_data"))
+    if "arrays_file" in data:
+        path = e.linked_path(
+            data["arrays_file"], e.artifact("diffusion_data", "production_data")
+        )
+        if path.suffix.lower() != ".npz":
+            raise UnsupportedEvidence(
+                "Diffusion arrays_file must be a numeric NPZ archive"
+            )
+        with np.load(path, allow_pickle=False) as archive:
+            for name in archive.files:
+                if name in data and not np.array_equal(data[name], archive[name]):
+                    raise EvidenceError(f"Diffusion JSON and NPZ disagree on {name}")
+                data[name] = archive[name]
+        for target, selector in (
+            ("unwrapped_positions_A", "positions_key"),
+            ("velocities_A_ps", "velocities_key"),
+        ):
+            if selector in data:
+                value = aliased_value(data, data[selector])
+                if target in data and not np.array_equal(data[target], value):
+                    raise EvidenceError(f"Conflicting diffusion array: {target}")
+                data[target] = value
+    if "cells_A" not in data and "cell_lengths_A" in data:
+        lengths = np.asarray(data["cell_lengths_A"], float)
+        if lengths.ndim != 2 or lengths.shape[1] != 3:
+            raise EvidenceError("cell_lengths_A must have shape [frames, 3]")
+        if "box_bounds_A" in data:
+            bounds = np.asarray(data["box_bounds_A"], float)
+            if bounds.shape not in ((len(lengths), 3, 2), (len(lengths), 3, 3)):
+                raise EvidenceError(
+                    "box_bounds_A must contain each frame's LAMMPS box bounds"
+                )
+            if bounds.shape[-1] == 3 and np.any(bounds[:, :, 2] != 0):
+                raise UnsupportedEvidence(
+                    "Triclinic diffusion cells require explicit cells_A matrices"
+                )
+            if not _close(bounds[:, :, 1] - bounds[:, :, 0], lengths):
+                raise EvidenceError("cell_lengths_A contradicts the saved box bounds")
+        data["cells_A"] = lengths[:, :, None] * np.eye(3)
     t = np.asarray(data["times_ps"], float)
-    p = np.asarray(data["unwrapped_positions_A"], float)
+    p = np.asarray(
+        aliased_value(data, "unwrapped_positions_A", "positions_unwrapped_A"), float
+    )
     cell = np.asarray(data["cells_A"], float)
     velocity = np.asarray(data["velocities_A_ps"], float)
     if not (t.ndim == 1 and len(t) >= 2 and np.all(np.diff(t) > 0)):

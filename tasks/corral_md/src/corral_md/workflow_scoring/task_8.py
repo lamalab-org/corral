@@ -18,6 +18,7 @@ from .common import (
     finite_array,
     result_close,
     scientific_screen,
+    stored_potential_energy,
 )
 from .regression import (
     metrics,
@@ -301,12 +302,9 @@ def evaluate(e, r):
         lookup = dict(zip(frame_ids, frames, strict=True))
         ordered = [lookup[key] for key in data["row_ids"]]
         for atoms, value in zip(ordered, y, strict=True):
-            stored = atoms.info.get(
-                "energy",
-                getattr(getattr(atoms, "calc", None), "results", {}).get("energy"),
-            )
+            stored = stored_potential_energy(atoms)
             _require(
-                stored is not None and close(stored, value),
+                close(stored, value),
                 "Stored structure energy does not match its row label",
             )
         if name != "strained_test":

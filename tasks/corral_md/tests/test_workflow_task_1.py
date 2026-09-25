@@ -228,6 +228,29 @@ def test_complete_saved_data_passes(evidence):
     assert _by_name(rubric, "execution_provenance")["status"] == "unverified"
 
 
+def test_linked_npz_diffusion_arrays_are_read_and_cross_checked(evidence):
+    manifest = json.loads((evidence / "manifest.json").read_text())
+    data_path = evidence / manifest["artifacts"]["diffusion_data"]
+    data = json.loads(data_path.read_text())
+    arrays = {
+        key: data.pop(key)
+        for key in ("unwrapped_positions_A", "velocities_A_ps", "cells_A")
+    }
+    arrays["positions_unwrapped_A"] = arrays.pop("unwrapped_positions_A")
+    archive = evidence / "trajectory_arrays.npz"
+    np.savez(archive, **arrays)
+    data.update(arrays_file=archive.name, positions_key="positions_unwrapped_A")
+    manifest["artifacts"]["trajectory_arrays"] = archive.name
+    _dump(data_path, data)
+    _dump(evidence / "manifest.json", manifest)
+    assert _by_name(_score(evidence), "production_data_integrity")["status"] == "passed"
+    data["velocities_A_ps"] = (np.asarray(arrays["velocities_A_ps"]) + 1).tolist()
+    _dump(data_path, data)
+    failed = _by_name(_score(evidence), "production_data_integrity")
+    assert failed["status"] == "failed"
+    assert "disagree" in failed["detail"]
+
+
 @pytest.mark.parametrize(
     "mutation",
     [

@@ -582,3 +582,34 @@ def test_task4_absolute_values_do_not_hide_force_constant_instability(tmp_path):
     result = _score(submission)
     assert _check(result, "zpe_and_imaginary_mode_accounting")["status"] == "failed"
     assert _check(result, "dos_from_signed_bz_samples")["status"] == "failed"
+
+
+def test_histogram_descriptive_density_name_is_numerically_verified(submission):
+    e = Evidence(submission)
+    samples = e.json("bz_samples")
+    energies = np.asarray(samples["energies_eV"]).ravel()
+    weights = np.repeat(samples["weights"], 3)
+    edges = np.linspace(energies.min() - 1e-8, energies.max() + 1e-8, 31)
+    density = np.histogram(energies, edges, weights=weights)[0] / np.diff(edges)
+    path = e.artifact("dos")
+    doc = {
+        "representation": "histogram",
+        "bin_edges_eV": edges.tolist(),
+        "density_modes_per_eV_per_primitive_cell": density.tolist(),
+    }
+    path.write_text(json.dumps(doc))
+    check = next(
+        c
+        for c in _score(submission).checks
+        if c["name"] == "dos_from_signed_bz_samples"
+    )
+    assert check["status"] == "passed", check
+    doc["density_per_eV"] = (density + 1).tolist()
+    path.write_text(json.dumps(doc))
+    check = next(
+        c
+        for c in _score(submission).checks
+        if c["name"] == "dos_from_signed_bz_samples"
+    )
+    assert check["status"] == "failed"
+    assert "Conflicting" in check["detail"]

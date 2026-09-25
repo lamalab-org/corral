@@ -149,7 +149,9 @@ def test_named_dof_order_and_transpose_average_are_equivalent(submission):
         path = submission.parent / name
         records = load(path)
         for record in records:
-            record["dof_order"] = [f"Si{atom}_{'xyz'[axis]}" for atom, axis in record["dof_order"]]
+            record["dof_order"] = [
+                f"Si{atom}_{'xyz'[axis]}" for atom, axis in record["dof_order"]
+            ]
             record["symmetrization"] = "Hessian transpose average"
             record["acoustic_sum_rule"] = "orthogonal translational projection"
         write(path, records)
@@ -165,6 +167,23 @@ def score(path):
 
 def check(rubric, name):
     return next(item for item in rubric.checks if item["name"] == name)
+
+
+def test_model_path_is_a_valid_teacher_identity(submission):
+    path = submission.parent / "settings.json"
+    settings = load(path)
+    settings["model"] = "/workspace/models/teacher.model"
+    write(path, settings)
+    assert (
+        check(score(submission), "recorded_model_units_and_conventions")["status"]
+        == "passed"
+    )
+    settings["model"] = "/workspace/models/student.model"
+    write(path, settings)
+    assert (
+        check(score(submission), "recorded_model_units_and_conventions")["status"]
+        == "failed"
+    )
 
 
 def test_consistent_physical_spring_system_gets_all_task_points_without_execution(

@@ -47,6 +47,24 @@ def example_files(task_number: int, *, level: int = 2) -> dict[str, str]:
         "JSON frames with symbols, positions, cell, and pbc. Follow the task "
         "description for all scientific requirements.\n"
     )
+    if level == 2:
+        guide += (
+            "\nAngle-bracketed type and shape placeholders describe the data to insert: "
+            "replace <number[frames, 216, 3]> with a numeric array, not a string. "
+            "Dimensions with the same name must agree across arrays; frame and atom "
+            "orders must stay aligned. A one-record trajectory example shows the "
+            "fields on EACH frame; repeat it for every retained state required by "
+            "the task. ASE .traj and Extended XYZ may carry the same data: save time "
+            "and stage IDs in frame info, momenta as atomic arrays, and energies/forces "
+            "as stored calculator results.\n\n"
+            "Files ending in .example.json are optional alternative layouts. Point "
+            "the same manifest artifact role to whichever layout you use. Files "
+            "ending in .layout.json describe array names and shapes inside a binary "
+            "file; create the real numeric file and do not submit its layout as data. "
+            "Resolve arrays_file and lammps_data paths relative to the referring JSON "
+            "file, and also list every referenced file in manifest.artifacts. "
+            "Linked LAMMPS data files must retain atom IDs, charges, and Velocities.\n"
+        )
     return {
         "README.md": guide,
         **{

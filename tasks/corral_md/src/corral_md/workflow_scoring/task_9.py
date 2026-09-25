@@ -12,6 +12,7 @@ from .common import (
     UnsupportedEvidence,
     close,
     finite_array,
+    is_teacher_model,
     optional_results_match,
     result_close,
     scientific_screen,
@@ -119,12 +120,15 @@ def evaluate(e, r):
     @lru_cache(None)
     def frames(run, stage="trajectory"):
         result = e.trajectory(f"runs.{run}.{stage}")
-        n = 200 if stage == "trajectory" else 2 if stage == "boundary" else None
-        if (n is not None and len(result) != n) or (
-            stage == "equilibration" and len(result) < 2
+        n = 200 if stage == "trajectory" else None
+        if (
+            (n is not None and len(result) != n)
+            or (stage == "equilibration" and len(result) < 2)
+            or (stage == "boundary" and len(result) not in (1, 2))
         ):
             raise EvidenceError(
-                "Expected 200 production frames, two boundary states, or >=2 equilibration states"
+                "Expected 200 production frames, one shared or two boundary states, "
+                "or >=2 equilibration states"
             )
         cell = finite_array(result[0].cell.array, shape=(3, 3))
         if abs(np.linalg.det(cell)) <= 1e-10:
@@ -229,7 +233,8 @@ def evaluate(e, r):
 
     def boundaries():
         for run in RUNS:
-            end, start = frames(run, "boundary")
+            saved = frames(run, "boundary")
+            end, start = (saved[0], saved[0]) if len(saved) == 1 else saved
             eq, prod = frames(run, "equilibration"), frames(run)
             if not _state_same(end, start) or not _state_same(eq[-1], end):
                 return False
@@ -261,7 +266,7 @@ def evaluate(e, r):
             and soap["n_max"] > 0
             and int(soap["l_max"]) == soap["l_max"]
             and soap["l_max"] >= 0
-            and "mace-mp-0" in str(e.settings["teacher"]).lower()
+            and is_teacher_model(e.settings["teacher"])
         )
 
     r.check("energy_descriptor_alignment_and_teacher_configuration", 4, aligned_data)

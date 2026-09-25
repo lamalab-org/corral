@@ -160,9 +160,7 @@ def test_level1_accepts_unbiased_interpolated_correlation(submission):
         "mean-subtracted potential-energy autocorrelation, "
         "unbiased covariance at each lag"
     )
-    doc["normalization"] = (
-        "C(k)/C(0); C(k)=sum((E_i-mean(E))*(E_(i+k)-mean(E)))/(N-k)"
-    )
+    doc["normalization"] = "C(k)/C(0); C(k)=sum((E_i-mean(E))*(E_(i+k)-mean(E)))/(N-k)"
     characteristic = doc["characteristic"]
     characteristic["method"] = "first 1/e crossing, linearly interpolated"
     crossing = int(np.flatnonzero(values <= characteristic["threshold"])[0])
@@ -175,13 +173,19 @@ def test_level1_accepts_unbiased_interpolated_correlation(submission):
 
     rubric = Rubric(9, fail_fast=False)
     evaluate_level1(Evidence(submission), rubric, 9)
-    assert check(rubric, "temporal_correlation_and_characteristic_time")["status"] == "passed"
+    assert (
+        check(rubric, "temporal_correlation_and_characteristic_time")["status"]
+        == "passed"
+    )
 
     doc["characteristic"]["value"] += 20
     write(correlation_path, doc)
     rubric = Rubric(9, fail_fast=False)
     evaluate_level1(Evidence(submission), rubric, 9)
-    assert check(rubric, "temporal_correlation_and_characteristic_time")["status"] == "failed"
+    assert (
+        check(rubric, "temporal_correlation_and_characteristic_time")["status"]
+        == "failed"
+    )
 
 
 def fit(x, y, alpha):
@@ -1032,5 +1036,24 @@ def test_alternative_tuning_is_reviewable_and_outer_holdout_access_still_fails(
     write(path, doc)
     assert (
         check(score(submission), "nested_tuning_protects_both_outer_holdouts")["status"]
+        == "failed"
+    )
+
+
+def test_level2_accepts_shared_boundary_but_rejects_state_changes(submission):
+    e = Evidence(submission)
+    for run in RUNS:
+        path = e.artifact(f"runs.{run}.boundary")
+        write(path, read(path)[:1])
+    assert (
+        check(score(submission), "equilibration_to_production_boundaries")["status"]
+        == "passed"
+    )
+    path = e.artifact("runs.main.boundary")
+    state = read(path)
+    state[0]["momenta"][0][0] += 1
+    write(path, state)
+    assert (
+        check(score(submission), "equilibration_to_production_boundaries")["status"]
         == "failed"
     )

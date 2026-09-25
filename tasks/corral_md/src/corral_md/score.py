@@ -23,6 +23,8 @@ from corral_md.workflow_scoring.common import (
     reproducibility,
 )
 
+from corral.evaluation import SubmissionScore
+
 
 class PendingReviewError(RuntimeError):
     """No task score exists yet because evidence needs independent review."""
@@ -64,10 +66,25 @@ class WorkflowScorer:
         return self.score_submission(submission)
 
     def score_submission(self, submission, *, review: dict | None = None) -> float:
+        return self.evaluate_submission(submission, review=review).score
+
+    def evaluate_submission(
+        self, submission, *, review: dict | None = None
+    ) -> SubmissionScore:
+        """Retain check diagnostics when invoked by the benchmark reporting adapter."""
         report = self.evaluate(submission, review=review)
         if report["score"] is None:
             raise PendingReviewError(report)
-        return float(report["score"])
+        failures = [
+            f"{check['name']}: {check['detail'] or 'Required evidence check failed'}"
+            for check in report["checks"]
+            if check["status"] == "failed"
+        ]
+        return SubmissionScore(
+            score=float(report["score"]),
+            feedback="; ".join(failures) or None,
+            metadata={"workflow_evaluation": report},
+        )
 
     def evaluate(self, submission, *, review: dict | None = None) -> dict:
         """Inspect evidence; optional review is trusted evaluator input only."""

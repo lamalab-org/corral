@@ -14,6 +14,7 @@ from .common import (
     UnsupportedEvidence,
     close,
     finite_array,
+    is_teacher_model,
     result_close,
     scientific_screen,
 )
@@ -220,7 +221,6 @@ def evaluate(e: Evidence, r: Rubric):
 
     def protocol():
         md = e.settings["md"]
-        model = str(e.settings["model"]).lower().replace("_", "-")
         return (
             bool(str(md["thermostat"]).strip())
             and _number(md["timestep_fs"]) > 0
@@ -232,7 +232,7 @@ def evaluate(e: Evidence, r: Rubric):
             and md["manual_velocity_resets"] == 0
             and str(md["ensemble"]).upper() == "NVT"
             and dof() in (321, 324)
-            and "mace-mp-0" in model
+            and is_teacher_model(e.settings["model"])
             and isinstance(e.settings["model_settings"], dict)
         )
 

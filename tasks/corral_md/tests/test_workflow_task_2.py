@@ -7,10 +7,12 @@ from zipfile import ZipFile
 import numpy as np
 import pandas as pd
 import pytest
+from ase import Atoms, units
 from ase.data import atomic_masses, atomic_numbers
+from ase.io import write as write_structure
 from corral_md.workflow_scoring.common import Evidence, Rubric
 from corral_md.workflow_scoring.level1 import _task_2 as evaluate_level1_task_2
-from corral_md.workflow_scoring.task_2 import _estimate, evaluate
+from corral_md.workflow_scoring.task_2 import _boundaries, _estimate, evaluate
 
 
 def write_json(path, data):
@@ -557,3 +559,67 @@ def test_nonliteral_variable_in_npt_schedule_remains_unverified(submission):
     rubric = grade(manifest)
     assert check(rubric, "thermal_cycle")["status"] == "unverified"
     assert rubric.score is None
+
+
+def test_descriptive_boundary_fields_preserve_checks_and_reject_conflicts(submission):
+    manifest, _, _, _ = submission
+    path = Evidence(manifest).artifact("boundary_states")
+    states = json.loads(path.read_text())
+    names = {
+        "cell": "cell_A",
+        "positions": "positions_A",
+        "velocities": "velocities_A_fs",
+        "charges": "charges_e",
+        "ids": "atom_ids",
+    }
+    states = {
+        name: {names.get(key, key): value for key, value in state.items()}
+        for name, state in states.items()
+    }
+    write_json(path, states)
+    rubric = grade(manifest)
+    assert check(rubric, "boundary_state_continuity")["status"] == "passed"
+    assert check(rubric, "boundary_density_consistency")["status"] == "passed"
+    states["hold_start"]["velocities"] = (
+        np.asarray(states["hold_start"]["velocities_A_fs"]) + 1
+    ).tolist()
+    write_json(path, states)
+    failure = check(grade(manifest), "boundary_state_continuity")
+    assert failure["status"] == "failed"
+    assert "Conflicting" in failure["detail"]
+
+
+def test_linked_lammps_states_preserve_continuity_checks(submission):
+    manifest, _, _, root = submission
+    path = Evidence(manifest).artifact("boundary_states")
+    states = json.loads(path.read_text())
+    linked = {}
+    manifest["artifacts"]["boundary_data"] = []
+    for name, state in states.items():
+        atoms = Atoms(
+            state["species"], positions=state["positions"], cell=state["cell"], pbc=True
+        )
+        atoms.set_initial_charges(state["charges"])
+        atoms.set_velocities(np.asarray(state["velocities"]) / units.fs)
+        output = root / f"{name}.data"
+        write_structure(
+            output,
+            atoms,
+            format="lammps-data",
+            atom_style="charge",
+            units="real",
+            velocities=True,
+            specorder=["Na", "Si", "O"],
+        )
+        manifest["artifacts"]["boundary_data"].append(str(output))
+        linked[name] = {
+            "time_ps": state["time_ps"],
+            "lammps_data": output.name,
+            "atom_style": "charge",
+            "atom_type_species": {"1": "Na", "2": "Si", "3": "O"},
+        }
+    write_json(path, linked)
+    assert _boundaries(Evidence(manifest)) is True
+    linked["hold_start"]["lammps_data"] = "initial.data"
+    write_json(path, linked)
+    assert _boundaries(Evidence(manifest)) == (False, "Cell changed at a stage handoff")

@@ -14,6 +14,7 @@ from .common import (
     EvidenceError,
     UnsupportedEvidence,
     finite_array,
+    is_teacher_model,
     result_close,
 )
 from .common import close as _shared_close
@@ -308,9 +309,8 @@ def evaluate(e: Evidence, r: Rubric) -> None:
     r.check("natural_silicon_masses", 3, lambda: bool(len(masses())))
 
     def conventions():
-        model = str(e.settings["model"]).lower().replace("_", "-")
         return (
-            "mace-mp-0" in model
+            is_teacher_model(e.settings["model"])
             and e.settings["energy_unit"] == "eV"
             and e.settings["force_unit"] == "eV/Angstrom"
             and e.settings["force_constant_unit"] == "eV/Angstrom^2"

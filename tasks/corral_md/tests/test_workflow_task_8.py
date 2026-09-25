@@ -346,7 +346,9 @@ def test_task8_consistent_artifacts_full_task_points_no_execution(
     assert json.loads(submission.read_text())["results"]["id_test"]["r2"] < 0
 
 
-def test_level1_accepts_row_aligned_energy_table_without_duplicate_frame_energy(submission):
+def test_level1_accepts_row_aligned_energy_table_without_duplicate_frame_energy(
+    submission,
+):
     manifest = json.loads(submission.read_text())
     path = Path(manifest["artifacts"]["train_structures"])
     frames = json.loads(path.read_text())
@@ -845,3 +847,15 @@ def test_documented_final_selection_can_differ_from_cv_candidates_without_test_a
     )
     assert _check(result, "training_only_preprocessing")["status"] == "passed"
     assert _check(result, "ridge_coefficient_consistency")["status"] == "passed"
+
+
+def test_teacher_energy_field_is_aligned_by_row_id_and_still_checked(submission):
+    path = Evidence(submission).artifact("train_structures")
+    frames = json.loads(path.read_text())
+    for frame in frames:
+        frame["info"]["teacher_energy_eV"] = frame.pop("energy")
+    _write(path, frames[::-1])
+    assert _check(_score(submission), "training_and_id_geometry")["status"] == "passed"
+    frames[0]["info"]["teacher_energy_eV"] += 1
+    _write(path, frames)
+    assert _check(_score(submission), "training_and_id_geometry")["status"] == "failed"

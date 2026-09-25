@@ -19,9 +19,97 @@ from corral_md.workflow_scoring.common import (
     EvidenceError,
     Rubric,
     UnsupportedEvidence,
+    is_teacher_model,
     level1_reproducibility,
     reproducibility,
 )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "MACE-MP-0",
+        "/workspace/models/teacher.model",
+        "teacher.model",
+        {"identity": "MACE-MP-0", "path": "/workspace/models/teacher.model"},
+    ],
+)
+def test_teacher_declaration_accepts_pinned_filename(value):
+    assert is_teacher_model(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "MACE-MP-0b",
+        "student.model",
+        "not-mace-mp-01",
+        {},
+        {"identity": "MACE-MP-0", "path": "student.model"},
+    ],
+)
+def test_teacher_declaration_rejects_other_or_conflicting_models(value):
+    assert not is_teacher_model(value)
+
+
+def test_columnar_json_frames_keep_labels_geometry_and_time_aligned(tmp_path):
+    data = {
+        "symbols": ["Ag", "Ag"],
+        "pbc": False,
+        "cell_A": np.eye(3).tolist(),
+        "positions_A": [[[0, 0, 0], [1, 0, 0]], [[0, 0, 0], [2, 0, 0]]],
+        "energy_eV": [2, 3],
+        "forces_eV_A": np.zeros((2, 2, 3)).tolist(),
+        "elapsed_time_fs": [0, 10],
+        "stage": ["equilibration", "production"],
+        "info": [{"row_id": "a"}, {"row_id": "b"}],
+    }
+    path = tmp_path / "frames.json"
+    path.write_text(json.dumps(data))
+    frames = Evidence({"artifacts": {"dataset": str(path)}}).trajectory("dataset")
+    assert len(frames) == 2
+    assert all(len(a) == 2 for a in frames)
+    assert [a.calc.results["energy"] for a in frames] == [2, 3]
+    assert [a.info["time_fs"] for a in frames] == [0, 10]
+    assert [a.info["stage"] for a in frames] == ["equilibration", "production"]
+    assert [a.info["row_id"] for a in frames] == ["a", "b"]
+    assert frames[1].positions[1, 0] == 2
+    data["energy_eV"] = [2]
+    path.write_text(json.dumps(data))
+    with pytest.raises(EvidenceError, match="one entry per frame"):
+        Evidence({"artifacts": {"dataset": str(path)}}).trajectory("dataset")
+
+
+def test_conflicting_frame_time_aliases_are_not_silently_selected(tmp_path):
+    path = tmp_path / "frames.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "symbols": ["Ag"],
+                    "positions": [[0, 0, 0]],
+                    "pbc": False,
+                    "time_fs": 1,
+                    "elapsed_time_fs": 2,
+                }
+            ]
+        )
+    )
+    with pytest.raises(EvidenceError, match="Conflicting evidence fields"):
+        Evidence({"artifacts": {"dataset": str(path)}}).trajectory("dataset")
+
+
+def test_document_sidecars_must_be_confined_and_manifest_linked(manifest, tmp_path):
+    root, path, _ = manifest
+    e = Evidence(resolve_submission(str(path), root))
+    assert e.linked_path("data.json", path) == path.parent / "data.json"
+    (path.parent / "unlisted.npz").write_bytes(b"not evidence")
+    with pytest.raises(EvidenceError, match="listed in manifest.artifacts"):
+        e.linked_path("unlisted.npz", path)
+    outside = tmp_path / "outside.npz"
+    outside.write_bytes(b"outside")
+    with pytest.raises(EvidenceError, match="escapes"):
+        e.linked_path(str(outside), path)
 
 
 @pytest.fixture

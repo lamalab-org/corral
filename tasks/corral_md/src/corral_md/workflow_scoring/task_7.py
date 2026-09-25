@@ -12,6 +12,7 @@ from scipy.spatial import ConvexHull
 from .common import (
     EvidenceError,
     UnsupportedEvidence,
+    aliased_value,
     close,
     finite_array,
     result_close,
@@ -45,6 +46,24 @@ def _checked(fn):
             return None, str(exc)
 
     return check
+
+
+def _production_interval(info):
+    start_key = "production_start_frame_index"
+    stop_key = "production_stop_frame_index_exclusive"
+    if start_key in info or stop_key in info:
+        explicit_interval = [aliased_value(info, key) for key in (start_key, stop_key)]
+        return aliased_value(
+            {**info, "explicit_production_interval": explicit_interval},
+            "explicit_production_interval",
+            "production",
+        )
+    if "production" in info:
+        return info["production"]
+    raise EvidenceError(
+        f"Stage {info['id']} must identify production frame indices as "
+        f"{start_key} and {stop_key}, or production: [start_index, exclusive_end_index]"
+    )
 
 
 def _time(a):
@@ -244,7 +263,16 @@ def evaluate(e: Evidence, r: Rubric) -> None:
     @lru_cache(None)
     def stages():
         raw = e.json("stages", "stage_map")
-        records = raw["stages"] if isinstance(raw, dict) else raw
+        records = raw.get("stages", raw) if isinstance(raw, dict) else raw
+        if isinstance(records, dict):
+            mapped = []
+            for sid, record in records.items():
+                if not isinstance(record, dict) or record.get("id", sid) != sid:
+                    raise EvidenceError(
+                        "Stage dictionary keys must match their record IDs"
+                    )
+                mapped.append({**record, "id": sid})
+            records = mapped
         if not isinstance(records, list) or not records:
             raise EvidenceError("Expected nonempty stage identity map")
         ids = [s["id"] for s in records]
@@ -254,7 +282,9 @@ def evaluate(e: Evidence, r: Rubric) -> None:
             raise EvidenceError("Stage identities must be unique nonempty strings")
         if any(s["ensemble"] not in ("NPT", "NVT") for s in records):
             raise EvidenceError("Supported ensembles are NPT and NVT")
-        return records
+        return [
+            {**record, "production": _production_interval(record)} for record in records
+        ]
 
     @lru_cache(None)
     def stage(sid):

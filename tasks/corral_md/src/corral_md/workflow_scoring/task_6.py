@@ -15,6 +15,7 @@ from .common import (
     UnsupportedEvidence,
     close,
     finite_array,
+    is_teacher_model,
     result_close,
     scientific_screen,
 )
@@ -32,6 +33,12 @@ def _number(value):
 
 
 def _time(atoms):
+    if "time_fs" not in atoms.info and "time_ps" not in atoms.info:
+        raise EvidenceError(
+            "Every trajectory frame must record cumulative time_fs or time_ps; "
+            "elapsed_time_fs is also accepted. A separate unlabeled time array "
+            "cannot establish the frame-to-time mapping."
+        )
     return _number(
         atoms.info["time_fs"]
         if "time_fs" in atoms.info
@@ -300,7 +307,10 @@ def evaluate(e: Evidence, r: Rubric) -> None:
         return finite_array([_energy(a) for a in stage(which)[0]])
 
     def geometry():
-        initial = stage("eq")[0][0]
+        # A missing time coordinate is a chronology failure, not bad FCC geometry.
+        initial = e.trajectory(
+            "equilibration_trajectory", "nvt_trajectory", "equilibration"
+        )[0]
         gram = initial.cell.array @ initial.cell.array.T
         expected = np.full((3, 3), (2 * 4.05) ** 2)
         np.fill_diagonal(expected, 2 * (2 * 4.05) ** 2)
@@ -349,7 +359,7 @@ def evaluate(e: Evidence, r: Rubric) -> None:
                 )
             )
             and config["production_ensemble"].upper() == "NVE"
-            and "mace-mp-0" in str(e.settings["model"]).lower()
+            and is_teacher_model(e.settings["model"])
             and isinstance(e.settings["model_settings"], dict)
         )
 
