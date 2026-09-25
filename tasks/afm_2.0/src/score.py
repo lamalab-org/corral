@@ -1,668 +1,383 @@
-"""AFM submission scoring and measurement helpers.
+"""Score AFM submissions from raw NID artifacts, without instrument access.
 
-Scorer factories return a callable that evaluates a submitted result.
-File helpers inspect NID data; instrument helpers read live Nanosurf settings.
-RMS roughness is returned in the original data units without conversion.
+Task lengths and reported roughness are in nm, line times in seconds, and
+friction in V. Task tolerance applies to both settings and measurements as a
+fraction of the expected value (0.01 = 1%), with no absolute allowance. Zero
+targets, counts, modes and setpoint units must match exactly.
 """
 
-import gc
 import json
 import math
-import platform
 import re
+from copy import deepcopy
 from pathlib import Path
 
-import nanosurf
 import numpy as np
 from loguru import logger
 from NSFopen.read import read
-from skimage.metrics import structural_similarity as ssim
 
-# ----------------------------------------------------------
-# Safe pythoncom import (Windows only)
-# ----------------------------------------------------------
-if platform.system() == "Windows":
-    import pythoncom
-else:
-    pythoncom = None
-
-
-# ----------------------------------------------------------------------------
-# Submission scorers: numeric and text answers
-# ----------------------------------------------------------------------------
-
-
-def check_numerical(target: float, tolerance: float, final_params):
-    """
-    Returns a scoring function that checks if a result is within a
-    percentage-based tolerance of the target.
-
-    Args:
-        target (float): The target value.
-        tolerance (float): Fractional tolerance (e.g., 0.1 means ±10% of target).
-
-    Returns:
-        score_fn (function): A function that accepts a result and returns 1.0
-            if it's within tolerance, else 0.0.
-    """
-
-    def score_fn(result: str) -> float:
-        try:
-            if isinstance(result, str):
-                result = result.strip()
-                try:
-                    parsed_result = json.loads(result)
-                    if isinstance(parsed_result, dict) and "answer" in parsed_result:
-                        answer = float(parsed_result["answer"])
-                    else:
-                        answer = float(result)
-                except json.JSONDecodeError:
-                    answer = float(result)
-            else:
-                if isinstance(result, dict) and "answer" in result:
-                    answer = float(result["answer"])
-                else:
-                    answer = float(result)
-        except (ValueError, TypeError):
-            return 0.0  # Not a valid number
-
-        abs_tol = tolerance * target
-        if target - abs_tol <= answer <= target + abs_tol:
-            score = check_params(final_params)
-            logger.info(f"score for params {score}")
-            return 1.0 * score
-        return 0.0
-
-    return score_fn
-
-
-def check_indentation(target: str):
-    """Build a scorer that compares stripped text to the target, ignoring case."""
-
-    def score_fn(result: str) -> float:
-        try:
-            isinstance(result, str)
-            result = result.strip()
-            if result.lower() == target.lower():
-                return 1.0
-            else:
-                return 0.0
-        except (ValueError, TypeError):
-            return 0.0
-
-    return score_fn
-
-
-# ----------------------------------------------------------------------------
-# Submission scorers: instrument settings and files
-# ----------------------------------------------------------------------------
-
-
-def check_params_function(final_params):
-    """Build a scorer that checks live instrument settings, ignoring the answer."""
-
-    def score_fn(_result: str) -> float:
-        try:
-            logger.info(f"Checking params with final_params: {final_params}")
-            # Validate against the live settings via check_params below
-            score = check_params(final_params)
-            logger.info(f"check params score: {score}")
-            return float(score)  # Ensure the returned score is a float
-        except Exception as e:
-            logger.error(f"Error during scoring: {e}")
-            return 0.0  # Return 0.0 in case of an error
-
-    return score_fn  # Return the scoring function itself
-
-
-def check_file_exists(final_params):
-    """Build a scorer requiring both matching instrument settings and a NID path."""
-
-    def score_fn(result: str) -> float:
-        try:
-            logger.info(f"Checking params with final_params: {final_params}")
-            # Validate against the live settings via check_params below
-            score = check_params(final_params)
-            score2 = check_nid_file_exists(result)
-            logger.info(f"check params score: {score}")
-            return float(score * score2)  # Ensure the returned score is a float
-        except Exception as e:
-            logger.error(f"Error during scoring: {e}")
-            return 0.0  # Return 0.0 in case of an error
-
-    return score_fn  # Return the scoring function itself
-
-
-# ----------------------------------------------------------------------------
-# Submission scorers: image measurements
-# ----------------------------------------------------------------------------
-
-
-def check_image_quality(tolerance, final_params):
-    """Build a scorer requiring trace/retrace similarity and matching settings."""
-
-    def score_fn(result):
-        try:
-            if isinstance(result, str):
-                result = result.strip()
-                afm = read(result)
-                data = afm.data
-                im_file_fw = data["Image"]["Forward"]["Z-Axis"]
-                im_file_bw = data["Image"]["Backward"]["Z-Axis"]
-                similarity_index, _diff = ssim(
-                    im_file_bw,
-                    im_file_fw,
-                    full=True,
-                    data_range=im_file_bw.max() - im_file_bw.min(),
-                )
-                if similarity_index >= tolerance:
-                    score = check_params(final_params)
-                    logger.info(f"check params score : {score}")
-                    return 1.0 * score
-                return 0.0
-        except (ValueError, TypeError):
-            return 0.0
-
-    return score_fn
-
-
-def check_roughness_function(tolerance: float, final_params):
-    """
-    Parses a submission_format string from the LLM, handling minor formatting issues.
-    Runs check_roughness(path) for each valid pair of (rms_roughness_n, path_n).
-    Submitted RMS values must use the original data units; no scaling is applied.
-    Returns 1 if all RMS values pass the tolerance check AND
-    check_params(final_params)==1, else 0.
-    """
-
-    def score_fn(result: str) -> float:
-        try:
-            cleaned = result.replace(
-                ";", ","
-            ).strip()  # Fix common LLM formatting mistakes
-
-            # Ensure JSON braces are balanced
-            if not cleaned.startswith("{"):
-                cleaned = "{" + cleaned
-            if not cleaned.endswith("}"):
-                cleaned = cleaned + "}"
-
-            data = json.loads(cleaned)  # Try parsing JSON
-            # Detect all indices dynamically (e.g., 1, 2, 3, ...)
-            indices = sorted(
-                {
-                    int(re.findall(r"\d+", key)[0])
-                    for key in data
-                    if key.startswith("rms_roughness_")
-                }
-            )
-
-            if not indices:
-                logger.warning("No RMS entries found")
-                return 0
-
-            all_passed = True  # Track if all checks pass
-            for i in indices:
-                rough_key = f"rms_roughness_{i}"
-                path_key = f"path_{i}"
-
-                if rough_key in data and path_key in data:
-                    try:
-                        rms = float(data[rough_key])
-                    except ValueError:
-                        logger.warning(f"Invalid RMS value for entry {i}")
-                        all_passed = False
-                        continue
-
-                    path = data[path_key]
-                    logger.info(f"Entry {i}: RMS={rms}, Path={path}")
-
-                    check_output = check_roughness(
-                        path
-                    )  # Run user-defined check function
-                    abs_tol = tolerance * rms
-                    logger.info(
-                        f"Tolerance: ±{tolerance}, Check Output: {check_output}"
-                    )
-
-                    # Check if the measured value is within tolerance
-                    if not (rms - abs_tol <= check_output <= rms + abs_tol):
-                        logger.warning(f"Entry {i} failed tolerance check.")
-                        all_passed = False
-
-            # Additional condition: check_params(final_params) must be 1
-            if check_params(final_params) != 1:
-                logger.warning("check_params(final_params) != 1")
-                logger.info(check_params(final_params))
-                all_passed = False
-
-            return 1 if all_passed else 0
-
-        except json.JSONDecodeError:
-            logger.warning("Could not parse JSON — please check the submission format.")
-            return 0
-        except Exception as e:
-            logger.warning(f"Error: {e}")
-            return 0
-
-    return score_fn
-
-
-# ----------------------------------------------------------------------------
-# Level 1 scorers: one acquisition and its reported measurements
-# ----------------------------------------------------------------------------
-
-
-def score_single_topography(tolerance: float, final_params):
-    """Score an absolute NID path and the requested topography settings."""
-    return _single_image_scorer(tolerance, final_params)
-
-
-def score_single_rms_roughness(tolerance: float, final_params):
-    """Score path_1 and rms_roughness_1 in the original image units."""
-    return _single_image_scorer(tolerance, final_params, ("rms_roughness",))
-
-
-def score_single_mean_roughness(tolerance: float, final_params):
-    """Score path_1 and mean_roughness_1 (mean absolute height deviation)."""
-    return _single_image_scorer(tolerance, final_params, ("mean_roughness",))
-
-
-def score_single_topography_roughness(tolerance: float, final_params):
-    """Score both roughness metrics; check the derived line time via final_params."""
-    return _single_image_scorer(
-        tolerance, final_params, ("rms_roughness", "mean_roughness")
-    )
-
-
-def score_single_average_friction(tolerance: float, final_params):
-    """Score average_friction_1 from half the trace/retrace difference."""
-    return _single_image_scorer(
-        tolerance, final_params, ("average_friction",), lateral=True
-    )
-
-
-def score_single_rms_friction(tolerance: float, final_params):
-    """Score rms_friction_1, without subtracting the friction signal's mean."""
-    return _single_image_scorer(
-        tolerance, final_params, ("rms_friction",), lateral=True
-    )
-
-
-def score_single_lateral_roughness(tolerance: float, final_params):
-    """Require lateral channels and score both roughness metrics from height."""
-    return _single_image_scorer(
-        tolerance, final_params, ("rms_roughness", "mean_roughness"), lateral=True
-    )
-
-
-def score_single_roughness_and_friction(tolerance: float, final_params):
-    """Score both height roughness metrics and signed average friction."""
-    return _single_image_scorer(
-        tolerance,
-        final_params,
-        ("rms_roughness", "mean_roughness", "average_friction"),
-        lateral=True,
-    )
-
-
-def _single_image_scorer(tolerance, final_params, metrics=(), *, lateral=False):
-    """Build a fail-closed scorer for the Level 1 path or numbered JSON format.
-
-    tolerance is the fractional error allowed in reported metrics. Instrument
-    settings use check_params' own tolerances. Settings are checked live, not
-    reconstructed from acquisition history. No metric unit conversion is applied.
-    """
-    tolerance = _finite_number(tolerance)
-    if tolerance < 0:
-        raise ValueError("Scoring tolerance must be nonnegative")
-    final_params = dict(final_params)
-
-    def score_fn(result) -> float:
-        try:
-            if metrics:
-                report = json.loads(result) if isinstance(result, str) else result
-                expected_keys = {"path_1", *(f"{metric}_1" for metric in metrics)}
-                if not isinstance(report, dict) or set(report) != expected_keys:
-                    raise ValueError(
-                        f"Expected submission fields: {sorted(expected_keys)}"
-                    )
-                submitted = {
-                    metric: _finite_number(report[f"{metric}_1"]) for metric in metrics
-                }
-                path = report["path_1"]
-            else:
-                submitted = {}
-                path = result
-
-            if not isinstance(path, str) or not path.strip():
-                raise ValueError("An absolute NID file path is required")
-            path = Path(path.strip())
-            if (
-                not path.is_absolute()
-                or path.suffix.lower() != ".nid"
-                or not path.is_file()
-            ):
-                raise ValueError("Expected an existing absolute .nid file path")
-
-            shape = (final_params["lines_per_frame"], final_params["points_per_line"])
-            image = read(str(path)).data["Image"]
-            height = _image_array(image["Forward"]["Z-Axis"], shape)
-            measured = {}
-            if "rms_roughness" in metrics or "mean_roughness" in metrics:
-                centered = height - np.mean(height)
-                rows, columns = height.shape
-                measured["rms_roughness"] = float(
-                    np.sqrt(np.sum(centered**2) / (rows * columns))
-                )
-                measured["mean_roughness"] = float(
-                    np.sum(np.abs(centered)) / (rows * columns)
-                )
-            if lateral:
-                friction = _friction_signal(image, shape)
-                measured["average_friction"] = float(np.mean(friction))
-                measured["rms_friction"] = float(np.sqrt(np.mean(friction**2)))
-
-            for metric, answer in submitted.items():
-                expected = _finite_number(measured[metric])
-                # A relative comparison keeps small, unconverted signals meaningful.
-                if not math.isclose(answer, expected, rel_tol=tolerance, abs_tol=0.0):
-                    logger.warning(f"{metric}: submitted {answer}, measured {expected}")
-                    return 0.0
-            return float(check_params(final_params))
-        except Exception as exc:
-            logger.warning(f"Level 1 scoring failed: {exc}")
-            return 0.0
-
-    return score_fn
+LENGTH_UNITS = {"m": 1.0, "mm": 1e-3, "µm": 1e-6, "um": 1e-6, "nm": 1e-9, "pm": 1e-12}
+TIME_UNITS = {"s": 1.0, "ms": 1e-3, "µs": 1e-6, "us": 1e-6, "ns": 1e-9}
+VOLT_UNITS = {"V": 1.0, "mV": 1e-3, "µV": 1e-6, "uV": 1e-6}
+ROUGHNESS = {"rms_roughness", "mean_roughness"}
+FRICTION = {"average_friction", "rms_friction"}
+NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 
 
 def _finite_number(value):
-    """Accept numeric values/strings, rejecting booleans, NaN, and infinity."""
-    if isinstance(value, bool | np.bool_):
-        raise ValueError("Boolean values are not measurements")
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("Booleans are not measurements")
     number = float(value)
     if not math.isfinite(number):
         raise ValueError("Measurements must be finite")
     return number
 
 
-def _image_array(values, shape):
-    """Require a finite, complete image matching the configured resolution."""
-    array = np.asarray(values, dtype=float)
-    if array.ndim != 2 or array.size == 0 or array.shape != shape:
-        raise ValueError(f"Expected image shape {shape}, got {array.shape}")
-    if not np.isfinite(array).all():
-        raise ValueError("Image contains non-finite values")
-    return array
+def clean_unit_string(value):
+    return str(value).replace("Â", "").replace("μ", "µ").strip()
 
 
-def _friction_signal(image, shape):
-    """Match Image_Analyzer: half the forward/backward Friction force difference.
-
-    Preserve the reader's array orientation and units; do not take absolute values.
-    """
-    trace = _image_array(image["Forward"]["Friction force"], shape)
-    retrace = _image_array(image["Backward"]["Friction force"], shape)
-    return 0.5 * (trace - retrace)
+def _quantity(value):
+    match = re.fullmatch(rf"\s*({NUMBER})\s*([^\d\s]*)\s*", clean_unit_string(value))
+    if not match:
+        raise ValueError(f"Invalid numeric quantity: {value}")
+    return _finite_number(match[1]), match[2]
 
 
-# ----------------------------------------------------------------------------
-# NID file and roughness helpers
-# ----------------------------------------------------------------------------
+def _convert(value, units):
+    number, unit = _quantity(value)
+    if unit not in units:
+        raise ValueError(f"Unsupported unit: {unit}")
+    return number * units[unit]
 
 
-def check_nid_file_exists(path):
-    """Return 1 for a .nid file or a directory containing a .nid entry; else 0."""
-    p = Path(path)
-    if p.is_dir():
-        # Path is a directory → check for any .nid files inside it
-        for filepath in p.iterdir():
-            if filepath.suffix == ".nid":
-                logger.info(f"NID file found in directory: {filepath.name}")
-                return 1
-        logger.info(f"No .nid files found in the specified directory: {path}")
-        return 0
-    elif p.is_file():
-        # Path is a file → check if it ends with .nid
-        if p.suffix == ".nid":
-            logger.info(f"NID file found: {p.name}")
-            return 1
-        else:
-            logger.info(f"File exists but is not a .nid file: {p.name}")
-            return 0
-    else:
-        logger.info(f"Path does not exist: {path}")
-        return 0
+def to_meters(value):
+    return _convert(value, LENGTH_UNITS)
 
 
-def check_roughness(path):
-    """
-    Calculate RMS roughness from the latest .nid file in a directory
-    or from a specified .nid file.
-
-    Parameters:
-        path (str): Path to a .nid file or a directory containing .nid files.
-
-    Returns:
-        float: RMS roughness value in the original data units (no conversion).
-    """
-
-    p = Path(path).resolve()  # Normalize path
-    # Case 1: If path is a directory
-    if p.is_dir():
-        nid_files = list(p.glob("*.nid"))
-        if not nid_files:
-            raise FileNotFoundError(f"No .nid files found in directory: {p}")
-        p = max(nid_files, key=lambda x: x.stat().st_mtime)
-
-    # Case 2: If path is a file
-    elif p.is_file():
-        if p.suffix.lower() != ".nid":
-            raise ValueError(f"The specified file is not a .nid file: {p}")
-    else:
-        # Path exists neither as a file nor a directory
-        raise FileNotFoundError(f"The specified path is not valid: {p}")
-
-    afm = read(str(p))  # At this point, `p` is a valid .nid file
-    # Extract data and parameters
-    data = afm.data
-    _param = afm.param
-
-    try:
-        z = data["Image"]["Forward"]["Z-Axis"]
-    except KeyError as e:
-        raise KeyError(f"Missing key in AFM data: {e}") from e
-
-    # Calculate RMS roughness
-    z_mean = np.mean(z)
-    rms_m = np.sqrt(np.mean((z - z_mean) ** 2))
-    return float(rms_m)
+def to_seconds(value):
+    return _convert(value, TIME_UNITS)
 
 
-# ----------------------------------------------------------------------------
-# Live instrument settings
-# ----------------------------------------------------------------------------
+def parse_setpoint(value):
+    number, unit = _quantity(value)
+    if unit == "%":
+        return {"value": number, "unit": "%"}
+    if unit in VOLT_UNITS:
+        return {"value": number * VOLT_UNITS[unit], "unit": "V"}
+    raise ValueError(f"Unsupported setpoint unit: {unit}")
 
 
-def get_params():
-    """Read live settings; image dimensions and center coordinates are in nanometers."""
-    if pythoncom:
-        pythoncom.CoInitialize()
-    _tip_guid_map = {
-        "AN2_200": "{BD61D124-8350-4464-BFE4-1D8A156E4913}",
-        "GLA_1": "{9E2BA28D-D843-41bf-8F62-05502B3EDB18}",
-        "ACL_A": "{ABB75273-9543-431a-B681-C79B533DD9E6}",
-        "ANSCM": "{40AEA787-942C-4d48-A389-DA81571F009C}",
-        "SICON_A": "{F7A339A7-E29F-42a9-B7AA-D69C54363B76}",
-        "XYNCHR": "{DD3DFE39-455E-40a1-801E-5D5B14CE4080}",
-        "XYCONTR": "{12ADC816-C7B1-48f8-8B9E-5E579151CF50}",
-        "ContAl_G": "{ED5A15E6-D3B0-4e64-8C50-809335D3E143}",
-        "Multi75E_G": "{9593403B-A476-49a9-AA1F-9C3AEDAC0178}",
-        "Multi75M_G": "{03D0715C-A520-4976-A5E2-4FC3078E3821}",
-        "Multi75Al_G": "{443A2EDC-5C9C-4d60-843F-C6688BEA1DEA}",
-        "Tap190Al_G": "{041FB80E-A179-4170-B5A4-A4EA1CC0A965}",
-        "Tap150Al_G": "{E0F31C86-6BB8-496b-AC7E-F55C62EAB635}",
-        "USC_F1_2_k7_3": "{19AEEE43-478F-4D16-BDB7-2EE256EAF4A4}",
-        "USC_F0_3_k0_3": "{16FAEEB6-A887-46F6-A418-81A9EBBCB6C3}",
-        "Dyn190Al": "{E9CE0D2D-F59E-4B44-A74F-B78C11575E9F}",
-        "Stat0_2LAuD": "{A4A16538-CCD1-4BB1-B048-7B4F0F1B31BD}",
-        "CONTR": "{89E92173-96FB-4ff9-94D8-42296D00D980}",
-        "CONTSCR": "{5A687B3E-A75A-4b22-BD70-40ABB931F00E}",
-        "CONTSCPt": "{1E95D12B-1DDB-4ace-B3AF-BE9C0D52D4FC}",
-        "EFMR": "{986305AC-64B5-462e-B37E-6BD5AE447BE3}",
-        "LFMR": "{C61FCA2C-6D5D-4105-9FDE-640D263E229F}",
-        "MFMR": "{9499F49F-920F-47ec-80B6-883F683FF056}",
-        "NCLR": "{62633FD4-0555-4cee-A8B4-B82F4CEFBB48}",
-        "PPP_FMR": "{EBA2B75C-AA94-4451-AD36-1388CDABF5E8}",
-        "pq_SCONT": "{8D28AE10-E1DD-49E0-8CC6-ABD7CEDF57B0}",
-        "qp_CONT": "{0996E3AC-ABF6-4A22-B320-4BF749288156}",
-        "qp_fast_CB1": "{3F3DD96B-F838-45B6-AA8C-B54F66ED9571}",
-        "qp_fast_CB2": "{964280C3-70F7-4E22-AA60-734E672D7A02}",
-        "qp_fast_CB3": "{CCF4B65D-F3D8-4A40-9108-53468ECBA1B4}",
+def _mode(value):
+    text = clean_unit_string(value).lower().replace("-", " ")
+    aliases = {
+        "contact": 2,
+        "contact mode": 2,
+        "static force": 2,
+        "lateral force": 2,
+        "dynamic": 3,
+        "dynamic force": 3,
+        "phase contrast": 4,
+        "tapping": 4,
+        "tapping mode": 4,
     }
-    spm = nanosurf.SPM()
-    application = spm.application
-    scan = application.Scan
-    opmode = application.OperatingMode
-    zcontrol = application.ZController
-    head = application.ScanHead
-    tip = head.CantileverByGUID
-    # tip = None
-    # # Reverse lookup: find key (tip name) for current GUID
-    # for tip_name, guid in tip_guid_map.items():
-    #     if guid.lower() == current_guid.lower():  # Case-insensitive match
-    #         tip = tip_name
+    return aliases[text] if text in aliases else _finite_number(text)
 
+
+def extract_params(afm):
+    """Extract available DataSet-Info fields in the task's nm/s/degree units.
+
+    Missing fields stay missing and fail comparison if required by the task.
+    No value is supplied by the submission or by the live instrument.
+    """
+    info = afm.param[("HeaderDump", "DataSet-Info")]
+    fields = {
+        "pgain": ("P-Gain", _finite_number),
+        "igain": ("I-Gain", _finite_number),
+        "dgain": ("D-Gain", _finite_number),
+        "times_per_line": ("Time/Line", to_seconds),
+        "points_per_line": ("Points", _finite_number),
+        "lines_per_frame": ("Lines", _finite_number),
+        "centre_x": ("X-Pos", lambda v: to_meters(v) * 1e9),
+        "centre_y": ("Y-Pos", lambda v: to_meters(v) * 1e9),
+        "rotation": ("Rotation", lambda v: _convert(v, {"°": 1, "deg": 1, "": 1})),
+        "image_height": ("Image size", lambda v: to_meters(v) * 1e9),
+        "image_width": ("Image size", lambda v: to_meters(v) * 1e9),
+        "mode": ("Op. mode", _mode),
+        "tip": ("Cantilever type", clean_unit_string),
+        "setpoint": ("Setpoint", parse_setpoint),
+    }
     params = {
-        "pgain": zcontrol.PGain,
-        "igain": zcontrol.IGain,
-        "dgain": zcontrol.DGain,
-        "image_height": scan.ImageHeight * 1e9,
-        "image_width": scan.ImageWidth * 1e9,
-        "times_per_line": scan.Scantime,
-        "points_per_line": scan.Points,
-        "lines_per_frame": scan.Lines,
-        "rotation": scan.rotation,
-        "centre_x": scan.CenterPosX * 1e9,
-        "centre_y": scan.CenterPosY * 1e9,
-        "setpoint": zcontrol.SetPoint,
-        "tip": tip,
-        "mode": opmode.OperatingMode,
+        key: convert(info[field])
+        for key, (field, convert) in fields.items()
+        if field in info
     }
-    # Nanosurf: dynamic/phase-contrast setpoints are percentages; contact
-    # setpoints are volts only when SetPointForceUnitMode is DefUnitMode_V (0).
-    if params["mode"] in (3, 4):
-        params["setpoint_p"] = params["setpoint"]
-    elif params["mode"] == 2 and zcontrol.SetPointForceUnitMode == 0:
-        params["setpoint_v"] = params["setpoint"]
-    del zcontrol
-    del scan
-    del application
-    del spm
-    gc.collect()
-    if pythoncom:
-        pythoncom.CoUninitialize()
+    # Channel extents describe rectangular scans more precisely than Image size.
+    channel = _channel_header(afm, "Forward", "Z-Axis")
+    for key, dim in (("image_width", "Dim0"), ("image_height", "Dim1")):
+        if f"{dim}Range" in channel:
+            params[key] = (
+                _convert(
+                    f"{channel[f'{dim}Range']} {channel[f'{dim}Unit']}", LENGTH_UNITS
+                )
+                * 1e9
+            )
     return params
 
 
-def check_params(gt_params, rel_tol=1e-2, abs_tol=1e-3):
-    """Compare expected settings with live values, allowing numeric tolerances."""
-    current_params = get_params()
+def _channel_header(afm, direction, channel):
+    header = afm.param["HeaderDump"]
+    matches = [
+        entry
+        for _, entry in header.items()
+        if isinstance(entry, dict)
+        and entry.get("Frame") == f"Scan {direction.lower()}"
+        and entry.get("Dim2Name") == channel
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"Expected one header for {direction}/{channel}")
+    return matches[0]
 
-    for key in gt_params:
-        logger.info(f"param {key}")
-        if key not in current_params:
-            logger.warning(f"Missing instrument parameter: {key}")
-            return 0.0
-        current_val = current_params[key]
-        logger.info(f"current {current_val}")
-        gt_val = gt_params[key]
-        logger.info(f"gt val {gt_val}")
 
-        # Counts and operating modes must match exactly, even if the SDK uses floats.
-        if key in {"points_per_line", "lines_per_frame", "mode"}:
-            if isinstance(current_val, bool) or current_val != gt_val:
-                return 0.0
+def check_params(expected, actual, tolerance=0.01):
+    """Compare NID settings within tolerance * abs(task target)."""
+    tolerance = _finite_number(tolerance)
+    if tolerance < 0:
+        raise ValueError("Tolerance must be nonnegative")
+    for key, expected_value in expected.items():
+        target = expected_value
+        if key not in actual:
+            return False
+        value = actual[key]
+        if key == "setpoint":
+            if value["unit"] != target["unit"]:
+                return False
+            value, target = value["value"], target["value"]
+        elif key == "mode":
+            if _mode(value) != _mode(target):
+                return False
             continue
-
-        # Use math.isclose for floats
-        if isinstance(gt_val, float) or isinstance(current_val, float):
-            try:
-                current_val = _finite_number(current_val)
-                gt_val = _finite_number(gt_val)
-            except (ValueError, TypeError):
-                return 0.0
-            if not math.isclose(current_val, gt_val, rel_tol=rel_tol, abs_tol=abs_tol):
-                logger.warning(f"Mismatch in {key}: {current_val} != {gt_val}")
-                return 0.0
-        else:
-            if current_val != gt_val:
-                logger.warning(f"Mismatch in {key}: {current_val} != {gt_val}")
-                return 0.0
-
-    return 1.0
+        elif key == "tip":
+            # NID stores the cantilever name, not its SDK GUID.
+            if str(value).strip() != str(target).strip():
+                return False
+            continue
+        value, target = _finite_number(value), _finite_number(target)
+        if key in {"points_per_line", "lines_per_frame"}:
+            if value != target or value != int(value) or value <= 0:
+                return False
+        elif not _close(value, target, tolerance):
+            return False
+    return True
 
 
-def check_gain():
-    """Return the live proportional, integral, and derivative gains."""
-    spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
-    application = spm.application
-    _scan = application.Scan
-    _opmode = application.OperatingMode
-    zcontrol = application.ZController
-    _head = application.ScanHead
-    return [zcontrol.PGain, zcontrol.IGain, zcontrol.DGain]
+def _image_array(afm, direction, channel, shape, units):
+    array = np.asarray(afm.data["Image"][direction][channel], dtype=float)
+    if (
+        array.ndim != 2
+        or array.size == 0
+        or array.shape != shape
+        or not np.isfinite(array).all()
+    ):
+        raise ValueError(f"Invalid {direction}/{channel} image; expected {shape}")
+    header = _channel_header(afm, direction, channel)
+    if (int(header["Lines"]), int(header["Points"])) != shape:
+        raise ValueError("Channel dimensions do not match acquisition settings")
+    unit = clean_unit_string(header["Dim2Unit"])
+    if unit not in units:
+        raise ValueError(f"Unsupported {channel} unit: {unit}")
+    return array * units[unit]
 
 
-def check_image_size():
-    """Return the live image height and width in nanometers."""
-    # load application
-    spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
-    application = spm.application
-    # all variables
-    scan = application.Scan
-    _opmode = application.OperatingMode
-    _zcontrol = application.ZController
-    _head = application.ScanHead
-    return [scan.ImageHeight * 1e9, scan.ImageWidth * 1e9]
+def measure_image(
+    afm, metrics, *, shape=None, require_lateral=False, friction_absolute=False
+):
+    """Compute raw-image roughness in nm and friction in V using channel units.
 
-
-def check_scan_mode():
-    """Return whether the instrument is currently scanning."""
-    spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreA FM()
-    application = spm.application
-    scan = application.Scan
-    return scan.IsScanning
-
-
-def check_tip():
-    """Return the selected cantilever GUID."""
-    spm = nanosurf.SPM()  # or .C3000() or .CX(), or .CoreAFM()
-    application = spm.application
-    # all variables
-    _scan = application.Scan
-    _opmode = application.OperatingMode
-    _zcontrol = application.ZController
-    head = application.ScanHead
-    return head.CantileverByGUID
-
-
-# ----------------------------------------------------------------------------
-# Scalar comparison helper
-# ----------------------------------------------------------------------------
-
-
-def check_scalar(gt, ag):
+    NSFopen scales samples by Dim2Range/Dim2Min; it does not convert Dim2Unit.
+    Convert the declared unit once, then compute the requested measurements.
     """
-    Check if 'ag' is within ±20% of 'gt'.
+    if shape is None:
+        header = _channel_header(afm, "Forward", "Z-Axis")
+        shape = (int(header["Lines"]), int(header["Points"]))
+    height = _image_array(afm, "Forward", "Z-Axis", shape, LENGTH_UNITS) * 1e9
+    values = {}
+    if ROUGHNESS.intersection(metrics):
+        centered = height - height.mean()
+        values["rms_roughness"] = float(np.sqrt(np.mean(centered**2)))
+        values["mean_roughness"] = float(np.mean(np.abs(centered)))
+    if require_lateral or FRICTION.intersection(metrics):
+        forward = _image_array(afm, "Forward", "Friction force", shape, VOLT_UNITS)
+        backward = _image_array(afm, "Backward", "Friction force", shape, VOLT_UNITS)
+        # Keep NSFopen's array orientation, as in Image_Analyzer.
+        friction = (forward - backward) / 2
+        values["average_friction"] = float(
+            np.mean(np.abs(friction) if friction_absolute else friction)
+        )
+        values["rms_friction"] = float(np.sqrt(np.mean(friction**2)))
+    return {metric: values[metric] for metric in metrics}
 
-    Parameters:
-        gt (float): Ground truth value
-        ag (float): Agent-predicted or measured value
 
-    Returns:
-        bool: True if ag is within 20% of gt, False otherwise
-    """
-    tolerance = 0.20 * abs(gt)
-    return abs(ag - gt) <= tolerance
+def score_topography(tolerance, final_params, **options):
+    """Check one raw path or the configured sequence of raw image paths."""
+    return _scorer(tolerance, final_params, (), **options)
+
+
+def score_roughness(
+    tolerance, final_params, metrics=("rms_roughness", "mean_roughness"), **options
+):
+    """Check configured height roughness measurements in nm and NID settings."""
+    if not metrics or not set(metrics) <= ROUGHNESS:
+        raise ValueError("Select RMS and/or mean roughness")
+    return _scorer(tolerance, final_params, metrics, **options)
+
+
+def score_friction(tolerance, final_params, metrics=("average_friction",), **options):
+    """Check configured friction measurements in V and NID settings."""
+    if not metrics or not set(metrics) <= FRICTION:
+        raise ValueError("Select average and/or RMS friction")
+    return _scorer(tolerance, final_params, metrics, **options)
+
+
+def score_roughness_and_friction(
+    tolerance,
+    final_params,
+    metrics=("rms_roughness", "mean_roughness", "average_friction"),
+    **options,
+):
+    """Require both roughness and friction measurements, plus NID settings."""
+    if (
+        not (set(metrics) & ROUGHNESS and set(metrics) & FRICTION)
+        or not set(metrics) <= ROUGHNESS | FRICTION
+    ):
+        raise ValueError("Select both roughness and friction metrics")
+    return _scorer(tolerance, final_params, metrics, **options)
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate submission key: {key}")
+        result[key] = value
+    return result
+
+
+def _scorer(
+    tolerance,
+    final_params,
+    metrics,
+    percent_change_reference=None,
+    require_lateral=False,
+    friction_absolute=False,
+):
+    tolerance = _finite_number(tolerance)
+    if tolerance < 0:
+        raise ValueError("Tolerance must be nonnegative")
+    # A mapping describes the single level-1 artifact; an ordered list describes
+    # each level-2 artifact. There is no separate duplicated final-image target.
+    sequence = deepcopy(
+        final_params if isinstance(final_params, list) else [final_params]
+    )
+    metrics = tuple(metrics)
+    if (
+        not sequence
+        or not final_params
+        or not all(isinstance(p, dict) and p for p in sequence)
+    ):
+        raise ValueError("Expected nonempty acquisition settings")
+    count = len(sequence)
+    if percent_change_reference is not None and (
+        isinstance(percent_change_reference, bool)
+        or not isinstance(percent_change_reference, int)
+        or not 1 <= percent_change_reference <= count
+        or not metrics
+    ):
+        raise ValueError("Invalid percentage-change reference acquisition")
+    fields = {f"path_{i}" for i in range(1, count + 1)}
+    fields.update(f"{m}_{i}" for m in metrics for i in range(1, count + 1))
+    if percent_change_reference is not None:
+        fields.update(
+            f"{m}_percent_change_{i}" for m in metrics for i in range(1, count + 1)
+        )
+
+    def score_fn(result):
+        try:
+            if count == 1 and not metrics:
+                report = {"path_1": result}
+            else:
+                report = (
+                    json.loads(result, object_pairs_hook=_unique_object)
+                    if isinstance(result, str)
+                    else result
+                )
+            if not isinstance(report, dict) or set(report) != fields:
+                raise ValueError(f"Expected submission fields: {sorted(fields)}")
+            seen = set()
+            measurements = []
+            for i, expected in enumerate(sequence, 1):
+                path = report[f"path_{i}"]
+                if not isinstance(path, str):
+                    raise ValueError("Expected an absolute NID path")
+                path = Path(path.strip())
+                if (
+                    not path.is_absolute()
+                    or path.suffix.lower() != ".nid"
+                    or not path.is_file()
+                ):
+                    raise ValueError("Expected an existing absolute .nid file")
+                stat = path.stat()
+                identity = (stat.st_dev, stat.st_ino)
+                if identity in seen:
+                    raise ValueError("Each acquisition requires a separate file")
+                seen.add(identity)
+                afm = read(str(path))
+                actual = extract_params(afm)
+                if not check_params(expected, actual, tolerance):
+                    raise ValueError(
+                        f"Acquisition {i} settings differ from task settings"
+                    )
+                measured = measure_image(
+                    afm,
+                    metrics,
+                    shape=(
+                        int(actual["lines_per_frame"]),
+                        int(actual["points_per_line"]),
+                    ),
+                    require_lateral=require_lateral,
+                    friction_absolute=friction_absolute,
+                )
+                for metric in metrics:
+                    if not _close(report[f"{metric}_{i}"], measured[metric], tolerance):
+                        raise ValueError(f"Acquisition {i}: incorrect {metric}")
+                measurements.append(measured)
+            if percent_change_reference is not None:
+                reference = measurements[percent_change_reference - 1]
+                for i, measured in enumerate(measurements, 1):
+                    for metric in metrics:
+                        base = reference[metric]
+                        expected = (
+                            None
+                            if base == 0
+                            else 100 * (measured[metric] - base) / base
+                        )
+                        answer = report[f"{metric}_percent_change_{i}"]
+                        if (expected is None and answer is not None) or (
+                            expected is not None
+                            and not _close(answer, expected, tolerance)
+                        ):
+                            raise ValueError(
+                                f"Acquisition {i}: incorrect percentage change"
+                            )
+            return 1.0
+        except Exception as exc:
+            logger.warning(f"AFM scoring failed: {exc}")
+            return 0.0
+
+    return score_fn
+
+
+def _close(answer, measured, tolerance):
+    measured = _finite_number(measured)
+    margin = tolerance * abs(measured)
+    return measured - margin <= _finite_number(answer) <= measured + margin

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import nanosurf
 import numpy as np
@@ -23,6 +24,7 @@ from pymoo.termination import get_termination
 
 from aila_image_process import *  # noqa: F403
 from corral.core.tool import tool
+from score import measure_image
 from tool_utils import Document_Retriever, MyProblem
 
 # ----------------------------------------------------------
@@ -93,7 +95,7 @@ def visualize_grain_boxes(image_path: str) -> list:
     [/LIMITATIONS]
     """
 
-    plt.use("Agg")  # Use non-GUI backend for saving
+    plt.switch_backend("Agg")  # Use non-GUI backend for saving
 
     indexed_boxes, extents, Z_flat2, _labeled = image_process(image_path)  # noqa: F405
 
@@ -104,7 +106,7 @@ def visualize_grain_boxes(image_path: str) -> list:
     box_coords = []
 
     for index, x, y, w, h in indexed_boxes:
-        rect = patches.Rectangle(  # noqa: F405
+        rect = patches.Rectangle(
             (x, y), w, h, linewidth=1, edgecolor="cyan", facecolor="none"
         )
         ax.add_patch(rect)
@@ -523,9 +525,10 @@ def Image_Analyzer(
     [BRIEF] Analyzes AFM `.nid` image files from Nanosurf instruments and optionally computes surface metrics such as average friction, mean roughness, and RMS roughness. [/BRIEF]
 
     [DETAILED] This tool processes Atomic Force Microscopy (AFM) image files in `.nid` format captured using Nanosurf devices. It leverages the Nanosurf API to read high-resolution topographical and force-channel data. In addition to extracting image data, the tool can optionally compute key surface metrics:
-    - Average friction (via forward/backward scan differences),
-    - Mean roughness (Ra),
-    - Root-mean-square roughness (Rq).
+    - Average friction signal in V (half the forward/backward difference),
+    - Mean roughness (Ra) in nm,
+    - Root-mean-square roughness (Rq) in nm.
+    Channel units are read from the NID header and converted before calculating these metrics. Raw image_data retains the reader units.
     It supports custom logic through the `dynamic_code` parameter, allowing flexible access to alternate scan channels or directions such as 'Deflection', 'Friction Force', or 'Backward' images. The tool is well-suited for automated AFM workflows in surface characterization and materials research.
     [/DETAILED]
 
@@ -575,7 +578,7 @@ def Image_Analyzer(
 
         calculate_friction (bool):
             [ARGS_BRIEF] If True, computes the average friction force. [/ARGS_BRIEF]
-            [ARGS_DETAILED] Computes the average of the difference between Forward and Backward friction force images. [/ARGS_DETAILED]
+            [ARGS_DETAILED] Computes the signed mean of half the Forward/Backward friction-signal difference, in V. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: Boolean flag. Default is `False`. Set to `True` to trigger friction force computation. [/ARGS_SYNTACTICAL]
             [ARGS_EXAMPLES] "True" [/ARGS_EXAMPLES]
 
@@ -594,9 +597,9 @@ def Image_Analyzer(
     Returns:
         Dict[str, Any]:
             [RETURNS_BRIEF] Dictionary with image data, computation results, and status messages. [/RETURNS_BRIEF]
-            [RETURNS_DETAILED] Contains raw image data extracted from the file, and optionally, values for average friction, mean roughness, and RMS roughness if requested. In case of error, includes a detailed message. [/RETURNS_DETAILED]
+            [RETURNS_DETAILED] Contains raw image data, requested roughness values in nm, average friction signal in V, and a metric_units mapping. Raw image_data is not converted. In case of error, includes a detailed message. [/RETURNS_DETAILED]
             [RETURNS_EXAMPLES] Example outputs:
-                - "{"status": "Success", "image_data": [...], "mean_roughness": 2.4e-9}"
+                - "{"status": "Success", "image_data": [...], "mean_roughness": 2.4, "metric_units": {"mean_roughness": "nm"}}"
                 - "{"status": "Error", "message": "An error occurred: File not found"}" [/RETURNS_EXAMPLES]
 
     [RAISES] Exceptions:
@@ -636,49 +639,24 @@ def Image_Analyzer(
                     "message": f"Error executing dynamic code: {e!s}",
                 }
 
-        # Calculate Average Friction if requested
+        metrics = []
         if calculate_friction:
-            friction = 0.5 * (
-                data["Image"]["Forward"]["Friction force"]
-                - data["Image"]["Backward"]["Friction force"]
-            )
-            average_friction = np.mean(friction)
-            logger.info(f"Average Friction: {average_friction}")
-
-        # Calculate Mean Roughness if requested
+            metrics.append("average_friction")
         if calculate_mean_roughness:
-            z = data["Image"]["Forward"]["Z-Axis"]
-            z_mean = np.mean(z)
-            absolute_differences = np.abs(z - z_mean)
-            total_sum = np.sum(absolute_differences)
-            M, N = z.shape
-            mean_roughness = total_sum / (M * N)
-            logger.info(f"Mean Roughness: {mean_roughness}")
-
-        # Calculate RMS Roughness if requested
+            metrics.append("mean_roughness")
         if calculate_rms_roughness:
-            z = data["Image"]["Forward"]["Z-Axis"]
-            z_mean = np.mean(z)
-            squared_differences = (z - z_mean) ** 2
-            total_sum = np.sum(squared_differences)
-            M, N = z.shape
-            rms_roughness = np.sqrt(total_sum / (M * N))
-            logger.info(f"RMS Roughness: {rms_roughness}")
-
-        # Return the image data along with status
+            metrics.append("rms_roughness")
+        measured = measure_image(afm, metrics) if metrics else {}
+        return_units = {
+            metric: "V" if "friction" in metric else "nm" for metric in measured
+        }
         result = {
             "status": "Success",
             "message": f"Raw Image {path} processed successfully.",
             "image_data": image_data,
+            **measured,
+            "metric_units": return_units,
         }
-
-        # Include calculated metrics in the result if they were calculated
-        if calculate_friction:
-            result["average_friction"] = average_friction
-        if calculate_mean_roughness:
-            result["mean_roughness"] = mean_roughness
-        if calculate_rms_roughness:
-            result["rms_roughness"] = rms_roughness
 
         return result
     except Exception as e:

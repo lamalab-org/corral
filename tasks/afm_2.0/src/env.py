@@ -25,19 +25,10 @@ from corral.core.tool import Tool
 from corral.report.logging import event, exception_fields
 from corral.utils.code_tools import execute_python_code
 from score import (
-    check_file_exists,
-    check_image_quality,
-    check_numerical,
-    check_params_function,
-    check_roughness_function,
-    score_single_average_friction,
-    score_single_lateral_roughness,
-    score_single_mean_roughness,
-    score_single_rms_friction,
-    score_single_rms_roughness,
-    score_single_roughness_and_friction,
-    score_single_topography,
-    score_single_topography_roughness,
+    score_topography,
+    score_roughness,
+    score_friction,
+    score_roughness_and_friction,
 )
 from tools import (
     Code_Executor,
@@ -61,19 +52,10 @@ TASK_TYPE = "subtasks_1"  # "single_task" or "subtasks"
 BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\{TASK_TYPE}"
 
 SCORING_FUNCTIONS = {
-    "check_numerical": check_numerical,
-    "check_image_quality": check_image_quality,
-    "check_params_function": check_params_function,
-    "check_file_exists": check_file_exists,
-    "check_roughness_function": check_roughness_function,
-    "score_single_topography": score_single_topography,
-    "score_single_rms_roughness": score_single_rms_roughness,
-    "score_single_mean_roughness": score_single_mean_roughness,
-    "score_single_topography_roughness": score_single_topography_roughness,
-    "score_single_average_friction": score_single_average_friction,
-    "score_single_rms_friction": score_single_rms_friction,
-    "score_single_lateral_roughness": score_single_lateral_roughness,
-    "score_single_roughness_and_friction": score_single_roughness_and_friction,
+    "score_topography": score_topography,
+    "score_roughness": score_roughness,
+    "score_friction": score_friction,
+    "score_roughness_and_friction": score_roughness_and_friction,
 }
 
 
@@ -193,6 +175,11 @@ class AFMEnvironment(Environment):
             if key in params:
                 setattr(obj, attr, transform(params[key]))
 
+        # Select the tip and mode before applying settings: switching modes may
+        # restore previously stored controller values.
+        safe_set(head, "CantileverByGUID", "tip")
+        safe_set(opmode, "OperatingMode", "mode")
+
         # Apply scan parameters (converted to meters and seconds)
         safe_set(scan, "ImageHeight", "image_height", lambda x: x * 1e-9)
         safe_set(scan, "ImageWidth", "image_width", lambda x: x * 1e-9)
@@ -207,19 +194,19 @@ class AFMEnvironment(Environment):
         safe_set(zcontrol, "PGain", "pgain")
         safe_set(zcontrol, "IGain", "igain")
         safe_set(zcontrol, "DGain", "dgain")
-        # safe_set(zcontrol, "SetPoint", "setpoint")  # Uncomment if needed
-        safe_set(opmode, "OperatingMode", "mode")
         # Set the mode first: changing mode restores its previous setpoint.
-        if "setpoint_v" in params:
+        if "setpoint" in params:
+            setpoint = params["setpoint"]
+            if setpoint["unit"] == "V" and params.get("mode") == 2:
+                zcontrol.SetPointForceUnitMode = 0  # DefUnitMode_V
+            elif setpoint["unit"] != "%" or params.get("mode") not in (3, 4):
+                raise ValueError("Expected V for contact mode, or % for dynamic mode")
+            zcontrol.SetPoint = setpoint["value"]
+        elif "setpoint_v" in params:
             zcontrol.SetPointForceUnitMode = 0  # DefUnitMode_V
             zcontrol.SetPoint = params["setpoint_v"]
         elif "setpoint_p" in params:
             zcontrol.SetPoint = params["setpoint_p"]
-
-        # Head and operating mode
-        safe_set(head, "CantileverByGUID", "tip")
-        # if "mode" in params:
-        #     opmode.OperatingMode = getattr(spm.OperatingMode, params["mode"])
 
         event(
             "DEBUG",
