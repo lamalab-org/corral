@@ -6,20 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from pathlib import Path
 
-    from pydantic import JsonValue
-
-    from corral.core.environment import Environment
+    from corral.core.environment import Environment, EnvironmentSetup
     from corral.core.state import ExecutionState
-
-
-@dataclass(frozen=True)
-class EnvironmentSetup:
-    """Serializable values produced while configuring one task execution."""
-
-    hidden_arguments: Mapping[str, JsonValue] = field(default_factory=dict)
-    values: Mapping[str, JsonValue] = field(default_factory=dict)
-    status: str = "Additional apps/services configured for this task."
 
 
 @dataclass(frozen=True)
@@ -82,6 +72,8 @@ class TaskDefinition:
     # Interactive benchmarks can score their committed trajectory. The final
     # answer still closes the Corral lifecycle; evaluation remains read-only.
     state_scoring_fn: Callable[[ExecutionState], float] | None = None
+    # Optional benchmark-specific handling of mixed file/JSON submissions.
+    submission_resolver: Callable[[str, str | Path], str] | None = None
 
     def dependencies(self) -> set[str]:
         return {ref.task_id for ref in self.input_map.values()}

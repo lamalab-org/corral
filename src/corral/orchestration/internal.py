@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
@@ -162,15 +163,20 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
                 raise ValueError(
                     "Docker runtime workspaces must be located below /workspace"
                 )
-            environment.tools["terminal"] = build_terminal_tool(
-                AbsoluteWorkspaceFilesystem(workspace_path)
-            )
+            if "terminal" not in environment.tools:
+                environment.tools["terminal"] = build_terminal_tool(
+                    AbsoluteWorkspaceFilesystem(workspace_path)
+                )
         head = await store.for_execution(request.execution_id).head("main")
         if head is not None:
             recovered_state = await store.for_execution(
                 request.execution_id
             ).materialize("main", head.hash)
-            environment.prepare_workspace(recovered_state.workspace)
+            # Environment.prepare_workspace is synchronous and may use
+            # asyncio.run() for artifact materialization. Keep it off this loop.
+            await asyncio.to_thread(
+                environment.prepare_workspace, recovered_state.workspace
+            )
 
         launcher = LocalTaskLauncher(
             store,

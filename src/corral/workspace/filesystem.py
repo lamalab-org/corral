@@ -140,6 +140,15 @@ def resolve_public_workspace_path(
     return confine_workspace_path(root, relative, allow_root=allow_root)
 
 
+def workspace_relative_path(path: str, *, allow_root: bool = False) -> str:
+    """Validate an agent's absolute /workspace path before translating it.
+
+    Snapshot keys and controller paths are separate, trusted representations.
+    Never normalize a relative path or traversal into an allowed tool argument.
+    """
+    return normalize_public_workspace_path(path, allow_root=allow_root)
+
+
 def confine_workspace_path(
     root: str | Path,
     path: str | Path,
@@ -206,6 +215,8 @@ class WorkspaceFilesystem:
             raise ValueError(f"workspace root must be a regular directory: {root}")
         self.root = root_path.resolve()
 
+    path_root = "."
+
     def _resolve(self, path: str, *, allow_root: bool = False) -> Path:
         if allow_root and path in {"", "."}:
             return self.root
@@ -267,7 +278,9 @@ class WorkspaceFilesystem:
         if target.is_symlink() or not target.exists():
             raise FileNotFoundError(f"workspace path was not found: {path}")
         info: dict[str, Any] = {
-            "path": "." if target == self.root else self._logical_path(target),
+            "path": self.path_root
+            if target == self.root
+            else self._logical_path(target),
             "type": "directory" if target.is_dir() else "file",
         }
         if target.is_file():
@@ -321,10 +334,10 @@ class WorkspaceFilesystem:
         """Search workspace text files using a Python regular expression."""
         if context_lines < 0 or max_matches < 0:
             raise ValueError("context_lines and max_matches cannot be negative")
-        target = self._resolve(path, allow_root=True)
-        if target.is_file():
-            files = [self._logical_path(target)]
-        elif target.is_dir():
+        info = self.file_info(path)
+        if info["type"] == "file":
+            files = [info["path"]]
+        elif info["type"] == "directory":
             files = self.list_files(path, recursive=recursive)
         else:
             raise FileNotFoundError(f"workspace path was not found: {path}")
@@ -363,6 +376,8 @@ class AbsoluteWorkspaceFilesystem(WorkspaceFilesystem):
     returned path is absolute in the worker namespace, which prevents prompts,
     observations, and persisted actions from depending on a host path.
     """
+
+    path_root = PUBLIC_WORKSPACE_ROOT
 
     def _public_relative(self, path: str, *, allow_root: bool) -> str:
         return normalize_public_workspace_path(path, allow_root=allow_root)
@@ -538,6 +553,16 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
         # Restricted workers rebuild these closures against their canonical
         # mount instead of serializing a controller-side physical root.
         item.worker_operation = f"workspace:{name}"
+        if filesystem.path_root == PUBLIC_WORKSPACE_ROOT:
+            item.description += " All paths must be absolute /workspace paths; relative paths are forbidden."
+            for parameter_name, parameter in item.params_json_schema[
+                "properties"
+            ].items():
+                if parameter_name in {"path", "paths", "source", "destination"}:
+                    parameter["description"] = (
+                        "Absolute POSIX path(s) under /workspace. Relative paths, "
+                        "parent traversal and symbolic links are forbidden."
+                    )
     return tools
 
 

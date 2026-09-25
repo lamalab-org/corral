@@ -902,7 +902,7 @@ def test_worker_rejects_replaced_workspace_before_mount(workspace, monkeypatch):
 
     monkeypatch.setattr(permissions.subprocess, "Popen", replace_before_bootstrap)
     with pytest.raises(RuntimeError, match="workspace was replaced"):
-        permissions.run_worker("tool", (permission_probe, {}), workspace)
+        permissions.execute_restricted_tool(permission_probe, {}, workspace)
     assert not (root / "allowed.txt").exists()
     assert not (original / "allowed.txt").exists()
 
@@ -1278,7 +1278,7 @@ async def test_scientist_node_workspaces_in_docker(workspace, tmp_path):
 
 
 @pytest.mark.anyio
-async def test_internal_entrypoint_protects_a_real_trial(tmp_path):
+async def test_internal_entrypoint_protects_a_real_trial(tmp_path, monkeypatch):
     from corral.orchestration.internal import run_task_from_files
     from corral.orchestration.models import (
         DockerSandboxSpec,
@@ -1309,6 +1309,22 @@ async def test_internal_entrypoint_protects_a_real_trial(tmp_path):
     result_path = tmp_path / "result.json"
     assert await run_task_from_files(request_path, result_path) == 0
     assert json.loads(result_path.read_text())["submission"]
+
+    # A second start restores a committed state. Workspace preparation must
+    # run outside this coroutine because it uses asyncio.run internally.
+    original_prepare = Environment.prepare_workspace
+    restored = []
+
+    def prepare_workspace(environment, state):
+        import asyncio
+
+        asyncio.run(asyncio.sleep(0))
+        restored.append(True)
+        return original_prepare(environment, state)
+
+    monkeypatch.setattr(Environment, "prepare_workspace", prepare_workspace)
+    assert await run_task_from_files(request_path, result_path) == 0
+    assert restored
 
 
 def permission_registry(request):
@@ -1602,8 +1618,8 @@ async def test_private_state_stays_in_controller(
     from datetime import datetime, timezone
     from uuid import uuid4
 
-    from corral.core.environment import Toolset
-    from corral.core.task import EnvironmentSetup, TaskDefinition
+    from corral.core.environment import EnvironmentSetup, Toolset
+    from corral.core.task import TaskDefinition
     from corral.observability import NoOpObserver
     from corral.persistence import SQLiteCommitStore
     from corral.runtime.task_runner import TaskRuntime

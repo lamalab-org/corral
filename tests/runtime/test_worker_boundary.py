@@ -10,9 +10,9 @@ import pytest
 from tests.agents.commit_session import start_session
 
 from corral.agents.llm_planner import LLMPlanner
-from corral.core.environment import Environment, Toolset
+from corral.core.environment import Environment, EnvironmentSetup, Toolset
 from corral.core.state import EnvironmentState, ExecutionState
-from corral.core.task import EnvironmentSetup, TaskDefinition
+from corral.core.task import TaskDefinition
 from corral.core.tool import tool
 from corral.core.transition import ToolExecutionResult
 from corral.runtime import permissions

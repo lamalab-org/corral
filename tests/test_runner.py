@@ -242,8 +242,9 @@ def test_runner_defaults_evaluation_parallelism_to_task_execution_limit():
     executor = RecordingExecutor(BenchmarkExecutionResult("benchmark", (), 1, ()))
     runner = _runner(executor, _metadata())
 
-    request = runner.build_input("benchmark", max_parallel=4)
+    request = runner.build_input("benchmark")
 
+    assert request.max_parallel == 4
     assert request.max_parallel_evaluations == 4
     assert request.max_parallel_total == 8
 
@@ -255,9 +256,9 @@ def test_benchmark_input_defaults_evaluation_parallelism_to_execution_limit():
         trials_per_task=1,
         agent_by_task={"task": "agent"},
         environment_by_task={"task": "environment"},
-        max_parallel=4,
     )
 
+    assert request.max_parallel == 4
     assert request.max_parallel_evaluations == 4
     assert request.max_parallel_total == 8
 
@@ -437,8 +438,9 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
     }
     assert report.metadata["benchmark"]["trials_per_task"] == 1
     assert report.metadata["benchmark"]["k_values"] == [1]
-    assert report.metadata["benchmark"]["max_parallel_evaluations"] == 1
-    assert report.metadata["benchmark"]["max_parallel_total"] == 2
+    assert report.metadata["benchmark"]["max_parallel"] == 4
+    assert report.metadata["benchmark"]["max_parallel_evaluations"] == 4
+    assert report.metadata["benchmark"]["max_parallel_total"] == 8
     assert report.metadata["benchmark"]["max_parallel_evaluations_by_environment"] == {}
 
 

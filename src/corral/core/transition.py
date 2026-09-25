@@ -29,6 +29,15 @@ HIDDEN_ARGUMENTS_NAMESPACE = "hidden_arguments"
 CORRAL_ACTION_ID_ARGUMENT = "corral_action_id"
 
 
+class ToolRecoveryPending(RuntimeError):
+    """Suspend execution while leaving this tool's durable action resumable.
+
+    A remote operation may still be running, or its result may need to be
+    synchronized. This is not a completed tool failure: callers must resume
+    the same action before proposing further work.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class ToolExecutionResult:
     """A tool observation and optional complete environment namespace."""
@@ -210,6 +219,8 @@ def execute_action(
             except ToolArgumentError as exc:
                 status = ToolCallStatus.INVALID_ARGS
                 content = environment.normalize_public_paths(str(exc))
+            except ToolRecoveryPending:
+                raise
             except Exception as exc:  # tool failures remain observations
                 status = ToolCallStatus.EXECUTION_ERROR
                 content = environment.normalize_public_paths(str(exc))
@@ -219,7 +230,13 @@ def execute_action(
         next_environment = capture_environment(next_environment)
     next_environment = environment.normalize_public_paths(next_environment)
     operations = environment_operations(before_environment, next_environment)
-    workspace_delta = _capture_workspace(environment, state, action)
+    try:
+        workspace_delta = _capture_workspace(environment, state, action)
+    except Exception as exc:
+        raise ToolRecoveryPending(
+            f"Tool output could not be saved; resume action {action.id}: "
+            f"{environment.normalize_public_paths(str(exc))}"
+        ) from exc
     observation = _json_copy(environment.normalize_public_paths(content))
     return ToolEffects(
         observation=observation,
@@ -241,6 +258,7 @@ __all__ = [
     "HIDDEN_ARGUMENTS_NAMESPACE",
     "ToolEffects",
     "ToolExecutionResult",
+    "ToolRecoveryPending",
     "environment_operations",
     "execute_action",
     "propose_action",

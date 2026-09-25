@@ -72,6 +72,18 @@ from corral.workspace import (
 if TYPE_CHECKING:
     from corral.runtime.tool_execution import PreparedToolCall
 
+if TYPE_CHECKING:
+    from pydantic import JsonValue
+
+
+@dataclass(frozen=True)
+class EnvironmentSetup:
+    """Serializable values produced while configuring one task execution."""
+
+    hidden_arguments: Mapping[str, JsonValue] = field(default_factory=dict)
+    values: Mapping[str, JsonValue] = field(default_factory=dict)
+    status: str = "Additional apps/services configured for this task."
+
 
 class _ReadWriteLock:
     """A readers-writer lock: many concurrent readers **or** one exclusive writer.

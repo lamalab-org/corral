@@ -1,0 +1,246 @@
+"""Prepare the stable SimAgent app, its assets, and deployment smoke tests.
+
+Use ``setup_simagent.py`` for the one-time app setup. No release setting is
+needed for deployment or for normal scoring.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+import uuid
+from contextlib import suppress
+from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import modal
+from asset_versions import asset_volume_names
+from ground_truth import publish_ground_truth
+from runtime_identity import runtime_id, source_paths
+from setup_assets import prepare_assets, upload_assets
+from verification_smoke import smoke_verification
+
+TASK_ROOT = Path(__file__).resolve().parents[1]
+APP_NAME = "simagent"
+SOURCES = source_paths(TASK_ROOT)
+
+
+def release_id() -> str:
+    """Return the app's automatically computed content identity."""
+    return runtime_id(TASK_ROOT, SOURCES)
+
+
+def wait_for_active_app(identifier: str) -> None:
+    """Wait until Modal discovery serves the build that was just deployed."""
+    expected_runtime = {
+        "schema": 1,
+        "app_name": APP_NAME,
+        "release_id": identifier,
+        "volume_name": os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations"),
+        "asset_volumes": asset_volume_names(
+            json.loads((TASK_ROOT / "modal_app/assets.json").read_text())
+        ),
+    }
+    # Modal may briefly route discovery to the preceding deployment after
+    # `modal deploy` returns. Wait for the active app before starting smoke.
+    for attempt in range(18):
+        runtime = modal.Function.from_name(APP_NAME, "runtime_info").remote()
+        if runtime == expected_runtime:
+            break
+        if attempt < 17:
+            time.sleep(5)
+    else:
+        raise RuntimeError("SimAgent runtime discovery disagrees with deployment")
+
+
+def smoke_test(identifier: str, volume: modal.Volume) -> None:
+    """Exercise LAMMPS, GPU Python, asset permissions and result recovery."""
+    wait_for_active_app(identifier)
+    initializer = modal.Function.from_name(APP_NAME, "prepare_workspace")
+    worker = modal.Function.from_name(APP_NAME, "run_lammps")
+    run_id = f"smoke-{uuid.uuid4().hex}"
+    action_id = f"smoke-{uuid.uuid4().hex}"
+    remote = f"/corral/runs/{run_id}"
+    script = b"""units metal
+atom_style atomic
+lattice fcc 4.0
+region box block 0 1 0 1 0 1
+create_box 1 box
+create_atoms 1 box
+mass 1 1.0
+pair_style lj/cut 2.5
+pair_coeff 1 1 1.0 1.0
+run 0
+"""
+    try:
+        state = initializer.remote(run_id, identifier)
+        with volume.batch_upload() as upload:
+            upload.put_file(BytesIO(script), f"{remote}/workspace/smoke.in")
+        call = worker.spawn(
+            run_id,
+            action_id,
+            "smoke.in",
+            "/smoke",
+            [],
+            identifier,
+            state["head"],
+            {
+                "smoke.in": {
+                    "sha256": hashlib.sha256(script).hexdigest(),
+                    "size": len(script),
+                }
+            },
+        )
+        result = call.get()
+        if result.get("action_id") != action_id or "output/smoke.log" not in result.get(
+            "files", {}
+        ):
+            raise RuntimeError("MD worker smoke test did not publish its log")
+        if not b"".join(volume.read_file(f"{remote}/actions/{action_id}.json")):
+            raise RuntimeError(
+                "MD worker smoke test did not commit its result manifest"
+            )
+        python_script = b"""import json, os, sys
+from pathlib import Path
+assert Path.cwd().samefile('/workspace'), str(Path.cwd())
+assert os.getuid() == 10001
+for hidden in ('/results', '/bases', '/corral-state', '/test_files'):
+    assert not Path(hidden).exists(), hidden
+for name in ('models', 'potentials', 'structures'):
+    root = Path('/workspace') / name
+    assert root.is_dir(), root
+    assert root.is_symlink(), root
+    try:
+        root.unlink()
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError(f'Asset link can be replaced: {root}')
+    assert any(p.is_file() for p in root.rglob('*')), root
+    probe = root / '.corral-read-only-smoke'
+    try:
+        with probe.open('xb'):
+            pass
+    except PermissionError:
+        pass
+    except OSError as exc:
+        import errno
+        assert exc.errno == errno.EROFS, exc
+    else:
+        probe.unlink()
+        raise AssertionError(f'Asset mount is writable: {root}')
+assert Path('/workspace/models/teacher.model').is_file()
+assert Path('/workspace/models/student.model').is_file()
+import torch
+assert torch.cuda.is_available()
+assert (torch.tensor([2.0], device='cuda') * 3).cpu().item() == 6
+Path('/workspace/output/gpu.json').write_text(json.dumps({'ok': True}))
+"""
+        state = initializer.remote(run_id, identifier)
+        action = f"smoke-{uuid.uuid4().hex}"
+        name = "scripts/smoke_gpu.py"
+        with volume.batch_upload() as upload:
+            upload.put_file(BytesIO(python_script), f"{remote}/workspace/{name}")
+        worker = modal.Function.from_name(APP_NAME, "run_python_gpu")
+        result = worker.spawn(
+            run_id,
+            action,
+            name,
+            "/workspace",
+            [],
+            identifier,
+            state["head"],
+            {
+                **state["files"],
+                name: {
+                    "sha256": hashlib.sha256(python_script).hexdigest(),
+                    "size": len(python_script),
+                },
+            },
+            execution_options={"timeout": 300, "working_dir": "/workspace"},
+        ).get()
+        if "output/gpu.json" not in result.get("files", {}):
+            raise RuntimeError("MD GPU sandbox smoke test did not publish its result")
+    finally:
+        with suppress(FileNotFoundError, modal.exception.NotFoundError):
+            volume.remove_file(remote, recursive=True)
+
+
+def deploy() -> str:
+    identifier = release_id()
+    print("Preparing the stable simagent app", flush=True)
+    with TemporaryDirectory(prefix=".corral-md-assets-", dir=TASK_ROOT) as temporary:
+        source = Path(temporary)
+        prepare_assets(source)
+        upload_assets(source)
+        print("Assets verified; deploying worker", flush=True)
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "modal",
+                "deploy",
+                "--strategy",
+                "recreate",
+                "modal_app/lammps_app.py",
+            ],
+            cwd=TASK_ROOT,
+            check=True,
+        )
+        volume = modal.Volume.from_name(
+            os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations"), create_if_missing=True
+        )
+        print("Running LAMMPS and GPU sandbox smoke tests", flush=True)
+        smoke_test(identifier, volume)
+        print(
+            "Running independent calculator and controlled MD smoke tests", flush=True
+        )
+        verification_smoke = smoke_verification(
+            APP_NAME, identifier, volume, source / "models"
+        )
+        print("Publishing fixed Task 3 and Task 5 numerical references", flush=True)
+        ground_truth = publish_ground_truth(
+            APP_NAME,
+            identifier,
+            volume,
+            json.loads((TASK_ROOT / "modal_app/assets.json").read_text()),
+        )
+    print(
+        json.dumps(
+            {
+                "build_id": identifier,
+                "app_name": APP_NAME,
+                "volume_name": os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations"),
+                "verification_smoke": verification_smoke,
+                "ground_truth": ground_truth,
+                "asset_volumes": asset_volume_names(
+                    json.loads((TASK_ROOT / "modal_app/assets.json").read_text())
+                ),
+            },
+            indent=2,
+        ),
+        flush=True,
+    )
+    return identifier
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--print-id",
+        action="store_true",
+        help="Print internal build identity without deploying",
+    )
+    args = parser.parse_args()
+    identifier = release_id() if args.print_id else deploy()
+    print(identifier)  # noqa: T201
+
+
+if __name__ == "__main__":
+    sys.exit(main())

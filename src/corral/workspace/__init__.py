@@ -11,6 +11,7 @@ from corral.workspace.filesystem import (
     materialize_public_workspace_paths,
     normalize_public_workspace_path,
     resolve_public_workspace_path,
+    workspace_relative_path,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "materialize_public_workspace_paths",
     "normalize_public_workspace_path",
     "resolve_public_workspace_path",
+    "workspace_relative_path",
 ]

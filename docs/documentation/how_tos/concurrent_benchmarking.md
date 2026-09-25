@@ -23,7 +23,7 @@ The following limits apply throughout the benchmark:
 
 | Argument | What it bounds |
 |---|---|
-| `max_parallel` | All running task attempts in the benchmark. |
+| `max_parallel` | All running task attempts in the benchmark. Defaults to `4`. |
 | `max_parallel_per_task` | Attempts of the same task. |
 | `max_parallel_evaluations` | Concurrent evaluations. Defaults to `max_parallel`. |
 | `max_parallel_total` | Executions and evaluations combined. Defaults to `max_parallel + max_parallel_evaluations`, or `2 * max_parallel` when both phase limits use their defaults. |
