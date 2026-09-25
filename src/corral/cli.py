@@ -23,6 +23,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 
 import corral.orchestration as orchestration
+from corral.observability.langfuse import langfuse_enabled
 from corral.persistence import ShardedCommitStore, SQLiteCommitStore
 from corral.run import CorralRunner, execute_task
 from corral.runtime.environment_loader import (
@@ -410,11 +411,14 @@ async def run_benchmark(
     if harness == "reflexion":
         harness = normalise_agent_name(runtime_options.get("actor", "tool-calling"))
     extra = AGENT_DEFINITIONS[harness].extra or ""
+    if langfuse_enabled():
+        extra = ",".join(filter(None, (extra, "langfuse")))
     image_kind = (
         args.environment if args.environment in {"stargazer", "wetlab"} else "benchmark"
     )
     sandbox = _sandbox_profile(
-        args, default_image=f"corral-{args.environment}:{extra or 'latest'}"
+        args,
+        default_image=f"corral-{args.environment}:{extra.replace(',', '-') or 'latest'}",
     )
     agents = {}
     if sandbox.mode == orchestration.SandboxMode.DOCKER.value:

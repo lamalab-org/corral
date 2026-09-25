@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 
 from corral import run
 from corral.agents.schema import AgentOutcome
@@ -125,6 +126,7 @@ class _RecordingSpan:
 class RecordingObserver:
     def __init__(self):
         self.observations = []
+        self.flushes = 0
 
     def start(self, observation):
         self.observations.append(observation)
@@ -134,7 +136,7 @@ class RecordingObserver:
         del commit, context
 
     def flush(self):
-        return None
+        self.flushes += 1
 
 
 class RecordingDockerLauncher:
@@ -172,6 +174,68 @@ def _environment(task_id: str, dependency: str | None = None) -> Environment:
         task,
         toolset=Toolset(workspace_factory=None),
     )
+
+
+@pytest.mark.anyio
+async def test_sampling_defaults_survive_persistence_and_resume(monkeypatch, tmp_path):
+    import litellm
+
+    class ParameterAgent(SubmitAgent):
+        temperature = 0.7
+
+    monkeypatch.setattr(
+        litellm, "get_model_info", lambda _model: {"default_reasoning_effort": "medium"}
+    )
+    store = SQLiteCommitStore(tmp_path / "parameters.sqlite3")
+    agent = ParameterAgent()
+    registry = RuntimeRegistry(
+        agents={"agent": agent}, environments={"task": _environment("task")}
+    )
+    request = RunTaskInput(
+        execution_id="parameters",
+        task_id="task",
+        environment_id="task",
+        agent_id="agent",
+    )
+    expected = {
+        "temperature": 0.7,
+        "reasoning_effort": "medium",
+        "parameter_sources": {
+            "temperature": "agent",
+            "reasoning_effort": "litellm_default",
+        },
+    }
+    try:
+        result = await execute_task(
+            task=request, state_store=store, registry=registry, observer=NoOpObserver()
+        )
+        # The same JSON boundary is used for Docker result.json.
+        result = TypeAdapter(StateRef).validate_json(
+            TypeAdapter(StateRef).dump_json(result)
+        )
+        assert result.metadata["model_parameters"] == expected
+        state = await store.for_execution(request.execution_id).materialize(
+            "main", result.commit_hash
+        )
+        assert state.task.model_dump(mode="json")["model"] == {
+            "name": agent.model,
+            **expected,
+        }
+
+        agent.temperature = 0.2
+        monkeypatch.setattr(
+            litellm,
+            "get_model_info",
+            lambda _model: {"default_reasoning_effort": "high"},
+        )
+        resumed = await execute_task(
+            task=request, state_store=store, registry=registry, observer=NoOpObserver()
+        )
+        assert resumed.commit_hash == result.commit_hash
+        assert resumed.metadata["model_parameters"] == expected
+    finally:
+        registry.close()
+        await store.aclose()
 
 
 @pytest.mark.anyio
@@ -406,10 +470,17 @@ async def test_direct_task_and_benchmark_lifecycle(tmp_path):
             max_parallel_per_task=2,
         )
         assert len(report.all_results) == 4
+        assert observer.flushes == 1
         assert all(trial.score == 1.0 for trial in report.all_results)
         assert report.verbosity == "brief"
         assert report.task_results["upstream"].trials[0].state["task"]["model"] == {
-            "name": "test-model"
+            "name": "test-model",
+            "temperature": None,
+            "reasoning_effort": None,
+            "parameter_sources": {
+                "temperature": "unknown",
+                "reasoning_effort": "unknown",
+            },
         }
         assert report.task_results["downstream"].trials[0].output == {"answer": "42"}
         evaluations = [o for o in observer.observations if o.name == "task.evaluate"]
@@ -841,6 +912,7 @@ async def test_task_retries_failed_launches(monkeypatch):
 async def test_benchmark_cancellation_finishes_active_trials(monkeypatch):
     started = asyncio.Event()
     active = 0
+    observer = RecordingObserver()
 
     async def launch(*args, **kwargs):
         nonlocal active
@@ -857,7 +929,7 @@ async def test_benchmark_cancellation_finishes_active_trials(monkeypatch):
         None,
         {"task": BenchmarkTaskMetadata("agent", "env")},
         state_store=None,
-        observer=NoOpObserver(),
+        observer=observer,
     )
     task = asyncio.create_task(
         runner.run(
@@ -874,6 +946,7 @@ async def test_benchmark_cancellation_finishes_active_trials(monkeypatch):
         with pytest.raises(asyncio.CancelledError):
             await task
     assert active == 0
+    assert observer.flushes == 1
 
 
 @pytest.mark.anyio

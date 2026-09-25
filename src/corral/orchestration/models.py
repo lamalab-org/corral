@@ -41,7 +41,13 @@ class DockerSandboxSpec:
         "ANTHROPIC_BASE_URL",
         "AZURE_OPENAI_API_KEY",
         "AZURE_OPENAI_ENDPOINT",
+        "CORRAL_LANGFUSE_ENABLED",
         "HF_TOKEN",
+        "LANGFUSE_BASE_URL",
+        "LANGFUSE_HOST",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_TRACING_ENABLED",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
     )
@@ -115,10 +121,17 @@ class AgentRuntimeDefinition:
     api_endpoint: str | None = None
     temperature: float | None = None
     options: dict[str, Any] = field(default_factory=dict)
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("agent runtime name cannot be empty")
+        # Promote --agent-kwargs (and older saved definitions) into the common
+        # parameter summary without removing the original constructor options.
+        if self.reasoning_effort is None:
+            object.__setattr__(
+                self, "reasoning_effort", self.options.get("reasoning_effort")
+            )
 
 
 @dataclass(frozen=True)

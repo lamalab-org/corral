@@ -344,15 +344,20 @@ class LangfuseObserver:
             flush()
 
 
-def observer_from_env() -> Observer:
-    local = LoggingObserver()
+def langfuse_enabled() -> bool:
+    """Whether environment configuration requests Langfuse export."""
     enabled = os.getenv("CORRAL_LANGFUSE_ENABLED", "").strip().lower()
     if enabled in {"0", "false", "no", "off"}:
-        return local
+        return False
     configured = bool(os.getenv("LANGFUSE_PUBLIC_KEY")) and bool(
         os.getenv("LANGFUSE_SECRET_KEY")
     )
-    if not configured and enabled not in {"1", "true", "yes", "on"}:
+    return configured or enabled in {"1", "true", "yes", "on"}
+
+
+def observer_from_env() -> Observer:
+    local = LoggingObserver()
+    if not langfuse_enabled():
         return local
     try:
         remote = LangfuseObserver()
@@ -371,6 +376,7 @@ def observer_from_env() -> Observer:
 __all__ = [
     "LangfuseObserver",
     "deterministic_trace_id",
+    "langfuse_enabled",
     "mask_sensitive_data",
     "observer_from_env",
 ]

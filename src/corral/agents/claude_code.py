@@ -172,6 +172,7 @@ class ClaudeCodeAgent:
     """
 
     tool_transport = "mcp"
+    unsupported_model_parameters = frozenset({"temperature"})
 
     def __init__(
         self,

@@ -284,6 +284,35 @@ python run_scripts/run_tool_calling.py --environment samplemath \
   --env-kwargs '{"subtasks": true}'
 ```
 
+#### Langfuse observability
+
+`run_tool_calling.py` loads the repository's `.env` before starting a run.
+Configure Langfuse there with the keys and URL for your project:
+
+```dotenv
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+CORRAL_LANGFUSE_ENABLED=true
+```
+
+Install the optional SDK in the environment running the script. From the
+repository root, use `uv sync --extra langfuse`, then retain the extra when
+running with uv:
+
+```bash
+uv run --extra langfuse python run_scripts/run_tool_calling.py \
+  --environment samplemath --task task1 --run-id samplemath-traced
+```
+
+When using a task package's environment instead, add `--with 'langfuse>=4,<5'`
+to its `uv run --project tasks/<environment>` command. Each task produces a
+trace named `corral.task.<task-id>`, with model turns, token usage, and tool
+results, grouped into a Langfuse session by run ID. Traces are flushed before
+the runner exits. Docker runs forward the Langfuse settings and build a
+separate image with the SDK installed; custom images need the `langfuse`
+extra too. Set `CORRAL_LANGFUSE_ENABLED=false` to keep only local logging.
+
 ### Scored, Multi-Trial Benchmarks
 
 `CorralRunner` is the higher-level convenience layer for repeated trials,

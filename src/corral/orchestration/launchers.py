@@ -22,6 +22,7 @@ from corral.orchestration.models import (
     SandboxRetention,
     StateRef,
 )
+from corral.orchestration.parameters import model_parameter_metadata
 from corral.persistence import CommitNotFoundError
 from corral.runtime import TaskRuntime
 
@@ -57,6 +58,12 @@ def state_ref(state: ExecutionState, commit: Commit) -> StateRef:
         else None
     )
     raw_error = state.runtime.metadata.get("error")
+    model_metadata = state.task.model_dump(mode="json")["model"]
+    parameters = {
+        key: model_metadata[key]
+        for key in ("temperature", "reasoning_effort", "parameter_sources")
+        if key in model_metadata
+    }
     return StateRef(
         commit_hash=commit.hash,
         execution_id=state.execution_id,
@@ -67,6 +74,7 @@ def state_ref(state: ExecutionState, commit: Commit) -> StateRef:
         submission=state.submission,
         output=output,
         error=str(raw_error) if raw_error is not None else None,
+        metadata={"model_parameters": parameters} if parameters else {},
     )
 
 
@@ -144,9 +152,12 @@ class LocalTaskLauncher:
             started_at=datetime.fromisoformat(request.started_at),
             max_iterations=request.max_iterations,
             dependency_outputs=dependencies,
-            model_metadata=(
-                {"name": configured_model} if configured_model is not None else {}
-            ),
+            model_metadata={
+                **({"name": configured_model} if configured_model is not None else {}),
+                **model_parameter_metadata(
+                    agent, model=configured_model, definition=request.agent_runtime
+                ),
+            },
             scaffold_metadata=scaffold_metadata,
             last_score=last_evaluation,
             previous_state=previous_state,

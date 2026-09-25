@@ -427,6 +427,7 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
             "model": "model-a",
             "api_endpoint": None,
             "temperature": None,
+            "reasoning_effort": None,
             "options": {"api_key": "[REDACTED]", "seed": 7},
         },
     }

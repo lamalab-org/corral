@@ -279,6 +279,7 @@ def _redact_secrets(value: Any) -> Any:
 def _report_metadata(
     request: BenchmarkInput,
     *,
+    result: BenchmarkExecutionResult | None = None,
     k_values: list[int],
     include_dependencies: bool,
     verbose: bool,
@@ -287,6 +288,17 @@ def _report_metadata(
         task_id: _redact_secrets(asdict(runtime))
         for task_id, runtime in request.agent_runtime_by_task.items()
     }
+    # The execution side owns resolved defaults, especially for SDKs installed
+    # only in Docker. Use persisted values so resumed runs retain their defaults.
+    if result is not None:
+        resolved_tasks: set[str] = set()
+        for trial in result.trials:
+            if trial.state is None or trial.task_id in resolved_tasks:
+                continue
+            parameters = trial.state.metadata.get("model_parameters")
+            if isinstance(parameters, dict):
+                agent_runtime.setdefault(trial.task_id, {}).update(parameters)
+                resolved_tasks.add(trial.task_id)
     environment_runtime = {
         task_id: _redact_secrets(asdict(runtime))
         for task_id, runtime in request.environment_runtime_by_task.items()
@@ -695,6 +707,7 @@ class CorralRunner:
             await asyncio.gather(*execution_handles.values(), return_exceptions=True)
             await asyncio.gather(*evaluation_handles.values(), return_exceptions=True)
             await asyncio.gather(evaluations, return_exceptions=True)
+            await asyncio.to_thread(self.observer.flush)
         return BenchmarkExecutionResult(
             benchmark_run_id=request.benchmark_run_id,
             task_ids=request.task_ids,
@@ -766,6 +779,7 @@ class CorralRunner:
                     metrics=self.metrics,
                     metadata=_report_metadata(
                         request,
+                        result=result,
                         k_values=normalised_k,
                         include_dependencies=include_dependencies,
                         verbose=verbose,

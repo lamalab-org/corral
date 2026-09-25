@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from corral.observability import LoggingObserver, ObservationContext
+from corral.observability import ObservationContext, observer_from_env
 from corral.orchestration.launchers import LocalTaskLauncher
 from corral.orchestration.models import RUNTIME_PROTOCOL_VERSION, RunTaskInput
 from corral.orchestration.registry import RuntimeRegistry
@@ -51,12 +51,15 @@ def _built_in_registry(
         load_environment_group,
     )
 
+    agent_options = dict(agent_definition.options)
+    if agent_definition.reasoning_effort is not None:
+        agent_options["reasoning_effort"] = agent_definition.reasoning_effort
     agent = create_agent(
         agent_definition.name,
         model=agent_definition.model,
         api_endpoint=agent_definition.api_endpoint,
         temperature=agent_definition.temperature,
-        agent_kwargs=agent_definition.options,
+        agent_kwargs=agent_options,
     )
     options = dict(environment_definition.options)
     options["work_dir"] = "/workspace"
@@ -127,6 +130,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
 
     registry: RuntimeRegistry | None = None
     store: SQLiteCommitStore | None = None
+    observer = observer_from_env()
     try:
         os.chown(checkpoint_root, 0, 0)
         checkpoint_root.chmod(0o700)
@@ -181,7 +185,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         launcher = LocalTaskLauncher(
             store,
             registry,
-            LoggingObserver(),
+            observer,
             scaffold_sandbox="docker",
         )
         result = await launcher.run(
@@ -194,6 +198,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         )
         _write_result(Path(result_file), asdict(result))
     finally:
+        await asyncio.to_thread(observer.flush)
         if registry is not None:
             registry.close()
         if store is not None:
