@@ -1360,8 +1360,8 @@ async def test_private_state_stays_in_controller(
     from datetime import datetime, timezone
     from uuid import uuid4
 
-    from corral.core.environment import Toolset
-    from corral.core.task import EnvironmentSetup, TaskDefinition
+    from corral.core.environment import EnvironmentSetup, Toolset
+    from corral.core.task import TaskDefinition
     from corral.observability import NoOpObserver
     from corral.persistence import SQLiteCommitStore
     from corral.runtime.task_runner import TaskRuntime
