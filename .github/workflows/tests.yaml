@@ -88,9 +88,11 @@ jobs:
       - name: Discover tasks with tests
         id: discover
         run: |
-          # Wetlab is tested separately because it requires a Conda-only dependency.
+          # Wetlab and AFM 2.0 use dedicated jobs with their own dependency setup.
           tasks=$(find tasks -maxdepth 1 -type d -name "*" | while read task_dir; do
-            if [[ "$(basename "$task_dir")" == "wetlab" ]]; then continue; fi
+            case "$(basename "$task_dir")" in
+              wetlab|afm_2.0) continue ;;
+            esac
             if [[ -f "$task_dir/pyproject.toml" ]] && [[ -d "$task_dir/tests" ]]; then
               echo "$(basename "$task_dir")"
             fi
@@ -146,6 +148,29 @@ jobs:
           CORRAL_TEST_ENVIRONMENT: ${{ matrix.task }}
         working-directory: ./tasks/${{ matrix.task }}
 
+  # Test AFM artifacts without importing the hardware environment or its tool stack.
+  test-afm-scoring:
+    needs: code-quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Run hardware-independent AFM scoring tests
+        run: >-
+          uv run --no-project --python 3.11
+          --with numpy --with pandas --with pytest --with loguru --with NSFopen
+          python -m pytest tasks/afm_2.0/tests -q
+
   # Wetlab requires Reaktoro, which is available from Conda but not from PyPI
   test-wetlab:
     needs: [code-quality, test-main]
@@ -191,8 +216,9 @@ jobs:
         run: |
           # Excluded tasks:
           #   afm            - requires nanosurf (Windows-only hardware library)
+          #   afm_2.0        - hardware environment; scoring tested in test-afm-scoring
           #   wetlab         - requires reaktoro (conda-only, not on PyPI)
-          EXCLUDED="afm wetlab"
+          EXCLUDED="afm afm_2.0 wetlab"
           tasks=$(find tasks -maxdepth 1 -type d | while read task_dir; do
             task_name=$(basename "$task_dir")
             if [[ "$task_name" == "tasks" ]]; then continue; fi
@@ -245,7 +271,7 @@ jobs:
 
   # Summary job to check all results
   test-summary:
-    needs: [test-main, test-tasks, test-wetlab, check-env-servers]
+    needs: [test-main, test-tasks, test-afm-scoring, test-wetlab, check-env-servers]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -254,6 +280,7 @@ jobs:
           env_result="${{ needs.check-env-servers.result }}"
           if [[ "${{ needs.test-main.result }}" == "success" ]] && \
              [[ "${{ needs.test-tasks.result }}" == "success" ]] && \
+             [[ "${{ needs.test-afm-scoring.result }}" == "success" ]] && \
              [[ "${{ needs.test-wetlab.result }}" == "success" ]] && \
              [[ "$env_result" == "success" || "$env_result" == "skipped" ]]; then
             echo "✅ All tests passed!"
@@ -261,6 +288,7 @@ jobs:
             echo "❌ Some tests failed:"
             echo "Main tests: ${{ needs.test-main.result }}"
             echo "Task tests: ${{ needs.test-tasks.result }}"
+            echo "AFM scoring tests: ${{ needs.test-afm-scoring.result }}"
             echo "Wetlab tests: ${{ needs.test-wetlab.result }}"
             echo "Env server checks: $env_result"
             exit 1
