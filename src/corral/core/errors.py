@@ -26,7 +26,7 @@ def concise_error_message(exc: BaseException) -> str:
     """Format the useful final exception without traceback or wrapper layers.
 
     Explicit causes (and unsuppressed implicit contexts) are followed to the
-    leaf exception. Provider exceptions are a special case: their structured
+    outer exception. Provider exceptions are a special case: their structured
     response body usually contains a clearer message than either the SDK
     wrapper or its low-level HTTP cause.
     """
@@ -53,6 +53,11 @@ def concise_error_message(exc: BaseException) -> str:
             break
 
     if message is None:
+        if (
+            type(selected).__module__ == "httpx"
+            and type(selected).__name__ == "HTTPStatusError"
+        ):
+            selected = chain[0]
         message = str(selected).strip()
     # Projection metadata is intended for reports and JSON, not traceback rendering.
     # Keep embedded multi-line SDK text readable as one exception-only message.
