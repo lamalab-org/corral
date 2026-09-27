@@ -354,7 +354,9 @@ def _scorer(
                             digest.update(chunk)
                     fingerprint = digest.digest()
                     if fingerprint in seen_contents:
-                        raise ValueError("Each acquisition requires distinct file contents")
+                        raise ValueError(
+                            "Each acquisition requires distinct file contents"
+                        )
                     seen_contents.add(fingerprint)
                 afm = read(str(path))
                 actual = extract_params(afm)
