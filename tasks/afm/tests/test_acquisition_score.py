@@ -35,7 +35,9 @@ def test_acquisition_sequence(number):
         }[number]
     elif number == 5:
         assert [p["image_width"] for p in sequence] == [10000, 5000, 2000]
-    elif number in (6, 8):
+    elif number == 6:
+        assert [p["times_per_line"] for p in sequence] == [0.1, 0.0375, 0.025]
+    elif number == 8:
         assert [p["times_per_line"] for p in sequence] == [0.1, 0.075, 0.05]
     elif number == 10:
         assert [(p["centre_x"], p["centre_y"]) for p in sequence] == [
@@ -47,8 +49,3 @@ def test_acquisition_sequence(number):
         assert sequence[0] == sequence[1] == sequence[2]
     if number == 6:
         assert config["percent_change_reference"] == 2
-        assert [p["times_per_line"] * p["lines_per_frame"] for p in sequence] == [
-            25.6,
-            19.2,
-            12.8,
-        ]

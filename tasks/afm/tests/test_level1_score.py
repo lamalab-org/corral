@@ -478,7 +478,12 @@ def test_task_unit_contract(task):
             if (level, number) == (2, 5)
             else 5000
         )
-        line_time = [0.1, 0.075, 0.05][i] if level == 2 and number in (6, 8) else 0.075
+        if number == 6:
+            line_time = 0.0375 if level == 1 else [0.1, 0.0375, 0.025][i]
+        elif level == 2 and number == 8:
+            line_time = [0.1, 0.075, 0.05][i]
+        else:
+            line_time = 0.075
         setpoint = (
             {2: [0.1, 0.2, 0.5], 3: [80, 70, 60], 7: [0.1, 0.2, 0.3]}[number][i]
             if level == 2 and number in (2, 3, 7)
