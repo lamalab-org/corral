@@ -64,12 +64,10 @@ def afm_instrument(monkeypatch):
 
     score = ModuleType("score")
     for name in (
-        "check_file_exists",
-        "check_image_quality",
-        "check_mathematical_eq",
-        "check_numerical",
-        "check_params_function",
-        "check_roughness_function",
+        "score_friction",
+        "score_roughness",
+        "score_roughness_and_friction",
+        "score_topography",
     ):
         setattr(score, name, lambda **_params: lambda _answer: 1.0)
     tools = ModuleType("tools")

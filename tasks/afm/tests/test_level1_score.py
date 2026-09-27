@@ -37,7 +37,12 @@ def fake_nid(params, amplitude=1):
         "X-Pos": f"{params.get('centre_x', 0)} nm",
         "Y-Pos": f"{params.get('centre_y', 0)} nm",
         "Rotation": f"{params.get('rotation', 0)} Â°",
-        "Op. mode": "Phase Contrast" if params.get("mode", 4) == 4 else "Contact",
+        "Op. mode": {
+            2: "Static Force",
+            3: "Dynamic Force",
+            4: "Phase Contrast",
+            9: "Lateral Force",
+        }[params.get("mode", 4)],
         "Cantilever type": "Multi75Al-G",
         "Setpoint": f"{params['setpoint']['value']} {params['setpoint']['unit']}",
     }
@@ -485,7 +490,7 @@ def test_task_unit_contract(task):
         assert p["times_per_line"] == line_time
         assert p["lines_per_frame"] == p["points_per_line"] == (512 if tapping else 256)
         assert p["setpoint"] == {"value": setpoint, "unit": "%" if tapping else "V"}
-        assert p["mode"] == (4 if tapping else 2)
+        assert p["mode"] == (4 if tapping else 9)
     initial = task["initial_input"]["params"]
     assert initial["image_width"] == initial["image_height"] == 1000
     assert initial["points_per_line"] == initial["lines_per_frame"] == 128
