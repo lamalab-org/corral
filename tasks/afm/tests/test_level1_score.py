@@ -157,6 +157,29 @@ def test_setpoint_units(text, expected):
 
 
 @pytest.mark.parametrize(
+    ("name", "mode"),
+    [
+        ("StaticAFM", 2),
+        ("DynamicAFM", 3),
+        ("PhaseContrast", 4),
+        ("ForceModulation", 5),
+        ("SpreadingResistivity", 6),
+        ("ContPhase", 7),
+        ("DeltaF", 8),
+        ("LateralForce", 9),
+        ("Tapping/Phase Contrast", 4),
+        ("Lateral Force", 9),
+        ("Dynamic Force", 3),
+        ("Static Force", 2),
+    ],
+)
+def test_operating_mode_mapping(name, mode):
+    assert score.check_params({"mode": mode}, {"mode": name})
+    for other in set(range(2, 10)) - {mode}:
+        assert not score.check_params({"mode": other}, {"mode": name})
+
+
+@pytest.mark.parametrize(
     ("text", "expected"),
     [("5 Âµm", 5e-6), ("-3 μm", -3e-6), ("5000 nm", 5e-6), ("2 mm", 0.002)],
 )
@@ -268,6 +291,22 @@ def test_paths_and_read_errors(acquisition, monkeypatch, tmp_path):
     assert fn(str(acquisition.path)) == 0
 
 
+@pytest.mark.parametrize("duplicate_index", [2, 3])
+def test_copied_artifacts_rejected(acquisition, tmp_path, duplicate_index):
+    report = {}
+    for i in range(1, 4):
+        path = tmp_path / f"copy_{i}.nid"
+        path.write_bytes(f"distinct-artifact-{i}".encode())
+        report[f"path_{i}"] = str(path)
+    fn = score.score_topography(0.01, [acquisition.params] * 3)
+    assert fn(report) == 1
+    original = Path(report["path_1"])
+    copied = Path(report[f"path_{duplicate_index}"])
+    copied.write_bytes(original.read_bytes())
+    assert copied.stat().st_ino != original.stat().st_ino
+    assert fn(report) == 0
+
+
 def test_percent_changes_use_measured_reference_and_null(
     tmp_path, monkeypatch, acquisition
 ):
@@ -276,7 +315,7 @@ def test_percent_changes_use_measured_reference_and_null(
     afms, report = {}, {}
     for i in range(1, 4):
         p = tmp_path / f"{i}.nid"
-        p.touch()
+        p.write_bytes(f"fixture-{i}".encode())
         afms[str(p)] = fake_nid(params, amplitude=0)
         report.update(
             {
@@ -552,6 +591,33 @@ def test_image_analyzer_returns_task_units(acquisition, friction_absolute):
         "average_friction": "V",
     }
     assert output["image_data"] is acquisition.afm.data["Image"]["Forward"]["Z-Axis"]
+
+
+@pytest.mark.parametrize(
+    ("direction", "channel"),
+    [("Forward", "Friction force"), ("Backward", "Deflection")],
+)
+def test_image_analyzer_channel_override(acquisition, direction, channel):
+    selected = np.array([[7.0, 8.0], [9.0, 10.0]])
+    acquisition.afm.data["Image"][direction][channel] = selected
+    tree = ast.parse((ROOT / "src/tools.py").read_text())
+    fn = next(
+        n for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name == "Image_Analyzer"
+    )
+    fn.decorator_list = []
+    ns = {
+        "Any": object,
+        "read": lambda _: acquisition.afm,
+        "logger": score.logger,
+    }
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "tools.py", "exec"), ns)
+    output = ns["Image_Analyzer"](
+        str(acquisition.path),
+        dynamic_code=f'image_data = data["Image"][{direction!r}][{channel!r}]',
+    )
+    assert output["status"] == "Success"
+    assert output["image_data"] is selected
 
 
 @pytest.mark.parametrize("task", TASKS, ids=lambda t: t["id"])
