@@ -57,8 +57,7 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
         description = (
             f"Build and submit one inference-time policy for "
             f"{BENCHMARK_LABELS[benchmark]}. The same policy is evaluated against "
-            "two frozen student models. You are scored on the smaller improvement, "
-            "so the policy must help both models."
+            "two frozen student models. It must help both models to pass."
         )
     else:
         name = f"Improve {benchmark}"
@@ -93,6 +92,8 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
             "final_setup_calls": 0,
             "setup_calls": 20,
             "scale": 1.0,
+            # Pass (score 1) when every student closes >= half its headroom.
+            "pass_rule": {"kind": "headroom", "min_closed": 0.5},
             "budget": {
                 "max_experiments": 20,
                 "max_debug_runs": 10,

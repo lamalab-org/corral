@@ -154,6 +154,8 @@ def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
     from inspect_ai.model import get_model
     from inspect_ai.util._display import init_display_type
 
+    from inference_opt.eval_runner.student_model import STUDENT_PROVIDERS, student_model
+
     started = time.monotonic()
     summary = RunSummary(run_id=spec.run_id)
     out_dir = Path(spec.out_dir)
@@ -188,20 +190,22 @@ def run(spec: RunSpec, targets: dict[str, str] | None = None) -> RunSummary:
     summary.n_questions = total
 
     init_display_type("plain")
-    model = get_model(
-        spec.model_spec,
-        **(
-            {
-                "base_url": spec.base_url,
-                "api_key": spec.api_key or "none",
-                # The OpenAI client otherwise gives up after 600 s, and Inspect
-                # regenerates the whole answer; long reasoning under load needs more.
-                "client_timeout": float(spec.time_limit_s),
-            }
-            if spec.base_url
-            else {}
-        ),
-    )
+    provider = spec.model_spec.partition("/")[0]
+    if spec.base_url and provider in STUDENT_PROVIDERS:
+        # A request may run as long as its question: a shorter client timeout
+        # would drop long reasoning and make Inspect regenerate it from scratch.
+        model = student_model(
+            spec.model_spec, spec.base_url, spec.api_key, float(spec.time_limit_s)
+        )
+    else:
+        model = get_model(
+            spec.model_spec,
+            **(
+                {"base_url": spec.base_url, "api_key": spec.api_key or "none"}
+                if spec.base_url
+                else {}
+            ),
+        )
 
     per_question_cap = min(manifest.max_calls_per_question, spec.max_calls_per_question)
     runtime = RunRuntime(

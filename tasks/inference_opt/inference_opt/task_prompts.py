@@ -33,8 +33,7 @@ Test questions: {n_test} (held out; you never should see these or their answers)
 
 ## Scoring
 
-- Your submitted policy is run on the held-out test split, and your score is the improvement over the student's measured zero-shot baseline on those same questions.
-- For two student models, the score is the smaller improvement.
+{scoring}
 
 
 ## Budget
@@ -69,6 +68,31 @@ def _budget_summary(config: dict) -> str:
     return "\n".join(lines)
 
 
+def _scoring_summary(config: dict) -> str:
+    """Describe the pass rule the scorer will apply to this task."""
+    rule = dict(config.get("pass_rule") or {"kind": "headroom", "min_closed": 0.5})
+    joint = len(config.get("models", [])) > 1
+    if rule.get("kind") == "continuous":
+        lines = [
+            "- Your submitted policy is run on the held-out test split, and your score "
+            "is the improvement over the student's measured zero-shot baseline on "
+            "those same questions.",
+        ]
+        if joint:
+            lines.append("- For two student models, the score is the smaller improvement.")
+        return "\n".join(lines)
+    share = f"{float(rule.get('min_closed', 0.5)):.0%}"
+    lines = [
+        "- Your submitted policy is run on the held-out test split. The task passes "
+        f"(score 1) if the policy answers correctly at least {share} of the test "
+        "questions the student's measured zero-shot baseline gets wrong; otherwise "
+        "it scores 0.",
+    ]
+    if joint:
+        lines.append("- With two student models, both must reach this to pass.")
+    return "\n".join(lines)
+
+
 def task_prompt(env: Environment, state: ExecutionState) -> str:
     """Build the prompt for one inference-optimization task."""
     del state
@@ -86,5 +110,6 @@ def task_prompt(env: Environment, state: ExecutionState) -> str:
         n_train=config.get("n_train", 30),
         n_test=config.get("n_test", 30),
         budget=_budget_summary(config),
+        scoring=_scoring_summary(config),
         policy_dir="policy",
     )

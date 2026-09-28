@@ -16,40 +16,29 @@ from pathlib import Path
 from inference_opt.eval_runner.__main__ import run, scrubbed_environment
 from inference_opt.eval_runner.spec import RunSpec, RunSummary
 
-__all__ = ["PolicyEvaluator"]
+__all__ = ["PolicyEvaluator", "evaluate_in_process"]
 
 
 @dataclass(frozen=True, slots=True)
 class PolicyEvaluator:
-    """Run policy code in the current task process."""
+    """Run policy evaluations, each in its own process.
+
+    Inspect allows one evaluation per process at a time, and an evaluation also
+    swaps process-global environment variables. Corral scores tasks in parallel
+    and an agent can call several tools at once, so every run gets a process.
+    """
 
     def run(
         self, spec: RunSpec, targets: dict[str, str] | None = None
     ) -> RunSummary:
-        # Inspect otherwise writes a process-global trace file under the
-        # user's application-data directory. In-process evaluations must keep
-        # that artifact task-local and must not collide with another run.
-        trace_file = Path(spec.out_dir) / "inspect-trace.log"
-        trace_file.parent.mkdir(parents=True, exist_ok=True)
-        api_key = spec.api_key or os.environ.get("VLLM_API_KEY")
-        safe_spec = replace(spec, api_key=api_key)
-        with (
-            _environment("INSPECT_TRACE_FILE", str(trace_file)),
-            scrubbed_environment(),
-        ):
-            return run(safe_spec, targets=targets)
+        return self.run_many([(spec, targets)])[0]
 
     def run_many(
         self, jobs: Sequence[tuple[RunSpec, dict[str, str] | None]]
     ) -> list[RunSummary]:
-        """Evaluate several specs at once, e.g. one per student model.
-
-        A single job runs in-process. Several jobs each get their own process,
-        because an in-process run swaps process-global environment variables and
-        Inspect state that concurrent runs would clobber.
-        """
-        if len(jobs) <= 1:
-            return [self.run(spec, targets=targets) for spec, targets in jobs]
+        """Evaluate several specs side by side, e.g. one per student model."""
+        if not jobs:
+            return []
         private = Path(tempfile.mkdtemp(prefix="inference-opt-specs-"))
         try:
             processes = [
@@ -61,6 +50,23 @@ class PolicyEvaluator:
         finally:
             shutil.rmtree(private, ignore_errors=True)
         return [_read_summary(spec, process) for (spec, _), process in zip(jobs, processes)]
+
+
+def evaluate_in_process(
+    spec: RunSpec, targets: dict[str, str] | None = None
+) -> RunSummary:
+    """Run one evaluation in this process; only safe when nothing else evaluates."""
+    # Inspect otherwise writes a process-global trace file under the user's
+    # application-data directory; keep that artifact task-local.
+    trace_file = Path(spec.out_dir) / "inspect-trace.log"
+    trace_file.parent.mkdir(parents=True, exist_ok=True)
+    api_key = spec.api_key or os.environ.get("VLLM_API_KEY")
+    safe_spec = replace(spec, api_key=api_key)
+    with (
+        _environment("INSPECT_TRACE_FILE", str(trace_file)),
+        scrubbed_environment(),
+    ):
+        return run(safe_spec, targets=targets)
 
 
 def _spawn(

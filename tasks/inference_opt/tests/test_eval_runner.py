@@ -387,3 +387,37 @@ class TestChemBench:
         logs = list(Path(spec.log_dir).glob("*.json"))
         assert logs
         assert all(json.loads(p.read_text())["status"] == "success" for p in logs)
+
+
+class TestConcurrentEvaluations:
+    def test_two_evaluations_at_once_both_succeed(self, tmp_path, questions_file):
+        """Inspect allows one eval per process; corral scores tasks in parallel."""
+        import threading
+
+        from inference_opt.eval_runner import PolicyEvaluator
+
+        source = (
+            "import time\n"
+            "class Policy:\n"
+            "    def solve(self, q, ctx):\n"
+            "        time.sleep(1)\n"
+            "        return ctx.student.generate(q.text)\n"
+        )
+        specs = [
+            make_spec(tmp_path / name, questions_file, source, run_id=name,
+                      out_dir=str(tmp_path / name / "out"))
+            for name in ("first", "second")
+        ]
+        summaries = {}
+
+        def evaluate(spec):
+            summaries[spec.run_id] = PolicyEvaluator().run(spec)
+
+        threads = [threading.Thread(target=evaluate, args=(s,)) for s in specs]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        for name in ("first", "second"):
+            assert summaries[name].ok, summaries[name].error
+            assert summaries[name].n_answered == 3
