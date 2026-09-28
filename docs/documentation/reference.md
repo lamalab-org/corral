@@ -110,6 +110,23 @@ commit hash. Load the full projection with
 Agents and environments are registered with `RuntimeRegistry`. Benchmarks use
 the same function for every trial, then evaluate the persisted result.
 
+## Restricted worker limits
+
+Under Docker, agent and tool code runs in a restricted worker and only JSON
+comes back. One setting bounds what a worker may return, on both the channels
+that carry it, through `corral.runtime.permissions.max_worker_response_bytes()`:
+
+| setting | default | bounds |
+| --- | --- | --- |
+| `CORRAL_MAX_WORKER_RESPONSE_BYTES` | 1 GiB | a worker's JSON reply, and the session channel that carries state snapshots |
+
+A checkpointed `PythonREPL` returns its whole session in that reply, so for
+environments that keep a dataset in the session this limit bounds the agent's
+working set rather than its output. Raise it for such an environment, or lower
+it to keep an untrusted worker from exhausting controller memory on a small
+host. `create_python_repl_tool(max_response_bytes=...)` overrides it for one
+tool, as `address_space_bytes` does for worker memory.
+
 ## Core transition API
 
 The low-level transition boundary produces events and effects:

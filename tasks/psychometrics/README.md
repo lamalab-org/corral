@@ -59,6 +59,24 @@ The REPL starts in the workspace; NumPy, pandas, SciPy, factor-analyzer, and sem
 
 The scorer, generators, answer keys, and shell are not exposed to the agent.
 
+### REPL checkpoints under Docker
+
+Under Docker the REPL runs in a restricted worker that hands its whole session
+back as a checkpoint on every call, so the limit on a worker's reply is really a
+limit on how much an agent may keep in the session. Reading the survey into a
+dataframe checkpoints to about 12 MiB, and roughly 25 MiB once a country subset
+and a float matrix are derived from it.
+
+Corral allows 1 GiB, which is ample for these tasks. It is a Corral-wide
+setting, not a psychometrics one, and `CORRAL_MAX_WORKER_RESPONSE_BYTES` changes
+it for a whole run:
+
+```bash
+CORRAL_MAX_WORKER_RESPONSE_BYTES=$((2 * 1024 ** 3)) uv run python -m corral_psychometrics.env --level 1
+```
+
+A reply over the limit fails the call and names the limit it exceeded.
+
 ## Task list
 
 | level | task | topic |
