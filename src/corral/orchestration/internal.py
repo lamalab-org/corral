@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from corral.observability import LoggingObserver, ObservationContext
+from corral.observability import ObservationContext, observer_from_env
 from corral.orchestration.launchers import LocalTaskLauncher
 from corral.orchestration.models import RUNTIME_PROTOCOL_VERSION, RunTaskInput
 from corral.orchestration.registry import RuntimeRegistry
@@ -127,6 +127,8 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
 
     registry: RuntimeRegistry | None = None
     store: SQLiteCommitStore | None = None
+    # The task runs here, not in the host process, so tracing starts here too.
+    observer = observer_from_env()
     try:
         os.chown(checkpoint_root, 0, 0)
         checkpoint_root.chmod(0o700)
@@ -181,7 +183,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         launcher = LocalTaskLauncher(
             store,
             registry,
-            LoggingObserver(),
+            observer,
             scaffold_sandbox="docker",
         )
         result = await launcher.run(
@@ -194,6 +196,8 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         )
         _write_result(Path(result_file), asdict(result))
     finally:
+        # Send buffered traces before the container exits.
+        observer.flush()
         if registry is not None:
             registry.close()
         if store is not None:
