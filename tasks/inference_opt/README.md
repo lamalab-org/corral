@@ -3,8 +3,12 @@
 This environment asks a teacher agent to write a Python policy that improves a frozen student model at test time. The policy controls the strategy around the model and does not change model weights.
 
 Level 1 evaluates one student per task. Level 2 evaluates one policy against two
-students and scores the smaller improvement.
-The final score is the accuracy improvement over the measured zero-shot baseline on held-out test questions.
+students, and both must pass.
+Each task scores 1 or 0 on held-out test questions: it passes when the policy
+closes at least half of the headroom over the measured zero-shot baseline, i.e.
+answers correctly at least 50% of the questions the baseline gets wrong
+(`pass_rule` in the task JSON; `{"kind": "continuous"}` restores the old
+improvement score).
 
 Tasks use the `primitive` policy API by default. Tasks may opt into `enhanced`,
 which adds sampling, batching, shared memory, setup, and component diagnostics.
@@ -81,5 +85,5 @@ Running the task outside Docker does not provide the intended safety boundary.
 - `inference_opt/policy.py` and `api.py`: policy loading and policy/client contract.
 - `inference_opt/eval_runner/`: policy evaluator, Inspect adapter, runtime, and summaries.
 - `inference_opt/outcomes.py`: Inspect-log outcome parsing.
-- `inference_opt/score.py`: held-out scoring and baseline delta.
+- `inference_opt/score.py`: held-out scoring, baseline delta, and the pass rule.
 - `inference_opt/datasets.py`: frozen questions and evaluator-only targets.

@@ -17,29 +17,13 @@ from inference_opt.client import probe_student
 from inference_opt.outcomes import read_outcomes
 from inference_opt.policy import PolicyError, discover_policy
 from inference_opt.eval_runner import PolicyEvaluator
+from inference_opt.errors import error_line, error_tail
 from inference_opt.eval_runner.spec import DEFAULT_STUDENT_CONCURRENCY, RunSpec
 
 __all__ = ["create_tools"]
 
 #: Below this fraction of any budget, every tool result carries a submit reminder.
 NAG_THRESHOLD = 0.2
-
-
-def _error_tail(error: str, limit: int) -> str:
-    """Keep the end of a traceback: the actual exception is at the bottom."""
-    error = error.strip()
-    return error if len(error) <= limit else "..." + error[-limit:]
-
-
-def _error_line(error: str) -> str:
-    """The final ``SomeError: message`` line, even inside an ExceptionGroup."""
-    lines = [line.strip().lstrip("|").strip() for line in error.splitlines()]
-    lines = [line for line in lines if line and not line.startswith(("+-", "^"))]
-    for line in reversed(lines):
-        name = line.split(":", 1)[0]
-        if name.endswith(("Error", "Exception", "Exhausted")) and " " not in name:
-            return line[:300]
-    return lines[-1][:300] if lines else ""
 
 
 def _compact(payload: dict[str, Any], summary: str, ledger: StateLedger) -> str:
@@ -421,13 +405,13 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 policy_dir=policy_path,
                 n_items=n_items,
                 calls_used=summary.calls_used,
-                error=_error_line(summary.error),
+                error=error_line(summary.error),
             )
         )
         headline = (
             f"Dry run OK on {len(traces)} question(s); the policy runs end to end."
             if summary.ok and not summary.error
-            else f"Dry run FAILED: {_error_line(summary.error)}"
+            else f"Dry run FAILED: {error_line(summary.error)}"
         )
         return _compact(
             {
@@ -437,7 +421,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "traces": traces,
                 "calls_used": summary.calls_used,
                 "artifacts": str(out.relative_to(Path(work_dir))),
-                "error": _error_tail(summary.error, 2000),
+                "error": error_tail(summary.error, 2000),
             },
             headline,
             ledger,
@@ -510,7 +494,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "n_crashed": summary.n_crashed,
                 "n_unparseable": summary.n_unparseable,
                 "budget_exhausted_at": summary.budget_exhausted_at,
-                "error": _error_tail(summary.error, 1000),
+                "error": error_tail(summary.error, 1000),
                 "by_topic": outcome.by_category(),
             }
 

@@ -11,16 +11,35 @@ from typing import TYPE_CHECKING, Any
 
 from inference_opt import datasets
 from inference_opt.outcomes import read_outcomes
+from inference_opt.errors import error_line, error_tail
 from inference_opt.eval_runner import PolicyEvaluator
 from inference_opt.eval_runner.spec import DEFAULT_STUDENT_CONCURRENCY, RunSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-__all__ = ["ScoreOutcome", "ScoreReport", "policy_score", "resolve_submission"]
+__all__ = [
+    "PolicyScorer",
+    "ScoreOutcome",
+    "ScoreReport",
+    "policy_score",
+    "resolve_submission",
+]
 
 #: Fraction of crashed items at which a policy run is rejected.
 CRASH_RATE_LIMIT = 0.5
+
+#: A task passes (score 1) when every student closes at least half of the gap
+#: between its zero-shot baseline and a perfect score; otherwise it scores 0.
+DEFAULT_PASS_RULE: dict[str, Any] = {"kind": "headroom", "min_closed": 0.5}
+
+
+def headroom_closed(n_correct: int, baseline: float, n_items: int) -> float | None:
+    """Share of the baseline's wrong answers the policy got right; None at ceiling."""
+    baseline_correct = round(baseline * n_items)
+    if baseline_correct >= n_items:
+        return None
+    return (n_correct - baseline_correct) / (n_items - baseline_correct)
 
 
 class ScoreOutcome(StrEnum):
@@ -66,6 +85,43 @@ class ScoreReport:
             "notes": self.notes,
         }
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), "utf-8")
+
+    def result(self) -> dict[str, Any]:
+        """The score, a one-line verdict, and details for Corral's run report."""
+        metrics: dict[str, float] = {}
+        for model, entry in self.per_model.items():
+            if model == "_aggregate":
+                metrics["raw_delta"] = float(entry.get("raw_delta", 0.0))
+                if "passed" in entry:
+                    metrics["passed"] = float(entry["passed"])
+                continue
+            for key in ("accuracy", "baseline", "delta", "headroom_closed"):
+                if entry.get(key) is not None:
+                    metrics[f"{model}_{key}"] = float(entry[key])
+        return {
+            "score": self.score,
+            "feedback": self._verdict(),
+            "metadata": {
+                "outcome": str(self.outcome),
+                "metrics": metrics,
+                "per_model": self.per_model,
+                "n_test_items": self.n_test_items,
+                "policy_dir": self.policy_dir,
+                "notes": self.notes,
+            },
+        }
+
+    def _verdict(self) -> str:
+        if self.outcome != ScoreOutcome.OK:
+            return f"{self.outcome}: " + "; ".join(self.notes[-1:])
+        closed = [
+            f"{model} closed {entry['headroom_closed']:.0%} of headroom"
+            if entry.get("headroom_closed") is not None
+            else f"{model} had no headroom"
+            for model, entry in self.per_model.items()
+            if model != "_aggregate"
+        ]
+        return f"score {self.score:g}: " + ", ".join(closed)
 
 
 def resolve_submission(answer: str, work_dir: Path) -> tuple[Path | None, list[str]]:
@@ -125,15 +181,31 @@ def _write_test_questions(benchmark: str, path: Path) -> int:
     return datasets.write_jsonl(path, records)
 
 
-def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float]:
+class PolicyScorer:
+    """Corral's scoring callable: a float when called, details via evaluate_submission."""
+
+    def __init__(self, evaluate: Callable[[Any], dict[str, Any]]) -> None:
+        self._evaluate = evaluate
+
+    def __call__(self, answer: Any) -> float:
+        return float(self._evaluate(answer)["score"])
+
+    def evaluate_submission(self, answer: Any) -> dict[str, Any]:
+        return self._evaluate(answer)
+
+
+def policy_score(config: dict[str, Any], work_dir: str) -> PolicyScorer:
     """Build the scorer Corral calls with the agent's submitted answer."""
 
-    def score_fn(answer: Any) -> float:
+    def score_fn(answer: Any) -> dict[str, Any]:
         report = ScoreReport()
         workspace = Path(work_dir).expanduser()
         benchmark = str(config["benchmark"])
         models = list(config["models"])
         baselines = dict(config.get("baselines") or {})
+        # `work_dir` is shared by every task, so each task reports into its own
+        # folder; otherwise tasks overwrite one another's diagnostics.
+        state = workspace / "state" / "-".join([benchmark, *models])
 
         # Configuration and dataset faults belong to the environment.
         if not models:
@@ -156,8 +228,8 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
         report.notes.extend(notes)
         if policy_dir is None:
             report.outcome = ScoreOutcome.NO_SUBMISSION
-            report.write(workspace / "state" / "scoring_failure.json")
-            return 0.0
+            report.write(state / "scoring_failure.json")
+            return report.result()
         report.policy_dir = str(policy_dir)
 
         with tempfile.TemporaryDirectory(prefix="inference-opt-score-") as scratch:
@@ -213,11 +285,12 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                         # A host that never produced a single answer is far more
                         # likely broken infrastructure than a broken policy.
                         raise HarnessError(
-                            f"policy evaluator produced no answers for {model}: {summary.error[:500]}"
+                            f"policy evaluator produced no answers for {model}: "
+                            f"{error_line(summary.error)}\n{error_tail(summary.error, 3000)}"
                         )
-                    report.notes.append(summary.error[:500])
-                    report.write(workspace / "state" / "scoring_failure.json")
-                    return 0.0
+                    report.notes.append(error_tail(summary.error, 3000))
+                    report.write(state / "scoring_failure.json")
+                    return report.result()
 
                 outcome = read_outcomes(spec.log_dir, _read_predictions(spec))
                 # The denominator is always the full test split: an unattempted
@@ -232,6 +305,9 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                     "accuracy": round(accuracy, 4),
                     "baseline": round(baseline_value, 4),
                     "delta": round(delta, 4),
+                    "headroom_closed": headroom_closed(
+                        outcome.n_correct, baseline_value, n_items
+                    ),
                     "n_correct": outcome.n_correct,
                     "n_items": n_items,
                     "n_answered": summary.n_answered,
@@ -259,8 +335,8 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                     report.notes.append(
                         f"{model}: {summary.n_crashed}/{n_items} items crashed"
                     )
-                    report.write(workspace / "state" / "scoring_diagnostics.json")
-                    return 0.0
+                    report.write(state / "scoring_diagnostics.json")
+                    return report.result()
 
                 # A policy that beats the baseline without calling the student did
                 # not perform inference-time optimisation.
@@ -270,29 +346,47 @@ def policy_score(config: dict[str, Any], work_dir: str) -> Callable[[Any], float
                         f"{model}: scored {accuracy:.3f} above a {baseline_value:.3f} "
                         "baseline while making zero student calls"
                     )
-                    report.write(workspace / "state" / "scoring_diagnostics.json")
-                    return 0.0
+                    report.write(state / "scoring_diagnostics.json")
+                    return report.result()
 
                 if summary.budget_exhausted_at:
                     report.outcome = ScoreOutcome.BUDGET_EXHAUSTED
 
-        # Level 2 scores the weaker of the two improvements, so a policy has to help
+        # Level 2 judges the weaker of the two students, so a policy has to help
         # both models rather than trading one off against the other.
         raw = min(deltas.values()) if config.get("joint") else deltas[models[0]]
-        scaled = float(config.get("scale", 1.0)) * raw + float(
-            config.get("offset", 0.0)
-        )
-        report.score = max(0.0, min(1.0, scaled))
-        report.per_model["_aggregate"] = {
+        rule = dict(config.get("pass_rule") or DEFAULT_PASS_RULE)
+        aggregate: dict[str, Any] = {
             "raw_delta": round(raw, 4),
             "joint": bool(config.get("joint")),
             "deltas": {model: round(value, 4) for model, value in deltas.items()},
-            "scale": config.get("scale", 1.0),
+            "pass_rule": rule,
         }
-        report.write(workspace / "state" / "scoring_diagnostics.json")
-        return report.score
+        if rule.get("kind") == "headroom":
+            threshold = float(rule.get("min_closed", 0.5))
+            closed = {m: report.per_model[m]["headroom_closed"] for m in models}
+            for model, value in closed.items():
+                if value is None:
+                    report.notes.append(
+                        f"{model}: baseline is already perfect, so it cannot improve"
+                    )
+            # A tiny tolerance keeps exact halves (e.g. 1 of 2) from failing on floats.
+            passed = all(v is not None and v >= threshold - 1e-9 for v in closed.values())
+            report.score = 1.0 if passed else 0.0
+            aggregate["passed"] = passed
+        elif rule.get("kind") == "continuous":
+            scaled = float(config.get("scale", 1.0)) * raw + float(
+                config.get("offset", 0.0)
+            )
+            report.score = max(0.0, min(1.0, scaled))
+            aggregate["scale"] = config.get("scale", 1.0)
+        else:
+            raise HarnessError(f"unknown pass_rule kind: {rule.get('kind')!r}")
+        report.per_model["_aggregate"] = aggregate
+        report.write(state / "scoring_diagnostics.json")
+        return report.result()
 
-    return score_fn
+    return PolicyScorer(score_fn)
 
 
 def _read_predictions(spec: RunSpec) -> list[dict[str, Any]]:

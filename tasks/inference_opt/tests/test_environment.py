@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from inference_opt.env import create_environments
@@ -174,15 +175,15 @@ GROUPED_TRACEBACK = """  + Exception Group Traceback (most recent call last):
 
 class TestToolErrors:
     def test_the_real_exception_is_named_not_the_group(self):
-        from inference_opt.tools import _error_line
+        from inference_opt.errors import error_line
 
-        assert _error_line(GROUPED_TRACEBACK) == "KeyError: 'choices'"
+        assert error_line(GROUPED_TRACEBACK) == "KeyError: 'choices'"
 
     def test_the_tail_of_a_long_traceback_is_kept(self):
-        from inference_opt.tools import _error_tail
+        from inference_opt.errors import error_tail
 
         long = "noise\n" * 1000 + GROUPED_TRACEBACK
-        tail = _error_tail(long, 500)
+        tail = error_tail(long, 500)
         assert tail.startswith("...")
         assert "KeyError: 'choices'" in tail
         assert "solver.py" in tail
@@ -208,3 +209,96 @@ class TestToolErrors:
         headline, payload = out.split("\n")[:2]
         assert headline == "Dry run FAILED: KeyError: 'choices'"
         assert "solver.py" in json.loads(payload)["error"]
+
+
+class TestScoringDiagnostics:
+    def test_tasks_sharing_a_work_dir_keep_their_own_diagnostics(self, tmp_path):
+        """Every task scores under the same work_dir; reports must not collide."""
+        from corral.evaluation.scorer import SubmissionScore
+        from inference_opt.env import load_tasks_from_json
+        from inference_opt.score import policy_score
+
+        root = Path(__file__).resolve().parents[1] / "environments/level_1/tasks_json"
+        tasks = load_tasks_from_json(root, str(tmp_path / "unused"))
+        shared = tmp_path / "workspaces"
+        for task_id in ("gsm8k_a", "arc_challenge_a"):
+            config = dict(tasks[task_id].initial_input)
+            config["model_specs"] = {"student_a": "mockllm/model"}
+            config["base_urls"] = {}
+            submission = tmp_path / task_id / "policy"
+            submission.mkdir(parents=True)
+            (submission / "policy.py").write_text(
+                "class Policy:\n"
+                "    def solve(self, q, ctx):\n"
+                "        return ctx.student.generate(q.text)\n"
+            )
+            scorer = policy_score(config, str(shared))
+            # Corral records the feedback and metadata next to the score.
+            details = SubmissionScore.model_validate(
+                scorer.evaluate_submission(str(submission))
+            )
+            metrics = details.metadata["metrics"]
+            assert {"student_a_accuracy", "student_a_delta", "raw_delta"} <= set(metrics)
+            assert details.metadata["outcome"] == "ok"
+            assert "student_a" in details.metadata["per_model"]
+            assert details.feedback.startswith("score ")
+
+        reports = sorted(shared.glob("state/*/scoring_diagnostics.json"))
+        assert [p.parent.name for p in reports] == [
+            "arc_challenge-student_a",
+            "gsm8k-student_a",
+        ]
+        for report in reports:
+            payload = json.loads(report.read_text())
+            assert "student_a" in payload["per_model"]
+
+
+class TestHeadroomPassRule:
+    def test_headroom_closed_counts_questions(self):
+        from inference_opt.score import headroom_closed
+
+        assert headroom_closed(29, 0.9333, 30) == 0.5  # 1 of the 2 missed
+        assert headroom_closed(30, 0.8667, 30) == 1.0
+        assert headroom_closed(20, 0.5, 30) < 0.5
+        assert headroom_closed(12, 0.5, 30) < 0  # worse than the baseline
+        assert headroom_closed(30, 1.0, 30) is None  # nothing left to improve
+
+    @pytest.mark.parametrize(
+        ("level", "task_id", "correct", "expected"),
+        [
+            (1, "gsm8k_a", {"student_a": 30}, 1.0),
+            (1, "gsm8k_a", {"student_a": 23}, 0.0),
+            # Level 2 needs every student to pass: one at 100% and one at 0% fails.
+            (2, "gsm8k_ab", {"student_a": 30, "student_b": 24}, 0.0),
+            (2, "gsm8k_ab", {"student_a": 30, "student_b": 30}, 1.0),
+        ],
+    )
+    def test_score_is_one_only_when_every_student_closes_half(
+        self, tmp_path, monkeypatch, level, task_id, correct, expected
+    ):
+        from inference_opt import score as score_module
+        from inference_opt.env import load_tasks_from_json
+        from inference_opt.outcomes import ItemOutcome, RunOutcome
+
+        root = Path(__file__).resolve().parents[1] / f"environments/level_{level}/tasks_json"
+        config = dict(load_tasks_from_json(root, str(tmp_path / "u"))[task_id].initial_input)
+        config["model_specs"] = {m: "mockllm/model" for m in config["models"]}
+        config["base_urls"] = {}
+        models = iter(config["models"])
+
+        def fake_outcomes(log_dir, predictions):
+            n = correct[next(models)]
+            return RunOutcome(items=[ItemOutcome(f"q{i}", i < n) for i in range(30)])
+
+        monkeypatch.setattr(score_module, "read_outcomes", fake_outcomes)
+        submission = tmp_path / "policy"
+        submission.mkdir()
+        (submission / "policy.py").write_text(
+            "class Policy:\n    def solve(self, q, ctx): return ctx.student.generate(q.text)\n"
+        )
+        scorer = score_module.policy_score(config, str(tmp_path / "w"))
+        result = scorer.evaluate_submission(str(submission))
+        assert result["score"] == expected
+        assert result["metadata"]["metrics"]["passed"] == expected
+        for model in config["models"]:
+            assert f"{model}_headroom_closed" in result["metadata"]["metrics"]
