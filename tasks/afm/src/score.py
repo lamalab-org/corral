@@ -1,8 +1,9 @@
 """Score AFM submissions from raw NID artifacts, without instrument access.
 
 Task lengths and reported roughness are in nm, line times in seconds, and
-friction in V. Task tolerance applies to both settings and measurements as a
-fraction of the expected value (0.01 = 1%), with no absolute allowance. Zero
+friction in V. Task tolerance applies to settings and file-derived measurements
+as a fraction of the expected value (0.01 = 1%), with no absolute allowance.
+Percentage changes are checked against accepted reported measurements. Zero
 targets, counts, modes and setpoint units must match exactly.
 """
 
@@ -330,7 +331,7 @@ def _scorer(
                 raise ValueError(f"Expected submission fields: {sorted(fields)}")
             seen = set()
             seen_contents = set()
-            measurements = []
+            reported_measurements = []
             for i, expected in enumerate(sequence, 1):
                 path = report[f"path_{i}"]
                 if not isinstance(path, str):
@@ -374,19 +375,21 @@ def _scorer(
                     require_lateral=require_lateral,
                     friction_absolute=friction_absolute,
                 )
+                reported = {}
                 for metric in metrics:
                     if not _close(report[f"{metric}_{i}"], measured[metric], tolerance):
                         raise ValueError(f"Acquisition {i}: incorrect {metric}")
-                measurements.append(measured)
+                    reported[metric] = _finite_number(report[f"{metric}_{i}"])
+                reported_measurements.append(reported)
             if percent_change_reference is not None:
-                reference = measurements[percent_change_reference - 1]
-                for i, measured in enumerate(measurements, 1):
+                reference = reported_measurements[percent_change_reference - 1]
+                for i, reported in enumerate(reported_measurements, 1):
                     for metric in metrics:
                         base = reference[metric]
                         expected = (
                             None
                             if base == 0
-                            else 100 * (measured[metric] - base) / base
+                            else 100 * (reported[metric] - base) / base
                         )
                         answer = report[f"{metric}_percent_change_{i}"]
                         if (expected is None and answer is not None) or (

@@ -49,3 +49,25 @@ def test_acquisition_sequence(number):
         assert sequence[0] == sequence[1] == sequence[2]
     if number == 6:
         assert config["percent_change_reference"] == 2
+        assert [
+            2 * p["times_per_line"] * p["lines_per_frame"] for p in sequence
+        ] == [51.2, 19.2, 12.8]
+        assert "scan times of 51.2, 19.2, and 12.8 s" in task["description"]
+        assert "one trace and one retrace per line" in task["description"]
+
+
+def test_spatial_task_requires_roughness_and_friction_at_each_location():
+    task = TASKS[10]
+    config = task["scoring_params"]
+    assert task["scoring_function"] == "score_roughness_and_friction"
+    assert config["metrics"] == [
+        "rms_roughness",
+        "mean_roughness",
+        "average_friction",
+    ]
+    assert config["friction_absolute"] is True
+    assert "roughness from the height channel" in task["description"]
+    assert "friction magnitude" in task["description"]
+    for i in range(1, 4):
+        for metric in config["metrics"]:
+            assert f'"{metric}_{i}"' in task["submission_format"]

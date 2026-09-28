@@ -312,7 +312,7 @@ def test_copied_artifacts_rejected(acquisition, tmp_path, duplicate_index):
     assert fn(report) == 0
 
 
-def test_percent_changes_use_measured_reference_and_null(
+def test_percent_changes_use_reported_reference_and_null(
     tmp_path, monkeypatch, acquisition
 ):
     params = acquisition.params
@@ -338,6 +338,33 @@ def test_percent_changes_use_measured_reference_and_null(
     )
     assert fn(report) == 1
     report["rms_roughness_percent_change_1"] = 0
+    assert fn(report) == 0
+
+
+def test_percent_changes_follow_accepted_rounded_measurements(
+    acquisition, tmp_path, monkeypatch
+):
+    raw_values = (1.0449, 1.0, 0.99)
+    reported_values = (1.04, 1.0, 0.99)
+    afms, report = {}, {}
+    for i, (raw, reported) in enumerate(zip(raw_values, reported_values), 1):
+        path = tmp_path / f"rounded_{i}.nid"
+        path.write_bytes(f"scan-{i}".encode())
+        afms[str(path)] = fake_nid(acquisition.params, amplitude=raw)
+        report[f"path_{i}"] = str(path)
+        report[f"rms_roughness_{i}"] = reported
+        report[f"rms_roughness_percent_change_{i}"] = 100 * (
+            reported - reported_values[1]
+        ) / reported_values[1]
+    monkeypatch.setattr(score, "read", lambda path: afms[path])
+    fn = score.score_roughness(
+        0.01,
+        [acquisition.params] * 3,
+        metrics=["rms_roughness"],
+        percent_change_reference=2,
+    )
+    assert fn(report) == 1
+    report["rms_roughness_percent_change_1"] = 4.49
     assert fn(report) == 0
 
 
@@ -397,7 +424,11 @@ def test_real_nid_reader():
 
 @pytest.mark.parametrize(
     ("mode", "setpoint"),
-    [(2, {"value": 0.1, "unit": "V"}), (4, {"value": 70, "unit": "%"})],
+    [
+        (2, {"value": 0.1, "unit": "V"}),
+        (9, {"value": 0.1, "unit": "V"}),
+        (4, {"value": 70, "unit": "%"}),
+    ],
 )
 def test_initial_structured_setpoint_applied_after_mode(mode, setpoint):
     tree = ast.parse((ROOT / "src/env.py").read_text())
@@ -487,14 +518,22 @@ def test_task_unit_contract(task):
         setpoint = (
             {2: [0.1, 0.2, 0.5], 3: [80, 70, 60], 7: [0.1, 0.2, 0.3]}[number][i]
             if level == 2 and number in (2, 3, 7)
+            else 80
+            if (level, number) == (1, 3)
             else 70
             if tapping
             else 0.1
         )
         assert p["image_width"] == p["image_height"] == width
         assert p["times_per_line"] == line_time
+        if (level, number) == (1, 6):
+            assert 2 * p["times_per_line"] * p["lines_per_frame"] == 19.2
+            assert "scan time of 19.2 s" in task["description"]
+            assert "one trace and one retrace per line" in task["description"]
         assert p["lines_per_frame"] == p["points_per_line"] == (512 if tapping else 256)
         assert p["setpoint"] == {"value": setpoint, "unit": "%" if tapping else "V"}
+        if (level, number) == (1, 1):
+            assert (p["pgain"], p["igain"], p["dgain"]) == (150, 100, 10)
         assert p["mode"] == (4 if tapping else 9)
     initial = task["initial_input"]["params"]
     assert initial["image_width"] == initial["image_height"] == 1000

@@ -197,10 +197,12 @@ class AFMEnvironment(Environment):
         # Set the mode first: changing mode restores its previous setpoint.
         if "setpoint" in params:
             setpoint = params["setpoint"]
-            if setpoint["unit"] == "V" and params.get("mode") == 2:
+            if setpoint["unit"] == "V" and params.get("mode") in (2, 9):
                 zcontrol.SetPointForceUnitMode = 0  # DefUnitMode_V
             elif setpoint["unit"] != "%" or params.get("mode") not in (3, 4):
-                raise ValueError("Expected V for contact mode, or % for dynamic mode")
+                raise ValueError(
+                    "Expected V for static/lateral force, or % for dynamic/phase contrast"
+                )
             zcontrol.SetPoint = setpoint["value"]
         elif "setpoint_v" in params:
             zcontrol.SetPointForceUnitMode = 0  # DefUnitMode_V

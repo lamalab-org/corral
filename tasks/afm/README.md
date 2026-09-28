@@ -77,7 +77,7 @@ There is no separate `acquisition_params` or duplicate last-image target.
 `initial_input.params` initializes a deliberately different reset baseline,
 not the settings required for image 1. All tasks start at P/I gains 80/40,
 0.125 s per line, 128×128 pixels, and a 1000×1000 nm scan. Tasks requiring
-tapping reset to contact mode (2), D gain 0, and a 0.05 V setpoint. Tasks
+tapping reset to static AFM mode (2), D gain 0, and a 0.05 V setpoint. Tasks
 requiring contact reset to tapping mode (4), D gain 5, and a 90% setpoint.
 The reset mode and setpoint unit therefore both differ from every target.
 The tip, origin, and rotation retain their configured values. Reset selects
@@ -114,8 +114,8 @@ A 70% amplitude setpoint cannot be replaced with 0.567 V without a known
 amplitude reference/calibration.
 
 Unit-bearing NID values are converted before comparison. Modes map to
-SDK values (contact/static/lateral force = 2, dynamic force = 3, phase
-contrast/tapping = 4). Setpoints preserve `%` versus `V`, including mV-to-V
+SDK values (static force = 2, dynamic force = 3, phase contrast/tapping = 4,
+contact/lateral force = 9). Setpoints preserve `%` versus `V`, including mV-to-V
 conversion. Cantilever targets, if used, must be NID names rather than SDK GUIDs.
 All 20 tasks set `tolerance: 0.01`. Continuous settings must fall within
 `target ± 0.01 * abs(target)` using the corresponding `final_params` target.
@@ -136,11 +136,13 @@ RMS friction is the root mean square without mean subtraction. Channel units
 are read from NID headers, and unsupported units fail scoring.
 
 The same 1% tolerance applies to measurements relative to the value computed
-from the image, including percentage-change fields. Zero measurements require
-zero; undefined percentage changes still require null.
+from the image. Percentage changes are calculated from the agent's reported
+measurements after each has passed its file-based check, then checked within 1%
+relative tolerance. This lets percentages follow accepted rounded measurements.
+Zero measurements require zero; undefined percentage changes still require null.
 Every requested measurement and every required setting must pass to score 1;
 otherwise the score is 0. Level 2 task 6 uses `percent_change_reference: 2` and
-checks `100 * (value_i - value_2) / value_2` against computed measurements,
+checks `100 * (reported_value_i - reported_value_2) / reported_value_2`,
 requiring JSON null when the reference is zero.
 
 File scoring cannot prove how many unsubmitted scans occurred or whether a
