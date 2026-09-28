@@ -15,8 +15,9 @@ from corral.core.state import EnvironmentState, ExecutionState
 from corral.core.task import TaskDefinition
 from corral.core.tool import tool
 from corral.core.transition import ToolExecutionResult
-from corral.runtime import permissions
+from corral.runtime import agent_worker, permissions
 from corral.runtime.agent_worker import RemoteSession, _snapshot
+from corral.tools.python_repl import create_python_repl_tool
 from corral.workspace import WorkspaceFilesystem, build_terminal_tool
 
 
@@ -242,3 +243,31 @@ def test_node_creation_and_copy_reject_symlink_ancestors(tmp_path):
         permissions.copy_workspace(nodes / "nested", destination)
     assert not list(destination.iterdir())
     assert (outside / "secret.txt").read_text() == "private data"
+
+
+def test_worker_response_ceiling_is_configurable(monkeypatch):
+    """Environments with large REPL checkpoints can raise the ceiling."""
+    monkeypatch.delenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", raising=False)
+    assert (
+        permissions.max_worker_response_bytes()
+        == permissions.DEFAULT_MAX_WORKER_RESPONSE_BYTES
+    )
+
+    monkeypatch.setenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", str(4 * 1024**3))
+    assert permissions.max_worker_response_bytes() == 4 * 1024**3
+    # The session channel carries snapshots, so it follows the same setting.
+    assert agent_worker._max_message() == 4 * 1024**3
+
+
+@pytest.mark.parametrize("value", ["nonsense", "0", "-1"])
+def test_worker_response_ceiling_rejects_unusable_values(monkeypatch, value):
+    monkeypatch.setenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", value)
+    with pytest.raises(ValueError, match="CORRAL_MAX_WORKER_RESPONSE_BYTES"):
+        permissions.max_worker_response_bytes()
+
+
+def test_repl_tool_carries_its_own_response_ceiling():
+    """An environment can raise the ceiling without changing it globally."""
+    repl = create_python_repl_tool(name="PythonREPL", max_response_bytes=1024**3)
+    assert repl.max_response_bytes == 1024**3
+    assert create_python_repl_tool(name="PythonREPL").max_response_bytes is None

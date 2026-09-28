@@ -696,6 +696,7 @@ def execute_python_repl(
     max_code_chars: int = DEFAULT_MAX_CODE_CHARS,
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
     address_space_bytes: int = DEFAULT_WORKER_ADDRESS_SPACE_BYTES,
+    max_response_bytes: int | None = None,
 ) -> PythonREPLResult:
     """Execute and checkpoint Python in Corral's restricted worker.
 
@@ -752,6 +753,7 @@ def execute_python_repl(
         ),
         workspace,
         cancel=cancel,
+        max_response_bytes=max_response_bytes,
     )["content"]
     result = json.loads(response)
     expected = (

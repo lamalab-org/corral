@@ -28,6 +28,30 @@ from uuid import uuid4
 import cloudpickle
 
 DENIED = "Permission denied: access outside the trial workspace is not permitted"
+
+#: Ceiling on the JSON a worker may hand back. It bounds how much an untrusted
+#: worker can make the controller hold in memory, so it is a safety limit, not a
+#: budget: raise it for environments whose REPL checkpoints are genuinely large.
+#: `$CORRAL_MAX_WORKER_RESPONSE_BYTES` overrides the default for a whole run.
+DEFAULT_MAX_WORKER_RESPONSE_BYTES = 64 * 1024 * 1024
+
+
+def max_worker_response_bytes() -> int:
+    """The configured ceiling on a worker's JSON response."""
+    configured = os.environ.get("CORRAL_MAX_WORKER_RESPONSE_BYTES", "").strip()
+    if not configured:
+        return DEFAULT_MAX_WORKER_RESPONSE_BYTES
+    try:
+        value = int(configured)
+    except ValueError as exc:
+        raise ValueError(
+            f"CORRAL_MAX_WORKER_RESPONSE_BYTES must be an integer: {configured!r}"
+        ) from exc
+    if value <= 0:
+        raise ValueError("CORRAL_MAX_WORKER_RESPONSE_BYTES must be positive")
+    return value
+
+
 POLICY_VERSION = "workspace-root-v1"
 SCRATCH_PREFIX = ".corral-runtime-"
 NODE_WORKSPACE_DIR = ".corral-nodes"
@@ -458,14 +482,26 @@ def _kill_identity(uid: int) -> None:
 
 
 def run_worker(
-    kind: str, payload: Any, workspace: str, *, cancel: threading.Event | None = None
+    kind: str,
+    payload: Any,
+    workspace: str,
+    *,
+    cancel: threading.Event | None = None,
+    max_response_bytes: int | None = None,
 ) -> Any:
     """Run one trusted bootstrap, then accept an unprivileged JSON result."""
     if not enabled() or _root is None:
         raise RuntimeError("restricted workers require Docker permission enforcement")
     descriptor = _open_directory(workspace)
     try:
-        return _run_worker(kind, payload, workspace, descriptor, cancel=cancel)
+        return _run_worker(
+            kind,
+            payload,
+            workspace,
+            descriptor,
+            cancel=cancel,
+            max_response_bytes=max_response_bytes or max_worker_response_bytes(),
+        )
     finally:
         try:
             root = Path(workspace)
@@ -484,6 +520,7 @@ def _run_worker(
     workspace_fd: int,
     *,
     cancel: threading.Event | None,
+    max_response_bytes: int,
 ) -> Any:
     uid, gid = workspace_identity(workspace, descriptor=workspace_fd)
     with tempfile.TemporaryDirectory(dir=_root) as directory:
@@ -497,7 +534,7 @@ def _run_worker(
 
         def read_result() -> None:
             with os.fdopen(reader, "rb") as stream:
-                output.append(stream.read(64 * 1024 * 1024 + 1))
+                output.append(stream.read(max_response_bytes + 1))
 
         thread = threading.Thread(target=read_result, daemon=True)
         thread.start()
@@ -551,8 +588,14 @@ def _run_worker(
                     log_thread.join(timeout=5)
                 if log_thread.is_alive():
                     raise RuntimeError("restricted worker log stream did not close")
-                if thread.is_alive() or not output or len(output[0]) > 64 * 1024 * 1024:
+                if not output or thread.is_alive():
                     raise RuntimeError("restricted worker returned an invalid response")
+                if len(output[0]) > max_response_bytes:
+                    raise RuntimeError(
+                        "restricted worker response exceeds "
+                        f"{max_response_bytes:,} bytes. A large REPL checkpoint is "
+                        "the usual cause; raise $CORRAL_MAX_WORKER_RESPONSE_BYTES."
+                    )
                 if process.returncode or not output[0]:
                     log.seek(0, os.SEEK_END)
                     log.seek(max(0, log.tell() - 16000))

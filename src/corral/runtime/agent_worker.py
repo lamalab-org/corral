@@ -23,7 +23,17 @@ from corral.core.actors import ActorRef
 from corral.core.tool import ToolConnection, ToolResponse
 from corral.runtime import permissions
 
-_MAX_MESSAGE = 64 * 1024 * 1024
+
+def _max_message() -> int:
+    """Session-channel ceiling.
+
+    A snapshot carries the environment state, so an environment with large REPL
+    checkpoints needs this raised; `$CORRAL_MAX_WORKER_RESPONSE_BYTES`
+    configures it and the worker response channel together.
+    """
+    return permissions.max_worker_response_bytes()
+
+
 _METHODS = frozenset(
     {
         "execute",
@@ -195,12 +205,12 @@ class RemoteSession:
                 "arguments": arguments,
             }
         ).encode()
-        if len(request) > _MAX_MESSAGE:
+        if len(request) > _max_message():
             raise ValueError("session request is too large")
         with socket.create_connection(self._endpoint) as stream:
             stream.sendall(struct.pack("!I", len(request)) + request)
             length = struct.unpack("!I", self._read(stream, 4))[0]
-            if length > _MAX_MESSAGE:
+            if length > _max_message():
                 raise RuntimeError("session response is too large")
             response = json.loads(self._read(stream, length))
         if not response["ok"]:
@@ -243,7 +253,7 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
         tasks.add(task)
         try:
             length = struct.unpack("!I", await reader.readexactly(4))[0]
-            if length > _MAX_MESSAGE:
+            if length > _max_message():
                 raise ValueError("session request is too large")
             request = json.loads(await reader.readexactly(length))
             if not secrets.compare_digest(request["token"], token):
@@ -304,8 +314,13 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
             response = {"ok": False, "error": str(exc)}
         try:
             data = json.dumps(response).encode()
-            if len(data) > _MAX_MESSAGE:
-                data = b'{"ok":false,"error":"session response is too large"}'
+            if len(data) > _max_message():
+                detail = (
+                    f"session response is {len(data):,} bytes, over the "
+                    f"{_max_message():,} byte limit; raise "
+                    "$CORRAL_MAX_WORKER_RESPONSE_BYTES"
+                )
+                data = json.dumps({"ok": False, "error": detail}).encode()
             writer.write(struct.pack("!I", len(data)) + data)
             await writer.drain()
         finally:

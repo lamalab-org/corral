@@ -21,6 +21,11 @@ from corral.workspace import WorkspaceFilesystem, build_workspace_tools
 MAX_CODE_CHARS = 50_000
 MAX_OUTPUT_CHARS = 10_000
 
+#: A session holds the survey as a dataframe, so its checkpoint is tens of
+#: megabytes before the agent derives anything. Corral's 64 MiB default leaves
+#: too little room for fitting and resampling on top of that.
+MAX_REPL_RESPONSE_BYTES = 1024 * 1024 * 1024
+
 REPL_DESCRIPTION = "Execute Python code in the task's persistent public-data-only session."
 
 
@@ -105,6 +110,7 @@ def workspace_tools(workspace: str) -> dict[str, Tool]:
         code_executor=_CellExecutor(workspace),
         max_code_chars=MAX_CODE_CHARS,
         max_output_chars=MAX_OUTPUT_CHARS,
+        max_response_bytes=MAX_REPL_RESPONSE_BYTES,
     )
     return {
         name: files[name]
