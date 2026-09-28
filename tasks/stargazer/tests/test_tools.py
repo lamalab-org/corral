@@ -165,25 +165,6 @@ def advance():
     assert analysis_session.execute("advance()\nprint(value, outer())") == "3 30\n"
 
 
-def test_both_startup_guides_fit_in_one_repl_response(analysis_session):
-    from stargazer.protocol import public_resources
-    from stargazer.tools import STARGAZER_SUBMISSION_GUIDE
-
-    expected = (
-        STARGAZER_SUBMISSION_GUIDE
-        + "\n"
-        + public_resources()["analysis-guide.md"]
-        + "\n"
-    )
-    assert len(expected) <= 4500  # Leave room for headings or a short data summary.
-    actual = analysis_session.execute(
-        "print(STARGAZER_SUBMISSION_GUIDE)\n"
-        "print(STARGAZER_PUBLIC_RESOURCES['analysis-guide.md'])"
-    )
-    assert actual == expected
-    assert "output truncated" not in actual
-
-
 def test_repl_supports_normal_python_and_checkpointed_functions(analysis_session):
     result = analysis_session.execute("""import pathlib
 import sys
@@ -281,6 +262,7 @@ def test_submission_guide_uses_real_newlines(analysis_session):
     # first thing every agent reads.
     assert "\\n" not in STARGAZER_SUBMISSION_GUIDE
     assert len(STARGAZER_SUBMISSION_GUIDE.splitlines()) == 7
-    assert (
-        analysis_session.execute("print(STARGAZER_SUBMISSION_GUIDE)").count("\n") == 8
+    assert len(STARGAZER_SUBMISSION_GUIDE) < 5000
+    assert analysis_session.execute("print(STARGAZER_SUBMISSION_GUIDE)") == (
+        STARGAZER_SUBMISSION_GUIDE + "\n"
     )

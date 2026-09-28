@@ -89,9 +89,9 @@ def _task_prompt(env: Environment, _state: ExecutionState) -> str:
         "\nUse stargazer_predict(planets) for the evaluator's RV signal and "
         "stargazer_diagnostics(planets, noise_jitter_ms=0.1) for fitted offsets, "
         "model_ms and residuals_ms arrays plus observation-only scalar diagnostics. "
-        "Custom prediction times retain t_ref_days. Read "
-        "STARGAZER_PUBLIC_RESOURCES['analysis-guide.md'] for conventions and a "
-        "synthetic fitting example; ['public_rv.py'] contains the shared source.\n"
+        "Custom prediction times retain t_ref_days. "
+        "STARGAZER_PUBLIC_RESOURCES['public_rv.py'] contains the shared source; "
+        "read it in slices of at most 4,000 characters per tool call.\n"
         if assisted
         else ""
     )

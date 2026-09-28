@@ -223,6 +223,10 @@ class _ExecutionSQLiteCommitStore:
         self._store = store
         self.execution_id = execution_id
 
+    @property
+    def path(self) -> Path:
+        return self._store.path
+
     def bind(
         self,
         author: ActorRef,

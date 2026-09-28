@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -32,21 +35,22 @@ from corral.observability import (
 @pytest.fixture
 def observer(monkeypatch):
     # Test the real SDK's exported parent contexts, not just its call arguments.
-    langfuse = pytest.importorskip("langfuse")
+    pytest.importorskip("langfuse")
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
         InMemorySpanExporter,
     )
 
+    from corral.observability._langfuse_delivery import DeliveryExporter
+
     exporter = InMemorySpanExporter()
-    client_type = langfuse.Langfuse
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", f"pk-test-{uuid4()}")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test-only")
     monkeypatch.setenv("LANGFUSE_MEDIA_UPLOAD_ENABLED", "false")
     monkeypatch.setattr(
-        langfuse,
-        "Langfuse",
-        lambda **kwargs: client_type(span_exporter=exporter, **kwargs),
+        "corral.observability.langfuse.task_exporter",
+        lambda _key: delivery_exporter,
     )
+    delivery_exporter = DeliveryExporter(exporter, "test-project")
     instance = LangfuseObserver()
     scores = []
     monkeypatch.setattr(
@@ -530,3 +534,229 @@ def test_restore_finished_trace_only_attaches_evaluation(observer):
     assert exporter.get_finished_spans() == ()
     assert scores[0]["trace_id"] == deterministic_trace_id("execution")
     assert scores[0]["timestamp"] == commits[-1].occurred_at
+
+
+@pytest.mark.parametrize("observed", range(11))
+def test_resume_after_persistence_before_observer_notification(
+    observer, tmp_path, observed
+):
+    before, exporter, _ = observer
+    context = ObservationContext(
+        "execution", state_db_path=tmp_path / "commits.sqlite3"
+    )
+    commits = [_commit(event, index) for index, event in enumerate(_events())]
+    for commit in commits[:observed]:
+        before.record_commit(commit, context=context)
+    before.flush()
+
+    # One more commit reached SQLite before the process died, without notification.
+    resumed = LangfuseObserver()
+    for commit in commits[: observed + 1]:
+        resumed.restore_commit(commit, context=context)
+    for commit in commits[observed + 1 :]:
+        resumed.record_commit(commit, context=context)
+    resumed.flush()
+    models = [
+        span
+        for span in exporter.get_finished_spans()
+        if span.attributes["langfuse.observation.type"] == "generation"
+    ]
+    assert len(models) == 2
+    assert sum(_json(span, "usage_details")["total_tokens"] for span in models) == 38
+    first = min(models, key=lambda span: span.start_time)
+    assert [call["id"] for call in _json(first, "output")["tool_calls"]] == [
+        "one",
+        "two",
+    ]
+
+    # Replaying a completed execution must not send either generation again.
+    again = LangfuseObserver()
+    for commit in commits:
+        again.restore_commit(commit, context=context)
+    again.flush()
+    assert [
+        span
+        for span in exporter.get_finished_spans()
+        if span.attributes["langfuse.observation.type"] == "generation"
+    ] == models
+
+
+@pytest.mark.parametrize("cut", [9, 11])
+def test_resume_recovers_generations_lost_before_transport(
+    observer, tmp_path, monkeypatch, cut
+):
+    from opentelemetry.sdk.trace.export import SpanExportResult
+
+    before, exporter, _ = observer
+    context = ObservationContext(
+        "execution", state_db_path=tmp_path / "commits.sqlite3"
+    )
+    commits = [_commit(event, index) for index, event in enumerate(_events())]
+    # Model a lost SDK queue: no generation reached the transport or receipt table.
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            before._exporter, "export", lambda spans: SpanExportResult.FAILURE
+        )
+        for commit in commits[:cut]:
+            before.record_commit(commit, context=context)
+        before.flush()
+    assert exporter.get_finished_spans() == ()
+
+    resumed = LangfuseObserver()
+    for commit in commits[:cut]:
+        resumed.restore_commit(commit, context=context)
+    for commit in commits[cut:]:
+        resumed.record_commit(commit, context=context)
+    resumed.flush()
+    models = [
+        span
+        for span in exporter.get_finished_spans()
+        if span.attributes["langfuse.observation.type"] == "generation"
+    ]
+    assert len(models) == 2
+    assert sum(_json(span, "usage_details")["total_tokens"] for span in models) == 38
+    by_id = {span.context.span_id: span for span in exporter.get_finished_spans()}
+    for span in models:
+        parent = by_id[span.parent.span_id]
+        assert parent.start_time <= span.start_time <= span.end_time <= parent.end_time
+
+
+@pytest.mark.parametrize("failure", ["transport", "receipt"])
+def test_uncertain_delivery_is_reconciled_without_resending(
+    observer, tmp_path, monkeypatch, failure
+):
+    from corral.observability._langfuse_delivery import GenerationDelivery
+
+    before, exporter, _ = observer
+    context = ObservationContext(
+        "execution", state_db_path=tmp_path / "commits.sqlite3"
+    )
+    commits = [_commit(event, index) for index, event in enumerate(_events())]
+    transport = exporter.export
+
+    def accepted_but_response_lost(spans):
+        transport(spans)
+        raise TimeoutError("response lost after remote acceptance")
+
+    def receipt_write_interrupted(*args):
+        raise RuntimeError("process stopped before local confirmation")
+
+    with monkeypatch.context() as patch:
+        if failure == "transport":
+            patch.setattr(exporter, "export", accepted_but_response_lost)
+        else:
+            patch.setattr(GenerationDelivery, "confirm", receipt_write_interrupted)
+        for commit in commits:
+            before.record_commit(commit, context=context)
+        before.flush()
+    delivered = exporter.get_finished_spans()
+    assert (
+        len(
+            [
+                span
+                for span in delivered
+                if span.attributes["langfuse.observation.type"] == "generation"
+            ]
+        )
+        == 2
+    )
+
+    # Reopen the state through a fresh observer, as a new process would.
+    before._exporter.stores.clear()
+    resumed = LangfuseObserver()
+    lookups = []
+
+    def lookup(**kwargs):
+        observation_id = json.loads(kwargs["filter"])[0]["value"]
+        lookups.append(observation_id)
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(id=f"{span.context.span_id:016x}")
+                for span in delivered
+                if f"{span.context.span_id:016x}" == observation_id
+            ]
+        )
+
+    monkeypatch.setattr(resumed.client.api.observations, "get_many", lookup)
+    for commit in commits:
+        resumed.restore_commit(commit, context=context)
+    resumed.flush()
+    assert len(lookups) == 2
+    assert exporter.get_finished_spans() == delivered
+    assert all(
+        resumed._deliveries["execution"].receipt(commits[index].hash)[0] == "confirmed"
+        for index in (2, 8)
+    )
+
+
+@pytest.mark.parametrize("lookup_fails", [False, True])
+def test_unknown_delivery_stays_unresolved_until_remote_confirmation(
+    observer, tmp_path, monkeypatch, lookup_fails
+):
+    from opentelemetry.sdk.trace.export import SpanExportResult
+
+    before, exporter, _ = observer
+    context = ObservationContext(
+        "execution", state_db_path=tmp_path / "commits.sqlite3"
+    )
+    commits = [_commit(event, index) for index, event in enumerate(_events())]
+    with monkeypatch.context() as patch:
+        patch.setattr(exporter, "export", lambda spans: SpanExportResult.FAILURE)
+        for commit in commits:
+            before.record_commit(commit, context=context)
+        before.flush()
+    before._exporter.stores.clear()
+    resumed = LangfuseObserver()
+
+    def lookup(**kwargs):
+        if lookup_fails:
+            raise TimeoutError("lookup unavailable")
+        return SimpleNamespace(data=[])
+
+    monkeypatch.setattr(resumed.client.api.observations, "get_many", lookup)
+    for commit in commits:
+        resumed.restore_commit(commit, context=context)
+    resumed.flush()
+    resumed.flush()
+    assert exporter.get_finished_spans() == ()
+    assert len(resumed._completed_generations) == 2
+    assert all(
+        resumed._deliveries["execution"].receipt(commits[index].hash)[0] == "sending"
+        for index in (2, 8)
+    )
+
+    # A later positive lookup resolves the attempt without retransmission.
+    monkeypatch.setattr(
+        resumed.client.api.observations,
+        "get_many",
+        lambda **kwargs: SimpleNamespace(
+            data=[SimpleNamespace(id=json.loads(kwargs["filter"])[0]["value"])]
+        ),
+    )
+    resumed.flush()
+    assert resumed._completed_generations == []
+    assert exporter.get_finished_spans() == ()
+
+
+def test_delivery_tracking_does_not_lock_the_commit_writer(observer, tmp_path):
+    instance, exporter, _ = observer
+    context = ObservationContext(
+        "execution", state_db_path=tmp_path / "commits.sqlite3"
+    )
+    with closing(sqlite3.connect(context.state_db_path)) as db:
+        db.execute("CREATE TABLE commit_writer (id INTEGER)")
+        db.execute("BEGIN IMMEDIATE")
+        for index, value in enumerate(_events()):
+            instance.record_commit(_commit(value, index), context=context)
+        instance.flush()
+        db.rollback()
+    assert (
+        len(
+            [
+                span
+                for span in exporter.get_finished_spans()
+                if span.attributes["langfuse.observation.type"] == "generation"
+            ]
+        )
+        == 2
+    )

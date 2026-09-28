@@ -396,6 +396,7 @@ async def test_running_tool_resumes_with_stable_invocation_id(tmp_path, restore_
         def restore_commit(self, commit, *, context=None):
             assert calls == []
             assert context.execution_id == execution_id
+            assert context.state_db_path == store.path
             restored.append(commit.event.type)
             if restore_fails:
                 raise RuntimeError("observer restore unavailable")

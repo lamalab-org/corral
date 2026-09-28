@@ -15,12 +15,9 @@ def protocol_version(analysis_assistance: bool) -> str:
 
 
 def public_resources() -> dict[str, str]:
-    """Read only these two audited files; never export a repository directory."""
-    root = Path(__file__).parent
-    return {
-        name: (root / name).read_text(encoding="utf-8")
-        for name in ("public_rv.py", "analysis-guide.md")
-    }
+    """Export only the public numerical implementation."""
+    source = Path(__file__).with_name("public_rv.py")
+    return {source.name: source.read_text(encoding="utf-8")}
 
 
 def execution_fingerprint(*, protocol, bank, criteria, development_mode, source_hash):

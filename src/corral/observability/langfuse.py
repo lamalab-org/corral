@@ -26,6 +26,7 @@ from corral.core.events import (
     ToolStarted,
     UsageDelta,
 )
+from corral.observability._langfuse_delivery import GenerationDelivery, task_exporter
 from corral.observability.base import (
     CompositeObserver,
     NoOpObserver,
@@ -201,6 +202,7 @@ class _RestoredGeneration:
     context: ObservationContext
     started_at: datetime
     arguments: dict[str, Any]
+    step_number: int
 
 
 class LangfuseObserver:
@@ -215,10 +217,14 @@ class LangfuseObserver:
     ) -> None:
         self._public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
         self._provider = tracer_provider or _task_tracer_provider(self._public_key)
+        self._exporter = None
         if client is None:
             from langfuse import Langfuse, propagate_attributes
 
-            client = Langfuse(mask=mask, tracer_provider=self._provider)
+            self._exporter = task_exporter(self._public_key)
+            client = Langfuse(
+                mask=mask, tracer_provider=self._provider, span_exporter=self._exporter
+            )
             attribute_scope_factory = propagate_attributes
         elif attribute_scope_factory is None:
             attribute_scope_factory = _null_attribute_scope
@@ -229,6 +235,10 @@ class LangfuseObserver:
         self._restoring = False
         self._restored_steps: set[tuple[str, str]] = set()
         self._restored_generations: dict[tuple[str, str], _RestoredGeneration] = {}
+        self._completed_generations: list[_RestoredGeneration] = []
+        self._deliveries: dict[str, GenerationDelivery] = {}
+        self._task_starts: dict[str, datetime] = {}
+        self._task_ends: dict[str, Commit] = {}
         self._noop = NoOpObserver()
         self._models: dict[str, str] = {}
         self._agents: dict[tuple[str, str], str] = {}
@@ -313,7 +323,7 @@ class LangfuseObserver:
 
     def _end_step(self, key: tuple[str, str]) -> None:
         self._restored_steps.discard(key)
-        self._restored_generations.pop(key, None)
+        self._finish_restored_generation(key)
         generation = self._generations.pop(key, None)
         if generation is not None:
             span, output, ended_at = generation
@@ -322,6 +332,105 @@ class LangfuseObserver:
         step = self._steps.pop(key, None)
         if step is not None:
             step.end(end_time=int(self._last_times[key].timestamp() * 1e9))
+
+    def _finish_restored_generation(self, key: tuple[str, str]) -> None:
+        restored = self._restored_generations.pop(key, None)
+        if restored is not None and key[0] in self._deliveries:
+            self._completed_generations.append(restored)
+
+    def _needs_export(self, generation: _RestoredGeneration) -> bool | None:
+        store = self._deliveries.get(generation.commit.execution_id)
+        if store is None:
+            return True  # Compatibility with checkpoints predating delivery tracking.
+        status, observation_id = store.receipt(generation.commit.hash)
+        if status == "pending":
+            return True
+        if status == "sending":
+            # An absent result is not proof of non-delivery: ingestion may lag.
+            try:
+                result = self.client.api.observations.get_many(
+                    fields="core",
+                    limit=1,
+                    filter=json.dumps(
+                        [
+                            {
+                                "type": "string",
+                                "column": "id",
+                                "operator": "=",
+                                "value": observation_id,
+                            }
+                        ]
+                    ),
+                )
+                if any(row.id == observation_id for row in result.data):
+                    store.confirm(generation.commit.hash)
+                    return False
+            except Exception as exc:
+                event(
+                    "WARNING",
+                    "observability.reconciliation_failed",
+                    subsystem="observability",
+                    **exception_fields(exc),
+                )
+            else:
+                event(
+                    "WARNING",
+                    "observability.delivery_unresolved",
+                    subsystem="observability",
+                    execution_id=generation.commit.execution_id,
+                    commit_hash=generation.commit.hash,
+                    observation_id=observation_id,
+                    message="Langfuse delivery remains uncertain; withholding resend",
+                )
+            return None
+        return False
+
+    def _recover_completed_generations(self) -> None:
+        remaining = []
+        for generation in self._completed_generations:
+            try:
+                needed = self._needs_export(generation)
+                if needed is None:
+                    remaining.append(generation)
+                elif needed:
+                    key = (
+                        generation.commit.execution_id,
+                        generation.arguments["run_id"],
+                    )
+                    last_time = self._last_times[key]
+                    step_number = self._step_numbers[key]
+                    restored_step = key in self._restored_steps
+                    # The pending current turn must survive opening an older step.
+                    current = self._restored_generations.pop(key, None)
+                    self._last_times[key] = generation.started_at
+                    self._step_numbers[key] = generation.step_number - 1
+                    try:
+                        self._record_delta(
+                            generation.commit,
+                            generation.context,
+                            **generation.arguments,
+                        )
+                        self._end_step(key)
+                    finally:
+                        self._last_times[key] = last_time
+                        self._step_numbers[key] = step_number
+                        if restored_step:
+                            self._restored_steps.add(key)
+                        if current is not None:
+                            self._restored_generations[key] = current
+            except Exception as exc:
+                remaining.append(generation)
+                event(
+                    "WARNING",
+                    "observability.recovery_failed",
+                    subsystem="observability",
+                    **exception_fields(exc),
+                )
+        self._completed_generations = remaining
+        for execution_id, commit in self._task_ends.items():
+            root = self._roots.pop(execution_id, None)
+            if root is not None:
+                root.end(end_time=int(commit.occurred_at.timestamp() * 1e9))
 
     def _metadata(self, commit: Commit, *, run_id: str | None = None) -> dict[str, Any]:
         selected_run = run_id or commit.author.run_id
@@ -353,10 +462,8 @@ class LangfuseObserver:
                 self._last_times[commit.execution_id] = commit.occurred_at
                 return
             if as_type == "generation":
+                self._finish_restored_generation(key)
                 self._restored_steps.discard(key)
-                # Only the final, unclosed generation was never exported.
-                # Older generations must not be replayed: Langfuse ingestion
-                # does not deduplicate repeated observations.
                 self._restored_generations[key] = _RestoredGeneration(
                     commit,
                     context,
@@ -369,6 +476,7 @@ class LangfuseObserver:
                         "input_messages": input_messages,
                         "usage": usage,
                     },
+                    self._step_numbers.get(key, 0) + 1,
                 )
             if key not in self._restored_steps:
                 self._step_numbers[key] = self._step_numbers.get(key, 0) + 1
@@ -386,7 +494,7 @@ class LangfuseObserver:
                 context,
                 name=f"Task · {context.task_id or commit.execution_id}",
                 as_type="agent",
-                started_at=self._last_times.get(
+                started_at=self._task_starts.get(
                     commit.execution_id, commit.occurred_at
                 ),
                 input=self._mask(
@@ -401,6 +509,7 @@ class LangfuseObserver:
         if set_trace_input:
             return
         if as_type == "generation":
+            metadata["commit_hash"] = commit.hash
             self._end_step(key)
         if key not in self._steps:
             if key not in self._restored_steps:
@@ -567,11 +676,38 @@ class LangfuseObserver:
     ) -> None:
         if commit.hash in self._recorded_hashes:
             return
+        selected_context = context or ObservationContext(
+            execution_id=commit.execution_id
+        )
+        if self._exporter is not None and selected_context.state_db_path is not None:
+            store = self._exporter.stores.get(commit.execution_id)
+            if store is None:
+                store = GenerationDelivery(
+                    selected_context.state_db_path,
+                    self._exporter.destination,
+                    commit.execution_id,
+                )
+                self._exporter.stores[commit.execution_id] = store
+            # Enroll fresh executions even if they stopped before the initial
+            # notification. Existing histories without receipts stay on the
+            # legacy path: absence of a receipt does not prove non-delivery.
+            if not self._restoring and not any(
+                key[0] == commit.execution_id for key in self._step_numbers
+            ):
+                store.track()
+            if store.tracked():
+                self._deliveries[commit.execution_id] = store
         if not self._restoring:
+            self._recover_completed_generations()
             for key, generation in list(self._restored_generations.items()):
                 if key[0] != commit.execution_id:
                     continue
+                needed = self._needs_export(generation)
+                if needed is None:
+                    continue
                 self._restored_generations.pop(key)
+                if not needed:
+                    continue
                 last_time = self._last_times[key]
                 self._last_times[key] = generation.started_at
                 # _record_delta opens this same step, rather than a new one.
@@ -581,11 +717,9 @@ class LangfuseObserver:
                 )
                 self._last_times[key] = last_time
         self._recorded_hashes.add(commit.hash)
-        selected_context = context or ObservationContext(
-            execution_id=commit.execution_id
-        )
         commit_event = commit.event
         if isinstance(commit_event, ExecutionStarted):
+            self._task_starts[commit.execution_id] = commit.occurred_at
             self._task_inputs[commit.execution_id] = _execution_started_messages(
                 commit_event
             )
@@ -644,6 +778,7 @@ class LangfuseObserver:
                 )
             return
         if isinstance(commit_event, ExecutionCompleted | ExecutionFailed):
+            self._task_ends[commit.execution_id] = commit
             for key in self._steps.keys() | self._restored_steps:
                 if key[0] == commit.execution_id:
                     self._end_step(key)
@@ -658,6 +793,7 @@ class LangfuseObserver:
             self._last_times[commit.execution_id] = commit.occurred_at
 
     def flush(self) -> None:
+        self._recover_completed_generations()
         flush = getattr(self.client, "flush", None)
         if flush is not None:
             flush()

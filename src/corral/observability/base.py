@@ -15,6 +15,8 @@ from pydantic import BaseModel
 from corral.report.logging import event, exception_fields
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from corral.core.actors import ActorRef
     from corral.core.commit import Commit
 
@@ -26,6 +28,7 @@ class ObservationContext:
     execution_id: str
     benchmark_run_id: str | None = None
     task_id: str | None = None
+    state_db_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)

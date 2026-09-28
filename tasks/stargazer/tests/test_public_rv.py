@@ -135,7 +135,7 @@ def test_public_module_has_no_private_imports_and_source_runs_standalone(tmp_pat
     )
     assert result.returncode == 0, result.stderr
     resources = public_resources()
-    assert set(resources) == {"public_rv.py", "analysis-guide.md"}
+    assert set(resources) == {"public_rv.py"}
     (tmp_path / "public_rv.py").write_text(resources["public_rv.py"])
     result = subprocess.run(
         [
@@ -151,18 +151,6 @@ def test_public_module_has_no_private_imports_and_source_runs_standalone(tmp_pat
         text=True,
     )
     assert result.returncode == 0, result.stderr
-
-
-def test_guide_example_runs_without_task_data():
-    example = (
-        public_resources()["analysis-guide.md"].split("```python\n")[1].split("```")[0]
-    )
-    namespace = {"np": np}
-    exec(example, namespace)
-    assert namespace["d"]["valid"]
-    assert namespace["d"]["bic"] < namespace["example"].diagnostics([])["bic"]
-    assert abs(namespace["fit"].x[0] - 19.3) < 0.1
-    assert json.loads(namespace["answer_json"]) == namespace["d"]["candidate"]
 
 
 def test_reference_substitution_and_helper_tampering(simple_task, exact_submission):

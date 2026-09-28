@@ -518,7 +518,7 @@ def create_tools(*, analysis_assistance: bool = True) -> dict[str, Tool]:
         repl["description"] += (
             "\nAlso preloaded: stargazer_predict(planets, times_days=None, per_planet=False), "
             "stargazer_diagnostics(planets, noise_jitter_ms=0.1), and "
-            "STARGAZER_PUBLIC_RESOURCES with public_rv.py and analysis-guide.md. "
+            "STARGAZER_PUBLIC_RESOURCES with public_rv.py. "
             "Helpers use public data only and keep model/residual arrays in the session."
         )
     repl_tool = create_python_repl_tool(

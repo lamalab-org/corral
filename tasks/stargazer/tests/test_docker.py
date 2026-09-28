@@ -205,27 +205,6 @@ def test_docker_functions_see_globals_across_cells_and_restore(
         checkpoint = result["checkpoint"]
 
 
-def test_docker_startup_guides_are_complete(docker_workspace, simple_task):
-    from stargazer.protocol import public_resources
-    from stargazer.tools import STARGAZER_SUBMISSION_GUIDE
-
-    result = execute_analysis(
-        code="print(STARGAZER_SUBMISSION_GUIDE)\nprint(STARGAZER_PUBLIC_RESOURCES['analysis-guide.md'])",
-        public_data={
-            **asdict(simple_task.observations),
-            "star_mass_sun": simple_task.star_mass_sun,
-        },
-        checkpoint=None,
-        workspace=docker_workspace,
-    )
-    assert result["output"] == (
-        STARGAZER_SUBMISSION_GUIDE
-        + "\n"
-        + public_resources()["analysis-guide.md"]
-        + "\n"
-    )
-
-
 def test_docker_repl_has_no_execution_deadline(docker_workspace, simple_task):
     data = {
         **asdict(simple_task.observations),
@@ -292,6 +271,8 @@ def test_docker_checkpoint_decoding_is_unprivileged_and_has_no_credentials(
 def test_docker_protocol_and_history_updates_survive_checkpoint(
     docker_workspace, simple_task
 ):
+    from stargazer.tools import STARGAZER_SUBMISSION_GUIDE
+
     data = {
         **asdict(simple_task.observations),
         "star_mass_sun": simple_task.star_mass_sun,
@@ -303,6 +284,7 @@ def test_docker_protocol_and_history_updates_survive_checkpoint(
         workspace=docker_workspace,
     )
     assert first["protocol_ack"] is True
+    assert first["output"] == STARGAZER_SUBMISSION_GUIDE + "\nTrue\n"
     history = [{"valid": True, "candidate": {"planets": []}, "residuals": {"rms": 1.0}}]
     second = execute_analysis(
         code="import json\nprint(json.dumps(history))",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -170,6 +171,7 @@ class TaskRuntime:
         store = self._execution_store(execution_id)
         branch_id = "main"
         context = self._context(execution_id, environment.task_id, observation_context)
+        context = replace(context, state_db_path=getattr(store, "path", None))
         runtime_actor = ActorRef(
             kind="runtime",
             actor_id="corral",
