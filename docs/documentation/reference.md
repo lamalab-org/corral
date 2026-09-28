@@ -127,6 +127,19 @@ it to keep an untrusted worker from exhausting controller memory on a small
 host. `create_python_repl_tool(max_response_bytes=...)` overrides it for one
 tool, as `address_space_bytes` does for worker memory.
 
+Corral's launcher grants a trial container exactly the capabilities the worker
+needs — `SETUID`, `SETGID`, `CHOWN`, `DAC_OVERRIDE`, `KILL`, `SYS_ADMIN` and
+`SYS_CHROOT` over a `--cap-drop ALL` baseline, with `apparmor=unconfined` so the
+trusted bootstrap can build the worker filesystem. Running a trial image by hand
+needs the same grants, or the worker fails with `cannot create worker mount
+namespace`:
+
+```bash
+docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+  -e CORRAL_PERMISSION_TESTS=1 <image> \
+  python -m pytest tests/runtime/test_permissions.py
+```
+
 ## Core transition API
 
 The low-level transition boundary produces events and effects:

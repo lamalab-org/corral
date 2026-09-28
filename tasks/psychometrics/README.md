@@ -77,6 +77,10 @@ CORRAL_MAX_WORKER_RESPONSE_BYTES=$((2 * 1024 ** 3)) uv run python -m corral_psyc
 
 A reply over the limit fails the call and names the limit it exceeded.
 
+`corral bench` grants the trial container the capabilities the worker needs, so
+these tasks need no Docker flags of their own. Running a trial image by hand
+does; see "Restricted worker limits" in the Corral reference.
+
 ## Task list
 
 | level | task | topic |
