@@ -13,9 +13,14 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
-from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.environment import (
+    Environment,
+    EnvironmentSetup,
+    Toolset,
+    build_environments,
+)
 from corral.core.state import ExecutionState
-from corral.core.task import EnvironmentSetup, InputRef, TaskDefinition, with_fixed_inputs
+from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
 from corral.core.transition import ToolExecutionResult
 from corral.report.logging import event, exception_fields
 from corral.runtime import permissions

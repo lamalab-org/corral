@@ -1,38 +1,123 @@
-"""Synchronize a local Corral workspace around a remote Modal LAMMPS run."""
-
 from __future__ import annotations
 
-import logging
+import asyncio
+import hashlib
+import json
 import os
+import re
 import shutil
 import tempfile
+import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import modal
+from corral_md.workspace import ASSET_DIRECTORIES
 
+from corral.core.transition import ToolRecoveryPending
 from corral.runtime.permissions import NODE_WORKSPACE_DIR, SCRATCH_PREFIX
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-_LOGGER = logging.getLogger(__name__)
-_DEFAULT_APP_NAME = "simagent"
-_DEFAULT_VOLUME_NAME = "simulations"
-_REMOTE_VOLUME_ROOT = PurePosixPath("/corral/jobs")
-_REMOTE_MOUNT_ROOT = PurePosixPath("/results")
+_ROOT = PurePosixPath("/corral/runs")
+_MOUNT = PurePosixPath("/results")
+_SCHEMA = 1
+APP_NAME = "simagent"
+_PINNED_RELEASE: ContextVar[str | None] = ContextVar("corral_md_release", default=None)
+_PINNED_VOLUME: ContextVar[str | None] = ContextVar("corral_md_volume", default=None)
+_RECOVERY_SNAPSHOT: ContextVar[tuple[Any, Any] | None] = ContextVar(
+    "corral_md_recovery_snapshot", default=None
+)
 
 
-def _modal_app_name() -> str:
-    configured = os.getenv("CORRAL_MD_MODAL_APP")
-    if configured:
-        return configured
+class _RemoteToolFailed(RuntimeError):
+    """A completed simulation error, as opposed to interrupted recovery."""
 
-    suffix = os.getenv("SIMAGENT_NAME", "")
-    if not suffix:
-        return _DEFAULT_APP_NAME
-    return f"{_DEFAULT_APP_NAME}{suffix if suffix.startswith('-') else f'-{suffix}'}"
+
+def _deployed_runtime_info() -> dict[str, Any]:
+    """Read the single stable SimAgent app's own runtime configuration."""
+    runtime = modal.Function.from_name(APP_NAME, "runtime_info").remote()
+    if not isinstance(runtime, dict) or runtime.get("schema") != 1:
+        raise RuntimeError("SimAgent returned invalid runtime information")
+    if runtime.get("app_name") != APP_NAME:
+        raise RuntimeError("SimAgent runtime information names a different app")
+    release = runtime.get("release_id")
+    volume = runtime.get("volume_name")
+    if not isinstance(release, str) or not isinstance(volume, str):
+        raise RuntimeError(
+            "SimAgent runtime information lacks build identity or Volume"
+        )
+    _identifier(release, "build identity")
+    _identifier(volume, "Volume name")
+    assets = runtime.get("asset_volumes")
+    if not isinstance(assets, dict) or set(assets) != ASSET_DIRECTORIES:
+        raise RuntimeError("SimAgent runtime information lacks asset Volumes")
+    for name in ASSET_DIRECTORIES:
+        if not isinstance(assets[name], str):
+            raise RuntimeError("SimAgent runtime information has invalid asset Volumes")
+        _identifier(assets[name], "asset Volume name")
+    return runtime
+
+
+def configured_runtime() -> tuple[str, str]:
+    """Discover the currently deployed SimAgent worker and its storage Volume."""
+    runtime = _deployed_runtime_info()
+    return runtime["release_id"], runtime["volume_name"]
+
+
+def configured_release_id() -> str:
+    """Read the internal content identity of the deployed SimAgent worker."""
+    return configured_runtime()[0]
+
+
+def configured_app_name() -> str:
+    """Return the single Modal app used by Corral MD."""
+    return APP_NAME
+
+
+def configured_volume_name() -> str:
+    """Return the default Volume used for explicit low-level calls."""
+    return os.getenv("CORRAL_MD_MODAL_VOLUME", "simulations")
+
+
+def configured_asset_volume_name(name: str) -> str:
+    """Resolve asset Volumes from the deployed app, with build pin checking."""
+    if name not in ASSET_DIRECTORIES:
+        raise ValueError(f"Unknown SimAgent asset kind: {name!r}")
+    runtime = _deployed_runtime_info()
+    pinned = _PINNED_RELEASE.get()
+    if pinned is not None and runtime["release_id"] != pinned:
+        raise RuntimeError("Active execution belongs to a different SimAgent build")
+    return runtime["asset_volumes"][name]
+
+
+@contextmanager
+def pinned_release(
+    release_id: str | None,
+    volume_name: str | None = None,
+):
+    """Bind a release from Corral's durable ExecutionStarted metadata."""
+    token = _PINNED_RELEASE.set(release_id)
+    volume_token = _PINNED_VOLUME.set(volume_name)
+    try:
+        yield
+    finally:
+        _PINNED_RELEASE.reset(token)
+        _PINNED_VOLUME.reset(volume_token)
+
+
+@contextmanager
+def recovery_snapshot(workspace_state: Any, workspace_manager: Any):
+    """Expose Corral's durable workspace revision to one tool invocation."""
+    token = _RECOVERY_SNAPSHOT.set((workspace_state, workspace_manager))
+    try:
+        yield
+    finally:
+        _RECOVERY_SNAPSHOT.reset(token)
 
 
 def _is_runtime_name(name: str) -> bool:
@@ -49,118 +134,121 @@ def _workspace_entries(workspace: Path, *, recursive: bool = False) -> Iterator[
             yield from entry.rglob("*")
 
 
-def _validate_workspace(workspace: str | Path) -> Path:
-    workspace_path = Path(workspace)
-    if workspace_path.is_symlink() or not workspace_path.is_dir():
-        raise ValueError(f"LAMMPS workspace must be a regular directory: {workspace}")
+def _identifier(value: str, label: str) -> str:
+    if (
+        not value
+        or len(value) > 128
+        or any(
+            char
+            not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+            for char in value
+        )
+    ):
+        raise ValueError(f"Invalid {label}: {value!r}")
+    return value
 
-    root = workspace_path.resolve()
+
+def _workspace(path: str | Path) -> Path:
+    source = Path(path)
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError(f"MD workspace must be a regular directory: {path}")
+    root = source.resolve()
     for entry in _workspace_entries(root, recursive=True):
-        relative = entry.relative_to(root).as_posix()
-        if entry.is_symlink():
-            raise ValueError(f"LAMMPS workspace cannot contain symlinks: {relative}")
-        if not entry.is_dir() and not entry.is_file():
+        if entry.relative_to(root).parts[0] in ASSET_DIRECTORIES:
             raise ValueError(
-                f"LAMMPS workspace can contain regular files only: {relative}"
+                "Shared asset directories cannot be stored in the writable workspace"
             )
+        if entry.is_symlink() or not (entry.is_file() or entry.is_dir()):
+            raise ValueError(f"Unsafe workspace entry: {entry.relative_to(root)}")
     return root
 
 
-def _resolve_input(workspace: Path, input_file: str) -> tuple[Path, PurePosixPath]:
-    supplied = Path(input_file)
-    local_input = supplied if supplied.is_absolute() else workspace / supplied
-    local_input = local_input.resolve()
-    if workspace != local_input and workspace not in local_input.parents:
-        raise ValueError(
-            f"LAMMPS input must be inside the current workspace: {input_file}"
-        )
-    relative = local_input.relative_to(workspace)
-    if relative.parts and _is_runtime_name(relative.parts[0]):
-        raise ValueError(
-            f"LAMMPS input cannot name a runtime workspace path: {input_file}"
-        )
-    if local_input.is_symlink() or not local_input.is_file():
-        raise FileNotFoundError(f"LAMMPS input file was not found: {input_file}")
-    return local_input, PurePosixPath(relative.as_posix())
-
-
-def _entry_kind(entry: Any) -> str:
-    entry_type = getattr(entry, "type", None)
-    name = getattr(entry_type, "name", "")
-    if name:
-        return name.lower()
-    if entry_type == 1:
-        return "file"
-    if entry_type == 2:
-        return "directory"
-    return str(entry_type).lower()
-
-
-def _entry_relative_path(entry: Any, remote_directory: PurePosixPath) -> Path:
-    entry_path = PurePosixPath(f"/{str(entry.path).lstrip('/')}")
-    remote_root = PurePosixPath(f"/{str(remote_directory).lstrip('/')}")
+def _input(root: Path, supplied: str, *, require_file: bool = True) -> PurePosixPath:
+    candidate = Path(supplied)
+    candidate = candidate if candidate.is_absolute() else root / candidate
     try:
-        relative = entry_path.relative_to(remote_root)
-    except ValueError as exc:
-        raise RuntimeError(
-            f"Modal returned a file outside the job workspace: {entry.path!r}"
-        ) from exc
-    if str(relative) in {"", "."}:
-        return Path()
-    if any(part in {"", ".", ".."} for part in relative.parts) or _is_runtime_name(
-        relative.parts[0]
+        lexical_relative = candidate.relative_to(root)
+    except ValueError:
+        pass
+    else:
+        if lexical_relative.parts and _is_runtime_name(lexical_relative.parts[0]):
+            raise ValueError(
+                f"MD input cannot name a runtime workspace path: {supplied}"
+            )
+    if candidate.is_symlink():
+        raise ValueError(f"MD input cannot be a symlink: {supplied}")
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError(f"MD input must be inside the current workspace: {supplied}")
+    relative = resolved.relative_to(root)
+    if relative.parts and _is_runtime_name(relative.parts[0]):
+        raise ValueError(f"MD input cannot name a runtime workspace path: {supplied}")
+    if require_file and not resolved.is_file():
+        raise FileNotFoundError(f"MD input file was not found: {supplied}")
+    return PurePosixPath(relative.as_posix())
+
+
+def _hash_file(path: Path) -> dict[str, str | int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return {"sha256": digest.hexdigest(), "size": size}
+
+
+def _files(root: Path) -> dict[str, dict[str, str | int]]:
+    _workspace(root)
+    return {
+        path.relative_to(root).as_posix(): _hash_file(path)
+        for path in sorted(_workspace_entries(root, recursive=True))
+        if path.is_file()
+    }
+
+
+def _safe_relative(path: str) -> Path:
+    if not isinstance(path, str) or not path or "\\" in path or "\x00" in path:
+        raise ValueError(f"Unsafe remote workspace path: {path!r}")
+    parsed = PurePosixPath(path)
+    if (
+        parsed.is_absolute()
+        or parsed.as_posix() != path
+        or any(part in {"", ".", ".."} for part in parsed.parts)
     ):
-        raise RuntimeError(f"Modal returned an unsafe workspace path: {entry.path!r}")
-    return Path(*relative.parts)
+        raise ValueError(f"Unsafe remote workspace path: {path!r}")
+    if parsed.parts[0] in ASSET_DIRECTORIES:
+        raise ValueError(f"Remote output cannot replace a read-only asset: {path!r}")
+    if _is_runtime_name(parsed.parts[0]):
+        raise ValueError(f"Remote output cannot replace a runtime path: {path!r}")
+    return Path(*parsed.parts)
 
 
-def _download_workspace(
-    volume: Any,
-    remote_directory: PurePosixPath,
-    destination: Path,
-) -> int:
-    entries = volume.listdir(str(remote_directory), recursive=True)
-    downloaded = 0
-    for entry in sorted(entries, key=lambda item: str(item.path)):
-        relative = _entry_relative_path(entry, remote_directory)
-        if relative == Path():
-            continue
-
-        target = destination / relative
-        kind = _entry_kind(entry)
-        if kind == "directory":
-            target.mkdir(parents=True, exist_ok=True)
-            continue
-        if kind != "file":
-            raise RuntimeError(
-                f"Modal job workspace contains unsupported {kind}: {entry.path!r}"
-            )
-
-        target.parent.mkdir(parents=True, exist_ok=True)
-        size = 0
-        with target.open("wb") as stream:
-            for chunk in volume.read_file(str(entry.path)):
-                stream.write(chunk)
-                size += len(chunk)
-        expected_size = getattr(entry, "size", None)
-        if expected_size is not None and size != expected_size:
-            raise RuntimeError(
-                f"Downloaded {entry.path!r} with {size} bytes; expected {expected_size}"
-            )
-        downloaded += 1
-    return downloaded
+def _stage_workspace(workspace: Path, destination: Path) -> None:
+    """Copy task files without copying private runtime directories."""
+    destination.mkdir()
+    for entry in _workspace_entries(workspace):
+        target = destination / entry.name
+        if entry.is_dir():
+            shutil.copytree(entry, target)
+        else:
+            shutil.copy2(entry, target)
 
 
 def _publish_workspace(staged_workspace: Path, workspace: Path) -> None:
-    # The workspace may be a bind mount with a non-writable parent. Preserve its
-    # inode, ownership and mode, and leave active worker scratch in place.
+    """Replace task files in place while preserving private runtime state."""
+    _workspace(staged_workspace)
+    staged_entries = list(staged_workspace.iterdir())
+    if any(_is_runtime_name(entry.name) for entry in staged_entries):
+        raise ValueError("Staged workspace contains a private runtime path")
+
     backup = staged_workspace.parent / "backup"
     backup.mkdir()
     published: list[Path] = []
     try:
         for entry in list(_workspace_entries(workspace)):
             entry.replace(backup / entry.name)
-        for entry in list(staged_workspace.iterdir()):
+        for entry in staged_entries:
             target = entry.replace(workspace / entry.name)
             published.append(target)
     except Exception:
@@ -171,102 +259,475 @@ def _publish_workspace(staged_workspace: Path, workspace: Path) -> None:
         raise
 
 
+def _read_json(volume: Any, path: PurePosixPath) -> dict[str, Any] | None:
+    try:
+        payload = b"".join(volume.read_file(str(path)))
+    except (FileNotFoundError, modal.exception.NotFoundError):
+        return None
+    value = json.loads(payload)
+    if not isinstance(value, dict):
+        raise RuntimeError(f"Invalid Modal manifest at {path}")
+    return value
+
+
+def _journal_path(root: Path) -> Path:
+    directory = root.parent / ".corral-modal"
+    if directory.is_symlink():
+        raise ValueError("Modal journal directory cannot be a symlink")
+    directory.mkdir(exist_ok=True)
+    return directory / f"{root.name}.json"
+
+
+def _save_journal(path: Path, journal: dict[str, Any]) -> None:
+    payload = (json.dumps(journal, sort_keys=True, indent=2) + "\n").encode()
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".modal-", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _restore_snapshot(root: Path) -> None:
+    bound = _RECOVERY_SNAPSHOT.get()
+    if bound is None or bound[1] is None:
+        raise RuntimeError(
+            "Remote run was lost and no Corral workspace snapshot is available"
+        )
+    workspace_state, manager = bound
+    temporary_root = Path(
+        tempfile.mkdtemp(prefix=f"{SCRATCH_PREFIX}restore-", dir=root)
+    )
+    staged = temporary_root / "workspace"
+    try:
+        asyncio.run(manager.materialize(workspace_state, staged))
+        _publish_workspace(staged, root)
+    finally:
+        shutil.rmtree(temporary_root, ignore_errors=True)
+
+
+def _load_journal(
+    root: Path,
+    requested_release: str | None,
+    requested_volume: str | None,
+) -> tuple[Path, dict[str, Any]]:
+    path = _journal_path(root)
+    if path.is_symlink():
+        raise ValueError("Modal journal cannot be a symlink")
+    if path.exists():
+        journal = json.loads(path.read_text())
+        if journal.get("schema") != _SCHEMA or journal.get("workspace") != str(root):
+            raise RuntimeError(f"Invalid Modal journal: {path}")
+        if requested_release and requested_release != journal["release_id"]:
+            raise RuntimeError("Active execution is pinned to a different MD release")
+        if requested_volume and requested_volume != journal.get("volume_name"):
+            raise RuntimeError("Active execution is pinned to a different MD Volume")
+        return path, journal
+    release_id = requested_release or _PINNED_RELEASE.get()
+    volume_name = requested_volume or _PINNED_VOLUME.get()
+    if not release_id:
+        release_id, current_volume = configured_runtime()
+        volume_name = volume_name or current_volume
+    _identifier(release_id, "release ID")
+    journal = {
+        "schema": _SCHEMA,
+        "workspace": str(root),
+        "release_id": release_id,
+        "volume_name": volume_name or configured_volume_name(),
+        "actions": {},
+    }
+    _save_journal(path, journal)
+    return path, journal
+
+
+def _sync_inputs(
+    volume: Any,
+    root: Path,
+    remote_workspace: PurePosixPath,
+    previous: dict[str, Any],
+) -> dict[str, dict[str, str | int]]:
+    local = _files(root)
+    old = previous.get("files", {})
+    for name in old:
+        _safe_relative(name)
+    for name in sorted(old.keys() - local.keys()):
+        volume.remove_file(str(remote_workspace / name))
+    directories = set(previous.get("directories", []))
+    directories.update(
+        parent.as_posix()
+        for name in old
+        for parent in PurePosixPath(name).parents
+        if parent != PurePosixPath(".")
+    )
+    for name in sorted(local.keys() & directories):
+        # Removing files leaves their parent directories behind on a Volume.
+        # Clear a directory that is being replaced with a regular file.
+        volume.remove_file(str(remote_workspace / _safe_relative(name)), recursive=True)
+    changed = [name for name in local if local[name] != old.get(name)]
+    if changed:
+        with volume.batch_upload(force=True) as upload:
+            for name in sorted(changed):
+                upload.put_file(
+                    str(root / _safe_relative(name)), str(remote_workspace / name)
+                )
+    return local
+
+
+def _sync_result(
+    volume: Any,
+    root: Path,
+    remote_run: PurePosixPath,
+    result: dict[str, Any],
+    expected_local: dict[str, Any] | None,
+) -> int:
+    remote_workspace = PurePosixPath(result.get("workspace", ""))
+    mounted_run = _MOUNT / remote_run.relative_to("/")
+    attempt = mounted_run / "attempts" / result["action_id"]
+    if result.get("attempt_id") is not None:
+        attempt /= _identifier(result["attempt_id"], "attempt ID")
+    expected_workspace = attempt / "workspace"
+    if remote_workspace != expected_workspace:
+        raise RuntimeError("Modal result points outside its action workspace")
+    files = result.get("files")
+    if not isinstance(files, dict):
+        raise RuntimeError("Modal result has no file manifest")
+    for name, ref in files.items():
+        _safe_relative(name)
+        if (
+            not isinstance(ref, dict)
+            or not isinstance(ref.get("size"), int)
+            or ref["size"] < 0
+            or not isinstance(ref.get("sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", ref["sha256"]) is None
+        ):
+            raise RuntimeError(f"Invalid Modal file manifest entry: {name}")
+    current = _files(root)
+    if current == files:
+        return 0
+    if expected_local is not None and current != expected_local:
+        raise RuntimeError("Local workspace changed during the Modal call")
+    temporary_root = Path(tempfile.mkdtemp(prefix=f"{SCRATCH_PREFIX}modal-", dir=root))
+    staged = temporary_root / "workspace"
+    downloaded = 0
+    try:
+        _stage_workspace(root, staged)
+        for name in sorted(current.keys() - files.keys()):
+            (staged / _safe_relative(name)).unlink()
+        for name, ref in sorted(files.items()):
+            if current.get(name) == ref:
+                continue
+            target = staged / _safe_relative(name)
+            if target.is_dir():
+                shutil.rmtree(target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("wb") as stream:
+                volume_path = (
+                    PurePosixPath("/") / remote_workspace.relative_to(_MOUNT) / name
+                )
+                for chunk in volume.read_file(str(volume_path)):
+                    stream.write(chunk)
+            if _hash_file(target) != ref:
+                raise RuntimeError(f"Modal output failed checksum: {name}")
+            downloaded += 1
+        if _files(root) != current:
+            raise RuntimeError("Local workspace changed during Modal download")
+        _publish_workspace(staged, root)
+    finally:
+        shutil.rmtree(temporary_root, ignore_errors=True)
+    return downloaded
+
+
+def _execute_impl(
+    workspace: str | Path,
+    input_file: str,
+    *,
+    kind: str,
+    args: list[str],
+    action_id: str | None,
+    release_id: str | None,
+    volume: Any | None,
+    remote_function: Any | None,
+    initializer: Any | None,
+    call_factory: Any | None,
+    execution_options: dict[str, Any] | None = None,
+) -> tuple[Path, int]:
+    root = _workspace(workspace)
+    action = _identifier(action_id or uuid.uuid4().hex, "action ID")
+    journal_path, journal = _load_journal(
+        root,
+        release_id or _PINNED_RELEASE.get(),
+        _PINNED_VOLUME.get(),
+    )
+    release = journal["release_id"]
+    run_id = _identifier(root.name, "run ID")
+    remote_run = _ROOT / run_id
+    action_manifest = remote_run / "actions" / f"{action}.json"
+    failure_manifest = remote_run / "actions" / f"{action}.failure.json"
+    call_manifest = remote_run / "actions" / f"{action}.call.json"
+    volume = volume or modal.Volume.from_name(journal["volume_name"])
+    if remote_function is None:
+        function_name = {
+            "lammps": "run_lammps",
+            "python": "run_python_gpu",
+            "verified_md": "run_verified_md",
+        }[kind]
+        remote_function = modal.Function.from_name(APP_NAME, function_name)
+    if initializer is None:
+        initializer = modal.Function.from_name(APP_NAME, "prepare_workspace")
+    call_factory = call_factory or modal.FunctionCall.from_id
+    actions = journal["actions"]
+    for other_action, other_record in actions.items():
+        if other_action != action and other_record.get("status") not in {
+            "completed",
+            "failed",
+        }:
+            raise ToolRecoveryPending(
+                f"Resume Modal action {other_action} before starting {action}"
+            )
+    record = actions.get(action)
+    prior_arguments = record.get("arguments") if record else None
+    if record is not None and _read_json(volume, remote_run / "run.json") is None:
+        # A lost Volume directory cannot provide the old result or attempt.
+        # Discard only this action's dispatch record and rebuild from Corral's
+        # last committed workspace revision before starting the tool again.
+        if _files(root) != record.get("local_before"):
+            _restore_snapshot(root)
+        record = None
+        actions.pop(action)
+        _save_journal(journal_path, journal)
+    relative_input = _input(root, input_file, require_file=False)
+    arguments = {"kind": kind, "input": relative_input.as_posix(), "args": args}
+    if execution_options:
+        arguments["execution_options"] = execution_options
+    if prior_arguments is not None and prior_arguments != arguments:
+        raise RuntimeError("An action ID was reused with different MD arguments")
+    result = _read_json(volume, action_manifest)
+    if result is None:
+        failure = _read_json(volume, failure_manifest)
+        superseded = record.get("superseded_call_ids", []) if record else []
+        if failure is not None and failure.get("call_id") in superseded:
+            failure = None
+        if failure is not None:
+            if record is not None:
+                record["status"] = "failed"
+                _save_journal(journal_path, journal)
+            raise _RemoteToolFailed(
+                f"Modal {kind} failed; diagnostics retained at {failure_manifest}: {failure.get('error')}"
+            )
+        if record is None or record.get("status") == "retryable":
+            if record is not None and _files(root) != record["local_before"]:
+                _restore_snapshot(root)
+                if _files(root) != record["local_before"]:
+                    raise ToolRecoveryPending(
+                        "The saved workspace does not match this Modal action's inputs"
+                    )
+            _input(root, input_file, require_file=kind != "shell")
+            run_state = initializer.remote(run_id, release)
+            if (
+                run_state.get("schema") != 1
+                or run_state.get("release_id") != release
+                or not isinstance(run_state.get("files"), dict)
+                or not isinstance(run_state.get("head"), str)
+            ):
+                raise RuntimeError("Remote run has a different MD release")
+            remote_workspace = remote_run / "workspace"
+            local_before = _sync_inputs(volume, root, remote_workspace, run_state)
+            if record is not None and record.get("call_id"):
+                superseded = [*superseded, record["call_id"]]
+            record = {
+                "arguments": arguments,
+                "local_before": local_before,
+                "status": "dispatching",
+                "superseded_call_ids": superseded,
+            }
+            actions[action] = record
+            _save_journal(journal_path, journal)
+            call = remote_function.spawn(
+                run_id,
+                action,
+                relative_input.as_posix(),
+                str(root),
+                args,
+                release,
+                run_state.get("head"),
+                local_before,
+                **(
+                    {"execution_options": execution_options}
+                    if execution_options
+                    else {}
+                ),
+            )
+            record["call_id"] = call.object_id
+            record["status"] = "running"
+            _save_journal(journal_path, journal)
+        else:
+            call_id = record.get("call_id")
+            if not call_id:
+                # The worker records its call ID before doing any computation.
+                # Never dispatch a second ambiguous call into the same action.
+                for _ in range(30):
+                    remote_call = _read_json(volume, call_manifest)
+                    if (
+                        remote_call is not None
+                        and remote_call["call_id"] not in superseded
+                    ):
+                        call_id = remote_call["call_id"]
+                        record["call_id"] = call_id
+                        _save_journal(journal_path, journal)
+                        break
+                    time.sleep(1)
+                if not call_id:
+                    raise ToolRecoveryPending(
+                        "Modal dispatch outcome is unknown; retry recovery after the worker starts"
+                    )
+            call = call_factory(call_id)
+        try:
+            call.get()
+        except Exception as exc:
+            result = _read_json(volume, action_manifest)
+            failure = _read_json(volume, failure_manifest)
+            if failure is not None and failure.get("call_id") in superseded:
+                failure = None
+            if result is None and failure is not None:
+                record["status"] = "failed"
+                _save_journal(journal_path, journal)
+                raise _RemoteToolFailed(
+                    f"Modal {kind} failed; diagnostics retained at {failure_manifest}: {failure.get('error')}"
+                ) from exc
+            if result is None:
+                # These exceptions come from a settled FunctionCall output.
+                # Transport errors and polling timeouts do not establish that
+                # the worker stopped, so retain and reattach to those calls.
+                if isinstance(
+                    exc,
+                    modal.exception.RemoteError
+                    | modal.exception.FunctionTimeoutError
+                    | modal.exception.InternalFailure
+                    | modal.exception.OutputExpiredError,
+                ):
+                    record["status"] = "retryable"
+                    record["last_error"] = str(exc)
+                    _save_journal(journal_path, journal)
+                raise ToolRecoveryPending(
+                    f"Modal call {call.object_id} has no result manifest; resume action {action}: {exc}"
+                ) from exc
+    result = result or _read_json(volume, action_manifest)
+    if (
+        result is None
+        or result.get("action_id") != action
+        or result.get("release_id") != release
+        or result.get("kind") != kind
+    ):
+        raise RuntimeError("Modal action result manifest is missing or mismatched")
+    if not isinstance(result.get("revision"), int) or result["revision"] < 1:
+        raise RuntimeError("Modal action result has no valid workspace revision")
+    expected = record.get("local_before") if record else None
+    try:
+        count = _sync_result(volume, root, remote_run, result, expected)
+    except Exception as exc:
+        raise ToolRecoveryPending(
+            f"Modal action {action} completed remotely; resume its output sync: {exc}"
+        ) from exc
+    if record is not None:
+        record["status"] = "completed"
+        record.pop("local_before", None)
+        _save_journal(journal_path, journal)
+    return root / "output" / relative_input.with_suffix(".log").name, count
+
+
+def _execute(*args: Any, **kwargs: Any) -> tuple[Path, int]:
+    try:
+        return _execute_impl(*args, **kwargs)
+    except (ToolRecoveryPending, _RemoteToolFailed, ValueError, FileNotFoundError):
+        raise
+    except Exception as exc:
+        raise ToolRecoveryPending(
+            f"Modal workspace recovery is pending: {exc}"
+        ) from exc
+
+
 def run_lammps_in_modal(
     workspace: str | Path,
     input_file: str,
     *,
+    action_id: str | None = None,
+    release_id: str | None = None,
     volume: Any | None = None,
     remote_function: Any | None = None,
+    initializer: Any | None = None,
+    call_factory: Any | None = None,
     job_id: str | None = None,
 ) -> tuple[Path, int]:
-    """Run LAMMPS on Modal and synchronize its outputs into the local workspace.
-
-    Local task files are uploaded to a unique directory in the
-    `simulations` Volume. The deployed `run_lammps` function executes there,
-    commits its writes, and this function downloads the complete directory into
-    staging inside the workspace before replacing its task files in place.
-    """
-
-    local_workspace = _validate_workspace(workspace)
-    local_input, relative_input = _resolve_input(local_workspace, input_file)
-    identifier = job_id or uuid.uuid4().hex
-    if not identifier or any(
-        char not in "abcdefghijklmnopqrstuvwxyz0123456789-_"
-        for char in identifier.lower()
-    ):
-        raise ValueError(f"Invalid Modal job id: {identifier!r}")
-
-    remote_volume_directory = _REMOTE_VOLUME_ROOT / identifier
-    remote_workspace = _REMOTE_MOUNT_ROOT / remote_volume_directory.relative_to("/")
-    remote_input = remote_workspace / relative_input
-    log_name = f"{local_input.stem}.log"
-    local_log = local_input.with_name(log_name)
-
-    if volume is None:
-        volume_name = os.getenv("CORRAL_MD_MODAL_VOLUME", _DEFAULT_VOLUME_NAME)
-        volume = modal.Volume.from_name(volume_name)
-    if remote_function is None:
-        remote_function = modal.Function.from_name(_modal_app_name(), "run_lammps")
-
-    with volume.batch_upload(force=True) as upload:
-        for entry in _workspace_entries(local_workspace):
-            remote_path = str(remote_volume_directory / entry.name)
-            if entry.is_dir():
-                upload.put_directory(str(entry), remote_path)
-            else:
-                upload.put_file(str(entry), remote_path)
-
-    remote_error: Exception | None = None
-    try:
-        remote_function.remote(
-            str(remote_input),
-            log_name,
-            str(local_workspace),
-            str(remote_workspace),
-        )
-    except Exception as exc:  # preserve diagnostic files from failed LAMMPS runs
-        remote_error = exc
-
-    temporary_root = Path(
-        tempfile.mkdtemp(prefix=f"{SCRATCH_PREFIX}modal-", dir=local_workspace)
+    """Run LAMMPS once per Corral action and recover its committed outputs."""
+    return _execute(
+        workspace,
+        input_file,
+        kind="lammps",
+        args=[],
+        action_id=action_id or job_id,
+        release_id=release_id,
+        volume=volume,
+        remote_function=remote_function,
+        initializer=initializer,
+        call_factory=call_factory,
     )
-    staged_workspace = temporary_root / "workspace"
-    staged_workspace.mkdir()
-    try:
-        downloaded = _download_workspace(
-            volume,
-            remote_volume_directory,
-            staged_workspace,
-        )
-        _publish_workspace(staged_workspace, local_workspace)
-    except Exception as sync_error:
-        detail = (
-            f" after the Modal LAMMPS call failed with {remote_error}"
-            if remote_error is not None
-            else ""
-        )
-        raise RuntimeError(
-            f"Failed to synchronize Modal LAMMPS outputs back to "
-            f"{str(local_workspace)!r}{detail}: {sync_error}"
-        ) from sync_error
-    finally:
-        shutil.rmtree(temporary_root, ignore_errors=True)
-
-    try:
-        volume.remove_file(str(remote_volume_directory), recursive=True)
-    except Exception as cleanup_error:  # outputs are already durable locally
-        _LOGGER.warning(
-            "Could not remove temporary Modal workspace %s: %s",
-            remote_volume_directory,
-            cleanup_error,
-        )
-
-    if remote_error is not None:
-        raise RuntimeError(
-            f"LAMMPS failed on Modal; remote diagnostics were synchronized to "
-            f"{str(local_workspace)!r}: {remote_error}"
-        ) from remote_error
-    return local_log, downloaded
 
 
-__all__ = ["run_lammps_in_modal"]
+def run_python_gpu_in_modal(
+    workspace: str | Path,
+    script_file: str,
+    args: list[str] | None = None,
+    *,
+    action_id: str | None = None,
+    release_id: str | None = None,
+    volume: Any | None = None,
+    remote_function: Any | None = None,
+    initializer: Any | None = None,
+    call_factory: Any | None = None,
+    job_id: str | None = None,
+    timeout: int = 600,
+    working_dir: str = "/workspace",
+) -> int:
+    """Run isolated GPU Python and recover its committed outputs."""
+    _, count = _execute(
+        workspace,
+        script_file,
+        kind="python",
+        args=[str(arg) for arg in args or []],
+        action_id=action_id or job_id,
+        release_id=release_id,
+        volume=volume,
+        remote_function=remote_function,
+        initializer=initializer,
+        call_factory=call_factory,
+        execution_options={"timeout": timeout, "working_dir": working_dir},
+    )
+    return count
+
+
+def run_verified_md_in_modal(workspace, config_file, *, action_id=None):
+    """Use normal action recovery and synchronization for controlled dynamics."""
+    return _execute(
+        workspace,
+        config_file,
+        kind="verified_md",
+        args=[],
+        action_id=action_id,
+        release_id=None,
+        volume=None,
+        remote_function=None,
+        initializer=None,
+        call_factory=None,
+    )
+
+
+__all__ = [
+    "run_lammps_in_modal",
+    "run_python_gpu_in_modal",
+    "run_verified_md_in_modal",
+]

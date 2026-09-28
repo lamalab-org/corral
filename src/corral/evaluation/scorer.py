@@ -37,6 +37,18 @@ class EvaluationResult(FrozenModel):
         validate_sha256_hex(self.commit_hash, field_name="commit_hash")
 
 
+class SubmissionScore(FrozenModel):
+    """Optional detailed result from a callable's evaluate_submission method.
+
+    Legacy scalar callables remain supported. Details are benchmark-only and
+    are never appended to the agent's execution state or conversation.
+    """
+
+    score: float
+    feedback: str | None = None
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class Scorer(Protocol):
     """Evaluate a completed projection without mutating execution data."""
 
@@ -56,6 +68,8 @@ def _resolve_submission(
     workspace: str | Path | None,
 ) -> str:
     """Resolve file-backed submissions only for the evaluation call."""
+    if task.submission_resolver is not None and workspace is not None:
+        return task.submission_resolver(submission, workspace)
     if not task.resolve_answer:
         return submission
     if submission.startswith("{") and submission.endswith("}"):
@@ -83,11 +97,19 @@ class TaskScorer:
             )
 
         commit_hash = state.through_commit_hash
+        details = None
         if self.task.state_scoring_fn is not None:
             score = float(self.task.state_scoring_fn(state))
         else:
             answer = _resolve_submission(self.task, state.submission, self.workspace)
-            score = float(self.task.scoring_fn(answer))
+            evaluate_submission = getattr(
+                self.task.scoring_fn, "evaluate_submission", None
+            )
+            if callable(evaluate_submission):
+                details = SubmissionScore.model_validate(evaluate_submission(answer))
+                score = details.score
+            else:
+                score = float(self.task.scoring_fn(answer))
 
         # The immutable model already prevents normal mutation. Checking the
         # content hash makes score purity an explicit runtime invariant too.
@@ -99,7 +121,9 @@ class TaskScorer:
             score=score,
             metrics={"score": score},
             scorer_version=self.scorer_version or _callable_version(self.task),
+            feedback=details.feedback if details else None,
+            metadata=details.metadata if details else {},
         )
 
 
-__all__ = ["EvaluationResult", "Scorer", "TaskScorer"]
+__all__ = ["EvaluationResult", "Scorer", "SubmissionScore", "TaskScorer"]

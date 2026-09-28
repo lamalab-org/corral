@@ -267,6 +267,7 @@ def test_benchmark_parser_has_safe_docker_defaults():
     assert args.sandbox_network == "bridge"
     assert args.keep_sandboxes == "never"
     assert args.state_dir == ".corral/runs"
+    assert args.max_parallel == 4
     assert args.max_parallel_evaluations is None
     assert args.max_parallel_total is None
     assert args.max_parallel_evaluations_by_environment == {}
@@ -596,13 +597,41 @@ def test_legacy_script_delegates_to_tool_calling_agent(monkeypatch):
     assert calls == [(args, "tool-calling", None)]
 
 
-def test_legacy_script_retains_existing_defaults():
+def test_legacy_script_defaults():
     args = run_tool_calling.build_parser().parse_args(["--environment", "samplemath"])
 
     assert args.model == "openai/gpt-5.6-terra"
     assert args.temperature == 1.0
     assert args.max_iterations == 20
+    assert args.sandbox is None
+    assert args.agent_kwargs == {}
     assert args.trials == 1
+    assert args.max_parallel == 5
+
+
+def test_legacy_script_uses_local_sandbox_for_md(monkeypatch):
+    async def fake_run_benchmark(args, *, agent_name=None, agent_kwargs=None):
+        assert args.sandbox == "local"
+        return 0
+
+    monkeypatch.setattr(run_tool_calling, "run_benchmark", fake_run_benchmark)
+    args = run_tool_calling.build_parser().parse_args(["--environment", "corral_md"])
+    assert asyncio.run(run_tool_calling.run(args)) == 0
+
+
+def test_legacy_script_accepts_md_local_sandbox_and_reasoning():
+    args = run_tool_calling.build_parser().parse_args(
+        [
+            "--environment",
+            "corral_md",
+            "--sandbox",
+            "local",
+            "--agent-kwargs",
+            '{"reasoning_effort":"low"}',
+        ]
+    )
+    assert args.sandbox == "local"
+    assert args.agent_kwargs == {"reasoning_effort": "low"}
 
 
 @pytest.mark.parametrize("agent_class", [SubmitAgent, FailingAgent])

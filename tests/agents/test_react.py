@@ -1,5 +1,6 @@
 """Focused tests for the ReAct session agent."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -31,6 +32,30 @@ def test_parse_llm_response_returns_actions(agent):
     assert thoughts[0].content == "inspect"
     assert actions[0].name == "measure"
     assert actions[0].arguments == {"sample": "a"}
+
+
+def test_python_literals_inside_strings_are_left_alone(agent):
+    """Code written through a tool must keep Python's True/False/None."""
+    code = 'MANIFEST = {"concurrent": True, "x": False, "y": None}\n'
+    # Bare True in the same input forces the Python-literal fallback path.
+    raw = (
+        '{"path": "policy.py", "overwrite": True, "content": ' + json.dumps(code) + "}"
+    )
+    _thoughts, actions = agent.parse_llm_response(
+        f"<action>write_file</action><action_input>{raw}</action_input>"
+    )
+
+    assert actions[0].arguments["content"] == code
+    assert actions[0].arguments["overwrite"] is True
+
+
+def test_bare_python_literals_are_accepted_as_json(agent):
+    _thoughts, actions = agent.parse_llm_response(
+        "<action>run</action>"
+        '<action_input>{"dry": True, "cmd": "echo True", "limit": None}</action_input>'
+    )
+
+    assert actions[0].arguments == {"dry": True, "cmd": "echo True", "limit": None}
 
 
 def test_parse_llm_response_rejects_missing_action_input(agent):

@@ -5,7 +5,7 @@ import pytest
 
 from corral.core.state import EnvironmentState, ExecutionState, RuntimeState
 from corral.core.task import TaskDefinition
-from corral.evaluation import TaskScorer
+from corral.evaluation import SubmissionScore, TaskScorer
 
 
 def _submitted_state(answer: str) -> ExecutionState:
@@ -41,6 +41,34 @@ def test_scorer_returns_sibling_result_without_changing_state():
     assert state.through_commit_hash == commit_hash
     assert "score" not in state.model_dump()
     assert "submitted_answer" not in state.model_dump()
+
+
+def test_detailed_submission_score_is_retained_without_double_evaluation():
+    class DetailedScorer:
+        calls = 0
+
+        def __call__(self, _answer):
+            raise AssertionError(
+                "Scalar fallback must not run after detailed evaluation"
+            )
+
+        def evaluate_submission(self, answer):
+            self.calls += 1
+            assert answer == "42"
+            return SubmissionScore(
+                score=0,
+                feedback="missing required evidence",
+                metadata={"checks": [{"name": "saved_state", "status": "failed"}]},
+            )
+
+    scorer = DetailedScorer()
+    state = _submitted_state("42")
+    before = state.model_dump_json()
+    result = TaskScorer(_task(scorer)).evaluate(state)
+    assert result.feedback == "missing required evidence"
+    assert result.metadata["checks"][0]["status"] == "failed"
+    assert scorer.calls == 1
+    assert state.model_dump_json() == before
 
 
 def test_file_submission_is_resolved_only_during_evaluation(tmp_path):

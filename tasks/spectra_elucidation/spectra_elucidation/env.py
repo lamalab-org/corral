@@ -22,10 +22,14 @@ from spectra_elucidation.tools import (
     create_tools,
 )
 
-from corral.core.environment import Environment, Toolset, build_environments
+from corral.core.environment import (
+    Environment,
+    EnvironmentSetup,
+    Toolset,
+    build_environments,
+)
 from corral.core.state import ExecutionState
 from corral.core.task import (
-    EnvironmentSetup,
     InputRef,
     TaskDefinition,
     with_fixed_inputs,

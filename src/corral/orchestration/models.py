@@ -259,7 +259,7 @@ class BenchmarkInput:
     dependency_graph: dict[str, tuple[str, ...]] = field(default_factory=dict)
     max_iterations_by_task: dict[str, int] = field(default_factory=dict)
     model_by_task: dict[str, str] = field(default_factory=dict)
-    max_parallel: int = 1
+    max_parallel: int = 4
     max_parallel_per_task: int = 1
     max_parallel_evaluations: int | None = None
     max_parallel_total: int | None = None

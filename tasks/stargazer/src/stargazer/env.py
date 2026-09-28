@@ -13,8 +13,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from loguru import logger
 
-from corral.core.environment import Environment, Toolset, build_environments
-from corral.core.task import EnvironmentSetup, TaskDefinition
+from corral.core.environment import (
+    Environment,
+    EnvironmentSetup,
+    Toolset,
+    build_environments,
+)
+from corral.core.task import TaskDefinition
 from corral.core.transition import ToolExecutionResult
 from corral.runtime import permissions
 from corral.tools.python_repl import PythonREPLTool

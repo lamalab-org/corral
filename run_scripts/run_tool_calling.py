@@ -69,6 +69,10 @@ def _print_results(run_id: str, result: Any) -> None:
 
 async def run(args: argparse.Namespace) -> int:
     """Run ToolCallingAgent through the shared commit-backed CLI path."""
+    if getattr(args, "sandbox", None) is None:
+        args.sandbox = (
+            "local" if getattr(args, "environment", None) == "corral_md" else "docker"
+        )
     return await run_benchmark(args, agent_name=AGENT_ID)
 
 
@@ -106,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     agent = parser.add_argument_group("agent")
     agent.add_argument("--model", default="openai/gpt-5.6-terra")
+    agent.add_argument("--agent-kwargs", type=_json_object, default={}, metavar="JSON")
     agent.add_argument("--api-endpoint")
     agent.add_argument("--temperature", type=float, default=1.0)
     agent.add_argument("--max-iterations", type=int, default=20)
@@ -113,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     execution = parser.add_argument_group("execution")
     execution.add_argument("--trials", type=int, default=1)
-    execution.add_argument("--max-parallel", type=int, default=1)
+    execution.add_argument("--max-parallel", type=int, default=5)
     execution.add_argument("--max-parallel-per-task", type=int, default=1)
     execution.add_argument("--max-parallel-evaluations", type=int)
     execution.add_argument("--max-parallel-total", type=int)
@@ -125,6 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON object mapping environment names or IDs to evaluation limits.",
     )
     execution.add_argument("--no-evaluate", action="store_true")
+    execution.add_argument("--sandbox", choices=("docker", "local"))
     execution.add_argument("--run-id")
     execution.add_argument("--max-attempts", type=int, default=3)
     execution.add_argument(

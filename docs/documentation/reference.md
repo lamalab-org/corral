@@ -53,8 +53,9 @@ result = await runner.run(
 )
 ```
 
-Task execution and evaluation use separate concurrency controls. Evaluation
-parallelism defaults to `max_parallel`, and the runner waits for all queued
+Task execution and evaluation use separate concurrency controls. Task
+execution parallelism defaults to `max_parallel=4`. Evaluation parallelism
+defaults to `max_parallel`, and the runner waits for all queued
 evaluations before returning. Set `max_parallel_evaluations` to override it.
 `max_parallel_total` bounds executions and evaluations together and defaults
 to the sum of their limits (`2 * max_parallel` with the defaults). Use
