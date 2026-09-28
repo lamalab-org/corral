@@ -233,6 +233,9 @@ class AgentSession:
                     "session capabilities differ from the registered agent run"
                 )
             self.capabilities = persisted_capabilities
+        if not environment.current_task.allow_previous_attempt_context:
+            previous_state = None
+            last_score = None
         self.previous_state = previous_state
         self._last_score = _json_value(last_score) if last_score is not None else None
         self._max_iterations = max_iterations

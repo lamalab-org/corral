@@ -70,6 +70,17 @@ def bind_bootstrap_parent(parent_pid: int) -> None:
         os.kill(os.getpid(), signal.SIGKILL)
 
 
+def isolate_network() -> None:
+    """Enter an empty Linux network namespace before executing untrusted code.
+
+    No interfaces or routes are brought up, including loopback. Failure aborts
+    the worker. The controller and model API client keep their own network.
+    """
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.unshare(0x40000000):  # CLONE_NEWNET
+        raise OSError(ctypes.get_errno(), "cannot isolate worker network")
+
+
 def enter_workspace(
     workspace: str,
     jail: Path,

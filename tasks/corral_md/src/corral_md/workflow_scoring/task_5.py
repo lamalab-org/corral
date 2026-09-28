@@ -108,6 +108,11 @@ def _geometry(frame, expected_cell):
 def _reconstruct(e, record):
     order = _order(record)
     method = record["method"]
+    energy_hessian = method in (
+        "energy_hessian",
+        "analytical_energy_hessian",
+        "MACE analytical Cartesian energy Hessian (automatic differentiation)",
+    )
     if method == "central_difference":
         plus = _array(e, record["plus_displacements_A"])
         minus = _array(e, record["minus_displacements_A"], plus.shape)
@@ -145,11 +150,29 @@ def _reconstruct(e, record):
                 "Derivative weights must cancel constants and differentiate all six coordinates"
             )
         matrix = -(weights @ forces.reshape(-1, 6)[:, order]).T
-    elif method == "analytic_hessian":
-        matrix = _array(e, record["raw_derivatives_eV_A2"], (6, 6)).copy()
-        if record["derivative_kind"] == "force_jacobian":
+    elif method == "analytic_hessian" or energy_hessian:
+        matrices = [
+            _array(e, record[key], (6, 6))
+            for key in ("raw_derivatives_eV_A2", "raw_analytical_hessian_eV_A2")
+            if key in record
+        ]
+        if not matrices:
+            raise EvidenceError("Missing raw analytical derivatives")
+        if any(not np.array_equal(matrices[0], value) for value in matrices[1:]):
+            raise EvidenceError("Conflicting raw analytical derivative arrays")
+        matrix = matrices[0].copy()
+        kind = (
+            record.get("derivative_kind", "energy_hessian")
+            if energy_hessian
+            else record["derivative_kind"]
+        )
+        if energy_hessian and kind != "energy_hessian":
+            raise EvidenceError(
+                "Derivative convention contradicts the energy Hessian method"
+            )
+        if kind == "force_jacobian":
             matrix *= -1
-        elif record["derivative_kind"] != "energy_hessian":
+        elif kind != "energy_hessian":
             raise UnsupportedMethod("Unknown analytical derivative convention")
     else:
         raise UnsupportedMethod(
@@ -160,12 +183,18 @@ def _reconstruct(e, record):
         "average_transpose",
         "transpose_average",
         "Hessian transpose average",
+        "H_sym = (H_raw + H_raw^T)/2",
     ):
         matrix = (matrix + matrix.T) / 2
     elif symmetry != "none":
         raise UnsupportedMethod(f"Unsupported symmetrization: {symmetry!r}")
     acoustic = record["acoustic_sum_rule"]
-    if acoustic in ("projection", "orthogonal translational projection"):
+    if acoustic in (
+        "projection",
+        "orthogonal translational projection",
+        "Cartesian orthogonal projection H = P H_sym P, "
+        "P removes the three uniform translations",
+    ):
         translations = np.tile(np.eye(3), (2, 1))[order]
         projection = np.eye(6) - translations @ translations.T / 2
         matrix = projection @ matrix @ projection

@@ -271,7 +271,7 @@ def test_benchmark_parser_has_safe_docker_defaults():
     assert args.sandbox_memory == "4g"
     assert args.sandbox_pids_limit == 256
     assert args.sandbox_network == "bridge"
-    assert args.keep_sandboxes == "never"
+    assert args.keep_sandboxes == "on-failure"
     assert args.state_dir == ".corral/runs"
     assert args.max_parallel == 4
     assert args.max_parallel_evaluations is None
@@ -285,6 +285,7 @@ def test_legacy_benchmark_namespace_also_defaults_to_docker():
     assert sandbox.mode == "docker"
     assert sandbox.docker is not None
     assert sandbox.docker.image == "corral-benchmark:latest"
+    assert sandbox.docker.retention == "on-failure"
 
 
 @pytest.mark.parametrize("environment", cli.ENVIRONMENT_NAMES)
@@ -642,9 +643,40 @@ def test_legacy_script_defaults():
     assert args.temperature == 1.0
     assert args.max_iterations == 20
     assert args.sandbox is None
+    assert args.keep_sandboxes == "on-failure"
     assert args.agent_kwargs == {}
     assert args.trials == 1
     assert args.max_parallel == 5
+
+
+def test_legacy_script_accepts_docker_resume_limits():
+    args = run_tool_calling.build_parser().parse_args(
+        [
+            "--environment",
+            "stargazer",
+            "--sandbox",
+            "docker",
+            "--sandbox-image",
+            "corral-stargazer:test",
+            "--sandbox-memory",
+            "12g",
+            "--sandbox-cpus",
+            "4",
+            "--sandbox-pids-limit",
+            "512",
+            "--keep-sandboxes",
+            "always",
+            "--run-id",
+            "existing-run",
+        ]
+    )
+    spec = cli._sandbox_profile(args).docker
+    assert spec.image == "corral-stargazer:test"
+    assert spec.memory == "12g"
+    assert spec.cpus == 4
+    assert spec.pids_limit == 512
+    assert spec.retention == "always"
+    assert args.run_id == "existing-run"
 
 
 def test_legacy_script_uses_local_sandbox_for_md(monkeypatch):

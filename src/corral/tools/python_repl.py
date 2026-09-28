@@ -52,6 +52,7 @@ class PythonREPLTool(Tool):
         max_output_chars: int,
         address_space_bytes: int,
         workspace_access: WorkspaceAccess | str,
+        network_access: str = "allowed",
     ):
         super().__init__(
             name=name,
@@ -72,6 +73,9 @@ class PythonREPLTool(Tool):
             concurrency=ToolConcurrency.SERIAL,
             workspace_access=workspace_access,
         )
+        if network_access not in {"allowed", "none"}:
+            raise ValueError("network_access must be allowed or none")
+        self.network_access = network_access
         self.argument_name = argument_name
         self.namespace_factory = namespace_factory
         self.code_executor = code_executor
@@ -128,6 +132,7 @@ class PythonREPLTool(Tool):
             max_output_chars=self.max_output_chars,
             address_space_bytes=self.address_space_bytes,
             workspace_access=self.workspace_access,
+            network_access=self.network_access,
         )
 
 
@@ -146,6 +151,7 @@ def create_python_repl_tool(
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
     address_space_bytes: int = DEFAULT_WORKER_ADDRESS_SPACE_BYTES,
     workspace_access: WorkspaceAccess | str = WorkspaceAccess.NONE,
+    network_access: str = "allowed",
 ) -> PythonREPLTool:
     """Create a serial, checkpointed REPL definition for a stateful environment."""
     return PythonREPLTool(
@@ -162,6 +168,7 @@ def create_python_repl_tool(
         max_output_chars=max_output_chars,
         address_space_bytes=address_space_bytes,
         workspace_access=workspace_access,
+        network_access=network_access,
     )
 
 

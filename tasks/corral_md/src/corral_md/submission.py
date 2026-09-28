@@ -134,6 +134,8 @@ def resolve_submission(submission: str, workspace: str | Path) -> str:
         resolved = dict(value)
         for key in ("artifacts", "settings", "scripts", "report"):
             if key in resolved:
+                if key == "report" and isinstance(resolved[key], dict):
+                    continue
                 resolved[key] = paths(resolved[key])
         return _ResolvedManifest(json.dumps(resolved), root, base)
 

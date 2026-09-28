@@ -15,6 +15,27 @@ from corral_md.workflow_scoring.level1 import _task_2 as evaluate_level1_task_2
 from corral_md.workflow_scoring.task_2 import _boundaries, _estimate, evaluate
 
 
+def test_boundary_density_uses_same_time_across_stage_labels(submission):
+    from corral_md.workflow_scoring.task_2 import _boundary_density
+
+    manifest, _, trace, root = submission
+    # A shared boundary can be retained once under the stage that just ended.
+    shared_starts = ((trace.stage == "hold") & (trace.time_ps == 20)) | (
+        (trace.stage == "reheating") & (trace.time_ps == 30)
+    )
+    trace = trace[~shared_starts].copy()
+    # A later sample can differ from the boundary density without contradiction.
+    trace.loc[(trace.stage == "hold") & (trace.time_ps == 20.25), "density_g_cm3"] += 0.1
+    trace.to_csv(root / "thermal.csv", index=False)
+    assert _boundary_density(Evidence(manifest)) is True
+
+    trace.loc[trace.time_ps == 20, "density_g_cm3"] += 0.1
+    trace.to_csv(root / "thermal.csv", index=False)
+    outcome = _boundary_density(Evidence(manifest))
+    assert outcome[0] is False
+    assert "density" in outcome[1]
+
+
 def write_json(path, data):
     path.write_text(json.dumps(data))
     return str(path)
@@ -589,7 +610,8 @@ def test_descriptive_boundary_fields_preserve_checks_and_reject_conflicts(submis
     assert "Conflicting" in failure["detail"]
 
 
-def test_linked_lammps_states_preserve_continuity_checks(submission):
+@pytest.mark.parametrize("shared_metadata", [False, True])
+def test_linked_lammps_states_preserve_continuity_checks(submission, shared_metadata):
     manifest, _, _, root = submission
     path = Evidence(manifest).artifact("boundary_states")
     states = json.loads(path.read_text())
@@ -618,6 +640,15 @@ def test_linked_lammps_states_preserve_continuity_checks(submission):
             "atom_style": "charge",
             "atom_type_species": {"1": "Na", "2": "Si", "3": "O"},
         }
+    if shared_metadata:
+        for record in linked.values():
+            record.pop("atom_style")
+            record.pop("atom_type_species")
+        linked.update(
+            description="Restartable states with common LAMMPS metadata.",
+            atom_style="charge",
+            atom_type_species={"1": "Na", "2": "Si", "3": "O"},
+        )
     write_json(path, linked)
     assert _boundaries(Evidence(manifest)) is True
     linked["hold_start"]["lammps_data"] = "initial.data"

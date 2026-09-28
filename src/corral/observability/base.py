@@ -138,6 +138,12 @@ class CompositeObserver:
             except BaseException as exc:
                 _observer_failure("record_commit", exc)
 
+    def restore_commit(
+        self, commit: Commit, *, context: ObservationContext | None = None
+    ) -> None:
+        for observer in self.observers:
+            restore_commit_safely(observer, commit, context=context)
+
     def flush(self) -> None:
         for observer in self.observers:
             try:
@@ -205,6 +211,21 @@ def record_commit_safely(
         observer.record_commit(commit, context=context)
     except BaseException as exc:
         _observer_failure("record_commit", exc)
+
+
+def restore_commit_safely(
+    observer: Observer,
+    commit: Commit,
+    *,
+    context: ObservationContext | None = None,
+) -> None:
+    """Restore optional observer context without exporting historical commits."""
+    try:
+        restore = getattr(observer, "restore_commit", None)
+        if restore is not None:
+            restore(commit, context=context)
+    except BaseException as exc:
+        _observer_failure("restore_commit", exc)
 
 
 def json_value(value: Any) -> Any:
@@ -295,5 +316,6 @@ __all__ = [
     "json_value",
     "observe_safely",
     "record_commit_safely",
+    "restore_commit_safely",
     "update_safely",
 ]

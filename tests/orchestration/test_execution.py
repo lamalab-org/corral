@@ -2,6 +2,7 @@
 
 import asyncio
 import shutil
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -282,12 +283,20 @@ async def test_execution_restores_prior_projection_for_reflective_agents(tmp_pat
 
 
 @pytest.mark.anyio
-async def test_benchmark_evaluates_prior_attempt_before_starting_the_next(tmp_path):
+@pytest.mark.parametrize("allow_previous", [True, False])
+async def test_benchmark_evaluates_prior_attempt_before_starting_the_next(
+    tmp_path, allow_previous
+):
     store = SQLiteCommitStore(tmp_path / "prior-attempt-commits.sqlite3")
     agent = RecordingPreviousAttemptAgent()
+    env = _environment("reflective")
+    env.current_task = replace(
+        env.current_task, allow_previous_attempt_context=allow_previous
+    )
+    env.group_tasks = {env.task_id: env.current_task}
     registry = RuntimeRegistry(
         agents={"agent": agent},
-        environments={"reflective": _environment("reflective")},
+        environments={"reflective": env},
     )
     runner = CorralRunner(
         registry,
@@ -311,6 +320,10 @@ async def test_benchmark_evaluates_prior_attempt_before_starting_the_next(tmp_pa
     assert [trial.score for trial in report.all_results] == [1.0, 1.0]
     assert agent.previous_evaluations[0] is None
     assert agent.previous_states[0] is None
+    if not allow_previous:
+        assert agent.previous_evaluations == [None, None]
+        assert agent.previous_states == [None, None]
+        return
     assert agent.previous_evaluations[1]["score"] == 1.0
     assert agent.previous_evaluations[1]["trial_id"] == (
         "reflective-benchmark:reflective:0"
@@ -880,6 +893,98 @@ async def test_evaluation_failure_preserves_downstream_output(monkeypatch):
         trial.evaluation_error == "scorer unavailable" for trial in report.all_results
     )
     assert all(trial.error_message is None for trial in report.all_results)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("pending", ["error", "unverified", "not_started"])
+async def test_benchmark_restart_retries_only_evaluation(tmp_path, pending):
+    agent_calls = 0
+    evaluations = []
+
+    class CountingAgent(FileSubmitAgent):
+        async def run_session(self, session):
+            nonlocal agent_calls
+            agent_calls += 1
+            assert agent_calls == 1, "Restart must reuse the completed submission"
+            return await super().run_session(session)
+
+    class Verifier:
+        def __init__(self, recovered):
+            self.recovered = recovered
+
+        def __call__(self, path):
+            return self.evaluate_submission(path)["score"]
+
+        def evaluate_submission(self, path):
+            assert Path(path).read_text() == "durable"
+            evaluations.append(self.recovered)
+            if not self.recovered and pending == "error":
+                raise RuntimeError("verifier unavailable")
+            return {
+                "score": float(self.recovered),
+                "metadata": {
+                    "verification": "passed" if self.recovered else "unverified"
+                },
+            }
+
+    trials = []
+    for recovered in (False, True):
+        # Reopen both the registry and on-disk store, as a fresh process would.
+        store = ShardedCommitStore(tmp_path / ".corral")
+        task = TaskDefinition(
+            name="file-task",
+            description="write a result",
+            tools=[],
+            scoring_fn=Verifier(recovered),
+            submission_format={"answer": "path"},
+            resolve_answer=True,
+        )
+        environment = Environment(
+            "file-task", task, base_work_dir=str(tmp_path / "live-workspaces")
+        )
+        registry = RuntimeRegistry(
+            agents={"agent": CountingAgent()},
+            environments={"file-task": environment},
+            workspace_manager_factory=store.workspace_manager,
+        )
+        runner = CorralRunner(
+            registry,
+            {"file-task": BenchmarkTaskMetadata("agent", "file-task")},
+            state_store=store,
+            observer=NoOpObserver(),
+        )
+        try:
+            report = await runner.run(
+                "pending-verifier",
+                trials_per_task=1,
+                evaluate=recovered or pending != "not_started",
+                retry_policy=RetryPolicy(maximum_attempts=1),
+            )
+            assert len(report.all_results) == 1
+            trials.append(report.all_results[0])
+        finally:
+            registry.close()
+            await store.aclose()
+        if not recovered:
+            shutil.rmtree(tmp_path / "live-workspaces")
+
+    before, after = trials
+    assert before.score == 0
+    if pending == "error":
+        assert before.evaluation_error == "verifier unavailable"
+    elif pending == "unverified":
+        assert before.evaluation.metadata["verification"] == "unverified"
+    else:
+        assert before.evaluation is None
+    assert after.score == 1
+    assert after.evaluation_error is None
+    assert after.evaluation.metadata["verification"] == "passed"
+    assert after.evaluation.commit_hash == before.state["through_commit_hash"]
+    assert after.state == before.state
+    assert after.trial_id == before.trial_id
+    assert after.output == before.output
+    assert agent_calls == 1
+    assert evaluations == ([True] if pending == "not_started" else [False, True])
 
 
 @pytest.mark.anyio

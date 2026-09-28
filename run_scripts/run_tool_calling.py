@@ -131,6 +131,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--sandbox", choices=("docker", "local"))
+    execution.add_argument("--sandbox-image")
+    execution.add_argument("--sandbox-cpus", type=float, default=2.0)
+    execution.add_argument("--sandbox-memory", default="4g")
+    execution.add_argument("--sandbox-pids-limit", type=int, default=256)
+    execution.add_argument(
+        "--keep-sandboxes",
+        choices=("never", "on-failure", "always"),
+        default="on-failure",
+        help="Keep failed Docker trials for resume; clean up completed trials by default.",
+    )
     execution.add_argument("--run-id")
     execution.add_argument("--max-attempts", type=int, default=3)
     execution.add_argument(

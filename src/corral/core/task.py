@@ -74,6 +74,11 @@ class TaskDefinition:
     state_scoring_fn: Callable[[ExecutionState], float] | None = None
     # Optional benchmark-specific handling of mixed file/JSON submissions.
     submission_resolver: Callable[[str, str | Path], str] | None = None
+    # Blind benchmarks prohibit feedback and state from independent attempts.
+    allow_previous_attempt_context: bool = True
+    # Explicit versions prevent resuming/reusing results across scientific changes.
+    execution_version: str | None = None
+    scorer_version: str | None = None
 
     def dependencies(self) -> set[str]:
         return {ref.task_id for ref in self.input_map.values()}

@@ -916,7 +916,16 @@ def _liquid(e):
 
 def evaluate(e: Evidence, r: Rubric) -> None:
     """Award 90 task-specific points; common scoring supplies reproducibility."""
-    geometry = r.check("diamond_preparation", 8, lambda: _geometry(e))
+
+    def prerequisites(*names):
+        statuses = [c["status"] for c in r.checks if c["name"] in names]
+        if any(status in ("failed", "skipped") for status in statuses):
+            return False
+        if "unverified" in statuses:
+            return None
+        return True
+
+    r.check("diamond_preparation", 8, lambda: _geometry(e))
     try:
         protocol = _protocol(e)
     except UnsupportedEvidence as exc:
@@ -931,12 +940,19 @@ def evaluate(e: Evidence, r: Rubric) -> None:
     else:
         detail = "Input, thermo and original log describe the required thermal cycle"
     r.check("thermal_protocol_and_log", 12, protocol, detail)
-    raw = r.check("production_data_integrity", 10, lambda: _data(e) is not None)
-    continuous = r.check(
-        "state_and_thermo_continuity", 12, lambda: raw and geometry and _continuity(e)
+    r.check("production_data_integrity", 10, lambda: _data(e) is not None)
+    r.check(
+        "state_and_thermo_continuity",
+        12,
+        lambda: prerequisites("diamond_preparation", "production_data_integrity")
+        and _continuity(e),
     )
     # Valid upstream physical evidence is required for scientific analysis credit.
-    valid = geometry and raw and continuous
+    valid = prerequisites(
+        "diamond_preparation",
+        "production_data_integrity",
+        "state_and_thermo_continuity",
+    )
     for name, points, check in (
         ("msd_reconstruction", 12, _msd_check),
         ("diffusion_estimator_and_units", 10, _estimate),
@@ -949,7 +965,7 @@ def evaluate(e: Evidence, r: Rubric) -> None:
             r.check(
                 name,
                 points,
-                False,
+                valid,
                 "Requires valid geometry, production data and boundary/thermo consistency",
             )
             continue

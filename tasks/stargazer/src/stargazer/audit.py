@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from stargazer.models import CandidateSubmission, StargazerTask, load_task
 from stargazer.score import (
+    EvaluationCriteria,
     EvaluationResult,
     SubmissionError,
     evaluate_submission,
@@ -27,6 +29,8 @@ FAILURE_REASONS = (
     "rms_gate",
     "physical_match_gate",
     "count_gate",
+    "complete_matching_gate",
+    "individual_match_gate",
 )
 
 
@@ -58,6 +62,12 @@ def _failed_gates(result: EvaluationResult) -> list[str]:
         ("rms_gate", result.ok_rms),
         ("physical_match_gate", result.ok_match),
         ("count_gate", result.ok_count),
+        (
+            "complete_matching_gate",
+            not result.criteria.require_complete_matching
+            or result.ok_complete_matching,
+        ),
+        ("individual_match_gate", result.ok_individual_matches),
     )
     return [name for name, passed in gates if not passed]
 
@@ -126,12 +136,7 @@ def audit_task_bank(data_root: str | Path = DEFAULT_DATA_ROOT) -> dict[str, Any]
     }
     return {
         "upstream_revision": UPSTREAM_REVISION,
-        "criteria": {
-            "minimum_delta_bic_per_point": 0.0,
-            "maximum_rms_factor": 1.5,
-            "minimum_match_score": 0.8,
-            "require_count_match": True,
-        },
+        "criteria": asdict(EvaluationCriteria()),
         "summary": {
             "by_source": by_source,
             "passing_synthetic_by_difficulty": by_difficulty,
@@ -246,6 +251,7 @@ def validate_official_banks(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--output", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument(
         "--check",
@@ -254,8 +260,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    report = audit_task_bank()
-    validate_official_banks(report)
+    report = audit_task_bank(args.data_root)
+    if args.data_root == DEFAULT_DATA_ROOT:
+        validate_official_banks(report)
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.check:
         if (

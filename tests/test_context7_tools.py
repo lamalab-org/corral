@@ -1,10 +1,14 @@
 """Tests for Context7 documentation tools."""
 
 import json
+from contextlib import asynccontextmanager
 from unittest.mock import patch
 
 import pytest
+from exceptiongroup import ExceptionGroup
+from mcp import types
 
+from corral.utils import context7_tools
 from corral.utils.context7_tools import (
     _cache_key,
     _load_cache,
@@ -76,11 +80,18 @@ def test_get_library_documentation_cached(tmp_path):
         assert data["library_id"] == "/facebook/react"
 
 
-def test_get_library_documentation_error_handling():
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_get_library_documentation_error_handling(wrapped):
     """Test error handling when Context7 API fails."""
-    with patch("corral.utils.context7_tools.asyncio.run") as mock_run:
-        mock_run.side_effect = RuntimeError("API connection failed")
 
+    def fail_fetch(coroutine):
+        coroutine.close()
+        error = RuntimeError("API connection failed")
+        if wrapped:
+            raise ExceptionGroup("unhandled errors in a TaskGroup", [error])
+        raise error
+
+    with patch("corral.utils.context7_tools.asyncio.run", side_effect=fail_fetch):
         result = get_library_documentation.execute(
             package_name="invalid-package", tokens=5000
         )
@@ -91,6 +102,96 @@ def test_get_library_documentation_error_handling():
         assert "error" in data
         assert "API connection failed" in data["error"]
         assert data["error_type"] == "RuntimeError"
+
+
+@pytest.mark.parametrize("library_id", [None, "/acesuit/mace"])
+@pytest.mark.parametrize("topic", [None, "ASE MACECalculator stress"])
+def test_current_context7_api(tmp_path, monkeypatch, library_id, topic):
+    calls = []
+
+    @asynccontextmanager
+    async def transport(*args, **kwargs):
+        yield None, None, None
+
+    class Session:
+        def __init__(self, *_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def initialize(self):
+            pass
+
+        async def call_tool(self, name, arguments):
+            calls.append((name, arguments))
+            assert isinstance(arguments.get("query"), str)
+            assert arguments["query"]
+            if topic:
+                assert arguments["query"] == topic
+            if name == "resolve-library-id":
+                assert set(arguments) == {"libraryName", "query"}
+                assert arguments["libraryName"] == "mace-torch"
+                text = (
+                    "- Title: MACE\n"
+                    "- Context7-compatible library ID: /acesuit/mace\n"
+                    "- Code Snippets: 123\n"
+                )
+            else:
+                assert name == "query-docs"
+                assert set(arguments) == {"libraryId", "query"}
+                assert arguments["libraryId"] == "/acesuit/mace"
+                text = "MACECalculator documentation"
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=text)]
+            )
+
+    monkeypatch.setattr(context7_tools, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(context7_tools, "streamablehttp_client", transport)
+    monkeypatch.setattr(context7_tools, "ClientSession", Session)
+    result = json.loads(
+        get_library_documentation.execute(
+            package_name="mace-torch",
+            topic=topic,
+            tokens=3000,
+            library_id=library_id,
+        )
+    )
+    assert result == {
+        "success": True,
+        "text": "MACECalculator documentation",
+        "cached": False,
+        "library_id": "/acesuit/mace",
+        "tokens": 3000,
+    }
+    assert [name for name, _ in calls] == (
+        ["query-docs"] if library_id else ["resolve-library-id", "query-docs"]
+    )
+
+
+@pytest.mark.parametrize("operation", ["resolve", "docs"])
+def test_context7_error_is_not_documentation(operation):
+    import asyncio
+
+    class Session:
+        async def call_tool(self, name, arguments):
+            return types.CallToolResult(
+                isError=True,
+                content=[types.TextContent(type="text", text="service unavailable")],
+            )
+
+    async def fetch():
+        if operation == "resolve":
+            return await context7_tools._resolve_library_id(Session(), "mace-torch")
+        return await context7_tools._get_docs_text(
+            Session(), "/acesuit/mace", "stress", 3000
+        )
+
+    with pytest.raises(RuntimeError, match="service unavailable"):
+        asyncio.run(fetch())
 
 
 @pytest.mark.integration

@@ -16,67 +16,25 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import rebound
-from pydantic import BaseModel, ConfigDict
 
-DAY_SECONDS = 86_400.0
-M_SUN_KG = 1.98847e30
-M_JUPITER_KG = 1.89813e27
-
-
-class CandidatePlanet(BaseModel):
-    """Canonical planet fields for normalized submissions and reference audits."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    P_days: float
-    m_sin_i_mjup: float
-    e: float
-    omega_rad: float
-    l_rad: float
-    inc_rad: float | None = None
-    Omega_rad: float | None = None
-
-    def to_planet_params(self) -> PlanetParams:
-        """Convert the public schema to the evaluator's native dataclass."""
-        return PlanetParams(
-            P_days=self.P_days,
-            m_sin_i_mjup=self.m_sin_i_mjup,
-            e=self.e,
-            omega_rad=self.omega_rad % (2.0 * math.pi),
-            l_rad=self.l_rad % (2.0 * math.pi),
-            inc_rad=math.pi / 2.0 if self.inc_rad is None else self.inc_rad,
-            Omega_rad=0.0
-            if self.Omega_rad is None
-            else self.Omega_rad % (2.0 * math.pi),
-        )
-
-
-class CandidateSubmission(BaseModel):
-    """Canonical candidate; omitted jitter is estimated by the action builder."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    planets: list[CandidatePlanet]
-    noise_jitter_ms: float | None = None
-
-    def canonical_payload(self) -> dict[str, Any]:
-        """Return JSON-compatible canonical fields, omitting compatibility defaults."""
-        return self.model_dump(exclude_none=True)
-
-
-@dataclass(frozen=True)
-class PlanetParams:
-    """Planet parameters in Stargazer's RV convention."""
-
-    P_days: float
-    m_sin_i_mjup: float
-    e: float
-    omega_rad: float
-    l_rad: float
-    inc_rad: float = math.pi / 2.0
-    Omega_rad: float = 0.0
-    m_true_mjup: float | None = None
+# Compatibility imports; public numerics never import this private loader.
+from stargazer.public_rv import (  # noqa: F401
+    DAY_SECONDS,
+    M_JUPITER_KG,
+    M_SUN_KG,
+    CandidatePlanet,
+    CandidateSubmission,
+    Observations,
+    PlanetParams,
+    PublicFitContext,
+    _simulate_legacy_rebound_rv,
+    _solve_kepler,
+    _wrap_angle,
+    mass_from_semi_amplitude,
+    semi_amplitude_ms,
+    simulate_keplerian_rv,
+    simulate_submission_rv,
+)
 
 
 @dataclass(frozen=True)
@@ -85,16 +43,6 @@ class InstrumentParams:
 
     label: str
     gamma_ms: float = 0.0
-
-
-@dataclass(frozen=True)
-class Observations:
-    """One radial-velocity time series."""
-
-    times_days: tuple[float, ...]
-    rvs_ms: tuple[float, ...]
-    sigmas_ms: tuple[float, ...]
-    instruments: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -116,6 +64,20 @@ class StargazerTask:
         """Published submission limit for this task family."""
         return 7
 
+    def public_fit_context(
+        self, *, maximum_rms_factor: float = 1.5
+    ) -> PublicFitContext:
+        """Copy only approved public conventions; never retain the task."""
+        axis = self.config.get("los_axis", "x")
+        integrator = self.config.get("integrator_preference", "whfast")
+        return PublicFitContext(
+            observations=self.observations,
+            star_mass_sun=self.star_mass_sun,
+            maximum_rms_factor=maximum_rms_factor,
+            los_axis=axis if axis in ("x", "y", "z") else "x",
+            integrator_preference="ias15" if integrator == "ias15" else "whfast",
+        )
+
     def public_observation(self) -> dict[str, Any]:
         """The original observation envelope, with evaluator-only truth excluded."""
         meta = {
@@ -127,13 +89,6 @@ class StargazerTask:
             "integrator_preference": self.config.get("integrator_preference", "whfast"),
             "engine": self.config.get("engine", "rebound"),
         }
-        meta.update(
-            {
-                key: self.metadata[key]
-                for key in ("task_description", "hints", "reference")
-                if self.metadata.get(key)
-            }
-        )
         return {
             "times_days": self.observations.times_days,
             "rvs_ms": self.observations.rvs_ms,
@@ -159,110 +114,6 @@ class StargazerTask:
         }
 
 
-def semi_amplitude_ms(
-    m_sin_i_mjup: float,
-    period_days: float,
-    eccentricity: float,
-    star_mass_sun: float,
-) -> float:
-    """Approximate stellar RV semi-amplitude in metres per second."""
-    if m_sin_i_mjup < 0.0:
-        raise ValueError("m_sin_i_mjup must be non-negative")
-    if period_days <= 0.0:
-        raise ValueError("period_days must be positive")
-    if not 0.0 <= eccentricity < 1.0:
-        raise ValueError("eccentricity must be in [0, 1)")
-    if star_mass_sun <= 0.0:
-        raise ValueError("star_mass_sun must be positive")
-    period_years = period_days / 365.25
-    return float(
-        28.4329
-        * m_sin_i_mjup
-        * star_mass_sun ** (-2.0 / 3.0)
-        * period_years ** (-1.0 / 3.0)
-        / math.sqrt(1.0 - eccentricity**2)
-    )
-
-
-def mass_from_semi_amplitude(
-    semi_amplitude: float,
-    period_days: float,
-    eccentricity: float,
-    star_mass_sun: float,
-) -> float:
-    """Invert :func:`semi_amplitude_ms` for minimum planet mass."""
-    if semi_amplitude < 0.0:
-        raise ValueError("semi_amplitude must be non-negative")
-    scale = semi_amplitude_ms(1.0, period_days, eccentricity, star_mass_sun)
-    return float(semi_amplitude / scale)
-
-
-def _wrap_angle(values: np.ndarray) -> np.ndarray:
-    return np.mod(values, 2.0 * np.pi)
-
-
-def _solve_kepler(mean_anomaly: np.ndarray, eccentricity: float) -> np.ndarray:
-    eccentricity = float(np.clip(eccentricity, 0.0, 0.999999))
-    if eccentricity == 0.0:
-        return _wrap_angle(mean_anomaly)
-
-    eccentric_anomaly = _wrap_angle(mean_anomaly + eccentricity * np.sin(mean_anomaly))
-    for _ in range(80):
-        residual = (
-            eccentric_anomaly - eccentricity * np.sin(eccentric_anomaly) - mean_anomaly
-        )
-        derivative = 1.0 - eccentricity * np.cos(eccentric_anomaly)
-        step = residual / derivative
-        eccentric_anomaly -= step
-        if float(np.max(np.abs(step))) < 1e-12:
-            break
-    return _wrap_angle(eccentric_anomaly)
-
-
-def simulate_keplerian_rv(
-    planets: tuple[PlanetParams, ...] | list[PlanetParams],
-    times_days: np.ndarray,
-    star_mass_sun: float,
-    gamma_ms: float = 0.0,
-) -> np.ndarray:
-    """Forward-model a non-interacting multi-planet RV signal.
-
-    `l_rad` is mean longitude at `times_days[0]`.  In the RV-only
-    convention `Omega_rad` is zero, but retaining it here also supports raw
-    released task records before compatibility conversion.
-    """
-    times = np.asarray(times_days, dtype=float)
-    if times.size == 0:
-        return np.zeros(0, dtype=float)
-
-    reference_time = float(times[0])
-    rv = np.zeros(times.shape, dtype=float)
-    for planet in planets:
-        if planet.P_days <= 0.0:
-            continue
-        eccentricity = float(np.clip(planet.e, 0.0, 0.95))
-        omega = float(planet.omega_rad) % (2.0 * np.pi)
-        ascending_node = float(planet.Omega_rad) % (2.0 * np.pi)
-        mean_anomaly_0 = (float(planet.l_rad) - ascending_node - omega) % (2.0 * np.pi)
-        mean_anomaly = _wrap_angle(
-            mean_anomaly_0
-            + (2.0 * np.pi / float(planet.P_days)) * (times - reference_time)
-        )
-        eccentric_anomaly = _solve_kepler(mean_anomaly, eccentricity)
-        true_anomaly = 2.0 * np.arctan2(
-            np.sqrt(1.0 + eccentricity) * np.sin(eccentric_anomaly / 2.0),
-            np.sqrt(1.0 - eccentricity) * np.cos(eccentric_anomaly / 2.0),
-        )
-        amplitude = semi_amplitude_ms(
-            planet.m_sin_i_mjup,
-            planet.P_days,
-            eccentricity,
-            star_mass_sun,
-        )
-        rv += amplitude * (np.cos(true_anomaly + omega) + eccentricity * np.cos(omega))
-    return rv + float(gamma_ms)
-
-
 def _planet_from_dict(payload: dict[str, Any]) -> PlanetParams:
     return PlanetParams(
         P_days=float(payload["P_days"]),
@@ -278,61 +129,6 @@ def _planet_from_dict(payload: dict[str, Any]) -> PlanetParams:
             else float(payload["m_true_mjup"])
         ),
     )
-
-
-def _simulate_legacy_rebound_rv(
-    raw_config: dict[str, Any],
-    planets: tuple[PlanetParams, ...],
-    times: np.ndarray,
-    t_ref_days: float = 0.0,
-) -> np.ndarray:
-    """Reproduce the clean signal in a released synthetic task."""
-    simulation = rebound.Simulation()
-    simulation.units = ["msun", "m", "s"]
-    star = raw_config["star"]
-    simulation.add(m=float(star["M_star_sun"]))
-
-    for planet in planets:
-        if planet.P_days <= 0 or not 0 <= planet.e < 1:
-            raise ValueError("Invalid period or eccentricity")
-        true_mass_mjup = planet.m_true_mjup
-        if true_mass_mjup is None:
-            sin_inclination = math.sin(planet.inc_rad)
-            if abs(sin_inclination) < 1e-3:
-                raise ValueError("Cannot recover a true mass for a face-on orbit")
-            true_mass_mjup = planet.m_sin_i_mjup / sin_inclination
-            if true_mass_mjup > 20.0:
-                raise ValueError("Derived true mass exceeds 20 Jupiter masses")
-        mass_solar = true_mass_mjup * M_JUPITER_KG / M_SUN_KG
-        simulation.add(
-            m=mass_solar,
-            P=planet.P_days * DAY_SECONDS,
-            h=planet.e * math.sin(planet.omega_rad),
-            k=planet.e * math.cos(planet.omega_rad),
-            ix=math.sin(planet.inc_rad / 2.0) * math.sin(planet.Omega_rad),
-            iy=math.sin(planet.inc_rad / 2.0) * math.cos(planet.Omega_rad),
-            l=planet.l_rad,
-        )
-
-    simulation.move_to_com()
-    preference = str(raw_config.get("integrator_preference", "whfast")).lower()
-    simulation.integrator = "ias15" if preference == "ias15" else "whfast"
-    if simulation.integrator == "whfast" and planets:
-        simulation.dt = max(
-            min(planet.P_days for planet in planets) * DAY_SECONDS / 50.0,
-            1e-3,
-        )
-
-    axis = str(raw_config.get("los_axis", "x")).lower()
-    if axis not in {"x", "y", "z"}:
-        raise ValueError(f"Unsupported line-of-sight axis: {axis}")
-
-    rv = np.zeros(times.shape, dtype=float)
-    for index, time_days in enumerate(times):
-        simulation.integrate((float(time_days) - t_ref_days) * DAY_SECONDS)
-        host = simulation.particles[0]
-        rv[index] = {"x": host.vx, "y": host.vy, "z": host.vz}[axis]
-    return rv
 
 
 def _normalize_rv_semantics(
@@ -464,40 +260,3 @@ def load_task(path: str | Path, source: str | None = None) -> StargazerTask:
         metadata=metadata,
         config=raw_config,
     )
-
-
-def simulate_submission_rv(
-    task: StargazerTask, planets: tuple[PlanetParams, ...]
-) -> np.ndarray:
-    """Reproduce the original action builder's REBOUND model and analytic fallback.
-
-    This model estimates omitted jitter. The evaluator independently uses the
-    analytic RV-only model when computing its likelihood and matching score.
-    """
-    times = np.asarray(task.observations.times_days, dtype=float)
-    axis = task.config.get("los_axis", "x")
-    axis = axis if axis in {"x", "y", "z"} else "x"
-    shift = {"x": np.pi / 2, "y": np.pi, "z": 0.0}[axis]
-    oriented = tuple(
-        replace(
-            planet,
-            Omega_rad=(planet.Omega_rad + shift) % (2 * np.pi),
-            l_rad=(planet.l_rad + shift) % (2 * np.pi),
-        )
-        for planet in planets
-    )
-    try:
-        return _simulate_legacy_rebound_rv(
-            {
-                "star": {"M_star_sun": task.star_mass_sun},
-                "los_axis": axis,
-                "integrator_preference": task.config.get(
-                    "integrator_preference", "whfast"
-                ),
-            },
-            oriented,
-            times,
-            t_ref_days=float(times[0]),
-        )
-    except Exception:
-        return simulate_keplerian_rv(planets, times, task.star_mass_sun)

@@ -97,3 +97,24 @@ def test_manifest_sibling_symlink_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="workspace"):
         resolve_submission("/workspace/output/manifest.json", workspace)
+
+
+def test_inline_report_prose_is_metadata_and_part_of_fingerprint(tmp_path):
+    from corral_md.workflow_scoring.common import Evidence
+
+    content = {
+        "artifacts": {},
+        "report": {"interpretation": "Scientific explanation. " * 100},
+    }
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(content))
+    resolved = resolve_submission("/workspace/manifest.json", tmp_path)
+    evidence = Evidence(resolved)
+
+    assert json.loads(resolved)["report"] == content["report"]
+    assert evidence.report == content["report"]
+    original = evidence.fingerprint()
+    content["report"]["interpretation"] += " Updated conclusion."
+    manifest.write_text(json.dumps(content))
+    changed = Evidence(resolve_submission("/workspace/manifest.json", tmp_path))
+    assert changed.fingerprint() != original

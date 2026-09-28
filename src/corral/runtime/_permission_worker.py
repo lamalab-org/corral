@@ -16,7 +16,11 @@ from pathlib import Path
 import cloudpickle
 from pydantic import TypeAdapter
 
-from corral.runtime._worker_filesystem import bind_bootstrap_parent, enter_workspace
+from corral.runtime._worker_filesystem import (
+    bind_bootstrap_parent,
+    enter_workspace,
+    isolate_network,
+)
 from corral.runtime.permissions import DENIED, drop_privileges, private_controller_types
 
 
@@ -93,6 +97,8 @@ def main() -> None:
         code = os.waitstatus_to_exitcode(status)
         os._exit(code if code >= 0 else 128 - code)
     bind_bootstrap_parent(parent_pid)
+    if kind == "tool" and getattr(tool, "network_access", "allowed") == "none":
+        isolate_network()
     scratch = enter_workspace(
         workspace,
         Path(request).parent / "root",

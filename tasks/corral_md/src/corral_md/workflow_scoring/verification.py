@@ -870,8 +870,11 @@ class ModalVerifier:
             refs = {name: file_ref(source) for name, source in files.items()}
             with volume.batch_upload() as upload:
                 for name, source in files.items():
+                    # Restored artifacts may be 0600; the sandbox reads as UID 10001.
                     upload.put_file(
-                        source, f"/corral/verifications/{identifier}/input/{name}"
+                        source,
+                        f"/corral/verifications/{identifier}/input/{name}",
+                        mode=0o644,
                     )
             response = modal.Function.from_name(app, "verify_calculations").remote(
                 identifier, release, refs

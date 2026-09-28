@@ -69,7 +69,7 @@ def teacher_digest_matches(e, task_number: int) -> bool:
 def replay_task8_default_rng(e) -> bool:
     """Replay the recorded NumPy generator on all 100 training geometries.
 
-    This is deliberately limited to an identifiable ``default_rng`` stream.
+    This supports ``default_rng`` and an explicitly declared PCG64 Generator.
     Another documented generator is an unsupported adapter, not a failed
     Gaussian requirement. Coordinates are compared after periodic wrapping and
     atom reordering so ordinary trajectory serialization does not cause zeros.
@@ -78,12 +78,28 @@ def replay_task8_default_rng(e) -> bool:
     generation = e.settings["generation"]["train"]
     library = str(generation.get("library", "")).lower()
     method = str(generation.get("method", "")).lower()
-    rng_name = str(generation.get("rng", "")).lower()
-    if "numpy" not in library or not any(
-        "default_rng" in value for value in (library, method, rng_name)
+    rng_names = [
+        re.sub(r"\s+", "", str(generation[key]).lower())
+        for key in ("rng", "random_generator")
+        if key in generation
+    ]
+    pcg64_names = {
+        "pcg64",
+        "generator(pcg64)",
+        "numpy.random.generator(pcg64)",
+        "numpy.random.generator(numpy.random.pcg64)",
+        "np.random.generator(np.random.pcg64)",
+    }
+    if any(name not in pcg64_names and "default_rng" not in name for name in rng_names):
+        raise UnsupportedEvidence("The recorded generator needs another replay adapter")
+    explicit_pcg64 = any(name in pcg64_names for name in rng_names)
+    if "numpy" not in library or not (
+        explicit_pcg64
+        or any("default_rng" in value for value in (library, method, *rng_names))
     ):
         raise UnsupportedEvidence(
-            "The recorded generator is not NumPy default_rng; replay needs its adapter"
+            "The recorded generator is not NumPy default_rng or PCG64; "
+            "replay needs its adapter"
         )
     seed = generation.get("seed")
     if type(seed) is not int or seed < 0:
@@ -113,7 +129,11 @@ def replay_task8_default_rng(e) -> bool:
     ideal = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
     cell = ideal.cell.array
     inverse_cell = np.linalg.inv(cell)
-    rng = np.random.default_rng(seed)
+    rng = (
+        np.random.Generator(np.random.PCG64(seed))
+        if explicit_pcg64
+        else np.random.default_rng(seed)
+    )
     for index in range(100):
         atoms = frame_by_index[index]
         if len(atoms) != 64 or not np.array_equal(atoms.numbers, ideal.numbers):

@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import PurePosixPath
 from typing import Any
 
 RUNTIME_PROTOCOL_VERSION = "4"
@@ -51,9 +52,11 @@ class DockerSandboxSpec:
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
     )
-    retention: str = SandboxRetention.NEVER.value
+    retention: str = SandboxRetention.ON_FAILURE.value
     registry_module: str | None = None
     runtime_protocol_version: str = RUNTIME_PROTOCOL_VERSION
+    # Read-only controller inputs, mounted outside every worker filesystem.
+    private_directories: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "retention", SandboxRetention(self.retention).value)
@@ -86,6 +89,15 @@ class DockerSandboxSpec:
                 raise ValueError(f"invalid environment variable name {name!r}")
         if len(set(self.environment_allowlist)) != len(self.environment_allowlist):
             raise ValueError("environment_allowlist cannot contain duplicates")
+        for directory in self.private_directories:
+            if (
+                not PurePosixPath(directory).is_absolute()
+                or "," in directory
+                or ".." in PurePosixPath(directory).parts
+            ):
+                raise ValueError(
+                    "private_directories must be absolute paths without commas or parent traversal"
+                )
 
     @property
     def immutable_image(self) -> str:

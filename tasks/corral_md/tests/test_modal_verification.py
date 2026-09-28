@@ -61,6 +61,75 @@ def response(plan, fingerprint):
     }
 
 
+def test_verifier_upload_makes_private_checkpoint_readable_without_changing_source(
+    tmp_path, monkeypatch
+):
+    import hashlib
+    import modal
+
+    checkpoint = tmp_path / "state.restart"
+    checkpoint.write_bytes(b"saved restart")
+    checkpoint.chmod(0o600)
+    plan = Plan(None, 1, "nonce")
+    plan.add(
+        "restart_state",
+        "lammps_restart",
+        {},
+        {},
+        parameters=plan.checkpoint(checkpoint),
+    )
+    uploaded = {}
+
+    class Volume:
+        def batch_upload(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def put_file(self, source, path, mode=None):
+            source = Path(source)
+            uploaded[path] = (
+                source.read_bytes(),
+                source.stat().st_mode & 0o777 if mode is None else mode,
+            )
+
+    def calculate(identifier, release, refs):
+        root = f"/corral/verifications/{identifier}/input/"
+        for name, ref in refs.items():
+            payload, mode = uploaded[root + name]
+            assert mode == 0o644  # The sandbox reads evidence as UID 10001.
+            assert ref == {
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size": len(payload),
+            }
+        request = json.loads(uploaded[root + "request.json"][0])
+        assert request["jobs"] == plan.jobs
+        return {
+            **response(plan, "fingerprint"),
+            "verification_id": identifier,
+            "release_id": release,
+            "input_sha256": hashlib.sha256(
+                json.dumps(refs, sort_keys=True).encode()
+            ).hexdigest(),
+        }
+
+    monkeypatch.setattr(modal.Volume, "from_name", lambda _: Volume())
+    monkeypatch.setattr(
+        modal.Function,
+        "from_name",
+        lambda *_: SimpleNamespace(remote=calculate),
+    )
+    verifier = ModalVerifier(release_id="release-1", volume_name="simulations")
+    result = verifier._calculate(plan, "fingerprint")
+    assert result["jobs"][0]["status"] == "complete"
+    assert checkpoint.stat().st_mode & 0o777 == 0o600
+    assert checkpoint.read_bytes() == b"saved restart"
+
+
 @pytest.mark.parametrize("number", range(3, 11))
 def test_current_evidence_builds_checks_without_scripts_or_expected_answers(
     tmp_path, number

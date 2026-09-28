@@ -6,12 +6,13 @@ import subprocess
 import textwrap
 import threading
 import time
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from itertools import combinations
 from pathlib import Path
 from typing import ClassVar
 
 import aiohttp
-import backoff
 from loguru import logger
 from rdkit import Chem
 from rdkit.Chem import rdMolDescriptors
@@ -303,6 +304,43 @@ class SpectraAPI:
     _last_request_time: float = 0
     _min_request_interval = 1
     _timeout = 60
+    _nmr_retry_after: float = 0
+    _max_nmr_attempts = 3
+
+    @staticmethod
+    def _retry_after_delay(value: str | None, attempt: int) -> float:
+        """Read Retry-After seconds or an HTTP date; fall back to backoff."""
+        if value is not None:
+            try:
+                return max(0, int(value))
+            except ValueError:
+                try:
+                    deadline = parsedate_to_datetime(value)
+                    if deadline.tzinfo is None:
+                        deadline = deadline.replace(tzinfo=timezone.utc)
+                    return max(0, deadline.timestamp() - time.time())
+                except (ValueError, TypeError, OverflowError):
+                    pass
+        return 2**attempt
+
+    @staticmethod
+    async def _wait_for_request_slot(prediction_type: str) -> None:
+        # Tools use separate event loops in worker threads. Share deadlines
+        # under a thread lock, but sleep outside it so other calls can progress.
+        while True:
+            with SpectraAPI._request_lock:
+                now = time.monotonic()
+                request_time = (
+                    SpectraAPI._last_request_time + SpectraAPI._min_request_interval
+                )
+                if prediction_type == "nmr":
+                    request_time = max(request_time, SpectraAPI._nmr_retry_after)
+                delay = request_time - now
+                if delay <= 0:
+                    SpectraAPI._last_request_time = now
+                    return
+            await asyncio.sleep(delay)
+            # Another call may have extended the cooldown while we slept.
 
     @staticmethod
     def format_c13_nmr(json_response: dict) -> str:
@@ -385,16 +423,6 @@ class SpectraAPI:
         return f"Wavenumbers (cm-1): {', '.join(map(str, wavenumbers))}"
 
     @staticmethod
-    @backoff.on_exception(
-        backoff.expo,
-        (aiohttp.ClientError, asyncio.TimeoutError),
-        max_tries=1,
-        max_time=60,
-        giveup=lambda e: isinstance(e, aiohttp.ClientResponseError)
-        and e.status in {400, 401, 403, 404},
-        jitter=backoff.full_jitter,
-        base=2,
-    )
     async def get_prediction_async(
         session: aiohttp.ClientSession,
         smiles: str,
@@ -404,6 +432,9 @@ class SpectraAPI:
     ) -> dict:
         """
         Get spectral prediction for a given SMILES string
+
+        NMR HTTP 429 responses get up to three attempts, honoring Retry-After
+        through a process-wide cooldown shared by proton and carbon calls.
 
         Args:
             session: aiohttp.ClientSession - Aiohttp client session
@@ -419,21 +450,6 @@ class SpectraAPI:
             ValueError: If invalid prediction_type or spectrum_type provided
             aiohttp.ClientError: If the request fails after all retries
         """
-        # Tool calls run in worker threads, each with its own event loop. Reserve
-        # request slots under a thread lock so rate limiting remains safe across
-        # those loops without binding an asyncio.Lock to one of them.
-        with SpectraAPI._request_lock:
-            current_time = time.monotonic()
-            request_time = max(
-                current_time,
-                SpectraAPI._last_request_time + SpectraAPI._min_request_interval,
-            )
-            SpectraAPI._last_request_time = request_time
-
-        delay = request_time - current_time
-        if delay > 0:
-            await asyncio.sleep(delay)
-
         if prediction_type == "nmr":
             if spectrum_type not in SpectraAPI.VALID_SPECTRUM_TYPES:
                 raise ValueError(
@@ -447,22 +463,45 @@ class SpectraAPI:
         else:
             raise ValueError("prediction_type must be 'nmr' or 'ir'")
 
-        async with session.post(
-            url,
-            headers={"Content-Type": "application/json"},
-            json=payload,
-            timeout=aiohttp.ClientTimeout(total=SpectraAPI._timeout),
-        ) as response:
-            try:
-                response.raise_for_status()
-                return await response.json()
-            except Exception as e:
-                logger.error(
-                    f"{prediction_type.upper()} prediction failed - Status: {response.status}"
-                )
-                logger.error(f"Headers: {response.headers}")
-                logger.error(f"Response body: {await response.text()}")
-                raise e
+        max_attempts = SpectraAPI._max_nmr_attempts if prediction_type == "nmr" else 1
+        attempt = 1
+        while True:
+            await SpectraAPI._wait_for_request_slot(prediction_type)
+            async with session.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=SpectraAPI._timeout),
+            ) as response:
+                if prediction_type == "nmr" and response.status == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    delay = SpectraAPI._retry_after_delay(retry_after, attempt)
+                    with SpectraAPI._request_lock:
+                        SpectraAPI._nmr_retry_after = max(
+                            SpectraAPI._nmr_retry_after, time.monotonic() + delay
+                        )
+                    if attempt < max_attempts:
+                        logger.warning(
+                            "NMR {} HTTP 429; retry {}/{} in at least {:.1f}s "
+                            "(Retry-After: {})",
+                            spectrum_type,
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                            retry_after,
+                        )
+                        attempt += 1
+                        continue
+                try:
+                    response.raise_for_status()
+                    return await response.json()
+                except Exception:
+                    logger.error(
+                        f"{prediction_type.upper()} prediction failed - Status: {response.status}"
+                    )
+                    logger.error(f"Headers: {response.headers}")
+                    logger.error(f"Response body: {await response.text()}")
+                    raise
 
     @classmethod
     async def get_all_predictions(cls, smiles: str) -> dict[str, str]:

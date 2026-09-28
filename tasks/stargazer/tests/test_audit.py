@@ -42,6 +42,8 @@ def test_audit_reports_no_reference_failures():
         "rms_gate",
         "physical_match_gate",
         "count_gate",
+        "complete_matching_gate",
+        "individual_match_gate",
     }
     assert all(count == 0 for count in reasons.values())
 

@@ -6,6 +6,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from exceptiongroup import BaseExceptionGroup
 from mcp import ClientSession, types
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -107,7 +108,9 @@ def _parse_text_results(text: str) -> list[dict]:
     return results
 
 
-async def _resolve_library_id(session: ClientSession, package_name: str) -> dict:
+async def _resolve_library_id(
+    session: ClientSession, package_name: str, query: str = ""
+) -> dict:
     """
     Call Context7's resolve-library-id tool and choose the best match.
 
@@ -118,6 +121,7 @@ async def _resolve_library_id(session: ClientSession, package_name: str) -> dict
     Args:
         session (ClientSession): Active MCP client session
         package_name (str): Package name to resolve
+        query (str): Documentation topic used to rank library matches
 
     Returns:
         dict: Chosen library entry with id, versions, etc.
@@ -128,8 +132,20 @@ async def _resolve_library_id(session: ClientSession, package_name: str) -> dict
     logger.debug(f"Resolving library ID for package: {package_name}")
 
     result = await session.call_tool(
-        "resolve-library-id", {"libraryName": package_name}
+        "resolve-library-id",
+        {
+            "libraryName": package_name,
+            "query": query or f"{package_name} usage examples",
+        },
     )
+    if result.isError:
+        raise RuntimeError(
+            "; ".join(
+                block.text
+                for block in result.content
+                if isinstance(block, types.TextContent)
+            )
+        )
 
     # Handle structured content or text-based JSON responses
     data = None
@@ -168,13 +184,13 @@ async def _get_docs_text(
     session: ClientSession, library_id: str, topic: str, tokens: int
 ) -> str:
     """
-    Call Context7's get-library-docs tool to fetch documentation text.
+    Call Context7's query-docs tool to fetch documentation text.
 
     Args:
         session (ClientSession): Active MCP client session
         library_id (str): Context7-compatible library ID (e.g., /org/project)
         topic (str): Optional topic to focus on
-        tokens (int): Maximum tokens to retrieve (server enforces min/defaults)
+        tokens (int): Legacy size hint retained for saved tool calls
 
     Returns:
         str: Documentation text
@@ -192,12 +208,17 @@ async def _get_docs_text(
         },
     ).debug("Fetching documentation")
 
-    args = {
-        "context7CompatibleLibraryID": library_id,
-        "topic": topic or "",
-        "tokens": int(tokens),
-    }
-    result = await session.call_tool("get-library-docs", args)
+    # The current API controls response size and no longer accepts tokens.
+    args = {"libraryId": library_id, "query": topic or f"{library_id} usage examples"}
+    result = await session.call_tool("query-docs", args)
+    if result.isError:
+        raise RuntimeError(
+            "; ".join(
+                block.text
+                for block in result.content
+                if isinstance(block, types.TextContent)
+            )
+        )
 
     # Prefer structured content with text key
     if getattr(result, "structuredContent", None):
@@ -387,7 +408,9 @@ def get_library_documentation(
                 # Resolve library ID if not provided
                 lib_id = library_id
                 if not lib_id:
-                    chosen = await _resolve_library_id(session, package_name)
+                    chosen = await _resolve_library_id(
+                        session, package_name, topic or ""
+                    )
                     lib_id = (
                         chosen.get("libraryId")
                         or chosen.get("id")
@@ -427,6 +450,9 @@ def get_library_documentation(
         )
 
     except Exception as e:
+        # MCP contexts wrap server errors in a task group; keep the useful cause.
+        while isinstance(e, BaseExceptionGroup) and len(e.exceptions) == 1:
+            e = e.exceptions[0]
         logger.error(f"Failed to get library documentation: {e}")
         return json.dumps(
             {

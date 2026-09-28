@@ -228,6 +228,23 @@ def test_complete_saved_data_passes(evidence):
     assert _by_name(rubric, "execution_provenance")["status"] == "unverified"
 
 
+@pytest.mark.parametrize("missing_reader_check", ["_geometry", "_continuity"])
+def test_unavailable_reader_keeps_dependent_checks_pending(
+    evidence, monkeypatch, missing_reader_check
+):
+    def unavailable(_evidence):
+        raise UnsupportedEvidence("Trusted restart reader unavailable")
+
+    monkeypatch.setattr(scoring, missing_reader_check, unavailable)
+    rubric = Rubric(1, binary=True, fail_fast=True)
+    scoring.evaluate(Evidence(evidence / "manifest.json"), rubric)
+
+    assert rubric.score is None
+    assert not rubric.failed
+    for name in ("state_and_thermo_continuity", "reported_diffusion"):
+        assert _by_name(rubric, name)["status"] == "unverified"
+
+
 def test_linked_npz_diffusion_arrays_are_read_and_cross_checked(evidence):
     manifest = json.loads((evidence / "manifest.json").read_text())
     data_path = evidence / manifest["artifacts"]["diffusion_data"]

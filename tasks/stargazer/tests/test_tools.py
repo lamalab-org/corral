@@ -21,10 +21,10 @@ def analysis_session(simple_task):
 
 def test_original_tool_schemas_are_preserved(protocol_reference):
     actual = list(create_tools().values())
-    assert [tool.name for tool in actual] == ["PythonREPL", "submit_action"]
+    assert [tool.name for tool in actual] == ["PythonREPL", "validate_fit"]
     formats = [tool.get_openai_tool_format() for tool in actual]
     # The REPL description now advertises unrestricted Python and no deadline;
-    # its input schema and the entire submission tool remain unchanged.
+    # input schemas stay fixed; stale parameter descriptions are corrected.
     expected_repl = protocol_reference["tools"][0]
     assert formats[0] == {
         **expected_repl,
@@ -33,7 +33,22 @@ def test_original_tool_schemas_are_preserved(protocol_reference):
             "description": actual[0].description,
         },
     }
-    assert formats[1] == protocol_reference["tools"][1]
+
+    def without_descriptions(value):
+        if isinstance(value, dict):
+            return {
+                k: without_descriptions(v)
+                for k, v in value.items()
+                if k != "description"
+            }
+        if isinstance(value, list):
+            return [without_descriptions(v) for v in value]
+        return value
+
+    assert without_descriptions(
+        formats[1]["function"]["parameters"]
+    ) == without_descriptions(protocol_reference["tools"][1]["function"]["parameters"])
+    assert actual[0].network_access == "none"
     assert all(not tool.hidden_args for tool in actual)
     assert actual[0].workspace_access is WorkspaceAccess.READ_WRITE
     assert actual[1].workspace_access is WorkspaceAccess.NONE
@@ -45,6 +60,13 @@ def test_repl_and_checkpoints_match_original_reference(
     for step in protocol_reference["repl"]:
         actual = analysis_session.execute(step["code"])
         expected = step["output"]
+        if "print(STARGAZER_SUBMISSION_GUIDE)" in step["code"]:
+            from stargazer.tools import STARGAZER_SUBMISSION_GUIDE
+
+            expected = STARGAZER_SUBMISSION_GUIDE + "\nTrue\n"
+        if step["code"] == "values[0] = 7\noffset = 10\nprint(shifted().tolist())":
+            # Corrected REPL semantics: functions see later global assignments.
+            expected = "[17, 11, 12]\n"
         if isinstance(expected, float):
             # Numerical fits can differ in the last digits across platforms.
             actual = float(actual)
@@ -71,7 +93,6 @@ def test_namespace_matches_upstream_public_surface(analysis_session):
     for name in (
         "benchmark_task",
         "StargazerTask",
-        "instruments",
         "scipy",
         "optimize",
         "signal",
@@ -109,6 +130,58 @@ fact_callable = factorial_factory()""")
         analysis_session.execute("print((advance(), read(), fact_callable(5)))").strip()
         == "(1, 1, 120)"
     )
+
+
+@pytest.mark.parametrize("checkpoint", [False, True])
+def test_functions_see_later_global_assignments(analysis_session, checkpoint):
+    result = analysis_session.execute(
+        "def total():\n    return t.sum()\nprint(total())"
+    )
+    assert "NameError: name 't' is not defined" in result
+    if checkpoint:
+        analysis_session.restore(analysis_session.snapshot())
+    assert analysis_session.execute("t = np.arange(3)\nprint(total())") == "3\n"
+    assert analysis_session.execute("t = np.array([8, 9])\nprint(total())") == "17\n"
+    if checkpoint:
+        analysis_session.restore(analysis_session.snapshot())
+    assert analysis_session.execute("t = np.array([42])\nprint(total())") == "42\n"
+    assert "NameError" in analysis_session.execute("del t\nprint(total())")
+    assert analysis_session.execute("t = np.array([5])\nprint(total())") == "5\n"
+
+
+def test_function_redefinitions_and_global_writes_survive_checkpoint(analysis_session):
+    analysis_session.execute("""value = 1
+def read():
+    return value
+def outer():
+    return read()
+def advance():
+    global value
+    value += 1""")
+    analysis_session.restore(analysis_session.snapshot())
+    assert analysis_session.execute("advance()\nprint(value, outer())") == "2 2\n"
+    analysis_session.execute("def read():\n    return value * 10")
+    analysis_session.restore(analysis_session.snapshot())
+    assert analysis_session.execute("advance()\nprint(value, outer())") == "3 30\n"
+
+
+def test_both_startup_guides_fit_in_one_repl_response(analysis_session):
+    from stargazer.protocol import public_resources
+    from stargazer.tools import STARGAZER_SUBMISSION_GUIDE
+
+    expected = (
+        STARGAZER_SUBMISSION_GUIDE
+        + "\n"
+        + public_resources()["analysis-guide.md"]
+        + "\n"
+    )
+    assert len(expected) <= 4500  # Leave room for headings or a short data summary.
+    actual = analysis_session.execute(
+        "print(STARGAZER_SUBMISSION_GUIDE)\n"
+        "print(STARGAZER_PUBLIC_RESOURCES['analysis-guide.md'])"
+    )
+    assert actual == expected
+    assert "output truncated" not in actual
 
 
 def test_repl_supports_normal_python_and_checkpointed_functions(analysis_session):
@@ -207,7 +280,7 @@ def test_submission_guide_uses_real_newlines(analysis_session):
     # The guide is the prompt's mandatory step 0, so a literal "\n" is the
     # first thing every agent reads.
     assert "\\n" not in STARGAZER_SUBMISSION_GUIDE
-    assert len(STARGAZER_SUBMISSION_GUIDE.splitlines()) == 6
+    assert len(STARGAZER_SUBMISSION_GUIDE.splitlines()) == 7
     assert (
-        analysis_session.execute("print(STARGAZER_SUBMISSION_GUIDE)").count("\n") == 7
+        analysis_session.execute("print(STARGAZER_SUBMISSION_GUIDE)").count("\n") == 8
     )

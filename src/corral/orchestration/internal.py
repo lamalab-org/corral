@@ -114,6 +114,9 @@ def _restore_host_ownership(root: Path) -> None:
 
 async def run_task_from_files(request_file: str | Path, result_file: str | Path) -> int:
     """Reconstruct one runtime, recover its last commit, and publish StateRef."""
+    # A retained container can be started again. Its previous result must never
+    # be mistaken for the outcome of this invocation, including startup errors.
+    Path(result_file).unlink(missing_ok=True)
     request = TypeAdapter(RunTaskInput).validate_json(
         Path(request_file).read_text(encoding="utf-8")
     )

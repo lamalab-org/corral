@@ -396,6 +396,8 @@ class Environment:
             for task_id, value in (dependency_outputs or {}).items()
         }
         task_metadata: dict[str, Any] = {"id": self.task_id}
+        if self.current_task.execution_version is not None:
+            task_metadata["execution_version"] = self.current_task.execution_version
         provisional = ExecutionState(
             through_commit_hash="0" * 64,
             execution_id=execution_id,
@@ -776,6 +778,13 @@ class Environment:
 
     def validate_state_tool_catalog(self, state: ExecutionState) -> ToolCatalogSnapshot:
         """Refuse to bind `state` when its executable tool catalog has drifted."""
+        if self.current_task.execution_version is not None and (
+            state.task.metadata.get("execution_version")
+            != self.current_task.execution_version
+        ):
+            raise ValueError(
+                "Incompatible execution protocol or task bank; start a fresh execution"
+            )
         catalog = validate_tool_catalog_binding(state, self.tool_catalog_snapshot())
         validate_tool_policy_binding(state, self.tool_policy_snapshot())
         stored_resources = state.task.environment.get(RESOURCE_CATALOG_METADATA_KEY, {})

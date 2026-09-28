@@ -13,6 +13,7 @@ import numpy as np
 from corral.core.tool import Tool
 from corral.runtime import python_repl as _python_repl
 from corral.tools.python_repl import create_python_repl_tool
+from stargazer.protocol import public_resources
 
 # Compatibility aliases keep old analysis checkpoints and task imports usable.
 _MAX_CODE_CHARS = _python_repl.DEFAULT_MAX_CODE_CHARS
@@ -60,6 +61,7 @@ def create_analysis_session(
     sigmas_ms: tuple[float, ...],
     instruments: tuple[str, ...],
     star_mass_sun: float,
+    analysis_assistance: bool = True,
 ) -> AnalysisSession:
     """Create a persistent worker containing only public trial data."""
     times = tuple(float(value) for value in times_days)
@@ -71,7 +73,10 @@ def create_analysis_session(
         "sigmas_ms": tuple(float(value) for value in sigmas_ms),
         "instruments": tuple(str(value) for value in instruments),
         "star_mass_sun": float(star_mass_sun),
+        "analysis_assistance": analysis_assistance,
     }
+    if analysis_assistance:
+        public_data["public_resources"] = public_resources()
     lengths = {
         len(public_data["times_days"]),
         len(public_data["rvs_ms"]),
@@ -93,6 +98,7 @@ def _create_worker_namespace(public_data: dict[str, Any]) -> dict[str, Any]:
         "times_days": times,
         "rvs_ms": np.asarray(public_data["rvs_ms"], dtype=float).copy(),
         "sigmas_ms": np.asarray(public_data["sigmas_ms"], dtype=float).copy(),
+        "instruments": np.asarray(public_data["instruments"], dtype=str).copy(),
         "star_mass_sun": float(public_data["star_mass_sun"]),
         "t_ref_days": float(times[0]),
         "baselines": baselines,
@@ -105,23 +111,26 @@ def _create_worker_namespace(public_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def worker_namespace_factory(analysis_assistance=True):
+    if analysis_assistance:
+        from stargazer.public_worker import create_assisted_namespace
+
+        return create_assisted_namespace
+    return _create_worker_namespace
+
+
 def _execute_persistent(code: str, namespace: dict[str, Any]) -> str:
     """Apply Stargazer policy around Corral's generic namespace executor."""
     if "matplotlib" in code:
         return "No plotting is allowed. Code was not executed since it contained 'matplotlib'."
     namespace["__builtins__"].update(_session_builtins())
     cleaned = wrap_last_line_with_print(sanitize_input(code))
-    # Preserve Stargazer's historical cell-global behavior: functions retain
-    # the bindings from their defining cell, while mutable values remain shared.
-    execution_namespace = dict(namespace)
-    conflict = detect_shadowing_callable_conflict(cleaned, execution_namespace)
+    conflict = detect_shadowing_callable_conflict(cleaned, namespace)
     if conflict:
         return conflict
-    result = execute_in_namespace(
-        cleaned, execution_namespace, preloaded_names=tuple(PRELOADED_VARS)
+    return execute_in_namespace(
+        cleaned, namespace, preloaded_names=tuple(PRELOADED_VARS)
     )
-    namespace.update(execution_namespace)
-    return result
 
 
 class AnalysisSession(PythonREPLSession):
@@ -130,7 +139,9 @@ class AnalysisSession(PythonREPLSession):
     def __init__(self, public_data: dict[str, Any]):
         super().__init__(
             public_data,
-            namespace_factory=_create_worker_namespace,
+            namespace_factory=worker_namespace_factory(
+                public_data.get("analysis_assistance", True)
+            ),
             code_executor=_execute_persistent,
             export_names=("_protocol_guide_ack",),
         )
@@ -157,12 +168,14 @@ STARGAZER_SUBMISSION_GUIDE = (
     "2) Reference epoch: t_ref = times_days[0]\n"
     "3) Convert M0 to l_rad via l_rad = (Omega_rad + omega_rad + M0) mod 2pi\n"
     "4) Avoid mixing phase aliases; if using l_rad, treat it as canonical\n"
-    "5) Before submit: verify converted action rv_model residual RMS is near sigma\n"
+    "5) Use validate_fit repeatedly to inspect observation-only fit diagnostics\n"
+    "6) Finalize once with submit_answer(answer=<candidate JSON>); this ends the episode\n"
 )
 PRELOADED_VARS = {
     "times_days",
     "rvs_ms",
     "sigmas_ms",
+    "instruments",
     "np",
     "baselines",
     "history",
@@ -170,6 +183,9 @@ PRELOADED_VARS = {
     "t_ref_days",
     "stargazer_planet_from_fit",
     "STARGAZER_SUBMISSION_GUIDE",
+    "stargazer_predict",
+    "stargazer_diagnostics",
+    "STARGAZER_PUBLIC_RESOURCES",
 }
 REQUIRED_OBS_KEYS = ("times_days", "rvs_ms", "sigmas_ms")
 
@@ -385,14 +401,14 @@ def detect_shadowing_callable_conflict(code: str, namespace: dict) -> str | None
     )
 
 
-def create_tools() -> dict[str, Tool]:
+def create_tools(*, analysis_assistance: bool = True) -> dict[str, Tool]:
     """Original two-tool interface, dispatched by the Corral environment."""
     definitions = [
         {
             "type": "function",
             "function": {
                 "name": "PythonREPL",
-                "description": "A persistent Python REPL with no per-call execution timeout. Use print(...) to see results. Normal Python builtins and installed packages are available; file, process, and network access follow the runtime's permissions. You cannot use matplotlib. No plotting is allowed.\nPreloaded variables: np, times_days, rvs_ms, sigmas_ms, baselines, history, star_mass_sun, t_ref_days, stargazer_planet_from_fit, STARGAZER_SUBMISSION_GUIDE.",
+                "description": "A persistent Python REPL with no per-call execution timeout. Use print(...) to see results. Normal Python builtins and installed packages are available; files and processes are isolated; network access is disabled in evaluation workers. You cannot use matplotlib. No plotting is allowed.\nPreloaded variables: np, times_days, rvs_ms, sigmas_ms, instruments, baselines, history, star_mass_sun, t_ref_days, stargazer_planet_from_fit, STARGAZER_SUBMISSION_GUIDE.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -408,8 +424,8 @@ def create_tools() -> dict[str, Tool]:
         {
             "type": "function",
             "function": {
-                "name": "submit_action",
-                "description": "Submit a candidate RV model to the environment. Preferred protocol: Stargazer-native planet fields (P_days, m_sin_i_mjup, e, omega_rad, l_rad). Provide up to 7 planets with P_days > 0.5 and eccentricity between 0 and 0.8. This task currently expects submission_mode='params_and_model'. The environment will evaluate your submission and return a reward with detailed metrics.",
+                "name": "validate_fit",
+                "description": "Validate a candidate using observations only. Returns format errors, normalized parameters, likelihood, BIC, and residuals. Does not grade scientific correctness or finish the episode. Finalize with submit_answer containing candidate JSON.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -428,7 +444,7 @@ def create_tools() -> dict[str, Tool]:
                                     },
                                     "m_sin_i_mjup": {
                                         "type": "number",
-                                        "description": "Stargazer planet format: minimum mass in Jupiter masses (optional; if provided, K is approximated assuming M_star=1Msun).",
+                                        "description": "Minimum mass in Jupiter masses; K is computed using the public star_mass_sun.",
                                     },
                                     "semi_amplitude_ms": {
                                         "type": "number",
@@ -448,7 +464,7 @@ def create_tools() -> dict[str, Tool]:
                                     },
                                     "phase_frac": {
                                         "type": "number",
-                                        "description": "Phase as fraction of an orbit in [0,1) (optional). Converted to radians via 2π*phase_frac.",
+                                        "description": "Periastron-time fraction of an orbit; M0 = -2π*phase_frac at t_ref.",
                                     },
                                     "l_rad": {
                                         "type": "number",
@@ -464,7 +480,7 @@ def create_tools() -> dict[str, Tool]:
                                     },
                                     "omega_rad": {
                                         "type": "number",
-                                        "description": "Stargazer planet format: argument of periapsis in radians (optional; matching uses l_rad).",
+                                        "description": "Argument of periapsis in radians (default 0).",
                                     },
                                     "inc_rad": {
                                         "type": "number",
@@ -481,7 +497,7 @@ def create_tools() -> dict[str, Tool]:
                         },
                         "rv_offset_ms": {
                             "type": "number",
-                            "description": "Constant RV offset in m/s (optional, will be estimated if not provided).",
+                            "description": "Constant RV offset used only for omitted-jitter estimation. Fit diagnostics refit an offset per instrument.",
                         },
                         "noise_jitter_ms": {
                             "type": "number",
@@ -498,6 +514,13 @@ def create_tools() -> dict[str, Tool]:
         },
     ]
     repl, submission = (entry["function"] for entry in definitions)
+    if analysis_assistance:
+        repl["description"] += (
+            "\nAlso preloaded: stargazer_predict(planets, times_days=None, per_planet=False), "
+            "stargazer_diagnostics(planets, noise_jitter_ms=0.1), and "
+            "STARGAZER_PUBLIC_RESOURCES with public_rv.py and analysis-guide.md. "
+            "Helpers use public data only and keep model/residual arrays in the session."
+        )
     repl_tool = create_python_repl_tool(
         name=repl["name"],
         description=repl["description"],
@@ -505,13 +528,14 @@ def create_tools() -> dict[str, Tool]:
         argument_description=repl["parameters"]["properties"]["input_code"][
             "description"
         ],
-        namespace_factory=_create_worker_namespace,
+        namespace_factory=worker_namespace_factory(analysis_assistance),
         code_executor=_execute_persistent,
         synchronized_names=("history",),
         export_names=("_protocol_guide_ack",),
         # Preserve the Stargazer worker wire format during migration.
         export_result_names={"_protocol_guide_ack": "protocol_ack"},
         workspace_access="read_write",
+        network_access="none",
     )
     return {
         repl_tool.name: repl_tool,

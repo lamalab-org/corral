@@ -12,6 +12,7 @@ from corral.observability.base import (
     commit_output,
     observe_safely,
     record_commit_safely,
+    restore_commit_safely,
     update_safely,
 )
 from corral.observability.langfuse import (
@@ -39,5 +40,6 @@ __all__ = [
     "observe_safely",
     "observer_from_env",
     "record_commit_safely",
+    "restore_commit_safely",
     "update_safely",
 ]

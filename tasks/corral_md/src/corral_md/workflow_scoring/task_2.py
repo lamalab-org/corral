@@ -469,13 +469,17 @@ def _boundary_density(e):
         )
         density = mass * 1.66053906660 / np.linalg.det(state["cell"])
         sample = t[t.stage == stage].iloc[location]
-        if not _close(density, sample.density_g_cm3, atol=1e-5):
+        if not _close(state["time_ps"], sample.time_ps, atol=0.5, rtol=0.001):
+            return False, f"{name} timing contradicts the corresponding trace endpoint"
+        # A shared handoff can be recorded only under the preceding stage.
+        matching = t[np.isclose(t.time_ps, state["time_ps"], rtol=0, atol=1e-6)]
+        if matching.empty:
+            return False, f"{name} has no thermal sample at its boundary time"
+        if not _close(density, matching.density_g_cm3, atol=1e-5):
             return (
                 False,
                 f"{name} cell and atomic masses contradict the endpoint density",
             )
-        if not _close(state["time_ps"], sample.time_ps, atol=0.5, rtol=0.001):
-            return False, f"{name} timing contradicts the corresponding trace endpoint"
     return True
 
 
@@ -532,13 +536,16 @@ def _state(s):
 def _boundary_states(e):
     """Read inline states or explicitly linked, restartable LAMMPS data files."""
     document = e.artifact("boundary_states", "stage_boundaries")
+    data = e.json("boundary_states", "stage_boundaries")
     result = {}
-    for name, record in e.json("boundary_states", "stage_boundaries").items():
+    for name, record in data.items():
+        if name in ("description", "atom_style", "atom_type_species"):
+            continue
         if "lammps_data" not in record:
             result[name] = _state(record)
             continue
         path = e.linked_path(record["lammps_data"], document)
-        species = record.get("atom_type_species")
+        species = record.get("atom_type_species", data.get("atom_type_species"))
         mapping = (
             {int(key): atomic_numbers[value] for key, value in species.items()}
             if species is not None
@@ -548,7 +555,7 @@ def _boundary_states(e):
             path,
             format="lammps-data",
             units="real",
-            atom_style=record.get("atom_style", "charge"),
+            atom_style=record.get("atom_style", data.get("atom_style", "charge")),
             Z_of_type=mapping,
         )
         if not {"id", "initial_charges", "momenta"} <= atoms.arrays.keys():

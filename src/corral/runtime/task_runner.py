@@ -30,6 +30,7 @@ from corral.observability import (
     Observer,
     observe_safely,
     record_commit_safely,
+    restore_commit_safely,
     update_safely,
 )
 
@@ -163,6 +164,9 @@ class TaskRuntime:
     ) -> ExecutionState:
         if not isinstance(agent, Agent):
             raise TypeError("an agent must implement run_session(AgentSession)")
+        if not environment.current_task.allow_previous_attempt_context:
+            last_score = None
+            previous_state = None
         store = self._execution_store(execution_id)
         branch_id = "main"
         context = self._context(execution_id, environment.task_id, observation_context)
@@ -206,6 +210,9 @@ class TaskRuntime:
                 ),
                 context,
             )
+        else:
+            async for commit in store.iter_commits(branch_id):
+                restore_commit_safely(self.observer, commit, context=context)
         current = await store.materialize(branch_id)
         environment.validate_state_tool_catalog(current)
         if current.is_terminal:

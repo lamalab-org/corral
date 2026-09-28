@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 from dataclasses import asdict, replace
 from datetime import datetime
@@ -48,6 +49,24 @@ class TaskLauncher(Protocol):
 
 class DockerInfrastructureError(RuntimeError):
     """A container could not be created, supervised, or decoded safely."""
+
+
+# Runs before the image's CLI, so retained containers also work with images
+# built before resume support. A checkpoint import can remove SQLite sidecars
+# on the host; docker cp alone would leave their old copies in the volume.
+_DOCKER_BOOTSTRAP = """\
+import json
+import os
+from pathlib import Path
+root = Path('/corral-state')
+missing = json.loads((root / 'checkpoint-import.json').read_text())['missing_sidecars']
+for name in ('commits.sqlite3-wal', 'commits.sqlite3-shm'):
+    if name in missing:
+        (root / name).unlink(missing_ok=True)
+(root / 'result.json').unlink(missing_ok=True)
+os.execvp('corral', ['corral', 'internal', 'run-task', '--request',
+                   '/corral-state/request.json', '--result', '/corral-state/result.json'])
+"""
 
 
 def state_ref(state: ExecutionState, commit: Commit) -> StateRef:
@@ -108,7 +127,11 @@ class LocalTaskLauncher:
             task_id: TaskOutput(output=output)
             for task_id, output in request.dependency_outputs.items()
         }
-        last_evaluation = self.registry.last_evaluation(request.task_id)
+        last_evaluation = (
+            self.registry.last_evaluation(request.task_id)
+            if environment.current_task.allow_previous_attempt_context
+            else None
+        )
         previous_state = None
         if last_evaluation is not None:
             previous_hash = last_evaluation.get("commit_hash")
@@ -168,6 +191,22 @@ class LocalTaskLauncher:
         if head is None:
             raise RuntimeError("task runtime returned without a branch head")
         return state_ref(state, head)
+
+
+def _translate_private_paths(value: Any, source: str, target: str) -> Any:
+    """Translate explicit environment option paths for controller-only mounts."""
+    if isinstance(value, dict):
+        return {
+            key: _translate_private_paths(item, source, target)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_translate_private_paths(item, source, target) for item in value]
+    if isinstance(value, str) and (
+        value == source or value.startswith(source.rstrip("/") + "/")
+    ):
+        return target + value[len(source) :]
+    return value
 
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
@@ -351,9 +390,65 @@ class DockerTaskLauncher:
             "rm",
             "--force",
             volume,
+            f"{volume}-state",
             output_limit=32_000,
             check=False,
         )
+
+    async def _inspect_container(self, container: str) -> dict[str, Any] | None:
+        code, output = await _command(
+            self.docker_executable,
+            "inspect",
+            "--type",
+            "container",
+            container,
+            output_limit=1_000_000,
+            check=False,
+        )
+        if code:
+            if (
+                "no such object" in output.lower()
+                or "no such container" in output.lower()
+            ):
+                return None
+            raise DockerInfrastructureError(
+                f"Could not inspect Docker container {container} (exit code {code})"
+            )
+        try:
+            (details,) = json.loads(output)
+            if not isinstance(details, dict) or not details.get("Id"):
+                raise ValueError("missing container ID")
+            return details
+        except (ValueError, TypeError) as exc:
+            # Docker inspect includes credentials; never include its raw output.
+            raise DockerInfrastructureError(
+                f"Docker returned invalid container metadata for {container}"
+            ) from exc
+
+    @staticmethod
+    def _configuration_key(arguments: list[str]) -> str:
+        """Identify immutable launch settings without storing environment values."""
+        immutable = []
+        iterator = iter(arguments)
+        for argument in iterator:
+            if argument in ("--cpus", "--memory", "--pids-limit"):
+                next(iterator)
+            else:
+                immutable.append(argument)
+        return hashlib.sha256(json.dumps(immutable).encode()).hexdigest()
+
+    @staticmethod
+    def _environment_matches(details: dict[str, Any], arguments: list[str]) -> bool:
+        existing = dict(
+            entry.split("=", 1) for entry in details.get("Config", {}).get("Env", [])
+        )
+        for index, argument in enumerate(arguments):
+            if argument != "--env":
+                continue
+            name, separator, value = arguments[index + 1].partition("=")
+            if existing.get(name) != (value if separator else os.environ[name]):
+                return False
+        return True
 
     async def _cleanup(
         self,
@@ -369,6 +464,45 @@ class DockerTaskLauncher:
         if keep:
             return
         await self._discard_stale(container, volume)
+
+    async def _export_checkpoint(self, shard: Path, container: str) -> None:
+        """Copy a stopped controller's checkpoint before releasing its volume."""
+        try:
+            # Also handles cancellation or a host process dying during a trial.
+            # Copying a live database and its WAL separately is unsafe.
+            await _command(
+                self.docker_executable,
+                "stop",
+                "--time",
+                "10",
+                container,
+                output_limit=32_000,
+            )
+            with tempfile.TemporaryDirectory(
+                prefix=".corral-checkpoint-", dir=shard.parent
+            ) as directory:
+                staged = Path(directory)
+                await _command(
+                    self.docker_executable,
+                    "cp",
+                    f"{container}:/corral-state/.",
+                    str(staged),
+                    output_limit=32_000,
+                )
+                shutil.copytree(staged, shard, dirs_exist_ok=True)
+                # A clean close can remove these in the container. Do not replay
+                # stale host WAL contents over the newly exported database.
+                for suffix in ("-wal", "-shm"):
+                    name = f"commits.sqlite3{suffix}"
+                    if not (staged / name).exists():
+                        (shard / name).unlink(missing_ok=True)
+            (shard / "checkpoint-pending.json").unlink()
+        except Exception as exc:
+            raise DockerInfrastructureError(
+                f"Could not export checkpoint from {container}; its container and "
+                "volumes are preserved. Retry to recover the checkpoint before "
+                "starting another trial."
+            ) from exc
 
     async def run(
         self,
@@ -388,6 +522,10 @@ class DockerTaskLauncher:
         close_execution = getattr(self.state_store, "close_execution", None)
         if close_execution is not None:
             await close_execution(request.execution_id)
+        pending_checkpoint = shard / "checkpoint-pending.json"
+        if pending_checkpoint.exists():
+            pending = json.loads(pending_checkpoint.read_text(encoding="utf-8"))
+            await self._export_checkpoint(shard, pending["container_id"])
         request_path = shard / "request.json"
         result_path = shard / "result.json"
         result_path.unlink(missing_ok=True)
@@ -395,13 +533,27 @@ class DockerTaskLauncher:
             (shard / directory / "latest.json").is_file()
             for directory in ("workspace-snapshots", "snapshots")
         )
-        _atomic_json(request_path, asdict(request))
-        # Remove the host shard's setgid mode before Docker Desktop mounts it.
-        # macOS bind mounts can reject chmod after the controller takes ownership.
+        container_request = asdict(request)
+        private_mounts = []
+        for index, source in enumerate(docker.private_directories):
+            if not Path(source).is_dir():
+                raise ValueError(
+                    f"Private controller directory does not exist: {source}"
+                )
+            target = f"/corral-private/{index}"
+            private_mounts.extend(
+                ("--mount", f"type=bind,src={source},dst={target},readonly")
+            )
+            definition = container_request.get("environment_runtime")
+            if definition:
+                definition["options"] = _translate_private_paths(
+                    definition["options"], source, target
+                )
+        _atomic_json(request_path, container_request)
+        # Checkpoints are private to the trusted controller.
         shard.chmod(0o700)
 
         container_name, volume_name = self._names(request.execution_id)
-        await self._discard_stale(container_name, volume_name)
         labels = {
             "corral.benchmark_run_id": request.benchmark_run_id or "",
             "corral.task_id": request.task_id,
@@ -413,8 +565,6 @@ class DockerTaskLauncher:
         volume_arguments = [self.docker_executable, "volume", "create"]
         for key, value in labels.items():
             volume_arguments.extend(("--label", f"{key}={value}"))
-        volume_arguments.append(volume_name)
-        await _command(*volume_arguments, output_limit=32_000)
 
         create_arguments = [
             self.docker_executable,
@@ -460,7 +610,7 @@ class DockerTaskLauncher:
             "--mount",
             f"type=volume,src={volume_name},dst=/workspace",
             "--mount",
-            f"type=bind,src={shard},dst=/corral-state",
+            f"type=volume,src={volume_name}-state,dst=/corral-state",
             "--env",
             "HOME=/tmp",
             "--env",
@@ -470,56 +620,167 @@ class DockerTaskLauncher:
         ]
         for key, value in labels.items():
             create_arguments.extend(("--label", f"{key}={value}"))
+        create_arguments.extend(private_mounts)
         for name in docker.environment_allowlist:
             if name in os.environ:
                 create_arguments.extend(("--env", name))
         create_arguments.extend(
             (
                 docker.immutable_image,
-                "corral",
-                "internal",
-                "run-task",
-                "--request",
-                "/corral-state/request.json",
-                "--result",
-                "/corral-state/result.json",
+                "python",
+                "-c",
+                _DOCKER_BOOTSTRAP,
             )
         )
+        configuration_key = self._configuration_key(create_arguments)
+        create_arguments[2:2] = [
+            "--label",
+            f"corral.launcher_config={configuration_key}",
+        ]
+
+        existing = await self._inspect_container(container_name)
+        reused = False
+        if existing is not None:
+            existing_labels = existing.get("Config", {}).get("Labels") or {}
+            for key in (
+                "corral.execution_id",
+                "corral.benchmark_run_id",
+                "corral.task_id",
+                "corral.trial_index",
+            ):
+                if existing_labels.get(key) != labels[key]:
+                    raise DockerInfrastructureError(
+                        f"Container {container_name} belongs to another execution; "
+                        "it has been left untouched."
+                    )
+            if existing.get("State", {}).get("Running"):
+                raise DockerInfrastructureError(
+                    f"Container {container_name} is already running; "
+                    "stop the active run before resuming it."
+                )
+            reused = (
+                existing_labels.get("corral.launcher_config") == configuration_key
+                and existing.get("Image") == docker.image_digest
+                and not existing.get("State", {}).get("Dead")
+                and self._environment_matches(existing, create_arguments)
+            )
+        if not reused:
+            # Any pending checkpoint was exported above. The durable host shard
+            # is authoritative when an image, mount, or credential has changed.
+            await self._discard_stale(container_name, volume_name)
 
         container_id = ""
         failed = True
         output = ""
         try:
-            _code, container_id = await _command(*create_arguments, output_limit=32_000)
-            container_id = container_id.splitlines()[-1].strip()
-            self._write_sandbox_metadata(
-                shard,
+            if reused:
+                assert existing is not None
+                container_id = existing["Id"]
+                # Resource limits can change without replacing the container.
+                # Keep Docker's default swap allowance (twice the memory limit)
+                # when increasing memory beyond the previous swap limit.
+                unit = docker.memory[-1].lower()
+                memory_bytes = (
+                    int(docker.memory[:-1]) * 1024 ** "bkmg".index(unit)
+                    if unit in "bkmg"
+                    else int(docker.memory)
+                )
+                await _command(
+                    self.docker_executable,
+                    "update",
+                    "--cpus",
+                    str(docker.cpus),
+                    "--memory",
+                    docker.memory,
+                    "--memory-swap",
+                    str(2 * memory_bytes),
+                    "--pids-limit",
+                    str(docker.pids_limit),
+                    container_id,
+                    output_limit=32_000,
+                )
+            else:
+                for name in (volume_name, f"{volume_name}-state"):
+                    await _command(*volume_arguments, name, output_limit=32_000)
+                _code, container_id = await _command(
+                    *create_arguments, output_limit=32_000
+                )
+                container_id = container_id.splitlines()[-1].strip()
+            sandbox_metadata = {
+                "benchmark_run_id": request.benchmark_run_id,
+                "container_id": container_id,
+                "container_name": container_name,
+                "permissions_policy": "workspace-root-v1",
+                "cpus": docker.cpus,
+                "execution_id": request.execution_id,
+                "image": docker.image,
+                "image_digest": docker.image_digest,
+                "memory": docker.memory,
+                "network": docker.network,
+                "pids_limit": docker.pids_limit,
+                "recovered": recovered,
+                "reused": reused,
+                "retention": docker.retention,
+                "runtime_protocol_version": docker.runtime_protocol_version,
+                "task_id": request.task_id,
+                "trial_index": request.trial_index,
+                "volume_name": volume_name,
+                "state_volume_name": f"{volume_name}-state",
+            }
+            self._write_sandbox_metadata(shard, sandbox_metadata)
+            _atomic_json(
+                shard / "checkpoint-import.json",
                 {
-                    "benchmark_run_id": request.benchmark_run_id,
-                    "container_id": container_id,
-                    "container_name": container_name,
-                    "permissions_policy": "workspace-root-v1",
-                    "cpus": docker.cpus,
-                    "execution_id": request.execution_id,
-                    "image": docker.image,
-                    "image_digest": docker.image_digest,
-                    "memory": docker.memory,
-                    "network": docker.network,
-                    "pids_limit": docker.pids_limit,
-                    "recovered": recovered,
-                    "runtime_protocol_version": docker.runtime_protocol_version,
-                    "task_id": request.task_id,
-                    "trial_index": request.trial_index,
-                    "volume_name": volume_name,
+                    "missing_sidecars": [
+                        name
+                        for name in ("commits.sqlite3-wal", "commits.sqlite3-shm")
+                        if not (shard / name).exists()
+                    ]
                 },
             )
-            _code, output = await _command(
+            await _command(
                 self.docker_executable,
-                "start",
-                "--attach",
-                container_id,
-                output_limit=self.output_limit,
+                "cp",
+                f"{shard}/.",
+                f"{container_id}:/corral-state",
+                output_limit=32_000,
             )
+            # Survives host crashes and failed exports. A retry must recover this
+            # checkpoint before discarding the previous container or volumes.
+            _atomic_json(pending_checkpoint, {"container_id": container_id})
+            try:
+                _code, output = await _command(
+                    self.docker_executable,
+                    "start",
+                    "--attach",
+                    container_id,
+                    output_limit=self.output_limit,
+                    check=False,
+                )
+                details = await self._inspect_container(container_id)
+                if details is None:
+                    raise DockerInfrastructureError(
+                        "Task container disappeared before checkpoint export"
+                    )
+                state = details.get("State", {})
+                sandbox_metadata.update(
+                    oom_killed=bool(state.get("OOMKilled")),
+                    exit_code=state.get("ExitCode"),
+                )
+                if state.get("OOMKilled"):
+                    raise DockerInfrastructureError(
+                        f"Task {request.execution_id} was killed by an out-of-memory event "
+                        f"(memory limit: {docker.memory}). Increase --sandbox-memory and the Docker VM's "
+                        "available memory, or reduce --max-parallel."
+                    )
+                if _code or state.get("ExitCode", 0):
+                    raise DockerInfrastructureError(
+                        f"Task container exited with code {state.get('ExitCode') or _code}; "
+                        f"bounded output: {output}"
+                    )
+            finally:
+                await asyncio.shield(self._export_checkpoint(shard, container_id))
+                self._write_sandbox_metadata(shard, sandbox_metadata)
             if not result_path.is_file():
                 raise DockerInfrastructureError(
                     "task container exited without publishing result.json; "
@@ -533,18 +794,18 @@ class DockerTaskLauncher:
                 raise DockerInfrastructureError(
                     "task container published an invalid StateRef"
                 ) from exc
-            failed = result.status == "failed"
+            if result.execution_id != request.execution_id:
+                raise DockerInfrastructureError(
+                    "Task container returned a result for another execution"
+                )
             snapshot_revision = self._latest_revision(shard)
-            sandbox_metadata_path = shard / "sandbox.json"
-            sandbox_metadata = json.loads(
-                sandbox_metadata_path.read_text(encoding="utf-8")
-            )
             sandbox_metadata.update(
                 final_commit_hash=result.commit_hash,
                 snapshot_revision=snapshot_revision,
                 status=result.status,
             )
             self._write_sandbox_metadata(shard, sandbox_metadata)
+            failed = result.status == "failed"
             return replace(
                 result,
                 metadata={
@@ -552,38 +813,21 @@ class DockerTaskLauncher:
                     "container_id": container_id,
                     "image_digest": docker.image_digest,
                     "recovered": recovered,
+                    "reused": reused,
                     "runtime_protocol_version": docker.runtime_protocol_version,
                     "snapshot_revision": snapshot_revision,
                 },
             )
-        except asyncio.CancelledError:
-            if container_id:
-                await _command(
-                    self.docker_executable,
-                    "stop",
-                    "--time",
-                    "10",
-                    container_id,
-                    output_limit=32_000,
-                    check=False,
-                )
-                await _command(
-                    self.docker_executable,
-                    "kill",
-                    container_id,
-                    output_limit=32_000,
-                    check=False,
-                )
-            raise
         finally:
-            await asyncio.shield(
-                self._cleanup(
-                    container_name,
-                    volume_name,
-                    retention=docker.retention,
-                    failed=failed,
+            if not pending_checkpoint.exists():
+                await asyncio.shield(
+                    self._cleanup(
+                        container_name,
+                        volume_name,
+                        retention=docker.retention,
+                        failed=failed,
+                    )
                 )
-            )
 
     @staticmethod
     def _latest_revision(shard: Path) -> int | None:
