@@ -29,11 +29,13 @@ import cloudpickle
 
 DENIED = "Permission denied: access outside the trial workspace is not permitted"
 
-#: Ceiling on the JSON a worker may hand back. It bounds how much an untrusted
-#: worker can make the controller hold in memory, so it is a safety limit, not a
-#: budget: raise it for environments whose REPL checkpoints are genuinely large.
-#: `$CORRAL_MAX_WORKER_RESPONSE_BYTES` overrides the default for a whole run.
-DEFAULT_MAX_WORKER_RESPONSE_BYTES = 64 * 1024 * 1024
+#: Ceiling on the JSON a worker may hand back. A reply carries the REPL
+#: checkpoint, so this bounds an agent's whole working set, not just its output.
+#: It exists to stop an untrusted worker exhausting controller memory, so it is
+#: a safety limit rather than a budget, and is set well above what an
+#: environment holding a real dataset in a session needs.
+#: `$CORRAL_MAX_WORKER_RESPONSE_BYTES` tunes it in either direction.
+DEFAULT_MAX_WORKER_RESPONSE_BYTES = 1024 * 1024 * 1024
 
 
 def max_worker_response_bytes() -> int:
