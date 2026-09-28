@@ -85,20 +85,16 @@ def test_restricted_dispatch_sends_only_public_json_and_opaque_checkpoint(
 ):
     requests = []
 
-    def run_worker(kind, payload, workspace, **kwargs):
+    def run_worker_with_bulk(kind, payload, workspace, **kwargs):
         worker_tool, arguments = payload
         requests.append((kind, worker_tool, arguments, workspace, kwargs))
-        return {
-            "content": json.dumps(
-                {
-                    "output": "6\n",
-                    "checkpoint": "replacement",
-                    "status_export": "updated",
-                }
-            )
-        }
+        # The checkpoint arrives on the bulk channel, not inside the JSON reply.
+        return (
+            {"content": json.dumps({"output": "6\n", "status_export": "updated"})},
+            {"checkpoint": b"replacement"},
+        )
 
-    monkeypatch.setattr(permissions, "run_worker", run_worker)
+    monkeypatch.setattr(permissions, "run_worker_with_bulk", run_worker_with_bulk)
     result = execute_python_repl(
         code="values.sum()",
         initial_data={"values": [1, 2, 3]},

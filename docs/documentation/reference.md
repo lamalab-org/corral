@@ -112,20 +112,33 @@ the same function for every trial, then evaluate the persisted result.
 
 ## Restricted worker limits
 
-Under Docker, agent and tool code runs in a restricted worker and only JSON
-comes back. One setting bounds what a worker may return, on both the channels
-that carry it, through `corral.runtime.permissions.max_worker_response_bytes()`:
+Under Docker, agent and tool code runs in a restricted worker, and a worker
+hands back two kinds of thing on two separate descriptors. Control replies are
+JSON and stay small. Bulk payloads — a `PythonREPL` checkpoint, or anything else
+whose size follows the agent's data rather than its output — travel beside them
+and are spooled to a controller-private file as they arrive. Each channel has
+its own ceiling:
 
 | setting | default | bounds |
 | --- | --- | --- |
-| `CORRAL_MAX_WORKER_RESPONSE_BYTES` | 1 GiB | a worker's JSON reply, and the session channel that carries state snapshots |
+| `CORRAL_MAX_WORKER_RESPONSE_BYTES` | 64 MiB | a worker's JSON control reply, and the session channel that carries state snapshots |
+| `CORRAL_MAX_WORKER_BULK_BYTES` | 1 GiB | one bulk payload, such as a REPL checkpoint |
 
-A checkpointed `PythonREPL` returns its whole session in that reply, so for
-environments that keep a dataset in the session this limit bounds the agent's
-working set rather than its output. Raise it for such an environment, or lower
-it to keep an untrusted worker from exhausting controller memory on a small
-host. `create_python_repl_tool(max_response_bytes=...)` overrides it for one
-tool, as `address_space_bytes` does for worker memory.
+Both are read from the length prefix ahead of the body, so an oversize payload
+is refused before the controller allocates for it. That is what keeps the reply
+ceiling a memory-safety limit rather than a budget, and why it can stay low: an
+environment that holds a whole dataset in its REPL session is bounded by the
+bulk ceiling, which costs disk, not by the reply ceiling, which costs memory.
+Neither limit needs raising for an ordinary session; raise the bulk ceiling for
+an unusually large one, and lower the reply ceiling on a small host.
+`create_python_repl_tool(max_response_bytes=...)` overrides the reply ceiling
+for one tool, as `address_space_bytes` does for worker memory.
+
+A tool that runs in a worker can send a bulk payload itself with
+`permissions.send_bulk(name, payload)`, and the controller receives it from
+`permissions.run_worker_with_bulk(...)`, which returns the JSON result and a
+mapping of payload name to bytes. Prefer it to a large return value: a value
+returned the ordinary way is JSON-encoded and held whole in controller memory.
 
 Corral's launcher grants a trial container exactly the capabilities the worker
 needs — `SETUID`, `SETGID`, `CHOWN`, `DAC_OVERRIDE`, `KILL`, `SYS_ADMIN` and

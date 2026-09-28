@@ -14,6 +14,7 @@ import json
 import os
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -29,29 +30,93 @@ import cloudpickle
 
 DENIED = "Permission denied: access outside the trial workspace is not permitted"
 
-#: Ceiling on the JSON a worker may hand back. A reply carries the REPL
-#: checkpoint, so this bounds an agent's whole working set, not just its output.
-#: It exists to stop an untrusted worker exhausting controller memory, so it is
-#: a safety limit rather than a budget, and is set well above what an
-#: environment holding a real dataset in a session needs.
+#: Ceiling on a worker's JSON control reply. Bulk values travel on their own
+#: channel, so this bounds control messages alone: the controller reads the
+#: reply's length prefix first and refuses an oversize reply before allocating
+#: for it, which is what makes this a memory-safety limit rather than a budget.
 #: `$CORRAL_MAX_WORKER_RESPONSE_BYTES` tunes it in either direction.
-DEFAULT_MAX_WORKER_RESPONSE_BYTES = 1024 * 1024 * 1024
+DEFAULT_MAX_WORKER_RESPONSE_BYTES = 64 * 1024 * 1024
+
+#: Ceiling on one bulk payload, such as a REPL checkpoint. Bulk bytes are
+#: spooled to a controller-private file as they arrive, so this bounds disk
+#: rather than controller memory and can stand far above the reply ceiling.
+#: `$CORRAL_MAX_WORKER_BULK_BYTES` tunes it in either direction.
+DEFAULT_MAX_WORKER_BULK_BYTES = 1024 * 1024 * 1024
+
+#: Length prefix on the JSON control reply, read before the reply itself.
+_REPLY_PREFIX = struct.Struct("!Q")
+#: One bulk record: name length, then payload length. The controller reads this
+#: header before the body, so an oversize payload is refused unspooled.
+_BULK_RECORD = struct.Struct("!IQ")
+#: Bulk payloads move in chunks rather than one write, so neither side needs a
+#: buffer the size of the payload.
+_BULK_CHUNK = 1024 * 1024
 
 
-def max_worker_response_bytes() -> int:
-    """The configured ceiling on a worker's JSON response."""
-    configured = os.environ.get("CORRAL_MAX_WORKER_RESPONSE_BYTES", "").strip()
+def _configured_bytes(variable: str, default: int) -> int:
+    """Read one positive byte-count setting from the environment."""
+    configured = os.environ.get(variable, "").strip()
     if not configured:
-        return DEFAULT_MAX_WORKER_RESPONSE_BYTES
+        return default
     try:
         value = int(configured)
     except ValueError as exc:
-        raise ValueError(
-            f"CORRAL_MAX_WORKER_RESPONSE_BYTES must be an integer: {configured!r}"
-        ) from exc
+        raise ValueError(f"{variable} must be an integer: {configured!r}") from exc
     if value <= 0:
-        raise ValueError("CORRAL_MAX_WORKER_RESPONSE_BYTES must be positive")
+        raise ValueError(f"{variable} must be positive")
     return value
+
+
+def max_worker_response_bytes() -> int:
+    """The configured ceiling on a worker's JSON control reply."""
+    return _configured_bytes(
+        "CORRAL_MAX_WORKER_RESPONSE_BYTES", DEFAULT_MAX_WORKER_RESPONSE_BYTES
+    )
+
+
+def max_worker_bulk_bytes() -> int:
+    """The configured ceiling on one bulk payload from a worker."""
+    return _configured_bytes(
+        "CORRAL_MAX_WORKER_BULK_BYTES", DEFAULT_MAX_WORKER_BULK_BYTES
+    )
+
+
+#: Worker-side write end of the bulk channel, installed by the trusted
+#: bootstrap. It crosses the mount namespace and chroot as a bare descriptor,
+#: exactly as the JSON reply channel does; no shared path is ever opened.
+_bulk_fd: int | None = None
+
+
+def set_bulk_channel(descriptor: int | None) -> None:
+    """Install this worker's bulk write descriptor (trusted bootstrap only)."""
+    global _bulk_fd  # noqa: PLW0603 - one bulk channel per worker process
+    _bulk_fd = descriptor
+
+
+def send_bulk(name: str, payload: str | bytes) -> None:
+    """Hand the controller one large value beside the JSON reply.
+
+    Called in a worker. A value sent this way is never embedded in JSON and is
+    never held whole in controller memory: the controller spools it straight to
+    a private file. Use it for a REPL checkpoint or any payload whose size
+    follows the agent's data rather than its output.
+    """
+    if _bulk_fd is None:
+        raise RuntimeError("no bulk channel is available in this worker")
+    data = payload.encode() if isinstance(payload, str) else payload
+    label = name.encode()
+    os.write(_bulk_fd, _BULK_RECORD.pack(len(label), len(data)) + label)
+    with memoryview(data) as view:
+        offset = 0
+        while offset < len(view):
+            with view[offset : offset + _BULK_CHUNK] as chunk:
+                offset += os.write(_bulk_fd, chunk)
+
+
+def framed_reply(response: Any) -> bytes:
+    """Serialize one control reply with the length prefix the controller reads."""
+    body = json.dumps(response).encode()
+    return _REPLY_PREFIX.pack(len(body)) + body
 
 
 POLICY_VERSION = "workspace-root-v1"
@@ -492,6 +557,30 @@ def run_worker(
     max_response_bytes: int | None = None,
 ) -> Any:
     """Run one trusted bootstrap, then accept an unprivileged JSON result."""
+    result, _ = run_worker_with_bulk(
+        kind,
+        payload,
+        workspace,
+        cancel=cancel,
+        max_response_bytes=max_response_bytes,
+    )
+    return result
+
+
+def run_worker_with_bulk(
+    kind: str,
+    payload: Any,
+    workspace: str,
+    *,
+    cancel: threading.Event | None = None,
+    max_response_bytes: int | None = None,
+) -> tuple[Any, dict[str, bytes]]:
+    """Run one worker, returning its JSON result and any bulk payloads it sent.
+
+    Bulk payloads arrive on a separate descriptor and are spooled to a private
+    file as they stream in, so a large one costs controller disk rather than a
+    multiple of itself in controller memory.
+    """
     if not enabled() or _root is None:
         raise RuntimeError("restricted workers require Docker permission enforcement")
     descriptor = _open_directory(workspace)
@@ -503,6 +592,7 @@ def run_worker(
             descriptor,
             cancel=cancel,
             max_response_bytes=max_response_bytes or max_worker_response_bytes(),
+            max_bulk_bytes=max_worker_bulk_bytes(),
         )
     finally:
         try:
@@ -523,7 +613,8 @@ def _run_worker(
     *,
     cancel: threading.Event | None,
     max_response_bytes: int,
-) -> Any:
+    max_bulk_bytes: int,
+) -> tuple[Any, dict[str, bytes]]:
     uid, gid = workspace_identity(workspace, descriptor=workspace_fd)
     with tempfile.TemporaryDirectory(dir=_root) as directory:
         request = Path(directory) / "input.pkl"
@@ -532,14 +623,65 @@ def _run_worker(
         )
         request.chmod(0o600)
         reader, writer = os.pipe()
+        bulk_reader, bulk_writer = os.pipe()
         output: list[bytes] = []
+        bulk: dict[str, bytes] = {}
+        refused: list[str] = []
 
         def read_result() -> None:
+            # The length prefix is read first so an oversize reply is refused
+            # before the controller allocates room for it.
             with os.fdopen(reader, "rb") as stream:
-                output.append(stream.read(max_response_bytes + 1))
+                header = stream.read(_REPLY_PREFIX.size)
+                if len(header) < _REPLY_PREFIX.size:
+                    # A worker that died before replying leaves an empty result,
+                    # which the caller reports with the worker's own log.
+                    output.append(b"")
+                    return
+                (length,) = _REPLY_PREFIX.unpack(header)
+                if length > max_response_bytes:
+                    refused.append(
+                        f"control reply is {length:,} bytes, over the "
+                        f"{max_response_bytes:,} byte limit; raise "
+                        "$CORRAL_MAX_WORKER_RESPONSE_BYTES, or send the large "
+                        "value on the bulk channel instead"
+                    )
+                    return
+                output.append(stream.read(length))
+
+        def read_bulk() -> None:
+            with os.fdopen(bulk_reader, "rb") as stream:
+                while header := stream.read(_BULK_RECORD.size):
+                    if len(header) < _BULK_RECORD.size:
+                        refused.append("bulk record header was truncated")
+                        return
+                    name_length, length = _BULK_RECORD.unpack(header)
+                    if length > max_bulk_bytes:
+                        refused.append(
+                            f"bulk payload is {length:,} bytes, over the "
+                            f"{max_bulk_bytes:,} byte limit; raise "
+                            "$CORRAL_MAX_WORKER_BULK_BYTES"
+                        )
+                        return
+                    name = stream.read(name_length).decode(errors="replace")
+                    spool = Path(directory) / f"bulk-{len(bulk)}.bin"
+                    remaining = length
+                    with spool.open("wb") as sink:
+                        while remaining:
+                            chunk = stream.read(min(remaining, _BULK_CHUNK))
+                            if not chunk:
+                                refused.append(f"bulk payload {name!r} was truncated")
+                                return
+                            sink.write(chunk)
+                            remaining -= len(chunk)
+                    # One copy, made after the payload is safely on disk.
+                    bulk[name] = spool.read_bytes()
+                    spool.unlink()
 
         thread = threading.Thread(target=read_result, daemon=True)
         thread.start()
+        bulk_thread = threading.Thread(target=read_bulk, daemon=True)
+        bulk_thread.start()
         try:
             with tempfile.TemporaryFile(dir=_root) as log:
                 process = subprocess.Popen(
@@ -549,6 +691,7 @@ def _run_worker(
                         "corral.runtime._permission_worker",
                         str(request),
                         str(writer),
+                        str(bulk_writer),
                     ],
                     stdin=subprocess.DEVNULL,
                     # A write-only pipe is the only log handle inherited by the
@@ -558,7 +701,7 @@ def _run_worker(
                     # Environment factories may add private task import roots.
                     # The fresh trusted bootstrap needs the same module paths.
                     env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
-                    pass_fds=(writer, workspace_fd),
+                    pass_fds=(writer, bulk_writer, workspace_fd),
                     start_new_session=True,
                 )
 
@@ -571,6 +714,8 @@ def _run_worker(
                 log_thread.start()
                 os.close(writer)
                 writer = -1
+                os.close(bulk_writer)
+                bulk_writer = -1
                 try:
                     while True:
                         try:
@@ -587,17 +732,16 @@ def _run_worker(
                 finally:
                     _kill_identity(uid)
                     thread.join(timeout=5)
+                    bulk_thread.join(timeout=5)
                     log_thread.join(timeout=5)
                 if log_thread.is_alive():
                     raise RuntimeError("restricted worker log stream did not close")
+                if bulk_thread.is_alive():
+                    raise RuntimeError("restricted worker bulk stream did not close")
+                if refused:
+                    raise RuntimeError(f"restricted worker {refused[0]}")
                 if not output or thread.is_alive():
                     raise RuntimeError("restricted worker returned an invalid response")
-                if len(output[0]) > max_response_bytes:
-                    raise RuntimeError(
-                        "restricted worker response exceeds "
-                        f"{max_response_bytes:,} bytes. A large REPL checkpoint is "
-                        "the usual cause; raise $CORRAL_MAX_WORKER_RESPONSE_BYTES."
-                    )
                 if process.returncode or not output[0]:
                     log.seek(0, os.SEEK_END)
                     log.seek(max(0, log.tell() - 16000))
@@ -608,10 +752,11 @@ def _run_worker(
                 response = json.loads(output[0])
                 if not response["ok"]:
                     raise RuntimeError(response["error"])
-                return response["result"]
+                return response["result"], bulk
         finally:
-            if writer >= 0:
-                os.close(writer)
+            for descriptor in (writer, bulk_writer):
+                if descriptor >= 0:
+                    os.close(descriptor)
 
 
 def execute_tool(

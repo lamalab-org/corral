@@ -1481,3 +1481,67 @@ async def test_cancelled_agent_stops_its_descendants_before_returning(
         running.cancel()
         await asyncio.gather(running, return_exceptions=True)
         await store.aclose()
+
+
+def test_session_larger_than_the_reply_ceiling_round_trips(workspace, monkeypatch):
+    """A checkpoint is bounded by the bulk channel, never by the reply ceiling.
+
+    The checkpoint is the one worker payload whose size follows the agent's data
+    rather than its output, so it travels beside the JSON reply. Pinning a reply
+    ceiling far below the checkpoint proves the two are genuinely decoupled: on
+    the old single-channel transport this call could not have returned.
+    """
+    from corral.runtime.python_repl import execute_python_repl
+
+    monkeypatch.setenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", str(64 * 1024))
+    first = execute_python_repl(
+        code=(
+            "import numpy as np\n"
+            "rng = np.random.default_rng(0)\n"
+            "block = rng.normal(size=(1200, 1200))\n"
+            "print('built')"
+        ),
+        workspace=workspace,
+    )
+    assert first.output.strip() == "built"
+    assert len(first.checkpoint) > 10 * 1024 * 1024
+    assert len(first.checkpoint) > permissions.max_worker_response_bytes()
+
+    # The same oversized state must survive being handed back to a new worker.
+    second = execute_python_repl(
+        code="print(block.shape, int(block[0][0] * 10**6))",
+        checkpoint=first.checkpoint,
+        workspace=workspace,
+    )
+    assert second.output.strip().startswith("(1200, 1200) ")
+
+
+def test_oversize_bulk_payload_is_refused_with_its_own_setting(workspace, monkeypatch):
+    """The bulk ceiling is enforced, and the error names the knob that raises it."""
+    from corral.runtime.python_repl import execute_python_repl
+
+    monkeypatch.setenv("CORRAL_MAX_WORKER_BULK_BYTES", str(4 * 1024 * 1024))
+    with pytest.raises(RuntimeError, match="CORRAL_MAX_WORKER_BULK_BYTES"):
+        execute_python_repl(
+            code="import numpy as np; pad = np.zeros((2000, 2000))",
+            workspace=workspace,
+        )
+
+
+def test_oversize_control_reply_is_refused_before_it_is_read(workspace, monkeypatch):
+    """An oversize reply is refused from its length prefix, not after buffering.
+
+    Tool output rides the control channel, so a tool returning more than the
+    ceiling is still rejected; the point is that the controller learns the size
+    from the prefix and never allocates for the body.
+    """
+    from corral.core.tool import tool
+
+    @tool
+    def chatty() -> str:
+        """Return more control-channel text than the ceiling allows."""
+        return "x" * (2 * 1024 * 1024)
+
+    monkeypatch.setenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", str(64 * 1024))
+    with pytest.raises(RuntimeError, match="CORRAL_MAX_WORKER_RESPONSE_BYTES"):
+        permissions.run_worker("tool", (chatty, {}), workspace)

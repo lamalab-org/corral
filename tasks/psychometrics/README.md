@@ -62,20 +62,21 @@ The scorer, generators, answer keys, and shell are not exposed to the agent.
 ### REPL checkpoints under Docker
 
 Under Docker the REPL runs in a restricted worker that hands its whole session
-back as a checkpoint on every call, so the limit on a worker's reply is really a
-limit on how much an agent may keep in the session. Reading the survey into a
-dataframe checkpoints to about 12 MiB, and roughly 25 MiB once a country subset
-and a float matrix are derived from it.
+back as a checkpoint on every call. Reading the survey into a dataframe
+checkpoints to about 12 MiB, and roughly 25 MiB once a country subset and a
+float matrix are derived from it.
 
-Corral allows 1 GiB, which is ample for these tasks. It is a Corral-wide
-setting, not a psychometrics one, and `CORRAL_MAX_WORKER_RESPONSE_BYTES` changes
-it for a whole run:
+Nothing needs configuring for that. The checkpoint travels on Corral's bulk
+channel, which is spooled to disk rather than held in controller memory, and its
+1 GiB default is far above what these tasks reach. A session is not bounded by
+the smaller limit on a worker's JSON reply. Both are Corral-wide settings rather
+than psychometrics ones, and either can be changed for a whole run:
 
 ```bash
-CORRAL_MAX_WORKER_RESPONSE_BYTES=$((2 * 1024 ** 3)) uv run python -m corral_psychometrics.env --level 1
+CORRAL_MAX_WORKER_BULK_BYTES=$((2 * 1024 ** 3)) uv run python -m corral_psychometrics.env --level 1
 ```
 
-A reply over the limit fails the call and names the limit it exceeded.
+A payload over either limit fails the call and names the setting to raise.
 
 `corral bench` grants the trial container the capabilities the worker needs, so
 these tasks need no Docker flags of their own. Running a trial image by hand

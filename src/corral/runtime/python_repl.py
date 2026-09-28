@@ -664,10 +664,10 @@ class _RestrictedPythonREPLTool(Tool):
         except BaseException:
             output = traceback.format_exc(limit=8)
         exports = _export_namespace(namespace, self.export_names)
-        result: dict[str, Any] = {
-            "output": output[: self.max_output_chars],
-            "checkpoint": snapshot_namespace(namespace),
-        }
+        # The checkpoint's size follows the agent's data rather than its output,
+        # so it leaves on the bulk channel and never enters this JSON reply.
+        permissions.send_bulk("checkpoint", snapshot_namespace(namespace))
+        result: dict[str, Any] = {"output": output[: self.max_output_chars]}
         if self.export_result_names:
             result.update(
                 {
@@ -741,7 +741,7 @@ def execute_python_repl(
         max_output_chars=max_output_chars,
         address_space_bytes=address_space_bytes,
     )
-    response = permissions.run_worker(
+    reply, bulk = permissions.run_worker_with_bulk(
         "tool",
         (
             worker_tool,
@@ -754,18 +754,17 @@ def execute_python_repl(
         workspace,
         cancel=cancel,
         max_response_bytes=max_response_bytes,
-    )["content"]
-    result = json.loads(response)
-    expected = (
-        {"output", "checkpoint", *result_names.values()}
-        if result_names
-        else {"output", "checkpoint", "exports"}
     )
+    result = json.loads(reply["content"])
+    expected = (
+        {"output", *result_names.values()} if result_names else {"output", "exports"}
+    )
+    checkpoint_payload = bulk.get("checkpoint")
     if (
         not isinstance(result, dict)
         or set(result) != expected
         or not isinstance(result.get("output"), str)
-        or not isinstance(result.get("checkpoint"), str)
+        or not isinstance(checkpoint_payload, bytes)
     ):
         raise RuntimeError("Invalid Python REPL worker result")
     exports = (
@@ -779,7 +778,9 @@ def execute_python_repl(
     if not isinstance(exports, dict) or set(exports) != set(export_names):
         raise RuntimeError("Invalid Python REPL worker exports")
     return PythonREPLResult(
-        output=result["output"], checkpoint=result["checkpoint"], exports=exports
+        output=result["output"],
+        checkpoint=checkpoint_payload.decode(),
+        exports=exports,
     )
 
 
