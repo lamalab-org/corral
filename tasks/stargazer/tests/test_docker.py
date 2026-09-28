@@ -49,18 +49,15 @@ def test_docker_dispatch_sends_only_public_data_and_opaque_checkpoint(
         assert not step.hidden_args
         arguments["public_data"] = json.loads(arguments["public_data"])
         requests.append(arguments)
-        return {
-            "content": json.dumps(
-                {
-                    "output": "42",
-                    "checkpoint": "new-opaque-checkpoint",
-                    "protocol_ack": True,
-                }
-            )
-        }
+        # The checkpoint travels on the bulk channel beside the JSON reply, so
+        # the session is bounded by disk rather than by the reply ceiling.
+        return (
+            {"content": json.dumps({"output": "42", "protocol_ack": True})},
+            {"checkpoint": b"new-opaque-checkpoint"},
+        )
 
     monkeypatch.setattr(permissions, "enabled", lambda: True)
-    monkeypatch.setattr(permissions, "run_worker", run)
+    monkeypatch.setattr(permissions, "run_worker_with_bulk", run)
     result = permissions.execute_tool(
         environment,
         state,
