@@ -44,6 +44,12 @@ class DockerSandboxSpec:
         "HF_TOKEN",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
+        # Tracing runs inside the task container (see observer_from_env).
+        "CORRAL_LANGFUSE_ENABLED",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_BASE_URL",
+        "LANGFUSE_HOST",
     )
     retention: str = SandboxRetention.NEVER.value
     registry_module: str | None = None

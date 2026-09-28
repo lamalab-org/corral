@@ -203,3 +203,91 @@ async def test_docker_launcher_uses_one_hardened_container_and_host_shard(
     assert any(command[1:3] == ("rm", "--force") for command in commands)
     assert any(command[1:3] == ("volume", "rm") for command in commands)
     await store.aclose()
+
+
+def _docker_request(execution_id: str) -> RunTaskInput:
+    return RunTaskInput(
+        execution_id=execution_id,
+        task_id="task-a",
+        environment_id="task-a",
+        agent_id="agent",
+        started_at="2026-01-01T00:00:00+00:00",
+        benchmark_run_id="benchmark",
+        trial_index=1,
+        sandbox=SandboxProfile(
+            mode=SandboxMode.DOCKER,
+            docker=DockerSandboxSpec(
+                image="corral:test",
+                image_digest="sha256:" + "b" * 64,
+            ),
+        ),
+        agent_runtime=AgentRuntimeDefinition(name="react", model="test-model"),
+        environment_runtime=EnvironmentRuntimeDefinition(name="samplemath"),
+    )
+
+
+@pytest.mark.anyio()
+async def test_docker_launcher_forwards_langfuse_keys_by_default(monkeypatch, tmp_path):
+    store = ShardedCommitStore(tmp_path / ".corral")
+    execution_id = "benchmark:task-a:1"
+    execution_dir = store.execution_dir(execution_id)
+    commands = []
+
+    async def fake_command(*arguments, **_kwargs):
+        commands.append(arguments)
+        if arguments[1] == "create":
+            return 0, "container-id"
+        if arguments[1:3] == ("start", "--attach"):
+            result = StateRef(
+                commit_hash="a" * 64,
+                execution_id=execution_id,
+                branch_id="main",
+                sequence=1,
+                status="submitted",
+                agent_steps=1,
+            )
+            (execution_dir / "result.json").write_text(json.dumps(asdict(result)))
+        return 0, ""
+
+    monkeypatch.setattr(launchers, "_command", fake_command)
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://langfuse.example")
+
+    await launchers.DockerTaskLauncher(store).run(_docker_request(execution_id))
+
+    create = next(command for command in commands if command[1] == "create")
+    forwarded = {
+        create[index + 1] for index, value in enumerate(create) if value == "--env"
+    }
+    # Names only: Docker reads the values from the launcher's environment.
+    assert {"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} <= (
+        forwarded
+    )
+    await store.aclose()
+
+
+@pytest.mark.anyio()
+async def test_container_task_traces_through_the_environment_observer(
+    monkeypatch, tmp_path
+):
+    flushed = []
+
+    class Observer:
+        def flush(self):
+            flushed.append(True)
+
+    def stop(*_args):
+        raise RuntimeError("stop after the observer is created")
+
+    monkeypatch.setattr(internal, "observer_from_env", Observer)
+    monkeypatch.setattr(internal.os, "chown", stop)
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    request_path = checkpoint / "request.json"
+    request_path.write_text(json.dumps(asdict(_docker_request("benchmark:task-a:1"))))
+
+    with pytest.raises(RuntimeError, match="stop after"):
+        await internal.run_task_from_files(request_path, checkpoint / "result.json")
+
+    assert flushed == [True]
