@@ -60,9 +60,10 @@ def _print_results(run_id: str, result: Any) -> None:
         for trial in task_results.trials:
             status = "failed" if trial.error_message else "completed"
             output = json.dumps(trial.output, ensure_ascii=False, default=str)
+            score = "-" if trial.score is None else f"{trial.score:g}"
             lines.append(
                 f"- {task_id} [{trial.trial_id}]: {status}, "
-                f"score={trial.score:g}, output={output}"
+                f"score={score}, output={output}"
             )
     sys.stdout.write("\n".join(lines) + "\n")
 

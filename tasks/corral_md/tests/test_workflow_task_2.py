@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from ase import Atoms, units
 from ase.data import atomic_masses, atomic_numbers
+from ase.io import read as read_structure
 from ase.io import write as write_structure
 from corral_md.workflow_scoring.common import Evidence, Rubric
 from corral_md.workflow_scoring.level1 import _task_2 as evaluate_level1_task_2
@@ -25,7 +26,9 @@ def test_boundary_density_uses_same_time_across_stage_labels(submission):
     )
     trace = trace[~shared_starts].copy()
     # A later sample can differ from the boundary density without contradiction.
-    trace.loc[(trace.stage == "hold") & (trace.time_ps == 20.25), "density_g_cm3"] += 0.1
+    trace.loc[(trace.stage == "hold") & (trace.time_ps == 20.25), "density_g_cm3"] += (
+        0.1
+    )
     trace.to_csv(root / "thermal.csv", index=False)
     assert _boundary_density(Evidence(manifest)) is True
 
@@ -43,6 +46,17 @@ def write_json(path, data):
 
 @pytest.fixture
 def submission(tmp_path):
+    with ZipFile(Path(__file__).parents[1] / "structures.zip") as archive:
+        (tmp_path / "liq1300.dat").write_bytes(
+            archive.read("structures/melt/liq1300.dat")
+        )
+    source = read_structure(
+        tmp_path / "liq1300.dat",
+        format="lammps-data",
+        atom_style="charge",
+        units="real",
+        sort_by_id=True,
+    )
     rows = []
     for stage, start, end, low, high, tg in [
         ("cooling", 0, 20, 1300, 300, 750),
@@ -67,6 +81,13 @@ def submission(tmp_path):
                 }
             )
     trace = pd.DataFrame(rows)
+    # Shift the synthetic density curve onto the real supplied starting density.
+    # Its transition slopes and the analysis below remain independently generated.
+    source_mass = sum(
+        atomic_masses[atomic_numbers[s]] for s in source.get_chemical_symbols()
+    )
+    source_density = source_mass * 1.66053906660 / source.get_volume()
+    trace["density_g_cm3"] += source_density - trace.density_g_cm3.iloc[0]
     trace.to_csv(tmp_path / "thermal.csv", index=False)
 
     report = {
@@ -146,7 +167,7 @@ def submission(tmp_path):
         ),
     )
     states = {}
-    species = ["Na", "Na", "Si", "O", "O", "O"]
+    species = source.get_chemical_symbols()
     mass = sum(atomic_masses[atomic_numbers[symbol]] for symbol in species)
     for name, time, row in [
         ("initial", 0, 0),
@@ -156,14 +177,20 @@ def submission(tmp_path):
         ("reheating_start", 30, 81),
         ("reheating_end", 50, 122),
     ]:
-        length = (mass * 1.66053906660 / trace.iloc[row].density_g_cm3) ** (1 / 3)
+        volume = mass * 1.66053906660 / trace.iloc[row].density_g_cm3
+        scale = (volume / source.get_volume()) ** (1 / 3)
+        velocities = source.get_velocities() * units.fs
+        if name != "initial":
+            velocities *= np.sqrt(
+                trace.iloc[row].temperature_K / source.get_temperature()
+            )
         states[name] = {
             "time_ps": time,
-            "cell": (np.eye(3) * length).tolist(),
-            "ids": list(range(1, 7)),
-            "positions": [[index * 0.1 * length] * 3 for index in range(6)],
-            "velocities": [[index * 0.01] * 3 for index in range(6)],
-            "charges": [0.6, 0.6, 2.4, -1.2, -1.2, -1.2],
+            "cell": (source.cell.array * scale).tolist(),
+            "ids": source.arrays["id"].tolist(),
+            "positions": (source.positions * scale).tolist(),
+            "velocities": velocities.tolist(),
+            "charges": source.get_initial_charges().tolist(),
             "species": species,
         }
     write_json(tmp_path / "boundaries.json", states)
@@ -198,6 +225,7 @@ run 20000
         "results": results,
         "report": report_path,
         "artifacts": {
+            "initial_state": str(tmp_path / "liq1300.dat"),
             "thermal_trace": str(tmp_path / "thermal.csv"),
             "boundary_states": str(tmp_path / "boundaries.json"),
             "lammps_inputs": str(tmp_path / "in.lammps"),
@@ -240,9 +268,9 @@ def test_level1_accepts_the_20_ps_cooling_stage(submission):
     rubric = Rubric(2)
     evaluate_level1_task_2(Evidence(manifest), rubric)
     assert check(rubric, "cooling_schedule_and_observables")["status"] == "passed"
-    assert check(rubric, "supplied_silicate_source_state")["status"] == "failed"
-    assert check(rubric, "cooled_endpoint_temperature")["status"] == "failed"
-    assert rubric.score == pytest.approx(0.80), rubric.checks
+    assert check(rubric, "supplied_silicate_source_state")["status"] == "passed"
+    assert check(rubric, "cooled_endpoint_temperature")["status"] == "passed"
+    assert rubric.score == pytest.approx(0.90), rubric.checks
 
 
 @pytest.mark.parametrize(

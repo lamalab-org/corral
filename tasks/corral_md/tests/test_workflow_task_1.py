@@ -11,6 +11,8 @@ from ase.io import read, write
 from corral_md.workflow_scoring import task_1 as scoring
 from corral_md.workflow_scoring.common import Evidence, Rubric, UnsupportedEvidence
 
+pytestmark = pytest.mark.usefixtures("offline_mp149_reference")
+
 
 def _dump(path, value):
     path.write_text(json.dumps(value))
@@ -58,6 +60,13 @@ def evidence(tmp_path):
     rng = np.random.default_rng(782)
     reference = bulk("Si", "diamond", a=5.43, cubic=True)
     initial = reference.repeat((3, 3, 3))
+    write(
+        tmp_path / "silicon.data",
+        reference,
+        format="lammps-data",
+        atom_style="full",
+        masses=True,
+    )
     initial.set_velocities(rng.normal(size=(216, 3)))
     initial.set_velocities(
         initial.get_velocities() * np.sqrt(300 / initial.get_temperature())
@@ -110,8 +119,9 @@ def evidence(tmp_path):
     (tmp_path / "input.lmp").write_text("""units metal
 atom_style full
 read_data silicon.data
+replicate 3 3 3
 pair_style sw
-pair_coeff * * silicon.sw Si
+pair_coeff * * /workspace/potentials/SW/Si.sw Si
 timestep 0.001
 velocity all create 300 4567 mom yes
 fix heat all npt temp 300 2500 0.1 iso 0 0 1
@@ -464,7 +474,9 @@ def test_unknown_input_control_flow_needs_review_but_missing_logs_fail(evidence)
     path.write_text(path.read_text() + '\nif "1 == 1" then "print done"\n')
     rubric = _score(evidence)
     assert _by_name(rubric, "thermal_protocol_and_log")["status"] == "unverified"
-    assert _by_name(rubric, "reported_diffusion")["status"] == "passed"
+    # The unknown input can also alter the prepared state; dependent analysis
+    # now stays pending until preparation can be verified.
+    assert _by_name(rubric, "reported_diffusion")["status"] == "unverified"
     assert rubric.score is None
     (evidence / "log.lammps").unlink()
     assert _by_name(_score(evidence), "thermal_protocol_and_log")["status"] == "failed"

@@ -26,6 +26,33 @@ def _state(submission):
     )
 
 
+@pytest.mark.parametrize("required", [False, True])
+def test_verified_cycle_requirement_is_explained_when_enabled(required):
+    from corral_md.workflow_scoring.verification import ModalVerifier
+
+    task = env.load_tasks_from_json(
+        env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_10.json"
+    )["level_2_task_10"]
+    task = replace(
+        task,
+        scoring_fn=WorkflowScorer(
+            10, level=2, verifier=ModalVerifier(require_provenance=required)
+        ),
+    )
+    environment = env.MolecularDynamicsEnvironment("task", task)
+    prompt = env._md_task_prompt(environment, _state("{}"))
+    assert ("This task requires trusted execution provenance" in prompt) is required
+    guide = example_files(10, level=2)["README.md"]
+    for text in (
+        "run_verified_md",
+        "random_seed",
+        "equilibration_steps",
+        "run_id",
+        "action_id",
+    ):
+        assert text in guide
+
+
 @pytest.mark.parametrize("number", range(1, 11))
 def test_shipped_workflow_contract_and_empty_evidence(number, tmp_path):
     task = env.load_tasks_from_json(

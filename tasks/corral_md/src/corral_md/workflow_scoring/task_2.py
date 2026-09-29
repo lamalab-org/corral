@@ -794,6 +794,7 @@ def _hold(e, drift=False):
 
 def evaluate(e, r):
     """Add task checks to the shared rubric (exactly 90 available points)."""
+    from . import lammps_checks
 
     trace_ok = False
 
@@ -807,7 +808,18 @@ def evaluate(e, r):
 
     r.check("thermal_cycle", 12, lambda: _verified(thermal_cycle))
     r.check("saved_physics_and_logs", 8, lambda: _verified(lambda: _physics(e)))
-    r.check("boundary_state_continuity", 10, lambda: _boundaries(e))
+
+    def boundary_check():
+        continuity = _boundaries(e)
+        if continuity is not True:
+            return continuity
+        return (
+            lammps_checks.supplied_silicate_initial_state(e)
+            and lammps_checks.no_silicate_state_resets(e)
+            and lammps_checks.cooled_endpoint_temperature(e)
+        )
+
+    r.check("boundary_state_continuity", 10, boundary_check)
     r.check("thermal_observables", 4, lambda: _verified(lambda: _logged_trace(e)))
     r.check("boundary_density_consistency", 3, lambda: _boundary_density(e))
     selections = r.check("transition_selections", 8, lambda: _selection(e))
@@ -842,31 +854,35 @@ def evaluate(e, r):
     r.check(
         "signed_transition_difference",
         4,
-        lambda: coordinate
-        and result_close(
-            e.results["delta_tg_K"],
-            float(e.results["reheating_tg_K"]) - float(e.results["cooling_tg_K"]),
-            atol=0.5,
+        lambda: (
+            coordinate
+            and result_close(
+                e.results["delta_tg_K"],
+                float(e.results["reheating_tg_K"]) - float(e.results["cooling_tg_K"]),
+                atol=0.5,
+            )
         ),
     )
     r.check(
         "reported_estimates_and_units",
         4,
-        lambda: all(
-            e.results["units"].get(key) == value
-            for key, value in [
-                ("temperature", "K"),
-                ("density", "g/cm3"),
-                ("density_drift", "g/cm3/ps"),
-            ]
-        )
-        and all(
-            result_close(
-                e.results[f"{stage}_tg_K"],
-                _transitions(e)[stage]["estimate_K"],
-                atol=0.5,
+        lambda: (
+            all(
+                e.results["units"].get(key) == value
+                for key, value in [
+                    ("temperature", "K"),
+                    ("density", "g/cm3"),
+                    ("density_drift", "g/cm3/ps"),
+                ]
             )
-            for stage in ["cooling", "reheating"]
+            and all(
+                result_close(
+                    e.results[f"{stage}_tg_K"],
+                    _transitions(e)[stage]["estimate_K"],
+                    atol=0.5,
+                )
+                for stage in ["cooling", "reheating"]
+            )
         ),
     )
     r.check(
@@ -877,12 +893,18 @@ def evaluate(e, r):
     r.check(
         "hold_means",
         6,
-        lambda: trace_ok
-        and result_close(
-            e.results["hold_temperature_K"], _hold(e).temperature_K.mean(), atol=1e-05
-        )
-        and result_close(
-            e.results["hold_density_g_cm3"], _hold(e).density_g_cm3.mean(), atol=1e-07
+        lambda: (
+            trace_ok
+            and result_close(
+                e.results["hold_temperature_K"],
+                _hold(e).temperature_K.mean(),
+                atol=1e-05,
+            )
+            and result_close(
+                e.results["hold_density_g_cm3"],
+                _hold(e).density_g_cm3.mean(),
+                atol=1e-07,
+            )
         ),
     )
 

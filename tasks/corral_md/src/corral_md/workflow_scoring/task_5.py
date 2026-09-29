@@ -34,6 +34,41 @@ class UnsupportedMethod(UnsupportedEvidence):
     """The numerical evidence uses a method this checker cannot reconstruct."""
 
 
+HESSIAN_OPERATIONS = {
+    "symmetrization": {
+        "none": ("none",),
+        "average_transpose": (
+            "average_transpose",
+            "transpose_average",
+            "Hessian transpose average",
+            "H_sym = (H_raw + H_raw^T)/2",
+        ),
+    },
+    "acoustic_sum_rule": {
+        "none": ("none",),
+        "projection": (
+            "projection",
+            "orthogonal translational projection",
+            "Cartesian orthogonal projection H = P H_sym P, P removes the three uniform translations",
+        ),
+    },
+}
+
+
+def postprocess_settings(record):
+    """Give local reconstruction and remote verification the same operations."""
+    normalized = {}
+    for field, operations in HESSIAN_OPERATIONS.items():
+        value = record[field]
+        for canonical, aliases in operations.items():
+            if value in aliases:
+                normalized[field] = canonical
+                break
+        else:
+            raise UnsupportedMethod(f"Unsupported {field}: {value!r}")
+    return normalized
+
+
 def close(actual, expected, rtol=1e-5, atol=1e-7):
     return _shared_close(actual, expected, rtol=rtol, atol=atol)
 
@@ -178,28 +213,13 @@ def _reconstruct(e, record):
         raise UnsupportedMethod(
             f"Cannot reconstruct the saved numerical method {method!r}"
         )
-    symmetry = record["symmetrization"]
-    if symmetry in (
-        "average_transpose",
-        "transpose_average",
-        "Hessian transpose average",
-        "H_sym = (H_raw + H_raw^T)/2",
-    ):
+    transformations = postprocess_settings(record)
+    if transformations["symmetrization"] == "average_transpose":
         matrix = (matrix + matrix.T) / 2
-    elif symmetry != "none":
-        raise UnsupportedMethod(f"Unsupported symmetrization: {symmetry!r}")
-    acoustic = record["acoustic_sum_rule"]
-    if acoustic in (
-        "projection",
-        "orthogonal translational projection",
-        "Cartesian orthogonal projection H = P H_sym P, "
-        "P removes the three uniform translations",
-    ):
+    if transformations["acoustic_sum_rule"] == "projection":
         translations = np.tile(np.eye(3), (2, 1))[order]
         projection = np.eye(6) - translations @ translations.T / 2
         matrix = projection @ matrix @ projection
-    elif acoustic != "none":
-        raise UnsupportedMethod(f"Unsupported acoustic sum rule: {acoustic!r}")
     if not close(matrix, matrix.T, rtol=1e-5, atol=1e-7):
         raise EvidenceError("Processed force constants are not symmetric")
     return matrix, order
@@ -338,8 +358,11 @@ def evaluate(e: Evidence, r: Rubric) -> None:
     r.check("natural_silicon_masses", 3, lambda: bool(len(masses())))
 
     def conventions():
+        from .level1_trusted import teacher_digest_matches
+
         return (
             is_teacher_model(e.settings["model"])
+            and teacher_digest_matches(e, 5)
             and e.settings["energy_unit"] == "eV"
             and e.settings["force_unit"] == "eV/Angstrom"
             and e.settings["force_constant_unit"] == "eV/Angstrom^2"

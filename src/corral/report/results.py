@@ -21,7 +21,7 @@ class TaskTrialResult:
 
     task_id: str
     trial_id: str
-    score: float
+    score: float | None
     state: dict[str, Any]  # TODO replace Any with specific types
     tool_statistics: dict[str, Any]  # TODO replace Any with specific types
     output: dict[str, Any] | None = None
@@ -34,8 +34,10 @@ class TaskTrialResult:
     surrendered: bool = False
 
     @property
-    def success(self) -> bool:
+    def success(self) -> bool | None:
         """Whether the external evaluation passed for reporting purposes."""
+        if self.score is None:
+            return None
         return self.score > 0 and self.error_message is None and not self.surrendered
 
     @property

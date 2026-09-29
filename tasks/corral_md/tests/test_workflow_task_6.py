@@ -291,6 +291,9 @@ def submission(tmp_path):
                 {
                     "stage": label,
                     "time_fs": frame["time_fs"],
+                    "step": int(frame["time_fs"]),
+                    "pressure_GPa": 0.0,
+                    "density_g_cm3": mass.sum() * 1.66053906660 / atoms.get_volume(),
                     "temperature_K": t,
                     "kinetic_energy_eV": kinetic,
                     "potential_energy_eV": frame["energy"],
@@ -616,6 +619,7 @@ def test_nonuniform_lomb_scargle_retains_evidence_for_review(submission):
     for row in trace:
         if row["stage"] == "production" and row["time_fs"] == original_time:
             row["time_fs"] += 0.2
+        row["step"] = round(row["time_fs"] / 0.1)
     _write(submission.parent / "trace.json", trace)
     _write(
         submission.parent / "spectrum.json",
@@ -628,6 +632,7 @@ def test_nonuniform_lomb_scargle_retains_evidence_for_review(submission):
         detrend="constant",
         window="none",
     )
+    settings["md"]["timestep_fs"] = 0.1
     _write(submission.parent / "settings.json", settings)
     manifest = _read(submission)
     claims = manifest["results"]["spectrum"]

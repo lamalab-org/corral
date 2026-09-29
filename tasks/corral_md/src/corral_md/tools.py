@@ -40,7 +40,7 @@ def build_run_verified_md_tool(workspace: str | Path):
         [WORKFLOW_INTEGRATION] Typical workflow integration:
         1. [PREREQUISITE] Save the cycle settings in a JSON file. [/PREREQUISITE]
         2. [CURRENT] Run this tool with the configuration file. [/CURRENT]
-        3. [FOLLOW_UP] Analyze the output and add the returned run and action IDs to the manifest. [/FOLLOW_UP]
+        3. [FOLLOW_UP] Analyze the output and copy the receipt's run_id and action_id into manifest.provenance; release_id is optional. Top-level IDs are also accepted. Duplicate IDs must agree. [/FOLLOW_UP]
         [/WORKFLOW_INTEGRATION]
 
         [CONTEXTUAL] How this tool works:
@@ -431,12 +431,12 @@ def build_execute_python_script_tool(workspace: str | Path):
     def execute_python_script(
         script_path: str,
         args: list[str] | None = None,
-        timeout: int = 600,
+        timeout: int = 900,
         working_dir: str | None = None,
         use_gpu: bool = False,
         corral_action_id: str | None = None,
     ) -> str:
-        """[BRIEF] Run a saved Python script with the appropriate CPU or GPU backend. [/BRIEF]
+        """[BRIEF] Run a saved Python script on CPU or an A100 GPU. The default wall-clock budget is 900 seconds (15 minutes) per call, including Python startup and model loading. The process is stopped when its timeout expires. Choose a workload that fits; use shorter runs and inspect their timing before scaling up. GPU outputs are synchronized only on success, so continue long simulations from previously synchronized restart states in separate calls, preserving positions and velocities. [/BRIEF]
 
         [DETAILED] CPU scripts run in Corral's restricted local task workspace. When use_gpu is true, the same interface synchronizes the script and task files to an env with an A100 GPU. [/DETAILED]
 
@@ -471,10 +471,10 @@ def build_execute_python_script_tool(workspace: str | Path):
                 [ARGS_DETAILED] The strings are passed to the script in order. Absolute /workspace arguments are translated for local CPU execution. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] List of strings or null. [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] ["--steps", "1000"], null [/ARGS_EXAMPLES]
-            timeout: [ARGS_BRIEF] Maximum run time in seconds. Defaults to 600. [/ARGS_BRIEF]
+            timeout: [ARGS_BRIEF] Wall-clock limit in seconds, including Python startup and model loading. Defaults to 900 (15 minutes); allowed range 1-7200. A timeout stops the process and returns an error so you can reduce the workload. [/ARGS_BRIEF]
                 [ARGS_DETAILED] The value must be between 1 and 7200. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Integer from 1 to 7200. [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] 600, 3600 [/ARGS_EXAMPLES]
+                [ARGS_EXAMPLES] 900, 3600 [/ARGS_EXAMPLES]
             working_dir: [ARGS_BRIEF] Working directory. Defaults to /workspace. [/ARGS_BRIEF]
                 [ARGS_DETAILED] The directory must be under /workspace. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Absolute /workspace directory path or null. [/ARGS_SYNTACTICAL]

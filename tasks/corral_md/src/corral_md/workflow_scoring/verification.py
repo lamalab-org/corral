@@ -17,6 +17,11 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 import numpy as np
+from corral_md.calculator_settings import (
+    CalculatorSettingsError,
+    UnsupportedCalculatorSettings,
+    parse_calculator_settings,
+)
 
 from .common import EvidenceError, UnsupportedEvidence, finite_array
 
@@ -228,6 +233,15 @@ class Plan:
     def attempt(self, name, function, targets=()):
         try:
             function()
+        except CalculatorSettingsError as exc:
+            self.notes.append(
+                {
+                    "id": name,
+                    "status": "failed",
+                    "detail": str(exc),
+                    "targets": list(targets),
+                }
+            )
         except UnsupportedEvidence as exc:
             self.notes.append(
                 {
@@ -249,32 +263,13 @@ class Plan:
 
 
 def calculator_settings(e, *, model="teacher.model", dispersion=False, role=None):
-    config = (
-        e.settings.get(f"{role}_model_settings", {})
-        if role
-        else e.settings.get("model_settings", e.settings.get("calculator", {}))
-    )
-    if not isinstance(config, dict):
-        raise UnsupportedEvidence("Calculator settings need review")
-    allowed = {
-        "default_dtype",
-        "dtype",
-        "precision",
-        "device",
-        "dispersion",
-        "model",
-        "model_path",
-        "checkpoint",
-    }
-    if set(config) - allowed:
-        raise UnsupportedEvidence(
-            "Additional calculator settings need a verification adapter"
-        )
+    try:
+        config = parse_calculator_settings(e.settings, role=role)
+    except UnsupportedCalculatorSettings as exc:
+        raise UnsupportedEvidence(str(exc)) from exc
     return {
         "model": model,
-        "default_dtype": config.get(
-            "default_dtype", config.get("dtype", config.get("precision", "float64"))
-        ),
+        "default_dtype": config.get("default_dtype", "float64"),
         "dispersion": config.get("dispersion", dispersion),
     }
 
@@ -445,7 +440,7 @@ def build_plan(e, task_number, challenge):
         ]
 
         def strains():
-            from .task_5 import _array, _order, _records
+            from .task_5 import _array, _order, _records, postprocess_settings
 
             frames = e.trajectory("strained_structures")
             records = _records(e, "strain_calculations")
@@ -461,12 +456,7 @@ def build_plan(e, task_number, challenge):
                     selected.append(base)
                     expected.append({"hessian": standard.tolist()})
                     pairs.append([row["isotropic_strain"], row["uniaxial_strain"]])
-                    transformations.append(
-                        {
-                            "symmetrization": row["symmetrization"],
-                            "acoustic_sum_rule": row["acoustic_sum_rule"],
-                        }
-                    )
+                    transformations.append(postprocess_settings(row))
                 p.add(
                     "silicon_reference_hessians",
                     "reference",
@@ -1087,9 +1077,21 @@ class ModalVerifier:
 
 def _check_provenance(verifier, e):
     import modal
+    from corral_md.provenance import provenance_identifiers
 
-    run_id = verifier.run_id or e.manifest.get("run_id")
-    action_id = verifier.action_id or e.manifest.get("action_id")
+    try:
+        identifiers = provenance_identifiers(e.manifest)
+    except ValueError as exc:
+        return {"status": "failed", "detail": str(exc)}
+    for key in ("run_id", "action_id"):
+        expected = getattr(verifier, key)
+        if expected and key in identifiers and identifiers[key] != expected:
+            return {
+                "status": "failed",
+                "detail": f"Submission names another execution ({key})",
+            }
+    run_id = verifier.run_id or identifiers.get("run_id")
+    action_id = verifier.action_id or identifiers.get("action_id")
     if not run_id or not action_id:
         return {
             "status": "unverified",
@@ -1097,8 +1099,11 @@ def _check_provenance(verifier, e):
         }
     # The endpoint is selected by the evaluator, never a submission-supplied app or URL.
     release, app, _ = verifier._configuration()
-    if verifier.run_id and e.manifest.get("run_id", run_id) != run_id:
-        return {"status": "failed", "detail": "Submission names another execution"}
+    if "release_id" in identifiers and identifiers["release_id"] != release:
+        return {
+            "status": "failed",
+            "detail": "Submission names another execution (release_id)",
+        }
     roles = {
         "initial_state": "initial.traj",
         "boundary_states": "boundaries.traj",

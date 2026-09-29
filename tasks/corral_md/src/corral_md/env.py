@@ -17,6 +17,7 @@ from corral_md.score import (
 )
 from corral_md.submission import resolve_submission
 from corral_md.submission_examples import example_prompt, seed_examples
+from corral_md.submission_validation import build_validate_submission_tool
 from corral_md.tools import (
     build_execute_python_script_tool,
     build_md_terminal_tool,
@@ -166,6 +167,22 @@ def _md_file_tools(workspace: str) -> dict[str, Tool]:
 class MolecularDynamicsEnvironment(Environment):
     """Confine every agent-controlled domain-tool path to this task workspace."""
 
+    def _resolve_tools(self, workspace: str | None) -> dict[str, Tool]:
+        tools = super()._resolve_tools(workspace)
+        scorer = self.current_task.scoring_fn
+        if workspace and isinstance(scorer, WorkflowScorer):
+            tools["validate_submission"] = build_validate_submission_tool(
+                workspace,
+                scorer.task_number,
+                level=scorer.level,
+                require_provenance=(
+                    scorer.level == 2
+                    and scorer.task_number == 10
+                    and getattr(scorer.verifier, "require_provenance", False)
+                ),
+            )
+        return tools
+
     def _ensure_seed_directories(self) -> None:
         if self.workspace_path:
             seed = json.loads(
@@ -242,6 +259,17 @@ def _md_task_prompt(env: Environment, state: ExecutionState) -> str:
         prompt += example_prompt(
             scorer.task_number, workspace=bool(env.workspace_path), level=scorer.level
         )
+        if (
+            scorer.level == 2
+            and scorer.task_number == 10
+            and getattr(scorer.verifier, "require_provenance", False)
+        ):
+            prompt += (
+                "\nThis task requires trusted execution provenance. Run the aluminum "
+                "cycle with run_verified_md, then analyze its saved artifacts. Read "
+                "submission_examples/README.md for its configuration and receipt "
+                "instructions before starting the simulation.\n"
+            )
 
     if env.workspace_path:
         prompt += (

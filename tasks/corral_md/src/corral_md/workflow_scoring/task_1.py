@@ -916,6 +916,7 @@ def _liquid(e):
 
 def evaluate(e: Evidence, r: Rubric) -> None:
     """Award 90 task-specific points; common scoring supplies reproducibility."""
+    from . import lammps_checks
 
     def prerequisites(*names):
         statuses = [c["status"] for c in r.checks if c["name"] in names]
@@ -925,7 +926,21 @@ def evaluate(e: Evidence, r: Rubric) -> None:
             return None
         return True
 
-    r.check("diamond_preparation", 8, lambda: _geometry(e))
+    r.check(
+        "diamond_preparation",
+        8,
+        lambda: (
+            _geometry(e)
+            and lammps_checks.prepared_before_heating(e)
+            and lammps_checks.mp149_conventional_cell(e)
+            and lammps_checks.silicon_input_matches_reference(e)
+        ),
+    )
+    r.check(
+        "supplied_silicon_sw_potential",
+        1,
+        lambda: lammps_checks.supplied_silicon_potential(e),
+    )
     try:
         protocol = _protocol(e)
     except UnsupportedEvidence as exc:
@@ -939,13 +954,15 @@ def evaluate(e: Evidence, r: Rubric) -> None:
         detail = str(exc)
     else:
         detail = "Input, thermo and original log describe the required thermal cycle"
-    r.check("thermal_protocol_and_log", 12, protocol, detail)
+    r.check("thermal_protocol_and_log", 11, protocol, detail)
     r.check("production_data_integrity", 10, lambda: _data(e) is not None)
     r.check(
         "state_and_thermo_continuity",
         12,
-        lambda: prerequisites("diamond_preparation", "production_data_integrity")
-        and _continuity(e),
+        lambda: (
+            prerequisites("diamond_preparation", "production_data_integrity")
+            and _continuity(e)
+        ),
     )
     # Valid upstream physical evidence is required for scientific analysis credit.
     valid = prerequisites(

@@ -72,6 +72,20 @@ def _call(environment, state, name, **arguments):
     )
 
 
+def test_python_timeout_budget_is_visible_to_the_agent(tmp_path):
+    tool = tools.build_execute_python_script_tool(tmp_path)
+    definition = tool.get_openai_tool_format()["function"]
+    description = definition["description"]
+    timeout = definition["parameters"]["properties"]["timeout"]
+    assert timeout["default"] == 900
+    assert "900" in description
+    assert "15 minutes" in description
+    assert "model loading" in description
+    assert "synchronized only on success" in description
+    assert "900" in timeout["description"]
+    assert "7200" in timeout["description"]
+
+
 @pytest.mark.parametrize("restricted", [False, True])
 @pytest.mark.parametrize("kind", ["models", "structures", "potentials", "resources"])
 def test_write_cannot_bypass_reserved_namespaces(
@@ -144,6 +158,7 @@ def test_cpu_worker_receives_only_public_paths_and_declared_access(
         assert arguments["script_relative"] == "scripts/analyze.py"
         assert arguments["directory_relative"] == "."
         assert arguments["args"] == ["/workspace/output/result.txt"]
+        assert arguments["timeout"] == 900
         assert "corral_action_id" not in arguments
         assert policy["workspace_access"] == "read_write"
         assert policy["resource_mounts"] == {}
@@ -195,6 +210,8 @@ def test_remote_dispatch_keeps_release_recovery_and_action_identity(
         assert workspace == str(root)
         assert Path(path).is_relative_to(root)
         assert action_id == "md-action"
+        if name == "execute_python_script":
+            assert _kwargs["timeout"] == 900
         assert modal_workspace._PINNED_RELEASE.get() == "pinned-build"
         assert modal_workspace._PINNED_VOLUME.get() == "pinned-volume"
         assert modal_workspace._RECOVERY_SNAPSHOT.get() == (

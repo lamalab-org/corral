@@ -30,7 +30,9 @@ MODEL_PARAMETERS = {
 }
 
 
-def teacher_digest_matches(e, task_number: int) -> bool:
+def teacher_digest_matches(
+    e, task_number: int, *, required: bool | None = None
+) -> bool:
     """Check each recorded teacher digest against the evaluator's pinned asset.
 
     Tasks 3, 4, and 5 do not explicitly require a digest, so a missing digest
@@ -57,7 +59,7 @@ def teacher_digest_matches(e, task_number: int) -> bool:
     if task_number == 4 and "model_sha256" in e.results:
         claims.append(e.results["model_sha256"])
     if not claims:
-        return task_number != 8
+        return not (task_number == 8 if required is None else required)
     return all(
         isinstance(value, str)
         and re.fullmatch(r"[0-9a-fA-F]{64}", value) is not None
@@ -161,11 +163,15 @@ def replay_task8_default_rng(e) -> bool:
 def _model_parameters(e, task_number: int) -> dict:
     """Read declared precision while fixing the model to the trusted teacher."""
 
-    configs: list[Mapping] = [e.settings]
-    for key in ("model_settings", "calculator_args"):
-        value = e.settings.get(key)
-        if isinstance(value, Mapping):
-            configs.append(value)
+    from corral_md.calculator_settings import (
+        UnsupportedCalculatorSettings,
+        parse_calculator_settings,
+    )
+
+    try:
+        configs: list[Mapping] = [parse_calculator_settings(e.settings)]
+    except UnsupportedCalculatorSettings as exc:
+        raise UnsupportedEvidence(str(exc)) from exc
     if task_number == 8:
         value = e.settings.get("generation", {}).get("train", {})
         if isinstance(value, Mapping):
