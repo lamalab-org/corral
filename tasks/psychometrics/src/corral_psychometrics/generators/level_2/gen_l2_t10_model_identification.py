@@ -236,11 +236,10 @@ def build_frames(rng, mapping, with_complications=True):
     }
 
 
-PROMPT = """You have six anonymised response datasets and a catalogue of six candidate measurement models. Each dataset is an independent sample from one of the candidates, and each also carries a different data-quality problem.
+PROMPT = f"""You have six anonymised response datasets and a catalogue of six candidate measurement models. Each dataset is an independent sample from one of the candidates.
 
-Identify which candidate generated each dataset. Treat the data-quality problems as distortions of the evidence rather than as model identities: a dependent item pair, a weak item, a subgroup that answers one item differently, repeated rows, missing responses and a response-style shift can all disturb the summaries used to tell the models apart.
-
-Fit each candidate to each dataset and compare them by BIC after removing rows with missing responses and collapsing exact duplicate response patterns. Report every candidate whose BIC is within 2 of the best-fitting one for that dataset; where that is a single model, report one, and where it is more, report them all. Do not break a tie arbitrarily."""
+For each dataset, report every candidate whose BIC is within {TIE_MARGIN:g} of the lowest, computed after removing rows with missing responses and collapsing exact duplicate response patterns. Where several candidates qualify, report all of them.
+"""
 
 SUBMISSION_FORMAT = """A single JSON object:
 
@@ -251,8 +250,7 @@ SUBMISSION_FORMAT = """A single JSON object:
 }
 
 Include every dataset exactly once and use only identifiers from
-`candidate_models.csv`. Report more than one model only when their BIC values
-are within 2 of each other. No working is submitted."""
+`candidate_models.csv`. No working is submitted."""
 
 
 def write_codebook(path):

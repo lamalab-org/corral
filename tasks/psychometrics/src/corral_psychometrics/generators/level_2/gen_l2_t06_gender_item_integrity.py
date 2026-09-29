@@ -93,13 +93,18 @@ FIELD_WIDTH = {
     "HSNS10": 3,
 }
 
-PROMPT = """You are investigating a reported difference between two groups on the Hypersensitive Narcissism Scale. You have the responses, a preliminary memo, and an audit describing how the response file was exported.
+PROMPT = """A preliminary memo reports a difference between two groups on the Hypersensitive Narcissism Scale. You have the responses, the memo, and an audit of how the response file was exported.
 
-Several items do not behave the same way in the two groups. An item can look that way because the export wrote values over the real answers, because the item genuinely functions differently in the two groups, because it was stored with its scale reversed, or because it is simply a weak item. The audit describes transmission, not measurement: an item it flags may be undamaged, and an item it does not flag may still be faulty.
+Diagnose every item with one of these labels:
 
-One check is worth knowing about. If a value was written in by the export it tells you nothing about the respondent, so the people carrying it look like an arbitrary slice of the sample on every other item. If the same value is a genuine answer, the people giving it sit where their remaining responses say they should. Comparing a response category against the rest of the questionnaire separates the two.
+  sound               the item works as intended.
+  mis_keyed           the item was stored with its scale reversed.
+  inserted_neutral    the export overwrote real answers with the middle response.
+  gender_dif          the item functions differently in the two groups.
+  weak_item           the item measures the trait poorly.
 
-Diagnose every item using exactly these labels: `sound`, `mis_keyed`, `inserted_neutral`, `gender_dif`, `weak_item`. Any label may apply to no items, one item, or several. Then repair what can be repaired, fit a model that supports a group comparison, and say whether the comparison is reportable."""
+A label may apply to any number of items, including none. Then repair what can be repaired, fit a model that supports a group comparison, and decide whether the comparison can be reported.
+"""
 
 SUBMISSION_FORMAT = """A single JSON object:
 

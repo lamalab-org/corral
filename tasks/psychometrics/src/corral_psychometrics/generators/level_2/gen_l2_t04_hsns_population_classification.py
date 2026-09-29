@@ -59,13 +59,11 @@ COMPATIBILITY_MARGIN = 0.04
 RESIDUAL_PAIR = ("HSNS5", "HSNS10")
 
 PROMPT = (
-    "You are given large response samples from six anonymised HSNS populations and five "
-    "case samples, each containing {case_size} respondents drawn from one of those populations. "
-    "The population identifiers say nothing about how the populations differ.\n\n"
-    "Work out what distinguishes the reference populations, then decide which of them each "
-    "case sample could have come from. Some cases could have come from only one population "
-    "and some from more than one; list every population a case could have come from and do "
-    "not force a unique answer.\n"
+    "You have large HSNS response samples from six reference populations, and five case "
+    "samples of {case_size} respondents, each drawn from one of those populations. The "
+    "population identifiers carry no information.\n\n"
+    "For each case, list every population it could have come from. Some cases have one answer "
+    "and some have more than one.\n"
 ).format(case_size=CASE_SIZE)
 
 SUBMISSION_FORMAT = """\

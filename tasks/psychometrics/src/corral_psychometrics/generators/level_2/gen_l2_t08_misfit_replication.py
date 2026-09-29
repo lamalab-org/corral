@@ -85,11 +85,12 @@ REPLICATION = {
     "rejected_development_modifications": [list(DEVELOPMENT_ONLY_RESIDUAL)],
 }
 
-PROMPT = """You are reviewing a two-factor HSNS measurement model. A development sample shows several item-level signs of misfit, and an independently collected replication sample contains the same questionnaire and group variable.
+PROMPT = """You are reviewing a two-factor HSNS measurement model. A development sample shows several item-level signs of misfit. An independently collected replication sample has the same questionnaire and group variable.
 
-Work out which apparent problems are real and what each one is. Consider local dependence between item pairs, items loading on a second factor, items answered differently by the two groups once the factors are accounted for, and items too weak to keep. Improving development fit is not evidence on its own: every candidate modification improves it, and the one that improves it most is not in the replication sample at all.
+Decide which of the apparent problems are real, and classify each as local dependence between two items, a cross-loading on the second factor, an item the two groups answer differently at the same trait level, or an item too weak to keep. An item may fall under more than one of these.
 
-Return a final model, a compositional account of the findings, and for each kind of finding whether it holds up in the replication sample. The categories are not mutually exclusive. Also report any modification the development sample supports that you decided to reject."""
+Return a final model, your findings, and for each kind of finding whether it holds up in the replication sample. Also list any modification the development sample supports that you rejected.
+"""
 
 SUBMISSION_FORMAT = """A single JSON object:
 

@@ -60,15 +60,19 @@ POP_REFERENCE_N = 200_000
 RECOMMENDATION = {"status": "not_supported"}
 
 PROMPT = (
-    "You are investigating whether the Hypersensitive Narcissism Scale (HSNS) can support a "
-    "comparison between the two groups identified in the codebook. The groups have visibly "
-    "different response patterns, and a preliminary memo recommends reporting a group "
-    "difference. It is unclear whether that recommendation reflects a difference in the "
-    "underlying traits, the way some items behave, or both.\n\n"
-    "Assess the memo's recommendation using the responses. Carry out whatever analyses you "
-    "judge necessary and return a reproducible model, one overall recommendation, and the "
-    "group difference that remains on each trait once the model accounts for any item that "
-    "does not behave the same way in both groups.\n"
+    "A preliminary memo recommends reporting a difference on the Hypersensitive Narcissism "
+    "Scale (HSNS) between the two groups identified in the codebook. Decide whether the "
+    "responses support that recommendation.\n\n"
+    "Return a model, your verdict on the recommendation, and the items, if any, that do not "
+    "function the same way in both groups. The verdicts are:\n\n"
+    "  supported\n"
+    "      the groups differ on the traits, and the memo's comparison stands as reported.\n"
+    "  supported_only_after_reanalysis\n"
+    "      the groups differ on the traits, but the difference must be estimated with a model "
+    "that allows for items functioning differently.\n"
+    "  not_supported\n"
+    "      no difference on the traits remains once items functioning differently are allowed "
+    "for.\n"
 )
 
 SUBMISSION_FORMAT = """\

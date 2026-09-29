@@ -65,20 +65,18 @@ N_TRAIN, N_HOLDOUT = 6_000, 4_000
 POP_REFERENCE_N = 200_000
 
 PROMPT = (
-    "You are given a labelled training dataset and three anonymised holdout datasets "
-    "containing the same questionnaire. A measurement model can look convincing in the data "
-    "used to develop it while failing in a new population.\n\n"
-    "Develop a model in the training data, then refit that model, unchanged, in each holdout "
-    "and decide what happens to it there:\n\n"
+    "You have a labelled training dataset and three anonymised holdout datasets from the same "
+    "questionnaire. Build a measurement model in the training data, refit it unchanged in each "
+    "holdout, and classify each holdout:\n\n"
     "  generalizes\n"
-    "      every standardised loading stays within {loading} of its training value, and so "
-    "does the correlation between the factors.\n"
+    "      every standardised loading stays within {loading} of its training value, and the "
+    "factor correlation stays within {factor_correlation}.\n"
     "  measurement_structure_holds_relations_differ\n"
-    "      the loadings stay within {loading}, but the correlation between the factors moves "
-    "by more than {factor_correlation}.\n"
+    "      every loading stays within {loading}, but the factor correlation moves by more than "
+    "{factor_correlation}.\n"
     "  measurement_structure_fails\n"
     "      at least one loading moves by more than {loading}.\n\n"
-    "Return the model and one decision for each holdout.\n"
+    "Return the model and one classification for each holdout.\n"
 ).format(**THRESHOLDS)
 
 SUBMISSION_FORMAT = """\

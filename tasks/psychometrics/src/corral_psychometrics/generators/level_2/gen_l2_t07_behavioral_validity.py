@@ -58,17 +58,15 @@ LOADINGS = {
     "HSNS10": 0.63,
 }
 
-PROMPT = f"""You are evaluating whether the Hypersensitive Narcissism Scale predicts an independently measured behavioural outcome. A preliminary memo reports an association in a labelled training sample. A second, held-out sample contains the same questionnaire, group variable, and outcome.
+PROMPT = f"""A preliminary memo reports that the Hypersensitive Narcissism Scale predicts an independently measured behavioural outcome in a labelled training sample. A held-out sample has the same questionnaire, group variable and outcome. In both, responses and outcomes are matched by `participant_id`.
 
-Investigate whether the association is only a difference between groups or whether it also appears within groups. Assess whether the group-adjusted latent association generalizes to the holdout. Examine whether any item contributes an outcome association in training that does not replicate in the holdout.
+Answer three questions by these rules, where the latent coefficient is the trait's coefficient on the outcome:
 
-Use these decision rules for the reported claims:
+  group_adjusted    `supported` if the latent coefficient, adjusted for group, is at least {MIN_EFFECT:.2f} in absolute value in both samples.
+  within_group      `replicates` if, in the training sample, the latent coefficient is at least {MIN_EFFECT:.2f} in absolute value in each group and the two estimates differ by no more than {EFFECT_TOLERANCE:.2f}.
+  holdout           `generalizes` if the group-adjusted latent coefficient changes by no more than {EFFECT_TOLERANCE:.2f} between training and holdout.
 
-  - `supported`: the group-adjusted latent coefficient has absolute value at least {MIN_EFFECT:.2f} in both samples.
-  - `replicates`: the latent coefficient has absolute value at least {MIN_EFFECT:.2f} in both groups and the two within-group estimates differ by no more than {EFFECT_TOLERANCE:.2f}.
-  - `generalizes`: the group-adjusted latent coefficient changes by no more than {EFFECT_TOLERANCE:.2f} between training and holdout.
-
-For the item check, identify an item whose direct outcome association is at least {ITEM_TRAIN_MIN:.2f} in training but no more than {ITEM_HOLDOUT_MAX:.2f} in the holdout after accounting for the latent trait and group. The response file and the outcome file are already joined by `participant_id`; do not infer a mechanism from a pooled coefficient alone.
+Also list every item whose direct association with the outcome, after accounting for the trait and group, is at least {ITEM_TRAIN_MIN:.2f} in training but no more than {ITEM_HOLDOUT_MAX:.2f} in the holdout.
 """
 
 SUBMISSION_FORMAT = """A single JSON object:
@@ -86,8 +84,7 @@ SUBMISSION_FORMAT = """A single JSON object:
 The model must cover every HSNS item, include `behavior`, and include both the
 latent factor and `gender` in the behavioural regression. The scorer refits the
 submitted measurement model in the training and holdout samples and performs
-the within-group and item checks from that model. The submission records
-conclusions, not a required analysis workflow.
+the within-group and item checks from that model.
 """
 
 

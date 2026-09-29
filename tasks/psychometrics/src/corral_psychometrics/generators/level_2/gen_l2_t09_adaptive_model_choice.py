@@ -83,11 +83,12 @@ VENDOR_FLAGS = sorted([*FLAGGED_PAIR, FALSE_FLAG])
 NODES = np.linspace(-4.0, 4.0, 31)
 PRIOR = norm.pdf(NODES) / norm.pdf(NODES).sum()
 
-PROMPT = """You are choosing an item bank for a short computerized adaptive test. The test administers a small number of items per respondent, always selecting the item that is most informative at the respondent's current ability estimate, and must estimate ability across the whole scale.
+PROMPT = """You are choosing an item bank for a short computerized adaptive test. The test gives each respondent a few items, each time the one most informative at the current ability estimate, and must estimate ability across the whole scale.
 
-You have calibration responses, an independent holdout sample, and the vendor's item review. The vendor recommends its full bank because it carries the most item information. The review marks some items for attention, but it is a review of the vendor's own process and has not been checked against the responses.
+You have calibration responses, an independent holdout sample, and the vendor's item review. The vendor recommends its full bank because it carries the most item information, and its review flags some items.
 
-Decide which bank to use and report what the responses say about the items: which item pairs are locally dependent, which vendor flags the data do not support, and which items do not behave the same way in the holdout sample. Item information computed from a calibration fit assumes responses are independent given ability; where that assumption fails, an adaptive test keeps selecting the same information twice."""
+Choose a bank, and report which item pairs are locally dependent, which vendor flags the responses do not support, and which items behave differently in the holdout sample.
+"""
 
 SUBMISSION_FORMAT = """A single JSON object:
 

@@ -56,15 +56,13 @@ DIAGNOSIS = "both_mechanisms"
 CORRELATION_TOLERANCE = 0.02
 
 PROMPT = (
-    "You are investigating an unexpectedly strong relationship between two dimensions of the "
-    "Hypersensitive Narcissism Scale in a panel-delivered survey. The response file, a "
-    "preliminary memo, and a separate delivery audit contain partially overlapping evidence. "
-    "The apparent relationship could reflect the respondents, repeated deliveries, identical "
-    "answers from different people, or more than one of these.\n\n"
-    "Use the evidence to decide which explanation is supported. Test how the conclusion changes "
-    "when records that appear to belong to the same respondent are collapsed, and state which "
-    "columns together identify such a record. Report the trait correlation from the resulting "
-    "analysis rather than assuming that the raw file is an independent sample.\n"
+    "A preliminary memo reports an unexpectedly strong correlation between the two dimensions "
+    "of the Hypersensitive Narcissism Scale in a panel-delivered survey. You have the response "
+    "file, the memo, and the panel's delivery audit.\n\n"
+    "Decide what produced the correlation: the same respondents delivered more than once "
+    "(`repeated_delivery_only`), different respondents giving identical answers "
+    "(`chance_collisions_only`), or both (`both_mechanisms`). Also give the columns that "
+    "together identify one respondent, and a model for the two dimensions.\n"
 )
 
 SUBMISSION_FORMAT = """\
