@@ -12,6 +12,7 @@ from modal.volume import FileEntryType
 
 from corral.core.environment import Toolset
 from corral.core.task import TaskDefinition
+from corral.runtime import permissions
 from corral.workspace import workspace_relative_path
 
 
@@ -150,19 +151,20 @@ def test_cpu_python_runs_in_local_workspace_and_checks_working_dir(tmp_path):
     assert (tmp_path / "output/result.txt").read_text() == str(tmp_path.resolve())
     assert (tmp_path / "output/script.stdout.txt").read_text() == "local cpu\n"
     assert "use_gpu" in tool.params_json_schema["properties"]
-    assert tool.trusted is True
+    assert tool.trusted is False
+    assert tool.controller_dispatch is True
 
 
 def test_cpu_python_dispatches_through_restricted_local_worker(tmp_path, monkeypatch):
     (tmp_path / "script.py").write_text("print('run')")
     calls = []
 
-    def run_worker(operation, payload, workspace):
-        calls.append((operation, payload, workspace))
+    def run_worker(operation, payload, workspace, **policy):
+        calls.append((operation, payload, workspace, policy))
         return {"content": json.dumps({"success": True, "backend": "local_cpu"})}
 
-    monkeypatch.setattr(md_tools.permissions, "enabled", lambda: True)
-    monkeypatch.setattr(md_tools.permissions, "run_worker", run_worker)
+    monkeypatch.setattr(permissions, "enabled", lambda: True)
+    monkeypatch.setattr(permissions, "run_worker", run_worker)
     result = json.loads(
         md_tools.build_execute_python_script_tool(tmp_path).execute(
             script_path="/workspace/script.py"
@@ -172,8 +174,12 @@ def test_cpu_python_dispatches_through_restricted_local_worker(tmp_path, monkeyp
     assert result["backend"] == "local_cpu"
     assert calls[0][0] == "tool"
     assert calls[0][1][0].name == "_corral_md_local_python"
-    assert calls[0][1][1]["script_path"] == "/workspace/script.py"
+    assert calls[0][1][1]["script_relative"] == "script.py"
+    assert calls[0][1][1]["workspace"] == "/workspace"
+    assert "corral_action_id" not in calls[0][1][1]
     assert calls[0][2] == str(tmp_path)
+    assert calls[0][3]["workspace_access"] == "read_write"
+    assert calls[0][3]["resource_mounts"] == {}
 
 
 def test_gpu_python_uses_only_modal_backend_and_checks_working_dir(
@@ -220,7 +226,7 @@ def test_domain_paths_require_public_absolute_names(tmp_path):
             resolved = env.preprocess_arguments(
                 tool, {argument: "/workspace/input/result.txt"}
             )
-            assert resolved[argument] == env.workspace_path + "/input/result.txt"
+            assert resolved[argument] == "/workspace/input/result.txt"
 
 
 def test_potential_metadata_cannot_accept_existing_host_file(tmp_path):

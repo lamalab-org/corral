@@ -167,11 +167,14 @@ def evaluate(e, r):
         return e.json("models", "pipeline")
 
     def geometry():
+        from .dynamics import matches_pinned_cu32, sampled_motion
+
         supplied = e.trajectory("input_structure")[0]
         if (
             len(supplied) != 32
             or set(supplied.get_chemical_symbols()) != {"Cu"}
             or not np.all(supplied.pbc)
+            or not matches_pinned_cu32(supplied)
         ):
             return False
         for run in RUNS:
@@ -179,6 +182,8 @@ def evaluate(e, r):
             if not _same(eq[0], supplied) or not close(
                 prod[0].cell.array, supplied.cell.array
             ):
+                return False
+            if not sampled_motion(prod, [_time(a) for a in prod]):
                 return False
         return True
 
@@ -719,8 +724,10 @@ def evaluate(e, r):
         r.check(
             f"{name}_mae_rmse_r2",
             2,
-            lambda name=name: metric_units()
-            and _metric_match(*evaluation(name), e.results["tests"][name]),
+            lambda name=name: (
+                metric_units()
+                and _metric_match(*evaluation(name), e.results["tests"][name])
+            ),
         )
 
     def comparisons():

@@ -92,6 +92,58 @@ def create_dummy_results():
     }
 
 
+@pytest.mark.parametrize("same_task", [False, True])
+def test_pending_score_keeps_reports_and_aggregate_metrics_unscored(
+    tmp_path, same_task
+):
+    scored = TaskTrialResult("scored", "1", 1.0, {}, {})
+    pending_id = "scored" if same_task else "pending"
+    pending = TaskTrialResult(
+        pending_id,
+        "2",
+        None,
+        {},
+        {},
+        output={"answer": "retained"},
+        evaluation_error="verifier unavailable",
+    )
+    task_results = {"scored": TaskTrialResults("scored", [scored])}
+    task_results.setdefault(pending_id, TaskTrialResults(pending_id)).trials.append(
+        pending
+    )
+    benchmark = BenchmarkResult(task_results=task_results, k=[1])
+    assert pending.success is None
+    assert pending.output_ready
+    metrics = benchmark.calculate_metrics()
+    for name in ("average_score", "overall_success_rate", "pass_at_1", "pass_hat_1"):
+        assert name in metrics
+        assert metrics[name] is None
+    for name in (
+        "task_average_score",
+        "task_success_rate",
+        "task_pass_at_1",
+        "task_pass_hat_1",
+    ):
+        metric = benchmark.metric_registry.get(name)
+        assert metric.calculate_for_task(benchmark, pending_id) is None
+        if not same_task:
+            assert metric.calculate_for_task(benchmark, "scored") == 1
+    report_file = tmp_path / "pending.json"
+    benchmark.generate_report(report_path=str(report_file))
+    report = json.loads(report_file.read_text())
+    assert report["metrics"]["Average Score"] is None
+    saved = report["task_results"][pending_id]["trials"][-1]
+    assert saved["score"] is None
+    assert saved["success"] is None
+    assert saved["evaluation_error"] == "verifier unavailable"
+
+    # A completed evaluation awarding zero is still a genuine model failure.
+    pending.score = 0.0
+    pending.evaluation_error = None
+    assert pending.success is False
+    assert benchmark.calculate_metrics()["average_score"] == 0.5
+
+
 def test_pass_metrics_for_various_k_values():
     task_results = create_dummy_results()
     benchmark = BenchmarkResult(task_results=task_results, k=[1, 2, 3, 4])

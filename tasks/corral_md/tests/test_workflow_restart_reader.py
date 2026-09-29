@@ -6,15 +6,17 @@ import numpy as np
 import pytest
 from ase.build import bulk
 
-from corral_md.score import check_level1_workflow
+from corral_md.score import check_level1_workflow, check_level2_workflow
 from corral_md.workflow_scoring.common import EvidenceError, UnsupportedEvidence
 from corral_md.workflow_scoring.restart_reader import ModalRestartReader
 from corral_md.workflow_scoring.verification import ModalVerifier
 
 
-def test_level1_task1_uses_trusted_reader_by_default():
-    assert isinstance(check_level1_workflow(1).restart_reader, ModalRestartReader)
-    assert check_level1_workflow(1, verification_backend="offline").restart_reader is None
+@pytest.mark.parametrize("factory", [check_level1_workflow, check_level2_workflow])
+def test_task1_uses_trusted_reader_by_default(factory, monkeypatch):
+    monkeypatch.delenv("CORRAL_MD_VERIFICATION", raising=False)
+    assert isinstance(factory(1).restart_reader, ModalRestartReader)
+    assert factory(1, verification_backend="offline").restart_reader is None
 
 
 def test_modal_restart_reader_reconstructs_sha_bound_state(tmp_path, monkeypatch):

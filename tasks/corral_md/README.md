@@ -71,7 +71,20 @@ needed. See the
 Each task still feels local: Corral uploads changed workspace files before a
 remote tool runs and downloads the results when it finishes successfully.
 LAMMPS, GPU Python, and independent verification use Modal. CPU Python and
-terminal commands run in Corral's restricted local workspace worker.
+terminal commands use Corral's shared tool executor. Docker trials run them in
+an unprivileged worker with access only to the assigned workspace. With
+`--sandbox local`, they run with the current user's OS permissions.
+
+Tool path arguments use absolute POSIX paths under `/workspace`; controller
+directories never belong in prompts or saved actions. Relative paths, parent
+traversal, symlinks, and the reserved `/workspace/resources` namespace are
+rejected. The virtual `/workspace/structures`, `/workspace/potentials`, and
+`/workspace/models` catalogs are read-only. Use `copy_file` to copy assets into
+`/workspace/input` for local analysis.
+
+Remote dispatch retains the execution's pinned Modal build, storage volume,
+workspace snapshot, and action ID. Interrupted remote calls remain resumable
+under that same action ID instead of being recorded as completed failures.
 
 ## Bundled inputs
 

@@ -16,8 +16,14 @@ from spectra_elucidation.spectra_utils import (
     predict_nmr_spectra,
 )
 
+from corral.core.resources import extracted_resource_archive
 from corral.core.tool import Tool, tool
 from corral.utils.rag import vector_database_search
+from corral.utils.tool_helpers import DEFAULT_CHEMICAL_EMBEDDING_MODEL
+
+NMRSHIFTDB2_DATABASE_PATH = (
+    Path(__file__).resolve().parents[3] / "scripts" / "vector_databases" / "nmrshiftdb2"
+)
 
 
 @tool
@@ -90,8 +96,15 @@ def get_formula_from_smiles(smiles: str) -> str:
         return f"Error: {e!s}"
 
 
-@tool
-def search_by_smiles(smiles: str, top_k: int = 10) -> list[dict[str, Any]]:
+@tool(
+    hidden_args=["nmr_database_archive"],
+    resources=("nmr_database_archive",),
+)
+def search_by_smiles(
+    smiles: str,
+    top_k: int = 10,
+    nmr_database_archive: str | None = None,
+) -> list[dict[str, Any]]:
     """[BRIEF] Search the NMRShift database for entries matching or chemically similar to the given SMILES. [/BRIEF]
 
     [DETAILED] This function searches the NMRShift database for entries that match or are chemically similar to the provided SMILES string. It uses a vector database search to find the top `top_k` results based on chemical similarity. The function returns a list of matching entries, each containing relevant information about the compound. [/DETAILED]
@@ -157,18 +170,25 @@ def search_by_smiles(smiles: str, top_k: int = 10) -> list[dict[str, Any]]:
     [/LIMITATIONS]
     """
     collection_name = "nmrshiftdb2"
-    db_path = Path(__file__).resolve().parents[3] / "vector_databases" / "nmrshiftdb2"
-
     top_k = int(top_k) if not isinstance(top_k, int) else top_k
 
     try:
-        return vector_database_search(
-            query=smiles,
-            collection_name=collection_name,
-            path=db_path,
-            top_k=top_k,
-            chemical_model="ibm-research/MoLFormer-XL-both-10pct",
-        )
+        if nmr_database_archive is None:
+            return vector_database_search(
+                query=smiles,
+                collection_name=collection_name,
+                path=NMRSHIFTDB2_DATABASE_PATH,
+                top_k=top_k,
+                chemical_model=DEFAULT_CHEMICAL_EMBEDDING_MODEL,
+            )
+        with extracted_resource_archive(nmr_database_archive) as db_path:
+            return vector_database_search(
+                query=smiles,
+                collection_name=collection_name,
+                path=db_path,
+                top_k=top_k,
+                chemical_model=DEFAULT_CHEMICAL_EMBEDDING_MODEL,
+            )
     except Exception as e:
         error_details = traceback.format_exc()
         raise ValueError(f"Error: {e}/n/nFull traceback:/n{error_details}") from e

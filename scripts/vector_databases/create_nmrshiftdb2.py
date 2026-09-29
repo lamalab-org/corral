@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -6,7 +7,11 @@ from rdkit import Chem
 
 from corral.utils.rag import create_vector_database
 
-load_dotenv("../.env", override=True)
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPOSITORY_ROOT = SCRIPT_DIR.parent.parent
+DATABASE_ROOT = SCRIPT_DIR
+
+load_dotenv(REPOSITORY_ROOT / ".env", override=True)
 
 
 def parse_nmr_properties(properties):
@@ -163,7 +168,7 @@ def convert_sd_to_vector_db(
 
     # Create path for database if not specified
     if db_path is None:
-        db_path = Path("vector_databases") / collection_name
+        db_path = DATABASE_ROOT / collection_name
 
     # Read molecules from SD file
     supplier = Chem.SDMolSupplier(sd_file_path)
@@ -232,10 +237,38 @@ def convert_sd_to_vector_db(
     return result
 
 
-if __name__ == "__main__":
-    sd_file = "../nmrshiftdb2withsignals.sd"
-    collection_name = "nmrshiftdb2"
-    db_path = "../vector_databases/nmrshiftdb2"
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build the NMRShiftDB2 vector database from an SD file."
+    )
+    parser.add_argument(
+        "sd_file",
+        type=Path,
+        help="Path to the separately downloaded nmrshiftdb2withsignals.sd file.",
+    )
+    parser.add_argument(
+        "--collection-name",
+        default="nmrshiftdb2",
+        help="Chroma collection name (default: nmrshiftdb2).",
+    )
+    parser.add_argument(
+        "--db-path",
+        type=Path,
+        help=(
+            "Output database directory (default: "
+            "scripts/vector_databases/<collection-name>)."
+        ),
+    )
+    args = parser.parse_args()
 
-    result = convert_sd_to_vector_db(sd_file, collection_name, db_path)
+    if not args.sd_file.is_file():
+        parser.error(f"SD input file does not exist: {args.sd_file}")
+
+    db_path = args.db_path or DATABASE_ROOT / args.collection_name
+
+    result = convert_sd_to_vector_db(args.sd_file, args.collection_name, db_path)
     logger.info(f"Result: {result}")
+
+
+if __name__ == "__main__":
+    main()

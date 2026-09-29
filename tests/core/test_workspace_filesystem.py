@@ -66,8 +66,13 @@ def test_default_file_tools_use_the_integrated_workspace(tmp_path):
         "read_file",
         "write_file",
     }
-    tools["write_file"].execute(path="nested/data.txt", content="workspace data")
-    assert tools["read_file"].execute(path="nested/data.txt") == "workspace data"
+    tools["write_file"].execute(
+        path="/workspace/nested/data.txt", content="workspace data"
+    )
+    assert (
+        tools["read_file"].execute(path="/workspace/nested/data.txt")
+        == "workspace data"
+    )
     assert (workspace / "nested" / "data.txt").read_text() == "workspace data"
 
 

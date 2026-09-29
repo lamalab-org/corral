@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo "Creating databases..."
 createdb -U "$POSTGRES_USER" reactions_raw_db

@@ -25,7 +25,7 @@ from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -210,7 +210,7 @@ def test_claude_usage_includes_cached_and_cache_created_input_tokens():
     assert usage.llm_calls == 3
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("agent_kwargs", "bare"),
     [({}, True), ({"bare": True}, True), ({"bare": False}, False)],
@@ -292,7 +292,7 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
     assert {"role": "assistant", "content": "42"} not in session.messages
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_claude_hydrates_query_and_limit_from_session_state(monkeypatch):
     async def factory(_options, _captured):
         return [FakeResultMessage("42", num_turns=1)]
@@ -309,7 +309,7 @@ async def test_claude_hydrates_query_and_limit_from_session_state(monkeypatch):
     assert captured["options"].max_turns == 2
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("subtype", "expected_status"),
     [
@@ -335,7 +335,7 @@ async def test_sdk_failures_are_typed_not_error_answers(
     assert outcome.error
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_wall_clock_timeout_is_a_typed_failure(monkeypatch):
     async def factory(options, captured):
         await asyncio.sleep(1)
@@ -351,7 +351,7 @@ async def test_wall_clock_timeout_is_a_typed_failure(monkeypatch):
     assert "timed out" in outcome.error
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_surrender_is_status_not_a_magic_answer(monkeypatch):
     async def factory(options, captured):
         return [FakeResultMessage("SURRENDER")]
@@ -370,7 +370,7 @@ async def test_surrender_is_status_not_a_magic_answer(monkeypatch):
     assert outcome.error is None
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_multimodal_prompt_uses_sdk_streaming_input(monkeypatch):
     async def factory(options, captured):
         return [FakeResultMessage("a cat")]
@@ -396,7 +396,7 @@ async def test_multimodal_prompt_uses_sdk_streaming_input(monkeypatch):
     }
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_mcp_tool_mismatch_is_a_protocol_failure(monkeypatch):
     async def factory(options, captured):
         return [FakeResultMessage("wrong")]
@@ -419,7 +419,7 @@ async def test_mcp_tool_mismatch_is_a_protocol_failure(monkeypatch):
     assert "tool mismatch" in outcome.error
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_plain_text_result_is_not_a_submission(monkeypatch):
     async def factory(options, captured):
         return [FakeResultMessage("42")]
@@ -442,7 +442,7 @@ def test_data_uri_converted_to_sdk_image_block():
     ]
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_bare_mode_real_sdk_preflight_exposes_corral_tools(tmp_path):
     """Connect the bundled CLI to Corral without sending a model query."""
     agent = ClaudeCodeAgent()
@@ -487,7 +487,7 @@ async def test_bare_mode_real_sdk_preflight_exposes_corral_tools(tmp_path):
     assert run.metadata["mcp_tools_exposed"] == ["submit_answer", "test_tool"]
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_claude_submits_through_the_session_mcp_tool(monkeypatch, tmp_path):
     async def factory(options, captured):
         url = options.mcp_servers["corral"]["url"]

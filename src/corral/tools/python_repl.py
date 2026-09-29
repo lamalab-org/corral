@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from corral.core.tool import Tool, ToolConcurrency
+from corral.core.tool import Tool, ToolConcurrency, WorkspaceAccess
 from corral.runtime.python_repl import (
     DEFAULT_MAX_CODE_CHARS,
     DEFAULT_MAX_OUTPUT_CHARS,
@@ -32,7 +32,8 @@ class PythonREPLTool(Tool):
 
     An environment owns the checkpoint in its projected state and calls
     `execute_repl`.  This object never evaluates model code in the
-    controller even though it is marked trusted for stateful dispatch.
+    controller. `controller_dispatch` routes it through the owning
+    Environment without granting direct controller execution.
     """
 
     def __init__(
@@ -51,6 +52,8 @@ class PythonREPLTool(Tool):
         max_output_chars: int,
         address_space_bytes: int,
         max_response_bytes: int | None,
+        workspace_access: WorkspaceAccess | str,
+        network_access: str = "allowed",
     ):
         super().__init__(
             name=name,
@@ -65,11 +68,15 @@ class PythonREPLTool(Tool):
                 },
                 "required": [argument_name],
             },
-            # Stateful dispatch runs in the controller, but execute() below can
-            # only reject direct calls. Model Python always runs in a worker.
-            trusted=True,
+            # Model Python always runs in a worker. The controller only manages
+            # the durable checkpoint and public-data dispatch.
+            controller_dispatch=True,
             concurrency=ToolConcurrency.SERIAL,
+            workspace_access=workspace_access,
         )
+        if network_access not in {"allowed", "none"}:
+            raise ValueError("network_access must be allowed or none")
+        self.network_access = network_access
         self.argument_name = argument_name
         self.namespace_factory = namespace_factory
         self.code_executor = code_executor
@@ -127,6 +134,8 @@ class PythonREPLTool(Tool):
             max_output_chars=self.max_output_chars,
             address_space_bytes=self.address_space_bytes,
             max_response_bytes=self.max_response_bytes,
+            workspace_access=self.workspace_access,
+            network_access=self.network_access,
         )
 
 
@@ -145,6 +154,8 @@ def create_python_repl_tool(
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
     address_space_bytes: int = DEFAULT_WORKER_ADDRESS_SPACE_BYTES,
     max_response_bytes: int | None = None,
+    workspace_access: WorkspaceAccess | str = WorkspaceAccess.NONE,
+    network_access: str = "allowed",
 ) -> PythonREPLTool:
     """Create a serial, checkpointed REPL definition for a stateful environment."""
     return PythonREPLTool(
@@ -161,6 +172,8 @@ def create_python_repl_tool(
         max_output_chars=max_output_chars,
         address_space_bytes=address_space_bytes,
         max_response_bytes=max_response_bytes,
+        workspace_access=workspace_access,
+        network_access=network_access,
     )
 
 

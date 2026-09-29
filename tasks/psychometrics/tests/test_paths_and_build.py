@@ -130,11 +130,14 @@ def test_local_repl_uses_workspace_without_changing_parent(tmp_path):
     assert Path.cwd() == cwd
 
 
-def test_repl_is_corrals_trusted_tool(tmp_path):
+def test_repl_is_dispatched_by_the_environment(tmp_path):
     repl = workspace_tools(str(tmp_path))["PythonREPL"]
     assert isinstance(repl, PythonREPLTool)
-    # Docker dispatches trusted tools in the controller, which owns the checkpoint.
-    assert repl.trusted
+    # The environment owns the checkpoint; model code still runs in a worker.
+    assert repl.controller_dispatch
+    assert not repl.trusted
+    assert repl.workspace_access == "read_write"
+    assert repl.network_access == "none"
 
 
 def test_scoring_checks_use_source_tests_and_selected_external_data(tmp_path, monkeypatch):

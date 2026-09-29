@@ -11,7 +11,8 @@ import pytest
 def worker(tmp_path: Path, monkeypatch):
     module_path = Path(__file__).resolve().parents[1] / "modal_app/lammps_app.py"
     spec = importlib.util.spec_from_file_location("md_worker_protocol_test", module_path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
@@ -78,25 +79,29 @@ def test_worker_commits_one_action_result_and_restores_head(worker) -> None:
     assert (working / "input/run.log").is_file()
 
 
-def test_worker_failure_keeps_attempt_and_does_not_advance_head(worker) -> None:
+@pytest.mark.parametrize("empty_timeout", [False, True])
+def test_worker_failure_keeps_attempt_and_does_not_advance_head(worker, empty_timeout) -> None:
     module, _ = worker
     module._prepare("run-1", "release-1")
     working = module.RUNS / "run-1/workspace"
     (working / "run.in").write_text("bad input")
+    error = module.modal.exception.SandboxTimeoutError() if empty_timeout else ValueError("simulation failed")
 
     def fail(input_path, *_args):
         (input_path.parent / "diagnostic.log").write_text("failure details")
-        raise ValueError("simulation failed")
+        raise error
 
     module._run_lammps = fail
     expected = module._manifest(working)
-    with pytest.raises(ValueError, match="simulation failed"):
+    with pytest.raises(type(error)):
         module._execute(
             "lammps", "run-1", "action-1", "run.in", "/local", [],
             "release-1", "base", expected,
         )
     assert json.loads((module.RUNS / "run-1/run.json").read_text())["head"] == "base"
     failure = json.loads((module.RUNS / "run-1/actions/action-1.failure.json").read_text())
+    assert failure["error"] == (str(error) or type(error).__name__)
+    assert failure["error_type"] == type(error).__name__
     assert (Path(failure["attempt"]) / "workspace/diagnostic.log").is_file()
     assert (Path(failure["attempt"]) / "failure.json").is_file()
     assert not (module.RUNS / "run-1/actions/action-1.json").exists()
@@ -164,7 +169,8 @@ def test_worker_uses_versioned_assets(worker):
 
 
 @pytest.mark.parametrize("gpu", [False, True])
-def test_sandbox_gets_only_current_task_and_read_only_assets(worker, tmp_path, monkeypatch, gpu):
+@pytest.mark.parametrize("timed_out", [False, True])
+def test_sandbox_gets_only_current_task_and_read_only_assets(worker, tmp_path, monkeypatch, gpu, timed_out):
     from io import StringIO
     from types import SimpleNamespace
 
@@ -191,7 +197,7 @@ def test_sandbox_gets_only_current_task_and_read_only_assets(worker, tmp_path, m
         def put_file(self, source, name):
             self.files[name] = Path(source).read_bytes()
 
-        def iterdir(self, *_, **kwargs):
+        def iterdir(self, *_, **_kwargs):
             assert finished, "Outputs cannot be collected while the sandbox is running"
             return [SimpleNamespace(path=name, type=module.FileEntryType.FILE) for name in self.files]
 
@@ -208,26 +214,41 @@ def test_sandbox_gets_only_current_task_and_read_only_assets(worker, tmp_path, m
     class Sandbox:
         object_id = "sb-test"
         stdout = StringIO("complete\n")
-        stderr = StringIO("")
+        stderr = StringIO("diagnostic\n")
         returncode = 0
 
         def wait(self):
             volume.files["/output/result.json"] = b'{"answer":42}'
+            if timed_out:
+                raise module.modal.exception.SandboxTimeoutError
 
         def terminate(self, *, wait):
             assert wait
             finished.append(True)
+            if timed_out:
+                raise module.modal.exception.SandboxTimeoutError
 
     def create(*command, **options):
         calls.append((command, options))
         return Sandbox()
 
     monkeypatch.setattr(module.modal.Sandbox, "create", create)
-    module._run_sandbox(["python", "/workspace/script.py"], working, gpu=gpu)
+    if timed_out:
+        with pytest.raises(module.modal.exception.SandboxTimeoutError, match="900-second wall-clock timeout") as raised:
+            module._run_sandbox(["python", "/workspace/script.py"], working, gpu=gpu, timeout=900)
+        assert "complete\n" in str(raised.value)
+        assert "diagnostic\n" in str(raised.value)
+        assert "not synchronized" in str(raised.value)
+        assert not (working / "output/result.json").exists()
+    else:
+        module._run_sandbox(["python", "/workspace/script.py"], working, gpu=gpu, timeout=900)
+        assert json.loads((working / "output/result.json").read_text()) == {"answer": 42}
     command, options = calls[0]
     assert command[-2:] == ("python", "/workspace/script.py")
     assert options["workdir"] == "/workspace"
     assert options["gpu"] == (module.GPU_TYPE if gpu else None)
+    assert options["timeout"] == 900
+    assert finished
     assert options.get("secrets", ()) == ()
     assert set(options["volumes"]) == {
         "/workspace", "/assets/potentials", "/assets/models", "/assets/structures",
@@ -235,13 +256,13 @@ def test_sandbox_gets_only_current_task_and_read_only_assets(worker, tmp_path, m
     assert options["volumes"]["/workspace"] is volume
     for name in ("potentials", "models", "structures"):
         assert options["volumes"][f"/assets/{name}"].read_only is True
-    assert json.loads((working / "output/result.json").read_text()) == {"answer": 42}
     assert (working / "output/execution.stdout.txt").read_text() == "complete\n"
+    assert (working / "output/execution.stderr.txt").read_text() == "diagnostic\n"
     assert not (working / "sandbox.json").exists()
     assert (working.parent / "sandbox.json").is_file()
 
 
-@pytest.mark.parametrize("name, entry_type", [
+@pytest.mark.parametrize(("name", "entry_type"), [
     ("../escape", "FILE"), ("/../escape", "FILE"),
     ("models/teacher.model", "FILE"), ("output/link", "SYMLINK"),
 ])
@@ -253,7 +274,7 @@ def test_sandbox_export_rejects_unsafe_files_without_replacing_attempt(worker, t
     working.mkdir(parents=True)
     (working / "input.txt").write_text("original")
     entry = SimpleNamespace(path=name, type=getattr(module.FileEntryType, entry_type))
-    volume = SimpleNamespace(iterdir=lambda *args, **kwargs: [entry])
+    volume = SimpleNamespace(iterdir=lambda *_args, **_kwargs: [entry])
     with pytest.raises(ValueError):
         module._collect_workspace(volume, working)
     assert (working / "input.txt").read_text() == "original"
@@ -270,9 +291,10 @@ def test_python_and_lammps_use_stable_absolute_paths_without_rewriting(worker, t
     calls = []
     monkeypatch.setattr(module, "_run_sandbox", lambda *args, **kwargs: calls.append((args, kwargs)))
     module._run_python(script, ["/workspace/input/data.json"], "/local", working)
-    assert calls[0][0][0] == ["python", "/workspace/scripts/analyze.py", "/workspace/input/data.json"]
+    assert calls[0][0][0] == ["python", "-u", "/workspace/scripts/analyze.py", "/workspace/input/data.json"]
     assert script.read_text() == original
     assert calls[0][1]["gpu"] is True
+    assert calls[0][1]["timeout"] == 900
     input_file = working / "run.in"
     input_file.write_text("log /workspace/custom.log\nrun 0\n")
     module._run_lammps(input_file, "run.log", "/local", working)

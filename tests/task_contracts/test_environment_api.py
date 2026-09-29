@@ -18,7 +18,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from corral.agents.schema import AgentOutcome
-from corral.core import Action, ExecutionState
+from corral.core import RESOURCE_STATE_NAMESPACE, Action, ExecutionState
 from corral.core.task import topological_order
 from corral.core.tool import Tool
 from corral.observability import NoOpObserver
@@ -41,7 +41,7 @@ CONFIGURATIONS = [
 ]
 
 
-@pytest.fixture()
+@pytest.fixture
 def afm_instrument(monkeypatch):
     """Keep the real AFM loader, prompt and reset hook; replace device dependencies."""
     applications = []
@@ -115,10 +115,13 @@ def test_task_definitions_run_and_restore(
     )
     monkeypatch.syspath_prepend(str(ROOT))
     monkeypatch.setenv("CORRAL_WORK_DIR", str(tmp_path / "work"))
+    env_kwargs = {"level": level, "subtasks": subtasks}
+    if benchmark == "stargazer":
+        # This API check runs a fixed submit-only agent on the host. Stargazer's
+        # restricted Docker workers are exercised by its own permission tests.
+        env_kwargs["development_mode"] = True
     # Do not supply repository_root: this also checks the CLI's default lookup.
-    environments = load_environment_group(
-        benchmark, env_kwargs={"level": level, "subtasks": subtasks}
-    )
+    environments = load_environment_group(benchmark, env_kwargs=env_kwargs)
     tasks = {name: env.current_task for name, env in environments.items()}
     order = topological_order(tasks)
 
@@ -150,11 +153,14 @@ def test_task_definitions_run_and_restore(
                     assert state.runtime.metadata["execution_completed"] is True
                     assert state.submission == "api-contract-answer"
                     assert state.task.metadata["prompt"]
-                    hidden = state.environment.values.get("hidden_arguments", {})  # noqa: PD011
                     if benchmark == "spectra_elucidation":
+                        hidden = state.environment.values.get("hidden_arguments", {})
                         assert hidden["h_smiles"] == tasks[task_id].scoring_inputs
                     elif benchmark == "wetlab":
-                        assert hidden["wetlab"]
+                        resources = state.environment.values.get(
+                            RESOURCE_STATE_NAMESPACE, {}
+                        )
+                        assert resources["wetlab"]
                     output = environment.get_task_output(state)
                     assert output is not None, task_id
                     outputs[task_id] = output

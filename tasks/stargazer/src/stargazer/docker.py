@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from corral.runtime.python_repl import execute_python_repl
-from stargazer.tools import _create_worker_namespace, _execute_persistent
+from stargazer.protocol import public_resources
+from stargazer.tools import _execute_persistent, worker_namespace_factory
 
 if TYPE_CHECKING:
     import threading
@@ -24,6 +25,8 @@ def execute_analysis(
     initial_data = {
         key: value for key, value in public_data.items() if key != "history"
     }
+    if initial_data.get("analysis_assistance", True):
+        initial_data.setdefault("public_resources", public_resources())
     result = execute_python_repl(
         code=code,
         initial_data=initial_data,
@@ -31,10 +34,14 @@ def execute_analysis(
         synchronized_names=("history",),
         checkpoint=checkpoint,
         workspace=workspace,
-        namespace_factory=_create_worker_namespace,
+        namespace_factory=worker_namespace_factory(
+            initial_data.get("analysis_assistance", True)
+        ),
         code_executor=_execute_persistent,
         export_names=("_protocol_guide_ack",),
         export_result_names={"_protocol_guide_ack": "protocol_ack"},
+        workspace_access="read_write",
+        network_access="none",
         cancel=cancel,
     )
     return {

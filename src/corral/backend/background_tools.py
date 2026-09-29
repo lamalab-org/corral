@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from corral.core.environment import Environment
+    from corral.core.state import ExecutionState
+    from corral.runtime.tool_execution import PreparedToolCall
 
 
 class _CallableTool(Tool):
@@ -35,6 +37,7 @@ class _CallableTool(Tool):
             params_json_schema=params_json_schema,
             concurrency=concurrency,
             hidden_args=hidden_args,
+            trusted=True,
         )
         self._fn = fn
 
@@ -43,6 +46,39 @@ class _CallableTool(Tool):
         if isinstance(result, str):
             return result
         return json.dumps(result, ensure_ascii=False, default=str)
+
+
+class _BackgroundStartTool(Tool):
+    """State-aware controller dispatch for one background-capable tool."""
+
+    def __init__(self, target: Tool, params_json_schema: dict[str, Any]) -> None:
+        super().__init__(
+            name=f"start_{target.name}",
+            description=_start_description(target),
+            params_json_schema=params_json_schema,
+            controller_dispatch=True,
+        )
+        self.target_name = target.name
+
+    def execute(self, **_kwargs: Any) -> Any:
+        raise RuntimeError("background start tools require controller dispatch")
+
+    def execute_controller(
+        self,
+        environment: Environment,
+        state: ExecutionState,
+        prepared: PreparedToolCall,
+    ) -> str:
+        return json.dumps(
+            environment.submit_job(
+                state,
+                self.target_name,
+                prepared.visible_arguments,
+                action_id=prepared.action_id,
+            ),
+            ensure_ascii=False,
+            default=str,
+        )
 
 
 def _job_id_schema(extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -71,27 +107,18 @@ def _start_description(tool: Tool) -> str:
     )
 
 
-def _make_start_tool(env: Environment, tool: Tool) -> _CallableTool:
+def _make_start_tool(tool: Tool) -> _BackgroundStartTool:
     """Build the `start_<tool>` background variant for one tool.
 
     The variant advertises the *same* argument schema as the original (hidden
-    arguments already stripped by the `@tool` decorator); the environment
-    re-injects hidden arguments and resolves the workspace at submit time.
+    arguments already stripped by the `@tool` decorator). Controller dispatch
+    prepares the underlying invocation from the current projected state.
     """
     schema = deepcopy(tool.params_json_schema)
     schema.pop("additionalProperties", None)
     schema.pop("title", None)
 
-    def _start(**kwargs: Any) -> dict[str, Any]:
-        return env.submit_job(tool.name, kwargs)
-
-    return _CallableTool(
-        name=f"start_{tool.name}",
-        description=_start_description(tool),
-        params_json_schema=schema,
-        fn=_start,
-        hidden_args=dict(tool.hidden_args),
-    )
+    return _BackgroundStartTool(tool, schema)
 
 
 def _make_control_tools(env: Environment) -> list[_CallableTool]:
@@ -213,7 +240,7 @@ def attach_background_tools(env: Environment) -> None:
         return
 
     for tool in background:
-        start_tool = _make_start_tool(env, tool)
+        start_tool = _make_start_tool(tool)
         env.tools[start_tool.name] = start_tool
 
     for control_tool in _make_control_tools(env):

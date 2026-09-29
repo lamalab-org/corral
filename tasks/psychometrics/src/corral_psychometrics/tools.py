@@ -76,7 +76,10 @@ class _CellExecutor:
     workspace: str
 
     def __call__(self, code: str, namespace: Namespace) -> str:
-        os.chdir(self.workspace)
+        # A restricted worker already starts in its /workspace mount, where the
+        # controller's path does not exist; a local session starts elsewhere.
+        if os.path.isdir(self.workspace):
+            os.chdir(self.workspace)
         return _run_cell(code, namespace)
 
 
@@ -106,6 +109,10 @@ def workspace_tools(workspace: str) -> dict[str, Tool]:
         code_executor=_CellExecutor(workspace),
         max_code_chars=MAX_CODE_CHARS,
         max_output_chars=MAX_OUTPUT_CHARS,
+        # Cells read the task data and may save intermediate files; nothing
+        # they need is online.
+        workspace_access="read_write",
+        network_access="none",
     )
     return {
         name: files[name]

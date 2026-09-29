@@ -469,13 +469,17 @@ def _boundary_density(e):
         )
         density = mass * 1.66053906660 / np.linalg.det(state["cell"])
         sample = t[t.stage == stage].iloc[location]
-        if not _close(density, sample.density_g_cm3, atol=1e-5):
+        if not _close(state["time_ps"], sample.time_ps, atol=0.5, rtol=0.001):
+            return False, f"{name} timing contradicts the corresponding trace endpoint"
+        # A shared handoff can be recorded only under the preceding stage.
+        matching = t[np.isclose(t.time_ps, state["time_ps"], rtol=0, atol=1e-6)]
+        if matching.empty:
+            return False, f"{name} has no thermal sample at its boundary time"
+        if not _close(density, matching.density_g_cm3, atol=1e-5):
             return (
                 False,
                 f"{name} cell and atomic masses contradict the endpoint density",
             )
-        if not _close(state["time_ps"], sample.time_ps, atol=0.5, rtol=0.001):
-            return False, f"{name} timing contradicts the corresponding trace endpoint"
     return True
 
 
@@ -532,13 +536,16 @@ def _state(s):
 def _boundary_states(e):
     """Read inline states or explicitly linked, restartable LAMMPS data files."""
     document = e.artifact("boundary_states", "stage_boundaries")
+    data = e.json("boundary_states", "stage_boundaries")
     result = {}
-    for name, record in e.json("boundary_states", "stage_boundaries").items():
+    for name, record in data.items():
+        if name in ("description", "atom_style", "atom_type_species"):
+            continue
         if "lammps_data" not in record:
             result[name] = _state(record)
             continue
         path = e.linked_path(record["lammps_data"], document)
-        species = record.get("atom_type_species")
+        species = record.get("atom_type_species", data.get("atom_type_species"))
         mapping = (
             {int(key): atomic_numbers[value] for key, value in species.items()}
             if species is not None
@@ -548,7 +555,7 @@ def _boundary_states(e):
             path,
             format="lammps-data",
             units="real",
-            atom_style=record.get("atom_style", "charge"),
+            atom_style=record.get("atom_style", data.get("atom_style", "charge")),
             Z_of_type=mapping,
         )
         if not {"id", "initial_charges", "momenta"} <= atoms.arrays.keys():
@@ -787,6 +794,7 @@ def _hold(e, drift=False):
 
 def evaluate(e, r):
     """Add task checks to the shared rubric (exactly 90 available points)."""
+    from . import lammps_checks
 
     trace_ok = False
 
@@ -800,7 +808,18 @@ def evaluate(e, r):
 
     r.check("thermal_cycle", 12, lambda: _verified(thermal_cycle))
     r.check("saved_physics_and_logs", 8, lambda: _verified(lambda: _physics(e)))
-    r.check("boundary_state_continuity", 10, lambda: _boundaries(e))
+
+    def boundary_check():
+        continuity = _boundaries(e)
+        if continuity is not True:
+            return continuity
+        return (
+            lammps_checks.supplied_silicate_initial_state(e)
+            and lammps_checks.no_silicate_state_resets(e)
+            and lammps_checks.cooled_endpoint_temperature(e)
+        )
+
+    r.check("boundary_state_continuity", 10, boundary_check)
     r.check("thermal_observables", 4, lambda: _verified(lambda: _logged_trace(e)))
     r.check("boundary_density_consistency", 3, lambda: _boundary_density(e))
     selections = r.check("transition_selections", 8, lambda: _selection(e))
@@ -835,31 +854,35 @@ def evaluate(e, r):
     r.check(
         "signed_transition_difference",
         4,
-        lambda: coordinate
-        and result_close(
-            e.results["delta_tg_K"],
-            float(e.results["reheating_tg_K"]) - float(e.results["cooling_tg_K"]),
-            atol=0.5,
+        lambda: (
+            coordinate
+            and result_close(
+                e.results["delta_tg_K"],
+                float(e.results["reheating_tg_K"]) - float(e.results["cooling_tg_K"]),
+                atol=0.5,
+            )
         ),
     )
     r.check(
         "reported_estimates_and_units",
         4,
-        lambda: all(
-            e.results["units"].get(key) == value
-            for key, value in [
-                ("temperature", "K"),
-                ("density", "g/cm3"),
-                ("density_drift", "g/cm3/ps"),
-            ]
-        )
-        and all(
-            result_close(
-                e.results[f"{stage}_tg_K"],
-                _transitions(e)[stage]["estimate_K"],
-                atol=0.5,
+        lambda: (
+            all(
+                e.results["units"].get(key) == value
+                for key, value in [
+                    ("temperature", "K"),
+                    ("density", "g/cm3"),
+                    ("density_drift", "g/cm3/ps"),
+                ]
             )
-            for stage in ["cooling", "reheating"]
+            and all(
+                result_close(
+                    e.results[f"{stage}_tg_K"],
+                    _transitions(e)[stage]["estimate_K"],
+                    atol=0.5,
+                )
+                for stage in ["cooling", "reheating"]
+            )
         ),
     )
     r.check(
@@ -870,12 +893,18 @@ def evaluate(e, r):
     r.check(
         "hold_means",
         6,
-        lambda: trace_ok
-        and result_close(
-            e.results["hold_temperature_K"], _hold(e).temperature_K.mean(), atol=1e-05
-        )
-        and result_close(
-            e.results["hold_density_g_cm3"], _hold(e).density_g_cm3.mean(), atol=1e-07
+        lambda: (
+            trace_ok
+            and result_close(
+                e.results["hold_temperature_K"],
+                _hold(e).temperature_K.mean(),
+                atol=1e-05,
+            )
+            and result_close(
+                e.results["hold_density_g_cm3"],
+                _hold(e).density_g_cm3.mean(),
+                atol=1e-07,
+            )
         ),
     )
 

@@ -61,6 +61,75 @@ def response(plan, fingerprint):
     }
 
 
+def test_verifier_upload_makes_private_checkpoint_readable_without_changing_source(
+    tmp_path, monkeypatch
+):
+    import hashlib
+    import modal
+
+    checkpoint = tmp_path / "state.restart"
+    checkpoint.write_bytes(b"saved restart")
+    checkpoint.chmod(0o600)
+    plan = Plan(None, 1, "nonce")
+    plan.add(
+        "restart_state",
+        "lammps_restart",
+        {},
+        {},
+        parameters=plan.checkpoint(checkpoint),
+    )
+    uploaded = {}
+
+    class Volume:
+        def batch_upload(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def put_file(self, source, path, mode=None):
+            source = Path(source)
+            uploaded[path] = (
+                source.read_bytes(),
+                source.stat().st_mode & 0o777 if mode is None else mode,
+            )
+
+    def calculate(identifier, release, refs):
+        root = f"/corral/verifications/{identifier}/input/"
+        for name, ref in refs.items():
+            payload, mode = uploaded[root + name]
+            assert mode == 0o644  # The sandbox reads evidence as UID 10001.
+            assert ref == {
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size": len(payload),
+            }
+        request = json.loads(uploaded[root + "request.json"][0])
+        assert request["jobs"] == plan.jobs
+        return {
+            **response(plan, "fingerprint"),
+            "verification_id": identifier,
+            "release_id": release,
+            "input_sha256": hashlib.sha256(
+                json.dumps(refs, sort_keys=True).encode()
+            ).hexdigest(),
+        }
+
+    monkeypatch.setattr(modal.Volume, "from_name", lambda _: Volume())
+    monkeypatch.setattr(
+        modal.Function,
+        "from_name",
+        lambda *_: SimpleNamespace(remote=calculate),
+    )
+    verifier = ModalVerifier(release_id="release-1", volume_name="simulations")
+    result = verifier._calculate(plan, "fingerprint")
+    assert result["jobs"][0]["status"] == "complete"
+    assert checkpoint.stat().st_mode & 0o777 == 0o600
+    assert checkpoint.read_bytes() == b"saved restart"
+
+
 @pytest.mark.parametrize("number", range(3, 11))
 def test_current_evidence_builds_checks_without_scripts_or_expected_answers(
     tmp_path, number
@@ -274,6 +343,78 @@ def test_nonreference_calculator_settings_keep_live_verification(tmp_path):
         else:
             assert plan.jobs
             assert all(job["operation"] == "mace" for job in plan.jobs)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "operation"), [("float64", "reference"), ("float32", "mace")]
+)
+def test_task5_class_metadata_and_top_level_precision_build_real_checks(
+    tmp_path, dtype, operation
+):
+    path = _submission(5, tmp_path)
+    settings_path = Path(json.loads(path.read_text())["settings"])
+    settings = json.loads(settings_path.read_text())
+    settings.pop("model_settings", None)
+    settings.update(
+        calculator="mace.calculators.MACECalculator", default_dtype=dtype, device="cuda"
+    )
+    settings_path.write_text(json.dumps(settings))
+    evidence = Evidence(path)
+    fingerprint = evidence.fingerprint()
+    plan = build_plan(evidence, 5, "nonce")
+    assert not plan.notes
+    assert plan.jobs
+    # Float64 uses 25 cached Hessians. Float32 recomputes both displacement
+    # signs for all six degrees of freedom at each strain.
+    assert sum(len(job["frames"]) for job in plan.jobs) == (
+        25 if dtype == "float64" else 300
+    )
+    assert all(job["operation"] == operation for job in plan.jobs)
+    assert evidence.fingerprint() == fingerprint
+
+
+@pytest.mark.parametrize(
+    ("symmetry", "acoustic"),
+    [
+        ("transpose_average", "projection"),
+        ("Hessian transpose average", "orthogonal translational projection"),
+        (
+            "H_sym = (H_raw + H_raw^T)/2",
+            "Cartesian orthogonal projection H = P H_sym P, P removes the three uniform translations",
+        ),
+        ("none", "none"),
+    ],
+)
+def test_task5_operation_aliases_reach_the_reference_verifier_in_canonical_form(
+    tmp_path, symmetry, acoustic
+):
+    path = _submission(5, tmp_path)
+    manifest = json.loads(path.read_text())
+    records_path = Path(manifest["artifacts"]["strain_calculations"])
+    records = json.loads(records_path.read_text())
+    for record in records:
+        record.update(symmetrization=symmetry, acoustic_sum_rule=acoustic)
+    records_path.write_text(json.dumps(records))
+    evidence = Evidence(path)
+    before = evidence.fingerprint()
+    plan = build_plan(evidence, 5, "nonce")
+    assert not plan.notes
+    job = plan.jobs[0]
+    assert (
+        job["postprocess"]
+        == [
+            {
+                "symmetrization": "none" if symmetry == "none" else "average_transpose",
+                "acoustic_sum_rule": "none" if acoustic == "none" else "projection",
+            }
+        ]
+        * 25
+    )
+    ground_truth = module("ground_truth")
+    # The actual remote transformation reader must accept every serialized spec.
+    for spec in job["postprocess"]:
+        assert ground_truth.postprocess_hessian(np.eye(6), spec).shape == (6, 6)
+    assert evidence.fingerprint() == before
 
 
 def test_ground_truth_resolves_dimer_orientation_and_task5_atom_order():
@@ -962,8 +1103,9 @@ def test_verification_sandbox_has_no_agent_workspace_or_controller_mounts(
     assert list(volumes[0].files) == ["/request.json"]
 
 
+@pytest.mark.parametrize("layout", ["top_level", "nested", "mixed", "duplicated"])
 def test_provenance_evaluator_uses_controller_record_not_submitted_copy(
-    worker, monkeypatch, short_config
+    worker, monkeypatch, short_config, layout
 ):
     import modal
     from corral_md.workflow_scoring.verification import _check_provenance
@@ -992,6 +1134,13 @@ def test_provenance_evaluator_uses_controller_record_not_submitted_copy(
             }.items()
         },
     }
+    if layout in ("nested", "duplicated"):
+        manifest["provenance"] = {key: manifest[key] for key in ("run_id", "action_id")}
+        manifest["provenance"]["release_id"] = "release-1"
+        if layout == "nested":
+            del manifest["run_id"], manifest["action_id"]
+    elif layout == "mixed":
+        manifest["provenance"] = {"action_id": manifest.pop("action_id")}
     path = output / "manifest.json"
     path.write_text(json.dumps(manifest))
     calls = []
@@ -1008,11 +1157,15 @@ def test_provenance_evaluator_uses_controller_record_not_submitted_copy(
     verifier = ModalVerifier(
         release_id="release-1",
         volume_name="simulations",
-        run_id="run-1",
     )
-    assert _check_provenance(verifier, Evidence(path))["status"] == "passed"
+    evidence = Evidence(path)
+    fingerprint = evidence.fingerprint()
+    assert _check_provenance(verifier, evidence)["status"] == "passed"
+    assert evidence.fingerprint() == fingerprint
+    assert json.loads(path.read_text()) == manifest
     assert calls[0][:3] == ("run-1", "action-1", "release-1")
     assert len(calls[0][3]) == 4
+    verifier.run_id = "run-1"
     manifest["run_id"] = "other-run"
     path.write_text(json.dumps(manifest))
     assert _check_provenance(verifier, Evidence(path))["status"] == "failed"

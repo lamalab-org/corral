@@ -35,13 +35,13 @@ def sample_tool_with_defaults(
 
 
 # Fixtures
-@pytest.fixture()
+@pytest.fixture
 def calculator_tool():
     """Fixture providing a basic calculator tool"""
     return tool(sample_valid_tool)
 
 
-@pytest.fixture()
+@pytest.fixture
 def calculator_with_defaults():
     """Fixture providing a calculator with default arguments"""
     return tool(sample_tool_with_defaults)

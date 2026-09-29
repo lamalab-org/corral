@@ -13,13 +13,13 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from corral.observability import LoggingObserver, ObservationContext
+from corral.observability import ObservationContext, observer_from_env
 from corral.orchestration.launchers import LocalTaskLauncher
 from corral.orchestration.models import RUNTIME_PROTOCOL_VERSION, RunTaskInput
 from corral.orchestration.registry import RuntimeRegistry
 from corral.persistence import SQLiteCommitStore, WorkspaceManager
 from corral.runtime import permissions
-from corral.workspace import WorkspaceFilesystem, build_terminal_tool
+from corral.workspace import AbsoluteWorkspaceFilesystem, build_terminal_tool
 
 
 def _registry_from_module(specification: str, request: RunTaskInput) -> RuntimeRegistry:
@@ -51,12 +51,15 @@ def _built_in_registry(
         load_environment_group,
     )
 
+    agent_options = dict(agent_definition.options)
+    if agent_definition.reasoning_effort is not None:
+        agent_options["reasoning_effort"] = agent_definition.reasoning_effort
     agent = create_agent(
         agent_definition.name,
         model=agent_definition.model,
         api_endpoint=agent_definition.api_endpoint,
         temperature=agent_definition.temperature,
-        agent_kwargs=agent_definition.options,
+        agent_kwargs=agent_options,
     )
     options = dict(environment_definition.options)
     options["work_dir"] = "/workspace"
@@ -111,6 +114,9 @@ def _restore_host_ownership(root: Path) -> None:
 
 async def run_task_from_files(request_file: str | Path, result_file: str | Path) -> int:
     """Reconstruct one runtime, recover its last commit, and publish StateRef."""
+    # A retained container can be started again. Its previous result must never
+    # be mistaken for the outcome of this invocation, including startup errors.
+    Path(result_file).unlink(missing_ok=True)
     request = TypeAdapter(RunTaskInput).validate_json(
         Path(request_file).read_text(encoding="utf-8")
     )
@@ -127,6 +133,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
 
     registry: RuntimeRegistry | None = None
     store: SQLiteCommitStore | None = None
+    observer = observer_from_env()
     try:
         os.chown(checkpoint_root, 0, 0)
         checkpoint_root.chmod(0o700)
@@ -165,7 +172,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
                 )
             if "terminal" not in environment.tools:
                 environment.tools["terminal"] = build_terminal_tool(
-                    WorkspaceFilesystem(workspace_path)
+                    AbsoluteWorkspaceFilesystem(workspace_path)
                 )
         head = await store.for_execution(request.execution_id).head("main")
         if head is not None:
@@ -181,7 +188,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         launcher = LocalTaskLauncher(
             store,
             registry,
-            LoggingObserver(),
+            observer,
             scaffold_sandbox="docker",
         )
         result = await launcher.run(
@@ -194,6 +201,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         )
         _write_result(Path(result_file), asdict(result))
     finally:
+        await asyncio.to_thread(observer.flush)
         if registry is not None:
             registry.close()
         if store is not None:

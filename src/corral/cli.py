@@ -23,6 +23,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 
 import corral.orchestration as orchestration
+from corral.observability.langfuse import langfuse_enabled
 from corral.persistence import ShardedCommitStore, SQLiteCommitStore
 from corral.run import CorralRunner, execute_task
 from corral.runtime.environment_loader import (
@@ -366,6 +367,10 @@ def _sandbox_profile(
         memory=getattr(args, "sandbox_memory", "4g"),
         pids_limit=getattr(args, "sandbox_pids_limit", 256),
         network=getattr(args, "sandbox_network", "bridge"),
+        private_directories=tuple(
+            str(Path(path).expanduser().resolve())
+            for path in getattr(args, "sandbox_private_directory", ())
+        ),
         environment_allowlist=tuple(
             dict.fromkeys(
                 getattr(
@@ -376,7 +381,7 @@ def _sandbox_profile(
             )
         ),
         retention=orchestration.SandboxRetention(
-            getattr(args, "keep_sandboxes", "never")
+            getattr(args, "keep_sandboxes", "on-failure")
         ),
         registry_module=getattr(args, "sandbox_registry_module", None),
     )
@@ -410,9 +415,14 @@ async def run_benchmark(
     if harness == "reflexion":
         harness = normalise_agent_name(runtime_options.get("actor", "tool-calling"))
     extra = AGENT_DEFINITIONS[harness].extra or ""
-    image_kind = "wetlab" if args.environment == "wetlab" else "benchmark"
+    if langfuse_enabled():
+        extra = ",".join(filter(None, (extra, "langfuse")))
+    image_kind = (
+        args.environment if args.environment in {"stargazer", "wetlab"} else "benchmark"
+    )
     sandbox = _sandbox_profile(
-        args, default_image=f"corral-{args.environment}:{extra or 'latest'}"
+        args,
+        default_image=f"corral-{args.environment}:{extra.replace(',', '-') or 'latest'}",
     )
     agents = {}
     if sandbox.mode == orchestration.SandboxMode.DOCKER.value:
@@ -752,6 +762,13 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     sandbox.add_argument("--sandbox-memory", default="4g")
     sandbox.add_argument("--sandbox-pids-limit", type=int, default=256)
     sandbox.add_argument(
+        "--sandbox-private-directory",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Read-only controller data directory; excluded from workers. Repeat as needed. Environment option paths under it are translated for Docker.",
+    )
+    sandbox.add_argument(
         "--sandbox-network",
         default="bridge",
         help="Docker network mode; default: bridge (outbound network enabled).",
@@ -759,7 +776,8 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     sandbox.add_argument(
         "--keep-sandboxes",
         choices=("never", "on-failure", "always"),
-        default="never",
+        default="on-failure",
+        help="Retain failed containers for resume by default; remove successful containers and volumes after checkpoint export.",
     )
     sandbox.add_argument(
         "--sandbox-env",

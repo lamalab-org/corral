@@ -261,7 +261,8 @@ class Evidence:
         if not isinstance(self.results, dict) or not isinstance(self._artifacts, dict):
             raise EvidenceError("results and artifacts must be JSON objects")
         self.settings = self._document(value.get("settings"))
-        self.report = self._document(value.get("report"))
+        report = value.get("report")
+        self.report = report if isinstance(report, dict) else self._document(report)
         self._cache: dict[tuple, Any] = {}
         self._restart_reader = restart_reader
 
@@ -336,6 +337,9 @@ class Evidence:
                     digest.update(b"unreadable-link")
 
         for role in ("artifacts", "settings", "scripts", "report"):
+            if role == "report" and isinstance(self.manifest.get(role), dict):
+                # Inline narrative is already hashed with the manifest above.
+                continue
             visit(self.manifest.get(role), role)
         return digest.hexdigest()
 

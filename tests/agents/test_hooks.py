@@ -18,7 +18,7 @@ from corral.core.task import TaskDefinition
 pytestmark = pytest.mark.usefixtures("session_stores")
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -65,7 +65,7 @@ def context(
     return HookContext(session=session, agent=agent, hook_point=point)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_sync_and_async_hooks_run_in_priority_order():
     hooks = AgentHooks()
     order: list[str] = []
@@ -85,7 +85,7 @@ async def test_sync_and_async_hooks_run_in_priority_order():
     assert order == ["high", "low"]
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_hook_context_exposes_only_the_current_session_surface():
     agent = SessionAgent()
     session = await make_session()
@@ -100,7 +100,7 @@ async def test_hook_context_exposes_only_the_current_session_surface():
     assert not hasattr(agent.hooks, "execute")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_hook_stop_flag_prevents_lower_priority_callbacks():
     hooks = AgentHooks()
     order: list[str] = []
@@ -123,7 +123,7 @@ async def test_hook_stop_flag_prevents_lower_priority_callbacks():
     assert result.should_continue is False
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_critical_errors_propagate_and_noncritical_errors_do_not():
     hooks = AgentHooks()
     continued: list[bool] = []
@@ -168,7 +168,7 @@ def test_registration_remove_and_clear():
     assert not hooks.has_hooks(HookPoint.AFTER_TASK)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_shared_runner_invokes_hooks_and_persists_hook_state():
     hooks = AgentHooks()
     events: list[str] = []
@@ -205,7 +205,7 @@ async def test_shared_runner_invokes_hooks_and_persists_hook_state():
     assert hook_state["metadata"] == {"source": "test"}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_before_task_hook_can_cancel_the_agent():
     hooks = AgentHooks()
 
@@ -230,7 +230,7 @@ async def test_before_task_hook_can_cancel_the_agent():
     assert result.state.submission is None
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_after_task_hook_runs_when_the_agent_raises():
     hooks = AgentHooks()
     seen: list[str] = []

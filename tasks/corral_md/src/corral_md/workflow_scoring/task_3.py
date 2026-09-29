@@ -162,9 +162,12 @@ def evaluate(e: Evidence, r: Rubric) -> None:
         )
 
     def identities():
+        from .level1_trusted import teacher_digest_matches
+
         settings = e.settings
         return (
-            str(settings["teacher_model"]).split("/")[-1] == "teacher.model"
+            teacher_digest_matches(e, 3)
+            and str(settings["teacher_model"]).split("/")[-1] == "teacher.model"
             and str(settings["student_model"]).split("/")[-1] == "student.model"
             and all(
                 re.fullmatch(r"[0-9a-fA-F]{64}", settings[key])

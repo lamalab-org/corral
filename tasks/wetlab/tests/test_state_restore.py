@@ -103,7 +103,7 @@ def _environment(work_dir: str = "") -> QualitativeAnalysisEnvironment:
 
 
 def _wetlab_payload(state: ExecutionState) -> dict:
-    return dict(state.environment.values["hidden_arguments"]["wetlab"])
+    return dict(state.environment.values["resources"]["wetlab"])
 
 
 def test_loader_binds_wetlab_scratch_per_execution(tmp_path, monkeypatch) -> None:

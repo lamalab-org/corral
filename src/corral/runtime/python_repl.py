@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 import cloudpickle
 import numpy as np
 
-from corral.core.tool import Tool
+from corral.core.tool import Tool, WorkspaceAccess
 from corral.runtime import permissions
 
 if TYPE_CHECKING:
@@ -619,6 +619,7 @@ class _RestrictedPythonREPLTool(Tool):
         export_result_names: Mapping[str, str],
         max_output_chars: int,
         address_space_bytes: int,
+        network_access: str = "allowed",
     ):
         super().__init__(
             name="_corral_python_repl_step",
@@ -633,6 +634,7 @@ class _RestrictedPythonREPLTool(Tool):
                 "required": ["code", "public_data", "checkpoint"],
             },
         )
+        self.network_access = network_access
         self.namespace_factory = namespace_factory
         self.code_executor = code_executor
         self.synchronized_names = synchronized_names
@@ -697,6 +699,8 @@ def execute_python_repl(
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
     address_space_bytes: int = DEFAULT_WORKER_ADDRESS_SPACE_BYTES,
     max_response_bytes: int | None = None,
+    workspace_access: WorkspaceAccess | str = WorkspaceAccess.NONE,
+    network_access: str = "allowed",
 ) -> PythonREPLResult:
     """Execute and checkpoint Python in Corral's restricted worker.
 
@@ -704,6 +708,8 @@ def execute_python_repl(
     Initial data is materialized only when no checkpoint exists; on restoration,
     only bindings named by `synchronized_names` are refreshed.
     """
+    if network_access not in {"allowed", "none"}:
+        raise ValueError("network_access must be allowed or none")
     if len(code) > max_code_chars:
         raise ValueError(
             f"Python REPL code is limited to {max_code_chars:,} characters"
@@ -740,6 +746,7 @@ def execute_python_repl(
         export_result_names=result_names,
         max_output_chars=max_output_chars,
         address_space_bytes=address_space_bytes,
+        network_access=network_access,
     )
     reply, bulk = permissions.run_worker_with_bulk(
         "tool",
@@ -754,6 +761,7 @@ def execute_python_repl(
         workspace,
         cancel=cancel,
         max_response_bytes=max_response_bytes,
+        workspace_access=WorkspaceAccess(workspace_access).value,
     )
     result = json.loads(reply["content"])
     expected = (

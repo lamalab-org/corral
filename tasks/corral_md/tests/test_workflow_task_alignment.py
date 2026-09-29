@@ -12,6 +12,7 @@ from corral_md.score import check_level2_workflow
 from corral_md.workflow_scoring.common import Rubric
 from corral_md.workflow_scoring.task_7 import _npt_fit
 
+pytestmark = pytest.mark.usefixtures("offline_mp149_reference")
 
 def _submission(number, root):
     spec = importlib.util.spec_from_file_location(
@@ -206,12 +207,12 @@ def test_task8_distribution_screen_requests_review_without_changing_other_credit
 ):
     path = _submission(8, tmp_path)
     ideal = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2)).positions
-    frames = read(tmp_path / "train.json")
+    frames = read(tmp_path / "id_test.json")
     for frame in frames:
         frame["positions"] = (
             ideal + 1.2 * (np.asarray(frame["positions"]) - ideal)
         ).tolist()
-    write(tmp_path / "train.json", frames)
+    write(tmp_path / "id_test.json", frames)
     report = check_level2_workflow(8).evaluate(path)
     assert report["pending_checks"] == ["distortion_statistical_plausibility"]
     assert report["score_bounds"] == [0, 1]

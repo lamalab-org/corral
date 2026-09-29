@@ -123,7 +123,7 @@ def _copy_public_inputs(
             raise ValueError(f"public task input must be a filename: {name!r}")
         shutil.copyfile(source, destination)
     return EnvironmentSetup(
-        hidden_arguments={"work_dir": str(workspace), "analysis_session": None},
+        hidden_arguments={"analysis_session": None},
         status="Public task inputs copied into the isolated workspace.",
     )
 
@@ -131,9 +131,10 @@ def _copy_public_inputs(
 class PsychometricsEnvironment(Environment):
     """Dispatches PythonREPL, keeping its session checkpoint in task state."""
 
-    def execute_tool(self, state: ExecutionState, tool: Any, arguments: dict[str, Any]) -> Any:
+    def execute_controller_tool(self, state: ExecutionState, prepared: Any) -> Any:
+        tool, arguments = prepared.tool, prepared.arguments
         if tool.name != "PythonREPL":
-            return super().execute_tool(state, tool, arguments)
+            return super().execute_controller_tool(state, prepared)
         if not isinstance(tool, PythonREPLTool):
             raise TypeError("PythonREPL must use Corral's PythonREPLTool")
         if not self.workspace_path:

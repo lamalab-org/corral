@@ -25,6 +25,7 @@ from corral.backend.executors import (
 )
 from corral.backend.jobs import JobManager, JobStatus
 from corral.core.tool import tool
+from corral.runtime.tool_execution import PreparedToolCall
 
 
 @tool
@@ -49,10 +50,12 @@ def nap(seconds: float = Field(description="seconds to sleep")) -> str:
 def _work(tool_obj, **arguments):
     return JobWork(
         job_id="job_test",
-        tool_name=tool_obj.name,
-        tool=tool_obj,
-        call_arguments=arguments,
+        prepared=PreparedToolCall.capture(tool_obj, arguments),
     )
+
+
+def _prepared(tool_obj, **arguments):
+    return PreparedToolCall.capture(tool_obj, arguments)
 
 
 def test_render_result_passes_strings_and_json_encodes_others():
@@ -169,9 +172,7 @@ def test_manager_routes_job_to_the_tools_declared_executor():
     injected = _RecordingExecutor()
     manager = JobManager(executors={"subprocess": injected})
 
-    rec = manager.submit(
-        sub_tool, visible_arguments={"x": 1.0}, call_arguments={"x": 1.0}
-    )
+    rec = manager.submit(_prepared(sub_tool, x=1.0))
     view = manager.result(rec.context.job_id, wait=True, timeout=3.0)
     assert view["status"] == JobStatus.SUCCEEDED.value
     assert view["result"] == "2.0"
@@ -184,9 +185,7 @@ def test_manager_uses_default_executor_when_tool_declares_none():
     injected = _RecordingExecutor()
     # Register the recorder under "subprocess"; the thread tool must NOT hit it.
     manager = JobManager(executors={"subprocess": injected})
-    rec = manager.submit(
-        thread_tool, visible_arguments={"x": 1.0}, call_arguments={"x": 1.0}
-    )
+    rec = manager.submit(_prepared(thread_tool, x=1.0))
     view = manager.result(rec.context.job_id, wait=True, timeout=3.0)
     assert view["result"] == "3.0"
     assert injected.ran == []
@@ -195,9 +194,7 @@ def test_manager_uses_default_executor_when_tool_declares_none():
 
 def test_manager_end_to_end_over_subprocess_executor():
     manager = JobManager()  # builds the real SubprocessExecutor lazily
-    rec = manager.submit(
-        sub_tool, visible_arguments={"x": 9.0}, call_arguments={"x": 9.0}
-    )
+    rec = manager.submit(_prepared(sub_tool, x=9.0))
     view = manager.result(rec.context.job_id, wait=True, timeout=15.0)
     assert view["status"] == JobStatus.SUCCEEDED.value
     assert view["result"] == "10.0"

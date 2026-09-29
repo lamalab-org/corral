@@ -138,8 +138,8 @@ def main() -> None:
 
     # For each qa_type and env, keep the shortest question
     shortest: dict[str, dict[str, tuple[str, str]]] = {"qa": {}, "reasoning_qa": {}}
-    for qa_type in questions:
-        for env, entries in questions[qa_type].items():
+    for qa_type, questions_by_environment in questions.items():
+        for env, entries in questions_by_environment.items():
             shortest[qa_type][env] = min(entries, key=lambda e: len(e[0]))
 
     # Build LaTeX

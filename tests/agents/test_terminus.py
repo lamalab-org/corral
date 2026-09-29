@@ -11,7 +11,7 @@ from corral.agents.terminus import TerminusAgent, TerminusResponse
 from corral.core.action import submit_answer_tool
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -76,7 +76,7 @@ def test_terminus_response_requires_exactly_one_terminal_choice():
         )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_terminus_executes_through_session_and_returns_outcome(monkeypatch):
     responses = iter(
         [

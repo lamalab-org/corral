@@ -406,7 +406,7 @@ def _sampled_topology_quality(topology: dict) -> tuple[int, int, int, int]:
     """Return canonical graph complexity metrics."""
     edges = topology["connections"]
     nodes = {node for a, b, _ in edges for node in (a, b)}
-    degrees = {node: 0 for node in nodes}
+    degrees = dict.fromkeys(nodes, 0)
     pairs: dict[tuple[str, str], int] = {}
     for a, b, _ in edges:
         degrees[a] += 1
