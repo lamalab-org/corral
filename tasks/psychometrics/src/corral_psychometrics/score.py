@@ -12,6 +12,7 @@ from typing import Any, NamedTuple
 import numpy as np
 import pandas as pd
 
+from corral.utils.json_text import parse_json_text
 from corral_psychometrics import paths
 
 warnings.filterwarnings("ignore")
@@ -518,11 +519,10 @@ def score_model_criteria(
         return score_model_identification(submission, params, base_dir)
 
     base = Path(base_dir) if base_dir is not None else paths.task_root()
-    if isinstance(submission, str):
-        try:
-            submission = json.loads(submission.strip().strip("`").removeprefix("json"))
-        except json.JSONDecodeError:
-            return _zero("submission is not valid JSON")
+    try:
+        submission = parse_json_text(submission)
+    except ValueError as exc:
+        return _zero(f"submission: {exc}")
 
     truth = json.loads((base / params["truth_path"]).read_text())
     ref = truth["scoring_reference"]
@@ -747,11 +747,10 @@ def score_behavioral_validity(
 ) -> dict:
     """Score compositional evidence for a questionnaire's behavioural validity."""
     base = Path(base_dir) if base_dir is not None else paths.task_root()
-    if isinstance(submission, str):
-        try:
-            submission = json.loads(submission.strip().strip("`").removeprefix("json"))
-        except json.JSONDecodeError:
-            return _zero("submission is not valid JSON")
+    try:
+        submission = parse_json_text(submission)
+    except ValueError as exc:
+        return _zero(f"submission: {exc}")
     if not isinstance(submission, dict):
         return _zero("submission must be a JSON object")
 
@@ -1024,11 +1023,10 @@ def score_misfit_replication(
 ) -> dict:
     """Score item-level modifications against an independent replication."""
     base = Path(base_dir) if base_dir is not None else paths.task_root()
-    if isinstance(submission, str):
-        try:
-            submission = json.loads(submission.strip().strip("`").removeprefix("json"))
-        except json.JSONDecodeError:
-            return _zero("submission is not valid JSON")
+    try:
+        submission = parse_json_text(submission)
+    except ValueError as exc:
+        return _zero(f"submission: {exc}")
     if not isinstance(submission, dict):
         return _zero("submission must be a JSON object")
 
@@ -1212,11 +1210,10 @@ def score_adaptive_bank_choice(
     flags, the unstable items and the recommendation. No model is submitted.
     """
     base = Path(base_dir) if base_dir is not None else paths.task_root()
-    if isinstance(submission, str):
-        try:
-            submission = json.loads(submission.strip().strip("`").removeprefix("json"))
-        except json.JSONDecodeError:
-            return _zero("submission is not valid JSON")
+    try:
+        submission = parse_json_text(submission)
+    except ValueError as exc:
+        return _zero(f"submission: {exc}")
     if not isinstance(submission, dict):
         return _zero("submission must be a JSON object")
 
@@ -1277,11 +1274,10 @@ def score_model_identification(
 ) -> dict:
     """Score a complete mapping from anonymous datasets to candidate models."""
     base = Path(base_dir) if base_dir is not None else paths.task_root()
-    if isinstance(submission, str):
-        try:
-            submission = json.loads(submission.strip().strip("`").removeprefix("json"))
-        except json.JSONDecodeError:
-            return _zero("submission is not valid JSON")
+    try:
+        submission = parse_json_text(submission)
+    except ValueError as exc:
+        return _zero(f"submission: {exc}")
     if not isinstance(submission, dict) or not isinstance(submission.get("assignments"), dict):
         return _zero("submission must contain an assignments object")
     truth = json.loads((base / params["truth_path"]).read_text())["scored"]["assignments"]
@@ -1314,11 +1310,10 @@ def score_population_classification(
     submitted.
     """
     base = Path(base_dir) if base_dir is not None else paths.task_root()
-    if isinstance(submission, str):
-        try:
-            submission = json.loads(submission.strip().strip("`").removeprefix("json"))
-        except json.JSONDecodeError:
-            return _zero("submission is not valid JSON")
+    try:
+        submission = parse_json_text(submission)
+    except ValueError as exc:
+        return _zero(f"submission: {exc}")
     if not isinstance(submission, dict):
         return _zero("submission must be a JSON object")
 
@@ -1361,11 +1356,10 @@ def score_gender_item_integrity(
     covers the items, carries a gender path and fits.
     """
     base = Path(base_dir) if base_dir is not None else paths.task_root()
-    if isinstance(submission, str):
-        try:
-            submission = json.loads(submission.strip().strip("`").removeprefix("json"))
-        except json.JSONDecodeError:
-            return _zero("submission is not valid JSON")
+    try:
+        submission = parse_json_text(submission)
+    except ValueError as exc:
+        return _zero(f"submission: {exc}")
     if not isinstance(submission, dict):
         return _zero("submission must be a JSON object")
 

@@ -490,3 +490,11 @@ if __name__ == "__main__":
         and (args.tasks is None or task[1] in args.tasks)
     ]
     raise SystemExit(main(selected))
+
+
+def test_scorers_report_why_a_submission_could_not_be_read():
+    from corral_psychometrics.score import score_population_classification
+
+    result = score_population_classification("no json here", params={}, base_dir=".")
+    assert result["score_binary"] == 0.0
+    assert result["reason"] == "submission: no valid JSON found"
