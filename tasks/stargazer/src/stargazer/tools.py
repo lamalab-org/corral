@@ -170,6 +170,8 @@ STARGAZER_SUBMISSION_GUIDE = (
     "4) Avoid mixing phase aliases; if using l_rad, treat it as canonical\n"
     "5) Use validate_fit repeatedly to inspect observation-only fit diagnostics\n"
     "6) Finalize once with submit_answer(answer=<candidate JSON>); this ends the episode\n"
+    "7) With analysis assistance: d = stargazer_diagnostics(planets); print({'rms': d['residuals']['rms'], 'bic': d['bic']})\n"
+    "Print scalar diagnostics instead of full arrays. For large periodograms, process the frequency grid in chunks to fit the worker memory budget.\n"
 )
 PRELOADED_VARS = {
     "times_days",

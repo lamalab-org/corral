@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import Counter
 from dataclasses import asdict
 from uuid import uuid4
 
@@ -126,20 +127,66 @@ def test_official_levels_have_fixed_reference_valid_synthetic_banks(tmp_path):
 
     expected_source_counts = {level: {"synthetic": 10} for level in (1, 2)}
     expected_difficulty_counts = {
-        1: {5: 4, 6: 3, 7: 3},
+        1: {1: 2, 2: 2, 3: 2, 4: 2, 5: 2},
         2: {8: 4, 9: 3, 10: 3},
     }
+    expected_planet_counts = {1: {1: 8, 2: 2}, 2: {2: 1, 3: 6, 4: 3}}
+    manifest = json.loads(
+        (DEFAULT_DATA_ROOT / "selection_manifest.json").read_text(encoding="utf-8")
+    )
     for level, environments in levels.items():
         source_counts: dict[str, int] = {}
         difficulty_counts: dict[int, int] = {}
+        planet_counts: Counter[int] = Counter()
+        rows = {row["task_id"]: row for row in manifest["levels"][str(level)]["tasks"]}
+        assert set(rows) == set(environments)
         for environment in environments.values():
             task = environment.current_task.scoring_inputs["benchmark_task"]
             source_counts[task.source] = source_counts.get(task.source, 0) + 1
             difficulty_counts[task.truth_difficulty] = (
                 difficulty_counts.get(task.truth_difficulty, 0) + 1
             )
+            planet_counts[len(task.truth_planets)] += 1
+            assert rows[task.task_id]["difficulty"] == task.truth_difficulty
+            if level == 1:
+                assert rows[task.task_id]["planet_count"] == len(task.truth_planets)
         assert source_counts == expected_source_counts[level]
         assert difficulty_counts == expected_difficulty_counts[level]
+        assert planet_counts == expected_planet_counts[level]
+
+
+def test_original_level_one_is_available_only_by_explicit_selector(tmp_path):
+    original = create_environments(
+        selector_path=DEFAULT_DATA_ROOT / "selectors/level_1_original.json",
+        work_dir=tmp_path / "original",
+        development_mode=True,
+    )
+    current = create_environments(work_dir=tmp_path / "current", development_mode=True)
+    manifest = json.loads((DEFAULT_DATA_ROOT / "selection_manifest.json").read_text())
+    assert len(original) == 10
+    assert set(original) == {
+        row["task_id"]
+        for row in manifest["historical_selections"]["level_1_original"]["tasks"]
+    }
+    assert set(original) & set(current) == {"seed15_diff5", "seed21_diff5"}
+    assert Counter(
+        len(env.current_task.scoring_inputs["benchmark_task"].truth_planets)
+        for env in original.values()
+    ) == {1: 2, 2: 7, 3: 1}
+    bundled_ids = {
+        path.stem for path in (DEFAULT_DATA_ROOT / "synthetic").glob("*.json")
+    }
+    official_ids = {
+        row["task_id"]
+        for level in manifest["levels"].values()
+        for row in level["tasks"]
+    }
+    assert bundled_ids == official_ids | set(original)
+    assert manifest["inventory"] == {
+        "synthetic_tasks": len(bundled_ids),
+        "official_synthetic_tasks": len(official_ids),
+        "historical_only_synthetic_tasks": len(bundled_ids - official_ids),
+    }
 
 
 @pytest.mark.parametrize("level", [3, "3", "real"])
@@ -153,7 +200,7 @@ def test_selected_rv_only_records_keep_observations_and_truth(tmp_path):
         (DEFAULT_DATA_ROOT / "selection_manifest.json").read_text(encoding="utf-8")
     )
     rv_only_ids = {
-        1: {"seed15_diff5", "seed64_diff6", "seed43_diff7"},
+        1: {"seed15_diff5"},
         2: {
             "seed1_diff8",
             "seed17_diff8",

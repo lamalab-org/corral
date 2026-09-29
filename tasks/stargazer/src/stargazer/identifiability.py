@@ -22,6 +22,8 @@ from stargazer.models import (
     simulate_keplerian_rv,
 )
 
+AUDIT_VERSION = "stargazer-recovery-v2"
+
 
 @dataclass(frozen=True)
 class BankRules:
@@ -35,12 +37,25 @@ class BankRules:
     starts: int = 3
     bootstraps: int = 4
     max_planets: int = 4
+    max_nfev: int = 180
+    noise_realizations: int = 50
+    minimum_full_passes: int = 45
 
     def __post_init__(self):
         if self.starts < 2 or self.bootstraps < 2 or not 1 <= self.max_planets <= 7:
             raise ValueError(
                 "Audit requires multiple starts and bootstraps and 1-7 planets"
             )
+        if (
+            self.max_nfev < 1
+            or not 1 <= self.minimum_full_passes <= self.noise_realizations
+        ):
+            raise ValueError("Invalid recovery search or acceptance budget")
+
+    def criteria(self):
+        from stargazer.score import EvaluationCriteria
+
+        return EvaluationCriteria(minimum_match_score=self.minimum_recovery_match)
 
 
 def _candidate(theta: np.ndarray, mass: float) -> CandidateSubmission:
@@ -69,6 +84,7 @@ def fit_counts(
     starts: int,
     max_planets: int,
     rng: np.random.Generator,
+    max_nfev: int = 180,
 ) -> list[dict]:
     """Search candidate counts with observation-only periodogram initialization."""
     obs = context.observations
@@ -133,28 +149,162 @@ def fit_counts(
                     residual,
                     np.clip(trial, lower + 1e-8, upper - 1e-8),
                     bounds=(lower, upper),
-                    max_nfev=180,
+                    max_nfev=max_nfev,
                 )
                 trial = opt.x
             candidate = _candidate(trial, context.star_mass_sun)
             fit = compute_fit(context, candidate)
-            fits.append((fit.bic, trial, candidate))
+            fits.append(
+                (
+                    fit.bic,
+                    trial,
+                    candidate,
+                    {
+                        "converged": bool(opt.success) if count else True,
+                        "nfev": int(opt.nfev) if count else 0,
+                        "status": int(opt.status) if count else 1,
+                    },
+                )
+            )
         fits.sort(key=lambda entry: entry[0])
-        bic, theta, candidate = fits[0]
+        bic, theta, candidate, optimizer = fits[0]
         solutions.append(
             {
                 "count": count,
                 "bic": bic,
                 "candidate": candidate.canonical_payload(),
                 "start_bics": [entry[0] for entry in fits],
+                "optimizer": optimizer,
+                "start_optimizers": [entry[3] for entry in fits],
             }
         )
     return solutions
 
 
+def audit_noise_recovery(task, rules: BankRules, *, seed: int) -> dict:
+    """Infer each fresh white-noise realization without reference initialization.
+
+    Truth is used only to generate observations and grade candidates. Exhausted
+    searches are unresolved, never evidence of physical impossibility.
+    """
+    from stargazer.score import evaluate_submission
+
+    noise_config = task.config.get("noise", {})
+    if (
+        task.metadata.get("rv_semantics") not in {"rv_only", "rv_only_compat"}
+        or noise_config.get("gp", {}).get("use_gp", False)
+        or any(
+            value
+            for key, value in noise_config.items()
+            if key not in {"sigma_jitter_ms", "sigma_white_ms", "gp"}
+        )
+    ):
+        raise ValueError("Recovery calibration supports RV-only white noise only")
+    obs = task.observations
+    sigma = np.sqrt(
+        np.asarray(obs.sigmas_ms) ** 2 + noise_config.get("sigma_jitter_ms", 0.0) ** 2
+    )
+    clean = simulate_keplerian_rv(
+        task.truth_planets, np.asarray(obs.times_days), task.star_mass_sun
+    )
+    offsets = {instrument.label: instrument.gamma_ms for instrument in task.instruments}
+    clean += np.asarray([offsets[label] for label in obs.instruments])
+    rng = np.random.default_rng(seed)
+    rows = []
+    for index in range(rules.noise_realizations):
+        noise_seed, fit_seed = (int(value) for value in rng.integers(0, 2**63, size=2))
+        replicate = replace(
+            task,
+            observations=replace(
+                obs,
+                rvs_ms=tuple(
+                    (
+                        clean + np.random.default_rng(noise_seed).normal(0, sigma)
+                    ).tolist()
+                ),
+            ),
+        )
+        fits = fit_counts(
+            replicate.public_fit_context(),
+            starts=rules.starts,
+            max_planets=rules.max_planets,
+            max_nfev=rules.max_nfev,
+            rng=np.random.default_rng(fit_seed),
+        )
+        # Count selection depends only on observed-data BIC, never private grades.
+        selected = min(fits, key=lambda row: row["bic"])
+        resolved = selected["optimizer"]["converged"]
+        unresolved_counts = [
+            fit["count"] for fit in fits if not fit["optimizer"]["converged"]
+        ]
+        grades = [
+            evaluate_submission(replicate, fit["candidate"], rules.criteria())
+            for fit in fits
+        ]
+        grade = grades[fits.index(selected)]
+        rows.append(
+            {
+                "realization": index,
+                "noise_seed": noise_seed,
+                "fit_seed": fit_seed,
+                "selected_count": selected["count"],
+                "resolved": resolved,
+                "status": "resolved" if resolved else "unresolved_search",
+                "unresolved_counts": unresolved_counts,
+                "full_pass": bool(resolved and grade.success),
+                "count_correct": grade.ok_count,
+                "match_score": grade.match_score,
+                "fits": [
+                    {
+                        **fit,
+                        "full_pass": result.success,
+                        "match_score": result.match_score,
+                        "complete_matching": result.ok_complete_matching,
+                        "status": "resolved"
+                        if fit["optimizer"]["converged"]
+                        else "unresolved_search",
+                    }
+                    for fit, result in zip(fits, grades, strict=True)
+                ],
+            }
+        )
+    passes = sum(row["full_pass"] for row in rows)
+    unresolved = sum(not row["resolved"] for row in rows)
+    return {
+        "audit_version": AUDIT_VERSION,
+        "seed": seed,
+        "rules": asdict(rules),
+        "criteria": asdict(rules.criteria()),
+        "realizations": len(rows),
+        "full_passes": passes,
+        "full_pass_fraction": passes / len(rows),
+        "count_accuracy": sum(row["count_correct"] for row in rows) / len(rows),
+        "unresolved_searches": unresolved,
+        "unresolved_count_fits": sum(len(row["unresolved_counts"]) for row in rows),
+        "match_score_quantiles": dict(
+            zip(
+                ("05", "50", "95"),
+                np.quantile(
+                    [row["match_score"] for row in rows], [0.05, 0.5, 0.95]
+                ).tolist(),
+                strict=True,
+            )
+        ),
+        "accepted": passes >= rules.minimum_full_passes,
+        "rejection_reasons": []
+        if passes >= rules.minimum_full_passes
+        else [
+            "insufficient_resolved_full_passes"
+            if unresolved
+            else "insufficient_full_recovery"
+        ],
+        "results": rows,
+    }
+
+
 def audit_identifiability(task, rules: BankRules | None = None) -> dict:
     """Check observation geometry, competing fits and residual-bootstrap stability."""
-    from stargazer.score import EvaluationCriteria, evaluate_submission
+    from stargazer.score import evaluate_submission
 
     rules = rules or BankRules()
     context = task.public_fit_context()
@@ -167,7 +317,11 @@ def audit_identifiability(task, rules: BankRules | None = None) -> dict:
     )
     rng = np.random.default_rng(seed)
     solutions = fit_counts(
-        context, starts=rules.starts, max_planets=rules.max_planets, rng=rng
+        context,
+        starts=rules.starts,
+        max_planets=rules.max_planets,
+        rng=rng,
+        max_nfev=rules.max_nfev,
     )
     ordered = sorted(solutions, key=lambda row: row["bic"])
     best = ordered[0]
@@ -218,7 +372,11 @@ def audit_identifiability(task, rules: BankRules | None = None) -> dict:
             context, observations=replace(obs, rvs_ms=tuple((model + noise).tolist()))
         )
         fits = fit_counts(
-            boot, starts=rules.starts, max_planets=rules.max_planets, rng=rng
+            boot,
+            starts=rules.starts,
+            max_planets=rules.max_planets,
+            rng=rng,
+            max_nfev=rules.max_nfev,
         )
         selected = min(fits, key=lambda row: row["bic"])
         bootstrap.append(selected["count"])
@@ -233,7 +391,7 @@ def audit_identifiability(task, rules: BankRules | None = None) -> dict:
     recovery = evaluate_submission(
         task,
         best["candidate"],
-        EvaluationCriteria(minimum_planet_score=rules.minimum_recovery_match),
+        rules.criteria(),
     )
     checks = {
         "cycles": all(p["cycles"] >= rules.minimum_cycles for p in per_planet),
@@ -248,7 +406,16 @@ def audit_identifiability(task, rules: BankRules | None = None) -> dict:
         "bootstrap_period": period_sd is not None
         and period_sd <= rules.maximum_bootstrap_log_period_sd,
     }
+    noise_recovery = (
+        audit_noise_recovery(task, rules, seed=seed)
+        if all(checks.values())
+        else {"accepted": False, "status": "screened_out"}
+    )
+    checks["noise_recovery"] = noise_recovery["accepted"]
     return {
+        "audit_version": AUDIT_VERSION,
+        "noise_recovery": noise_recovery,
+        "rejection_reasons": [name for name, passed in checks.items() if not passed],
         "accepted": all(checks.values()),
         "checks": checks,
         "rules": asdict(rules),

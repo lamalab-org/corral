@@ -261,7 +261,7 @@ def test_submission_guide_uses_real_newlines(analysis_session):
     # The guide is the prompt's mandatory step 0, so a literal "\n" is the
     # first thing every agent reads.
     assert "\\n" not in STARGAZER_SUBMISSION_GUIDE
-    assert len(STARGAZER_SUBMISSION_GUIDE.splitlines()) == 7
+    assert len(STARGAZER_SUBMISSION_GUIDE.splitlines()) == 9
     assert len(STARGAZER_SUBMISSION_GUIDE) < 5000
     assert analysis_session.execute("print(STARGAZER_SUBMISSION_GUIDE)") == (
         STARGAZER_SUBMISSION_GUIDE + "\n"

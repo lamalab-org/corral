@@ -22,7 +22,7 @@ TASK_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_ROOT = TASK_ROOT / "data"
 DEFAULT_REPORT_PATH = DEFAULT_DATA_ROOT / "reference_audit.json"
 UPSTREAM_REVISION = "3f617667472061e253288c7b26f0e70f186f2dff"
-OFFICIAL_LEVEL_DIFFICULTIES = {1: (5, 7), 2: (8, 10)}
+OFFICIAL_LEVEL_DIFFICULTIES = {1: (1, 5), 2: (8, 10)}
 FAILURE_REASONS = (
     "invalid_reference_parameters",
     "bic_gate",

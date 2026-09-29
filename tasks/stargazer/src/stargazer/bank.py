@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from stargazer.identifiability import BankRules, audit_identifiability
+from stargazer.identifiability import AUDIT_VERSION, BankRules, audit_identifiability
 from stargazer.models import (
     PlanetParams,
     load_task,
@@ -154,13 +154,16 @@ def generate_bank(
     calibration: str | Path | None = None,
     rules: BankRules | None = None,
     max_attempts: int = 200,
+    levels: tuple[int, ...] = (1, 2),
 ) -> dict:
     """Freeze fresh seeds, IDs, accepted systems and rejected-system diagnostics.
 
     Without a calibration bank this creates a calibration set. Evaluation
     accepts only the rules already frozen in the supplied calibration manifest.
     """
-    if per_level < 1 or max_attempts < 2 * per_level:
+    if not levels or len(set(levels)) != len(levels) or not set(levels) <= {1, 2}:
+        raise ValueError("Select unique levels from 1 and 2")
+    if per_level < 1 or max_attempts < len(levels) * per_level:
         raise ValueError("Invalid bank size or attempt budget")
     root = Path(root)
     if root.exists():
@@ -171,6 +174,8 @@ def generate_bank(
         verify_bank(calibration, purpose="calibration") if calibration else None
     )
     if calibration_manifest:
+        if calibration_manifest.get("audit_version") != AUDIT_VERSION:
+            raise ValueError("Calibration requires the current recovery audit")
         if rules is not None:
             raise ValueError("Evaluation rules must come from calibration")
         rules = BankRules(**calibration_manifest["rules"])
@@ -180,13 +185,13 @@ def generate_bank(
             )
     rules = rules or BankRules()
     root.mkdir(parents=True, mode=0o700)
-    memberships = {1: [], 2: []}
+    memberships = {level: [] for level in levels}
     records = []
     rejected = []
     attempts = 0
     # Calibration and evaluation use independent 256-bit seeds. Opaque IDs are
     # independently generated and carry neither seed nor difficulty information.
-    for level in (1, 2):
+    for level in levels:
         while len(memberships[level]) < per_level:
             if attempts >= max_attempts:
                 raise RuntimeError(
@@ -210,6 +215,8 @@ def generate_bank(
                 "level": level,
                 "audit": audit,
             }
+            # Retain evidence even if the attempt budget is later exhausted.
+            _write(root / "attempts" / f"{attempts:04d}.json", record)
             if not audit["accepted"]:
                 rejected.append(record)
                 continue
@@ -232,6 +239,8 @@ def generate_bank(
     }
     manifest = {
         "generator_version": GENERATOR_VERSION,
+        "audit_version": AUDIT_VERSION,
+        "criteria": asdict(rules.criteria()),
         "frozen": True,
         "purpose": "evaluation" if calibration else "calibration",
         "rules": asdict(rules),
@@ -242,7 +251,7 @@ def generate_bank(
         "calibration_hash": calibration_manifest["bank_hash"]
         if calibration_manifest
         else None,
-        "calibration_accepted": len(records) == 2 * per_level,
+        "calibration_accepted": len(records) == len(levels) * per_level,
         "membership": memberships,
         "attempted": attempts,
         "accepted": len(records),
@@ -265,6 +274,7 @@ def main():
     parser.add_argument("--calibration", type=Path)
     parser.add_argument("--per-level", type=int, default=10)
     parser.add_argument("--max-attempts", type=int, default=200)
+    parser.add_argument("--level", type=int, choices=(1, 2), action="append")
     args = parser.parse_args()
     if args.command == "verify":
         manifest = verify_bank(args.directory)
@@ -276,6 +286,7 @@ def main():
             per_level=args.per_level,
             calibration=args.calibration if args.command == "generate" else None,
             max_attempts=args.max_attempts,
+            levels=tuple(args.level) if args.level else (1, 2),
         )
     print(  # noqa: T201 - CLI summary
         json.dumps(
