@@ -893,6 +893,8 @@ async def test_evaluation_failure_preserves_downstream_output(monkeypatch):
         trial.evaluation_error == "scorer unavailable" for trial in report.all_results
     )
     assert all(trial.error_message is None for trial in report.all_results)
+    assert all(trial.score is None for trial in report.all_results)
+    assert all(trial.success is None for trial in report.all_results)
 
 
 @pytest.mark.anyio
@@ -969,12 +971,14 @@ async def test_benchmark_restart_retries_only_evaluation(tmp_path, pending):
             shutil.rmtree(tmp_path / "live-workspaces")
 
     before, after = trials
-    assert before.score == 0
     if pending == "error":
+        assert before.score is None
         assert before.evaluation_error == "verifier unavailable"
     elif pending == "unverified":
+        assert before.score == 0
         assert before.evaluation.metadata["verification"] == "unverified"
     else:
+        assert before.score == 0
         assert before.evaluation is None
     assert after.score == 1
     assert after.evaluation_error is None

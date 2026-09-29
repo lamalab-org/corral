@@ -117,7 +117,10 @@ def test_prepare_records_bank_and_primary_scorer(tmp_path, monkeypatch):
     manifest = json.loads(output.read_text())
     assert manifest["bank_hash"] == bank_identity(DEFAULT_DATA_ROOT)
     assert manifest["primary_scorer"] == "legacy"
-    assert len(manifest["task_hashes"]) == 20
+    # Preparation includes official tasks and the retained historical bank.
+    assert set(manifest["task_hashes"]) == {
+        path.stem for path in (DEFAULT_DATA_ROOT / "synthetic").glob("*.json")
+    }
 
 
 def test_prepared_arms_match_execution_fingerprints_and_effective_data(
@@ -148,7 +151,9 @@ def test_prepared_arms_match_execution_fingerprints_and_effective_data(
     main()
     manifest = json.loads(output.read_text())
     assert manifest["resources"]["concurrency"] == 2
-    assert len(manifest["effective_observation_hashes"]) == 20
+    assert set(manifest["effective_observation_hashes"]) == {
+        path.stem for path in (DATA_ROOT / "synthetic").glob("*.json")
+    }
     assert manifest["launch_order"] == sorted(manifest["task_hashes"])
     for arm, assisted in [("A", False), ("B", True)]:
         env = create_environments(

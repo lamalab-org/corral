@@ -21,6 +21,9 @@ def test_helper_arrays_match_all_historical_and_reference_candidates():
     records = json.loads(
         (Path(__file__).parent / "fixtures/run2_candidates.json").read_text()
     )
+    assert len(records) == 72
+    # Replay every historical candidate and every bundled reference, including
+    # tasks retained for the original Level 1 selection.
     for path in sorted((DEFAULT_DATA_ROOT / "synthetic").glob("*.json")):
         task = load_task(path)
         records.append(
@@ -31,7 +34,6 @@ def test_helper_arrays_match_all_historical_and_reference_candidates():
                 ).canonical_payload(),
             }
         )
-    assert len(records) == 92
     for row in records:
         task = load_task(DEFAULT_DATA_ROOT / "synthetic" / f"{row['task_id']}.json")
         context = task.public_fit_context()

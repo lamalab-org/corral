@@ -115,10 +115,13 @@ def test_task_definitions_run_and_restore(
     )
     monkeypatch.syspath_prepend(str(ROOT))
     monkeypatch.setenv("CORRAL_WORK_DIR", str(tmp_path / "work"))
+    env_kwargs = {"level": level, "subtasks": subtasks}
+    if benchmark == "stargazer":
+        # This API check runs a fixed submit-only agent on the host. Stargazer's
+        # restricted Docker workers are exercised by its own permission tests.
+        env_kwargs["development_mode"] = True
     # Do not supply repository_root: this also checks the CLI's default lookup.
-    environments = load_environment_group(
-        benchmark, env_kwargs={"level": level, "subtasks": subtasks}
-    )
+    environments = load_environment_group(benchmark, env_kwargs=env_kwargs)
     tasks = {name: env.current_task for name, env in environments.items()}
     order = topological_order(tasks)
 
