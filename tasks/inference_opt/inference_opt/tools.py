@@ -218,9 +218,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         elif strategy == "failures":
             pool.sort(key=lambda i: bool(baseline_items.get(i.item_id, False)))
         elif strategy == "hardest":
-            # The frozen set is selected by IRT difficulty; reference accuracy
-            # is retained only as provenance and can rank these items poorly.
-            pool.sort(key=lambda i: i.reference_accuracy or 0.0, reverse=True)
+            pool.sort(key=lambda i: i.reference_accuracy or 1.0)
         else:
             random.Random(len(already)).shuffle(pool)
 
@@ -265,7 +263,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         prompt: str,
         system: str = "",
         temperature: float = 0.0,
-        max_tokens: int = 8192,
+        max_tokens: int = 16384,
         n: int = 1,
         work_dir: str = "",
         inference_state: Any = None,

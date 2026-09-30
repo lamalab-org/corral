@@ -134,6 +134,12 @@ def measure_baseline(
     """Run the pinned zero-shot policy over one split and grade it."""
     items = datasets.load_items(benchmark, split)  # type: ignore[arg-type]
     targets = datasets.load_targets(benchmark, split)  # type: ignore[arg-type]
+    unlabeled = [item.item_id for item in items if item.item_id not in targets]
+    if unlabeled:
+        raise datasets.DatasetError(
+            f"{benchmark}/{split}: {len(unlabeled)} item(s) have no label, "
+            f"e.g. {unlabeled[:3]}"
+        )
     result = BaselineResult(
         benchmark=benchmark,
         model=model,
@@ -167,6 +173,7 @@ def measure_baseline(
             total_calls=len(items) * 2,
             max_calls_per_question=1,
             max_tokens_per_call=8192,
+            time_limit_s=timeout_s,
             benchmark=benchmark,
             split=split,
             max_connections=max(1, max_connections),

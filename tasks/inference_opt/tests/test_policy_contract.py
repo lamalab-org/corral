@@ -89,7 +89,7 @@ class TestManifest:
     def test_defaults(self):
         manifest = manifest_from_mapping(None)
         assert manifest.concurrent is True
-        assert manifest.max_tokens_per_call == 8192
+        assert manifest.max_tokens_per_call == 16384
 
     def test_unknown_key_is_an_error_not_a_silent_noop(self):
         # `concurrent` is the only execution knob; look-alikes fail loudly.

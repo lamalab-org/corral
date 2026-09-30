@@ -172,7 +172,7 @@ def probe_student(
     *,
     system: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 8192,
+    max_tokens: int = 16384,
     n: int = 1,
     served_name: str | None = None,
 ) -> list[StudentCompletion]:

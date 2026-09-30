@@ -203,7 +203,7 @@ class PolicyManifest:
     version: int = 1
     max_calls_per_question: int = 8
     setup_calls: int = 0
-    max_tokens_per_call: int = 8192
+    max_tokens_per_call: int = 16384
     #: Whether questions may be solved concurrently. Set False when a question
     #: depends on earlier ones, e.g. through ``ctx.memory`` or state kept on the
     #: policy across calls.

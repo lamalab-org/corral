@@ -24,7 +24,7 @@ class TestShippedDataset:
         assert manifest["dataset_version"] == datasets.DATASET_VERSION
         assert len(manifest["content_fingerprint"]) == 64
         assert manifest["items_per_benchmark"] == 60
-        assert manifest["selection"]["rule"] == "top 60 items by IRT difficulty"
+        assert manifest["selection"]["rule"].startswith("60 items per benchmark")
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
     def test_every_benchmark_has_a_matched_split(self, benchmark):
@@ -115,7 +115,7 @@ class TestQuestionConversion:
         assert len(rendered.splitlines()) == len(question.choices or ())
 
     def test_public_record_is_the_only_thing_the_host_receives(self):
-        item = datasets.load_items("gsm8k", "test")[0]
+        item = datasets.load_items("gpqa_diamond", "test")[0]
         record = datasets.public_record(item)
         assert "target" not in record
         assert record["item_id"] == item.item_id

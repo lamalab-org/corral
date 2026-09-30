@@ -40,13 +40,13 @@ All fields are optional:
 MANIFEST = {
     "name": "my-policy",
     "max_calls_per_question": 8,
-    "max_tokens_per_call": 8192,
+    "max_tokens_per_call": 16384,
     "concurrent": True,
 }
 ```
 
 `max_calls_per_question` is the policy's per-question cap. `max_tokens_per_call`
-(default 8192) is the policy's per-call output limit and the default for calls
+(default 16384) is the policy's per-call output limit and the default for calls
 that omit `max_tokens`; the task sets no token cap of its own. The task also has
 a total run budget. `setup_calls` reserves calls for optional `setup(ctx)`.
 Questions are solved concurrently, so `solve` may run for several questions at

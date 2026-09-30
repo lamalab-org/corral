@@ -34,11 +34,11 @@ DATASET_VERSION = "v1"
 
 #: The benchmarks included in the frozen set.
 BENCHMARKS: tuple[str, ...] = (
-    "chembench",
+    "mmlu_pro",
     "bbh",
     "gpqa_diamond",
-    "gsm8k",
-    "mmlu_pro",
+    "math",
+    "chembench",
     "arc_challenge",
 )
 
@@ -96,8 +96,7 @@ class FrozenItem:
     options: tuple[str, ...] | None = None
     category: str | None = None
     subcategory: str | None = None
-    #: Accuracy of the reference model cohort on this item when the set was
-    #: assembled. Between 0.2 and 0.8 by construction; lower means harder.
+    #: Accuracy of a 7-8B reference model cohort on this item; lower means harder.
     reference_accuracy: float | None = None
     question_hash: str | None = None
 

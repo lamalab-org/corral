@@ -16,11 +16,11 @@ ROOT = Path(__file__).resolve().parents[1]
 #: A deterministic namespace, so regenerating does not churn every uuid.
 NAMESPACE = uuid.UUID("6f1d5a52-0f6e-4a1d-9a27-6b6c9f0e1a10")
 
-BENCHMARKS = ("gsm8k", "mmlu_pro", "gpqa_diamond", "bbh", "chembench", "arc_challenge")
+BENCHMARKS = ("mmlu_pro", "bbh", "gpqa_diamond", "math", "chembench")
 BENCHMARK_LABELS = {
-    "gsm8k": "GSM8K",
     "mmlu_pro": "MMLU-Pro",
     "gpqa_diamond": "GPQA-Diamond",
+    "math": "MATH",
     "bbh": "BIG-Bench Hard",
     "chembench": "ChemBench",
     "arc_challenge": "ARC-Challenge",

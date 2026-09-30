@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
 from inference_opt.env import create_environments
 from inference_opt.score import resolve_submission
 
-BENCHMARKS = {"gsm8k", "mmlu_pro", "gpqa_diamond", "bbh", "chembench", "arc_challenge"}
+TASK_BENCHMARKS = {"mmlu_pro", "bbh", "gpqa_diamond", "math", "chembench"}
 
 
 @pytest.fixture
@@ -19,9 +20,9 @@ def environments(tmp_path):
 
 class TestConstruction:
     @pytest.mark.parametrize("level", [1, 2])
-    def test_twelve_tasks_per_level(self, tmp_path, level):
+    def test_ten_tasks_per_level(self, tmp_path, level):
         built = create_environments(level=level, work_dir=str(tmp_path / f"w{level}"))
-        assert len(built) == 12
+        assert len(built) == 10
         models = {
             len(environment.current_task.initial_input["models"])
             for environment in built.values()
@@ -33,7 +34,7 @@ class TestConstruction:
             environment.current_task.initial_input["benchmark"]
             for environment in environments.values()
         }
-        assert covered == BENCHMARKS
+        assert covered == TASK_BENCHMARKS
 
     def test_building_needs_no_server_or_dataset(self, tmp_path, monkeypatch):
         """Corral's contract suite builds every task with no GPU and no network."""
@@ -52,11 +53,11 @@ class TestConstruction:
 class TestToolSurface:
     def test_the_agent_can_write_its_policy(self, environments):
         """Without workspace tools the agent cannot produce a submission at all."""
-        tools = environments["gsm8k_a"].tools
+        tools = environments["mmlu_pro_a"].tools
         assert {"write_file", "read_file", "list_files"} <= set(tools)
 
     def test_all_nine_task_tools_are_present(self, environments):
-        tools = environments["gsm8k_a"].tools
+        tools = environments["mmlu_pro_a"].tools
         assert {
             "get_baseline", "reveal_train_questions", "query_student",
             "dry_run_policy", "evaluate_candidate", "inspect_failures",
@@ -65,7 +66,7 @@ class TestToolSurface:
 
     def test_inference_tools_are_trusted(self, environments):
         """The environment uses trusted tools and committed session state."""
-        tools = environments["gsm8k_a"].tools
+        tools = environments["mmlu_pro_a"].tools
         trusted = {name for name, tool in tools.items() if getattr(tool, "trusted", False)}
         assert trusted == {
             "get_baseline", "reveal_train_questions", "query_student",
@@ -75,7 +76,7 @@ class TestToolSurface:
 
     def test_tools_are_bound_to_their_own_task(self, environments):
         """One shared pool would bind every task to whichever was built last."""
-        first = environments["gsm8k_a"].tools["get_baseline"]
+        first = environments["mmlu_pro_a"].tools["get_baseline"]
         second = environments["chembench_a"].tools["get_baseline"]
         assert first is not second
 
@@ -84,18 +85,18 @@ class TestPrompt:
     def test_prompt_states_the_rule_and_how_to_finish(self, environments):
         from corral.core.state import ExecutionState
 
-        environment = environments["gsm8k_a"]
+        environment = environments["mmlu_pro_a"]
         prompt = environment.current_task.prompt_fn(environment, ExecutionState)
         assert "submit_answer" in prompt
         assert "modify model weights" in prompt
         assert "frozen student model" in prompt
-        assert "gsm8k" in prompt
+        assert "mmlu_pro" in prompt
 
     def test_prompt_does_not_name_strategies(self, environments):
         """The prompt leaves strategy choice to the policy."""
         from corral.core.state import ExecutionState
 
-        environment = environments["gsm8k_a"]
+        environment = environments["mmlu_pro_a"]
         prompt = environment.current_task.prompt_fn(environment, ExecutionState).lower()
         for leak in ("self-consistency", "majority vote", "debate", "chain of thought"):
             assert leak not in prompt
@@ -148,7 +149,7 @@ class TestQueryStudent:
                 StudentCompletion("30", "stop"),
             ],
         )
-        query = environments["gsm8k_a"].tools["query_student"]._func
+        query = environments["mmlu_pro_a"].tools["query_student"]._func
         out = query(prompt="3/5 of 50?", max_tokens=256, n=2, work_dir="", inference_state={})
         summary, payload = out.split("\n")[:2]
         data = json.loads(payload)
@@ -199,7 +200,7 @@ class TestToolErrors:
                 run_id=spec.run_id, ok=False, error=GROUPED_TRACEBACK
             ),
         )
-        dry = environments["gsm8k_a"].tools["dry_run_policy"]._func
+        dry = environments["mmlu_pro_a"].tools["dry_run_policy"]._func
         workspace = tmp_path / "workspace"
         (workspace / "policy").mkdir(parents=True)
         (workspace / "policy" / "policy.py").write_text(
@@ -221,7 +222,7 @@ class TestScoringDiagnostics:
         root = Path(__file__).resolve().parents[1] / "environments/level_1/tasks_json"
         tasks = load_tasks_from_json(root, str(tmp_path / "unused"))
         shared = tmp_path / "workspaces"
-        for task_id in ("gsm8k_a", "arc_challenge_a"):
+        for task_id in ("mmlu_pro_a", "bbh_a"):
             config = dict(tasks[task_id].initial_input)
             config["model_specs"] = {"student_a": "mockllm/model"}
             config["base_urls"] = {}
@@ -245,8 +246,8 @@ class TestScoringDiagnostics:
 
         reports = sorted(shared.glob("state/*/scoring_diagnostics.json"))
         assert [p.parent.name for p in reports] == [
-            "arc_challenge-student_a",
-            "gsm8k-student_a",
+            "bbh-student_a",
+            "mmlu_pro-student_a",
         ]
         for report in reports:
             payload = json.loads(report.read_text())
@@ -264,17 +265,17 @@ class TestHeadroomPassRule:
         assert headroom_closed(30, 1.0, 30) is None  # nothing left to improve
 
     @pytest.mark.parametrize(
-        ("level", "task_id", "correct", "expected"),
+        ("level", "task_id", "outcome", "expected"),
         [
-            (1, "gsm8k_a", {"student_a": 30}, 1.0),
-            (1, "gsm8k_a", {"student_a": 23}, 0.0),
-            # Level 2 needs every student to pass: one at 100% and one at 0% fails.
-            (2, "gsm8k_ab", {"student_a": 30, "student_b": 24}, 0.0),
-            (2, "gsm8k_ab", {"student_a": 30, "student_b": 30}, 1.0),
+            (1, "mmlu_pro_a", {"student_a": "all"}, 1.0),
+            (1, "mmlu_pro_a", {"student_a": "just_short"}, 0.0),
+            # Level 2 needs every student to pass: one perfect and one just short fails.
+            (2, "mmlu_pro_ab", {"student_a": "all", "student_b": "just_short"}, 0.0),
+            (2, "mmlu_pro_ab", {"student_a": "all", "student_b": "all"}, 1.0),
         ],
     )
     def test_score_is_one_only_when_every_student_closes_half(
-        self, tmp_path, monkeypatch, level, task_id, correct, expected
+        self, tmp_path, monkeypatch, level, task_id, outcome, expected
     ):
         from inference_opt import score as score_module
         from inference_opt.env import load_tasks_from_json
@@ -285,6 +286,15 @@ class TestHeadroomPassRule:
         config["model_specs"] = {m: "mockllm/model" for m in config["models"]}
         config["base_urls"] = {}
         models = iter(config["models"])
+
+        def n_correct(model):
+            if outcome[model] == "all":
+                return 30
+            # One question fewer than closing half the headroom over the baseline.
+            baseline_correct = round(config["baselines"][model] * 30)
+            return baseline_correct + math.ceil((30 - baseline_correct) / 2) - 1
+
+        correct = {model: n_correct(model) for model in config["models"]}
 
         def fake_outcomes(log_dir, predictions):
             n = correct[next(models)]
