@@ -23,6 +23,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 
 import corral.orchestration as orchestration
+from corral.observability.langfuse import langfuse_enabled
 from corral.persistence import ShardedCommitStore, SQLiteCommitStore
 from corral.run import CorralRunner, execute_task
 from corral.runtime.environment_loader import (
@@ -38,7 +39,6 @@ class AgentDefinition:
     module: str
     attribute: str
     extra: str | None = None
-    default_kwargs: tuple[tuple[str, Any], ...] = ()
 
 
 AGENT_DEFINITIONS: Mapping[str, AgentDefinition] = MappingProxyType(
@@ -191,9 +191,7 @@ def create_agent(
 ) -> Any:
     """Construct any public concrete Corral agent from CLI-safe values."""
     canonical = normalise_agent_name(name)
-    definition = AGENT_DEFINITIONS[canonical]
-    kwargs = dict(definition.default_kwargs)
-    kwargs.update(dict(agent_kwargs or {}))
+    kwargs = dict(agent_kwargs or {})
 
     if model is None:
         model = kwargs.pop("model", None)
@@ -355,18 +353,24 @@ def _retry_policy(args: argparse.Namespace) -> Any:
     )
 
 
-def _sandbox_profile(args: argparse.Namespace) -> Any:
+def _sandbox_profile(
+    args: argparse.Namespace, *, default_image: str = "corral-benchmark:latest"
+) -> Any:
     # Every benchmark entry point defaults to Docker, including legacy parsers
     # whose Namespace predates the explicit sandbox options. Local execution
     # remains available only through an explicit `--sandbox local` selection.
     if getattr(args, "sandbox", "docker") == "local":
         return orchestration.SandboxProfile.local()
     spec = orchestration.DockerSandboxSpec(
-        image=getattr(args, "sandbox_image", "corral-benchmark:latest"),
+        image=getattr(args, "sandbox_image", None) or default_image,
         cpus=getattr(args, "sandbox_cpus", 2.0),
         memory=getattr(args, "sandbox_memory", "4g"),
         pids_limit=getattr(args, "sandbox_pids_limit", 256),
         network=getattr(args, "sandbox_network", "bridge"),
+        private_directories=tuple(
+            str(Path(path).expanduser().resolve())
+            for path in getattr(args, "sandbox_private_directory", ())
+        ),
         environment_allowlist=tuple(
             dict.fromkeys(
                 getattr(
@@ -377,7 +381,7 @@ def _sandbox_profile(args: argparse.Namespace) -> Any:
             )
         ),
         retention=orchestration.SandboxRetention(
-            getattr(args, "keep_sandboxes", "never")
+            getattr(args, "keep_sandboxes", "on-failure")
         ),
         registry_module=getattr(args, "sandbox_registry_module", None),
     )
@@ -402,27 +406,48 @@ async def run_benchmark(
         _list_tasks(environments)
         return 0
 
-    canonical_agent, agent, model = _configured_agent(
-        args,
-        agent_name=agent_name,
-        agent_kwargs=agent_kwargs,
+    canonical_agent = normalise_agent_name(agent_name or args.agent)
+    runtime_options = {
+        **dict(getattr(args, "agent_kwargs", {}) or {}),
+        **dict(agent_kwargs or {}),
+    }
+    harness = canonical_agent
+    if harness == "reflexion":
+        harness = normalise_agent_name(runtime_options.get("actor", "tool-calling"))
+    extra = AGENT_DEFINITIONS[harness].extra or ""
+    if langfuse_enabled():
+        extra = ",".join(filter(None, (extra, "langfuse")))
+    image_kind = (
+        args.environment if args.environment in {"stargazer", "wetlab"} else "benchmark"
     )
-
-    sandbox = _sandbox_profile(args)
+    sandbox = _sandbox_profile(
+        args,
+        default_image=f"corral-{args.environment}:{extra.replace(',', '-') or 'latest'}",
+    )
+    agents = {}
     if sandbox.mode == orchestration.SandboxMode.DOCKER.value:
+        # Construct the agent only inside Docker, where its SDK is installed.
+        # None lets the container resolve the agent's default model.
+        model = args.model if args.model is not None else runtime_options.get("model")
+        if model is not None and (not isinstance(model, str) or not model):
+            raise ValueError("model must be a non-empty string")
         assert sandbox.docker is not None
         repository_root = Path(__file__).resolve().parents[2]
-        sandbox_image = getattr(args, "sandbox_image", "corral-benchmark:latest")
         docker_executable = getattr(args, "docker_executable", "docker")
         build_local = getattr(args, "build_sandbox_image", False) or (
-            sandbox_image == "corral-benchmark:latest"
+            getattr(args, "sandbox_image", None) is None
         )
         resolved = await orchestration.DockerTaskLauncher.preflight(
             sandbox.docker,
             docker_executable=docker_executable,
             build_context=repository_root if build_local else None,
             dockerfile=(
-                repository_root / "docker" / "benchmark.Dockerfile"
+                repository_root / "docker" / f"{image_kind}.Dockerfile"
+                if build_local
+                else None
+            ),
+            build_args=(
+                {"CORRAL_EXTRAS": extra, "CORRAL_TASK": args.environment}
                 if build_local
                 else None
             ),
@@ -431,11 +456,18 @@ async def run_benchmark(
             mode=orchestration.SandboxMode.DOCKER,
             docker=resolved,
         )
+    else:
+        canonical_agent, agent, model = _configured_agent(
+            args,
+            agent_name=agent_name,
+            agent_kwargs=agent_kwargs,
+        )
+        agents[canonical_agent] = agent
 
     requested_task_ids = tuple(args.tasks or environments)
     run_id = args.run_id or _default_benchmark_run_id(
         agent=canonical_agent,
-        model=model,
+        model=model if model is not None else "default",
         environment=args.environment,
         task_ids=requested_task_ids,
         trials=args.trials,
@@ -471,7 +503,7 @@ async def run_benchmark(
     _atomic_json(run_manifest_path, run_manifest)
     store = ShardedCommitStore(run_dir, benchmark_run_id=run_id)
     registry = orchestration.RuntimeRegistry(
-        agents={canonical_agent: agent},
+        agents=agents,
         environments=environments,
         workspace_manager_factory=store.workspace_manager,
     )
@@ -499,10 +531,7 @@ async def run_benchmark(
                 model=model,
                 api_endpoint=args.api_endpoint,
                 temperature=args.temperature,
-                options={
-                    **dict(getattr(args, "agent_kwargs", {}) or {}),
-                    **dict(agent_kwargs or {}),
-                },
+                options=runtime_options,
             ),
             environment_runtime=orchestration.EnvironmentRuntimeDefinition(
                 name=args.environment,
@@ -515,6 +544,11 @@ async def run_benchmark(
             trials_per_task=args.trials,
             max_parallel=args.max_parallel,
             max_parallel_per_task=args.max_parallel_per_task,
+            max_parallel_evaluations=getattr(args, "max_parallel_evaluations", None),
+            max_parallel_total=getattr(args, "max_parallel_total", None),
+            max_parallel_evaluations_by_environment=getattr(
+                args, "max_parallel_evaluations_by_environment", None
+            ),
             enable_surrender=args.enable_surrender,
             evaluate=not args.no_evaluate,
             verbose=args.verbose,
@@ -690,8 +724,17 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
 
     execution = parser.add_argument_group("execution")
     execution.add_argument("--trials", type=int, default=1)
-    execution.add_argument("--max-parallel", type=int, default=1)
+    execution.add_argument("--max-parallel", type=int, default=4)
     execution.add_argument("--max-parallel-per-task", type=int, default=1)
+    execution.add_argument("--max-parallel-evaluations", type=int)
+    execution.add_argument("--max-parallel-total", type=int)
+    execution.add_argument(
+        "--max-parallel-evaluations-by-environment",
+        type=_json_object,
+        default={},
+        metavar="JSON",
+        help="JSON object mapping environment names or IDs to evaluation limits.",
+    )
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--run-id")
     _add_execution_arguments(
@@ -709,13 +752,22 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     )
     sandbox.add_argument(
         "--sandbox-image",
-        default="corral-benchmark:latest",
         metavar="IMAGE",
-        help="Benchmark image; resolved to an immutable image ID at preflight.",
+        help=(
+            "Override the image selected for the environment and harness; "
+            "resolved to an immutable image ID at preflight."
+        ),
     )
     sandbox.add_argument("--sandbox-cpus", type=float, default=2.0)
     sandbox.add_argument("--sandbox-memory", default="4g")
     sandbox.add_argument("--sandbox-pids-limit", type=int, default=256)
+    sandbox.add_argument(
+        "--sandbox-private-directory",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Read-only controller data directory; excluded from workers. Repeat as needed. Environment option paths under it are translated for Docker.",
+    )
     sandbox.add_argument(
         "--sandbox-network",
         default="bridge",
@@ -724,7 +776,8 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     sandbox.add_argument(
         "--keep-sandboxes",
         choices=("never", "on-failure", "always"),
-        default="never",
+        default="on-failure",
+        help="Retain failed containers for resume by default; remove successful containers and volumes after checkpoint export.",
     )
     sandbox.add_argument(
         "--sandbox-env",
@@ -741,7 +794,7 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     sandbox.add_argument(
         "--build-sandbox-image",
         action="store_true",
-        help="Build a missing custom image from docker/benchmark.Dockerfile.",
+        help="Build a missing custom image using the environment's Dockerfile and harness extra.",
     )
     sandbox.add_argument("--docker-executable", default="docker")
     sandbox.add_argument(

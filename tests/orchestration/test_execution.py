@@ -2,10 +2,12 @@
 
 import asyncio
 import shutil
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 
 from corral import run
 from corral.agents.schema import AgentOutcome
@@ -17,6 +19,7 @@ from corral.orchestration import (
     AgentRuntimeDefinition,
     DockerSandboxSpec,
     EnvironmentRuntimeDefinition,
+    EvaluationRef,
     RetryPolicy,
     RuntimeRegistry,
     SandboxMode,
@@ -31,7 +34,7 @@ from corral.run import BenchmarkTaskMetadata, CorralRunner
 from corral.runtime import TaskRuntime
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -58,6 +61,17 @@ class PreviousStateAgent(SubmitAgent):
         return await super().run_session(session)
 
 
+class RecordingPreviousAttemptAgent(SubmitAgent):
+    def __init__(self):
+        self.previous_evaluations = []
+        self.previous_states = []
+
+    async def run_session(self, session):
+        self.previous_evaluations.append(session.previous_evaluation)
+        self.previous_states.append(session.previous_state)
+        return await super().run_session(session)
+
+
 class FileSubmitAgent:
     model = "test-model"
 
@@ -65,18 +79,21 @@ class FileSubmitAgent:
         written = await session.execute(
             Action(
                 name="write_file",
-                arguments={"path": "answer.txt", "content": "durable"},
+                arguments={
+                    "path": "/workspace/answer.txt",
+                    "content": "durable",
+                },
             )
         )
         assert written.success is True
         submitted = await session.execute(
             Action(
                 name=SUBMIT_ANSWER_TOOL_NAME,
-                arguments={"answer": "answer.txt"},
+                arguments={"answer": "/workspace/answer.txt"},
             )
         )
         assert submitted.success is True
-        return AgentOutcome(status="completed", answer="answer.txt")
+        return AgentOutcome(status="completed", answer="/workspace/answer.txt")
 
 
 class ConcurrentAgent(SubmitAgent):
@@ -110,6 +127,7 @@ class _RecordingSpan:
 class RecordingObserver:
     def __init__(self):
         self.observations = []
+        self.flushes = 0
 
     def start(self, observation):
         self.observations.append(observation)
@@ -119,7 +137,7 @@ class RecordingObserver:
         del commit, context
 
     def flush(self):
-        return None
+        self.flushes += 1
 
 
 class RecordingDockerLauncher:
@@ -159,7 +177,69 @@ def _environment(task_id: str, dependency: str | None = None) -> Environment:
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
+async def test_sampling_defaults_survive_persistence_and_resume(monkeypatch, tmp_path):
+    import litellm
+
+    class ParameterAgent(SubmitAgent):
+        temperature = 0.7
+
+    monkeypatch.setattr(
+        litellm, "get_model_info", lambda _model: {"default_reasoning_effort": "medium"}
+    )
+    store = SQLiteCommitStore(tmp_path / "parameters.sqlite3")
+    agent = ParameterAgent()
+    registry = RuntimeRegistry(
+        agents={"agent": agent}, environments={"task": _environment("task")}
+    )
+    request = RunTaskInput(
+        execution_id="parameters",
+        task_id="task",
+        environment_id="task",
+        agent_id="agent",
+    )
+    expected = {
+        "temperature": 0.7,
+        "reasoning_effort": "medium",
+        "parameter_sources": {
+            "temperature": "agent",
+            "reasoning_effort": "litellm_default",
+        },
+    }
+    try:
+        result = await execute_task(
+            task=request, state_store=store, registry=registry, observer=NoOpObserver()
+        )
+        # The same JSON boundary is used for Docker result.json.
+        result = TypeAdapter(StateRef).validate_json(
+            TypeAdapter(StateRef).dump_json(result)
+        )
+        assert result.metadata["model_parameters"] == expected
+        state = await store.for_execution(request.execution_id).materialize(
+            "main", result.commit_hash
+        )
+        assert state.task.model_dump(mode="json")["model"] == {
+            "name": agent.model,
+            **expected,
+        }
+
+        agent.temperature = 0.2
+        monkeypatch.setattr(
+            litellm,
+            "get_model_info",
+            lambda _model: {"default_reasoning_effort": "high"},
+        )
+        resumed = await execute_task(
+            task=request, state_store=store, registry=registry, observer=NoOpObserver()
+        )
+        assert resumed.commit_hash == result.commit_hash
+        assert resumed.metadata["model_parameters"] == expected
+    finally:
+        registry.close()
+        await store.aclose()
+
+
+@pytest.mark.anyio
 async def test_execution_restores_prior_projection_for_reflective_agents(tmp_path):
     store = SQLiteCommitStore(tmp_path / "prior-commits.sqlite3")
     environment = _environment("reflective")
@@ -202,7 +282,56 @@ async def test_execution_restores_prior_projection_for_reflective_agents(tmp_pat
     assert agent.seen_previous_hash == prior.through_commit_hash
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
+@pytest.mark.parametrize("allow_previous", [True, False])
+async def test_benchmark_evaluates_prior_attempt_before_starting_the_next(
+    tmp_path, allow_previous
+):
+    store = SQLiteCommitStore(tmp_path / "prior-attempt-commits.sqlite3")
+    agent = RecordingPreviousAttemptAgent()
+    env = _environment("reflective")
+    env.current_task = replace(
+        env.current_task, allow_previous_attempt_context=allow_previous
+    )
+    env.group_tasks = {env.task_id: env.current_task}
+    registry = RuntimeRegistry(
+        agents={"agent": agent},
+        environments={"reflective": env},
+    )
+    runner = CorralRunner(
+        registry,
+        {
+            "reflective": BenchmarkTaskMetadata(
+                agent_id="agent",
+                environment_id="reflective",
+                max_iterations=1,
+            )
+        },
+        state_store=store,
+        observer=NoOpObserver(),
+    )
+
+    try:
+        report = await runner.run("reflective-benchmark", trials_per_task=2)
+    finally:
+        registry.close()
+        await store.aclose()
+
+    assert [trial.score for trial in report.all_results] == [1.0, 1.0]
+    assert agent.previous_evaluations[0] is None
+    assert agent.previous_states[0] is None
+    if not allow_previous:
+        assert agent.previous_evaluations == [None, None]
+        assert agent.previous_states == [None, None]
+        return
+    assert agent.previous_evaluations[1]["score"] == 1.0
+    assert agent.previous_evaluations[1]["trial_id"] == (
+        "reflective-benchmark:reflective:0"
+    )
+    assert agent.previous_states[1].submission == "42"
+
+
+@pytest.mark.anyio
 async def test_executions_do_not_serialize_requests_by_agent_id(tmp_path):
     store = SQLiteCommitStore(tmp_path / "concurrent-commits.sqlite3")
     agent = ConcurrentAgent()
@@ -243,7 +372,7 @@ async def test_executions_do_not_serialize_requests_by_agent_id(tmp_path):
     assert agent.peak_active == 2
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_evaluation_uses_durable_snapshot_after_live_workspace_is_deleted(
     tmp_path,
 ):
@@ -302,7 +431,7 @@ async def test_evaluation_uses_durable_snapshot_after_live_workspace_is_deleted(
     assert evaluation.score == 1.0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_direct_task_and_benchmark_lifecycle(tmp_path):
     store = SQLiteCommitStore(tmp_path / "commits.sqlite3")
     registry = RuntimeRegistry(
@@ -354,10 +483,17 @@ async def test_direct_task_and_benchmark_lifecycle(tmp_path):
             max_parallel_per_task=2,
         )
         assert len(report.all_results) == 4
+        assert observer.flushes == 1
         assert all(trial.score == 1.0 for trial in report.all_results)
         assert report.verbosity == "brief"
         assert report.task_results["upstream"].trials[0].state["task"]["model"] == {
-            "name": "test-model"
+            "name": "test-model",
+            "temperature": None,
+            "reasoning_effort": None,
+            "parameter_sources": {
+                "temperature": "unknown",
+                "reasoning_effort": "unknown",
+            },
         }
         assert report.task_results["downstream"].trials[0].output == {"answer": "42"}
         evaluations = [o for o in observer.observations if o.name == "task.evaluate"]
@@ -369,7 +505,7 @@ async def test_direct_task_and_benchmark_lifecycle(tmp_path):
         await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_execution_forwards_docker_runtime_definitions(tmp_path):
     store = SQLiteCommitStore(tmp_path / "docker-payload.sqlite3")
     registry = RuntimeRegistry(
@@ -410,7 +546,7 @@ async def test_execution_forwards_docker_runtime_definitions(tmp_path):
     assert context.execution_id == "docker-payload"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("limits", "expected_peak"),
     [
@@ -455,7 +591,250 @@ async def test_benchmark_enforces_concurrency_limits(
     assert active == 0
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
+async def test_evaluation_does_not_consume_execution_capacity(monkeypatch):
+    evaluation_started = asyncio.Event()
+    second_started = asyncio.Event()
+    release_evaluations = asyncio.Event()
+
+    async def launch(*, task, **kwargs):
+        if task.task_id == "second":
+            second_started.set()
+            await evaluation_started.wait()
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        if request.task_id == "first":
+            evaluation_started.set()
+            await second_started.wait()
+        await release_evaluations.wait()
+        return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {
+            task_id: BenchmarkTaskMetadata("agent", task_id)
+            for task_id in ("first", "second")
+        },
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+    benchmark = asyncio.create_task(
+        runner.run(
+            "overlap",
+            max_parallel=1,
+            max_parallel_evaluations=1,
+        )
+    )
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(evaluation_started.wait(), second_started.wait()),
+            timeout=2,
+        )
+        assert not benchmark.done()
+    finally:
+        release_evaluations.set()
+
+    report = await asyncio.wait_for(benchmark, timeout=2)
+    assert [trial.score for trial in report.all_results] == [1.0, 1.0]
+
+
+@pytest.mark.anyio
+async def test_dependency_execution_does_not_wait_for_upstream_evaluation(
+    monkeypatch,
+):
+    downstream_started = asyncio.Event()
+
+    async def launch(*, task, **kwargs):
+        if task.task_id == "downstream":
+            assert task.dependency_outputs == {"upstream": {"answer": "42"}}
+            downstream_started.set()
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        if request.task_id == "upstream":
+            await downstream_started.wait()
+        return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {
+            "upstream": BenchmarkTaskMetadata("agent", "upstream"),
+            "downstream": BenchmarkTaskMetadata("agent", "downstream", ("upstream",)),
+        },
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+
+    report = await asyncio.wait_for(
+        runner.run(
+            "dependencies",
+            max_parallel=1,
+            max_parallel_evaluations=1,
+        ),
+        timeout=2,
+    )
+
+    assert downstream_started.is_set()
+    assert all(trial.score == 1.0 for trial in report.all_results)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("max_parallel_evaluations", "expected_peak"),
+    [(None, 2), (1, 1)],
+)
+async def test_benchmark_enforces_evaluation_concurrency_limit(
+    monkeypatch, max_parallel_evaluations, expected_peak
+):
+    active = 0
+    peak = 0
+
+    async def launch(*, task, **kwargs):
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.01)
+            return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {"task": BenchmarkTaskMetadata("agent", "environment")},
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+
+    report = await runner.run(
+        "evaluation-limit",
+        trials_per_task=4,
+        max_parallel=2,
+        max_parallel_per_task=4,
+        max_parallel_evaluations=max_parallel_evaluations,
+    )
+
+    assert len(report.all_results) == 4
+    assert peak == expected_peak
+    assert active == 0
+
+
+@pytest.mark.anyio
+async def test_benchmark_enforces_environment_evaluation_concurrency_limit(
+    monkeypatch,
+):
+    active = 0
+    peak = 0
+
+    async def launch(*, task, **kwargs):
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.01)
+            return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {
+            task_id: BenchmarkTaskMetadata(
+                "agent",
+                f"{task_id}-environment",
+                environment_runtime=EnvironmentRuntimeDefinition("shared"),
+            )
+            for task_id in ("first", "second")
+        },
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+
+    report = await runner.run(
+        "environment-evaluation-limit",
+        trials_per_task=2,
+        max_parallel=4,
+        max_parallel_per_task=2,
+        max_parallel_evaluations=4,
+        max_parallel_evaluations_by_environment={"shared": 1},
+    )
+
+    assert len(report.all_results) == 4
+    assert peak == 1
+    assert active == 0
+
+
+@pytest.mark.anyio
+async def test_benchmark_enforces_total_concurrency_limit(monkeypatch):
+    active = 0
+    peak = 0
+    evaluation_started = asyncio.Event()
+
+    async def launch(*, task, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            if task.task_id == "second":
+                await evaluation_started.wait()
+            return await RecordingDockerLauncher().run(task)
+        finally:
+            active -= 1
+
+    async def evaluate(request, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        evaluation_started.set()
+        try:
+            await asyncio.sleep(0.01)
+            return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {
+            task_id: BenchmarkTaskMetadata("agent", task_id)
+            for task_id in ("first", "second")
+        },
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+
+    report = await asyncio.wait_for(
+        runner.run(
+            "total-limit",
+            max_parallel=2,
+            max_parallel_evaluations=2,
+            max_parallel_total=2,
+        ),
+        timeout=2,
+    )
+
+    assert len(report.all_results) == 2
+    assert peak == 2
+    assert active == 0
+
+
+@pytest.mark.anyio
 async def test_failed_trial_blocks_only_its_own_descendants(monkeypatch):
     requests = []
 
@@ -487,7 +866,7 @@ async def test_failed_trial_blocks_only_its_own_descendants(monkeypatch):
     assert downstream[0].dependency_outputs == {"upstream": {"answer": "42"}}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_evaluation_failure_preserves_downstream_output(monkeypatch):
     async def launch(*, task, **kwargs):
         return await RecordingDockerLauncher().run(task)
@@ -514,9 +893,105 @@ async def test_evaluation_failure_preserves_downstream_output(monkeypatch):
         trial.evaluation_error == "scorer unavailable" for trial in report.all_results
     )
     assert all(trial.error_message is None for trial in report.all_results)
+    assert all(trial.score is None for trial in report.all_results)
+    assert all(trial.success is None for trial in report.all_results)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
+@pytest.mark.parametrize("pending", ["error", "unverified", "not_started"])
+async def test_benchmark_restart_retries_only_evaluation(tmp_path, pending):
+    agent_calls = 0
+    evaluations = []
+
+    class CountingAgent(FileSubmitAgent):
+        async def run_session(self, session):
+            nonlocal agent_calls
+            agent_calls += 1
+            assert agent_calls == 1, "Restart must reuse the completed submission"
+            return await super().run_session(session)
+
+    class Verifier:
+        def __init__(self, recovered):
+            self.recovered = recovered
+
+        def __call__(self, path):
+            return self.evaluate_submission(path)["score"]
+
+        def evaluate_submission(self, path):
+            assert Path(path).read_text() == "durable"
+            evaluations.append(self.recovered)
+            if not self.recovered and pending == "error":
+                raise RuntimeError("verifier unavailable")
+            return {
+                "score": float(self.recovered),
+                "metadata": {
+                    "verification": "passed" if self.recovered else "unverified"
+                },
+            }
+
+    trials = []
+    for recovered in (False, True):
+        # Reopen both the registry and on-disk store, as a fresh process would.
+        store = ShardedCommitStore(tmp_path / ".corral")
+        task = TaskDefinition(
+            name="file-task",
+            description="write a result",
+            tools=[],
+            scoring_fn=Verifier(recovered),
+            submission_format={"answer": "path"},
+            resolve_answer=True,
+        )
+        environment = Environment(
+            "file-task", task, base_work_dir=str(tmp_path / "live-workspaces")
+        )
+        registry = RuntimeRegistry(
+            agents={"agent": CountingAgent()},
+            environments={"file-task": environment},
+            workspace_manager_factory=store.workspace_manager,
+        )
+        runner = CorralRunner(
+            registry,
+            {"file-task": BenchmarkTaskMetadata("agent", "file-task")},
+            state_store=store,
+            observer=NoOpObserver(),
+        )
+        try:
+            report = await runner.run(
+                "pending-verifier",
+                trials_per_task=1,
+                evaluate=recovered or pending != "not_started",
+                retry_policy=RetryPolicy(maximum_attempts=1),
+            )
+            assert len(report.all_results) == 1
+            trials.append(report.all_results[0])
+        finally:
+            registry.close()
+            await store.aclose()
+        if not recovered:
+            shutil.rmtree(tmp_path / "live-workspaces")
+
+    before, after = trials
+    if pending == "error":
+        assert before.score is None
+        assert before.evaluation_error == "verifier unavailable"
+    elif pending == "unverified":
+        assert before.score == 0
+        assert before.evaluation.metadata["verification"] == "unverified"
+    else:
+        assert before.score == 0
+        assert before.evaluation is None
+    assert after.score == 1
+    assert after.evaluation_error is None
+    assert after.evaluation.metadata["verification"] == "passed"
+    assert after.evaluation.commit_hash == before.state["through_commit_hash"]
+    assert after.state == before.state
+    assert after.trial_id == before.trial_id
+    assert after.output == before.output
+    assert agent_calls == 1
+    assert evaluations == ([True] if pending == "not_started" else [False, True])
+
+
+@pytest.mark.anyio
 async def test_task_retries_failed_launches(monkeypatch):
     attempts = 0
     requests = []
@@ -542,10 +1017,11 @@ async def test_task_retries_failed_launches(monkeypatch):
     assert all(request is requests[0] for request in requests)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_benchmark_cancellation_finishes_active_trials(monkeypatch):
     started = asyncio.Event()
     active = 0
+    observer = RecordingObserver()
 
     async def launch(*args, **kwargs):
         nonlocal active
@@ -562,7 +1038,7 @@ async def test_benchmark_cancellation_finishes_active_trials(monkeypatch):
         None,
         {"task": BenchmarkTaskMetadata("agent", "env")},
         state_store=None,
-        observer=NoOpObserver(),
+        observer=observer,
     )
     task = asyncio.create_task(
         runner.run(
@@ -578,4 +1054,55 @@ async def test_benchmark_cancellation_finishes_active_trials(monkeypatch):
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+    assert active == 0
+    assert observer.flushes == 1
+
+
+@pytest.mark.anyio
+async def test_benchmark_cancellation_drains_active_evaluation(monkeypatch):
+    started = asyncio.Event()
+    release = asyncio.Event()
+    active = 0
+    calls = 0
+
+    async def launch(*, task, **kwargs):
+        return await RecordingDockerLauncher().run(task)
+
+    async def evaluate(request, **kwargs):
+        nonlocal active, calls
+        calls += 1
+        active += 1
+        started.set()
+        try:
+            await release.wait()
+            return EvaluationRef(request.commit_hash, 1.0, {}, "test")
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(run, "execute_task", launch)
+    monkeypatch.setattr(run, "evaluate_task", evaluate)
+    runner = CorralRunner(
+        None,
+        {"task": BenchmarkTaskMetadata("agent", "environment")},
+        state_store=None,
+        observer=NoOpObserver(),
+    )
+    benchmark = asyncio.create_task(
+        runner.run(
+            "cancel-evaluation",
+            trials_per_task=2,
+            max_parallel=2,
+            max_parallel_per_task=1,
+            max_parallel_evaluations=1,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=2)
+    benchmark.cancel()
+    await asyncio.sleep(0)
+    assert not benchmark.done()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(benchmark, timeout=2)
+    assert calls == 1
     assert active == 0

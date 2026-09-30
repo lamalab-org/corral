@@ -19,7 +19,7 @@ class AverageScoreMetric(Metric):
             description="Mean score across all task trials",
         )
 
-    def calculate(self, context: MetricContext) -> float:
+    def calculate(self, context: MetricContext) -> float | None:
         """Calculate average score across all tasks.
 
         For each task, computes the mean score of all trials, then averages
@@ -32,6 +32,8 @@ class AverageScoreMetric(Metric):
         for task_id in context.all_task_ids:
             trials = context.get_task_trials(task_id)
             if trials:
+                if any(trial.score is None for trial in trials.trials):
+                    return None
                 task_averages.append(mean(trial.score for trial in trials.trials))
 
         return mean(task_averages)
@@ -48,7 +50,7 @@ class SuccessRateMetric(Metric):
             description="Percentage of successful trials across all tasks",
         )
 
-    def calculate(self, context: MetricContext) -> float:
+    def calculate(self, context: MetricContext) -> float | None:
         """Calculate overall success rate across all tasks.
 
         For each task, computes the success rate of all trials, then averages
@@ -61,6 +63,8 @@ class SuccessRateMetric(Metric):
         for task_id in context.all_task_ids:
             task_trials = context.get_task_trials(task_id)
             if task_trials and task_trials.trials:
+                if any(trial.score is None for trial in task_trials.trials):
+                    return None
                 success_rate = mean(
                     1 if trial.success else 0 for trial in task_trials.trials
                 )
@@ -332,7 +336,7 @@ class TaskPassAtKMetric(TaskMetric):
             description=f"Pass@{self.k} for each individual task",
         )
 
-    def calculate_for_task(self, context: MetricContext, task_id: str) -> float:
+    def calculate_for_task(self, context: MetricContext, task_id: str) -> float | None:
         """Calculate pass@k for a specific task.
 
         Estimation formula:
@@ -354,6 +358,8 @@ class TaskPassAtKMetric(TaskMetric):
                 f"Number of trials ({len(trials)}) is less than k ({self.k}) for task ID '{task_id}'."
             )
 
+        if any(trial.score is None for trial in trials):
+            return None
         c = sum(1 if trial.success else 0 for trial in trials)
         n = len(trials)
 
@@ -383,12 +389,14 @@ class PassAtKMetric(Metric):
             description=f"Probability that at least 1 of {self.k} trials succeeds",
         )
 
-    def calculate(self, context: MetricContext) -> float:
+    def calculate(self, context: MetricContext) -> float | None:
         """Calculate overall pass@k across all tasks.
 
         For each task, calculates pass@k, then averages across all tasks.
         """
         task_results = self._task_metric.calculate(context)
+        if any(value is None for value in task_results.values()):
+            return None
         return mean(task_results.values()) if task_results else 0.0
 
 
@@ -415,7 +423,7 @@ class TaskPassHatKMetric(TaskMetric):
             description=f"Pass^{self.k} for each individual task",
         )
 
-    def calculate_for_task(self, context: MetricContext, task_id: str) -> float:
+    def calculate_for_task(self, context: MetricContext, task_id: str) -> float | None:
         """Calculate pass^k for a specific task.
 
         Estimation formula: pass^k = (c/n)^k
@@ -433,6 +441,8 @@ class TaskPassHatKMetric(TaskMetric):
         if not trials:
             raise NoResultsError(f"No trials available for task ID '{task_id}'.")
 
+        if any(trial.score is None for trial in trials):
+            return None
         c = sum(1 if trial.success else 0 for trial in trials)
         n = len(trials)
 
@@ -462,12 +472,14 @@ class PassHatKMetric(Metric):
             description=f"Probability that all {self.k} trials succeed",
         )
 
-    def calculate(self, context: MetricContext) -> float:
+    def calculate(self, context: MetricContext) -> float | None:
         """Calculate overall pass^k across all tasks.
 
         For each task, calculates pass^k, then averages across all tasks.
         """
         task_results = self._task_metric.calculate(context)
+        if any(value is None for value in task_results.values()):
+            return None
         return mean(task_results.values()) if task_results else 0.0
 
 
@@ -482,7 +494,7 @@ class TaskSuccessRateMetric(TaskMetric):
             description="Success rate for each individual task",
         )
 
-    def calculate_for_task(self, context: MetricContext, task_id: str) -> float:
+    def calculate_for_task(self, context: MetricContext, task_id: str) -> float | None:
         """Calculate success rate for a specific task."""
 
         task_trials = context.get_task_trials(task_id)
@@ -493,6 +505,8 @@ class TaskSuccessRateMetric(TaskMetric):
         if not trials:
             raise NoResultsError(f"No trials available for task ID '{task_id}'.")
 
+        if any(trial.score is None for trial in trials):
+            return None
         return mean(1 if trial.success else 0 for trial in trials)
 
 
@@ -507,7 +521,7 @@ class TaskAverageScoreMetric(TaskMetric):
             description="Average score for each individual task",
         )
 
-    def calculate_for_task(self, context: MetricContext, task_id: str) -> float:
+    def calculate_for_task(self, context: MetricContext, task_id: str) -> float | None:
         """Calculate average score for a specific task."""
 
         task_trials = context.get_task_trials(task_id)
@@ -518,4 +532,6 @@ class TaskAverageScoreMetric(TaskMetric):
         if not trials:
             raise NoResultsError(f"No trials available for task ID '{task_id}'.")
 
+        if any(trial.score is None for trial in trials):
+            return None
         return mean(trial.score for trial in trials)

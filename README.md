@@ -21,7 +21,7 @@
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/_static/corral_logo_final.png">
-  <img alt="Corral logo" src="docs/_static/definitive.png" width='300px'>
+  <img alt="Corral logo" src="docs/_static/corral_logo_final.png" width='300px'>
 </picture>
 </p>
 
@@ -263,9 +263,9 @@ uv run --project tasks/samplemath python run_scripts/run_tool_calling.py \
   --report .corral/samplemath-report.json
 ```
 
-The built-in presets are `afm`, `catalyst`, `corral_md`, `ml`,
-`resistor_network`, `retrosynthesis`, `samplemath`, `spectra_elucidation`, and
-`wetlab`. These are fixed choices for `--environment`. Use `--env-kwargs` for
+The built-in presets are `afm`, `corral_md`, `resistor_network`,
+`retrosynthesis`, `samplemath`, `spectra_elucidation`, and `wetlab`. These are
+fixed choices for `--environment`. Use `--env-kwargs` for
 environment-specific configuration, including the common `level`, `subtasks`,
 `task_config`, and `work_dir` keys. Environment dependencies and credentials
 still need to be configured as described in each task package's README.
@@ -283,6 +283,35 @@ For example, select SampleMath's subtask set with one environment argument:
 python run_scripts/run_tool_calling.py --environment samplemath \
   --env-kwargs '{"subtasks": true}'
 ```
+
+#### Langfuse observability
+
+`run_tool_calling.py` loads the repository's `.env` before starting a run.
+Configure Langfuse there with the keys and URL for your project:
+
+```dotenv
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+CORRAL_LANGFUSE_ENABLED=true
+```
+
+Install the optional SDK in the environment running the script. From the
+repository root, use `uv sync --extra langfuse`, then retain the extra when
+running with uv:
+
+```bash
+uv run --extra langfuse python run_scripts/run_tool_calling.py \
+  --environment samplemath --task task1 --run-id samplemath-traced
+```
+
+When using a task package's environment instead, add `--with 'langfuse>=4,<5'`
+to its `uv run --project tasks/<environment>` command. Each task produces a
+trace named `corral.task.<task-id>`, with model turns, token usage, and tool
+results, grouped into a Langfuse session by run ID. Traces are flushed before
+the runner exits. Docker runs forward the Langfuse settings and build a
+separate image with the SDK installed; custom images need the `langfuse`
+extra too. Set `CORRAL_LANGFUSE_ENABLED=false` to keep only local logging.
 
 ### Scored, Multi-Trial Benchmarks
 
@@ -315,11 +344,13 @@ result = await runner.run(
     k_values=[1, 2, 3],
     max_parallel=4,
     max_parallel_per_task=2,
+    max_parallel_evaluations=2,
+    max_parallel_total=6,
 )
 ```
 
 `CorralRunner` handles concurrency, task retries, and dependency readiness.
-Task state remains persisted in the commit store. Tool verbosity is fixed to Corral's default (`brief`) on this path.
+Task execution and evaluation are split into two separate processes in corral.
 
 ## 🏗️ Available Environments
 
@@ -327,12 +358,13 @@ The framework includes several pre-built environments:
 
 | Environment | Description |
 |-------------|-------------|
-| `samplemath` | Basic mathematical operations |
-| `spectra_elucidation` | Spectroscopy/NMR spectra elucidation tasks |
-| `corral_md` | LAMMPS molecular dynamics simulation setup |
-| `catalyst` | Catalysis research and material design tasks |
-| `afm` | Atomic force microscopy image analysis |
-| `ml` | Machine learning model training and evaluation |
+| `afm` | Hardware-in-the-loop atomic force microscopy tasks |
+| `corral_md` | LAMMPS molecular dynamics simulation setup and analysis |
+| `resistor_network` | Hidden resistor-topology inference from measurements |
+| `retrosynthesis` | Reaction-template-based synthesis planning |
+| `samplemath` | Lightweight mathematical operations |
+| `spectra_elucidation` | Spectroscopy-based organic structure elucidation |
+| `wetlab` | Simulated qualitative inorganic ion analysis |
 
 ## 🤖 Available Agents
 
@@ -607,7 +639,7 @@ for task_id, task_result in result.task_results.items():
 
 - **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/lamalab-org/corral/issues)
 - **Discussions**: Join conversations on [GitHub Discussions](https://github.com/lamalab-org/corral/discussions)
-- **Contributing**: See our [Contributing Guide](CONTRIBUTING.md)
+- **Community standards**: See our [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## 📄 License
 

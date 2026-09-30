@@ -48,7 +48,7 @@ def main(model, data="results/prepared_data.csv", output="results/", **sampling_
     start_time = time.time()
     idata = sample_model(pm_model, **sampling_kwargs)
     elapsed = time.time() - start_time
-    logger.info(f"Sampling time: {elapsed/60:.1f} minutes")
+    logger.info(f"Sampling time: {elapsed / 60:.1f} minutes")
 
     # Check convergence
     check_convergence(idata, model_name=model_name)

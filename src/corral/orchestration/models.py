@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import PurePosixPath
 from typing import Any
 
 RUNTIME_PROTOCOL_VERSION = "4"
@@ -41,13 +42,21 @@ class DockerSandboxSpec:
         "ANTHROPIC_BASE_URL",
         "AZURE_OPENAI_API_KEY",
         "AZURE_OPENAI_ENDPOINT",
+        "CORRAL_LANGFUSE_ENABLED",
         "HF_TOKEN",
+        "LANGFUSE_BASE_URL",
+        "LANGFUSE_HOST",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_TRACING_ENABLED",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
     )
-    retention: str = SandboxRetention.NEVER.value
+    retention: str = SandboxRetention.ON_FAILURE.value
     registry_module: str | None = None
     runtime_protocol_version: str = RUNTIME_PROTOCOL_VERSION
+    # Read-only controller inputs, mounted outside every worker filesystem.
+    private_directories: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "retention", SandboxRetention(self.retention).value)
@@ -80,6 +89,15 @@ class DockerSandboxSpec:
                 raise ValueError(f"invalid environment variable name {name!r}")
         if len(set(self.environment_allowlist)) != len(self.environment_allowlist):
             raise ValueError("environment_allowlist cannot contain duplicates")
+        for directory in self.private_directories:
+            if (
+                not PurePosixPath(directory).is_absolute()
+                or "," in directory
+                or ".." in PurePosixPath(directory).parts
+            ):
+                raise ValueError(
+                    "private_directories must be absolute paths without commas or parent traversal"
+                )
 
     @property
     def immutable_image(self) -> str:
@@ -115,10 +133,17 @@ class AgentRuntimeDefinition:
     api_endpoint: str | None = None
     temperature: float | None = None
     options: dict[str, Any] = field(default_factory=dict)
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("agent runtime name cannot be empty")
+        # Promote --agent-kwargs (and older saved definitions) into the common
+        # parameter summary without removing the original constructor options.
+        if self.reasoning_effort is None:
+            object.__setattr__(
+                self, "reasoning_effort", self.options.get("reasoning_effort")
+            )
 
 
 @dataclass(frozen=True)
@@ -259,10 +284,15 @@ class BenchmarkInput:
     dependency_graph: dict[str, tuple[str, ...]] = field(default_factory=dict)
     max_iterations_by_task: dict[str, int] = field(default_factory=dict)
     model_by_task: dict[str, str] = field(default_factory=dict)
-    max_parallel: int = 1
+    max_parallel: int = 4
     max_parallel_per_task: int = 1
+    max_parallel_evaluations: int | None = None
+    max_parallel_total: int | None = None
     max_parallel_by_model: dict[str, int] = field(default_factory=dict)
     max_parallel_by_environment: dict[str, int] = field(default_factory=dict)
+    max_parallel_evaluations_by_environment: dict[str, int] = field(
+        default_factory=dict
+    )
     enable_surrender: bool = False
     evaluate: bool = True
     retry_policy: RetryPolicy = field(default_factory=RetryPolicy)
@@ -283,6 +313,26 @@ class BenchmarkInput:
             raise ValueError("trials_per_task must be at least 1")
         if self.max_parallel < 1 or self.max_parallel_per_task < 1:
             raise ValueError("parallelism limits must be at least 1")
+        evaluation_limit = self.max_parallel_evaluations
+        if evaluation_limit is None:
+            evaluation_limit = self.max_parallel
+        if (
+            isinstance(evaluation_limit, bool)
+            or not isinstance(evaluation_limit, int)
+            or evaluation_limit < 1
+        ):
+            raise ValueError("max_parallel_evaluations must be a positive integer")
+        object.__setattr__(self, "max_parallel_evaluations", evaluation_limit)
+        total_limit = self.max_parallel_total
+        if total_limit is None:
+            total_limit = self.max_parallel + evaluation_limit
+        if (
+            isinstance(total_limit, bool)
+            or not isinstance(total_limit, int)
+            or total_limit < 1
+        ):
+            raise ValueError("max_parallel_total must be a positive integer")
+        object.__setattr__(self, "max_parallel_total", total_limit)
         missing_agents = set(self.task_ids) - self.agent_by_task.keys()
         missing_environments = set(self.task_ids) - self.environment_by_task.keys()
         if missing_agents or missing_environments:
@@ -298,6 +348,12 @@ class BenchmarkInput:
             if limit < 1:
                 raise ValueError(
                     f"max_parallel_by_environment[{environment!r}] must be at least 1"
+                )
+        for environment, limit in self.max_parallel_evaluations_by_environment.items():
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+                raise ValueError(
+                    "max_parallel_evaluations_by_environment"
+                    f"[{environment!r}] must be a positive integer"
                 )
         if self.sandbox.mode == SandboxMode.DOCKER.value:
             docker = self.sandbox.docker

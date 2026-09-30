@@ -24,9 +24,7 @@ from corral.report.logging import (
 
 TASK_ENVIRONMENT_MODULES = (
     "tasks/afm/src/env.py",
-    "tasks/catalyst/src/catalyst/env.py",
     "tasks/corral_md/src/corral_md/env.py",
-    "tasks/ml/src/ml/env.py",
     "tasks/resistor_network/src/resistor_network/env.py",
     "tasks/retrosynthesis/retrosynthesis/env.py",
     "tasks/samplemath/samplemath/env_subtask.py",
@@ -41,7 +39,7 @@ def _restore_default_logging():
     configure_logging()
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -123,7 +121,7 @@ def test_sink_routing_filters_by_subsystem():
     assert "task.started" not in rag_output.getvalue()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_context_is_isolated_across_concurrent_tasks():
     records = _capture()
 

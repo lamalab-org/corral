@@ -54,6 +54,17 @@ MANUAL_PRICES = {
     "O=Cc1ccc(S(=O)(=O)Cl)cc1": 60.0,
     "O=C1CCC1": 30.0,
     "CC(=O)c1cc([N+](=O)[O-])ccc1O": 25.0,
+    # Long reference routes (make_9 and make_10). Supplier identities and
+    # estimate provenance are documented in README.md.
+    "Nc1c(C(=O)O)[nH]c(=O)[nH]c1=O": 20.0,
+    "Brc1cn[nH]c1": 30.0,
+    "COc1cccc(N)c1C(=O)O": 40.0,
+    "OCCNCc1ccccc1": 10.0,
+    "C=C(OCC)[Sn](CCCC)(CCCC)CCCC": 50.0,
+    "OB(O)C1CC1": 10.0,
+    "CCOC(=O)C(C)(F)F": 35.0,
+    "CCOC(=O)C(Br)C1CC1": 30.0,
+    "CCOP(=O)(CS(C)(=O)=O)OCC": 150.0,
 }
 
 

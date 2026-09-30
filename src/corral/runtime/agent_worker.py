@@ -92,6 +92,13 @@ def _snapshot(session: AgentSession) -> dict[str, Any]:
         "_require_submission",
     )
     snapshot = {name: _json(getattr(session, name)) for name in fields}
+    # Controller materialization names are capabilities, not public context.
+    # Native agents receive a separate scratch mount at this stable path; task
+    # workspace mutations must go through authorized Corral tools.
+    if snapshot.get("workspace") is not None:
+        snapshot["workspace"] = "/workspace"
+    if snapshot.get("execution_workspace") is not None:
+        snapshot["execution_workspace"] = "/workspace"
     # Evaluation records can contain private scoring inputs and diagnostics.
     # Reflexion needs only the public score and attempt identifier.
     evaluation = session.previous_evaluation
@@ -221,6 +228,10 @@ class RemoteSession:
             "get_agent_state", {"namespace": namespace, "previous": previous}
         )
 
+    def _workspace_reference(self) -> str:
+        """Return an opaque broker capability, never a controller path."""
+        return f"corral-branch:{self._handle}"
+
     run_hooks = AgentSession.run_hooks
 
     def final_messages(self) -> tuple[dict[str, Any], ...]:
@@ -254,11 +265,24 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
                 raise PermissionError("session operation is not permitted")
             arguments = request["arguments"]
             if method == "fork_branch":
-                arguments.setdefault("workspace_parent", workspace)
-                if arguments["workspace_parent"] != workspace:
+                supplied_parent = arguments.get("workspace_parent")
+                if supplied_parent not in {None, "/workspace", workspace}:
                     raise PermissionError(
                         "node workspaces must belong to the calling agent"
                     )
+                arguments["workspace_parent"] = workspace
+            elif method == "promote_artifacts":
+                reference = arguments.get("source_workspace")
+                prefix = "corral-branch:"
+                if not isinstance(reference, str) or not reference.startswith(prefix):
+                    raise PermissionError(
+                        "artifact promotion requires an opaque branch capability"
+                    )
+                source_handle = reference.removeprefix(prefix)
+                source_session = sessions.get(source_handle)
+                if source_session is None or source_session.workspace is None:
+                    raise PermissionError("unknown branch workspace capability")
+                arguments["source_workspace"] = source_session.workspace
             if method == "execute":
                 arguments["action"] = TypeAdapter(Action).validate_python(
                     arguments["action"]

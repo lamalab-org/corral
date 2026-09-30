@@ -28,9 +28,10 @@ from uuid import uuid4
 import cloudpickle
 
 DENIED = "Permission denied: access outside the trial workspace is not permitted"
-POLICY_VERSION = "workspace-root-v1"
+POLICY_VERSION = "canonical-workspace-v2"
 SCRATCH_PREFIX = ".corral-runtime-"
 NODE_WORKSPACE_DIR = ".corral-nodes"
+RESOURCE_WORKSPACE_DIR = "resources"
 _enabled = False
 _identities = itertools.count(20000)
 _groups: dict[Path, int] = {}
@@ -133,7 +134,8 @@ def _entries(directory: int, prefix: str = ""):
         # SDK homes can contain sockets and executable aliases. They are private
         # scratch within the workspace, not task artifacts or shared task files.
         if not prefix and (
-            name.startswith(SCRATCH_PREFIX) or name == NODE_WORKSPACE_DIR
+            name.startswith(SCRATCH_PREFIX)
+            or name in {NODE_WORKSPACE_DIR, RESOURCE_WORKSPACE_DIR}
         ):
             continue
         descriptor = os.open(
@@ -174,7 +176,7 @@ def copy_workspace(
                         parent = next_parent
                     if stat.S_ISDIR(status.st_mode):
                         with suppress(FileExistsError):
-                            os.mkdir(parts[-1], mode=0o770, dir_fd=parent)  # noqa: PTH102 - Path.mkdir does not support dir_fd
+                            os.mkdir(parts[-1], mode=0o770, dir_fd=parent)
                         existing = os.open(parts[-1], directory_flags, dir_fd=parent)
                         try:
                             if enabled():
@@ -231,7 +233,7 @@ def create_node_workspace(parent: str, source: str) -> str:
     parent_fd = _open_directory(parent)
     try:
         with suppress(FileExistsError):
-            os.mkdir(NODE_WORKSPACE_DIR, mode=0o2770, dir_fd=parent_fd)  # noqa: PTH102 - Path.mkdir does not support dir_fd
+            os.mkdir(NODE_WORKSPACE_DIR, mode=0o2770, dir_fd=parent_fd)
         nodes_fd = os.open(
             NODE_WORKSPACE_DIR,
             os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
@@ -242,7 +244,7 @@ def create_node_workspace(parent: str, source: str) -> str:
                 os.fchown(nodes_fd, 0, _groups[parent_path])
                 os.fchmod(nodes_fd, 0o2770)
             name = uuid4().hex
-            os.mkdir(name, mode=0o2770, dir_fd=nodes_fd)  # noqa: PTH102 - Path.mkdir does not support dir_fd
+            os.mkdir(name, mode=0o2770, dir_fd=nodes_fd)
             node_fd = os.open(
                 name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=nodes_fd
             )
@@ -366,8 +368,6 @@ def workspace_identity(
     root = Path(os.path.abspath(workspace))  # noqa: PTH100 - do not follow links
     if root == Path("/workspace") or not root.is_relative_to("/workspace"):
         raise ValueError("workers require an assigned directory below /workspace")
-    if root.is_relative_to("/workspace/.corral-runtime-system"):
-        raise ValueError("the worker runtime path is reserved")
     with _lock:
         parent = _node_parents.get(root)
         if root not in _groups:
@@ -405,7 +405,12 @@ def _allow_workspace_group(descriptor: int, gid: int) -> None:
 
 
 def drop_privileges(
-    uid: int, gid: int, workspace: str, *, scratch: str | None = None
+    uid: int,
+    gid: int,
+    workspace: str,
+    *,
+    scratch: str | None = None,
+    preserve_environment: bool = False,
 ) -> None:
     """Irreversibly enter the worker identity before running supplied code."""
     if os.geteuid() != 0 or uid <= 0 or gid <= 0:
@@ -426,6 +431,22 @@ def drop_privileges(
     os.chdir(workspace)
     if scratch is None:
         scratch = tempfile.mkdtemp(prefix=SCRATCH_PREFIX, dir=workspace)
+    if not preserve_environment:
+        public_environment = {
+            name: os.environ[name]
+            for name in (
+                "LANG",
+                "LC_ALL",
+                "LD_LIBRARY_PATH",
+                "PATH",
+                "PYTHONPATH",
+                "REQUESTS_CA_BUNDLE",
+                "SSL_CERT_FILE",
+            )
+            if name in os.environ
+        }
+        os.environ.clear()
+        os.environ.update(public_environment)
     os.environ.update(HOME=scratch, TMPDIR=scratch, XDG_CACHE_HOME=scratch + "/.cache")
     tempfile.tempdir = scratch
 
@@ -458,14 +479,32 @@ def _kill_identity(uid: int) -> None:
 
 
 def run_worker(
-    kind: str, payload: Any, workspace: str, *, cancel: threading.Event | None = None
+    kind: str,
+    payload: Any,
+    workspace: str,
+    *,
+    cancel: threading.Event | None = None,
+    workspace_access: str | None = None,
+    resource_mounts: dict[str, tuple[str, str]] | None = None,
 ) -> Any:
     """Run one trusted bootstrap, then accept an unprivileged JSON result."""
     if not enabled() or _root is None:
         raise RuntimeError("restricted workers require Docker permission enforcement")
     descriptor = _open_directory(workspace)
     try:
-        return _run_worker(kind, payload, workspace, descriptor, cancel=cancel)
+        return _run_worker(
+            kind,
+            payload,
+            workspace,
+            descriptor,
+            cancel=cancel,
+            workspace_access=(
+                ("scratch" if kind == "agent" else "none")
+                if workspace_access is None
+                else workspace_access
+            ),
+            resource_mounts=resource_mounts or {},
+        )
     finally:
         try:
             root = Path(workspace)
@@ -484,12 +523,25 @@ def _run_worker(
     workspace_fd: int,
     *,
     cancel: threading.Event | None,
+    workspace_access: str,
+    resource_mounts: dict[str, tuple[str, str]],
 ) -> Any:
     uid, gid = workspace_identity(workspace, descriptor=workspace_fd)
     with tempfile.TemporaryDirectory(dir=_root) as directory:
         request = Path(directory) / "input.pkl"
         request.write_bytes(
-            serialize((kind, payload, uid, gid, workspace, workspace_fd))
+            serialize(
+                (
+                    kind,
+                    payload,
+                    uid,
+                    gid,
+                    workspace,
+                    workspace_fd,
+                    workspace_access,
+                    resource_mounts,
+                )
+            )
         )
         request.chmod(0o600)
         reader, writer = os.pipe()
@@ -569,23 +621,28 @@ def _run_worker(
                 os.close(writer)
 
 
-def execute_tool(
-    environment: Any, state: Any, tool: Any, arguments: dict[str, Any]
+def execute_restricted_tool(
+    tool: Any,
+    arguments: dict[str, Any],
+    workspace: str,
+    *,
+    resource_mounts: dict[str, tuple[str, str]] | None = None,
+    cancel: threading.Event | None = None,
+    prepared: Any | None = None,
 ) -> Any:
-    """Keep private task logic here; give code workers only public arguments."""
-    from corral.backend.background_tools import (  # - avoid tool import cycle
-        _CallableTool,
+    """Execute an untrusted tool with exactly its declared OS capabilities."""
+    return _run_public_tool(
+        tool,
+        arguments,
+        workspace,
+        resource_mounts=resource_mounts or {},
+        cancel=cancel,
+        prepared=prepared,
     )
-
-    # Job controls and explicitly trusted scientific functions never evaluate
-    # model-controlled code. They alone may receive the execution projection.
-    if isinstance(tool, _CallableTool) or getattr(tool, "trusted", False):
-        return environment.execute_tool(state, tool, arguments)
-    return _run_public_tool(tool, arguments, environment.workspace_path)
 
 
 def visible_argument_error(tool: Any, arguments: dict[str, Any]) -> str | None:
-    """Validate the public schema before preprocessing or injecting private data."""
+    """Validate normalized public arguments before injecting private data."""
     from jsonschema import Draft202012Validator
 
     schema = {
@@ -603,45 +660,76 @@ def _run_public_tool(
     workspace: str,
     *,
     cancel: threading.Event | None = None,
+    resource_mounts: dict[str, tuple[str, str]] | None = None,
+    prepared: Any | None = None,
 ) -> Any:
-    workspace_args = set(getattr(tool, "workspace_args", ()))
-    if set(tool.hidden_args) - workspace_args:
+    hidden_arg_names = set(
+        prepared.hidden_arg_names
+        if prepared is not None
+        else getattr(tool, "hidden_args", ())
+    )
+    workspace_args = set(
+        prepared.workspace_args
+        if prepared is not None
+        else getattr(tool, "workspace_args", ())
+    )
+    resources = set(
+        prepared.resources if prepared is not None else getattr(tool, "resources", ())
+    )
+    resource_args = resources & hidden_arg_names
+    if hidden_arg_names - workspace_args - resource_args:
         raise PermissionError(
             "restricted tools cannot receive hidden arguments; "
             "private inputs require explicitly trusted task logic"
         )
     public = {
-        name: value for name, value in arguments.items() if name not in tool.hidden_args
+        name: value for name, value in arguments.items() if name not in hidden_arg_names
     }
-    if error := visible_argument_error(tool, public):
+    if prepared is None and (error := visible_argument_error(tool, public)):
         raise ValueError(error)
-    public.update(dict.fromkeys(workspace_args, workspace))
-    operation = getattr(tool, "worker_operation", None)
+    public.update(dict.fromkeys(workspace_args, "/workspace"))
+    public.update(
+        {name: arguments[name] for name in resource_args if name in arguments}
+    )
+    access: Any = (
+        prepared.workspace_access
+        if prepared is not None
+        else getattr(tool, "workspace_access", "none")
+    )
+    access = access.value if hasattr(access, "value") else str(access)
+    operation = (
+        prepared.worker_operation
+        if prepared is not None
+        else getattr(tool, "worker_operation", None)
+    )
     if operation == "terminal":
-        result = run_worker("terminal", public, workspace, cancel=cancel)
+        result = run_worker(
+            "terminal",
+            public,
+            workspace,
+            cancel=cancel,
+            workspace_access=access,
+            resource_mounts=resource_mounts,
+        )
+    elif isinstance(operation, str) and operation.startswith("workspace:"):
+        result = run_worker(
+            "workspace_tool",
+            (operation.removeprefix("workspace:"), public),
+            workspace,
+            cancel=cancel,
+            workspace_access=access,
+            resource_mounts=resource_mounts,
+        )
     else:
-        result = run_worker("tool", (tool, public), workspace, cancel=cancel)
+        result = run_worker(
+            "tool",
+            (tool, public),
+            workspace,
+            cancel=cancel,
+            workspace_access=access,
+            resource_mounts=resource_mounts,
+        )
     return result["content"]
-
-
-def execute_job(
-    tool: Any,
-    arguments: dict[str, Any],
-    workspace: str,
-    *,
-    cancel: threading.Event | None = None,
-) -> Any:
-    """Background jobs obey the same trust classification as foreground tools."""
-    if getattr(tool, "trusted", False):
-        from corral.core.transition import ToolExecutionResult
-
-        result = tool.execute(**arguments)
-        if isinstance(result, ToolExecutionResult):
-            if result.environment is not None:
-                raise ValueError("stateful task tools must execute in the foreground")
-            return result.content
-        return result
-    return _run_public_tool(tool, arguments, workspace, cancel=cancel)
 
 
 if __name__ == "__main__":

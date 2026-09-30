@@ -313,6 +313,10 @@ class OpenHandsAgent(BaseAgent):
             )
         return suffix
 
+    def model_parameter_defaults(self) -> dict[str, Any]:
+        """Read SDK defaults without constructing an authenticated LLM client."""
+        return {"reasoning_effort": LLM.model_fields["reasoning_effort"].default}
+
     def _make_llm(self) -> Any:
         """Build the OpenHands `LLM` handed to the harness agent."""
         key = self.api_key or os.getenv("LLM_API_KEY")

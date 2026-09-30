@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 TOOL_CATALOG_METADATA_KEY = "tool_catalog"
 TOOL_CATALOG_SCHEMA_VERSION = 1
+TOOL_POLICY_METADATA_KEY = "tool_policy"
+TOOL_POLICY_SCHEMA_VERSION = 2
 
 
 class ToolCatalogBindingError(RuntimeError):
@@ -33,6 +35,18 @@ class InvalidToolCatalogError(ToolCatalogBindingError):
 
 class ToolCatalogMismatchError(ToolCatalogBindingError):
     """The persisted and currently executable tool catalogs differ."""
+
+
+class MissingToolPolicyError(ToolCatalogBindingError):
+    """A projection is missing its authoritative private tool policy."""
+
+
+class InvalidToolPolicyError(ToolCatalogBindingError):
+    """A persisted private tool policy is malformed."""
+
+
+class ToolPolicyMismatchError(ToolCatalogBindingError):
+    """The persisted and currently executable private tool policies differ."""
 
 
 def _tool_name(tool: Mapping[str, Any], *, index: int) -> str:
@@ -149,6 +163,93 @@ class ToolCatalogSnapshot(FrozenModel):
         )
 
 
+class ToolPolicy(FrozenModel):
+    """Private execution policy for one tool.
+
+    These fields are deliberately kept out of provider/MCP schemas: they are
+    controller authorization data, not arguments the agent may influence.
+    """
+
+    trusted: bool = False
+    controller_dispatch: bool = False
+    workspace_access: Literal["none", "read", "read_write"] = "none"
+    hidden_args: tuple[str, ...] = ()
+    workspace_args: tuple[str, ...] = ()
+    resources: tuple[str, ...] = ()
+    worker_operation: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_bindings(self) -> ToolPolicy:
+        if len(set(self.hidden_args)) != len(self.hidden_args):
+            raise ValueError("hidden_args cannot contain duplicates")
+        if len(set(self.workspace_args)) != len(self.workspace_args):
+            raise ValueError("workspace_args cannot contain duplicates")
+        if not set(self.workspace_args) <= set(self.hidden_args):
+            raise ValueError("workspace_args must name hidden_args")
+        if len(set(self.resources)) != len(self.resources):
+            raise ValueError("resources cannot contain duplicates")
+        return self
+
+
+def canonical_tool_policy_json(policies: Mapping[str, Any]) -> str:
+    """Return a stable representation of controller-only tool policies."""
+    return json.dumps(
+        {name: policies[name] for name in sorted(policies)},
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def tool_policy_fingerprint(policies: Mapping[str, Any]) -> str:
+    payload = canonical_tool_policy_json(policies)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+class ToolPolicySnapshot(FrozenModel):
+    """Versioned private policy persisted with an execution's tool catalog."""
+
+    schema_version: Literal[2] = TOOL_POLICY_SCHEMA_VERSION
+    policies: Mapping[str, ToolPolicy]
+    fingerprint: str
+
+    @model_validator(mode="after")
+    def _validate_fingerprint(self) -> ToolPolicySnapshot:
+        validate_sha256_hex(self.fingerprint, field_name="tool policy fingerprint")
+        payload = {
+            name: policy.model_dump(mode="json")
+            for name, policy in self.policies.items()
+        }
+        expected = tool_policy_fingerprint(payload)
+        if self.fingerprint != expected:
+            raise ValueError(
+                "tool policy fingerprint does not match the persisted policies"
+            )
+        return self
+
+    @classmethod
+    def capture(cls, tools: Mapping[str, Any]) -> ToolPolicySnapshot:
+        policies: dict[str, dict[str, Any]] = {}
+        for name, tool in tools.items():
+            if name != getattr(tool, "name", None):
+                raise ValueError(f"tool policy key {name!r} does not match tool name")
+            policies[name] = ToolPolicy(
+                trusted=bool(getattr(tool, "trusted", False)),
+                controller_dispatch=bool(getattr(tool, "controller_dispatch", False)),
+                workspace_access=str(
+                    getattr(tool, "workspace_access", "none").value
+                    if hasattr(getattr(tool, "workspace_access", "none"), "value")
+                    else getattr(tool, "workspace_access", "none")
+                ),
+                hidden_args=tuple(sorted(getattr(tool, "hidden_args", {}))),
+                workspace_args=tuple(sorted(getattr(tool, "workspace_args", ()))),
+                resources=tuple(sorted(getattr(tool, "resources", ()))),
+                worker_operation=getattr(tool, "worker_operation", None),
+            ).model_dump(mode="json")
+        return cls(policies=policies, fingerprint=tool_policy_fingerprint(policies))
+
+
 def state_tool_catalog(state: ExecutionState) -> ToolCatalogSnapshot:
     """Read and validate the authoritative catalog persisted on `state`."""
     raw = state.task.environment.get(TOOL_CATALOG_METADATA_KEY)
@@ -165,6 +266,24 @@ def state_tool_catalog(state: ExecutionState) -> ToolCatalogSnapshot:
         raise InvalidToolCatalogError(
             f"Execution {state.execution_id!r} at {state.through_commit_hash} has an invalid "
             f"persisted tool catalog snapshot: {exc}"
+        ) from exc
+
+
+def state_tool_policy(state: ExecutionState) -> ToolPolicySnapshot:
+    """Read and validate the authoritative private policy on `state`."""
+    raw = state.task.environment.get(TOOL_POLICY_METADATA_KEY)
+    if not isinstance(raw, Mapping):
+        raise MissingToolPolicyError(
+            f"Execution {state.execution_id!r} at {state.through_commit_hash} has no "
+            "persisted tool policy snapshot. Refusing to derive controller "
+            "authorization from the current Environment."
+        )
+    try:
+        return ToolPolicySnapshot.model_validate(raw)
+    except Exception as exc:
+        raise InvalidToolPolicyError(
+            f"Execution {state.execution_id!r} at {state.through_commit_hash} has an "
+            f"invalid persisted tool policy snapshot: {exc}"
         ) from exc
 
 
@@ -215,16 +334,52 @@ def validate_tool_catalog_binding(
     return stored
 
 
+def validate_tool_policy_binding(
+    state: ExecutionState,
+    current: ToolPolicySnapshot,
+) -> ToolPolicySnapshot:
+    """Refuse resumed execution if any controller-only permission changed."""
+    stored = state_tool_policy(state)
+    if stored.fingerprint != current.fingerprint:
+        stored_names = set(stored.policies)
+        current_names = set(current.policies)
+        changed = sorted(
+            name
+            for name in stored_names & current_names
+            if stored.policies[name] != current.policies[name]
+        )
+        raise ToolPolicyMismatchError(
+            f"Tool policy mismatch for execution {state.execution_id!r} at "
+            f"{state.through_commit_hash}: stored fingerprint={stored.fingerprint}, "
+            f"current Environment fingerprint={current.fingerprint}; "
+            f"stored_only={sorted(stored_names - current_names)}, "
+            f"current_only={sorted(current_names - stored_names)}, "
+            f"changed={changed}. Refusing to resume with different permissions."
+        )
+    return stored
+
+
 __all__ = [
     "TOOL_CATALOG_METADATA_KEY",
     "TOOL_CATALOG_SCHEMA_VERSION",
+    "TOOL_POLICY_METADATA_KEY",
+    "TOOL_POLICY_SCHEMA_VERSION",
     "InvalidToolCatalogError",
+    "InvalidToolPolicyError",
     "MissingToolCatalogError",
+    "MissingToolPolicyError",
     "ToolCatalogBindingError",
     "ToolCatalogMismatchError",
     "ToolCatalogSnapshot",
+    "ToolPolicy",
+    "ToolPolicyMismatchError",
+    "ToolPolicySnapshot",
     "canonical_tool_catalog_json",
+    "canonical_tool_policy_json",
     "state_tool_catalog",
+    "state_tool_policy",
     "tool_catalog_fingerprint",
+    "tool_policy_fingerprint",
     "validate_tool_catalog_binding",
+    "validate_tool_policy_binding",
 ]

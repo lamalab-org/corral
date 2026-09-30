@@ -34,6 +34,47 @@ if TYPE_CHECKING:
     from corral.agents.session import AgentSession
 
 
+_PYTHON_LITERALS = {"True": "true", "False": "false", "None": "null"}
+
+
+def _loads_arguments(text: str) -> Any:
+    """Parse action arguments, accepting Python's bare True/False/None.
+
+    Only literals outside JSON strings are converted, so code the agent writes
+    (``write_file`` content, shell commands) keeps its ``True`` and ``False``.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(_python_literals_to_json(text))
+
+
+def _python_literals_to_json(text: str) -> str:
+    out: list[str] = []
+    i, in_string = 0, False
+    while i < len(text):
+        char = text[i]
+        if in_string:
+            out.append(char)
+            if char == "\\" and i + 1 < len(text):
+                out.append(text[i + 1])
+                i += 1
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+            out.append(char)
+        else:
+            match = re.match(r"(True|False|None)\b", text[i:])
+            if match and not (i and (text[i - 1].isalnum() or text[i - 1] == "_")):
+                out.append(_PYTHON_LITERALS[match.group(1)])
+                i += len(match.group(1))
+                continue
+            out.append(char)
+        i += 1
+    return "".join(out)
+
+
 class ReActAgent(BaseAgent):
     """Run a text-based thought/action/observation loop inside an AgentSession."""
 
@@ -76,8 +117,7 @@ class ReActAgent(BaseAgent):
                 return thoughts or None, None
             try:
                 converted = convert_outermost_triple_quotes(raw_arguments.strip())
-                converted = converted.replace("True", "true").replace("False", "false")
-                arguments = json.loads(converted)
+                arguments = _loads_arguments(converted)
                 if not isinstance(arguments, dict):
                     raise ValueError("action_input must be a JSON object")
                 actions.append(Action(name=match.group(1).strip(), arguments=arguments))

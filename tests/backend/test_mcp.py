@@ -20,7 +20,7 @@ from corral.core.tool import ToolResponse
 from corral.core.tool_catalog import ToolCatalogSnapshot
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -62,7 +62,7 @@ async def serve_tools(binding):
         yield connection
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_endpoints_route_tools_to_their_own_sessions():
     first, second = make_binding("first"), make_binding("second")
     async with (
@@ -103,7 +103,7 @@ async def test_endpoints_route_tools_to_their_own_sessions():
                 await client.post(endpoint.url, json={})
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_endpoint_preserves_tool_errors():
     session = make_binding("failed-tool")
     session.execute.return_value = ToolResponse(
@@ -120,7 +120,7 @@ async def test_endpoint_preserves_tool_errors():
         assert result.content[0].text == "sample is missing"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_endpoint_closes_when_the_harness_is_cancelled():
     with anyio.CancelScope() as scope:
         async with serve_tools(make_binding("cancelled")) as endpoint:
@@ -132,7 +132,7 @@ async def test_endpoint_closes_when_the_harness_is_cancelled():
             await client.post(endpoint.url, json={})
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_failed_startup_releases_the_listener(monkeypatch):
     listeners = []
 
@@ -162,7 +162,7 @@ async def post_tool(client, url):
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_concurrent_first_bindings_start_one_listener(monkeypatch):
     listeners = []
     startup = transport_module._EmbeddedServer.startup
@@ -189,7 +189,7 @@ async def test_concurrent_first_bindings_start_one_listener(monkeypatch):
     assert listeners[0].fileno() == -1
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("cancel_startup", [False, True])
 async def test_first_binding_can_retry_after_startup_failure(
     monkeypatch, cancel_startup
@@ -240,7 +240,7 @@ async def test_first_binding_can_retry_after_startup_failure(
             pytest.fail("a closed host cannot accept bindings")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_host_preserves_signal_handlers_and_invocation_context():
     handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
     context = ContextVar("invocation", default="outside")
@@ -263,7 +263,7 @@ async def test_host_preserves_signal_handlers_and_invocation_context():
     assert {sig: signal.getsignal(sig) for sig in handlers} == handlers
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_binding_revokes_new_requests_and_drains_accepted_responses():
     started, release, finish = asyncio.Event(), asyncio.Event(), asyncio.Event()
     endpoint_ready = asyncio.get_running_loop().create_future()
@@ -303,7 +303,7 @@ async def test_binding_revokes_new_requests_and_drains_accepted_responses():
             await asyncio.gather(owner, request, return_exceptions=True)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("synchronous", [False, True])
 @pytest.mark.parametrize("cancel_while_draining", [False, True])
 async def test_cancellation_waits_for_accepted_tool_cleanup(
@@ -367,7 +367,7 @@ async def test_cancellation_waits_for_accepted_tool_cleanup(
             await asyncio.gather(owner, request, return_exceptions=True)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_partial_startup_failure_leaves_no_server_or_listener(monkeypatch):
     servers, listeners = [], []
     startup = transport_module._EmbeddedServer.startup
@@ -389,7 +389,7 @@ async def test_partial_startup_failure_leaves_no_server_or_listener(monkeypatch)
     )
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_startup_cancellation_leaves_no_task_or_socket(monkeypatch):
     listeners = []
     started = asyncio.Event()

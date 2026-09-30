@@ -30,7 +30,7 @@ def to_title_case_label(text: str) -> str:
     lowered = text.lower()
     for idx, char in enumerate(lowered):
         if char.isalpha():
-            return f"{lowered[:idx]}{char.upper()}{lowered[idx + 1:]}"
+            return f"{lowered[:idx]}{char.upper()}{lowered[idx + 1 :]}"
     return lowered
 
 

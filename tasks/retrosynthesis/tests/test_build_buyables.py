@@ -82,5 +82,5 @@ def test_source_loaders_accept_documented_formats(tmp_path):
 def test_manual_prices_are_valid_built_in_rows():
     rows = list(load_manual_prices())
 
-    assert len(rows) == 11
+    assert len(rows) == 20
     assert all(source == "corral_manual" for _smiles, _price, source in rows)

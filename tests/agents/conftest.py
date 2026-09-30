@@ -88,7 +88,7 @@ class MockToolCall:
         )()
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_prompt_store():
     """Mock PromptStore for testing."""
 
@@ -199,16 +199,16 @@ class MockFunction:
 
     def assert_has_calls(self, expected_calls):
         """Assert the function was called with the expected calls."""
-        assert len(self.call_args_list) == len(
-            expected_calls
-        ), f"Expected {len(expected_calls)} calls, got {len(self.call_args_list)}"
+        assert len(self.call_args_list) == len(expected_calls), (
+            f"Expected {len(expected_calls)} calls, got {len(self.call_args_list)}"
+        )
         for i, expected in enumerate(expected_calls):
-            assert (
-                self.call_args_list[i] == expected
-            ), f"Call {i}: expected {expected}, got {self.call_args_list[i]}"
+            assert self.call_args_list[i] == expected, (
+                f"Call {i}: expected {expected}, got {self.call_args_list[i]}"
+            )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def session_stores(anyio_backend, monkeypatch):
     """Close stores created by the session helper before the test loop exits."""
     async with AsyncExitStack() as stack:

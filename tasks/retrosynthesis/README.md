@@ -47,6 +47,22 @@ docker run --name corral-retro-db \
   -d ghcr.io/lamalab-org/corral-retro-db:v1
 ```
 
+Tasks 9 and 10 need the final three entries in the existing
+`database_config/add_custom_reactions.py` list (Boc removal, quinazolinone
+formation, and sulfone olefination). The published `v1` image predates these
+entries. After restoration, with the Python environment installed and
+`RETRO_DB_*` configured, import them from `tasks/retrosynthesis`:
+
+```bash
+PYTHONPATH=database_config python -c \
+  'from add_custom_reactions import CUSTOM_REACTIONS, add_reactions_from_list; add_reactions_from_list(CUSTOM_REACTIONS[-3:])'
+```
+
+They have IDs 1914400–1914402 in the updated benchmark database. The importer
+compares exact SMARTS when fingerprint hashes collide, preserving the older
+Boc-removal template. Task data and level 2 hints are defined directly in the
+existing level 2 and level 3 generators.
+
 ## Setup
 
 Create and activate the virtual environment from this directory:
@@ -58,7 +74,7 @@ source .venv/bin/activate
 uv sync
 ```
 
-The bundled buyables snapshot combines CoPriNet and ChemCost records with 11
+The bundled buyables snapshot combines CoPriNet and ChemCost records with 20
 repository-authored SMILES/price rows embedded directly by the database builder
 for reference-route leaves those sources do not cover. The manual values are
 frozen benchmark estimates, not live vendor quotes. SMILES are canonicalized
@@ -77,20 +93,28 @@ uv run python scripts/build_buyables.py \
   --output retrosynthesis/data/buyables.sqlite
 ```
 
-The 11 built-in manual rows are added automatically on every rebuild; no
+The 20 built-in manual rows are added automatically on every rebuild; no
 separate task-price file or option is required.
 
 An ASKCOS `buyables.json` or `buyables.json.gz` snapshot can optionally be
 included with `--askcos`. To use a database outside the package, set
 `RETRO_PRICE_DB_PATH=/absolute/path/to/buyables.sqlite`.
 
-The first four level-3 price budgets are the reference-route total plus 10%,
+The level-3 price budgets for tasks 1–4, 9, and 10 are the reference-route total plus 10%,
 rounded up to the nearest cent. Tests enforce both complete reference-leaf
 coverage and this margin.
 
 If you prefer not to activate the environment, use `uv run` to prefix the commands below.
 
 ## Inspect The Environment Definitions
+
+Levels 2 and 3 each have ten full-route tasks. The two longest additions have
+16 and 11 reaction nodes; level 2 includes descriptions for every reaction.
+Task 9 uses [TREM2 Example 2](https://patents.google.com/patent/AU2023303060A1/en),
+with the two N-debenzylations represented separately. Task 10 uses
+[quinazoline Example 133](https://patents.google.com/patent/WO2026086892A1/en),
+with aniline substitution and acetate hydrolysis represented separately.
+These are reference-route counts, not proven minimum synthesis lengths.
 
 Build and list the retrosynthesis environment definitions from this directory:
 

@@ -12,6 +12,9 @@ from tenacity import (
 
 from corral.report.logging import logger
 
+DEFAULT_CHEMICAL_EMBEDDING_MODEL = "ibm-research/MoLFormer-XL-both-10pct"
+DEFAULT_CHEMICAL_EMBEDDING_MODEL_REVISION = "7b12d946c181a37f6012b9dc3b002275de070314"
+
 
 def extract_path_from_answer(answer: str) -> str:
     """Extract file path from agent answers"""
@@ -89,6 +92,11 @@ def smart_resolve_path(input_path: str, base_dir: str | None = None) -> str:
 
     if base_dir is not None:
         from corral.workspace import confine_workspace_path
+
+        if extracted_path == "/workspace":
+            raise ValueError("submission path must name a file below /workspace")
+        if extracted_path.startswith("/workspace/"):
+            extracted_path = extracted_path.removeprefix("/workspace/")
 
         candidate = confine_workspace_path(base_dir, extracted_path)
         if candidate.is_file():
@@ -174,10 +182,19 @@ def embed_text(chunks: list, model: str, chemical=False) -> list[list[float]]:
 
             logger.debug("Using MoLFormer model for chemical embeddings")
 
-            # Load model & tokenizer
-            tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
+            # Keep the model's remote code and weights reproducible. The upstream
+            # repository has changed its Python implementation without changing
+            # the model identifier, so following its moving default branch can
+            # break an otherwise locked environment.
+            pretrained_kwargs = {"trust_remote_code": True}
+            if model == DEFAULT_CHEMICAL_EMBEDDING_MODEL:
+                pretrained_kwargs["revision"] = (
+                    DEFAULT_CHEMICAL_EMBEDDING_MODEL_REVISION
+                )
+
+            tokenizer = AutoTokenizer.from_pretrained(model, **pretrained_kwargs)
             molformer_model = AutoModel.from_pretrained(
-                model, deterministic_eval=True, trust_remote_code=True
+                model, deterministic_eval=True, **pretrained_kwargs
             )
 
             # Tokenization
