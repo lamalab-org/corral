@@ -48,8 +48,7 @@ event(
     llm_model=LLM_MODEL,
 )
 ENVIRONMENT = "enviroment"
-TASK_TYPE = "subtasks_1"  # "single_task" or "subtasks"
-BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\{TASK_TYPE}"
+BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\tasks"
 
 SCORING_FUNCTIONS = {
     "score_topography": score_topography,
@@ -231,8 +230,7 @@ class AFMEnvironment(Environment):
 
     def get_task_prompt(self, state: ExecutionState) -> str:
         prompt = "You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API."
-        prompt += f"""\nTask: {self.current_task.name}
-        Description: {self.current_task.description}
+        prompt += f"""\nTask Description: {self.current_task.description}
         Required submission format:
         {self.current_task.submission_format}
 
@@ -283,7 +281,7 @@ def create_environments(
 
     Args:
         task_json_path: Path to the JSON file with task definitions
-        taskgroup_common_tools: dictionary of Tools which are common for subtasks, for example file system tools
+        taskgroup_common_tools: dictionary of Tools shared by tasks, for example file system tools
         work_dir: Working directory for task execution
 
     Returns:
@@ -307,7 +305,7 @@ def create_environments(
         work_dir=work_dir,
     )
 
-    subtask_specific_tools = {
+    task_specific_tools = {
         "visualize_grain_boxes": visualize_grain_boxes,
         "scan_grain_area": scan_grain_area,
         "Document_Retrieval": Document_Retrieval,
@@ -324,7 +322,7 @@ def create_environments(
             base_work_dir=work_dir,
             name=ENVIRONMENT,
             toolset=Toolset(
-                pool=subtask_specific_tools,
+                pool=task_specific_tools,
                 common=taskgroup_common_tools or {},
             ),
             env_cls=AFMEnvironment,
