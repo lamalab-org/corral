@@ -27,6 +27,12 @@ The environment binds these values into the task at startup, so probes, dry runs
 The committed tasks use placeholder baseline values until `scripts/measure_baselines.py` has been run.
 Private labels are supplied separately through `CORRAL_INFERENCE_LABELS_PATH`.
 
+The shipped 60-item set for each benchmark uses the highest available item
+difficulties from `bp`'s IRT estimates, split into 30 train and 30 test items.
+To regenerate it from the sibling `bp` checkout, run
+`uv run python scripts/select_hard_questions.py --irt-root /path/to/bp/results`
+from `tasks/inference_opt`.
+
 ### Student models
 
 Task JSON pins each benchmark/model pair's zero-shot baseline

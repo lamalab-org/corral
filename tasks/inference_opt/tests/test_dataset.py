@@ -14,10 +14,6 @@ from inference_opt import datasets
 
 TRAIN_PER_BENCHMARK = 30
 TEST_PER_BENCHMARK = 30
-#: The band every selected item was required to fall in.
-BAND = (0.20, 0.80)
-
-
 @pytest.fixture(scope="module")
 def manifest():
     return datasets.load_manifest()
@@ -28,7 +24,7 @@ class TestShippedDataset:
         assert manifest["dataset_version"] == datasets.DATASET_VERSION
         assert len(manifest["content_fingerprint"]) == 64
         assert manifest["items_per_benchmark"] == 60
-        assert manifest["selection"]["band"] == list(BAND)
+        assert manifest["selection"]["rule"] == "top 60 items by IRT difficulty"
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
     def test_every_benchmark_has_a_matched_split(self, benchmark):
@@ -42,16 +38,9 @@ class TestShippedDataset:
     def test_the_halves_are_equally_hard(self, benchmark, manifest):
         entry = manifest["per_benchmark"][benchmark]
         gap = abs(
-            entry["train_reference_accuracy"] - entry["test_reference_accuracy"]
+            entry["train_mean_irt_difficulty"] - entry["test_mean_irt_difficulty"]
         )
-        assert gap < 0.15, f"{benchmark}: halves differ by {gap:.3f}"
-
-    @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
-    def test_every_item_sits_in_the_movable_band(self, benchmark):
-        """Outside this band no test-time strategy could shift the outcome."""
-        for item in datasets.load_items(benchmark):
-            assert item.reference_accuracy is not None
-            assert BAND[0] <= item.reference_accuracy <= BAND[1], item.item_id
+        assert gap < 0.5, f"{benchmark}: halves differ by {gap:.3f}"
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
     def test_every_item_has_a_label(self, benchmark):
@@ -102,8 +91,7 @@ class TestShippedDataset:
     def test_selection_provenance_is_recorded_per_benchmark(self, manifest):
         for benchmark in datasets.BENCHMARKS:
             entry = manifest["per_benchmark"][benchmark]
-            assert entry["n_in_band"] >= 60
-            assert entry["cohort_size"] >= 1
+            assert entry["irt_difficulty_cutoff"] is not None
             assert entry["selected"] == 60
 
 

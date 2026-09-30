@@ -218,7 +218,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         elif strategy == "failures":
             pool.sort(key=lambda i: bool(baseline_items.get(i.item_id, False)))
         elif strategy == "hardest":
-            pool.sort(key=lambda i: i.reference_accuracy or 1.0)
+            # The frozen set is selected by IRT difficulty; reference accuracy
+            # is retained only as provenance and can rank these items poorly.
+            pool.sort(key=lambda i: i.reference_accuracy or 0.0, reverse=True)
         else:
             random.Random(len(already)).shuffle(pool)
 
