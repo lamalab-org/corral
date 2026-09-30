@@ -163,8 +163,12 @@ def main() -> None:
     for row in selected_all:
         if row["item_id"] not in labels_by_id:
             raise RuntimeError(f"missing private label for {row['item_id']}")
-    kept_ids = {row["item_id"] for row in selected_all}
-    labels = [row for row in labels if row["item_id"] in kept_ids]
+    selected_splits = {row["item_id"]: row["split"] for row in selected_all}
+    labels = [row for row in labels if row["item_id"] in selected_splits]
+    for row in labels:
+        # The labels carry split metadata too; keep it synchronized after the
+        # deterministic 30/30 reassignment or split-filtered loads miss labels.
+        row["split"] = selected_splits[row["item_id"]]
 
     for benchmark in BENCHMARKS:
         rows = [row for row in selected_all if row["benchmark"] == benchmark]
