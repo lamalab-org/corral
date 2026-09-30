@@ -22,6 +22,12 @@ logging.disable(logging.WARNING)
 # Submitted-syntax validation
 # --------------------------------------------------------------------------
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: A numeric literal, including a sign and an exponent, that is not the tail
+#: of a name: `-0.5`, `1e-3` and `.8`, but not the `1` in `HSNS1`.
+_NUMBER = re.compile(r"(?<![A-Za-z0-9_.])-?\d+(?:\.\d*)?(?:[eE]-?\d+)?")
+#: A fixed value as semopy reads it before `*`: `0.5`, `-1e-3`, `1.`. Not `.5`,
+#: which it rejects, nor `1e+3`, whose `+` it takes as the start of a new term.
+_FIXING = re.compile(r"-?\d+(?:\.\d*)?(?:[eE]-?\d+)?")
 #: Longest first, so `=~` and `~~` are recognised before plain `~`.
 _ALLOWED_OPS = ("=~", "~~", "~")
 
@@ -43,14 +49,24 @@ class Statement(NamedTuple):
     right: list[str]
 
 
+def _code(line: str) -> str:
+    """A line without its `#` comment."""
+    return line.split("#", 1)[0]
+
+
+def names_in(text: str) -> list[str]:
+    """The variable and factor names a piece of syntax mentions, numbers aside."""
+    return _TOKEN.findall(_NUMBER.sub(" ", text))
+
+
 def parse_statement(line: str) -> Statement | None:
     """One line of a submitted model, or None if it states nothing.
 
-    Submitters choose their own factor names, spacing and line order, so
-    everything that reads a submitted model parses it here instead of matching
-    text against an assumed spelling.
+    Submitters choose their own factor names, spacing, comments and line
+    order, so everything that reads a submitted model parses it here instead
+    of matching text against an assumed spelling.
     """
-    stripped = line.strip()
+    stripped = _code(line).strip()
     for op in _ALLOWED_OPS:
         if op in stripped:
             left, rhs = stripped.split(op, 1)
@@ -70,28 +86,47 @@ def latent_names(spec: str) -> set[str]:
 
 
 def validate_syntax(spec: str, items: list[str], max_factors: int = 6) -> str:
-    """Check a submitted model before fitting it.
+    """Check a submitted model before fitting it, and return it without comments.
 
-    Permits only the listed observed variables, the operators `=~`, `~~` and
-    `~`, and numeric fixings. Raises InvalidSubmission on anything else.
+    Permits `#` comments, one statement per line using `=~`, `~~` or `~`,
+    numeric fixings such as `0.5*` or `-1e-3*` (not labels or `start()`),
+    and no names but the listed
+    observed variables and the factors the model defines. Raises
+    InvalidSubmission on anything else. Every later step reads the returned
+    specification, so a comment can never be mistaken for a variable.
     """
     if not isinstance(spec, str) or not spec.strip():
         raise InvalidSubmission("empty model specification")
     if len(spec) > 8000:
         raise InvalidSubmission("model specification too long")
-    for bad in ("import", "exec", "eval", "__", "open(", "system", ";"):
-        if bad in spec:
-            raise InvalidSubmission(f"forbidden token in specification: {bad!r}")
 
-    lines = [ln.strip() for ln in spec.splitlines() if ln.strip()]
+    lines = [code.strip() for code in map(_code, spec.splitlines()) if code.strip()]
     if not lines:
         raise InvalidSubmission("no statements in specification")
 
     latents: set[str] = set()
     for line in lines:
+        if ";" in line:
+            raise InvalidSubmission(f"write one statement per line: {line!r}")
         parsed = parse_statement(line)
         if parsed is None:
             raise InvalidSubmission(f"line has no permitted operator: {line!r}")
+        if not parsed.left or not parsed.right:
+            raise InvalidSubmission(f"statement is missing a side: {line!r}")
+        # semopy splits the right-hand side on `+`, so each piece must be a
+        # name, optionally preceded by a fixed value and `*`.
+        for term in (piece.strip() for piece in line.split(parsed.op, 1)[1].split("+")):
+            if any(op in term for op in _ALLOWED_OPS):
+                raise InvalidSubmission(f"write one statement per line: {line!r}")
+            if not term:
+                raise InvalidSubmission(f"empty term between `+` signs: {line!r}")
+            fixing, star, name = term.rpartition("*")
+            if star and not _FIXING.fullmatch(fixing):
+                raise InvalidSubmission(
+                    f"only numeric fixings such as 0.5* are allowed, not {term!r}"
+                )
+            if not _TOKEN.fullmatch(name):
+                raise InvalidSubmission(f"not a variable name: {term!r}")
         if parsed.op == "=~":
             latents.add(parsed.left)
     if len(latents) > max_factors:
@@ -99,11 +134,12 @@ def validate_syntax(spec: str, items: list[str], max_factors: int = 6) -> str:
             f"{len(latents)} latent variables exceeds the limit of {max_factors}"
         )
 
+    cleaned = "\n".join(lines)
     known = set(items) | latents
-    for tok in _TOKEN.findall(spec):
-        if tok not in known:
-            raise InvalidSubmission(f"unknown variable in specification: {tok!r}")
-    return spec
+    for name in names_in(cleaned):
+        if name not in known:
+            raise InvalidSubmission(f"unknown variable in specification: {name!r}")
+    return cleaned
 
 
 # --------------------------------------------------------------------------
@@ -111,7 +147,7 @@ def validate_syntax(spec: str, items: list[str], max_factors: int = 6) -> str:
 # --------------------------------------------------------------------------
 def observed_in_spec(spec: str, known: list[str]) -> set:
     """The data columns a model actually refers to."""
-    return {tok for tok in _TOKEN.findall(spec) if tok in set(known)}
+    return set(names_in("\n".join(map(_code, spec.splitlines())))) & set(known)
 
 
 def evaluate_model(
