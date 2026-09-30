@@ -179,7 +179,7 @@ def _task_prompt(env: Environment, state: ExecutionState) -> str:
     task = env.current_task
     files = sorted(task.initial_input.get("public_inputs", ()))
     prompt = (
-        f"Task: {task.name}\n\n{task.description}\n\n"
+        f"{task.description}\n\n"
         f"Required submission format:\n{task.submission_format}\n\n"
         "Available workspace files:\n"
         + "\n".join(f"- {name}" for name in files)
