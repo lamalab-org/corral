@@ -4,6 +4,7 @@ import ast
 import copy
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +17,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("afm_score", ROOT / "src/score.py")
 score = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(score)
+SUBMISSION_SPEC = importlib.util.spec_from_file_location(
+    "afm_submission", ROOT / "src/submission.py"
+)
+submission = importlib.util.module_from_spec(SUBMISSION_SPEC)
+SUBMISSION_SPEC.loader.exec_module(submission)
 TASKS = [
     json.loads(p.read_text())[0]
     for p in sorted((ROOT / "environments").glob("*/tasks_json/*.json"))
@@ -353,9 +359,9 @@ def test_percent_changes_follow_accepted_rounded_measurements(
         afms[str(path)] = fake_nid(acquisition.params, amplitude=raw)
         report[f"path_{i}"] = str(path)
         report[f"rms_roughness_{i}"] = reported
-        report[f"rms_roughness_percent_change_{i}"] = 100 * (
-            reported - reported_values[1]
-        ) / reported_values[1]
+        report[f"rms_roughness_percent_change_{i}"] = (
+            100 * (reported - reported_values[1]) / reported_values[1]
+        )
     monkeypatch.setattr(score, "read", lambda path: afms[path])
     fn = score.score_roughness(
         0.01,
@@ -368,7 +374,7 @@ def test_percent_changes_follow_accepted_rounded_measurements(
     assert fn(report) == 0
 
 
-def test_registry_and_loader_cover_all_tasks(tmp_path):
+def test_registry_and_loader_cover_all_tasks(tmp_path, monkeypatch):
     tree = ast.parse((ROOT / "src/env.py").read_text())
     wanted = {"SCORING_FUNCTIONS", "get_scoring_function", "load_tasks_from_json"}
     nodes = [
@@ -388,14 +394,30 @@ def test_registry_and_loader_cover_all_tasks(tmp_path):
         TaskDefinition=SimpleNamespace,
         InputRef=lambda x: x,
         event=lambda *a, **kw: None,
+        resolve_submission=submission.resolve_submission,
     )
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "env.py", "exec"), ns)
+    # Emulate the lab workstation's legacy default encoding. Explicit UTF-8
+    # must preserve the units embedded in the task descriptions.
+    original_open = Path.open
+
+    def windows_open(path, mode="r", buffering=-1, encoding=None, **kwargs):
+        return original_open(
+            path, mode, buffering, encoding=encoding or "cp1252", **kwargs
+        )
+
+    monkeypatch.setattr(Path, "open", windows_open)
     for level in (1, 2):
         tasks = ns["load_tasks_from_json"](
             ROOT / f"environments/level_{level}", str(tmp_path)
         )
         assert len(tasks) == 10
         assert all(callable(t.scoring_fn) for t in tasks.values())
+        for definition in TASKS:
+            if definition["id"] in tasks:
+                task = tasks[definition["id"]]
+                assert task.description == definition["description"]
+                assert task.submission_resolver is submission.resolve_submission
     assert len(ns["SCORING_FUNCTIONS"]) == 4
 
 
@@ -420,6 +442,32 @@ def test_real_nid_reader():
     assert score.score_topography(0.05, params)(str(path)) == 1
     params["setpoint"]["value"] = 70
     assert score.score_topography(0.05, params)(str(path)) == 0
+
+
+def test_full_path_scores_saved_acquisition_after_original_is_removed(
+    acquisition, tmp_path, monkeypatch
+):
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    saved = snapshot / acquisition.path.name
+    shutil.copyfile(acquisition.path, saved)
+    original = str(acquisition.path)
+    acquisition.path.unlink()
+
+    def read_saved(path):
+        assert Path(path) == saved
+        assert Path(path).read_bytes() == b"fixture"
+        return acquisition.afm
+
+    monkeypatch.setattr(score, "read", read_saved)
+    scorer = score.score_roughness(0.01, acquisition.params, metrics=["rms_roughness"])
+    report = json.dumps({"path_1": original, "rms_roughness_1": 1})
+    assert scorer(submission.resolve_submission(report, snapshot)) == 1
+    # A live replacement must not change the saved evaluation result.
+    acquisition.path.write_bytes(b"changed scan")
+    assert scorer(submission.resolve_submission(report, snapshot)) == 1
+    saved.unlink()
+    assert scorer(submission.resolve_submission(report, snapshot)) == 0
 
 
 @pytest.mark.parametrize(
@@ -651,7 +699,8 @@ def test_image_analyzer_channel_override(acquisition, direction, channel):
     acquisition.afm.data["Image"][direction][channel] = selected
     tree = ast.parse((ROOT / "src/tools.py").read_text())
     fn = next(
-        n for n in tree.body
+        n
+        for n in tree.body
         if isinstance(n, ast.FunctionDef) and n.name == "Image_Analyzer"
     )
     fn.decorator_list = []

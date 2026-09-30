@@ -1,17 +1,18 @@
 #!/usr/bin/env python
+import asyncio
 import gc
 import json
 import os
 import platform
-from collections.abc import Callable
+import threading
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
 
 import nanosurf
 
-# ----------------------------------------------------------
 # Safe pythoncom import (Windows only)
-# ----------------------------------------------------------
 if platform.system() == "Windows":
     import pythoncom
 else:
@@ -30,6 +31,7 @@ from score import (
     score_roughness_and_friction,
     score_topography,
 )
+from submission import resolve_submission
 from tools import (
     Code_Executor,
     Document_Retrieval,
@@ -49,6 +51,9 @@ event(
 )
 ENVIRONMENT = "enviroment"
 BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\tasks"
+
+# Every task and trial in this process controls the same physical instrument.
+_INSTRUMENT_LOCK = threading.Lock()
 
 SCORING_FUNCTIONS = {
     "score_topography": score_topography,
@@ -104,7 +109,7 @@ def load_tasks_from_json(
     task_files = sorted(json_path.glob("*.json")) if json_path.is_dir() else [json_path]
     task_data = {}
     for task_file in task_files:
-        with task_file.open() as f:
+        with task_file.open(encoding="utf-8") as f:
             entries = json.load(f)
         if isinstance(entries, list):
             entries = {entry["id"]: entry for entry in entries}
@@ -134,6 +139,7 @@ def load_tasks_from_json(
             },
             initial_input=initial_input,
             resolve_answer=False,
+            submission_resolver=resolve_submission,
         )
 
     return tasks
@@ -146,6 +152,18 @@ class AFMEnvironment(Environment):
     `Environment`; only the prompt and per-task instrument reset are
     specialised here. Evaluation uses the task's scoring callable directly.
     """
+
+    @asynccontextmanager
+    async def task_execution_guard(self) -> AsyncIterator[None]:
+        """Allow one AFM task at a time, regardless of runner concurrency."""
+        # Nonblocking acquisition keeps the event loop responsive and cannot
+        # leave a worker thread acquiring an abandoned lock after cancellation.
+        while not _INSTRUMENT_LOCK.acquire(blocking=False):  # noqa: ASYNC110
+            await asyncio.sleep(0.05)
+        try:
+            yield
+        finally:
+            _INSTRUMENT_LOCK.release()
 
     @property
     def initial_params(self) -> dict:

@@ -7,6 +7,8 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
+import anyio
+
 from corral.agents.schema import BudgetExhaustedError
 from corral.agents.session import (
     Agent,
@@ -163,6 +165,36 @@ class TaskRuntime:
         previous_state: ExecutionState | None = None,
         observation_context: ObservationContext | None = None,
     ) -> ExecutionState:
+        async with environment.task_execution_guard():
+            return await self._run(
+                agent,
+                environment,
+                execution_id=execution_id,
+                started_at=started_at,
+                max_iterations=max_iterations,
+                dependency_outputs=dependency_outputs,
+                model_metadata=model_metadata,
+                scaffold_metadata=scaffold_metadata,
+                last_score=last_score,
+                previous_state=previous_state,
+                observation_context=observation_context,
+            )
+
+    async def _run(
+        self,
+        agent: Agent,
+        environment: Environment,
+        *,
+        execution_id: str,
+        started_at: datetime,
+        max_iterations: int,
+        dependency_outputs: Mapping[str, TaskOutput | Mapping[str, Any]] | None,
+        model_metadata: Mapping[str, JsonValue] | None,
+        scaffold_metadata: Mapping[str, JsonValue] | None,
+        last_score: Mapping[str, Any] | None,
+        previous_state: ExecutionState | None,
+        observation_context: ObservationContext | None,
+    ) -> ExecutionState:
         if not isinstance(agent, Agent):
             raise TypeError("an agent must implement run_session(AgentSession)")
         if not environment.current_task.allow_previous_attempt_context:
@@ -242,9 +274,17 @@ class TaskRuntime:
                     commit.event.type async for commit in store.iter_commits(branch_id)
                 ]
                 if "task.configured" not in event_types:
-                    configured_event = await asyncio.to_thread(
-                        environment.configure, current
+                    configuration = asyncio.create_task(
+                        asyncio.to_thread(environment.configure, current)
                     )
+                    try:
+                        configured_event = await asyncio.shield(configuration)
+                    except asyncio.CancelledError:
+                        # Setup can still be changing a shared instrument in its
+                        # worker thread. Keep the task guard until it finishes.
+                        with anyio.CancelScope(shield=True):
+                            await asyncio.gather(configuration, return_exceptions=True)
+                        raise
                     head = await self._append(
                         store,
                         CommitRequest(
