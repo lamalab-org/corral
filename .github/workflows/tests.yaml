@@ -73,6 +73,14 @@ jobs:
       - name: Install root project
         run: uv sync --all-extras --dev
 
+      # Samplemath has no task-test job; its runtime tests run in the root suite.
+      - name: Install samplemath and check environment import
+        run: |
+          uv pip install -e ./tasks/samplemath
+          uv run --no-sync python -c "from importlib import import_module; from corral.runtime.environment_loader import ENVIRONMENT_PRESETS; import_module(ENVIRONMENT_PRESETS['samplemath'].factory.split(':')[0]); print('Environment import OK')"
+        env:
+          CORRAL_WORK_DIR: ${{ runner.temp }}/corral-env-check
+
       - name: Run root project tests
         run: uv run pytest tests
 
@@ -136,6 +144,15 @@ jobs:
           uv pip install -e .
         working-directory: ./tasks/${{ matrix.task }}
 
+      - name: Check environment import
+        # AFM requires Windows-only hardware dependencies.
+        if: matrix.task != 'afm'
+        run: |
+          uv run python -c "from importlib import import_module; from corral.runtime.environment_loader import ENVIRONMENT_PRESETS; import_module(ENVIRONMENT_PRESETS['${{ matrix.task }}'].factory.split(':')[0]); print('Environment import OK')"
+        env:
+          CORRAL_WORK_DIR: ${{ runner.temp }}/corral-env-check
+        working-directory: ./tasks/${{ matrix.task }}
+
       - name: Run task tests
         run: |
           # Set CORRAL_WORK_DIR for tests that need it
@@ -181,95 +198,22 @@ jobs:
           CORRAL_TEST_ENVIRONMENT: wetlab
         working-directory: ./tasks/wetlab
 
-  # Discover tasks with env.py files for server setup checking
-  discover-env-tasks:
-    needs: code-quality
-    runs-on: ubuntu-latest
-    outputs:
-      tasks: ${{ steps.discover.outputs.tasks }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Discover tasks with env.py (excluding those requiring special setup)
-        id: discover
-        run: |
-          # Excluded tasks:
-          #   afm            - requires nanosurf (Windows-only hardware library)
-          #   wetlab         - requires reaktoro (conda-only, not on PyPI)
-          EXCLUDED="afm wetlab"
-          tasks=$(find tasks -maxdepth 1 -type d | while read task_dir; do
-            task_name=$(basename "$task_dir")
-            if [[ "$task_name" == "tasks" ]]; then continue; fi
-            if echo "$EXCLUDED" | grep -qw "$task_name"; then continue; fi
-            if [[ ! -f "$task_dir/pyproject.toml" ]]; then continue; fi
-            if find "$task_dir" -maxdepth 4 -type f \( -name "env.py" -o -name "env_subtask.py" \) | grep -q .; then
-              echo "$task_name"
-            fi
-          done | sort | jq -R -s -c 'split("\n")[:-1]')
-          echo "tasks=$tasks" >> $GITHUB_OUTPUT
-          echo "Found env tasks: $tasks"
-
-  # Check that each task's env server can be set up correctly
-  check-env-servers:
-    needs: [discover-env-tasks, code-quality]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        task: ${{ fromJson(needs.discover-env-tasks.outputs.tasks) }}
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          lfs: true
-
-      - name: Ensure Git LFS is initialized
-        run: |
-          git lfs install
-          git lfs pull --exclude="" || echo "Some LFS objects missing, continuing..."
-
-      - name: Require spectra NMR database
-        if: matrix.task == 'spectra_elucidation'
-        run: git lfs pull --include="scripts/vector_databases/nmrshiftdb2/**" --exclude=""
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install root project (corral)
-        run: uv sync --all-extras --dev
-
-      - name: Install task dependencies
-        run: uv pip install -e .
-        working-directory: ./tasks/${{ matrix.task }}
-
-      - name: Check env server setup
-        run: |
-          uv run python -c "from importlib import import_module; from corral.runtime.environment_loader import ENVIRONMENT_PRESETS; import_module(ENVIRONMENT_PRESETS['${{ matrix.task }}'].factory.split(':')[0]); print('Environment import OK')"
-        env:
-          CORRAL_WORK_DIR: ${{ runner.temp }}/corral-env-check
-        working-directory: ./tasks/${{ matrix.task }}
-
   # Summary job to check all results
   test-summary:
-    needs: [test-main, test-tasks, test-wetlab, check-env-servers]
+    needs: [test-main, test-tasks, test-wetlab]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check test results
         run: |
-          env_result="${{ needs.check-env-servers.result }}"
           if [[ "${{ needs.test-main.result }}" == "success" ]] && \
              [[ "${{ needs.test-tasks.result }}" == "success" ]] && \
-             [[ "${{ needs.test-wetlab.result }}" == "success" ]] && \
-             [[ "$env_result" == "success" || "$env_result" == "skipped" ]]; then
+             [[ "${{ needs.test-wetlab.result }}" == "success" ]]; then
             echo "✅ All tests passed!"
           else
             echo "❌ Some tests failed:"
             echo "Main tests: ${{ needs.test-main.result }}"
             echo "Task tests: ${{ needs.test-tasks.result }}"
             echo "Wetlab tests: ${{ needs.test-wetlab.result }}"
-            echo "Env server checks: $env_result"
             exit 1
           fi
