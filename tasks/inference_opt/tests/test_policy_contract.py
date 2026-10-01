@@ -29,12 +29,23 @@ class TestDiscovery:
         )
         assert not discover_policy(root).runs_whole_set
 
-    def test_a_bare_module_function_is_not_a_policy(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("source", "whole_set"),
+        [
+            ("def run(questions, ctx):\n    return {}\n", True),
+            ("def solve(question, ctx):\n    return 'A'\n", False),
+        ],
+    )
+    def test_module_functions_are_a_policy(self, tmp_path, source, whole_set):
+        root = write_policy(tmp_path / "p", source)
+        assert discover_policy(root).runs_whole_set is whole_set
+
+    def test_a_module_function_with_the_wrong_signature_is_rejected(self, tmp_path):
         root = write_policy(
             tmp_path / "p",
             "def solve(question, model_client, context):\n    return question.upper()\n",
         )
-        with pytest.raises(PolicyError, match="must define a Policy class"):
+        with pytest.raises(PolicyError, match=r"solve\(\) must take exactly"):
             discover_policy(root)
 
     def test_policy_instance_is_accepted(self, tmp_path):
@@ -66,7 +77,7 @@ class TestDiscovery:
 
     def test_missing_run_and_solve_reports_the_contract(self, tmp_path):
         root = write_policy(tmp_path / "p", "answer = 1\n")
-        with pytest.raises(PolicyError, match="must define a Policy class"):
+        with pytest.raises(PolicyError, match=r"must define run\(questions, ctx\)"):
             discover_policy(root)
 
     def test_wrong_solve_arity_is_rejected(self, tmp_path):

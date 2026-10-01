@@ -17,7 +17,7 @@ ordinary Python variables.
 
 If you only need one question at a time, define `solve(question, ctx)` instead
 and return the answer; each question is then solved on its own, several at
-once.
+once. Both may also be plain module-level functions instead of methods.
 
 Answers are text ending in `ANSWER: <answer>`, or `[ANSWER]<answer>[/ANSWER]`
 for ChemBench. You can also submit `Answer(final=...)` from `inference_opt.api`,
@@ -30,7 +30,8 @@ module a policy may import.
 a later submit for the same question replaces it. A question never submitted
 counts as wrong. Submit a cheap guess early: if the budget or time runs out, or
 `run()` raises, what you already submitted still counts. Returning a dict of
-`{question_id: answer}` from `run()` submits those too.
+`{question_id: answer}` from `run()` submits those too; any other return value
+is an error. A run that submits nothing is reported as failed.
 
 ## Question
 
@@ -42,10 +43,11 @@ counts as wrong. Submit a cheap guess early: if the budget or time runs out, or
 
 - `ctx.student.generate(prompt, *, system=None, temperature=0.0,
   max_tokens=None, stop=None, seed=None, question_id=None, component=None)`:
-  one metered call. `max_tokens=None` uses the manifest's `max_tokens_per_call`.
-  `question_id` attributes the call to a question in the run's diagnostics.
-- `ctx.examples`: the revealed train questions, each with `question`, `answer`
-  (gold), `baseline_completion` and `baseline_correct`.
+  one metered call that returns the completion as a `str`. `max_tokens=None`
+  uses the manifest's `max_tokens_per_call`. `question_id` attributes the call
+  to a question in the run's diagnostics.
+- `ctx.examples`: the revealed train questions, as objects with the attributes
+  `question`, `answer` (gold), `baseline_completion` and `baseline_correct`.
 - `ctx.submit(question_id, answer)`: record an answer.
 - `ctx.budget`: student calls left for this run.
 - `ctx.log(text, question_id=None)`: add a diagnostic line.

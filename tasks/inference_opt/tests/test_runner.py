@@ -204,6 +204,17 @@ class TestPolicyShapes:
         )
         assert set(runs["m"].answers.values()) == {"ANSWER: B"}
 
+    def test_returning_anything_else_is_an_error(self, tmp_path):
+        _, runs = _run(
+            tmp_path,
+            "def run(questions, ctx):\n    return ['ANSWER: B' for q in questions]\n",
+        )
+        assert "run() returned a list" in runs["m"].error
+
+    def test_a_run_that_submits_nothing_is_reported(self, tmp_path):
+        _, runs = _run(tmp_path, "def run(questions, ctx):\n    pass\n")
+        assert "without submitting any answer" in runs["m"].error
+
     def test_revealed_examples_reach_the_policy(self, tmp_path):
         example = {**datasets.public_record(_items(n=10)[9]), "target": "C"}
         _, runs = _run(

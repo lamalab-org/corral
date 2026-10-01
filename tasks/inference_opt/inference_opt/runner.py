@@ -181,6 +181,12 @@ def run_policy(
         if gateway.backend_failures and not gateway.backend_successes:
             failed = next((call["error"] for call in gateway.calls if call["error"]), "")
             run.infrastructure_error = f"the student never answered: {failed}"
+        if not (run.load_error or run.error or run.answers or gateway.errors):
+            run.error = (
+                "the policy finished without submitting any answer; call "
+                "ctx.submit(question_id, answer) or return {question_id: answer} "
+                "from run()"
+            )
         if not run.load_error:
             _grade(run, records, targets, private / model, benchmark)
         if write_copy:

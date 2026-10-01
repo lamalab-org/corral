@@ -140,7 +140,7 @@ def _check_signature(obj: Any) -> None:
 
 
 def discover_policy(root: Path | str) -> LoadedPolicy:
-    """Import ``<root>/policy.py`` and return its ``Policy()`` or ``policy`` object.
+    """Import ``<root>/policy.py`` and return its ``Policy()``, ``policy`` or module.
 
     Importing runs the policy's code: call this only inside the jail.
     """
@@ -159,10 +159,12 @@ def discover_policy(root: Path | str) -> LoadedPolicy:
                 "The constructor must take no arguments."
             ) from exc
     elif (obj := getattr(module, "policy", None)) is None:
-        raise PolicyError(
-            "policy.py must define a Policy class with run(questions, ctx) or "
-            "solve(question, ctx)"
-        )
+        if not any(callable(getattr(module, name, None)) for name in ("run", "solve")):
+            raise PolicyError(
+                "policy.py must define run(questions, ctx) or solve(question, ctx), "
+                "as functions or as methods of a Policy class"
+            )
+        obj = module
     _check_signature(obj)
 
     # A MANIFEST on the object wins over one on the module.

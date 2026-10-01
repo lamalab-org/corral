@@ -295,6 +295,12 @@ def run_policy(request: dict[str, Any]) -> dict[str, Any]:
             if isinstance(returned, Mapping):
                 for question_id, answer in returned.items():
                     submit(str(question_id), answer)
+            elif returned is not None:
+                raise TypeError(
+                    f"run() returned a {type(returned).__name__}; submit answers "
+                    "with ctx.submit(question_id, answer) or return a dict of "
+                    "{question_id: answer}"
+                )
         else:
             _solve_each(policy, questions, ctx, client)
     except BudgetExhausted as exc:
