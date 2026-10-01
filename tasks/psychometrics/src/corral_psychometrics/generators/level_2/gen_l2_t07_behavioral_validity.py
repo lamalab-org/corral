@@ -72,13 +72,13 @@ Also list every item whose direct association with the outcome, after accounting
 SUBMISSION_FORMAT = """A single JSON object:
 
 {
-  "model_syntax": "F =~ HSNS1+...+HSNS10\\nbehavior ~ F + gender",
+  "model_syntax": "<complete model including the behavioural regression>",
   "association": {
-    "group_adjusted": "supported|not_supported",
-    "within_group": "replicates|does_not_replicate",
-    "holdout": "generalizes|does_not_generalize"
+    "group_adjusted": "not_supported|supported",
+    "within_group": "does_not_replicate|replicates",
+    "holdout": "does_not_generalize|generalizes"
   },
-  "unstable_items": ["<item identified from the evidence>"]
+  "unstable_items": ["<item>", ...]
 }
 
 The model must cover every HSNS item, include `behavior`, and include both the
@@ -141,10 +141,7 @@ def write_memo(path):
         "# Preliminary analysis\n\n"
         "The training sample shows a statistically clear association between the "
         "HSNS total and the behavioural outcome. The analyst recommends describing "
-        "the HSNS as a behavioural predictor.\n\n"
-        "The analysis did not adjust for group membership, separate the association "
-        "within groups, or test the result in the second sample. It also treated all "
-        "items as interchangeable contributors to the total.\n"
+        "the HSNS as a behavioural predictor.\n"
     )
 
 

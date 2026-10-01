@@ -99,13 +99,6 @@ The survey contains two instruments. Using the participants from the United Stat
 establish a measurement model for each instrument, then report how strongly each \
 dimension of one instrument is related to each dimension of the other, free of \
 measurement error.
-
-Before estimating those relationships, inspect response quality. Some respondents \
-give the same answer to every item. The self-rated `accuracy` field is available, \
-but it is only another piece of evidence, not a guaranteed indicator of careless \
-responding. Use the response patterns to decide which rows should be excluded.
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\

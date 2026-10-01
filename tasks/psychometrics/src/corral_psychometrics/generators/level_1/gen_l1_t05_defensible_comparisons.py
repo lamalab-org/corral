@@ -83,22 +83,20 @@ You are given responses from an online personality survey. The codebook describe
 every column.
 
 Read the data and select participants from the United States who reported male or \
-female. Investigate how far the Hypersensitive Narcissism Scale (HSNS) measures the \
+female. Investigate whether the Hypersensitive Narcissism Scale (HSNS) measures the \
 same thing in men and in women, and on that basis decide which of the following \
 comparisons between the two groups are psychometrically defensible:
 
-  factor_structure               do the same items measure the same factor
+  latent_means                   is the average level of the trait comparable
   loadings                       does the trait relate to its items the same way
-  factor_variances               is the spread of the trait comparable
+  observed_score_means           are the average total scores comparable
+  factor_structure               do the same items measure the same factor
   association_with_other_trait   is its relationship with the Dark Triad narcissism
                                  items comparable
-  latent_means                   is the average level of the trait comparable
-  observed_score_means           are the average total scores comparable
+  factor_variances               is the spread of the trait comparable
 
 Carry out the comparisons you judge defensible, and report the correlation between \
 the two traits in each group.
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\
@@ -107,9 +105,9 @@ A single JSON object:
 {
   "model_syntax": "<complete lavaan/semopy model>",
   "comparisons": {
-    "factor_structure": <true|false>, "loadings": <true|false>,
-    "factor_variances": <true|false>, "association_with_other_trait": <true|false>,
-    "latent_means": <true|false>, "observed_score_means": <true|false>
+    "latent_means": <true|false>, "loadings": <true|false>,
+    "observed_score_means": <true|false>, "factor_structure": <true|false>,
+    "association_with_other_trait": <true|false>, "factor_variances": <true|false>
   },
   "trait_correlation_men": <float>,
   "trait_correlation_women": <float>

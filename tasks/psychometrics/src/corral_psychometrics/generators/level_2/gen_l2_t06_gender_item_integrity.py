@@ -111,7 +111,7 @@ SUBMISSION_FORMAT = """A single JSON object:
 {
   "model_syntax": "<complete model with the required group paths>",
   "item_diagnoses": {"<item>": "<label>", ...},
-  "comparison": "reportable_after_repair|not_reportable"
+  "comparison": "not_reportable|reportable_after_repair"
 }
 
 Give one diagnosis for every HSNS item. The model must cover every item and give
@@ -244,11 +244,7 @@ def write_audit(out_dir):
     (out_dir / "preliminary_analysis.md").write_text(
         "# Preliminary analysis\n\n"
         "Group 2 scored higher on the HSNS total and the difference was highly "
-        "significant, so the analyst recommended reporting it as a group difference.\n\n"
-        "Two observations were left unresolved. One item correlates negatively with "
-        "the total until it is recoded. Several items sit at the middle response far "
-        "more often in Group 2 than in Group 1, and the analyst assumed these were the "
-        "columns named in the export audit.\n"
+        "significant, so the analyst recommended reporting it as a group difference.\n"
     )
 
 

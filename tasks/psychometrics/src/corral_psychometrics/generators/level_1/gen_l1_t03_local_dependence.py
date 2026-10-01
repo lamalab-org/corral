@@ -82,8 +82,6 @@ every column.
 Read the data and select participants from the United States. Report the one \
 model for the Hypersensitive Narcissism Scale (HSNS) you would defend to a \
 reviewer.
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\
@@ -91,13 +89,16 @@ A single JSON object:
 
 {
   "model_syntax": "<complete lavaan/semopy model>",
-  "loadings": {"<item>": <float>, ...}
+  "loadings": {"<item>": <float>, ...},
+  "factor_correlation": <float or null>
 }
 
 `model_syntax` uses lavaan notation (`=~` loadings, `~~` (co)variances, `0*` to fix a
 parameter to zero).
 
 `loadings` gives, for each item you analysed, the largest absolute standardised loading that item has on any factor in your model.
+
+`factor_correlation` is the correlation between the factors when your model has exactly two correlated factors, and null otherwise.
 """
 
 

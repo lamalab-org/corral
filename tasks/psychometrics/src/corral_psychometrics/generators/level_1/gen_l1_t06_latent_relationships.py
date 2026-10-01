@@ -102,15 +102,13 @@ You are given responses from an online personality survey. The codebook describe
 every column.
 
 Read the data and select participants from the United States. The survey contains two \
-instruments, each covering several dimensions. Examine how the dimensions of one \
+instruments. Examine how the dimensions of one \
 relate to the dimensions of the other, accounting for the fact that no dimension is \
 measured perfectly.
 
 Report the correlation between each pair of dimensions across the two instruments, and \
 say which of those pairs are too closely related to be treated as distinct - take a \
 correlation of 0.80 or above to mean the two dimensions cannot be told apart.
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\

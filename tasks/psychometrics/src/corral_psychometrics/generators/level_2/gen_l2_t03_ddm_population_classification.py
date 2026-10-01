@@ -56,8 +56,7 @@ PROMPT = (
     "You have large Dirty Dozen response samples from six reference populations, and five "
     "case samples of {case_size} respondents, each drawn from one of those populations. The "
     "population identifiers carry no information.\n\n"
-    "For each case, list every population it could have come from. Some cases have one answer "
-    "and some have more than one.\n"
+    "For each case, list every population it could have come from.\n"
 ).format(case_size=CASE_SIZE)
 
 SUBMISSION_FORMAT = """\
