@@ -49,7 +49,7 @@ LOADINGS = {
 
 # Three recording faults and one genuinely poor item.
 MIS_KEYED = "HSNS4"  # stored with the scale reversed
-NEUTRAL_CODED = "HSNS7"  # non-responses written as the midpoint
+NEUTRAL_CODED = "HSNS7"  # real answers overwritten with the midpoint
 NEUTRAL_RATE = 0.45
 TRUNCATED = "HSNS2"  # the top of the scale was never recorded
 TRUNCATED_AT = 4
@@ -57,7 +57,7 @@ WEAK = "HSNS6"  # the data are fine; the item measures poorly
 
 TRUTH = {
     MIS_KEYED: "mis_keyed",
-    NEUTRAL_CODED: "missing_as_neutral",
+    NEUTRAL_CODED: "inserted_neutral",
     TRUNCATED: "truncated_scale",
     WEAK: "weak_item",
     **{i: "sound" for i in HSNS if i not in (MIS_KEYED, NEUTRAL_CODED, TRUNCATED, WEAK)},
@@ -80,7 +80,7 @@ classify each item of the Hypersensitive Narcissism Scale as exactly one of:
 
   sound                the item is doing its job
   mis_keyed            the item was stored with its scale reversed
-  missing_as_neutral   non-responses were recorded as the middle category
+  inserted_neutral     recorded answers were overwritten with the middle category
   truncated_scale      one end of the response scale was never recorded
   duplicated_item      the column repeats another item's responses
   out_of_range         values outside the response scale were recorded
@@ -216,7 +216,7 @@ def build_truth(floor, pop, data_sha, rows):
             "loadings": LOADINGS,
             "faults": {
                 "mis_keyed": MIS_KEYED,
-                "missing_as_neutral": {"item": NEUTRAL_CODED, "rate": NEUTRAL_RATE},
+                "inserted_neutral": {"item": NEUTRAL_CODED, "rate": NEUTRAL_RATE},
                 "truncated_scale": {"item": TRUNCATED, "top": TRUNCATED_AT},
                 "weak_item": WEAK,
             },
@@ -285,7 +285,7 @@ def candidate_submissions(X):
 
     drop_the_weak = {i: ("weak_item" if TRUTH[i] != "sound" else "sound") for i in ITEMS}
     missed_the_quiet = {i: (TRUTH[i] if i in (MIS_KEYED, WEAK) else "sound") for i in ITEMS}
-    swapped = {**TRUTH, NEUTRAL_CODED: "weak_item", WEAK: "missing_as_neutral"}
+    swapped = {**TRUTH, NEUTRAL_CODED: "weak_item", WEAK: "inserted_neutral"}
     return {
         "correct": sub(dict(TRUTH)),
         "everything odd is a weak item": sub(drop_the_weak),
