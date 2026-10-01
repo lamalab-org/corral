@@ -1879,6 +1879,29 @@ def test_a_worker_reaches_its_controller_only_through_the_service(workspace):
     assert seen == [{"question": 6}, {"question": "refuse"}]
 
 
+@tool
+def environment_probe() -> str:
+    """Report what a worker can still learn about the controller's environment."""
+    import os
+    from pathlib import Path
+
+    try:
+        initial = Path("/proc/self/environ").read_bytes().decode(errors="replace")
+    except OSError as exc:
+        initial = f"unreadable: {exc}"
+    return initial + "\n" + "\n".join(os.environ)
+
+
+def test_a_worker_cannot_read_controller_secrets_from_its_initial_environment(
+    workspace, monkeypatch
+):
+    monkeypatch.setenv("CORRAL_PROBE_SECRET", "do-not-leak")
+
+    seen = permissions.run_worker("tool", (environment_probe, {}), workspace)["content"]
+
+    assert "do-not-leak" not in seen
+
+
 def test_a_worker_without_a_service_has_no_channel(workspace):
     import json
 
