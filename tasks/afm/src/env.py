@@ -1,17 +1,18 @@
 #!/usr/bin/env python
+import asyncio
 import gc
 import json
 import os
 import platform
-from collections.abc import Callable
+import threading
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
 
 import nanosurf
 
-# ----------------------------------------------------------
 # Safe pythoncom import (Windows only)
-# ----------------------------------------------------------
 if platform.system() == "Windows":
     import pythoncom
 else:
@@ -25,13 +26,12 @@ from corral.core.tool import Tool
 from corral.report.logging import event, exception_fields
 from corral.utils.code_tools import execute_python_code
 from score import (
-    check_file_exists,
-    check_image_quality,
-    check_mathematical_eq,
-    check_numerical,
-    check_params_function,
-    check_roughness_function,
+    score_friction,
+    score_roughness,
+    score_roughness_and_friction,
+    score_topography,
 )
+from submission import resolve_submission
 from tools import (
     Code_Executor,
     Document_Retrieval,
@@ -50,16 +50,16 @@ event(
     llm_model=LLM_MODEL,
 )
 ENVIRONMENT = "enviroment"
-TASK_TYPE = "subtasks_1"  # "single_task" or "subtasks"
-BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\{TASK_TYPE}"
+BASE_WORK_DIR = rf"C:\Users\Admin\Desktop\corral\corral\tasks\afm\src\afm\{LLM_MODEL}\{ENVIRONMENT}\tasks"
+
+# Every task and trial in this process controls the same physical instrument.
+_INSTRUMENT_LOCK = threading.Lock()
 
 SCORING_FUNCTIONS = {
-    "check_numerical": check_numerical,
-    "check_image_quality": check_image_quality,
-    "check_params_function": check_params_function,
-    "check_file_exists": check_file_exists,
-    "check_roughness_function": check_roughness_function,
-    "check_mathematical_eq": check_mathematical_eq,
+    "score_topography": score_topography,
+    "score_roughness": score_roughness,
+    "score_friction": score_friction,
+    "score_roughness_and_friction": score_roughness_and_friction,
 }
 
 
@@ -104,10 +104,12 @@ def load_tasks_from_json(
         raise FileNotFoundError(f"Task definition file not found: {json_path}")
 
     json_path = Path(json_path)
+    if json_path.is_dir() and (json_path / "tasks_json").is_dir():
+        json_path = json_path / "tasks_json"
     task_files = sorted(json_path.glob("*.json")) if json_path.is_dir() else [json_path]
     task_data = {}
     for task_file in task_files:
-        with task_file.open() as f:
+        with task_file.open(encoding="utf-8") as f:
             entries = json.load(f)
         if isinstance(entries, list):
             entries = {entry["id"]: entry for entry in entries}
@@ -137,6 +139,7 @@ def load_tasks_from_json(
             },
             initial_input=initial_input,
             resolve_answer=False,
+            submission_resolver=resolve_submission,
         )
 
     return tasks
@@ -149,6 +152,18 @@ class AFMEnvironment(Environment):
     `Environment`; only the prompt and per-task instrument reset are
     specialised here. Evaluation uses the task's scoring callable directly.
     """
+
+    @asynccontextmanager
+    async def task_execution_guard(self) -> AsyncIterator[None]:
+        """Allow one AFM task at a time, regardless of runner concurrency."""
+        # Nonblocking acquisition keeps the event loop responsive and cannot
+        # leave a worker thread acquiring an abandoned lock after cancellation.
+        while not _INSTRUMENT_LOCK.acquire(blocking=False):  # noqa: ASYNC110
+            await asyncio.sleep(0.05)
+        try:
+            yield
+        finally:
+            _INSTRUMENT_LOCK.release()
 
     @property
     def initial_params(self) -> dict:
@@ -177,6 +192,11 @@ class AFMEnvironment(Environment):
             if key in params:
                 setattr(obj, attr, transform(params[key]))
 
+        # Select the tip and mode before applying settings: switching modes may
+        # restore previously stored controller values.
+        safe_set(head, "CantileverByGUID", "tip")
+        safe_set(opmode, "OperatingMode", "mode")
+
         # Apply scan parameters (converted to meters and seconds)
         safe_set(scan, "ImageHeight", "image_height", lambda x: x * 1e-9)
         safe_set(scan, "ImageWidth", "image_width", lambda x: x * 1e-9)
@@ -191,13 +211,21 @@ class AFMEnvironment(Environment):
         safe_set(zcontrol, "PGain", "pgain")
         safe_set(zcontrol, "IGain", "igain")
         safe_set(zcontrol, "DGain", "dgain")
-        # safe_set(zcontrol, "SetPoint", "setpoint")  # Uncomment if needed
-        safe_set(opmode, "OperatingMode", "mode")
-
-        # Head and operating mode
-        safe_set(head, "CantileverByGUID", "tip")
-        # if "mode" in params:
-        #     opmode.OperatingMode = getattr(spm.OperatingMode, params["mode"])
+        # Set the mode first: changing mode restores its previous setpoint.
+        if "setpoint" in params:
+            setpoint = params["setpoint"]
+            if setpoint["unit"] == "V" and params.get("mode") in (2, 9):
+                zcontrol.SetPointForceUnitMode = 0  # DefUnitMode_V
+            elif setpoint["unit"] != "%" or params.get("mode") not in (3, 4):
+                raise ValueError(
+                    "Expected V for static/lateral force, or % for dynamic/phase contrast"
+                )
+            zcontrol.SetPoint = setpoint["value"]
+        elif "setpoint_v" in params:
+            zcontrol.SetPointForceUnitMode = 0  # DefUnitMode_V
+            zcontrol.SetPoint = params["setpoint_v"]
+        elif "setpoint_p" in params:
+            zcontrol.SetPoint = params["setpoint_p"]
 
         event(
             "DEBUG",
@@ -220,8 +248,7 @@ class AFMEnvironment(Environment):
 
     def get_task_prompt(self, state: ExecutionState) -> str:
         prompt = "You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API."
-        prompt += f"""\nTask: {self.current_task.name}
-        Description: {self.current_task.description}
+        prompt += f"""\nTask Description: {self.current_task.description}
         Required submission format:
         {self.current_task.submission_format}
 
@@ -272,7 +299,7 @@ def create_environments(
 
     Args:
         task_json_path: Path to the JSON file with task definitions
-        taskgroup_common_tools: dictionary of Tools which are common for subtasks, for example file system tools
+        taskgroup_common_tools: dictionary of Tools shared by tasks, for example file system tools
         work_dir: Working directory for task execution
 
     Returns:
@@ -296,7 +323,7 @@ def create_environments(
         work_dir=work_dir,
     )
 
-    subtask_specific_tools = {
+    task_specific_tools = {
         "visualize_grain_boxes": visualize_grain_boxes,
         "scan_grain_area": scan_grain_area,
         "Document_Retrieval": Document_Retrieval,
@@ -313,7 +340,7 @@ def create_environments(
             base_work_dir=work_dir,
             name=ENVIRONMENT,
             toolset=Toolset(
-                pool=subtask_specific_tools,
+                pool=task_specific_tools,
                 common=taskgroup_common_tools or {},
             ),
             env_cls=AFMEnvironment,
@@ -345,12 +372,21 @@ def create_environments(
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Create AFM task environments.")
+    parser.add_argument(
+        "--level",
+        choices=("level_1", "level_2"),
+        default="level_1",
+        help="Task level to load (default: level_1).",
+    )
+    args = parser.parse_args()
     tasks_json_path = (
-        Path(__file__).parent.parent.parent
-        / "afm"
-        / "src"
-        / ENVIRONMENT
-        / f"{TASK_TYPE}.json"
+        Path(__file__).resolve().parent.parent
+        / "environments"
+        / args.level
+        / "tasks_json"
     )
     event(
         "DEBUG",

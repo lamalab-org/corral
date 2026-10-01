@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -903,6 +903,15 @@ class Environment:
                 lock = _ReadWriteLock()
                 self._resource_locks[key] = lock
             return lock
+
+    @contextlib.asynccontextmanager
+    async def task_execution_guard(self) -> AsyncIterator[None]:
+        """Guard a complete task, including setup, when sharing external resources.
+
+        Environments may override this to serialize access across task instances.
+        The default allows independent tasks to run concurrently.
+        """
+        yield
 
     @contextlib.contextmanager
     def execution_guard(self, tool: Tool) -> Iterator[None]:
