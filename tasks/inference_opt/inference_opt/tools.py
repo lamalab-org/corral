@@ -275,7 +275,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             preferred = [i.item_id for i in train if i.item_id in revealed][:2]
             wanted = preferred or [item.item_id for item in train[:2]]
 
-        run_id = f"dry-{len(ledger.runs) + 1}"
+        run_id = ledger.next_run_id("dry")
         budget = min(32, ledger.remaining()["student_calls"])
         ledger.reserve(debug_runs=1, calls=budget)
         run = run_policy(
@@ -357,7 +357,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         """
         ledger = _ledger(inference_state)
         policy_dir = _resolve(work_dir, policy_path)
-        run_id = f"exp-{ledger.experiments + 1}"
+        run_id = ledger.next_run_id("exp")
         model_budget = ledger.remaining()["student_calls"] // len(models)
         reserved = model_budget * len(models)
         ledger.reserve(experiments=1, calls=reserved)
@@ -581,7 +581,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         runs = run_policy(
             config=config,
             work_dir=Path(work_dir),
-            run_id=f"final-{used + 1}",
+            run_id=ledger.next_run_id("final"),
             policy_dir=policy_dir,
             split="test",
             models=models,

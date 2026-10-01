@@ -73,6 +73,9 @@ class StateLedger:
             "probe_calls": 0,
             "revealed_ids": [],
             "runs": [],
+            # Run numbers per kind. Unlike the budget counters, never refunded,
+            # so a refunded run cannot hand its id, and its folder, to the next.
+            "run_numbers": {},
             "best_run_id": None,
             "submissions": 0,
             # The hidden test result of the last submission; never shown to the agent.
@@ -131,6 +134,11 @@ class StateLedger:
         self.state["student_calls"] = max(0, int(self.state["student_calls"]) - calls)
         self.state["experiments"] = max(0, self.experiments - experiments)
         self.state["debug_runs"] = max(0, int(self.state["debug_runs"]) - debug_runs)
+
+    def next_run_id(self, prefix: str) -> str:
+        numbers = self.state["run_numbers"]
+        numbers[prefix] = int(numbers.get(prefix, 0)) + 1
+        return f"{prefix}-{numbers[prefix]}"
 
     def record_run(self, record: RunRecord) -> None:
         self.runs.append(asdict(record))

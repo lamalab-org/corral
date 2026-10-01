@@ -190,6 +190,24 @@ class TestSubmission:
         assert out.startswith("NOT submitted: all 3 submissions are used")
 
 
+def test_a_refunded_run_keeps_its_folder_and_id(tmp_path):
+    from inference_opt.tools import create_tools
+
+    workspace = _workspace_with_policy(tmp_path, "raise ImportError('nope')\n")
+    dry_run = create_tools(_task_config(1, "mmlu_pro_a"), "")["dry_run_policy"]._func
+    ledger = {}
+    dry_run(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
+    (workspace / "policy" / "policy.py").write_text(TestSubmission.POLICY)
+
+    out = dry_run(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
+
+    assert json.loads(out.split("\n")[1])["run_id"] == "dry-2"
+    assert sorted(path.name for path in (workspace / "runs").iterdir()) == [
+        "dry-1",
+        "dry-2",
+    ]
+
+
 class TestQueryStudent:
     def test_a_cut_off_answer_is_explained_not_shown_as_none(
         self, environments, monkeypatch
