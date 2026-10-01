@@ -6,7 +6,7 @@ You are given responses from an online personality survey collected in several c
 
 - `sound`: the item and its recorded data are usable;
 - `mis_keyed`: the response scale was stored in reverse;
-- `missing_as_neutral`: non-responses were recorded as the midpoint;
+- `inserted_neutral`: recorded answers were overwritten with the midpoint;
 - `truncated_scale`: the upper part of the response scale was not recorded;
 - `weak_item`: the data are intact but the item measures the trait poorly.
 

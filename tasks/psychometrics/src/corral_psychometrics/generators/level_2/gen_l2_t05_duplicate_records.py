@@ -94,7 +94,7 @@ def respondents(rng, n):
         index = 0 if item in F1_ITEMS else 1
         y = loading * eta[:, index] + rng.normal(0, np.sqrt(1 - loading**2), n)
         out[item] = C.categorize(y, C.THRESHOLDS[item])
-    frame = pd.DataFrame(out)
+    frame = pd.DataFrame(out)[ITEMS]
     frame["age"] = np.clip(rng.normal(35, 11, n).round(), 18, 78).astype(int)
     frame["gender"] = rng.choice([1, 2], size=n, p=[0.61, 0.39])
     frame["accuracy"] = np.clip(rng.beta(8, 1.5, n) * 100, 1, 100).round().astype(int)
@@ -129,11 +129,17 @@ def deliver(rng, people):
         {
             "session_id": delivered["session_id"],
             "device_family": [device_codes[int(i)] for i in source],
+            # Redelivered sessions lean fast and high, but no band value is
+            # reserved for them.
             "completion_band": np.where(
-                redelivered, "repeatable", rng.choice(["ordinary", "repeatable"], n, p=[0.84, 0.16])
+                redelivered,
+                rng.choice(["typical", "fast"], n, p=[0.45, 0.55]),
+                rng.choice(["typical", "fast"], n, p=[0.84, 0.16]),
             ),
             "response_quality_band": np.where(
-                redelivered, "high", rng.choice(["low", "typical", "high"], n, p=[0.08, 0.74, 0.18])
+                redelivered,
+                rng.choice(["low", "typical", "high"], n, p=[0.05, 0.45, 0.50]),
+                rng.choice(["low", "typical", "high"], n, p=[0.08, 0.74, 0.18]),
             ),
         }
     )

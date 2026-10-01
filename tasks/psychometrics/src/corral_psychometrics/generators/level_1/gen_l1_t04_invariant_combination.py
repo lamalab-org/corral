@@ -4,8 +4,8 @@
 Two instruments, only one of which supports a gender comparison.
 
     HSNS          one factor. Women really are 0.45 higher on the trait, but
-                  four items are also biased against them, so the observed gap
-                  mixes trait and bias and the comparison is not defensible.
+                  four items are also biased, two against them and two in
+                  their favour, so the observed gap mixes trait and bias and the comparison is not defensible.
     Dirty Dozen   bifactor - one broad trait plus a narrow one per subscale.
                   No item is biased; women are simply 0.30 higher. This is the
                   instrument that supports the comparison.
@@ -51,7 +51,12 @@ HSNS_LOADINGS = {
 }
 HSNS_LATENT_DIFFERENCE = 0.45
 HSNS_BIASED_ITEMS = ["HSNS1", "HSNS5", "HSNS8", "HSNS10"]
-HSNS_BIAS_SHIFT = 0.55
+# Threshold shift for women, in latent SD units. Positive lowers their answers.
+# Each shift pushes its item's raw gender gap toward the middle of the range the
+# unbiased items span (high-loading items down, the low-loading HSNS1 up), so
+# raw item means do not single the biased items out; a model that allows for
+# the loadings does.
+HSNS_BIAS_SHIFT = {"HSNS1": -0.15, "HSNS5": 0.20, "HSNS8": 0.20, "HSNS10": 0.15}
 
 # --------------------------------------------------------------------------
 # Dirty Dozen: a general factor plus three specifics, identical in both groups.
@@ -143,7 +148,7 @@ A single JSON object:
 # Simulation
 # --------------------------------------------------------------------------
 def simulate_hsns(n, rng, female, scale=1.0, us=True):
-    """One trait, a real gender difference, and bias against women on four items."""
+    """One trait, a real gender difference, and gender bias on four items."""
     eta = rng.normal(0.0, 1.0, n) + (np.where(female, HSNS_LATENT_DIFFERENCE, 0.0) if us else 0.0)
     out = {}
     for item in HSNS:
@@ -153,7 +158,7 @@ def simulate_hsns(n, rng, female, scale=1.0, us=True):
         if us and item in HSNS_BIASED_ITEMS:
             out[item] = np.where(
                 female,
-                C.categorize(ystar, tau + HSNS_BIAS_SHIFT),
+                C.categorize(ystar, tau + HSNS_BIAS_SHIFT[item]),
                 C.categorize(ystar, tau),
             )
         else:
@@ -409,8 +414,8 @@ def _bias_recover(spec, X, variables, items, factors):
     """Items that behave differently across gender, found by freeing every path.
 
     Freeing all of them at once leaves the overall level unidentified, so the
-    estimates centre themselves: items carrying bias in one direction separate
-    cleanly from the rest. Scanning items one at a time does not work here,
+    estimates centre themselves: items carrying bias, in either direction,
+    separate cleanly from the rest. Scanning items one at a time does not work here,
     because the no-bias baseline is itself contaminated by the bias.
     """
     import semopy
@@ -425,7 +430,7 @@ def _bias_recover(spec, X, variables, items, factors):
     ins = model.inspect(std_est=True)
     rows = ins[(ins.op == "~") & (ins.rval == "gender") & ins.lval.isin(items)]
     effect = rows.assign(v=pd.to_numeric(rows["Est. Std"], errors="coerce")).set_index("lval")["v"]
-    return sorted(effect[effect < effect.median() - 0.05].index)
+    return sorted(effect[(effect - effect.median()).abs() > 0.05].index)
 
 
 def verify(df, target, pop):
