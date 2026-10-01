@@ -11,7 +11,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
-from corral.core import ToolExecutionResult
+from corral.core import EnvironmentResourceAdapter
 from corral.core.environment import (
     Environment,
     EnvironmentSetup,
@@ -20,6 +20,7 @@ from corral.core.environment import (
 )
 from corral.core.task import TaskDefinition
 from corral.report.logging import event, exception_fields
+from inference_opt.budget import BudgetSpec, StateLedger
 from inference_opt.task_prompts import task_prompt
 from inference_opt.score import policy_score
 from inference_opt.tools import create_tools
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 __all__ = ["InferenceOptEnvironment", "create_environments", "load_tasks_from_json"]
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", ".corral/workspaces")
+LEDGER_RESOURCE = "inference_state"
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 
@@ -129,50 +131,38 @@ def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSe
     workspace = env.workspace_path or ""
     if workspace:
         _seed_workspace(Path(workspace), str(config.get("policy_api", "primitive")))
-    budget = dict(config.get("budget") or {})
-    inference_state = {
-        "experiments": 0,
-        "debug_runs": 0,
-        "student_calls": 0,
-        "reveals": 0,
-        "probe_calls": 0,
-        "revealed_ids": [],
-        "runs": [],
-        "best_run_id": None,
-        "limits": {
-            "max_experiments": int(budget.get("max_experiments", 20)),
-            "max_debug_runs": int(budget.get("max_debug_runs", 10)),
-            "max_student_calls": int(budget.get("max_student_calls", 250)),
-            "max_reveals": int(budget.get("max_reveals", 4)),
-            "max_probe_calls": int(budget.get("max_probe_calls", 30)),
-            "reveal_batch": int(budget.get("reveal_batch", 5)),
-        },
-    }
     return EnvironmentSetup(
-        hidden_arguments={"work_dir": workspace, "inference_state": inference_state},
+        hidden_arguments={"work_dir": workspace},
         status="Policy workspace prepared with guide, starter policy and state.",
     )
 
 
-class InferenceOptEnvironment(Environment):
-    """Run inference tools and return their updated session state."""
+def _initial_ledger(task: TaskDefinition) -> dict[str, Any]:
+    budget = BudgetSpec.from_mapping(task.initial_input.get("budget"))
+    return StateLedger({}, budget).state
 
-    def execute_tool(self, state: ExecutionState, tool, arguments):
-        if "inference_state" not in tool.hidden_args:
-            return super().execute_tool(state, tool, arguments)
-        session = arguments.get("inference_state")
-        if not isinstance(session, Mapping):
-            raise TypeError(
-                "ExecutionState hidden argument 'inference_state' must be an object"
-            )
-        raw = tool.execute(**arguments)
-        hidden = dict(state.environment.values.get("hidden_arguments", {}))
-        hidden["inference_state"] = session
-        environment = {
-            **dict(state.environment.values),
-            "hidden_arguments": hidden,
-        }
-        return ToolExecutionResult(content=raw, environment=environment)
+
+class InferenceLedgerAdapter(EnvironmentResourceAdapter):
+    """Restore and capture the budget ledger as committed JSON state."""
+
+    def restore(self, state: Any) -> object:
+        if not isinstance(state, Mapping):
+            raise TypeError("inference_state resource must be an object")
+        return json.loads(json.dumps(state))
+
+    def capture(self, runtime: object) -> Any:
+        if not isinstance(runtime, dict):
+            raise TypeError("inference_state runtime must be a dict")
+        return runtime
+
+
+class InferenceOptEnvironment(Environment):
+    """One inference-optimization task; the budget ledger is a Corral resource."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        adapters = dict(kwargs.pop("resource_adapters", {}) or {})
+        adapters.setdefault(LEDGER_RESOURCE, InferenceLedgerAdapter())
+        super().__init__(*args, resource_adapters=adapters, **kwargs)
 
 
 def create_environments(
@@ -207,6 +197,7 @@ def create_environments(
                 task=task,
                 base_work_dir=work_dir,
                 component_id=name,
+                resource_states={LEDGER_RESOURCE: _initial_ledger(task)},
                 toolset=Toolset(
                     pool=create_tools(task.initial_input, work_dir),
                     workspace_factory=default_file_tools,

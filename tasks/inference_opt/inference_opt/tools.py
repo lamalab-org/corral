@@ -124,7 +124,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
     concurrency = int(config.get("student_concurrency", DEFAULT_STUDENT_CONCURRENCY))
 
     def _ledger(inference_state: Any) -> StateLedger:
-        return StateLedger(inference_state or {}, spec)
+        return StateLedger({} if inference_state is None else inference_state, spec)
 
     def _spec_for(
         work_dir: str,
@@ -156,7 +156,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
 
     # -- trusted tools: they read gold answers, so they never run policy code ----
 
-    @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
+    @tool(hidden_args=["work_dir", "inference_state"], trusted=True, resources=("inference_state",))
     def get_baseline(work_dir: str = "", inference_state: Any = None) -> str:
         """Return the measured zero-shot baseline.
 
@@ -183,7 +183,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             ledger,
         )
 
-    @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
+    @tool(hidden_args=["work_dir", "inference_state"], trusted=True, resources=("inference_state",))
     def reveal_train_questions(
         count: int = 5,
         strategy: str = "failures",
@@ -258,7 +258,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
 
     # -- trusted tools -----------------------------------------------------------
 
-    @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
+    @tool(hidden_args=["work_dir", "inference_state"], trusted=True, resources=("inference_state",))
     def query_student(
         prompt: str,
         system: str = "",
@@ -314,7 +314,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             ]
         return _compact(payload, summary, ledger)
 
-    @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
+    @tool(hidden_args=["work_dir", "inference_state"], trusted=True, resources=("inference_state",))
     def dry_run_policy(
         policy_path: str = "policy",
         question_ids: str = "",
@@ -427,7 +427,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             ledger,
         )
 
-    @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
+    @tool(hidden_args=["work_dir", "inference_state"], trusted=True, resources=("inference_state",))
     def evaluate_candidate(
         policy_path: str = "policy",
         note: str = "",
@@ -540,7 +540,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             ledger,
         )
 
-    @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
+    @tool(hidden_args=["work_dir", "inference_state"], trusted=True, resources=("inference_state",))
     def inspect_failures(
         run_id: str = "last",
         only: str = "wrong",
@@ -608,7 +608,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             ledger,
         )
 
-    @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
+    @tool(hidden_args=["work_dir", "inference_state"], trusted=True, resources=("inference_state",))
     def compare_runs(work_dir: str = "", inference_state: Any = None) -> str:
         """Compare completed policy runs.
 
@@ -639,7 +639,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             ledger,
         )
 
-    @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
+    @tool(hidden_args=["work_dir", "inference_state"], trusted=True, resources=("inference_state",))
     def get_budget(work_dir: str = "", inference_state: Any = None) -> str:
         """Return the remaining policy budget.
 
@@ -653,7 +653,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         ledger = _ledger(inference_state)
         return _compact(ledger.snapshot(), ledger.advice(), ledger)
 
-    @tool(hidden_args=["work_dir", "inference_state"], trusted=True)
+    @tool(hidden_args=["work_dir", "inference_state"], trusted=True, resources=("inference_state",))
     def submit_policy(
         policy_path: str = "policy",
         rationale: str = "",
