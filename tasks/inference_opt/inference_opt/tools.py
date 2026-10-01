@@ -43,6 +43,19 @@ def _compact(payload: dict[str, Any], summary: str, ledger: StateLedger) -> str:
     return "\n".join(lines)
 
 
+def _idle_warning(runs: list[ModelRun]) -> str:
+    """Name a run that never reached the student or answered nothing, else ``""``.
+
+    Such a run does not crash, so without this its reply reads as a success.
+    """
+    problems = []
+    if not any(run.calls_used for run in runs):
+        problems.append("made no student calls")
+    if not any(answer.strip() for run in runs for answer in run.answers.values()):
+        problems.append("gave no non-empty answer")
+    return f"WARNING: the policy ran but {' and '.join(problems)}. " if problems else ""
+
+
 def _resolve(work_dir: str, policy_path: str) -> Path:
     root = Path(work_dir).resolve()
     candidate = (root / policy_path).resolve()
@@ -320,11 +333,14 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             )
         )
         failed = run.error or run.infrastructure_error
-        headline = (
-            f"Dry run FAILED: {error_line(failed)}"
-            if failed
-            else f"Dry run OK on {len(traces)} question(s); the policy runs end to end."
-        )
+        if failed:
+            headline = f"Dry run FAILED: {error_line(failed)}"
+        elif warning := _idle_warning([run]):
+            headline = f"Dry run on {len(traces)} question(s): {warning}"
+        else:
+            headline = (
+                f"Dry run OK on {len(traces)} question(s); the policy runs end to end."
+            )
         return _compact(
             {
                 "run_id": run_id,
@@ -403,6 +419,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "artifacts": f"runs/{run_id}",
                 "best_so_far": ledger.best_run_id == run_id,
             },
+            f"{_idle_warning(list(runs.values()))}"
             f"Experiment {run_id} on {record.n_items} train questions - {verdicts}",
             ledger,
         )

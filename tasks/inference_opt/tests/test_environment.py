@@ -208,6 +208,32 @@ def test_a_refunded_run_keeps_its_folder_and_id(tmp_path):
     ]
 
 
+@pytest.mark.parametrize(
+    ("source", "warning"),
+    [
+        (
+            "def solve(question, ctx):\n    return ''\n",
+            "made no student calls and gave no non-empty answer",
+        ),
+        (TestSubmission.POLICY, None),
+    ],
+)
+def test_a_dry_run_that_never_reaches_the_student_is_not_ok(tmp_path, source, warning):
+    from inference_opt.tools import create_tools
+
+    workspace = _workspace_with_policy(tmp_path, source)
+    dry_run = create_tools(_task_config(1, "mmlu_pro_a"), "")["dry_run_policy"]._func
+
+    headline = dry_run(
+        policy_path="policy", work_dir=str(workspace), inference_state={}
+    ).split("\n")[0]
+
+    if warning:
+        assert warning in headline and "OK" not in headline
+    else:
+        assert "Dry run OK" in headline
+
+
 class TestQueryStudent:
     def test_a_cut_off_answer_is_explained_not_shown_as_none(
         self, environments, monkeypatch
