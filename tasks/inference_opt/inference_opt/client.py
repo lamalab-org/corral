@@ -52,6 +52,8 @@ class StudentCompletion:
     finish_reason: str | None = None
     #: Reasoning the server returned separately from the answer, if any.
     reasoning: str = ""
+    #: Tokens generated for this completion, reasoning included.
+    output_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,23 +73,6 @@ class StudentEndpoint:
         if base.endswith("/v1"):
             return f"{base}/chat/completions"
         return f"{base}/v1/chat/completions"
-
-    def generate(
-        self,
-        prompt: str,
-        *,
-        system: str | None = None,
-        temperature: float = 0.0,
-        max_tokens: int = 512,
-        n: int = 1,
-    ) -> list[str]:
-        """Return the text of ``n`` completions, or raise with a message worth reading."""
-        return [
-            completion.text
-            for completion in self.complete(
-                prompt, system=system, temperature=temperature, max_tokens=max_tokens, n=n
-            )
-        ]
 
     def complete(
         self,
@@ -121,6 +106,29 @@ class StudentEndpoint:
             batches = list(pool.map(lambda _: self._request(body), range(count)))
         return [completion for batch in batches for completion in batch]
 
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 512,
+        stop: list[str] | None = None,
+        seed: int | None = None,
+    ) -> StudentCompletion:
+        """Complete one conversation in one request."""
+        _check_url(self.completions_url, self.api_key)
+        body: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if stop:
+            body["stop"] = list(stop)
+        if seed is not None:
+            body["seed"] = seed
+        return self._request(body)[0]
+
     def _request(self, body: dict[str, Any]) -> list[StudentCompletion]:
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         # Assume a slow floor of 5 tokens/s: a busy server can drop well below 20.
@@ -142,7 +150,19 @@ class StudentEndpoint:
 
         payload: dict[str, Any] = response.json()
         choices = payload.get("choices") or []
-        return [_completion(choice) for choice in choices] or [StudentCompletion("")]
+        completions = [_completion(choice) for choice in choices]
+        if len(completions) == 1:
+            usage = payload.get("usage") or {}
+            only = completions[0]
+            completions = [
+                StudentCompletion(
+                    text=only.text,
+                    finish_reason=only.finish_reason,
+                    reasoning=only.reasoning,
+                    output_tokens=int(usage.get("completion_tokens") or 0),
+                )
+            ]
+        return completions or [StudentCompletion("")]
 
 
 def _completion(choice: dict[str, Any]) -> StudentCompletion:
@@ -172,7 +192,7 @@ def probe_student(
     *,
     system: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 8192,
+    max_tokens: int = 16384,
     n: int = 1,
     served_name: str | None = None,
 ) -> list[StudentCompletion]:

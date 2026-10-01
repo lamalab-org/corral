@@ -14,10 +14,6 @@ from inference_opt import datasets
 
 TRAIN_PER_BENCHMARK = 30
 TEST_PER_BENCHMARK = 30
-#: The band every selected item was required to fall in.
-BAND = (0.20, 0.80)
-
-
 @pytest.fixture(scope="module")
 def manifest():
     return datasets.load_manifest()
@@ -28,7 +24,7 @@ class TestShippedDataset:
         assert manifest["dataset_version"] == datasets.DATASET_VERSION
         assert len(manifest["content_fingerprint"]) == 64
         assert manifest["items_per_benchmark"] == 60
-        assert manifest["selection"]["band"] == list(BAND)
+        assert manifest["selection"]["rule"].startswith("60 items per benchmark")
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
     def test_every_benchmark_has_a_matched_split(self, benchmark):
@@ -42,16 +38,9 @@ class TestShippedDataset:
     def test_the_halves_are_equally_hard(self, benchmark, manifest):
         entry = manifest["per_benchmark"][benchmark]
         gap = abs(
-            entry["train_reference_accuracy"] - entry["test_reference_accuracy"]
+            entry["train_mean_irt_difficulty"] - entry["test_mean_irt_difficulty"]
         )
-        assert gap < 0.15, f"{benchmark}: halves differ by {gap:.3f}"
-
-    @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
-    def test_every_item_sits_in_the_movable_band(self, benchmark):
-        """Outside this band no test-time strategy could shift the outcome."""
-        for item in datasets.load_items(benchmark):
-            assert item.reference_accuracy is not None
-            assert BAND[0] <= item.reference_accuracy <= BAND[1], item.item_id
+        assert gap < 0.5, f"{benchmark}: halves differ by {gap:.3f}"
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
     def test_every_item_has_a_label(self, benchmark):
@@ -102,32 +91,25 @@ class TestShippedDataset:
     def test_selection_provenance_is_recorded_per_benchmark(self, manifest):
         for benchmark in datasets.BENCHMARKS:
             entry = manifest["per_benchmark"][benchmark]
-            assert entry["n_in_band"] >= 60
-            assert entry["cohort_size"] >= 1
+            assert entry["irt_difficulty_cutoff"] is not None
             assert entry["selected"] == 60
 
 
-class TestQuestionConversion:
-    def test_items_become_policy_facing_questions(self):
+class TestPolicyFacingQuestions:
+    def test_public_records_become_questions_with_their_options(self):
+        from inference_opt.host import _question
+
         items = datasets.load_items("mmlu_pro", "test")
-        questions = list(datasets.iter_questions(items))
-        assert len(questions) == TEST_PER_BENCHMARK
-        assert all(question.total == TEST_PER_BENCHMARK for question in questions)
+        records = [datasets.public_record(item) for item in items]
+        questions = [_question(record, i, len(records)) for i, record in enumerate(records)]
         assert [question.index for question in questions] == list(range(len(questions)))
-
-    def test_multiple_choice_questions_render_their_options(self):
-        item = next(
-            item
-            for item in datasets.load_items("mmlu_pro", "test")
-            if item.answer_format == "mcq_single"
-        )
-        question = datasets.to_question(item)
-        rendered = question.rendered_choices()
+        assert all(question.total == TEST_PER_BENCHMARK for question in questions)
+        rendered = questions[0].rendered_choices()
         assert rendered.startswith("A) ")
-        assert len(rendered.splitlines()) == len(question.choices or ())
+        assert len(rendered.splitlines()) == len(questions[0].choices or ())
 
-    def test_public_record_is_the_only_thing_the_host_receives(self):
-        item = datasets.load_items("gsm8k", "test")[0]
+    def test_public_record_never_carries_the_target(self):
+        item = datasets.load_items("gpqa_diamond", "test")[0]
         record = datasets.public_record(item)
         assert "target" not in record
         assert record["item_id"] == item.item_id

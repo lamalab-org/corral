@@ -17,7 +17,7 @@ def test_api_key_is_allowed_for_local_http(monkeypatch):
     )
 
     endpoint = StudentEndpoint("http://127.0.0.1:8000", api_key="secret")
-    assert endpoint.generate("hello") == [""]
+    assert [c.text for c in endpoint.complete("hello")] == [""]
 
 
 def test_api_key_is_rejected_for_remote_http(monkeypatch):
@@ -27,7 +27,7 @@ def test_api_key_is_rejected_for_remote_http(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="non-local HTTP"):
-        StudentEndpoint("http://student.example", api_key="secret").generate("hello")
+        StudentEndpoint("http://student.example", api_key="secret").complete("hello")
 
 
 def test_remote_http_without_api_key_is_allowed(monkeypatch):
@@ -36,7 +36,7 @@ def test_remote_http_without_api_key_is_allowed(monkeypatch):
     )
 
     endpoint = StudentEndpoint("http://student.example")
-    assert endpoint.generate("hello") == [""]
+    assert [c.text for c in endpoint.complete("hello")] == [""]
 
 
 class JsonResponse:
@@ -72,7 +72,7 @@ def test_truncated_reasoning_is_empty_text_not_none(monkeypatch):
     assert completion.text == ""
     assert completion.finish_reason == "length"
     assert completion.reasoning == "Let me think..."
-    assert endpoint.generate("hi") == [""]
+    assert [c.text for c in endpoint.complete("hi")] == [""]
 
 
 def test_several_samples_are_separate_single_requests(monkeypatch):

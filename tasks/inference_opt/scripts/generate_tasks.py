@@ -16,11 +16,11 @@ ROOT = Path(__file__).resolve().parents[1]
 #: A deterministic namespace, so regenerating does not churn every uuid.
 NAMESPACE = uuid.UUID("6f1d5a52-0f6e-4a1d-9a27-6b6c9f0e1a10")
 
-BENCHMARKS = ("gsm8k", "mmlu_pro", "gpqa_diamond", "bbh", "chembench", "arc_challenge")
+BENCHMARKS = ("mmlu_pro", "bbh", "gpqa_diamond", "math", "chembench")
 BENCHMARK_LABELS = {
-    "gsm8k": "GSM8K",
     "mmlu_pro": "MMLU-Pro",
     "gpqa_diamond": "GPQA-Diamond",
+    "math": "MATH",
     "bbh": "BIG-Bench Hard",
     "chembench": "ChemBench",
     "arc_challenge": "ARC-Challenge",
@@ -89,8 +89,6 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
             "model_specs": {},
             "base_urls": {},
             "final_max_student_calls": final_calls,
-            "final_setup_calls": 0,
-            "setup_calls": 20,
             "scale": 1.0,
             # Pass (score 1) when every student closes >= half its headroom.
             "pass_rule": {"kind": "headroom", "min_closed": 0.5},
@@ -101,6 +99,7 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
                 "max_reveals": 4,
                 "max_probe_calls": 40,
                 "reveal_batch": 5,
+                "max_submissions": 3,
             },
         },
     }

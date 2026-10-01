@@ -451,6 +451,7 @@ async def run_benchmark(
                 if build_local
                 else None
             ),
+            rebuild=getattr(args, "build_sandbox_image", False),
         )
         sandbox = orchestration.SandboxProfile(
             mode=orchestration.SandboxMode.DOCKER,
@@ -794,7 +795,10 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     sandbox.add_argument(
         "--build-sandbox-image",
         action="store_true",
-        help="Build a missing custom image using the environment's Dockerfile and harness extra.",
+        help=(
+            "Rebuild the environment's image from this checkout before running. "
+            "Without it, an image is built only when its tag is missing."
+        ),
     )
     sandbox.add_argument("--docker-executable", default="docker")
     sandbox.add_argument(

@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from inference_opt import datasets
-from inference_opt.outcomes import read_outcomes
-from inference_opt.eval_runner import PolicyEvaluator
-from inference_opt.eval_runner.spec import RunSpec
+from inference_opt.runner import run_policy
 
 __all__ = [
     "BASELINE_POLICY_SOURCE",
@@ -27,7 +24,6 @@ BASELINE_POLICY_SOURCE = '''\
 
 MANIFEST = {
     "name": "baseline-zero-shot",
-    "max_calls_per_question": 1,
     "max_tokens_per_call": 8192,
 }
 
@@ -127,13 +123,18 @@ def measure_baseline(
     *,
     model_spec: str | None = None,
     base_url: str | None = None,
-    out_dir: Path | None = None,
     timeout_s: int = 3600,
     max_connections: int = 8,
 ) -> BaselineResult:
     """Run the pinned zero-shot policy over one split and grade it."""
     items = datasets.load_items(benchmark, split)  # type: ignore[arg-type]
     targets = datasets.load_targets(benchmark, split)  # type: ignore[arg-type]
+    unlabeled = [item.item_id for item in items if item.item_id not in targets]
+    if unlabeled:
+        raise datasets.DatasetError(
+            f"{benchmark}/{split}: {len(unlabeled)} item(s) have no label, "
+            f"e.g. {unlabeled[:3]}"
+        )
     result = BaselineResult(
         benchmark=benchmark,
         model=model,
@@ -143,49 +144,50 @@ def measure_baseline(
     )
 
     with tempfile.TemporaryDirectory(prefix="inference-opt-baseline-") as scratch:
-        scratch_root = Path(scratch)
-        policy_dir = scratch_root / "policy"
-        policy_dir.mkdir()
+        workspace = Path(scratch) / "workspace"
+        policy_dir = workspace / "policy"
+        policy_dir.mkdir(parents=True)
         (policy_dir / "policy.py").write_text(BASELINE_POLICY_SOURCE, encoding="utf-8")
-
-        questions = scratch_root / "questions.jsonl"
-        datasets.write_jsonl(
-            questions,
-            [
-                {**datasets.public_record(item), "index": index}
-                for index, item in enumerate(items)
-            ],
-        )
-
-        spec = RunSpec(
+        config = {
+            "benchmark": benchmark,
+            "model_specs": {model: model_spec or model},
+            "base_urls": {model: base_url},
+            "policy_api": "primitive",
+            "student_concurrency": max(1, max_connections),
+        }
+        run = run_policy(
+            config=config,
+            work_dir=workspace,
             run_id=f"baseline-{benchmark}-{model}-{split}",
-            policy_dir=str(policy_dir),
-            questions_path=str(questions),
-            out_dir=str(out_dir or scratch_root / "out"),
-            model_spec=model_spec or model,
-            base_url=base_url,
-            total_calls=len(items) * 2,
-            max_calls_per_question=1,
-            max_tokens_per_call=8192,
-            benchmark=benchmark,
+            policy_dir=policy_dir,
             split=split,
-            max_connections=max(1, max_connections),
-        )
-        summary = PolicyEvaluator().run(spec, targets=targets)
-        if not summary.ok and summary.n_answered == 0:
-            result.error = summary.error[:600]
-            return result
+            models=[model],
+            budget_per_model=len(items) * 2,
+            examples=[],
+            write_copy=False,
+            max_tokens_cap=8192,
+            time_limit_s=timeout_s,
+        )[model]
 
-        outcome = read_outcomes(spec.log_dir)
-        result.n_correct = outcome.n_correct
-        result.accuracy = outcome.n_correct / len(items) if items else 0.0
-        result.n_unparseable = summary.n_unparseable
-        result.per_item = {item.item_id: item.correct for item in outcome.items}
-        result.per_topic = outcome.by_category()
-
+    failure = run.load_error or run.grading_error or (
+        run.infrastructure_error if not run.answers else ""
+    )
+    if failure:
+        result.error = failure[:600]
+        return result
+    result.n_correct = run.n_correct
+    result.accuracy = run.accuracy
+    result.n_unparseable = sum(
+        1 for item_id in run.question_ids if not run.answers.get(item_id, "").strip()
+    )
+    result.per_item = {item_id: run.correct.get(item_id, False) for item_id in run.question_ids}
+    by_topic: dict[str, dict[str, Any]] = {}
+    for item in items:
+        bucket = by_topic.setdefault(item.category or "(none)", {"n": 0, "n_correct": 0})
+        bucket["n"] += 1
+        bucket["n_correct"] += int(run.correct.get(item.item_id, False))
+    result.per_topic = {
+        name: {**bucket, "accuracy": bucket["n_correct"] / bucket["n"]}
+        for name, bucket in sorted(by_topic.items())
+    }
     return result
-
-
-def load_measured(path: Path) -> dict[str, Any]:
-    """Read a baselines artifact written by ``scripts/measure_baselines.py``."""
-    return json.loads(Path(path).read_text(encoding="utf-8"))
