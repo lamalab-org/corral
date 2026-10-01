@@ -100,16 +100,30 @@ def _write_result(path: Path, value: dict[str, Any]) -> None:
         raise
 
 
-def _restore_host_ownership(root: Path) -> None:
-    """Return bind-mounted checkpoint files to the invoking host user."""
+def _chown_checkpoint(root: Path, uid: int, gid: int) -> None:
     if os.geteuid() != 0:
         return
-    uid = int(os.environ.get("CORRAL_HOST_UID", "0"))
-    gid = int(os.environ.get("CORRAL_HOST_GID", "0"))
     for entry in (*root.rglob("*"), root):
         if entry.is_symlink():
             raise ValueError("checkpoint directories cannot contain symbolic links")
         os.chown(entry, uid, gid)
+
+
+def _restore_host_ownership(root: Path) -> None:
+    """Return bind-mounted checkpoint files to the invoking host user."""
+    _chown_checkpoint(
+        root,
+        int(os.environ.get("CORRAL_HOST_UID", "0")),
+        int(os.environ.get("CORRAL_HOST_GID", "0")),
+    )
+
+
+def _reclaim_checkpoint(root: Path) -> None:
+    """Take back what the previous start handed to the host user.
+
+    The controller has no CAP_FOWNER, so it cannot chmod a file it does not own.
+    """
+    _chown_checkpoint(root, 0, 0)
 
 
 async def run_task_from_files(request_file: str | Path, result_file: str | Path) -> int:
@@ -135,7 +149,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
     store: SQLiteCommitStore | None = None
     observer = observer_from_env()
     try:
-        os.chown(checkpoint_root, 0, 0)
+        _reclaim_checkpoint(checkpoint_root)
         checkpoint_root.chmod(0o700)
         permissions.configure(checkpoint_root)
         workspace_snapshots = checkpoint_root / "workspace-snapshots"

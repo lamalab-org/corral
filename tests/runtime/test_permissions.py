@@ -1327,6 +1327,27 @@ async def test_internal_entrypoint_protects_a_real_trial(tmp_path, monkeypatch):
     assert restored
 
 
+@pytest.mark.anyio
+async def test_restarted_controller_can_store_artifacts_handed_to_the_host(
+    tmp_path, monkeypatch
+):
+    from corral.orchestration import internal
+    from corral.persistence.artifacts import LocalArtifactStore
+
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    await LocalArtifactStore(checkpoint / "artifacts").put_bytes(b"tool output")
+    monkeypatch.setenv("CORRAL_HOST_UID", "12345")
+    monkeypatch.setenv("CORRAL_HOST_GID", "12345")
+    internal._restore_host_ownership(checkpoint)
+
+    internal._reclaim_checkpoint(checkpoint)
+
+    # The same output again lands in the shard the previous start created.
+    await LocalArtifactStore(checkpoint / "artifacts").put_bytes(b"tool output")
+    assert {path.stat().st_uid for path in checkpoint.rglob("*")} == {0}
+
+
 def permission_registry(request):
     """A model-free trial using the same private registry loader as production."""
     from corral.core.task import TaskDefinition

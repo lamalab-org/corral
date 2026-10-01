@@ -134,6 +134,11 @@ def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
 
     assert ownership_changes == [(result, 501, 20), (checkpoint, 501, 20)]
 
+    ownership_changes.clear()
+    internal._reclaim_checkpoint(checkpoint)
+
+    assert ownership_changes == [(result, 0, 0), (checkpoint, 0, 0)]
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("cached", [False, True])
