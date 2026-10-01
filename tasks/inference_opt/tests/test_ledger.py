@@ -49,15 +49,10 @@ def test_initial_event_seeds_the_ledger(tmp_path):
 
 
 def test_charges_persist_between_tool_calls(tmp_path):
-    environment = create_environments(level=1, work_dir=str(tmp_path))["mmlu_pro_a"]
+    definition = create_environments(level=1, work_dir=str(tmp_path))["mmlu_pro_a"]
+    environment = definition.for_task("ledger-test")
     seed = environment.initial_event(execution_id="ledger-test").environment
-    state = _state(
-        environment,
-        {
-            **dict(seed),
-            "hidden_arguments": {"work_dir": str(tmp_path)},
-        },
-    )
+    state = _state(environment, dict(seed))
 
     _, state = _call(environment, state, "reveal_train_questions", {}, "reveal")
     committed = state.environment.values["resources"][LEDGER_RESOURCE]

@@ -2,139 +2,91 @@
 
 Inference-opt asks an agent to write a Python policy that improves a frozen
 student model. The agent edits `policy/policy.py`, tests it on labelled train
-data, and submits it for scoring on held-out test data.
+data, and submits it; the submission runs once on held-out test data.
+
+The rule the design keeps: agent-written code runs only in Corral's restricted
+worker (the jail), and gold answers exist only in the controller.
 
 ## Components
 
 ```text
-Corral
-  └─ InferenceOptEnvironment
-       ├─ workspace tools
-       ├─ inference tools
-       └─ committed environment state
-
-inference tools
-  └─ PolicyEvaluator
-       └─ Inspect AI task
-            └─ StudentClient and benchmark scorer
+CONTROLLER (trusted, has the labels)          JAIL (agent code, no network)
+  inference tools ── run_policy ──────────────▶ policy host
+    │                 (one per student)          imports policy.py
+    │                                            policy.run(questions, ctx)
+    │   StudentGateway ◀── service channel ────── ctx.student / submit / log
+    │     counts calls, stops at the budget,
+    │     forwards to vLLM, records answers
+    │
+    └─ Grader: Inspect, replaying the answers,
+       in its own process; its log stays outside the workspace
 ```
 
-Each task binds one benchmark and one or two student models. The task definition
-contains immutable configuration, the teacher prompt, the workspace setup, and
-the final scorer. It does not contain session history.
+- `host.py` runs in the jail. It gets public questions, the revealed examples,
+  and one service channel to the controller (`corral.runtime.service_channel`,
+  passed in by `permissions.run_worker(service=...)`). Every `inference_opt`
+  module a policy may use is imported before the jail closes.
+- `gateway.py` answers the channel. Requests are agent-written, so it checks
+  the budget, the question ids, the token ceiling and the allowed client
+  methods. The vLLM address and key never enter the jail.
+- `grading/` scores the submitted answers with Inspect's scorers. A replay
+  solver puts each answer on its sample; the log, which holds the targets, is
+  written beside the workspace, never inside it.
+- `runner.py` ties these together. Without Docker permission enforcement the
+  host runs as a plain subprocess: metering still holds, privacy does not.
 
 ## Corral state
 
-`InferenceOptEnvironment` is stateless. Corral passes the current
-`ExecutionState` to each tool call. Inference-opt passes the hidden
-`inference_state` mapping to the tool and returns the updated mapping in
-`ToolExecutionResult.environment`.
-
-Corral commits that environment update with the tool result. This makes the
-session ledger available after replay, restart, and task branching.
-
-The session state is JSON-shaped:
-
-```json
-{
-  "experiments": 0,
-  "debug_runs": 0,
-  "student_calls": 0,
-  "reveals": 0,
-  "probe_calls": 0,
-  "revealed_ids": [],
-  "runs": [],
-  "best_run_id": null,
-  "limits": {
-    "max_experiments": 20,
-    "max_debug_runs": 10,
-    "max_student_calls": 250,
-    "max_reveals": 4,
-    "max_probe_calls": 30,
-    "reveal_batch": 5
-  }
-}
-```
-
-`StateLedger` in `budget.py` provides the budget and run-record operations used
-by the tools. The mapping in Corral state remains the source of truth.
+The ledger is a Corral resource (`inference_state`, `InferenceLedgerAdapter`
+in `env.py`), seeded through `resource_states` and committed after every tool
+call. It holds the budget counters, revealed question ids, run records, the
+submission count, and the hidden result of the last submission.
 
 ## Workspace
-
-The workspace holds source and detailed artifacts:
 
 ```text
 policy/policy.py
 guide/policy_api.md
 notes.md
-revealed/train_revealed.jsonl
-runs/<run-id>/
+revealed/train_revealed.jsonl   copy for the agent; runs use the ledger
+runs/<run-id>/<model>/          written by the controller, never a target
   predictions.jsonl
+  student_calls.jsonl
   summary.json
-  log/
-submission.json
+submission.json                 what was submitted, with its hash
 ```
 
-The packaged guide is filtered for the task's `policy_api` mode before it is
-copied into the workspace. Primitive mode is the default.
+Each run folder is cleared at the start of its run, so a restart that reuses a
+container never mixes old and new results.
 
-The ledger stays in Corral state. Files hold the policy, revealed examples, and
-run output because those artifacts are larger and useful to inspect directly.
+## Scoring
 
-## Tool flow
+`submit_policy` runs the policy on the test split exactly like an experiment,
+computes the pass rule (`score.final_result`), and stores the result in the
+ledger. The reply shows nothing about it. Corral's evaluation step calls
+`StateScorer`, which only reads that stored result, so no agent code runs on the
+host that scores the episode. A task with no submission scores 0; an
+environment fault raises `HarnessError` instead of scoring.
 
-1. Corral materializes `ExecutionState` and injects hidden arguments.
-2. `InferenceOptEnvironment.execute_tool()` passes `inference_state` to the tool.
-3. The trusted tool updates the state and writes any workspace artifacts.
-4. The environment returns the tool result and updated environment namespace.
-5. Corral commits both as one transition.
+## Known limits
 
-The domain tools are trusted because they read private labels and run the
-submitted policy. Policy code is also trusted inside the task container. Docker
-is the isolation boundary; the evaluator does not create a second sandbox.
-
-## Policy evaluation
-
-`evaluate_candidate()` writes public train questions to a private temporary file,
-loads targets separately, then runs `PolicyEvaluator` once per configured model.
-The evaluator:
-
-- loads the policy;
-- creates Inspect samples and scorers;
-- runs questions sequentially;
-- meters calls through `StudentClient`;
-- writes predictions, summaries, and Inspect logs.
-
-The tool stores a compact `RunRecord` in the session ledger and keeps detailed
-output under `runs/`. `dry_run_policy()` uses the same evaluator on a smaller set.
-
-Final scoring runs the submitted policy on the held-out split and subtracts the
-stored zero-shot baseline. Level-2 tasks score the smaller improvement across
-the two student models.
-
-Inspect handles model execution, sample execution, answer parsing, grading, and
-logs. Inference-opt supplies the policy solver, policy API, client metering, and
-task-specific data preparation.
-
-## Runtime limits
-
-The environment has no persistent policy process, background policy
-jobs, file-backed active ledger, or restricted policy worker. Policy questions
-run concurrently (`student_concurrency`, default 16) unless the manifest sets
-`concurrent: False`. Budgets, memory, and predictions are lock-protected, and
-predictions are written in question order. With several students, each model is
-evaluated in its own process at the same time.
+- Per-question right/wrong is shown for train runs, so a multiple-choice answer
+  marked correct reveals the gold option.
+- Without Docker permission enforcement there is no jail; see `runner.py`.
 
 ## Source map
 
 | Responsibility | Source |
 | --- | --- |
-| Task and environment factory | `inference_opt/env.py` |
-| Teacher tools and ledger updates | `inference_opt/tools.py`, `inference_opt/budget.py` |
+| Task and environment factory, ledger resource | `inference_opt/env.py` |
+| Teacher tools | `inference_opt/tools.py` |
+| Ledger operations | `inference_opt/budget.py` |
 | Policy contract and loading | `inference_opt/api.py`, `inference_opt/policy.py` |
-| Inspect adapter | `inference_opt/eval_runner/` |
-| Final scoring | `inference_opt/score.py` |
+| Jailed policy host | `inference_opt/host.py` |
+| Student gateway | `inference_opt/gateway.py` |
+| Run orchestration | `inference_opt/runner.py` |
+| Grading | `inference_opt/grading/` |
+| Pass rule and state scorer | `inference_opt/score.py` |
 | Frozen data | `inference_opt/datasets.py` |
-| Environment base class | `src/corral/core/environment.py` |
-| State projection | `src/corral/core/state.py` |
-| Tool transition | `src/corral/core/transition.py` |
+| Service channel | `src/corral/runtime/service_channel.py` |
+| Restricted worker | `src/corral/runtime/permissions.py` |

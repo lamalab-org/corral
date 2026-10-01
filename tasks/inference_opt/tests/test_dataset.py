@@ -95,26 +95,20 @@ class TestShippedDataset:
             assert entry["selected"] == 60
 
 
-class TestQuestionConversion:
-    def test_items_become_policy_facing_questions(self):
+class TestPolicyFacingQuestions:
+    def test_public_records_become_questions_with_their_options(self):
+        from inference_opt.host import _question
+
         items = datasets.load_items("mmlu_pro", "test")
-        questions = list(datasets.iter_questions(items))
-        assert len(questions) == TEST_PER_BENCHMARK
-        assert all(question.total == TEST_PER_BENCHMARK for question in questions)
+        records = [datasets.public_record(item) for item in items]
+        questions = [_question(record, i, len(records)) for i, record in enumerate(records)]
         assert [question.index for question in questions] == list(range(len(questions)))
-
-    def test_multiple_choice_questions_render_their_options(self):
-        item = next(
-            item
-            for item in datasets.load_items("mmlu_pro", "test")
-            if item.answer_format == "mcq_single"
-        )
-        question = datasets.to_question(item)
-        rendered = question.rendered_choices()
+        assert all(question.total == TEST_PER_BENCHMARK for question in questions)
+        rendered = questions[0].rendered_choices()
         assert rendered.startswith("A) ")
-        assert len(rendered.splitlines()) == len(question.choices or ())
+        assert len(rendered.splitlines()) == len(questions[0].choices or ())
 
-    def test_public_record_is_the_only_thing_the_host_receives(self):
+    def test_public_record_never_carries_the_target(self):
         item = datasets.load_items("gpqa_diamond", "test")[0]
         record = datasets.public_record(item)
         assert "target" not in record

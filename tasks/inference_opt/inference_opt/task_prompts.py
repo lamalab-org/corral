@@ -46,7 +46,8 @@ Every experiment costs real inference. `dry_run_policy` is much cheaper than
 ## Submitting
 
 When you are done - or when your budget is nearly gone - call `submit_policy('{policy_dir}')`, then pass the exact string it returns to `submit_answer`.
-A policy that is never submitted scores nothing, so submit early and re-submit if you improve on it.
+`submit_policy` runs your policy once on the held-out test questions and keeps the result hidden until the episode is scored.
+You have {max_submissions} submissions; the last one counts. A policy that is never submitted scores nothing, so submit early and again if you improve on it.
 """
 
 
@@ -112,4 +113,5 @@ def task_prompt(env: Environment, state: ExecutionState) -> str:
         budget=_budget_summary(config),
         scoring=_scoring_summary(config),
         policy_dir="policy",
+        max_submissions=int((config.get("budget") or {}).get("max_submissions", 3)),
     )

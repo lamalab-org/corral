@@ -1808,3 +1808,60 @@ def test_oversize_control_reply_is_refused_before_it_is_read(workspace, monkeypa
     monkeypatch.setenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", str(64 * 1024))
     with pytest.raises(RuntimeError, match="CORRAL_MAX_WORKER_RESPONSE_BYTES"):
         permissions.run_worker("tool", (chatty, {}), workspace)
+
+
+@tool
+def service_probe() -> str:
+    """Ask the controller for a value from inside a network-isolated worker."""
+    import json
+    import os
+    import socket
+
+    from corral.runtime import service_channel
+
+    result = {"uid": os.geteuid(), "answer": service_channel.call({"question": 6})}
+    try:
+        socket.create_connection(("1.1.1.1", 53), timeout=2).close()
+    except OSError:
+        result["network_blocked"] = True
+    try:
+        service_channel.call({"question": "refuse"})
+    except service_channel.ServiceError as exc:
+        result["refusal"] = [str(exc), exc.kind]
+    return json.dumps(result)
+
+
+service_probe.network_access = "none"
+
+
+def test_a_worker_reaches_its_controller_only_through_the_service(workspace):
+    import json
+
+    secret = {"value": 7}
+    seen = []
+
+    def service(body):
+        seen.append(body)
+        if body["question"] == "refuse":
+            raise PermissionError("not for you")
+        return body["question"] * secret["value"]
+
+    result = json.loads(
+        permissions.run_worker("tool", (service_probe, {}), workspace, service=service)[
+            "content"
+        ]
+    )
+    assert result["uid"] != 0
+    assert result["answer"] == 42
+    assert result["network_blocked"]
+    assert result["refusal"] == ["not for you", "PermissionError"]
+    assert seen == [{"question": 6}, {"question": "refuse"}]
+
+
+def test_a_worker_without_a_service_has_no_channel(workspace):
+    import json
+
+    with pytest.raises(RuntimeError, match="no service channel"):
+        json.loads(
+            permissions.run_worker("tool", (service_probe, {}), workspace)["content"]
+        )

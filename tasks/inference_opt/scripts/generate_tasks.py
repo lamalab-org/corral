@@ -89,8 +89,6 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
             "model_specs": {},
             "base_urls": {},
             "final_max_student_calls": final_calls,
-            "final_setup_calls": 0,
-            "setup_calls": 20,
             "scale": 1.0,
             # Pass (score 1) when every student closes >= half its headroom.
             "pass_rule": {"kind": "headroom", "min_closed": 0.5},
@@ -101,6 +99,7 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
                 "max_reveals": 4,
                 "max_probe_calls": 40,
                 "reveal_batch": 5,
+                "max_submissions": 3,
             },
         },
     }

@@ -1,41 +1,8 @@
-"""Tests for local metering and Corral session state."""
+"""Tests for the Corral-committed task ledger."""
 
 import pytest
 from inference_opt.api import BudgetExhausted
-from inference_opt.budget import (
-    Budget,
-    BudgetSpec,
-    QuestionAllocator,
-    RunRecord,
-    StateLedger,
-)
-
-
-def test_budget_charges_student_calls():
-    budget = Budget(max_student_calls=2)
-    budget.reserve_student_call(2)
-    with pytest.raises(BudgetExhausted):
-        budget.reserve_student_call()
-
-
-def test_output_token_ceiling():
-    budget = Budget(max_student_calls=10, max_output_tokens=100)
-    budget.record_tokens(60)
-    with pytest.raises(BudgetExhausted, match="output-token"):
-        budget.record_tokens(50)
-
-
-def test_allocator_protects_each_question():
-    allocator = QuestionAllocator(total_calls=100, questions=10, per_question_cap=8)
-    allocator.charge("q1", 8)
-    assert allocator.allowance("q9") > 0
-
-
-def test_allocator_enforces_per_question_cap():
-    allocator = QuestionAllocator(total_calls=1000, questions=10, per_question_cap=4)
-    allocator.charge("q1", 4)
-    with pytest.raises(BudgetExhausted, match="per-question cap"):
-        allocator.charge("q1", 1)
+from inference_opt.budget import BudgetSpec, RunRecord, StateLedger
 
 
 def test_state_ledger_is_json_shaped_corral_state():
@@ -46,6 +13,27 @@ def test_state_ledger_is_json_shaped_corral_state():
     assert state["experiments"] == 1
     assert state["student_calls"] == 3
     assert state["revealed_ids"] == ["q1"]
+    assert state["submissions"] == 0 and state["final"] is None
+
+
+def test_reserving_past_a_limit_is_refused():
+    ledger = StateLedger({}, BudgetSpec(max_student_calls=5))
+    ledger.reserve(calls=5)
+    with pytest.raises(BudgetExhausted, match="student calls"):
+        ledger.reserve(calls=1)
+
+
+def test_a_refund_returns_what_a_run_did_not_use():
+    ledger = StateLedger({}, BudgetSpec(max_student_calls=10))
+    ledger.reserve(experiments=1, calls=10)
+    ledger.refund(calls=4, experiments=1)
+    assert ledger.remaining()["student_calls"] == 4
+    assert ledger.experiments == 0
+
+
+def test_submissions_left_are_reported():
+    ledger = StateLedger({"submissions": 1}, BudgetSpec(max_submissions=3))
+    assert ledger.remaining()["submissions"] == 2
 
 
 def test_state_ledger_keeps_zero_delta_above_negative_delta():

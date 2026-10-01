@@ -105,7 +105,12 @@ class TaskScorer:
         commit_hash = state.through_commit_hash
         details = None
         if self.task.state_scoring_fn is not None:
-            score = float(self.task.state_scoring_fn(state))
+            evaluate_state = getattr(self.task.state_scoring_fn, "evaluate_state", None)
+            if callable(evaluate_state):
+                details = SubmissionScore.model_validate(evaluate_state(state))
+                score = details.score
+            else:
+                score = float(self.task.state_scoring_fn(state))
         else:
             answer = _resolve_submission(self.task, state.submission, self.workspace)
             evaluate_submission = getattr(

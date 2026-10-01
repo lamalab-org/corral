@@ -7,8 +7,7 @@ import math
 from pathlib import Path
 
 import pytest
-from inference_opt.env import create_environments
-from inference_opt.score import resolve_submission
+from inference_opt.env import create_environments, load_tasks_from_json
 
 TASK_BENCHMARKS = {"mmlu_pro", "bbh", "gpqa_diamond", "math", "chembench"}
 
@@ -102,38 +101,93 @@ class TestPrompt:
             assert leak not in prompt
 
 
-class TestSubmissionResolution:
-    def _policy(self, root):
-        policy = root / "policy"
-        policy.mkdir(parents=True, exist_ok=True)
-        (policy / "policy.py").write_text(
-            "class Policy:\n    def solve(self, q, ctx): return 'A'\n", encoding="utf-8"
+def _task_config(level, task_id):
+    root = Path(__file__).resolve().parents[1] / f"environments/level_{level}/tasks_json"
+    config = dict(load_tasks_from_json(root)[task_id].initial_input)
+    config["model_specs"] = dict.fromkeys(config["models"], "mockllm/model")
+    config["base_urls"] = {}
+    return config
+
+
+def _workspace_with_policy(tmp_path, source):
+    workspace = tmp_path / "workspace"
+    (workspace / "policy").mkdir(parents=True, exist_ok=True)
+    (workspace / "policy" / "policy.py").write_text(source, encoding="utf-8")
+    return workspace
+
+
+class TestSubmission:
+    POLICY = "class Policy:\n    def solve(self, q, ctx): return ctx.student.generate(q.text)\n"
+
+    def _submit(self, tmp_path, ledger, source=POLICY):
+        from inference_opt.tools import create_tools
+
+        workspace = _workspace_with_policy(tmp_path, source)
+        submit = create_tools(_task_config(1, "mmlu_pro_a"), "")["submit_policy"]._func
+        return submit(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
+
+    def _state(self, ledger):
+        from corral.core.state import EnvironmentState, ExecutionState
+
+        return ExecutionState(
+            through_commit_hash="a" * 64,
+            execution_id="x",
+            branch_id="main",
+            environment=EnvironmentState(values={"resources": {"inference_state": ledger}}),
         )
-        return policy
 
-    def test_staged_submission_is_preferred(self, tmp_path):
-        self._policy(tmp_path)
-        (tmp_path / "submission.json").write_text(
-            json.dumps({"policy_dir": "policy"}), encoding="utf-8"
+    def test_the_test_run_is_recorded_but_not_shown(self, tmp_path):
+        ledger = {}
+        out = self._submit(tmp_path, ledger)
+        assert out.startswith("Submitted.")
+        final = ledger["final"]
+        assert final["submission"] == 1 and len(final["policy_hash"]) == 64
+        # The reply carries no test score, accuracy or per-model result.
+        for leak in ("accuracy", "headroom", "delta", "score "):
+            assert leak not in out
+        assert "per_model" in final["result"]["metadata"]
+        assert not (tmp_path / "workspace" / "runs").exists()
+
+    def test_the_host_scorer_only_reads_the_recorded_result(self, tmp_path):
+        from inference_opt.score import StateScorer
+
+        from corral.evaluation.scorer import SubmissionScore
+
+        ledger = {}
+        self._submit(tmp_path, ledger)
+        details = SubmissionScore.model_validate(
+            StateScorer().evaluate_state(self._state(ledger))
         )
-        resolved, _ = resolve_submission(str(tmp_path / "submission.json"), tmp_path)
-        assert resolved == (tmp_path / "policy").resolve()
+        metrics = details.metadata["metrics"]
+        assert {"student_a_accuracy", "student_a_delta", "raw_delta"} <= set(metrics)
+        assert details.metadata["outcome"] == "ok"
+        assert details.metadata["policy_hash"] == ledger["final"]["policy_hash"]
+        assert details.feedback.startswith("score ")
 
-    def test_a_bare_directory_still_resolves(self, tmp_path):
-        policy = self._policy(tmp_path)
-        resolved, notes = resolve_submission(str(policy), tmp_path)
-        assert resolved == policy.resolve()
-        assert notes
+    def test_no_submission_scores_zero_with_a_reason(self):
+        from inference_opt.score import StateScorer
 
-    def test_garbage_falls_back_to_the_workspace_policy(self, tmp_path):
-        self._policy(tmp_path)
-        resolved, _ = resolve_submission("not-a-real-path", tmp_path)
-        assert resolved == (tmp_path / "policy").resolve()
+        result = StateScorer().evaluate_state(self._state({}))
+        assert result["score"] == 0.0
+        assert result["metadata"]["outcome"] == "no_submission"
 
-    def test_nothing_to_score_is_reported_not_guessed(self, tmp_path):
-        resolved, notes = resolve_submission("nope", tmp_path)
-        assert resolved is None
-        assert any("no policy.py" in note for note in notes)
+    def test_an_environment_fault_is_raised_not_scored(self):
+        from inference_opt.score import HarnessError, StateScorer
+
+        state = self._state({"final": {"harness_error": "student unreachable"}})
+        with pytest.raises(HarnessError, match="student unreachable"):
+            StateScorer().evaluate_state(state)
+
+    def test_a_policy_that_does_not_load_uses_no_submission(self, tmp_path):
+        ledger = {}
+        out = self._submit(tmp_path, ledger, "raise ImportError('nope')\n")
+        assert out.startswith("NOT submitted")
+        assert ledger.get("submissions", 0) == 0 and ledger.get("final") is None
+
+    def test_submissions_are_capped(self, tmp_path):
+        ledger = {"submissions": 3}
+        out = self._submit(tmp_path, ledger)
+        assert out.startswith("NOT submitted: all 3 submissions are used")
 
 
 class TestQueryStudent:
@@ -192,66 +246,28 @@ class TestToolErrors:
     def test_a_failed_dry_run_names_the_real_exception(
         self, environments, monkeypatch, tmp_path
     ):
-        from inference_opt.eval_runner.spec import RunSummary
+        from inference_opt.runner import ModelRun
 
         monkeypatch.setattr(
-            "inference_opt.tools.PolicyEvaluator.run",
-            lambda self, spec, targets=None: RunSummary(
-                run_id=spec.run_id, ok=False, error=GROUPED_TRACEBACK
-            ),
+            "inference_opt.tools.run_policy",
+            lambda **kwargs: {
+                model: ModelRun(
+                    model=model,
+                    split="train",
+                    question_ids=list(kwargs["item_ids"]),
+                    error=GROUPED_TRACEBACK,
+                )
+                for model in kwargs["models"]
+            },
         )
         dry = environments["mmlu_pro_a"].tools["dry_run_policy"]._func
-        workspace = tmp_path / "workspace"
-        (workspace / "policy").mkdir(parents=True)
-        (workspace / "policy" / "policy.py").write_text(
-            "class Policy:\n    def solve(self, q, ctx): return 'A'\n"
+        workspace = _workspace_with_policy(
+            tmp_path, "class Policy:\n    def solve(self, q, ctx): return 'A'\n"
         )
         out = dry(policy_path="policy", work_dir=str(workspace), inference_state={})
         headline, payload = out.split("\n")[:2]
         assert headline == "Dry run FAILED: KeyError: 'choices'"
         assert "solver.py" in json.loads(payload)["error"]
-
-
-class TestScoringDiagnostics:
-    def test_tasks_sharing_a_work_dir_keep_their_own_diagnostics(self, tmp_path):
-        """Every task scores under the same work_dir; reports must not collide."""
-        from corral.evaluation.scorer import SubmissionScore
-        from inference_opt.env import load_tasks_from_json
-        from inference_opt.score import policy_score
-
-        root = Path(__file__).resolve().parents[1] / "environments/level_1/tasks_json"
-        tasks = load_tasks_from_json(root, str(tmp_path / "unused"))
-        shared = tmp_path / "workspaces"
-        for task_id in ("mmlu_pro_a", "bbh_a"):
-            config = dict(tasks[task_id].initial_input)
-            config["model_specs"] = {"student_a": "mockllm/model"}
-            config["base_urls"] = {}
-            submission = tmp_path / task_id / "policy"
-            submission.mkdir(parents=True)
-            (submission / "policy.py").write_text(
-                "class Policy:\n"
-                "    def solve(self, q, ctx):\n"
-                "        return ctx.student.generate(q.text)\n"
-            )
-            scorer = policy_score(config, str(shared))
-            # Corral records the feedback and metadata next to the score.
-            details = SubmissionScore.model_validate(
-                scorer.evaluate_submission(str(submission))
-            )
-            metrics = details.metadata["metrics"]
-            assert {"student_a_accuracy", "student_a_delta", "raw_delta"} <= set(metrics)
-            assert details.metadata["outcome"] == "ok"
-            assert "student_a" in details.metadata["per_model"]
-            assert details.feedback.startswith("score ")
-
-        reports = sorted(shared.glob("state/*/scoring_diagnostics.json"))
-        assert [p.parent.name for p in reports] == [
-            "bbh-student_a",
-            "mmlu_pro-student_a",
-        ]
-        for report in reports:
-            payload = json.loads(report.read_text())
-            assert "student_a" in payload["per_model"]
 
 
 class TestHeadroomPassRule:
@@ -275,17 +291,13 @@ class TestHeadroomPassRule:
         ],
     )
     def test_score_is_one_only_when_every_student_closes_half(
-        self, tmp_path, monkeypatch, level, task_id, outcome, expected
+        self, level, task_id, outcome, expected
     ):
-        from inference_opt import score as score_module
-        from inference_opt.env import load_tasks_from_json
-        from inference_opt.outcomes import ItemOutcome, RunOutcome
+        from inference_opt.runner import ModelRun
+        from inference_opt.score import final_result
 
-        root = Path(__file__).resolve().parents[1] / f"environments/level_{level}/tasks_json"
-        config = dict(load_tasks_from_json(root, str(tmp_path / "u"))[task_id].initial_input)
-        config["model_specs"] = {m: "mockllm/model" for m in config["models"]}
-        config["base_urls"] = {}
-        models = iter(config["models"])
+        config = _task_config(level, task_id)
+        question_ids = [f"q{i}" for i in range(30)]
 
         def n_correct(model):
             if outcome[model] == "all":
@@ -294,20 +306,18 @@ class TestHeadroomPassRule:
             baseline_correct = round(config["baselines"][model] * 30)
             return baseline_correct + math.ceil((30 - baseline_correct) / 2) - 1
 
-        correct = {model: n_correct(model) for model in config["models"]}
-
-        def fake_outcomes(log_dir, predictions):
-            n = correct[next(models)]
-            return RunOutcome(items=[ItemOutcome(f"q{i}", i < n) for i in range(30)])
-
-        monkeypatch.setattr(score_module, "read_outcomes", fake_outcomes)
-        submission = tmp_path / "policy"
-        submission.mkdir()
-        (submission / "policy.py").write_text(
-            "class Policy:\n    def solve(self, q, ctx): return ctx.student.generate(q.text)\n"
-        )
-        scorer = score_module.policy_score(config, str(tmp_path / "w"))
-        result = scorer.evaluate_submission(str(submission))
+        runs = {}
+        for model in config["models"]:
+            n = n_correct(model)
+            runs[model] = ModelRun(
+                model=model,
+                split="test",
+                question_ids=question_ids,
+                answers=dict.fromkeys(question_ids, "ANSWER: A"),
+                correct={qid: index < n for index, qid in enumerate(question_ids)},
+                calls_used=30,
+            )
+        result = final_result(config, runs)
         assert result["score"] == expected
         assert result["metadata"]["metrics"]["passed"] == expected
         for model in config["models"]:

@@ -10,9 +10,9 @@ from inspect_ai.scorer import (
     match,
 )
 
-__all__ = ["ANSWER_PREFIX", "BenchmarkSpec", "scorer_for", "spec_for"]
+from inference_opt.answers import ANSWER_PREFIX
 
-ANSWER_PREFIX = "ANSWER:"
+__all__ = ["ANSWER_PREFIX", "BenchmarkSpec", "scorer_for", "spec_for"]
 
 
 def scorer_for(benchmark: str, answer_format: str) -> Scorer:

@@ -20,9 +20,9 @@ from corral.core.environment import (
 )
 from corral.core.task import TaskDefinition
 from corral.report.logging import event, exception_fields
-from inference_opt.budget import BudgetSpec, StateLedger
+from inference_opt.budget import LEDGER_RESOURCE, BudgetSpec, StateLedger
+from inference_opt.score import StateScorer
 from inference_opt.task_prompts import task_prompt
-from inference_opt.score import policy_score
 from inference_opt.tools import create_tools
 
 if TYPE_CHECKING:
@@ -31,14 +31,11 @@ if TYPE_CHECKING:
 __all__ = ["InferenceOptEnvironment", "create_environments", "load_tasks_from_json"]
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", ".corral/workspaces")
-LEDGER_RESOURCE = "inference_state"
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 
 
-def load_tasks_from_json(
-    json_path: str | Path, work_dir: str
-) -> dict[str, TaskDefinition]:
+def load_tasks_from_json(json_path: str | Path) -> dict[str, TaskDefinition]:
     """Load task definitions and bind each to its scorer."""
     path = Path(json_path)
     files = sorted(path.glob("*.json")) if path.is_dir() else [path]
@@ -60,14 +57,15 @@ def load_tasks_from_json(
             name=entry["name"],
             description=entry["description"],
             tools=list(entry.get("tools", [])),
-            scoring_fn=policy_score(config, work_dir),
+            # submit_policy runs the test split inside the episode and records
+            # the result; scoring only reads it back from committed state.
+            scoring_fn=_scored_from_state,
+            state_scoring_fn=StateScorer(),
             submission_format=entry.get("submission_format", "submission.json"),
             initial_input=config,
             prompt_fn=task_prompt,
             setup_fn=_prepare_workspace,
-            # The scorer needs the path resolved against the re-materialised
-            # workspace so the scorer can find the submitted files.
-            resolve_answer=True,
+            resolve_answer=False,
         )
     return tasks
 
@@ -79,7 +77,6 @@ def _bind_endpoints(models: list[str], configured: Any) -> dict[str, str]:
     for model in models:
         key = "CORRAL_VLLM_URL_" + re.sub(r"[^A-Z0-9]+", "_", model.upper()).strip("_")
         base_urls.setdefault(model, os.environ.get(key, default))
-    # The eval runner hands these to Inspect, which expects the ``/v1`` root.
     return {model: _v1_root(url) for model, url in base_urls.items()}
 
 
@@ -118,10 +115,9 @@ def _seed_workspace(root: Path, policy_api: str = "primitive") -> None:
             if item.is_file():
                 shutil.copyfile(item, policy_dir / item.name)
 
-    for name, body in (("notes.md", "# Notes\n\nWhat I have learned about this student so far.\n"),):
-        path = root / name
-        if not path.exists():
-            path.write_text(body, encoding="utf-8")
+    notes = root / "notes.md"
+    if not notes.exists():
+        notes.write_text("# Notes\n\nWhat I have learned about this student so far.\n", "utf-8")
 
 
 def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSetup:
@@ -132,8 +128,14 @@ def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSe
     if workspace:
         _seed_workspace(Path(workspace), str(config.get("policy_api", "primitive")))
     return EnvironmentSetup(
-        hidden_arguments={"work_dir": workspace},
         status="Policy workspace prepared with guide, starter policy and state.",
+    )
+
+
+def _scored_from_state(answer: Any) -> float:
+    raise RuntimeError(
+        "inference_opt is scored from committed state by StateScorer, not from "
+        f"the submitted answer {answer!r}"
     )
 
 
@@ -190,7 +192,7 @@ def create_environments(
         operation="create",
     )
     try:
-        tasks = load_tasks_from_json(source, work_dir)
+        tasks = load_tasks_from_json(source)
         environments = {
             task_id: InferenceOptEnvironment(
                 task_id=task_id,

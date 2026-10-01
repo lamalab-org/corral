@@ -9,10 +9,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from inference_opt.api import Question
-
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterable
 
 __all__ = [
     "BENCHMARKS",
@@ -21,12 +19,10 @@ __all__ = [
     "FrozenItem",
     "Split",
     "data_root",
-    "iter_questions",
     "load_items",
     "load_manifest",
     "load_targets",
     "public_record",
-    "to_question",
     "write_jsonl",
 ]
 
@@ -43,19 +39,6 @@ BENCHMARKS: tuple[str, ...] = (
 )
 
 Split = Literal["train", "test"]
-
-#: Fields exposed to policy execution. The target is not included.
-PUBLIC_FIELDS: tuple[str, ...] = (
-    "item_id",
-    "benchmark",
-    "sample_id",
-    "split",
-    "question",
-    "options",
-    "answer_format",
-    "category",
-    "subcategory",
-)
 
 
 class DatasetError(RuntimeError):
@@ -100,15 +83,6 @@ class FrozenItem:
     reference_accuracy: float | None = None
     question_hash: str | None = None
 
-    @property
-    def answer_type(self) -> str:
-        """Map the storage-level format onto the policy-facing answer type."""
-        if self.answer_format in ("mcq_single", "mcq_multi"):
-            return "mcq"
-        if self.answer_format == "numeric":
-            return "numeric"
-        return "text"
-
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> FrozenItem:
         options = record.get("options")
@@ -130,8 +104,8 @@ class FrozenItem:
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         raise DatasetError(
-            f"frozen dataset file not found: {path}. Build it with "
-            "scripts/build_pool.py then scripts/freeze_dataset.py."
+            f"frozen dataset file not found: {path}; set CORRAL_INFERENCE_DATA_DIR "
+            "to a mounted dataset"
         )
     records: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as stream:
@@ -240,30 +214,3 @@ def public_record(item: FrozenItem) -> dict[str, Any]:
     if item.options:
         record["options"] = list(item.options)
     return record
-
-
-def to_question(item: FrozenItem, index: int = 0, total: int = 1) -> Question:
-    """Convert a frozen item into the policy-facing :class:`~inference_opt.api.Question`."""
-    labels = (
-        tuple(chr(ord("A") + position) for position in range(len(item.options)))
-        if item.options
-        else None
-    )
-    return Question(
-        id=item.item_id,
-        text=item.question,
-        benchmark=item.benchmark,
-        answer_type=item.answer_type,  # type: ignore[arg-type]
-        choices=item.options,
-        choice_labels=labels,
-        topic=item.category,
-        index=index,
-        total=total,
-    )
-
-
-def iter_questions(items: Sequence[FrozenItem]) -> Iterator[Question]:
-    """Yield questions with ``index``/``total`` populated for pacing."""
-    total = len(items)
-    for index, item in enumerate(items):
-        yield to_question(item, index=index, total=total)

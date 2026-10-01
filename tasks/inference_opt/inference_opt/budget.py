@@ -1,127 +1,22 @@
-"""In-memory run meters and Corral-backed task state."""
+"""The task ledger, kept in Corral state."""
 
 from __future__ import annotations
 
-import threading
 from dataclasses import asdict, dataclass
 from typing import Any
 
 from inference_opt.api import BudgetExhausted
 
 __all__ = [
-    "Budget",
+    "LEDGER_RESOURCE",
     "BudgetExhausted",
     "BudgetSpec",
-    "QuestionAllocator",
     "RunRecord",
     "StateLedger",
 ]
-RESERVED_FRACTION = 0.7
 
-
-@dataclass
-class Budget:
-    """In-memory meter for one policy run."""
-
-    max_experiments: int = 20
-    max_debug_questions: int = 10
-    max_student_calls: int = 250
-    max_output_tokens: int = 0
-    experiments: int = 0
-    debug_questions: int = 0
-    student_calls: int = 0
-    output_tokens: int = 0
-
-    def reserve_experiment(self, calls: int) -> None:
-        if self.experiments >= self.max_experiments:
-            raise BudgetExhausted(
-                f"experiment budget exhausted ({self.max_experiments} used)"
-            )
-        self._reserve_calls(calls)
-        self.experiments += 1
-
-    def reserve_student_call(self, count: int = 1) -> None:
-        self._reserve_calls(count)
-
-    def reserve_debug(self, calls: int = 1) -> None:
-        if self.debug_questions >= self.max_debug_questions:
-            raise BudgetExhausted(
-                f"debug-question budget exhausted ({self.max_debug_questions} used)"
-            )
-        self._reserve_calls(calls)
-        self.debug_questions += 1
-
-    def record_tokens(self, tokens: int) -> None:
-        self.output_tokens += max(0, tokens)
-        if 0 < self.max_output_tokens < self.output_tokens:
-            raise BudgetExhausted(
-                f"output-token budget exhausted ({self.output_tokens}/{self.max_output_tokens})"
-            )
-
-    @property
-    def calls_remaining(self) -> int:
-        return max(0, self.max_student_calls - self.student_calls)
-
-    def _reserve_calls(self, calls: int) -> None:
-        if calls < 0:
-            raise ValueError("cannot reserve a negative number of calls")
-        if self.student_calls + calls > self.max_student_calls:
-            raise BudgetExhausted(
-                f"student inference budget exhausted ({self.student_calls}/{self.max_student_calls} used, {calls} more requested)"
-            )
-        self.student_calls += calls
-
-    def snapshot(self) -> dict[str, int]:
-        return {
-            "experiments": self.experiments,
-            "debug_questions": self.debug_questions,
-            "student_calls": self.student_calls,
-            "output_tokens": self.output_tokens,
-            "max_experiments": self.max_experiments,
-            "max_debug_questions": self.max_debug_questions,
-            "max_student_calls": self.max_student_calls,
-        }
-
-
-class QuestionAllocator:
-    """Split a run's calls between per-question reserves and a shared pool."""
-
-    def __init__(self, total_calls: int, questions: int, per_question_cap: int) -> None:
-        if questions < 1:
-            raise ValueError("a run needs at least one question")
-        self.total_calls = max(0, total_calls)
-        self.questions = questions
-        self.per_question_cap = max(1, per_question_cap)
-        self.reserve_each = int(self.total_calls * RESERVED_FRACTION) // questions
-        self.pool = self.total_calls - self.reserve_each * questions
-        self._used: dict[str, int] = {}
-        self._lock = threading.RLock()
-
-    def allowance(self, question_id: str) -> int:
-        with self._lock:
-            used = self._used.get(question_id, 0)
-            return min(
-                max(0, self.per_question_cap - used),
-                max(0, self.reserve_each - used) + max(0, self.pool),
-            )
-
-    def charge(self, question_id: str, calls: int) -> None:
-        with self._lock:
-            used = self._used.get(question_id, 0)
-            if used + calls > self.per_question_cap:
-                raise BudgetExhausted(f"per-question cap reached for {question_id}")
-            from_pool = max(0, calls - max(0, self.reserve_each - used))
-            if from_pool > self.pool:
-                raise BudgetExhausted(
-                    f"run call budget exhausted at question {question_id}"
-                )
-            self.pool -= from_pool
-            self._used[question_id] = used + calls
-
-    @property
-    def used_total(self) -> int:
-        with self._lock:
-            return sum(self._used.values())
+#: The Corral resource that holds the ledger in committed state.
+LEDGER_RESOURCE = "inference_state"
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,9 +29,11 @@ class BudgetSpec:
     max_reveals: int = 4
     max_probe_calls: int = 30
     reveal_batch: int = 5
+    #: Test-split runs of a submitted policy; the score shown is the last one.
+    max_submissions: int = 3
 
     @classmethod
-    def from_mapping(cls, raw: dict[str, Any] | None) -> "BudgetSpec":
+    def from_mapping(cls, raw: dict[str, Any] | None) -> BudgetSpec:
         if not raw:
             return cls()
         known = {key: raw[key] for key in raw if key in cls.__dataclass_fields__}
@@ -160,7 +57,6 @@ class RunRecord:
     calls_used: int = 0
     note: str = ""
     error: str = ""
-    created_at: str = ""
 
 
 class StateLedger:
@@ -178,6 +74,9 @@ class StateLedger:
             "revealed_ids": [],
             "runs": [],
             "best_run_id": None,
+            "submissions": 0,
+            # The hidden test result of the last submission; never shown to the agent.
+            "final": None,
         }.items():
             state.setdefault(key, default)
 
@@ -227,8 +126,11 @@ class StateLedger:
                 )
         self.state.update(proposed)
 
-    def refund(self, *, calls: int = 0) -> None:
+    def refund(self, *, calls: int = 0, experiments: int = 0, debug_runs: int = 0) -> None:
+        """Give back what a run reserved but did not use."""
         self.state["student_calls"] = max(0, int(self.state["student_calls"]) - calls)
+        self.state["experiments"] = max(0, self.experiments - experiments)
+        self.state["debug_runs"] = max(0, int(self.state["debug_runs"]) - debug_runs)
 
     def record_run(self, record: RunRecord) -> None:
         self.runs.append(asdict(record))
@@ -261,6 +163,7 @@ class StateLedger:
             - int(self.state["student_calls"]),
             "reveals": self.spec.max_reveals - int(self.state["reveals"]),
             "probe_calls": self.spec.max_probe_calls - int(self.state["probe_calls"]),
+            "submissions": self.spec.max_submissions - int(self.state["submissions"]),
         }
 
     def snapshot(self) -> dict[str, Any]:
@@ -271,6 +174,7 @@ class StateLedger:
                 "student_calls": int(self.state["student_calls"]),
                 "reveals": int(self.state["reveals"]),
                 "probe_calls": int(self.state["probe_calls"]),
+                "submissions": int(self.state["submissions"]),
             },
             "limits": asdict(self.spec),
             "remaining": self.remaining(),

@@ -27,10 +27,12 @@ from corral.runtime.permissions import (
     private_controller_types,
     set_bulk_channel,
 )
+from corral.runtime.service_channel import set_channel
 
 
 def main() -> None:
-    request, descriptor, bulk_descriptor = sys.argv[1:]
+    request, descriptor, bulk_descriptor, *rest = sys.argv[1:]
+    service = int(rest[0]) if rest else -1
     # This file is written by the root controller in its private directory.
     with Path(request).open("rb") as stream:
         (
@@ -114,7 +116,14 @@ def main() -> None:
         Path(request).parent / "root",
         uid,
         gid,
-        keep_fds={0, 1, 2, output.fileno(), bulk},
+        keep_fds={
+            0,
+            1,
+            2,
+            output.fileno(),
+            bulk,
+            *((service,) if service >= 0 else ()),
+        },
         workspace_fd=workspace_fd,
         workspace_access=workspace_access,
         resource_mounts=resource_mounts,
@@ -135,6 +144,7 @@ def main() -> None:
     # Linux clears the parent-death signal when credentials change.
     bind_bootstrap_parent(parent_pid)
     set_bulk_channel(bulk)
+    set_channel(service if service >= 0 else None)
     try:
         if kind == "agent":
             if isinstance(agent, _DelegatedAgent):
