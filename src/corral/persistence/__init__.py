@@ -6,6 +6,7 @@ from corral.persistence.artifacts import (
     ArtifactStore,
     ArtifactStoreError,
     LocalArtifactStore,
+    PrivateArtifacts,
     StoredBlob,
 )
 from corral.persistence.base import (
@@ -44,6 +45,7 @@ __all__ = [
     "CommitStoreError",
     "ExecutionShard",
     "LocalArtifactStore",
+    "PrivateArtifacts",
     "SQLiteCommitStore",
     "ShardedCommitStore",
     "StoredBlob",
