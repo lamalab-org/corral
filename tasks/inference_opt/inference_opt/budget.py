@@ -57,6 +57,8 @@ class RunRecord:
     calls_used: int = 0
     note: str = ""
     error: str = ""
+    #: ``blob_ref`` of the run's archived graded logs; empty outside Corral.
+    private_artifact: str = ""
 
 
 class StateLedger:

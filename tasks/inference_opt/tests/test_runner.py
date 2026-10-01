@@ -49,6 +49,7 @@ def _run(
     models=("m",),
     examples=None,
     time_limit_s=None,
+    save_private=None,
 ):
     workspace = tmp_path / "workspace"
     (workspace / "policy").mkdir(parents=True, exist_ok=True)
@@ -71,6 +72,7 @@ def _run(
         item_ids=[item.item_id for item in _items(benchmark, n)],
         backends=backends or {model: MockBackend() for model in models},
         time_limit_s=time_limit_s,
+        save_private=save_private,
     )
     return workspace, runs
 
@@ -141,6 +143,28 @@ class TestWorkspaceCopy:
         logs = list((private_root(workspace) / "exp-1" / "m" / "log").glob("*.json"))
         assert logs
         assert all(not log.resolve().is_relative_to(workspace.resolve()) for log in logs)
+
+    def test_the_private_folder_is_archived_with_its_targets(self, tmp_path):
+        import tarfile
+
+        saved = []
+
+        def save(path):
+            saved.append(path.read_bytes())
+            return "blob:sha256:" + "0" * 64
+
+        _, runs = _run(tmp_path, _gold_policy(BENCHMARK), save_private=save)
+
+        assert runs["m"].private_artifact == "blob:sha256:" + "0" * 64
+        archive = tmp_path / "archive.tar.gz"
+        archive.write_bytes(saved[0])
+        with tarfile.open(archive) as tar:
+            names = tar.getnames()
+            log = next(name for name in names if name.endswith(".json") and "/log/" in name)
+            graded = tar.extractfile(log).read().decode()
+        target = datasets.load_targets(BENCHMARK, "train")[_items()[0].item_id]
+        assert {"exp-1/m/predictions.jsonl", "exp-1/m/student_calls.jsonl"} <= set(names)
+        assert f'"target": "{target}"' in graded
 
     def test_a_rerun_replaces_the_previous_copy(self, tmp_path):
         workspace, _ = _run(tmp_path, _gold_policy(BENCHMARK))

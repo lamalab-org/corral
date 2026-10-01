@@ -171,6 +171,13 @@ class TestSubmission:
         assert result["score"] == 0.0
         assert result["metadata"]["outcome"] == "no_submission"
 
+    def test_the_score_carries_the_train_history(self):
+        from inference_opt.score import StateScorer
+
+        runs = [{"run_id": "exp-1", "kind": "experiment", "delta": 0.1}]
+        result = StateScorer().evaluate_state(self._state({"runs": runs}))
+        assert result["metadata"]["train_history"] == runs
+
     def test_an_environment_fault_is_raised_not_scored(self):
         from inference_opt.score import HarnessError, StateScorer
 

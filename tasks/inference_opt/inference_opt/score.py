@@ -217,17 +217,23 @@ class StateScorer:
 
     def evaluate_state(self, state: ExecutionState) -> dict[str, Any]:
         resources = state.environment.values.get("resources") or {}
-        final = (resources.get(LEDGER_RESOURCE) or {}).get("final")
+        ledger = resources.get(LEDGER_RESOURCE) or {}
+        final = ledger.get("final")
         if not final:
-            return ScoreReport(
+            result = ScoreReport(
                 outcome=ScoreOutcome.NO_SUBMISSION,
                 notes=["no policy was submitted with submit_policy"],
             ).result()
-        if final.get("harness_error"):
+        elif final.get("harness_error"):
             raise HarnessError(str(final["harness_error"]))
-        result = dict(final["result"])
+        else:
+            result = dict(final["result"])
         metadata = dict(result.get("metadata") or {})
-        metadata["policy_hash"] = final.get("policy_hash", "")
-        metadata["submission"] = final.get("submission", 0)
+        if final:
+            metadata["policy_hash"] = final.get("policy_hash", "")
+            metadata["submission"] = final.get("submission", 0)
+            metadata["private_artifact"] = final.get("private_artifact", "")
+        # Every dry run and experiment, in order: how the policy improved on train.
+        metadata["train_history"] = list(ledger.get("runs") or [])
         result["metadata"] = metadata
         return result

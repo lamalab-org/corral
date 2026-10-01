@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from inference_opt.env import LEDGER_RESOURCE, create_environments
@@ -46,6 +47,35 @@ def test_initial_event_seeds_the_ledger(tmp_path):
     assert ledger["reveals"] == 0
     assert ledger["revealed_ids"] == []
     assert LEDGER_RESOURCE not in started.environment["hidden_arguments"]
+
+
+def test_each_run_keeps_its_graded_logs_out_of_the_workspace(tmp_path, monkeypatch):
+    import asyncio
+    import tarfile
+
+    from inference_opt import runner
+    from inference_opt.gateway import MockBackend
+
+    monkeypatch.setattr(runner, "backend_for", lambda *_args: MockBackend())
+    definition = create_environments(level=1, work_dir=str(tmp_path))["mmlu_pro_a"]
+    environment = definition.for_task("ledger-test")
+    seed = environment.initial_event(execution_id="ledger-test").environment
+    state = _state(environment, dict(seed))
+    policy = Path(environment.workspace_path) / "policy" / "policy.py"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        "def solve(question, ctx):\n    return ctx.student.generate(question.text)\n"
+    )
+
+    _, state = _call(environment, state, "dry_run_policy", {}, "dry")
+
+    record = state.environment.values["resources"][LEDGER_RESOURCE]["runs"][0]
+    store = environment.workspace_manager.artifact_store
+    archive = tmp_path / "dry-1.tar.gz"
+    archive.write_bytes(asyncio.run(store.get_bytes(record["private_artifact"])))
+    with tarfile.open(archive) as tar:
+        assert any("/log/" in name for name in tar.getnames())
+    assert not list(Path(environment.workspace_path).rglob("log/*.json"))
 
 
 def test_charges_persist_between_tool_calls(tmp_path):

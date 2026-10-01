@@ -11,8 +11,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,6 +71,8 @@ class ModelRun:
     #: The student never answered; the environment, not the policy, failed.
     infrastructure_error: str = ""
     grading_error: str = ""
+    #: ``blob_ref`` of the archived private folder, when the run was saved.
+    private_artifact: str = ""
 
     @property
     def n_items(self) -> int:
@@ -114,8 +118,13 @@ def run_policy(
     max_tokens_cap: int = MAX_TOKENS_CAP,
     time_limit_s: int | None = None,
     backends: dict[str, Backend] | None = None,
+    save_private: Callable[[Path], str] | None = None,
 ) -> dict[str, ModelRun]:
-    """Run ``policy_dir`` on one split for each model, side by side, and grade it."""
+    """Run ``policy_dir`` on one split for each model, side by side, and grade it.
+
+    ``save_private`` keeps the run's private folder (graded logs, targets and
+    student calls) with the trial and returns its reference.
+    """
     work_dir = Path(work_dir).resolve()
     benchmark = str(config["benchmark"])
     items = datasets.load_items(benchmark, split)  # type: ignore[arg-type]
@@ -189,13 +198,26 @@ def run_policy(
             )
         if not run.load_error:
             _grade(run, records, targets, private / model, benchmark)
+        _write_copy(run, private / model, run_id)
         if write_copy:
             _write_copy(run, workspace_copy / model, run_id)
         return run
 
     with ThreadPoolExecutor(max_workers=max(1, len(models))) as pool:
         runs = list(pool.map(one, models))
+    if save_private is not None:
+        ref = save_private(_archive(private))
+        for run in runs:
+            run.private_artifact = ref
     return {run.model: run for run in runs}
+
+
+def _archive(folder: Path) -> Path:
+    """Pack one run's private folder, graded logs included, into a single file."""
+    archive = folder.with_name(f"{folder.name}.tar.gz")
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(folder, arcname=folder.name)
+    return archive
 
 
 def _execute_host(
@@ -319,15 +341,10 @@ def _grade(
         run.grading_error = summary.error[-4000:]
         return
     run.correct = {item.item_id: item.correct for item in read_outcomes(spec.log_dir)}
-    # Student calls and graded logs stay here, not in the workspace.
-    (out_dir / "student_calls.jsonl").write_text(
-        "".join(json.dumps(call, ensure_ascii=False) + "\n" for call in run.calls),
-        encoding="utf-8",
-    )
 
 
 def _write_copy(run: ModelRun, folder: Path, run_id: str) -> None:
-    """What the agent may read about a train run: no targets anywhere."""
+    """Answers, right or wrong, calls and a summary for one run; never a target."""
     folder.mkdir(parents=True, exist_ok=True)
     with (folder / "predictions.jsonl").open("w", encoding="utf-8") as stream:
         for item_id in run.question_ids:

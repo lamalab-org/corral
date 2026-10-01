@@ -6,10 +6,12 @@ import hashlib
 import json
 import random
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from corral.core.tool import Tool, tool
+from corral.core.transition import CORRAL_PRIVATE_ARTIFACTS_ARGUMENT
 from inference_opt import datasets
 from inference_opt.budget import LEDGER_RESOURCE, BudgetSpec, RunRecord, StateLedger
 from inference_opt.client import probe_student
@@ -28,6 +30,11 @@ _TOOL = {
     "trusted": True,
     "resources": (LEDGER_RESOURCE,),
 }
+#: Tools that run a policy also keep each run's graded logs with the trial.
+_RUN_TOOL = {
+    **_TOOL,
+    "hidden_args": [*_TOOL["hidden_args"], CORRAL_PRIVATE_ARTIFACTS_ARGUMENT],
+}
 
 
 def _compact(payload: dict[str, Any], summary: str, ledger: StateLedger) -> str:
@@ -41,6 +48,11 @@ def _compact(payload: dict[str, Any], summary: str, ledger: StateLedger) -> str:
             "submit_answer('submission.json') NOW - an unsubmitted policy scores nothing."
         )
     return "\n".join(lines)
+
+
+def _saver(private_artifacts: Any) -> Callable[[Path], str] | None:
+    """Corral's private store when the tool runs under Corral, else nothing."""
+    return None if private_artifacts is None else private_artifacts.save
 
 
 def _idle_warning(runs: list[ModelRun]) -> str:
@@ -261,12 +273,13 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
 
     # -- running a policy -------------------------------------------------------
 
-    @tool(**_TOOL)
+    @tool(**_RUN_TOOL)
     def dry_run_policy(
         policy_path: str = "policy",
         question_ids: str = "",
         work_dir: str = "",
         inference_state: Any = None,
+        corral_private_artifacts: Any = None,
     ) -> str:
         """Run a policy through the evaluation pipeline on a small sample.
 
@@ -301,6 +314,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             budget_per_model=budget,
             examples=_examples(ledger),
             item_ids=wanted,
+            save_private=_saver(corral_private_artifacts),
         )[models[0]]
         if run.load_error:
             ledger.refund(calls=budget, debug_runs=1)
@@ -330,6 +344,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 n_correct=run.n_correct,
                 calls_used=run.calls_used,
                 error=error_line(run.error or run.infrastructure_error),
+                private_artifact=run.private_artifact,
             )
         )
         failed = run.error or run.infrastructure_error
@@ -354,12 +369,13 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             ledger,
         )
 
-    @tool(**_TOOL)
+    @tool(**_RUN_TOOL)
     def evaluate_candidate(
         policy_path: str = "policy",
         note: str = "",
         work_dir: str = "",
         inference_state: Any = None,
+        corral_private_artifacts: Any = None,
     ) -> str:
         """Evaluate a policy on the training split.
 
@@ -386,6 +402,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             models=models,
             budget_per_model=model_budget,
             examples=_examples(ledger),
+            save_private=_saver(corral_private_artifacts),
         )
         load_error = next((run.load_error for run in runs.values() if run.load_error), "")
         if load_error:
@@ -407,6 +424,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             n_items=next(iter(runs.values())).n_items,
             calls_used=used,
             note=note[:200],
+            private_artifact=next(iter(runs.values())).private_artifact,
         )
         ledger.record_run(record)
         verdicts = "; ".join(
@@ -532,7 +550,11 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             JSON with the experiment ledger and the best run so far.
         """
         ledger = _ledger(inference_state)
-        experiments = [run for run in ledger.runs if run.get("kind") == "experiment"]
+        experiments = [
+            {key: value for key, value in run.items() if key != "private_artifact"}
+            for run in ledger.runs
+            if run.get("kind") == "experiment"
+        ]
         ordered = sorted(
             experiments, key=lambda run: run.get("delta") or -9.9, reverse=True
         )
@@ -566,12 +588,13 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         ledger = _ledger(inference_state)
         return _compact(ledger.snapshot(), ledger.advice(), ledger)
 
-    @tool(**_TOOL)
+    @tool(**_RUN_TOOL)
     def submit_policy(
         policy_path: str = "policy",
         rationale: str = "",
         work_dir: str = "",
         inference_state: Any = None,
+        corral_private_artifacts: Any = None,
     ) -> str:
         """Submit the final policy: it runs once on the held-out test questions.
 
@@ -595,16 +618,18 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 ledger,
             )
         policy_hash = _policy_hash(policy_dir)
+        run_id = ledger.next_run_id("final")
         runs = run_policy(
             config=config,
             work_dir=Path(work_dir),
-            run_id=ledger.next_run_id("final"),
+            run_id=run_id,
             policy_dir=policy_dir,
             split="test",
             models=models,
             budget_per_model=int(config["final_max_student_calls"]),
             examples=_examples(ledger),
             write_copy=False,
+            save_private=_saver(corral_private_artifacts),
         )
         load_error = next((run.load_error for run in runs.values() if run.load_error), "")
         if load_error:
@@ -616,7 +641,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             "policy_hash": policy_hash,
             "policy_dir": policy_path,
             "submission": used + 1,
+            "run_id": run_id,
             "submitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "private_artifact": next(iter(runs.values())).private_artifact,
         }
         try:
             final["result"] = final_result(config, runs)
