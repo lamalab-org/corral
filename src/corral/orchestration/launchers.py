@@ -294,8 +294,13 @@ class DockerTaskLauncher:
         build_context: str | Path | None = None,
         dockerfile: str | Path | None = None,
         build_args: Mapping[str, str] | None = None,
+        rebuild: bool = False,
     ) -> DockerSandboxSpec:
-        """Ensure an image exists before trials start and pin it to an image ID."""
+        """Ensure an image exists before trials start and pin it to an image ID.
+
+        ``rebuild`` builds even when the tag exists, so a changed checkout is
+        not silently run from an older image.
+        """
         if spec.image_digest is not None:
             await _command(
                 docker_executable,
@@ -315,7 +320,8 @@ class DockerTaskLauncher:
             output_limit=32_000,
             check=False,
         )
-        if code != 0:
+        can_build = build_context is not None and dockerfile is not None
+        if code != 0 or (rebuild and can_build):
             if build_context is not None and dockerfile is not None:
                 await _command(
                     docker_executable,
