@@ -87,22 +87,22 @@ PROMPT = """You are choosing an item bank for a short computerized adaptive test
 
 You have calibration responses, an independent holdout sample, and the vendor's item review. The vendor recommends its full bank because it carries the most item information, and its review flags some items.
 
-Choose a bank, and report which item pairs are locally dependent, which vendor flags the responses do not support, and which items behave differently in the holdout sample.
+Choose a bank, and report which item pairs, if any, are locally dependent, which vendor flags, if any, the responses do not support, and which items, if any, behave differently in the holdout sample.
 """
 
 SUBMISSION_FORMAT = """A single JSON object:
 
 {
   "bank_choice": "vendor_bank|screened_bank",
-  "dependent_pairs": [["CATxx", "CATyy"]],
-  "unsupported_vendor_flags": ["CATxx"],
-  "unstable_items": ["CATxx"],
-  "recommendation": "use_for_adaptive_testing|do_not_use_without_recalibration"
+  "dependent_pairs": [["CATxx", "CATyy"], ...],
+  "unsupported_vendor_flags": ["CATxx", ...],
+  "unstable_items": ["CATxx", ...],
+  "recommendation": "do_not_use_without_recalibration|use_for_adaptive_testing"
 }
 
 `screened_bank` means the vendor bank with the redundant half of each dependent
 pair and every unstable item removed. `dependent_pairs` lists every locally
-dependent pair the responses show, whether or not the vendor flagged it.
+dependent pair the responses show.
 `unsupported_vendor_flags` lists items the vendor flagged that the responses do
 not justify. No model syntax or working is required."""
 
@@ -297,9 +297,7 @@ def write_memo(path):
         "The vendor recommends its full twenty-item bank. Its case is that the bank "
         "carries more item information than any reduced version, and that the items it "
         "marked for attention in the latest review are the ones to watch.\n\n"
-        "The recommendation rests on information computed from the calibration fit. No "
-        "one has checked the vendor's flags against the responses, looked for items that "
-        "behave differently in the holdout sample, or simulated the adaptive test itself.\n"
+        "The recommendation rests on information computed from the calibration fit.\n"
     )
 
 

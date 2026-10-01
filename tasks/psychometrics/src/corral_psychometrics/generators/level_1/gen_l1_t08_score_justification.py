@@ -110,8 +110,6 @@ score. Classify each instrument as exactly one of:
   subscales_only       separate subscale scores, but no defensible total
   total_and_subscales  both
   none                 neither
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\

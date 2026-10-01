@@ -114,13 +114,13 @@ You are given responses from an online personality survey. The codebook describe
 every column.
 
 Read the data and select participants from the United States. Two instruments were \
-administered. Determine which of them supports a comparison of men and women - that \
-is, which one measures the same thing in both groups - and report the size of the \
-gender difference on it, as the standardised coefficient of the latent trait regressed \
+administered. Determine whether either of them supports a comparison of men and \
+women - that is, measures the same thing in both groups - and, for an instrument \
+that does, report the size of the gender difference on it, as the standardised coefficient of the latent trait regressed \
 on `gender`.
 
-Also report which items, in the instrument that does not support the comparison, \
-function differently across gender.
+Also report every item, in either instrument, that functions differently across \
+gender.
 
 Restrict the comparison to respondents who reported male or female.\
 """
@@ -129,9 +129,9 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<lavaan syntax for the instrument you selected>",
-  "latent_difference": <float>,
-  "biased_items": ["<items in the OTHER instrument that function differently>"]
+  "model_syntax": "<lavaan syntax for the instrument you report the difference on>",
+  "latent_difference": <float, or null if neither instrument supports the comparison>,
+  "biased_items": ["<item>", ...]
 }
 
 `model_syntax` uses lavaan notation (`=~` loadings, `~` regressions, `~~`

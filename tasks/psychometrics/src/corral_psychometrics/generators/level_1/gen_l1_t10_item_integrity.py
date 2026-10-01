@@ -76,16 +76,15 @@ You are given responses from an online personality survey run in several countri
 The codebook describes every column.
 
 The survey contains two instruments. Using the participants from the United States, \
-work through the Hypersensitive Narcissism Scale item by item and classify each of \
-its items as exactly one of:
+classify each item of the Hypersensitive Narcissism Scale as exactly one of:
 
   sound                the item is doing its job
   mis_keyed            the item was stored with its scale reversed
   missing_as_neutral   non-responses were recorded as the middle category
-  truncated_scale      the upper part of the response scale was never recorded
+  truncated_scale      one end of the response scale was never recorded
+  duplicated_item      the column repeats another item's responses
+  out_of_range         values outside the response scale were recorded
   weak_item            nothing is wrong with the data; the item measures poorly
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\
