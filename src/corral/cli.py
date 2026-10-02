@@ -25,7 +25,6 @@ from dotenv import load_dotenv
 import corral.orchestration as orchestration
 from corral.observability.langfuse import langfuse_enabled
 from corral.persistence import ShardedCommitStore, SQLiteCommitStore
-from corral.run import CorralRunner, execute_task
 from corral.runtime.environment_loader import (
     ENVIRONMENT_NAMES,
     load_environment_group,
@@ -398,6 +397,8 @@ async def run_benchmark(
     agent_kwargs: Mapping[str, Any] | None = None,
 ) -> int:
     """Run one CLI-configured benchmark with the task runner."""
+    from corral.run import CorralRunner
+
     environments = load_environment_group(
         args.environment,
         env_kwargs=args.env_kwargs,
@@ -591,6 +592,8 @@ async def run_benchmark(
 
 async def run_task(args: argparse.Namespace) -> int:
     """Run exactly one independent task without benchmark evaluation/reporting."""
+    from corral.run import execute_task
+
     environments = load_environment_group(
         args.environment,
         env_kwargs=args.env_kwargs,
@@ -826,6 +829,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run scientific agents and benchmarks with Corral.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    from corral.epistemic_analysis.cli import add_arguments as add_analysis_arguments
+
+    analyze = commands.add_parser(
+        "analyze", help="Annotate traces and analyze epistemic patterns."
+    )
+    add_analysis_arguments(analyze)
     run = commands.add_parser(
         "run",
         help="Run one independent task without benchmark evaluation.",
