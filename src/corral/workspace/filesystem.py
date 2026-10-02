@@ -553,16 +553,26 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
         # Restricted workers rebuild these closures against their canonical
         # mount instead of serializing a controller-side physical root.
         item.worker_operation = f"workspace:{name}"
+        # The docstrings describe the canonical /workspace form; a relative
+        # workspace rejects exactly those paths, so say what it does accept.
         if filesystem.path_root == PUBLIC_WORKSPACE_ROOT:
             item.description += " All paths must be absolute /workspace paths; relative paths are forbidden."
-            for parameter_name, parameter in item.params_json_schema[
-                "properties"
-            ].items():
-                if parameter_name in {"path", "paths", "source", "destination"}:
-                    parameter["description"] = (
-                        "Absolute POSIX path(s) under /workspace. Relative paths, "
-                        "parent traversal and symbolic links are forbidden."
-                    )
+            parameter_text = (
+                "Absolute POSIX path(s) under /workspace. Relative paths, "
+                "parent traversal and symbolic links are forbidden."
+            )
+        else:
+            item.description += (
+                " Paths are relative to the workspace root, e.g. 'data.csv'; "
+                "absolute paths are rejected."
+            )
+            parameter_text = (
+                "POSIX path(s) relative to the workspace root, e.g. 'data.csv'. "
+                "Absolute paths, parent traversal and symbolic links are forbidden."
+            )
+        for parameter_name, parameter in item.params_json_schema["properties"].items():
+            if parameter_name in {"path", "paths", "source", "destination"}:
+                parameter["description"] = parameter_text
     return tools
 
 

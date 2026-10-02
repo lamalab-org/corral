@@ -24,10 +24,15 @@ from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
 from corral.core.transition import ToolExecutionResult
 from corral.report.logging import event, exception_fields
 from corral.runtime import permissions
+from corral.runtime.python_repl import PythonREPLTimeoutError
 from corral.tools.python_repl import PythonREPLTool
 
 from corral_psychometrics import paths, score
-from corral_psychometrics.tools import workspace_tools
+from corral_psychometrics.tools import (
+    DEFAULT_REPL_TIMEOUT_MINUTES,
+    timeout_message,
+    workspace_tools,
+)
 
 SCORING_FUNCTIONS: dict[str, Callable[..., dict]] = {
     name: getattr(score, name)
@@ -145,19 +150,24 @@ class PsychometricsEnvironment(Environment):
         checkpoint = hidden.get("analysis_session")
         code = arguments["input_code"]
 
-        if permissions.enabled():
-            result = tool.execute_repl(
-                code=code, checkpoint=checkpoint, workspace=self.workspace_path
-            )
-            output, checkpoint = result.output, result.checkpoint
-        else:
-            session = tool.create_session()
-            try:
-                session.restore(checkpoint)
-                output = session.execute(code)
-                checkpoint = session.snapshot()
-            finally:
-                session.close()
+        try:
+            if permissions.enabled():
+                result = tool.execute_repl(
+                    code=code, checkpoint=checkpoint, workspace=self.workspace_path
+                )
+                output, checkpoint = result.output, result.checkpoint
+            else:
+                session = tool.create_session()
+                try:
+                    session.restore(checkpoint)
+                    output = session.execute(code)
+                    checkpoint = session.snapshot()
+                finally:
+                    session.close()
+        except PythonREPLTimeoutError as exc:
+            # The checkpoint from before the call is kept, so the agent loses
+            # only this call's work.
+            output = timeout_message(exc.timeout_seconds / 60)
 
         hidden["analysis_session"] = checkpoint
         environment["hidden_arguments"] = hidden
@@ -252,12 +262,16 @@ def create_environments(
     level: int = 1,
     work_dir: str | None = None,
     data_root: str | Path | None = None,
+    repl_timeout_minutes: float | None = DEFAULT_REPL_TIMEOUT_MINUTES,
 ) -> dict[str, Environment]:
     """Create one isolated psychometrics environment per generated task.
 
-    `data_root`  which built dataset to read; defaults to the source checkout
-    `work_dir`   where the agents' writable workspaces go
+    `data_root`             which built dataset to read; defaults to the source checkout
+    `work_dir`              where the agents' writable workspaces go
+    `repl_timeout_minutes`  how long one PythonREPL call may run; None for no limit
     """
+    if repl_timeout_minutes is not None and repl_timeout_minutes <= 0:
+        raise ValueError("repl_timeout_minutes must be positive, or None for no limit")
     started = perf_counter()
     root = paths.task_root(data_root)
     work_dir = work_dir or os.environ.get("CORRAL_WORK_DIR", str(root / "CORRAL_WORK_DIR"))
@@ -273,7 +287,12 @@ def create_environments(
             tasks,
             base_work_dir=str(Path(work_dir).expanduser().resolve()),
             name=f"psychometrics-level-{level}",
-            toolset=Toolset(pool={}, workspace_factory=workspace_tools),
+            toolset=Toolset(
+                pool={},
+                workspace_factory=functools.partial(
+                    workspace_tools, repl_timeout_minutes=repl_timeout_minutes
+                ),
+            ),
             env_cls=PsychometricsEnvironment,
         )
     except Exception as exc:
