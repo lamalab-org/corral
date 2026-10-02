@@ -49,7 +49,8 @@ async def extract(trial: Path, out: Path) -> list[str]:
             archive = Path(scratch) / "run.tar.gz"
             await artifacts.materialize(ref, archive)
             with tarfile.open(archive) as tar:
-                tar.extractall(out / run_id, filter="data")
+                # Each archive holds its run folder, so it lands at out/<run_id>.
+                tar.extractall(out, filter="data")
         written.append(run_id)
     return written
 
