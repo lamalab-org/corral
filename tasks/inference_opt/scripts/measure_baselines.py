@@ -19,7 +19,8 @@ baseline. Showing the test number would leak how hard the held-out split is.
 
 ``--splits examples`` instead records each student's reply to the example
 questions, which the agent sees when it reveals them, in
-``inference_opt/data/baselines/examples_v1.jsonl``. Rows for other models are kept.
+``inference_opt/data/baselines/examples_v1.jsonl``. Rows for other models and
+benchmarks are kept.
 """
 
 from __future__ import annotations
@@ -86,13 +87,18 @@ def _patch_tasks(level: int, measured: dict, specs: dict[str, str]) -> int:
 
 
 def _write_example_baselines(results: dict, models: dict[str, str]) -> Path:
-    """Replace the measured models' rows in the example baselines file."""
+    """Replace the rows of each measured model and benchmark; keep every other row."""
     path = datasets.example_baselines_path()
+    measured = {
+        (model, benchmark)
+        for (model, benchmark, split) in results
+        if split == "examples"
+    }
     kept = []
     if path.is_file():
         kept = [
             row for row in map(json.loads, path.read_text(encoding="utf-8").splitlines())
-            if row["model"] not in models
+            if (row["model"], row["item_id"].split(":", 1)[0]) not in measured
         ]
     rows = [
         {
