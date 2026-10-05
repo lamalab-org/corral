@@ -280,6 +280,27 @@ class TestPolicyShapes:
         )
         assert runs["m"].logs["_run"] == ["['C']"]
 
+    def test_each_student_sees_its_own_baseline_reply(self, tmp_path):
+        example = {
+            **datasets.public_record(datasets.load_items(BENCHMARK, "examples")[0]),
+            "target": "C",
+            "baseline": {
+                "m1": {"correct": True, "completion": "ANSWER: C"},
+                "m2": {"correct": False, "completion": ""},
+            },
+        }
+        _, runs = _run(
+            tmp_path,
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        e = ctx.examples[0]\n"
+            "        ctx.log(f'{e.baseline_correct} {e.baseline_completion!r}')\n",
+            models=("m1", "m2"),
+            examples=[example],
+        )
+        assert runs["m1"].logs["_run"] == ["True 'ANSWER: C'"]
+        assert runs["m2"].logs["_run"] == ["False ''"]
+
     def test_a_policy_that_does_not_load_is_reported(self, tmp_path):
         _, runs = _run(tmp_path, "raise ImportError('missing helper')\n")
         run = runs["m"]

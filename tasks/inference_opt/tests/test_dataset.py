@@ -8,12 +8,16 @@ being matched, that silently corrupts every score measured afterwards.
 from __future__ import annotations
 
 import json
+from collections import Counter
 
 import pytest
 from inference_opt import datasets
 
 TRAIN_PER_BENCHMARK = 30
 TEST_PER_BENCHMARK = 30
+EXAMPLES_PER_BENCHMARK = 30
+
+
 @pytest.fixture(scope="module")
 def manifest():
     return datasets.load_manifest()
@@ -35,6 +39,30 @@ class TestShippedDataset:
         assert not {item.item_id for item in train} & {item.item_id for item in test}
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
+    def test_examples_are_separate_from_the_scored_questions(self, benchmark):
+        """Revealing an example must never show the answer to a scored question."""
+        examples = datasets.load_items(benchmark, "examples")
+        scored = datasets.load_items(benchmark, "train") + datasets.load_items(
+            benchmark, "test"
+        )
+        assert len(examples) == EXAMPLES_PER_BENCHMARK
+        assert not {item.item_id for item in examples} & {item.item_id for item in scored}
+        assert not {item.question_hash for item in examples if item.question_hash} & {
+            item.question_hash for item in scored if item.question_hash
+        }
+
+    @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
+    def test_examples_cover_the_same_topics_as_train(self, benchmark):
+        """bbh has no unused hyperbaton or snarks items, so two of its examples come
+        from other topics."""
+        train = Counter(item.category for item in datasets.load_items(benchmark, "train"))
+        examples = Counter(
+            item.category for item in datasets.load_items(benchmark, "examples")
+        )
+        assert set(examples) <= set(train)
+        assert sum((examples & train).values()) >= EXAMPLES_PER_BENCHMARK - 2
+
+    @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
     def test_the_halves_are_equally_hard(self, benchmark, manifest):
         entry = manifest["per_benchmark"][benchmark]
         gap = abs(
@@ -44,7 +72,7 @@ class TestShippedDataset:
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
     def test_every_item_has_a_label(self, benchmark):
-        for split in ("train", "test"):
+        for split in ("train", "test", "examples"):
             items = datasets.load_items(benchmark, split)
             targets = datasets.load_targets(benchmark, split)
             missing = [item.item_id for item in items if item.item_id not in targets]
@@ -76,10 +104,17 @@ class TestShippedDataset:
         for item in datasets.load_items("bbh"):
             assert "QUESTION:" not in item.question
 
-    def test_chembench_keeps_its_answer_formats(self):
-        formats = {item.answer_format for item in datasets.load_items("chembench")}
-        assert "mcq_single" in formats
-        assert formats <= {"mcq_single", "mcq_multi", "numeric"}
+    def test_chembench_never_says_how_many_options_are_correct(self):
+        """Every multiple-choice question asks for all correct options, as ChemBench does."""
+        items = datasets.load_items("chembench")
+        assert {i.answer_format for i in items if i.options} == {"mcq_multi"}
+        assert {i.answer_format for i in items if not i.options} <= {"numeric"}
+
+    def test_chembench_has_no_chemical_preference_questions(self):
+        assert not [
+            item for item in datasets.load_items("chembench")
+            if item.category == "chemical_preference"
+        ]
 
     def test_categories_are_spread_not_clustered(self):
         """A set drawn from two of bbh's subtasks would measure almost nothing."""

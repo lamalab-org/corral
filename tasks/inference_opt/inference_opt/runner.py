@@ -111,6 +111,15 @@ def private_root(work_dir: Path) -> Path:
     return work_dir.parent / ".inference-opt-private" / work_dir.name
 
 
+def _example_for(example: dict[str, Any], model: str) -> dict[str, Any]:
+    """An example as the host expects it, with ``model``'s own zero-shot reply."""
+    reply = (example.get("baseline") or {}).get(model) or {}
+    record = {key: value for key, value in example.items() if key != "baseline"}
+    record["baseline_correct"] = bool(reply.get("correct"))
+    record["baseline_completion"] = str(reply.get("completion", ""))
+    return record
+
+
 def run_policy(
     *,
     config: dict[str, Any],
@@ -172,7 +181,7 @@ def run_policy(
         request = {
             "policy_dir": "",
             "questions": records,
-            "examples": examples,
+            "examples": [_example_for(example, model) for example in examples],
             "benchmark": benchmark,
             "budget": budget_per_model,
         }

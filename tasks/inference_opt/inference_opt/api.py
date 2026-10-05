@@ -73,7 +73,7 @@ class Question:
 
 @dataclass(frozen=True, slots=True)
 class LabeledExample:
-    """A revealed training question, its gold answer, and the baseline's reply."""
+    """A revealed example question, its gold answer, and the student's zero-shot reply."""
 
     question: Question
     answer: str
@@ -128,7 +128,7 @@ class RunContext:
 
     #: The metered student model.
     student: StudentClient
-    #: The revealed train questions with their gold answers.
+    #: The revealed example questions with their gold answers.
     examples: tuple[LabeledExample, ...]
     #: ``answer(question_id, text)``, or ``answer({question_id: text, ...})``,
     #: records answers straight away; a later answer replaces an earlier one.

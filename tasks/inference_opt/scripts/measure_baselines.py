@@ -16,6 +16,10 @@ several benchmark/split evaluations side by side against the same server.
 
 The agent is shown the **train** baseline; the scorer subtracts the **test**
 baseline. Showing the test number would leak how hard the held-out split is.
+
+``--splits examples`` instead records each student's reply to the example
+questions, which the agent sees when it reveals them, in
+``inference_opt/data/baselines/examples_v1.jsonl``. Rows for other models are kept.
 """
 
 from __future__ import annotations
@@ -75,11 +79,36 @@ def _patch_tasks(level: int, measured: dict, specs: dict[str, str]) -> int:
                 continue
             config["baselines"][model] = entry["test"]["accuracy"]
             config["baselines_train"][model] = entry["train"]["accuracy"]
-            config.setdefault("baseline_items", {})[model] = entry["train"]["per_item"]
             patched += 1
     for path, task in zip(paths, tasks, strict=True):
         path.write_text(json.dumps(task, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return patched
+
+
+def _write_example_baselines(results: dict, models: dict[str, str]) -> Path:
+    """Replace the measured models' rows in the example baselines file."""
+    path = datasets.example_baselines_path()
+    kept = []
+    if path.is_file():
+        kept = [
+            row for row in map(json.loads, path.read_text(encoding="utf-8").splitlines())
+            if row["model"] not in models
+        ]
+    rows = [
+        {
+            "model": model,
+            "model_spec": models[model],
+            "item_id": item_id,
+            "correct": correct,
+            **result.completions.get(item_id, {"completion": "", "finish_reason": ""}),
+        }
+        for (model, _benchmark, split), result in results.items()
+        if split == "examples"
+        for item_id, correct in result.per_item.items()
+    ]
+    rows = sorted(kept + rows, key=lambda row: (row["model"], row["item_id"]))
+    datasets.write_jsonl(path, rows)
+    return path
 
 
 def main() -> None:
@@ -90,6 +119,9 @@ def main() -> None:
                         help="OpenAI-compatible endpoint ending in /v1, either shared "
                              "or name=url per model (repeatable)")
     parser.add_argument("--benchmarks", nargs="*", default=list(datasets.BENCHMARKS))
+    parser.add_argument("--splits", nargs="+", default=["train", "test"],
+                        choices=["train", "test", "examples"],
+                        help="train and test are measured together; examples on its own")
     parser.add_argument("--out", type=Path,
                         default=ROOT / "inference_opt" / "data" / "baselines" / "v1.json")
     parser.add_argument("--write-tasks", action="store_true")
@@ -102,6 +134,9 @@ def main() -> None:
     models = _parse_models(args.model)
     if not models:
         raise SystemExit("at least one --model name=spec is required")
+    scored = [split for split in args.splits if split != "examples"]
+    if scored and sorted(set(scored)) != ["test", "train"]:
+        raise SystemExit("--splits: measure train and test together")
 
     base_urls = _parse_base_urls(args.base_url, models)
     manifest = datasets.load_manifest()
@@ -110,7 +145,7 @@ def main() -> None:
         (model, benchmark, split)
         for model in models
         for benchmark in args.benchmarks
-        for split in ("train", "test")
+        for split in args.splits
     ]
     slots = {model: threading.Semaphore(max(1, args.runs_per_model)) for model in models}
     print_lock = threading.Lock()
@@ -137,6 +172,11 @@ def main() -> None:
     ]
     if failures:
         raise SystemExit("baseline runs failed:\n\n" + "\n\n".join(failures))
+
+    if "examples" in args.splits:
+        print(f"\nwrote {_write_example_baselines(results, models)}")
+    if not scored:
+        return
 
     measured: dict[str, dict] = {}
     rows: list[tuple[str, str, float, float, float, str]] = []

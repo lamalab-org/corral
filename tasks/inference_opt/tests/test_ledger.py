@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from inference_opt import datasets
 from inference_opt.env import LEDGER_RESOURCE, create_environments
 
 from corral.core.resources import RESOURCE_CATALOG_METADATA_KEY
@@ -86,10 +87,12 @@ def test_charges_persist_between_tool_calls(tmp_path):
     seed = environment.initial_event(execution_id="ledger-test").environment
     state = _state(environment, dict(seed))
 
-    _, state = _call(environment, state, "reveal_train_questions", {}, "reveal")
+    _, state = _call(environment, state, "reveal_examples", {}, "reveal")
     committed = state.environment.values["resources"][LEDGER_RESOURCE]
     assert committed["reveals"] == 1
     assert len(committed["revealed_ids"]) == 5
+    examples = {item.item_id for item in datasets.load_items("mmlu_pro", "examples")}
+    assert set(committed["revealed_ids"]) <= examples
 
     result, _ = _call(environment, state, "get_budget", {}, "budget")
     budget = json.loads(result.content.splitlines()[1])

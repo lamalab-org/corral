@@ -15,6 +15,7 @@ Everything else can be defined by you: the order of questions, what is sent side
 Keep any state you need in ordinary Python variables.
 
 Answers are text ending in `ANSWER: <answer>`, or `[ANSWER]<answer>[/ANSWER]` for ChemBench.
+A ChemBench multiple-choice question may have one or more correct options, and nothing says how many: answer with every correct letter, separated by commas (`[ANSWER]A,C[/ANSWER]`); only the exact set counts.
 You can also give `Answer(final=...)` from `inference_opt.api`, which adds the right marker. `inference_opt.api` is the only `inference_opt` module a policy may import.
 
 ## Calling the student
@@ -58,7 +59,9 @@ A later answer for the same question replaces the earlier one, and a question ne
 ## The context
 
 - `ctx.student`: the student, as above.
-- `ctx.examples`: the revealed train questions, as objects with the attributes `question`, `answer` (gold), `baseline_completion` and `baseline_correct`.
+- `ctx.examples`: the example questions you revealed, as objects with the attributes `question`, `answer` (gold), `baseline_completion` and `baseline_correct`.
+  The baseline fields are this run's student answering zero-shot; `baseline_completion` is empty when it ran out of tokens.
+  Examples are separate from the train and test questions.
 - `ctx.answer(...)`: record answers, as above.
 - `ctx.budget`: student calls left for this run.
 - `ctx.log(text, question_id=None)`: add a diagnostic line.
@@ -82,4 +85,4 @@ MANIFEST = {
 ## What each run writes
 
 After a dry run or an experiment, `runs/<run_id>/<model>/` holds `predictions.jsonl` (your answer, whether it was right, calls and log per question), `student_calls.jsonl` (every prompt and completion) and `summary.json`.
-Gold answers appear only through `ctx.examples` and `inspect_failures`, for questions you revealed.
+Gold answers appear only for the example questions you revealed, through `reveal_examples` and `ctx.examples`.

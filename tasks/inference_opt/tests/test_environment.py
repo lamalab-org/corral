@@ -58,7 +58,7 @@ class TestToolSurface:
     def test_all_nine_task_tools_are_present(self, environments):
         tools = environments["mmlu_pro_a"].tools
         assert {
-            "get_baseline", "reveal_train_questions", "query_student",
+            "get_baseline", "reveal_examples", "query_student",
             "dry_run_policy", "evaluate_candidate", "inspect_failures",
             "compare_runs", "get_budget", "submit_policy",
         } <= set(tools)
@@ -68,7 +68,7 @@ class TestToolSurface:
         tools = environments["mmlu_pro_a"].tools
         trusted = {name for name, tool in tools.items() if getattr(tool, "trusted", False)}
         assert trusted == {
-            "get_baseline", "reveal_train_questions", "query_student",
+            "get_baseline", "reveal_examples", "query_student",
             "dry_run_policy", "evaluate_candidate", "inspect_failures",
             "compare_runs", "get_budget", "submit_policy",
         }

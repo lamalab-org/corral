@@ -43,6 +43,9 @@ Labels ship in `inference_opt/data/frozen/v1/private/`; `CORRAL_INFERENCE_LABELS
 ## Questions and baselines
 
 The frozen set has 60 questions each for `mmlu_pro`, `bbh`, `gpqa_diamond`, `math`, `chembench` and `arc_challenge`, split 30 train / 30 test.
+ChemBench leaves out its `chemical_preference` questions, and every ChemBench multiple-choice question asks for all correct options, as ChemBench's own harness does, so the agent is never told how many are right.
+Each benchmark also has 30 example questions, chosen by `scripts/select_examples.py` with the same topic mix as train.
+The agent reveals examples with their gold answers, and policies receive them as `ctx.examples`; they are never scored, so train answers are never shown.
 
 Each task pins its zero-shot baselines to one deployment. Serve these models,
 and re-run `scripts/measure_baselines.py --write-tasks` if you change one:
@@ -58,6 +61,7 @@ and re-run `scripts/measure_baselines.py --write-tasks` if you change one:
 `student_c` and `student_d` in level 2 `*_cd` tasks.
 
 `scripts/generate_tasks.py` writes the task JSONs with zero baselines; `measure_baselines.py --write-tasks` fills them in.
+`measure_baselines.py --splits examples` records each student's zero-shot reply to the examples in `inference_opt/data/baselines/examples_v1.jsonl`, which the agent sees when it reveals them.
 
 ## Agent tools
 
@@ -66,7 +70,7 @@ Besides Corral's file tools for editing `policy/policy.py`:
 | tool | purpose |
 | --- | --- |
 | `get_baseline` | The measured train baseline, by topic. |
-| `reveal_train_questions` | Spend a reveal on labelled train questions. |
+| `reveal_examples` | Spend a reveal on labelled example questions, with each student's zero-shot reply. |
 | `query_student` | Probe the student directly, from the probe budget. |
 | `dry_run_policy` | Run the policy on two train questions. |
 | `evaluate_candidate` | Run and record a full train experiment. |

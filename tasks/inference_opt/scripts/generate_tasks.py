@@ -31,7 +31,7 @@ LEVEL_2_MODELS = [["student_a", "student_b"], ["student_c", "student_d"]]
 
 TOOLS = [
     "get_baseline",
-    "reveal_train_questions",
+    "reveal_examples",
     "query_student",
     "dry_run_policy",
     "evaluate_candidate",
@@ -84,7 +84,6 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
             # Filled in by scripts/measure_baselines.py --write-tasks.
             "baselines": dict.fromkeys(models, 0.0),
             "baselines_train": dict.fromkeys(models, 0.0),
-            "baseline_items": {},
             "model_specs": {},
             "base_urls": {},
             "final_max_student_calls": final_calls,

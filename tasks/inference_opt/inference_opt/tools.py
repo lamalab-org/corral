@@ -24,6 +24,9 @@ __all__ = ["create_tools"]
 #: Below this fraction of any budget, every tool result carries a submit reminder.
 NAG_THRESHOLD = 0.2
 
+#: How much of a student's baseline reply ``reveal_examples`` shows inline.
+REPLY_PREVIEW_CHARS = 1500
+
 _TOOL = {
     "hidden_args": ["work_dir", LEDGER_RESOURCE],
     "workspace_args": ("work_dir",),
@@ -106,22 +109,36 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
     def _ledger(inference_state: Any) -> StateLedger:
         return StateLedger({} if inference_state is None else inference_state, spec)
 
+    def _example_record(
+        item: datasets.FrozenItem,
+        targets: dict[str, str],
+        baselines: dict[str, dict[str, dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """One example with its gold answer and each student's zero-shot reply."""
+        return {
+            **datasets.public_record(item),
+            "target": targets.get(item.item_id, ""),
+            "baseline": {
+                model: {
+                    "correct": row.get("correct"),
+                    "completion": str(row.get("completion", "")),
+                    "finish_reason": str(row.get("finish_reason", "")),
+                }
+                for model in models
+                for row in [baselines[model].get(item.item_id, {})]
+            },
+        }
+
     def _examples(ledger: StateLedger) -> list[dict[str, Any]]:
-        """The revealed train questions with their answers, rebuilt from the ledger."""
+        """The revealed examples with their answers, rebuilt from the ledger."""
         revealed = set(ledger.revealed_ids)
         if not revealed:
             return []
-        targets = datasets.load_targets(benchmark, "train")
-        baseline_items = dict((config.get("baseline_items") or {}).get(models[0], {}))
-        completions = dict(config.get("baseline_completions") or {})
+        targets = datasets.load_targets(benchmark, "examples")
+        baselines = datasets.load_example_baselines(models)
         return [
-            {
-                **datasets.public_record(item),
-                "target": targets.get(item.item_id, ""),
-                "baseline_correct": bool(baseline_items.get(item.item_id, False)),
-                "baseline_completion": str(completions.get(item.item_id, "")),
-            }
-            for item in datasets.load_items(benchmark, "train")
+            _example_record(item, targets, baselines)
+            for item in datasets.load_items(benchmark, "examples")
             if item.item_id in revealed
         ]
 
@@ -152,58 +169,66 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         )
 
     @tool(**_TOOL)
-    def reveal_train_questions(
+    def reveal_examples(
         count: int = 5,
         strategy: str = "failures",
         work_dir: str = "",
         inference_state: Any = None,
     ) -> str:
-        """Reveal a bounded set of labelled training questions.
+        """Reveal labelled example questions, separate from the train questions.
 
         Args:
-            count: How many new questions to reveal, at most 5 per call.
-            strategy: Which to pick - "failures" (student got them wrong),
-                "random", "hardest", or "topic:<name>".
+            count: How many new examples to reveal, at most 5 per call.
+            strategy: Which to pick - "failures" (the most students got them
+                wrong zero-shot), "random", "hardest", or "topic:<name>".
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON with the newly revealed questions, their gold answers, and what
-            the student answered zero-shot.
+            JSON with the newly revealed examples, their gold answers, and what
+            each student answered zero-shot.
         """
         ledger = _ledger(inference_state)
         count = max(1, min(int(count), spec.reveal_batch))
         ledger.reserve(reveals=1)
 
-        items = datasets.load_items(benchmark, "train")
-        targets = datasets.load_targets(benchmark, "train")
-        baseline_items = dict((config.get("baseline_items") or {}).get(models[0], {}))
+        items = datasets.load_items(benchmark, "examples")
+        targets = datasets.load_targets(benchmark, "examples")
+        baselines = datasets.load_example_baselines(models)
         already = set(ledger.revealed_ids)
         pool = [item for item in items if item.item_id not in already]
         if strategy.startswith("topic:"):
             wanted = strategy.split(":", 1)[1].strip().lower()
             pool = [i for i in pool if (i.category or "").lower() == wanted] or pool
         elif strategy == "failures":
-            pool.sort(key=lambda i: bool(baseline_items.get(i.item_id, False)))
+            pool.sort(
+                key=lambda i: sum(
+                    baselines[m].get(i.item_id, {}).get("correct") is False
+                    for m in models
+                ),
+                reverse=True,
+            )
         elif strategy == "hardest":
             pool.sort(key=lambda i: i.reference_accuracy or 1.0)
         else:
             random.Random(len(already)).shuffle(pool)
 
         chosen = pool[:count]
-        new_records = []
-        for item in chosen:
-            record = datasets.public_record(item)
-            record["target"] = targets.get(item.item_id, "")
-            record["baseline_correct"] = bool(baseline_items.get(item.item_id, False))
-            record["baseline_completion"] = str(
-                (config.get("baseline_completions") or {}).get(item.item_id, "")
-            )
-            new_records.append(record)
         ledger.mark_revealed([item.item_id for item in chosen])
+        new_records = [_example_record(item, targets, baselines) for item in chosen]
+        # A long reply is cut to its end, where the answer is, to keep the result
+        # readable; the stored copy and ctx.examples keep it whole.
+        for record in new_records:
+            for reply in record["baseline"].values():
+                text = reply["completion"]
+                if len(text) > REPLY_PREVIEW_CHARS:
+                    reply["completion"] = (
+                        f"[last {REPLY_PREVIEW_CHARS} of {len(text)} characters] "
+                        + text[-REPLY_PREVIEW_CHARS:]
+                    )
 
         # A copy for the agent to reread. Runs rebuild the examples from the
         # ledger, so editing or deleting this file changes nothing.
-        store = Path(work_dir) / "revealed" / "train_revealed.jsonl"
+        store = Path(work_dir) / "revealed" / "examples.jsonl"
         datasets.write_jsonl(store, _examples(ledger))
         return _compact(
             {
@@ -212,8 +237,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "reveals_left": ledger.remaining()["reveals"],
                 "stored_at": str(store.relative_to(Path(work_dir))),
             },
-            f"Revealed {len(new_records)} train question(s) using strategy "
-            f"{strategy!r}. Every run's ctx.examples holds all of them.",
+            f"Revealed {len(new_records)} example(s) using strategy {strategy!r}. "
+            "Every run's ctx.examples holds all of them. A baseline completion is "
+            "empty when the student ran out of tokens (finish_reason 'length').",
             ledger,
         )
 
@@ -290,8 +316,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
 
         Args:
             policy_path: Workspace-relative path to the policy directory.
-            question_ids: Optional comma-separated item ids; defaults to two
-                revealed train questions.
+            question_ids: Optional comma-separated train item ids; defaults to
+                the first two train questions.
             work_dir: Task workspace, injected by the environment.
 
         Returns:
@@ -301,10 +327,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         policy_dir = _resolve(work_dir, policy_path)
         wanted = [item.strip() for item in question_ids.split(",") if item.strip()]
         if not wanted:
-            train = datasets.load_items(benchmark, "train")
-            revealed = set(ledger.revealed_ids)
-            preferred = [i.item_id for i in train if i.item_id in revealed][:2]
-            wanted = preferred or [item.item_id for item in train[:2]]
+            wanted = [item.item_id for item in datasets.load_items(benchmark, "train")[:2]]
 
         run_id = ledger.next_run_id("dry")
         budget = min(32, ledger.remaining()["student_calls"])
@@ -496,8 +519,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON with per-question answers, logs, call counts and errors. The gold
-            answer is shown only for questions you have revealed.
+            JSON with per-question answers, whether each was right, logs, call
+            counts and errors. Gold answers of train questions are never shown.
         """
         ledger = _ledger(inference_state)
         runs_root = Path(work_dir) / "runs"
@@ -513,8 +536,6 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         if not folder.is_relative_to(runs_root.resolve()):
             raise ValueError(f"unknown run {run_id!r}")
 
-        revealed = set(ledger.revealed_ids)
-        targets = datasets.load_targets(benchmark, "train") if revealed else {}
         rows: list[dict[str, Any]] = []
         for model_dir in sorted(path for path in folder.glob("*") if path.is_dir()):
             predictions = model_dir / "predictions.jsonl"
@@ -532,15 +553,11 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                     or (only == "errored" and record.get("error"))
                 )
                 if keep:
-                    item_id = str(record.get("item_id", ""))
                     rows.append(
                         {
-                            "item_id": item_id,
+                            "item_id": str(record.get("item_id", "")),
                             "model": model_dir.name,
                             "answer": record.get("answer", ""),
-                            "target": targets.get(item_id)
-                            if item_id in revealed
-                            else None,
                             "correct": correct,
                             "calls": record.get("calls", 0),
                             "error": record.get("error", ""),
@@ -698,7 +715,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
 
     built = (
         get_baseline,
-        reveal_train_questions,
+        reveal_examples,
         query_student,
         dry_run_policy,
         evaluate_candidate,

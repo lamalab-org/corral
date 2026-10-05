@@ -19,6 +19,8 @@ __all__ = [
     "FrozenItem",
     "Split",
     "data_root",
+    "example_baselines_path",
+    "load_example_baselines",
     "load_items",
     "load_manifest",
     "load_targets",
@@ -38,7 +40,9 @@ BENCHMARKS: tuple[str, ...] = (
     "arc_challenge",
 )
 
-Split = Literal["train", "test"]
+#: ``train`` is scored by experiments, ``test`` by the submission, and ``examples``
+#: is what the agent reveals and policies get as ``ctx.examples``; it is never scored.
+Split = Literal["train", "test", "examples"]
 
 
 class DatasetError(RuntimeError):
@@ -197,6 +201,30 @@ def load_manifest(version: str = DATASET_VERSION) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise DatasetError(f"malformed manifest at {path}: {exc}") from exc
+
+
+def example_baselines_path(version: str = DATASET_VERSION) -> Path:
+    """Where ``measure_baselines.py --splits examples`` writes the students' answers."""
+    return Path(__file__).resolve().parent / "data" / "baselines" / f"examples_{version}.jsonl"
+
+
+def load_example_baselines(
+    models: Iterable[str], *, version: str = DATASET_VERSION
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Each student's zero-shot answer to each example, as ``{model: {item_id: row}}``.
+
+    A row holds ``correct``, ``completion`` and ``finish_reason``. A model that
+    was never measured maps to an empty dict.
+    """
+    wanted = set(models)
+    result: dict[str, dict[str, dict[str, Any]]] = {model: {} for model in wanted}
+    path = example_baselines_path(version)
+    if not path.is_file():
+        return result
+    for record in _read_jsonl(path):
+        if record["model"] in wanted:
+            result[record["model"]][str(record["item_id"])] = record
+    return result
 
 
 def public_record(item: FrozenItem) -> dict[str, Any]:

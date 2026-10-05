@@ -24,11 +24,13 @@ You can change the prompts, how many samples you draw, how they are combined, wh
 Write it as a Python policy in `{policy_dir}/policy.py`. The API is documented in `guide/policy_api.md`.
 
 Return the answer marker required by the benchmark scorer: use `ANSWER: <answer>` for every benchmark except ChemBench, which uses `[ANSWER]<answer>[/ANSWER]`.
+Every ChemBench multiple-choice question may have one or more correct options; the answer is all of them, as comma-separated letters, and it is right only if the set is exact.
 The scorer parses and grades these markers.
 
 Benchmark: {benchmark}
 Student model(s): {models}
-Train questions: {n_train} (labels revealed a few at a time)
+Train questions: {n_train} (scored by `evaluate_candidate`; their answers are never shown)
+Example questions: labelled, revealed a few at a time, and given to your policy as `ctx.examples`; never scored
 Test questions: {n_test} (held out; you never should see these or their answers)
 
 ## Scoring
@@ -59,7 +61,7 @@ def _budget_summary(config: dict) -> str:
         f"- {budget.get('max_debug_runs', budget.get('max_debug_questions', 10))} dry runs",
         f"- {budget.get('max_student_calls', 250)} student model calls in total",
         f"- {budget.get('max_reveals', 4)} reveals of {budget.get('reveal_batch', 5)} "
-        "labelled train questions each",
+        "labelled example questions each",
         (
             f"- at most {MAX_TOKENS_CAP} generated tokens per student call, reasoning included"
         ),

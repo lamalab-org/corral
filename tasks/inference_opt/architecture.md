@@ -1,8 +1,8 @@
 # Inference-opt architecture
 
 Inference-opt asks an agent to write a Python policy that improves a frozen
-student model. The agent edits `policy/policy.py`, tests it on labelled train
-data, and submits it; the submission runs once on held-out test data.
+student model. The agent edits `policy/policy.py`, tests it on train data,
+learns from labelled example questions it reveals, and submits it; the submission runs once on held-out test data.
 
 The rule the design keeps: agent-written code runs only in Corral's restricted
 worker (the jail), and gold answers exist only in the controller.
@@ -57,7 +57,7 @@ store through `PrivateArtifacts`; the run record keeps its reference.
 policy/policy.py
 guide/policy_api.md
 notes.md
-revealed/train_revealed.jsonl   copy for the agent; runs use the ledger
+revealed/examples.jsonl         copy for the agent; runs use the ledger
 runs/<run-id>/<model>/          written by the controller, never a target
   predictions.jsonl
   student_calls.jsonl
@@ -80,7 +80,8 @@ environment fault raises `HarnessError` instead of scoring.
 ## Known limits
 
 - Per-question right/wrong is shown for train runs, so a multiple-choice answer
-  marked correct reveals the gold option.
+  marked correct reveals the gold option. Gold answers themselves are shown only
+  for the example split, which is never scored.
 - Without Docker permission enforcement there is no jail; see `runner.py`.
 
 ## Source map

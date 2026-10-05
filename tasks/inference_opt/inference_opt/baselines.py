@@ -31,7 +31,12 @@ def _prompt(question):
     prompt = question.text
     if question.choices:
         prompt += "\\n\\n" + question.rendered_choices()
-    if question.benchmark == "chembench":
+    if question.benchmark == "chembench" and question.choices:
+        prompt += (
+            "\\n\\nOne or more options may be correct. Respond with the letters of "
+            "all correct options, separated by commas, wrapped as [ANSWER]<letters>[/ANSWER]."
+        )
+    elif question.benchmark == "chembench":
         prompt += "\\n\\nRespond with your final answer wrapped as [ANSWER]<answer>[/ANSWER]."
     elif question.choices:
         prompt += (
@@ -68,6 +73,9 @@ class BaselineResult:
     n_unparseable: int = 0
     chance: float = 0.0
     per_item: dict[str, bool] = field(default_factory=dict)
+    #: The student's reply and why it ended (``"stop"``, or ``"length"`` when the
+    #: token limit ran out, often while it was still reasoning), per item.
+    completions: dict[str, dict[str, str]] = field(default_factory=dict)
     per_topic: dict[str, Any] = field(default_factory=dict)
     error: str = ""
 
@@ -194,6 +202,15 @@ def measure_baseline(
     )
     result.per_item = {
         item_id: run.correct.get(item_id, False) for item_id in run.question_ids
+    }
+    # The baseline makes one call per question.
+    result.completions = {
+        call["question_id"]: {
+            "completion": call["completion"],
+            "finish_reason": call["finish_reason"],
+        }
+        for call in run.calls
+        if call["question_id"]
     }
     by_topic: dict[str, dict[str, Any]] = {}
     for item in items:

@@ -7,7 +7,13 @@ def _prompt(question):
     prompt = question.text
     if question.choices:
         prompt += "\n\n" + question.rendered_choices()
-        prompt += "\n\nAnswer with the letter of the correct option."
+        if question.benchmark == "chembench":
+            prompt += (
+                "\n\nOne or more options may be correct. "
+                "Answer with the letters of all of them, separated by commas."
+            )
+        else:
+            prompt += "\n\nAnswer with the letter of the correct option."
     marker = (
         "`[ANSWER]<answer>[/ANSWER]`"
         if question.benchmark == "chembench"
