@@ -44,23 +44,23 @@ class Policy:
         except OSError:
             probe["network"] = "blocked"
         try:
-            service_channel.call({"op": "submit", "question_id": "not-in-run", "answer": "x"})
-            probe["foreign_submit"] = "accepted"
+            service_channel.call({"op": "answer", "question_id": "not-in-run", "answer": "x"})
+            probe["foreign_answer"] = "accepted"
         except service_channel.ServiceError as exc:
-            probe["foreign_submit"] = str(exc)
+            probe["foreign_answer"] = str(exc)
         probe["examples"] = [e.answer for e in ctx.examples]
         probe["reply"] = ctx.student.generate("hello", question_id=questions[0].id)
         with open("/workspace/probe.json", "w") as stream:
             json.dump(probe, stream)
         for q in questions:
-            ctx.submit(q.id, "ANSWER: A")
+            ctx.answer(q.id, "ANSWER: A")
 """
 
 HONEST_POLICY = """
 class Policy:
-    def solve(self, question, ctx):
-        ctx.student.generate(question.text)
-        return "ANSWER: " + ANSWERS[question.id]
+    def run(self, questions, ctx):
+        ctx.student.generate([q.text for q in questions])
+        ctx.answer({q.id: "ANSWER: " + ANSWERS[q.id] for q in questions})
 """
 
 
@@ -89,7 +89,6 @@ def _run(workspace: Path, budget: int = 10, examples=None):
         "benchmark": BENCHMARK,
         "models": ["student_a"],
         "model_specs": {"student_a": "mockllm/model"},
-        "policy_api": "primitive",
     }
     return items, run_policy(
         config=config,
@@ -119,7 +118,7 @@ def test_a_jailed_policy_sees_no_answers_and_no_network(workspace):
     assert probe["network"] == "blocked"
     assert not any(key.endswith(("_KEY", "_TOKEN")) for key in probe["env"])
     assert "CORRAL_INFERENCE_LABELS_PATH" not in probe["env"]
-    assert "not a question in this run" in probe["foreign_submit"]
+    assert "not a question in this run" in probe["foreign_answer"]
     # Paid-for examples are the only answers that cross into the jail.
     assert probe["examples"] == ["Z"]
     assert probe["reply"] == "student says hi"
@@ -184,9 +183,13 @@ def test_tools_run_the_policy_jailed_through_corrals_executor(monkeypatch):
     (workspace / "policy" / "policy.py").write_text(
         "import os\n"
         "class Policy:\n"
-        "    def solve(self, question, ctx):\n"
-        "        ctx.log(f'{os.geteuid()} {os.getcwd()}')\n"
-        "        return ctx.student.generate(question.text)\n"
+        "    def run(self, questions, ctx):\n"
+        "        for q in questions:\n"
+        "            ctx.log(f'{os.geteuid()} {os.getcwd()}', question_id=q.id)\n"
+        "        texts = ctx.student.generate(\n"
+        "            [{'prompt': q.text, 'question_id': q.id} for q in questions]\n"
+        "        )\n"
+        "        ctx.answer({q.id: t for q, t in zip(questions, texts)})\n"
     )
     seed = environment.initial_event(execution_id="executor-test").environment
     state = ExecutionState(

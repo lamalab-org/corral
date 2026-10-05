@@ -64,7 +64,9 @@ def test_each_run_keeps_its_graded_logs_out_of_the_workspace(tmp_path, monkeypat
     policy = Path(environment.workspace_path) / "policy" / "policy.py"
     policy.parent.mkdir(parents=True, exist_ok=True)
     policy.write_text(
-        "def solve(question, ctx):\n    return ctx.student.generate(question.text)\n"
+        "def run(questions, ctx):\n"
+        "    texts = ctx.student.generate([q.text for q in questions])\n"
+        "    ctx.answer({q.id: t for q, t in zip(questions, texts)})\n"
     )
 
     _, state = _call(environment, state, "dry_run_policy", {}, "dry")

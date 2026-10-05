@@ -85,7 +85,7 @@ def _v1_root(url: str) -> str:
     return url if url.endswith("/v1") else f"{url}/v1"
 
 
-def _seed_workspace(root: Path, policy_api: str = "primitive") -> None:
+def _seed_workspace(root: Path) -> None:
     """Create the guide, starter policy, and artifact directories."""
     (root / "revealed").mkdir(parents=True, exist_ok=True)
     (root / "runs").mkdir(parents=True, exist_ok=True)
@@ -96,16 +96,7 @@ def _seed_workspace(root: Path, policy_api: str = "primitive") -> None:
         destination.mkdir(parents=True, exist_ok=True)
         core = destination / "policy_api.md"
         if not core.exists():
-            guide = guide_source.read_text(encoding="utf-8")
-            start = "<!-- enhanced:start -->"
-            end = "<!-- enhanced:end -->"
-            if policy_api != "enhanced":
-                before, _, remainder = guide.partition(start)
-                _, _, after = remainder.partition(end)
-                guide = before.rstrip() + "\n" + after.lstrip()
-            else:
-                guide = guide.replace(start, "").replace(end, "")
-            core.write_text(guide, encoding="utf-8")
+            shutil.copyfile(guide_source, core)
 
     template = _PACKAGE_ROOT / "templates" / "policy"
     policy_dir = root / "policy"
@@ -123,10 +114,9 @@ def _seed_workspace(root: Path, policy_api: str = "primitive") -> None:
 def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSetup:
     """Expose the workspace to tools and seed its starting contents."""
     del state
-    config = dict(env.current_task.initial_input)
     workspace = env.workspace_path or ""
     if workspace:
-        _seed_workspace(Path(workspace), str(config.get("policy_api", "primitive")))
+        _seed_workspace(Path(workspace))
     return EnvironmentSetup(
         status="Policy workspace prepared with guide, starter policy and state.",
     )

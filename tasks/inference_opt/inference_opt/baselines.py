@@ -28,19 +28,31 @@ MANIFEST = {
 }
 
 
+def _prompt(question):
+    prompt = question.text
+    if question.choices:
+        prompt += "\\n\\n" + question.rendered_choices()
+    if question.benchmark == "chembench":
+        prompt += "\\n\\nRespond with your final answer wrapped as [ANSWER]<answer>[/ANSWER]."
+    elif question.choices:
+        prompt += (
+            "\\n\\nAnswer with the letter of the correct option, in the "
+            "format 'ANSWER: <letter>'."
+        )
+    return prompt
+
+
 class Policy:
-    def solve(self, question, ctx):
-        prompt = question.text
-        if question.choices:
-            prompt += "\\n\\n" + question.rendered_choices()
-        if question.benchmark == "chembench":
-            prompt += "\\n\\nRespond with your final answer wrapped as [ANSWER]<answer>[/ANSWER]."
-        elif question.choices:
-            prompt += (
-                "\\n\\nAnswer with the letter of the correct option, in the "
-                "format 'ANSWER: <letter>'."
-            )
-        return ctx.student.generate(prompt, temperature=0.0, max_tokens=8192, seed=0)
+    def run(self, questions, ctx):
+        texts = ctx.student.generate(
+            [{"prompt": _prompt(q), "question_id": q.id} for q in questions],
+            temperature=0.0,
+            max_tokens=8192,
+            seed=0,
+        )
+        # A failed request comes back empty and stays recorded as that
+        # question's error; an empty answer would be graded wrong anyway.
+        ctx.answer({q.id: text for q, text in zip(questions, texts) if text})
 '''
 
 
@@ -152,7 +164,6 @@ def measure_baseline(
             "benchmark": benchmark,
             "model_specs": {model: model_spec or model},
             "base_urls": {model: base_url},
-            "policy_api": "primitive",
             "student_concurrency": max(1, max_connections),
         }
         run = run_policy(

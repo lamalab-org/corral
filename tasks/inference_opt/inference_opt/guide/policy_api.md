@@ -1,37 +1,67 @@
 # Policy API
 
-Put one policy in `policy/policy.py`. Define a `Policy` class whose `run()`
-gets every question of a run at once and submits an answer for each.
+Put one policy in `policy/policy.py`. It defines `run(questions, ctx)`, which
+gets every question of a run at once and records an answer for each:
 
 ```python
 class Policy:
     def run(self, questions, ctx):
-        for q in questions:
-            answer = ctx.student.generate(q.text, question_id=q.id)
-            ctx.submit(q.id, answer)
+        texts = ctx.student.generate([q.text for q in questions])  # sent side by side
+        ctx.answer({q.id: text for q, text in zip(questions, texts)})
 ```
 
-You decide the order, what runs side by side, what is remembered between
+`run` may also be a plain module-level function. Everything else is yours: the
+order of questions, what is sent side by side, what is remembered between
 questions, and how the call budget is spread. Keep any state you need in
 ordinary Python variables.
 
-If you only need one question at a time, define `solve(question, ctx)` instead
-and return the answer; each question is then solved on its own, several at
-once. Both may also be plain module-level functions instead of methods.
-
 Answers are text ending in `ANSWER: <answer>`, or `[ANSWER]<answer>[/ANSWER]`
-for ChemBench. You can also submit `Answer(final=...)` from `inference_opt.api`,
+for ChemBench. You can also give `Answer(final=...)` from `inference_opt.api`,
 which adds the right marker. `inference_opt.api` is the only `inference_opt`
 module a policy may import.
 
-## Submitting answers
+## Calling the student
 
-`ctx.submit(question_id, answer)` records an answer as soon as you call it, and
-a later submit for the same question replaces it. A question never submitted
-counts as wrong. Submit a cheap guess early: if the budget or time runs out, or
-`run()` raises, what you already submitted still counts. Returning a dict of
-`{question_id: answer}` from `run()` submits those too; any other return value
-is an error. A run that submits nothing is reported as failed.
+`ctx.student.generate(prompt, *, system=None, temperature=0.0, max_tokens=None,
+stop=None, seed=None, question_id=None, component=None)`
+
+- **One prompt** (a string, or a list of `{"role": ..., "content": ...}`
+  messages) returns one completion as a `str`. A failed request raises.
+- **A list of prompts** returns a list of completions, in the same order, and
+  sends them side by side. A failed entry comes back as `""` and is logged.
+  Each entry is a prompt, or a dict `{"prompt": ..., **settings}` that sets its
+  own `system`, `temperature`, `max_tokens`, `stop`, `seed`, `question_id` or
+  `component`. The keyword arguments apply to every entry that does not.
+
+Sampling one question several times is a list with that prompt repeated:
+
+```python
+votes = ctx.student.generate(
+    [{"prompt": q.text, "seed": s} for s in range(5)], temperature=0.8
+)
+```
+
+Every completion costs one call of the run's budget; `ctx.budget` says how many
+are left. A batch larger than what is left sends what fits and returns `""` for
+the rest; a call when nothing is left raises `BudgetExhausted`.
+
+No call generates more than 8192 tokens, reasoning included: the limit the
+zero-shot baseline was measured with. `max_tokens=None` uses the manifest's
+`max_tokens_per_call`; a larger request is cut to 8192. How many requests run
+at once is set by the task, not the policy: send as many as you like and the
+rest wait their turn.
+
+`question_id` attributes a call to a question in the run's diagnostics;
+`component` labels it in `student_calls.jsonl`.
+
+## Recording answers
+
+`ctx.answer(question_id, text)`, or `ctx.answer({question_id: text, ...})` for
+several at once, records answers as soon as you call it. A later answer for the
+same question replaces the earlier one, and a question never answered counts as
+wrong. Record a cheap guess early: if the budget or time runs out, or `run()`
+raises, what you already recorded still counts. `run()` should return nothing;
+a run that records no answer is reported as failed.
 
 ## Question
 
@@ -41,19 +71,12 @@ is an error. A run that submits nothing is reported as failed.
 
 ## The context
 
-- `ctx.student.generate(prompt, *, system=None, temperature=0.0,
-  max_tokens=None, stop=None, seed=None, question_id=None, component=None)`:
-  one metered call that returns the completion as a `str`. `max_tokens=None`
-  uses the manifest's `max_tokens_per_call`. `question_id` attributes the call
-  to a question in the run's diagnostics.
+- `ctx.student`: the student, as above.
 - `ctx.examples`: the revealed train questions, as objects with the attributes
   `question`, `answer` (gold), `baseline_completion` and `baseline_correct`.
-- `ctx.submit(question_id, answer)`: record an answer.
+- `ctx.answer(...)`: record answers, as above.
 - `ctx.budget`: student calls left for this run.
 - `ctx.log(text, question_id=None)`: add a diagnostic line.
-
-Prompts may be strings or lists of message dictionaries with `role` and
-`content`. When the budget is spent, student calls raise `BudgetExhausted`.
 
 Your policy runs in a sandbox with no network: the student is reachable only
 through `ctx.student`, and every call is counted.
@@ -71,9 +94,7 @@ MANIFEST = {
 ```
 
 `max_tokens_per_call` (default 8192) is the default `max_tokens` for each
-call. No call can generate more than 8192 tokens, reasoning included: the
-same limit the zero-shot baseline was measured with. A larger request is cut
-to 8192. Unknown fields are rejected.
+call; it cannot raise the 8192 limit. Unknown fields are rejected.
 
 ## What each run writes
 
@@ -82,19 +103,3 @@ After a dry run or an experiment, `runs/<run_id>/<model>/` holds
 question), `student_calls.jsonl` (every prompt and completion) and
 `summary.json`. Gold answers appear only through `ctx.examples` and
 `inspect_failures`, for questions you revealed.
-
-<!-- enhanced:start -->
-## Enhanced API
-
-Enhanced tasks also provide:
-
-```python
-ctx.student.sample(prompt, *, n, temperature=0.8, system=None,
-                   max_tokens=None, question_id=None, component=None)
-ctx.student.batch(prompts, *, system=None, temperature=0.0,
-                  max_tokens=None, question_id=None, component=None)
-```
-
-`sample()` costs `n` calls; `batch()` sends its prompts side by side and costs
-one call per prompt. `component` labels calls in `student_calls.jsonl`.
-<!-- enhanced:end -->

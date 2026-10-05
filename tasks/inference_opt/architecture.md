@@ -14,8 +14,9 @@ CONTROLLER (trusted, has the labels)          JAIL (agent code, no network)
   inference tools ── run_policy ──────────────▶ policy host
     │                 (one per student)          imports policy.py
     │                                            policy.run(questions, ctx)
-    │   StudentGateway ◀── service channel ────── ctx.student / submit / log
+    │   StudentGateway ◀── service channel ────── ctx.student / answer / log
     │     counts calls, stops at the budget,
+    │     caps tokens and concurrency,
     │     forwards to vLLM, records answers
     │
     └─ Grader: Inspect, replaying the answers,
@@ -27,8 +28,10 @@ CONTROLLER (trusted, has the labels)          JAIL (agent code, no network)
   passed in by `permissions.run_worker(service=...)`). Every `inference_opt`
   module a policy may use is imported before the jail closes.
 - `gateway.py` answers the channel. Requests are agent-written, so it checks
-  the budget, the question ids, the token ceiling and the allowed client
-  methods. The vLLM address and key never enter the jail.
+  every field: the budget, the question ids and the 8192-token cap per call.
+  It also holds the run to `student_concurrency` requests in flight (default
+  16); the rest wait in the gateway, not in vLLM's queue. The vLLM address and
+  key never enter the jail.
 - `grading/` scores the submitted answers with Inspect's scorers. A replay
   solver puts each answer on its sample; the log, which holds the targets, is
   written beside the workspace, never inside it.
@@ -40,7 +43,13 @@ CONTROLLER (trusted, has the labels)          JAIL (agent code, no network)
 The ledger is a Corral resource (`inference_state`, `InferenceLedgerAdapter`
 in `env.py`), seeded through `resource_states` and committed after every tool
 call. It holds the budget counters, revealed question ids, run records, the
-submission count, and the hidden result of the last submission.
+submission count, and the hidden test result of the one submission a task
+allows.
+
+Each run's graded files (predictions, student calls and the Inspect log with
+the targets) are packed into one archive and stored in the trial's artifact
+store through `PrivateArtifacts`; the run record keeps its reference.
+`scripts/extract_private_runs.py` unpacks them from a finished trial.
 
 ## Workspace
 

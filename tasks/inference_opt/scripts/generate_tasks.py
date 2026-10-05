@@ -79,7 +79,6 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
             "benchmark": benchmark,
             "models": models,
             "joint": joint,
-            "policy_api": "primitive",
             "n_train": N_TRAIN,
             "n_test": N_TEST,
             # Filled in by scripts/measure_baselines.py --write-tasks.

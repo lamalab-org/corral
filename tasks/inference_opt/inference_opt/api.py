@@ -13,9 +13,9 @@ __all__ = [
     "BudgetExhausted",
     "LabeledExample",
     "Message",
-    "PolicyApiMode",
     "PolicyManifest",
     "Prompt",
+    "PromptItem",
     "Question",
     "RunContext",
     "StudentClient",
@@ -27,11 +27,15 @@ Answerable = str | float | int
 #: One chat message, e.g. ``{"role": "user", "content": "..."}``.
 Message = Mapping[str, str]
 
-#: What every client method accepts: a bare prompt or an explicit message list.
+#: One prompt: a bare string or an explicit message list.
 Prompt = str | Sequence[Message]
 
+#: One entry of a batch: a prompt, or ``{"prompt": ..., **settings}`` to give
+#: that call its own ``system``, ``temperature``, ``max_tokens``, ``stop``,
+#: ``seed``, ``question_id`` or ``component``.
+PromptItem = Prompt | Mapping[str, Any]
+
 AnswerType = Literal["mcq", "numeric", "text"]
-PolicyApiMode = Literal["primitive", "enhanced"]
 
 
 class BudgetExhausted(RuntimeError):
@@ -95,7 +99,7 @@ class StudentClient(Protocol):
 
     def generate(
         self,
-        prompt: Prompt,
+        prompt: Prompt | Sequence[PromptItem],
         *,
         system: str | None = None,
         temperature: float = 0.0,
@@ -104,23 +108,14 @@ class StudentClient(Protocol):
         seed: int | None = None,
         question_id: str | None = None,
         component: str | None = None,
-    ) -> str:
-        """Complete one prompt. Charges one call."""
-        ...
+    ) -> str | list[str]:
+        """Complete one prompt, or a list of prompts sent side by side.
 
-    def sample(
-        self,
-        prompt: Prompt,
-        *,
-        n: int,
-        temperature: float = 0.8,
-        **kwargs: Any,
-    ) -> list[str]:
-        """Draw ``n`` completions of one prompt. Charges ``n`` calls."""
-        ...
-
-    def batch(self, prompts: Sequence[Prompt], **kwargs: Any) -> list[str]:
-        """Complete several prompts side by side. Charges ``len(prompts)`` calls."""
+        One prompt returns a ``str`` and charges one call; a failed request
+        raises. A list returns one ``str`` per entry, in order, and charges one
+        call per entry; a failed entry comes back as ``""`` and is logged. The
+        keyword settings apply to every entry that does not set its own.
+        """
         ...
 
     @property
@@ -134,13 +129,13 @@ class StudentClient(Protocol):
 class RunContext:
     """What a policy gets besides the questions: everything from the controller."""
 
-    #: The metered student model. ``sample`` and ``batch`` exist only in
-    #: enhanced tasks.
+    #: The metered student model.
     student: StudentClient
     #: The revealed train questions with their gold answers.
     examples: tuple[LabeledExample, ...]
-    #: ``submit(question_id, answer)`` records an answer straight away.
-    submit: Callable[[str, Any], None]
+    #: ``answer(question_id, text)``, or ``answer({question_id: text, ...})``,
+    #: records answers straight away; a later answer replaces an earlier one.
+    answer: Callable[..., None]
     #: ``log(text, question_id=None)`` adds a line to the run's diagnostics.
     log: Callable[..., None]
 

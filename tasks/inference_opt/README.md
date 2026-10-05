@@ -10,8 +10,13 @@ half of the held-out test questions the student's zero-shot baseline gets
 wrong, and 0 otherwise (`pass_rule` in the task JSON; `{"kind": "continuous"}`
 scores the improvement instead).
 
-Tasks use the `primitive` policy API (`ctx.student.generate` only). A task can
-set `"policy_api": "enhanced"` to add `sample` and `batch`.
+A policy defines `run(questions, ctx)`. `ctx.student.generate` takes one prompt,
+or a list of prompts that are sent together, and `ctx.answer` records answers;
+`inference_opt/guide/policy_api.md` is the full contract. Every run is limited
+by its student-call budget, 8192 generated tokens per call (the limit the
+baselines were measured with) and its wall clock (`run_time_limit_s`, default
+one hour). `student_concurrency` in the task JSON (default 16) caps the requests
+one run has in flight; the policy does not set it.
 
 How the policy is isolated from the answers is described in `architecture.md`.
 
@@ -26,6 +31,17 @@ uv run pytest tests -q
 
 The policy is isolated only inside Corral's Docker trial. Outside it, the
 policy runs as a plain subprocess and can read the labels on disk.
+
+`corral bench --sandbox docker --build-sandbox-image` rebuilds the trial image
+from this checkout; pass it after any change here, or trials run the old code.
+To build the image by hand, from the repository root:
+
+```bash
+docker build -f docker/benchmark.Dockerfile --build-arg CORRAL_TASK=inference_opt \
+  --build-arg CORRAL_EXTRAS=langfuse -t corral-inference_opt:langfuse .
+```
+
+Leave out `CORRAL_EXTRAS` and tag it `:latest` when Langfuse is not configured.
 
 The jail tests in `tests/test_isolation.py` need that Docker boundary: run them
 in the trial image as root with `CORRAL_PERMISSION_TESTS=1`.
@@ -71,4 +87,4 @@ Besides Corral's file tools for editing `policy/policy.py`:
 | `inspect_failures` | Answers, logs and errors from an earlier run. |
 | `compare_runs` | Recorded experiments and the best so far. |
 | `get_budget` | What is left of each budget. |
-| `submit_policy` | Run the policy once on the test split; the result stays hidden until scoring. |
+| `submit_policy` | Run the policy once on the test split; the result stays hidden until scoring. A task allows one submission; the agent then ends the episode with Corral's `submit_answer`. |

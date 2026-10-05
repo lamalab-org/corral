@@ -23,7 +23,12 @@ from typing import Any
 from corral.runtime import permissions
 from corral.runtime.service_channel import ServiceServer, socket_pair
 from inference_opt import datasets
-from inference_opt.gateway import Backend, StudentGateway, backend_for
+from inference_opt.gateway import (
+    DEFAULT_CONCURRENCY,
+    Backend,
+    StudentGateway,
+    backend_for,
+)
 from inference_opt.grading import Grader, GradeSpec
 from inference_opt.host import PolicyHostTool
 from inference_opt.outcomes import read_outcomes
@@ -37,9 +42,9 @@ __all__ = [
     "run_policy",
 ]
 
-#: Concurrent student requests per run when the task config does not set
-#: ``student_concurrency``.
-DEFAULT_STUDENT_CONCURRENCY = 16
+#: Student requests one run has in flight when the task config does not set
+#: ``student_concurrency``. The controller enforces it; a policy never sets it.
+DEFAULT_STUDENT_CONCURRENCY = DEFAULT_CONCURRENCY
 #: Wall clock for one run; answers submitted before it still count.
 DEFAULT_RUN_TIME_LIMIT_S = 3600
 #: Ceiling on ``max_tokens`` for any one student call. It matches the pinned
@@ -159,14 +164,13 @@ def run_policy(
             budget=budget_per_model,
             max_tokens_cap=max_tokens_cap,
             question_ids=[record["item_id"] for record in records],
-            policy_api=str(config.get("policy_api", "primitive")),
+            concurrency=concurrency,
         )
         request = {
             "policy_dir": "",
             "questions": records,
             "examples": examples,
             "benchmark": benchmark,
-            "policy_api": str(config.get("policy_api", "primitive")),
             "budget": budget_per_model,
         }
         result = _execute_host(
@@ -194,9 +198,8 @@ def run_policy(
             run.infrastructure_error = f"the student never answered: {failed}"
         if not (run.load_error or run.error or run.answers or gateway.errors):
             run.error = (
-                "the policy finished without submitting any answer; call "
-                "ctx.submit(question_id, answer) or return {question_id: answer} "
-                "from run()"
+                "the policy finished without recording any answer; call "
+                "ctx.answer(question_id, text) or ctx.answer({question_id: text})"
             )
         if not run.load_error:
             _grade(run, records, targets, private / model, benchmark)

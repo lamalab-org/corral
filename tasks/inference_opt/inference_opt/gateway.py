@@ -16,14 +16,26 @@ from inference_opt.answers import MAX_COMPLETION_CHARS
 from inference_opt.api import BudgetExhausted
 from inference_opt.client import StudentCompletion, StudentEndpoint
 
-__all__ = ["Backend", "MockBackend", "StudentGateway", "backend_for"]
+__all__ = [
+    "DEFAULT_CONCURRENCY",
+    "Backend",
+    "MockBackend",
+    "StudentGateway",
+    "backend_for",
+]
 
 _ROLES = frozenset({"system", "user", "assistant"})
 _MAX_LOG_LINES = 50
 _MAX_RUN_LOG_LINES = 200
 _MAX_PROMPT_CHARS = 200_000
-#: Completions of one request sent side by side; the rest wait their turn.
-_MAX_PARALLEL = 16
+#: Entries in one generate request; the call budget is the real limit.
+_MAX_BATCH = 2048
+_REQUEST_FIELDS = frozenset(
+    {"messages", "temperature", "max_tokens", "stop", "seed", "question_id", "component"}
+)
+#: Student requests one run has in flight unless the task sets
+#: ``student_concurrency``; the rest wait here, not in the student's queue.
+DEFAULT_CONCURRENCY = 16
 
 #: ``backend(messages, temperature, max_tokens, stop, seed)`` -> one completion.
 Backend = Callable[..., StudentCompletion]
@@ -59,7 +71,12 @@ def backend_for(
 
 
 class StudentGateway:
-    """Meter, forward and record every request of one policy run."""
+    """The controller's end of one policy run.
+
+    Serves the jail's three requests: ``generate`` meters student calls and sends
+    them on, ``answer`` records an answer for a question of this run, and ``log``
+    keeps a diagnostic line. Every field comes from agent code and is validated.
+    """
 
     def __init__(
         self,
@@ -68,7 +85,7 @@ class StudentGateway:
         budget: int,
         max_tokens_cap: int,
         question_ids: list[str],
-        policy_api: str = "primitive",
+        concurrency: int = DEFAULT_CONCURRENCY,
         retries: int = 2,
     ) -> None:
         self._backend = backend
@@ -76,7 +93,9 @@ class StudentGateway:
         self.max_tokens_cap = max(1, int(max_tokens_cap))
         self.question_ids = list(question_ids)
         self._known = frozenset(self.question_ids)
-        self.policy_api = policy_api
+        self.concurrency = max(1, int(concurrency))
+        # One limit for the whole run, however the policy spreads its requests.
+        self._slots = threading.BoundedSemaphore(self.concurrency)
         self._retries = max(0, retries)
         self._lock = threading.Lock()
 
@@ -99,12 +118,10 @@ class StudentGateway:
         op = body.get("op")
         if op == "generate":
             return self._generate(body)
-        if op == "submit":
-            return self._submit(body)
+        if op == "answer":
+            return self._answer(body)
         if op == "log":
             return self._log(body)
-        if op == "error":
-            return self._error(body)
         raise ValueError(f"unknown request {op!r}")
 
     def _question(self, value: Any) -> str | None:
@@ -116,63 +133,82 @@ class StudentGateway:
         return question_id
 
     def _generate(self, body: dict[str, Any]) -> dict[str, Any]:
-        conversations = body.get("conversations")
-        if not isinstance(conversations, list) or not conversations:
-            raise ValueError("generate needs a non-empty list of conversations")
-        if self.policy_api == "primitive" and len(conversations) != 1:
-            raise ValueError("this task allows one completion per call")
-        cleaned = [_conversation(messages) for messages in conversations]
-        question_id = self._question(body.get("question_id"))
-        component = body.get("component")
-        component = str(component)[:64] if component else None
-        temperature = min(2.0, max(0.0, float(body.get("temperature") or 0.0)))
-        requested = body.get("max_tokens") or body.get("default_max_tokens")
-        max_tokens = max(1, min(int(requested or self.max_tokens_cap), self.max_tokens_cap))
-        stop = body.get("stop") or None
-        if stop is not None:
-            if not isinstance(stop, list) or len(stop) > 4:
-                raise ValueError("stop must be a list of at most 4 strings")
-            stop = [str(item)[:100] for item in stop]
-        seed = body.get("seed")
-        seed = int(seed) if seed is not None else None
+        raw = body.get("requests")
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("generate needs a non-empty list of requests")
+        if len(raw) > _MAX_BATCH:
+            raise ValueError(f"one generate call may hold at most {_MAX_BATCH} prompts")
+        requests = [self._request(item, body.get("default_max_tokens")) for item in raw]
 
-        count = len(cleaned)
+        # A batch larger than the budget left sends what fits; the rest come
+        # back empty. Only a request that can send nothing at all is refused.
+        count = len(requests)
         with self._lock:
-            if self.used + count > self.budget:
+            granted = min(count, self.budget - self.used)
+            if granted <= 0:
                 self.exhausted = True
                 raise BudgetExhausted(
                     f"run call budget exhausted ({self.used}/{self.budget} used, "
                     f"{count} more requested)"
                 )
-            self.used += count
-            if question_id is not None:
-                bucket = self.per_question.setdefault(
-                    question_id, {"calls": 0, "output_tokens": 0}
-                )
-                bucket["calls"] += count
+            if granted < count:
+                self.exhausted = True
+            self.used += granted
+            for request in requests[:granted]:
+                if request["question_id"] is not None:
+                    bucket = self.per_question.setdefault(
+                        request["question_id"], {"calls": 0, "output_tokens": 0}
+                    )
+                    bucket["calls"] += 1
 
-        def one(messages: list[dict[str, str]]) -> StudentCompletion:
-            return self._complete(
-                messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stop=stop,
-                seed=seed,
-                question_id=question_id,
-                component=component,
-            )
-
-        if count == 1:
-            completions = [one(cleaned[0])]
+        sent = requests[:granted]
+        if len(sent) == 1:
+            results = [self._complete(**sent[0])]
         else:
-            with ThreadPoolExecutor(max_workers=min(count, _MAX_PARALLEL)) as pool:
-                completions = list(pool.map(one, cleaned))
+            with ThreadPoolExecutor(max_workers=min(len(sent), self.concurrency)) as pool:
+                results = list(pool.map(lambda request: self._complete(**request), sent))
+        skipped = count - granted
+        errors = [error for _, error in results] + ["budget exhausted"] * skipped
+        if skipped:
+            self._log({"text": f"budget exhausted: sent {granted} of {count} prompts"})
         with self._lock:
+            for request, error in zip(requests, errors, strict=True):
+                question_id = request["question_id"]
+                if error and question_id is not None and question_id not in self.answers:
+                    self.errors[question_id] = f"student request failed: {error}"[:2000]
             remaining = self.budget - self.used
         return {
-            "completions": [completion.text for completion in completions],
-            "finish_reasons": [completion.finish_reason for completion in completions],
+            "completions": [completion.text for completion, _ in results] + [""] * skipped,
+            "errors": errors,
+            "sent": granted,
             "remaining": remaining,
+        }
+
+    def _request(self, item: Any, default_max_tokens: Any) -> dict[str, Any]:
+        """Validate one entry of a generate request; it comes from agent code."""
+        if not isinstance(item, dict):
+            raise ValueError("each request must be an object")
+        unknown = set(item) - _REQUEST_FIELDS
+        if unknown:
+            raise ValueError(f"unknown request field(s): {', '.join(sorted(unknown))}")
+        component = item.get("component")
+        requested = item.get("max_tokens") or default_max_tokens
+        stop = item.get("stop") or None
+        if stop is not None:
+            if not isinstance(stop, list) or len(stop) > 4:
+                raise ValueError("stop must be a list of at most 4 strings")
+            stop = [str(entry)[:100] for entry in stop]
+        seed = item.get("seed")
+        return {
+            "messages": _conversation(item.get("messages")),
+            "temperature": min(2.0, max(0.0, float(item.get("temperature") or 0.0))),
+            "max_tokens": max(
+                1, min(int(requested or self.max_tokens_cap), self.max_tokens_cap)
+            ),
+            "stop": stop,
+            "seed": int(seed) if seed is not None else None,
+            "question_id": self._question(item.get("question_id")),
+            "component": str(component)[:64] if component else None,
         }
 
     def _complete(
@@ -182,19 +218,21 @@ class StudentGateway:
         question_id: str | None,
         component: str | None,
         **params: Any,
-    ) -> StudentCompletion:
+    ) -> tuple[StudentCompletion, str]:
+        """Send one request; return its completion and an error, empty on success."""
         started = time.monotonic()
         error = ""
         completion = StudentCompletion("")
-        for attempt in range(self._retries + 1):
-            try:
-                completion = self._backend(messages, **params)
-                error = ""
-                break
-            except Exception as exc:  # recorded, then reported to the policy
-                error = f"{type(exc).__name__}: {exc}"[:500]
-                if attempt < self._retries:
-                    time.sleep(min(2.0, 0.5 * (attempt + 1)))
+        with self._slots:
+            for attempt in range(self._retries + 1):
+                try:
+                    completion = self._backend(messages, **params)
+                    error = ""
+                    break
+                except Exception as exc:  # recorded, then reported to the policy
+                    error = f"{type(exc).__name__}: {exc}"[:500]
+                    if attempt < self._retries:
+                        time.sleep(min(2.0, 0.5 * (attempt + 1)))
         with self._lock:
             if error:
                 self.backend_failures += 1
@@ -218,14 +256,12 @@ class StudentGateway:
                     "error": error,
                 }
             )
-        if error:
-            raise RuntimeError(f"student request failed: {error}")
-        return completion
+        return completion, error
 
-    def _submit(self, body: dict[str, Any]) -> dict[str, Any]:
+    def _answer(self, body: dict[str, Any]) -> dict[str, Any]:
         question_id = self._question(body.get("question_id"))
         if question_id is None:
-            raise ValueError("submit needs a question_id")
+            raise ValueError("an answer needs a question_id")
         answer = str(body.get("answer", ""))[:MAX_COMPLETION_CHARS]
         with self._lock:
             self.answers[question_id] = answer
@@ -240,15 +276,6 @@ class StudentGateway:
             lines = self.logs.setdefault(key, [])
             if len(lines) < limit:
                 lines.append(str(body.get("text", ""))[:500])
-        return {"accepted": True}
-
-    def _error(self, body: dict[str, Any]) -> dict[str, Any]:
-        question_id = self._question(body.get("question_id"))
-        if question_id is None:
-            raise ValueError("error needs a question_id")
-        with self._lock:
-            if question_id not in self.answers:
-                self.errors[question_id] = str(body.get("text", ""))[:2000]
         return {"accepted": True}
 
 

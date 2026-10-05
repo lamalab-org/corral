@@ -11,8 +11,6 @@ import sys
 import threading
 import traceback
 from collections.abc import Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -30,9 +28,6 @@ from inference_opt.api import (
 from inference_opt.policy import PolicyError, discover_policy
 
 __all__ = ["PolicyHostTool", "main", "run_policy"]
-
-#: Questions answered side by side when a policy defines only ``solve()``.
-SOLVE_CONCURRENCY = 16
 
 
 def _call(body: dict[str, Any]) -> Any:
@@ -81,45 +76,33 @@ class _Meter:
             self.remaining = remaining
 
 
-class EnhancedStudentClient:
-    """The student, for enhanced tasks: one call, several samples, or a batch."""
+#: Settings a batch entry may give itself, besides its ``prompt``.
+_ENTRY_SETTINGS = (
+    "system",
+    "temperature",
+    "max_tokens",
+    "stop",
+    "seed",
+    "question_id",
+    "component",
+)
 
-    def __init__(
-        self, meter: _Meter, default_max_tokens: int, question_id: str | None = None
-    ) -> None:
+
+def _is_batch(prompt: Any) -> bool:
+    """A list is a batch, unless it is one conversation of role/content messages."""
+    if isinstance(prompt, str) or not isinstance(prompt, Sequence):
+        return False
+    return not prompt or not all(
+        isinstance(item, Mapping) and "role" in item for item in prompt
+    )
+
+
+class StudentClient:
+    """The metered student: one prompt per call, or a list sent side by side."""
+
+    def __init__(self, meter: _Meter, default_max_tokens: int) -> None:
         self._meter = meter
         self._default_max_tokens = default_max_tokens
-        self._question_id = question_id
-
-    def for_question(self, question_id: str) -> EnhancedStudentClient:
-        return type(self)(self._meter, self._default_max_tokens, question_id)
-
-    def _send(
-        self,
-        conversations: list[list[dict[str, str]]],
-        *,
-        temperature: float,
-        max_tokens: int | None,
-        stop: Sequence[str] | None = None,
-        seed: int | None = None,
-        question_id: str | None = None,
-        component: str | None = None,
-    ) -> list[str]:
-        reply = _call(
-            {
-                "op": "generate",
-                "conversations": conversations,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "default_max_tokens": self._default_max_tokens,
-                "stop": list(stop) if stop else None,
-                "seed": seed,
-                "question_id": question_id or self._question_id,
-                "component": component,
-            }
-        )
-        self._meter.update(len(conversations), int(reply["remaining"]))
-        return list(reply["completions"])
 
     def generate(
         self,
@@ -132,59 +115,37 @@ class EnhancedStudentClient:
         seed: int | None = None,
         question_id: str | None = None,
         component: str | None = None,
-    ) -> str:
-        return self._send(
-            [_messages(prompt, system)],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stop=stop,
-            seed=seed,
-            question_id=question_id,
-            component=component,
-        )[0]
-
-    def sample(
-        self,
-        prompt: Any,
-        *,
-        n: int,
-        temperature: float = 0.8,
-        system: str | None = None,
-        max_tokens: int | None = None,
-        question_id: str | None = None,
-        component: str | None = None,
-        **_ignored: Any,
-    ) -> list[str]:
-        messages = _messages(prompt, system)
-        return self._send(
-            [messages] * max(1, int(n)),
-            temperature=temperature,
-            max_tokens=max_tokens,
-            question_id=question_id,
-            component=component,
-        )
-
-    def batch(
-        self,
-        prompts: Sequence[Any],
-        *,
-        system: str | None = None,
-        temperature: float = 0.0,
-        max_tokens: int | None = None,
-        question_id: str | None = None,
-        component: str | None = None,
-        **_ignored: Any,
-    ) -> list[str]:
-        items = list(prompts)
-        if not items:
+    ) -> str | list[str]:
+        defaults = {
+            "system": system,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stop": stop,
+            "seed": seed,
+            "question_id": question_id,
+            "component": component,
+        }
+        if not _is_batch(prompt):
+            completions, errors = self._send([_request(prompt, defaults)])
+            if errors[0]:
+                raise RuntimeError(f"student request failed: {errors[0]}")
+            return completions[0]
+        entries = list(prompt)
+        if not entries:
             return []
-        return self._send(
-            [_messages(prompt, system) for prompt in items],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            question_id=question_id,
-            component=component,
+        completions, _ = self._send([_entry(item, defaults) for item in entries])
+        return completions
+
+    def _send(self, requests: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+        reply = _call(
+            {
+                "op": "generate",
+                "requests": requests,
+                "default_max_tokens": self._default_max_tokens,
+            }
         )
+        self._meter.update(int(reply["sent"]), int(reply["remaining"]))
+        return list(reply["completions"]), list(reply["errors"])
 
     @property
     def calls_used(self) -> int:
@@ -195,25 +156,31 @@ class EnhancedStudentClient:
         return self._meter.remaining
 
 
-class PrimitiveStudentClient:
-    """The student, for primitive tasks: one completion per call."""
+def _entry(item: Any, defaults: dict[str, Any]) -> dict[str, Any]:
+    """One batch entry: a prompt, or a dict with ``prompt`` and its own settings."""
+    if not isinstance(item, Mapping):
+        return _request(item, defaults)
+    unknown = set(item) - {"prompt", *_ENTRY_SETTINGS}
+    if unknown or "prompt" not in item:
+        raise TypeError(
+            "a batch entry given as a dict needs a 'prompt' and may set only "
+            f"{', '.join(_ENTRY_SETTINGS)}; got {', '.join(sorted(map(str, item)))}"
+        )
+    settings = {**defaults, **{key: item[key] for key in _ENTRY_SETTINGS if key in item}}
+    return _request(item["prompt"], settings)
 
-    def __init__(self, inner: EnhancedStudentClient) -> None:
-        self._inner = inner
 
-    def for_question(self, question_id: str) -> PrimitiveStudentClient:
-        return type(self)(self._inner.for_question(question_id))
-
-    def generate(self, prompt: Any, **kwargs: Any) -> str:
-        return self._inner.generate(prompt, **kwargs)
-
-    @property
-    def calls_used(self) -> int:
-        return self._inner.calls_used
-
-    @property
-    def calls_remaining(self) -> int:
-        return self._inner.calls_remaining
+def _request(prompt: Any, settings: dict[str, Any]) -> dict[str, Any]:
+    stop = settings["stop"]
+    return {
+        "messages": _messages(prompt, settings["system"]),
+        "temperature": settings["temperature"],
+        "max_tokens": settings["max_tokens"],
+        "stop": list(stop) if stop else None,
+        "seed": settings["seed"],
+        "question_id": settings["question_id"],
+        "component": settings["component"],
+    }
 
 
 def _question(record: dict[str, Any], index: int, total: int) -> Question:
@@ -249,12 +216,6 @@ def _example(record: dict[str, Any]) -> LabeledExample:
     )
 
 
-def _report_error(question_id: str, text: str) -> None:
-    # A closed channel already ends the run on the controller side.
-    with suppress(Exception):
-        _call({"op": "error", "question_id": question_id, "text": text})
-
-
 def run_policy(request: dict[str, Any]) -> dict[str, Any]:
     """Load the policy, run it over every question, and say how it went."""
     try:
@@ -264,9 +225,7 @@ def run_policy(request: dict[str, Any]) -> dict[str, Any]:
 
     manifest = policy.manifest
     meter = _Meter(int(request["budget"]))
-    client: Any = EnhancedStudentClient(meter, manifest.max_tokens_per_call)
-    if request.get("policy_api", "primitive") == "primitive":
-        client = PrimitiveStudentClient(client)
+    client = StudentClient(meter, manifest.max_tokens_per_call)
 
     records = list(request["questions"])
     questions = [
@@ -275,34 +234,36 @@ def run_policy(request: dict[str, Any]) -> dict[str, Any]:
     examples = tuple(_example(record) for record in request.get("examples", []))
     benchmark = str(request.get("benchmark", ""))
 
-    def submit(question_id: str, answer: Any) -> None:
+    def record(question_id: Any, text: Any) -> None:
         _call(
             {
-                "op": "submit",
+                "op": "answer",
                 "question_id": str(question_id),
-                "answer": completion_for(answer, benchmark),
+                "answer": completion_for(text, benchmark),
             }
         )
+
+    def answer(question_id: Any, text: Any = None) -> None:
+        if isinstance(question_id, Mapping):
+            if text is not None:
+                raise TypeError("pass either answer(question_id, text) or answer(dict)")
+            for key, value in question_id.items():
+                record(key, value)
+        else:
+            record(question_id, text)
 
     def log(text: Any, question_id: str | None = None) -> None:
         _call({"op": "log", "text": str(text)[:500], "question_id": question_id})
 
-    ctx = RunContext(student=client, examples=examples, submit=submit, log=log)
+    ctx = RunContext(student=client, examples=examples, answer=answer, log=log)
     error = ""
     try:
-        if policy.runs_whole_set:
-            returned = policy.run(questions, ctx)
-            if isinstance(returned, Mapping):
-                for question_id, answer in returned.items():
-                    submit(str(question_id), answer)
-            elif returned is not None:
-                raise TypeError(
-                    f"run() returned a {type(returned).__name__}; submit answers "
-                    "with ctx.submit(question_id, answer) or return a dict of "
-                    "{question_id: answer}"
-                )
-        else:
-            _solve_each(policy, questions, ctx, client)
+        returned = policy.run(questions, ctx)
+        if returned is not None:
+            raise TypeError(
+                f"run() returned a {type(returned).__name__}; record answers with "
+                "ctx.answer(question_id, text) or ctx.answer({question_id: text})"
+            )
     except BudgetExhausted as exc:
         error = f"budget_exhausted: {exc}"
     except Exception:
@@ -312,37 +273,9 @@ def run_policy(request: dict[str, Any]) -> dict[str, Any]:
             "name": manifest.name,
             "version": manifest.version,
             "max_tokens_per_call": manifest.max_tokens_per_call,
-            "runs_whole_set": policy.runs_whole_set,
         },
         "error": error[-4000:],
     }
-
-
-def _solve_each(policy: Any, questions: list[Question], ctx: RunContext, client: Any) -> None:
-    """The default ``run()``: ``solve()`` per question, side by side."""
-
-    def one(question: Question) -> None:
-        def log(text: Any, question_id: str | None = None) -> None:
-            ctx.log(text, question_id or question.id)
-
-        question_ctx = RunContext(
-            student=client.for_question(question.id),
-            examples=ctx.examples,
-            submit=ctx.submit,
-            log=log,
-        )
-        try:
-            ctx.submit(question.id, policy.solve(question, question_ctx))
-        except BudgetExhausted as exc:
-            _report_error(question.id, f"budget_exhausted: {exc}")
-        except Exception as exc:  # a policy fault costs this question, not the run
-            _report_error(
-                question.id,
-                f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=8)}",
-            )
-
-    with ThreadPoolExecutor(max_workers=SOLVE_CONCURRENCY) as pool:
-        list(pool.map(one, questions))
 
 
 class PolicyHostTool(Tool):

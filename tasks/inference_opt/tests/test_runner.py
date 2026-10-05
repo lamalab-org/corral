@@ -44,7 +44,6 @@ def _run(
     benchmark: str = BENCHMARK,
     n: int = 3,
     budget: int = 20,
-    policy_api: str = "primitive",
     backends=None,
     models=("m",),
     examples=None,
@@ -58,7 +57,6 @@ def _run(
         "benchmark": benchmark,
         "models": list(models),
         "model_specs": dict.fromkeys(models, "mockllm/model"),
-        "policy_api": policy_api,
     }
     runs = run_policy(
         config=config,
@@ -90,7 +88,7 @@ def _gold_policy(benchmark: str, wrong: set[str] = frozenset()) -> str:
         "    def run(self, questions, ctx):\n"
         "        for q in questions:\n"
         "            ctx.student.generate(q.text, question_id=q.id)\n"
-        f"            ctx.submit(q.id, {marker!r}.format(ANSWERS[q.id]))\n"
+        f"            ctx.answer(q.id, {marker!r}.format(ANSWERS[q.id]))\n"
     )
 
 
@@ -175,69 +173,101 @@ class TestWorkspaceCopy:
 
 
 class TestPolicyShapes:
-    def test_solve_is_a_shortcut_for_one_question_at_a_time(self, tmp_path):
+    def test_a_batch_keeps_its_order_and_attributes_each_entry(self, tmp_path):
+        echo = EchoBackend()
         _, runs = _run(
             tmp_path,
             "class Policy:\n"
-            "    def solve(self, question, ctx):\n"
-            "        ctx.log('solving')\n"
-            "        return 'ANSWER: ' + ctx.student.generate('x')[:1]\n",
+            "    def run(self, questions, ctx):\n"
+            "        texts = ctx.student.generate(\n"
+            "            [{'prompt': q.id, 'question_id': q.id} for q in questions]\n"
+            "        )\n"
+            "        ctx.answer({q.id: 'ANSWER: ' + t for q, t in zip(questions, texts)})\n",
+            backends={"m": echo},
         )
         run = runs["m"]
-        assert len(run.answers) == 3
-        # Calls inside solve() are attributed to their question without asking.
-        assert {qid: usage["calls"] for qid, usage in run.per_question.items()} == {
-            item.item_id: 1 for item in _items()
-        }
-        assert all(run.logs[item.item_id] == ["solving"] for item in _items())
+        ids = [item.item_id for item in _items()]
+        assert [run.answers[qid] for qid in ids] == [f"ANSWER: {qid}" for qid in ids]
+        assert {qid: usage["calls"] for qid, usage in run.per_question.items()} == dict.fromkeys(
+            ids, 1
+        )
 
-    def test_a_failing_solve_costs_one_question(self, tmp_path):
+    def test_a_failed_entry_comes_back_empty_and_the_rest_still_answer(self, tmp_path):
         bad = _items()[0].item_id
+
+        def flaky(messages, **_):
+            if messages[-1]["content"] == bad:
+                raise ConnectionError("dropped")
+            return StudentCompletion(text="ok", finish_reason="stop", output_tokens=1)
+
         _, runs = _run(
             tmp_path,
             "class Policy:\n"
-            "    def solve(self, question, ctx):\n"
-            f"        if question.id == {bad!r}:\n"
-            "            raise ValueError('boom')\n"
-            "        return 'ANSWER: A'\n",
+            "    def run(self, questions, ctx):\n"
+            "        texts = ctx.student.generate(\n"
+            "            [{'prompt': q.id, 'question_id': q.id} for q in questions]\n"
+            "        )\n"
+            "        ctx.log(texts)\n"
+            "        ctx.answer({q.id: 'ANSWER: A' for q, t in zip(questions, texts) if t})\n",
+            backends={"m": flaky},
         )
         run = runs["m"]
+        assert run.logs["_run"] == ["['', 'ok', 'ok']"]
         assert set(run.answers) == {item.item_id for item in _items()[1:]}
-        assert run.errors[bad].startswith("ValueError: boom")
-        assert run.n_crashed == 1
+        assert "dropped" in run.errors[bad]
+        assert run.error == ""
+        assert run.infrastructure_error == ""
 
-    def test_a_crash_in_run_keeps_what_was_submitted(self, tmp_path):
+    def test_a_failed_single_call_raises(self, tmp_path):
+        def unreachable(_messages, **_):
+            raise ConnectionError("dropped")
+
+        _, runs = _run(
+            tmp_path,
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        try:\n"
+            "            ctx.student.generate('x')\n"
+            "        except RuntimeError as exc:\n"
+            "            ctx.log(str(exc))\n",
+            backends={"m": unreachable},
+        )
+        assert "student request failed" in runs["m"].logs["_run"][0]
+
+    def test_a_crash_in_run_keeps_what_was_answered(self, tmp_path):
         first = _items()[0].item_id
         _, runs = _run(
             tmp_path,
             "class Policy:\n"
             "    def run(self, questions, ctx):\n"
-            "        ctx.submit(questions[0].id, 'ANSWER: A')\n"
+            "        ctx.answer(questions[0].id, 'ANSWER: A')\n"
             "        raise RuntimeError('halfway')\n",
         )
         run = runs["m"]
         assert list(run.answers) == [first]
         assert "halfway" in run.error
 
-    def test_returning_a_mapping_submits_it(self, tmp_path):
+    def test_answer_takes_one_question_or_a_dict(self, tmp_path):
         _, runs = _run(
             tmp_path,
             "class Policy:\n"
             "    def run(self, questions, ctx):\n"
-            "        return {q.id: 'ANSWER: B' for q in questions}\n",
+            "        ctx.answer({q.id: 'ANSWER: B' for q in questions})\n"
+            "        ctx.answer(questions[0].id, 'ANSWER: C')\n",
         )
-        assert set(runs["m"].answers.values()) == {"ANSWER: B"}
+        answers = runs["m"].answers
+        assert answers[_items()[0].item_id] == "ANSWER: C"
+        assert [answers[item.item_id] for item in _items()[1:]] == ["ANSWER: B"] * 2
 
-    def test_returning_anything_else_is_an_error(self, tmp_path):
-        _, runs = _run(
-            tmp_path,
-            "def run(questions, ctx):\n    return ['ANSWER: B' for q in questions]\n",
-        )
-        assert "run() returned a list" in runs["m"].error
+    @pytest.mark.parametrize("returned", ["{q.id: 'ANSWER: B' for q in questions}", "[]"])
+    def test_returning_anything_is_an_error(self, tmp_path, returned):
+        _, runs = _run(tmp_path, f"def run(questions, ctx):\n    return {returned}\n")
+        assert "record answers with ctx.answer" in runs["m"].error
+        assert runs["m"].answers == {}
 
-    def test_a_run_that_submits_nothing_is_reported(self, tmp_path):
+    def test_a_run_that_answers_nothing_is_reported(self, tmp_path):
         _, runs = _run(tmp_path, "def run(questions, ctx):\n    pass\n")
-        assert "without submitting any answer" in runs["m"].error
+        assert "without recording any answer" in runs["m"].error
 
     def test_revealed_examples_reach_the_policy(self, tmp_path):
         example = {**datasets.public_record(_items(n=10)[9]), "target": "C"}
@@ -263,7 +293,7 @@ class TestBudget:
             tmp_path,
             "class Policy:\n"
             "    def run(self, questions, ctx):\n"
-            "        ctx.submit(questions[0].id, 'ANSWER: A')\n"
+            "        ctx.answer(questions[0].id, 'ANSWER: A')\n"
             "        while True:\n"
             "            ctx.student.generate('again')\n",
             budget=5,
@@ -273,6 +303,24 @@ class TestBudget:
         assert run.budget_exhausted
         assert run.error.startswith("budget_exhausted")
         assert len(run.answers) == 1
+
+    def test_a_batch_bigger_than_the_budget_sends_what_fits(self, tmp_path):
+        _, runs = _run(
+            tmp_path,
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        ctx.log(ctx.student.generate(['a', 'b', 'c']))\n"
+            "        ctx.log(ctx.budget)\n"
+            "        ctx.student.generate('d')\n",
+            budget=2,
+            backends={"m": EchoBackend()},
+        )
+        run = runs["m"]
+        assert run.logs["_run"][0] == "budget exhausted: sent 2 of 3 prompts"
+        assert run.logs["_run"][1:] == ["['a', 'b', '']", "0"]
+        assert run.calls_used == 2
+        assert run.budget_exhausted
+        assert run.error.startswith("budget_exhausted")
 
     def test_ctx_budget_counts_down(self, tmp_path):
         _, runs = _run(
@@ -303,30 +351,51 @@ class TestBudget:
 
 
 class TestStudentClient:
-    def test_primitive_tasks_offer_only_generate(self, tmp_path):
-        _, runs = _run(
-            tmp_path,
-            "class Policy:\n"
-            "    def run(self, questions, ctx):\n"
-            "        ctx.log(hasattr(ctx.student, 'sample'))\n",
-        )
-        assert runs["m"].logs["_run"] == ["False"]
-
-    def test_sampling_charges_every_draw_and_batch_keeps_order(self, tmp_path):
+    def test_entries_set_their_own_settings_over_the_shared_ones(self, tmp_path):
         echo = EchoBackend()
         _, runs = _run(
             tmp_path,
             "class Policy:\n"
             "    def run(self, questions, ctx):\n"
-            "        drawn = ctx.student.sample('p', n=3)\n"
-            "        batch = ctx.student.batch(['one', 'two', 'three'])\n"
-            "        ctx.log(f'{len(drawn)} {batch}')\n",
-            policy_api="enhanced",
+            "        texts = ctx.student.generate(\n"
+            "            ['plain', {'prompt': 'hot', 'temperature': 0.9, 'seed': 7}],\n"
+            "            temperature=0.2,\n"
+            "        )\n"
+            "        ctx.log(texts)\n",
             backends={"m": echo},
         )
         run = runs["m"]
-        assert run.calls_used == 6
-        assert run.logs["_run"] == ["3 ['one', 'two', 'three']"]
+        assert run.calls_used == 2
+        assert run.logs["_run"] == ["['plain', 'hot']"]
+        settings = {
+            r["messages"][-1]["content"]: (r["temperature"], r["seed"]) for r in echo.requests
+        }
+        assert settings == {"plain": (0.2, None), "hot": (0.9, 7)}
+
+    def test_a_message_list_is_one_prompt_not_a_batch(self, tmp_path):
+        echo = EchoBackend()
+        _, runs = _run(
+            tmp_path,
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        text = ctx.student.generate(\n"
+            "            [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': 'u'}]\n"
+            "        )\n"
+            "        ctx.log(repr(text))\n",
+            backends={"m": echo},
+        )
+        assert runs["m"].logs["_run"] == ["'u'"]
+        assert [m["role"] for m in echo.requests[0]["messages"]] == ["system", "user"]
+
+    def test_an_unknown_entry_setting_is_refused(self, tmp_path):
+        _, runs = _run(
+            tmp_path,
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        ctx.student.generate([{'prompt': 'x', 'temprature': 1.0}])\n",
+        )
+        assert "may set only" in runs["m"].error
+        assert runs["m"].calls_used == 0
 
     def test_max_tokens_is_capped_by_the_task(self, tmp_path):
         echo = EchoBackend()
@@ -349,7 +418,7 @@ class TestStudentClient:
             tmp_path,
             "class Policy:\n"
             "    def run(self, questions, ctx):\n"
-            "        ctx.submit('somebody-elses-question', 'ANSWER: A')\n",
+            "        ctx.answer('somebody-elses-question', 'ANSWER: A')\n",
         )
         assert "not a question in this run" in runs["m"].error
 
@@ -373,7 +442,7 @@ def test_the_run_stops_at_its_time_limit(tmp_path):
         "import time\n"
         "class Policy:\n"
         "    def run(self, questions, ctx):\n"
-        "        ctx.submit(questions[0].id, 'ANSWER: A')\n"
+        "        ctx.answer(questions[0].id, 'ANSWER: A')\n"
         "        time.sleep(60)\n",
         time_limit_s=3,
     )
@@ -389,31 +458,66 @@ class TestGateway:
             "budget": 3,
             "max_tokens_cap": 100,
             "question_ids": ["q1"],
-            "policy_api": "primitive",
         }
         settings.update(overrides)
         return StudentGateway(**settings)
 
-    def test_unknown_requests_and_roles_are_refused(self):
+    @staticmethod
+    def _request(**fields):
+        return {"messages": [{"role": "user", "content": "x"}], **fields}
+
+    def test_unknown_requests_fields_and_roles_are_refused(self):
         gateway = self._gateway()
         with pytest.raises(ValueError, match="unknown request"):
             gateway.handle({"op": "read_labels"})
+        with pytest.raises(ValueError, match="unknown request field"):
+            gateway.handle({"op": "generate", "requests": [self._request(answer="A")]})
         with pytest.raises(ValueError, match="unsupported message role"):
             gateway.handle(
-                {"op": "generate", "conversations": [[{"role": "tool", "content": "x"}]]}
+                {
+                    "op": "generate",
+                    "requests": [{"messages": [{"role": "tool", "content": "x"}]}],
+                }
             )
+        assert gateway.used == 0
 
-    def test_primitive_tasks_get_one_completion_per_call(self):
+    def test_a_request_bigger_than_the_budget_sends_what_fits(self):
         gateway = self._gateway()
-        message = [{"role": "user", "content": "x"}]
-        with pytest.raises(ValueError, match="one completion per call"):
-            gateway.handle({"op": "generate", "conversations": [message, message]})
+        reply = gateway.handle({"op": "generate", "requests": [self._request()] * 4})
+        assert reply["errors"] == ["", "", "", "budget exhausted"]
+        assert reply["completions"][3] == ""
+        assert reply["remaining"] == 0
+        assert gateway.used == 3
+        assert gateway.exhausted
 
-    def test_a_request_bigger_than_the_budget_is_refused_whole(self):
+    def test_nothing_left_is_refused(self):
         from inference_opt.api import BudgetExhausted
 
-        gateway = self._gateway(policy_api="enhanced")
-        message = [{"role": "user", "content": "x"}]
+        gateway = self._gateway(budget=0)
         with pytest.raises(BudgetExhausted):
-            gateway.handle({"op": "generate", "conversations": [message] * 4})
-        assert gateway.used == 0
+            gateway.handle({"op": "generate", "requests": [self._request()]})
+
+    def test_concurrency_is_capped_for_the_whole_run(self):
+        import time
+
+        lock = threading.Lock()
+        state = {"now": 0, "most": 0}
+
+        def slow(_messages, **_):
+            with lock:
+                state["now"] += 1
+                state["most"] = max(state["most"], state["now"])
+            time.sleep(0.05)
+            with lock:
+                state["now"] -= 1
+            return StudentCompletion(text="ok", finish_reason="stop", output_tokens=1)
+
+        gateway = self._gateway(backend=slow, budget=40, concurrency=3)
+        body = {"op": "generate", "requests": [self._request()] * 10}
+        threads = [threading.Thread(target=gateway.handle, args=(body,)) for _ in range(3)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert gateway.used == 30
+        assert state["most"] == 3

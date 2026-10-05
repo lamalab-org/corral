@@ -64,16 +64,8 @@ class LoadedPolicy:
     manifest: PolicyManifest
     root: Path
 
-    @property
-    def runs_whole_set(self) -> bool:
-        """True when the policy defines ``run(questions, ctx)`` itself."""
-        return callable(getattr(self.obj, "run", None))
-
     def run(self, questions: list[Question], ctx: RunContext) -> Any:
         return self.obj.run(questions, ctx)
-
-    def solve(self, question: Question, ctx: RunContext) -> Any:
-        return self.obj.solve(question, ctx)
 
 
 def _import_module(root: Path) -> ModuleType:
@@ -114,15 +106,17 @@ def _import_module(root: Path) -> ModuleType:
     return module
 
 
+_CONTRACT = (
+    "policy.py must define run(questions, ctx), as a function or as a method of "
+    "a Policy class"
+)
+
+
 def _check_signature(obj: Any) -> None:
-    """Accept ``run(questions, ctx)``, or ``solve(question, ctx)`` as a shortcut."""
-    name = "run" if callable(getattr(obj, "run", None)) else "solve"
-    method = getattr(obj, name, None)
+    """Require ``run(questions, ctx)``."""
+    method = getattr(obj, "run", None)
     if not callable(method):
-        raise PolicyError(
-            "the policy object must define run(questions, ctx), or "
-            "solve(question, ctx) to answer one question at a time"
-        )
+        raise PolicyError(_CONTRACT)
     positional = [
         parameter
         for parameter in inspect.signature(method).parameters.values()
@@ -131,9 +125,8 @@ def _check_signature(obj: Any) -> None:
         and parameter.name not in ("self", "cls")
     ]
     if len(positional) != 2:
-        expected = "(questions, ctx)" if name == "run" else "(question, ctx)"
         raise PolicyError(
-            f"{name}() must take exactly {expected}; found "
+            "run() must take exactly (questions, ctx); found "
             f"{len(positional)} positional parameter(s): "
             f"{', '.join(parameter.name for parameter in positional) or 'none'}"
         )
@@ -159,11 +152,8 @@ def discover_policy(root: Path | str) -> LoadedPolicy:
                 "The constructor must take no arguments."
             ) from exc
     elif (obj := getattr(module, "policy", None)) is None:
-        if not any(callable(getattr(module, name, None)) for name in ("run", "solve")):
-            raise PolicyError(
-                "policy.py must define run(questions, ctx) or solve(question, ctx), "
-                "as functions or as methods of a Policy class"
-            )
+        if not callable(getattr(module, "run", None)):
+            raise PolicyError(_CONTRACT)
         obj = module
     _check_signature(obj)
 

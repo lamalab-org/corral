@@ -117,7 +117,12 @@ def _workspace_with_policy(tmp_path, source):
 
 
 class TestSubmission:
-    POLICY = "class Policy:\n    def solve(self, q, ctx): return ctx.student.generate(q.text)\n"
+    POLICY = (
+        "class Policy:\n"
+        "    def run(self, questions, ctx):\n"
+        "        texts = ctx.student.generate([q.text for q in questions])\n"
+        "        ctx.answer({q.id: t for q, t in zip(questions, texts)})\n"
+    )
 
     def _submit(self, tmp_path, ledger, source=POLICY):
         from inference_opt.tools import create_tools
@@ -227,7 +232,7 @@ def test_a_refunded_run_keeps_its_folder_and_id(tmp_path):
     ("source", "warning"),
     [
         (
-            "def solve(question, ctx):\n    return ''\n",
+            "def run(questions, ctx):\n    ctx.answer({q.id: '' for q in questions})\n",
             "made no student calls and gave no non-empty answer",
         ),
         (TestSubmission.POLICY, None),
@@ -336,7 +341,7 @@ class TestToolErrors:
         )
         dry = environments["mmlu_pro_a"].tools["dry_run_policy"]._func
         workspace = _workspace_with_policy(
-            tmp_path, "class Policy:\n    def solve(self, q, ctx): return 'A'\n"
+            tmp_path, "def run(questions, ctx):\n    ctx.answer(questions[0].id, 'A')\n"
         )
         out = dry(policy_path="policy", work_dir=str(workspace), inference_state={})
         headline, payload = out.split("\n")[:2]
