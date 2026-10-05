@@ -17,10 +17,9 @@ _TEMPLATE = """\
 
 ## The setup
 
-A frozen student model is served for you. Implement any strategy that does not
-modify model weights. You can change the prompts, how many samples you draw, how
-they are combined, whether one call checks another, what is remembered between
-questions, or any strategy you can come up with.
+A frozen student model is served for you.
+Implement any strategy that does not modify model weights.
+You can change the prompts, how many samples you draw, how they are combined, whether one call checks another, what is remembered between questions, or any strategy you can come up with.
 
 Write it as a Python policy in `{policy_dir}/policy.py`. The API is documented in `guide/policy_api.md`.
 
@@ -41,12 +40,12 @@ Test questions: {n_test} (held out; you never should see these or their answers)
 
 {budget}
 
-Every experiment costs real inference. `dry_run_policy` is much cheaper than
-`evaluate_candidate` and catches the errors that would otherwise waste one.
+Every experiment costs real inference.
+`dry_run_policy` is much cheaper than `evaluate_candidate` and catches the errors that would otherwise waste one.
 
 ## Submitting
 
-To submit, call `submit_policy('{policy_dir}')`, then pass the exact string it returns to `submit_answer`.
+To submit, call `submit_policy('{policy_dir}')`, then call `submit_answer` to end the episode; the text you pass to it is not used.
 `submit_policy` runs your policy once on the held-out test questions and keeps the result hidden until the episode is scored.
 Submit when you are done. The policy you submitted would be used for final scoring.
 A policy that is never submitted scores nothing, so submit before you run out of steps.
@@ -62,15 +61,13 @@ def _budget_summary(config: dict) -> str:
         f"- {budget.get('max_reveals', 4)} reveals of {budget.get('reveal_batch', 5)} "
         "labelled train questions each",
         (
-            f"- at most {MAX_TOKENS_CAP} generated tokens per student call, reasoning "
-            "included (the limit the zero-shot baseline was measured with)"
+            f"- at most {MAX_TOKENS_CAP} generated tokens per student call, reasoning included"
         ),
     ]
     final_calls = config.get("final_max_student_calls")
     if final_calls:
         lines.append(
-            f"- at test time your policy may make {final_calls} student calls in "
-            f"total, per model - plan for that, not for unlimited sampling"
+            f"- at test time your policy may make {final_calls} student calls in total, per model"
         )
     return "\n".join(lines)
 
@@ -81,19 +78,16 @@ def _scoring_summary(config: dict) -> str:
     joint = len(config.get("models", [])) > 1
     if rule.get("kind") == "continuous":
         lines = [
-            "- Your submitted policy is run on the held-out test split, and your score "
-            "is the improvement over the student's measured zero-shot baseline on "
-            "those same questions.",
+            "- Your submitted policy is run on the held-out test split, and your score is the improvement over the student's measured zero-shot baseline on those same questions.",
         ]
         if joint:
-            lines.append("- For two student models, the score is the smaller improvement.")
+            lines.append(
+                "- For two student models, the score is the smaller improvement."
+            )
         return "\n".join(lines)
     share = f"{float(rule.get('min_closed', 0.5)):.0%}"
     lines = [
-        "- Your submitted policy is run on the held-out test split. The task passes "
-        f"(score 1) if the policy answers correctly at least {share} of the test "
-        "questions the student's measured zero-shot baseline gets wrong; otherwise "
-        "it scores 0.",
+        f"- Your submitted policy is run on the held-out test split. The task passes (score 1) if the policy answers correctly at least {share} of the test questions the student's measured zero-shot baseline gets wrong; otherwise it scores 0.",
     ]
     if joint:
         lines.append("- With two student models, both must reach this to pass.")

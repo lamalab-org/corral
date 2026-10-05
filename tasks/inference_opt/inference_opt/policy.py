@@ -29,6 +29,7 @@ _MODULE_NAME = "submitted_policy"
 _IMPORT_LOCK = threading.Lock()
 
 _MANIFEST_FIELDS = frozenset({"name", "version", "max_tokens_per_call"})
+_CONTRACT = "policy.py must define run(questions, ctx), as a function or as a method of a Policy class"
 
 
 class PolicyError(ValueError):
@@ -106,12 +107,6 @@ def _import_module(root: Path) -> ModuleType:
     return module
 
 
-_CONTRACT = (
-    "policy.py must define run(questions, ctx), as a function or as a method of "
-    "a Policy class"
-)
-
-
 def _check_signature(obj: Any) -> None:
     """Require ``run(questions, ctx)``."""
     method = getattr(obj, "run", None)
@@ -161,4 +156,6 @@ def discover_policy(root: Path | str) -> LoadedPolicy:
     raw_manifest = getattr(obj, "MANIFEST", None)
     if raw_manifest is None:
         raw_manifest = getattr(module, "MANIFEST", None)
-    return LoadedPolicy(obj=obj, manifest=manifest_from_mapping(raw_manifest), root=root)
+    return LoadedPolicy(
+        obj=obj, manifest=manifest_from_mapping(raw_manifest), root=root
+    )

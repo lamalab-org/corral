@@ -1,7 +1,7 @@
 """Runs a submitted policy in the jail; everything goes through the service channel.
 
-Imports what a policy may use at load time: the package is unreadable once the
-jail is entered. Locally: ``python -m inference_opt.host <request> <result> <fd>``.
+Imports what a policy may use at load time: the package is unreadable once the jail is entered.
+Locally: ``python -m inference_opt.host <request> <result> <fd>``.
 """
 
 from __future__ import annotations
@@ -166,7 +166,10 @@ def _entry(item: Any, defaults: dict[str, Any]) -> dict[str, Any]:
             "a batch entry given as a dict needs a 'prompt' and may set only "
             f"{', '.join(_ENTRY_SETTINGS)}; got {', '.join(sorted(map(str, item)))}"
         )
-    settings = {**defaults, **{key: item[key] for key in _ENTRY_SETTINGS if key in item}}
+    settings = {
+        **defaults,
+        **{key: item[key] for key in _ENTRY_SETTINGS if key in item},
+    }
     return _request(item["prompt"], settings)
 
 

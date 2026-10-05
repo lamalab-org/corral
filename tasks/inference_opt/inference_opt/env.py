@@ -61,7 +61,7 @@ def load_tasks_from_json(json_path: str | Path) -> dict[str, TaskDefinition]:
             # the result; scoring only reads it back from committed state.
             scoring_fn=_scored_from_state,
             state_scoring_fn=StateScorer(),
-            submission_format=entry.get("submission_format", "submission.json"),
+            submission_format=entry.get("submission_format", "Any text; the score comes from the policy submitted with submit_policy."),
             initial_input=config,
             prompt_fn=task_prompt,
             setup_fn=_prepare_workspace,

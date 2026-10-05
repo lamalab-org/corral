@@ -31,10 +31,17 @@ _MAX_PROMPT_CHARS = 200_000
 #: Entries in one generate request; the call budget is the real limit.
 _MAX_BATCH = 2048
 _REQUEST_FIELDS = frozenset(
-    {"messages", "temperature", "max_tokens", "stop", "seed", "question_id", "component"}
+    {
+        "messages",
+        "temperature",
+        "max_tokens",
+        "stop",
+        "seed",
+        "question_id",
+        "component",
+    }
 )
-#: Student requests one run has in flight unless the task sets
-#: ``student_concurrency``; the rest wait here, not in the student's queue.
+#: Student requests one run has in flight unless the task sets ``student_concurrency``; the rest wait here, not in the student's queue.
 DEFAULT_CONCURRENCY = 16
 
 #: ``backend(messages, temperature, max_tokens, stop, seed)`` -> one completion.
@@ -165,8 +172,12 @@ class StudentGateway:
         if len(sent) == 1:
             results = [self._complete(**sent[0])]
         else:
-            with ThreadPoolExecutor(max_workers=min(len(sent), self.concurrency)) as pool:
-                results = list(pool.map(lambda request: self._complete(**request), sent))
+            with ThreadPoolExecutor(
+                max_workers=min(len(sent), self.concurrency)
+            ) as pool:
+                results = list(
+                    pool.map(lambda request: self._complete(**request), sent)
+                )
         skipped = count - granted
         errors = [error for _, error in results] + ["budget exhausted"] * skipped
         if skipped:
@@ -174,11 +185,16 @@ class StudentGateway:
         with self._lock:
             for request, error in zip(requests, errors, strict=True):
                 question_id = request["question_id"]
-                if error and question_id is not None and question_id not in self.answers:
+                if (
+                    error
+                    and question_id is not None
+                    and question_id not in self.answers
+                ):
                     self.errors[question_id] = f"student request failed: {error}"[:2000]
             remaining = self.budget - self.used
         return {
-            "completions": [completion.text for completion, _ in results] + [""] * skipped,
+            "completions": [completion.text for completion, _ in results]
+            + [""] * skipped,
             "errors": errors,
             "sent": granted,
             "remaining": remaining,

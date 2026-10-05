@@ -45,7 +45,7 @@ def _compact(payload: dict[str, Any], summary: str, ledger: StateLedger) -> str:
     if ledger.fraction_left() <= NAG_THRESHOLD:
         lines.append(
             "NEXT: budget is nearly gone. Call submit_policy('policy'), then "
-            "submit_answer('submission.json') NOW - an unsubmitted policy scores nothing."
+            "submit_answer to end the episode NOW - an unsubmitted policy scores nothing."
         )
     return "\n".join(lines)
 
@@ -99,7 +99,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
     models = list(config["models"])
     spec = BudgetSpec.from_mapping(config.get("budget"))
     model_specs = dict(config.get("model_specs") or {})
-    baselines_train = dict(config.get("baselines_train") or config.get("baselines") or {})
+    baselines_train = dict(
+        config.get("baselines_train") or config.get("baselines") or {}
+    )
 
     def _ledger(inference_state: Any) -> StateLedger:
         return StateLedger({} if inference_state is None else inference_state, spec)
@@ -269,7 +271,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             )
             # The end of the cut-off reasoning shows how far the student got.
             payload["reasoning_tail"] = [
-                c.reasoning[-300:] if not c.text and c.reasoning else "" for c in completions
+                c.reasoning[-300:] if not c.text and c.reasoning else ""
+                for c in completions
             ]
         return _compact(payload, summary, ledger)
 
@@ -406,11 +409,15 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             examples=_examples(ledger),
             save_private=_saver(corral_private_artifacts),
         )
-        load_error = next((run.load_error for run in runs.values() if run.load_error), "")
+        load_error = next(
+            (run.load_error for run in runs.values() if run.load_error), ""
+        )
         if load_error:
             ledger.refund(calls=reserved, experiments=1)
             return _compact(
-                {"error": load_error}, f"Policy could not be loaded: {load_error}", ledger
+                {"error": load_error},
+                f"Policy could not be loaded: {load_error}",
+                ledger,
             )
         used = sum(run.calls_used for run in runs.values())
         ledger.refund(calls=max(0, reserved - used))
@@ -453,7 +460,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             for item in datasets.load_items(benchmark, "train")
         }
         for item_id in run.question_ids:
-            bucket = by_topic.setdefault(categories.get(item_id, "(none)"), {"n": 0, "n_correct": 0})
+            bucket = by_topic.setdefault(
+                categories.get(item_id, "(none)"), {"n": 0, "n_correct": 0}
+            )
             bucket["n"] += 1
             bucket["n_correct"] += int(run.correct.get(item_id, False))
         return {
@@ -464,7 +473,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             "n_submitted": len(run.answers),
             "n_crashed": run.n_crashed,
             "budget_exhausted": run.budget_exhausted,
-            "error": error_tail(run.error or run.infrastructure_error or run.grading_error, 1000),
+            "error": error_tail(
+                run.error or run.infrastructure_error or run.grading_error, 1000
+            ),
             "by_topic": by_topic,
         }
 
@@ -527,7 +538,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                             "item_id": item_id,
                             "model": model_dir.name,
                             "answer": record.get("answer", ""),
-                            "target": targets.get(item_id) if item_id in revealed else None,
+                            "target": targets.get(item_id)
+                            if item_id in revealed
+                            else None,
                             "correct": correct,
                             "calls": record.get("calls", 0),
                             "error": record.get("error", ""),
@@ -606,8 +619,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON confirming the submission, and the literal string to submit. The
-            test result is not shown; it is used when the episode is scored.
+            JSON confirming the submission. The test result is not shown; it is
+            used when the episode is scored.
         """
         ledger = _ledger(inference_state)
         policy_dir = _resolve(work_dir, policy_path)
@@ -616,7 +629,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             return _compact(
                 {"error": "no submissions left"},
                 "NOT submitted: a policy was already submitted and is used for final "
-                "scoring. Call submit_answer with exactly: submission.json",
+                "scoring. Call submit_answer to end the episode.",
                 ledger,
             )
         policy_hash = _policy_hash(policy_dir)
@@ -633,7 +646,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             write_copy=False,
             save_private=_saver(corral_private_artifacts),
         )
-        load_error = next((run.load_error for run in runs.values() if run.load_error), "")
+        load_error = next(
+            (run.load_error for run in runs.values() if run.load_error), ""
+        )
         if load_error:
             # Import fails before any test question is seen; it costs nothing.
             return _compact(
@@ -674,11 +689,10 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "policy_dir": policy_path,
                 "policy_hash": policy_hash[:12],
                 "submissions_left": spec.max_submissions - used - 1,
-                "submit_answer_with": "submission.json",
             },
             "Submitted. Your policy ran on the held-out test questions; that result "
-            "is kept hidden and is used for final scoring. Now call submit_answer "
-            "with exactly: submission.json",
+            "is kept hidden and is used for final scoring. Now call submit_answer to "
+            "end the episode; the text you pass is not used.",
             ledger,
         )
 

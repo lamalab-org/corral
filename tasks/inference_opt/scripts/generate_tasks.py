@@ -73,7 +73,7 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
         "description": description,
         "tools": TOOLS,
         "submission_format": (
-            "The literal string 'submission.json' - stage it with submit_policy first."
+            "Any text; the score comes from the policy submitted with submit_policy."
         ),
         "initial_input": {
             "benchmark": benchmark,

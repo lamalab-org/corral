@@ -30,9 +30,7 @@ Message = Mapping[str, str]
 #: One prompt: a bare string or an explicit message list.
 Prompt = str | Sequence[Message]
 
-#: One entry of a batch: a prompt, or ``{"prompt": ..., **settings}`` to give
-#: that call its own ``system``, ``temperature``, ``max_tokens``, ``stop``,
-#: ``seed``, ``question_id`` or ``component``.
+#: One entry of a batch: a prompt, or ``{"prompt": ..., **settings}`` to give that call its own ``system``, ``temperature``, ``max_tokens``, ``stop``, ``seed``, ``question_id`` or ``component``.
 PromptItem = Prompt | Mapping[str, Any]
 
 AnswerType = Literal["mcq", "numeric", "text"]
@@ -111,10 +109,9 @@ class StudentClient(Protocol):
     ) -> str | list[str]:
         """Complete one prompt, or a list of prompts sent side by side.
 
-        One prompt returns a ``str`` and charges one call; a failed request
-        raises. A list returns one ``str`` per entry, in order, and charges one
-        call per entry; a failed entry comes back as ``""`` and is logged. The
-        keyword settings apply to every entry that does not set its own.
+        One prompt returns a ``str`` and charges one call; a failed request raises.
+        A list returns one ``str`` per entry, in order, and charges one call per entry; a failed entry comes back as ``""`` and is logged.
+        The keyword settings apply to every entry that does not set its own.
         """
         ...
 
@@ -149,8 +146,7 @@ class RunContext:
 class PolicyManifest:
     """How a policy wants to be run. Every field has a working default.
 
-    Declared by the policy as a plain ``MANIFEST`` dict; unknown keys are rejected
-    so a typo surfaces at ``dry_run_policy`` rather than silently doing nothing.
+    Declared by the policy as a plain ``MANIFEST`` dict; unknown keys are rejected so a typo surfaces at ``dry_run_policy`` rather than silently doing nothing.
     """
 
     name: str = "policy"

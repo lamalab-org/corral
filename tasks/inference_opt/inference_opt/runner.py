@@ -1,7 +1,6 @@
 """Run a policy on one split: jailed host, controller gateway, then grading.
 
-Without Docker permission enforcement the host is a plain subprocess, so
-metering holds but the labels are not protected.
+Without Docker permission enforcement the host is a plain subprocess, so metering holds but the labels are not protected.
 """
 
 from __future__ import annotations
@@ -96,7 +95,9 @@ class ModelRun:
     @property
     def n_crashed(self) -> int:
         return sum(
-            1 for text in self.errors.values() if not text.startswith("budget_exhausted")
+            1
+            for text in self.errors.values()
+            if not text.startswith("budget_exhausted")
         )
 
 
@@ -148,7 +149,9 @@ def run_policy(
     workspace_copy = work_dir / "runs" / run_id
     if write_copy:
         shutil.rmtree(workspace_copy, ignore_errors=True)
-    limit = int(time_limit_s or config.get("run_time_limit_s", DEFAULT_RUN_TIME_LIMIT_S))
+    limit = int(
+        time_limit_s or config.get("run_time_limit_s", DEFAULT_RUN_TIME_LIMIT_S)
+    )
     concurrency = int(config.get("student_concurrency", DEFAULT_STUDENT_CONCURRENCY))
 
     def one(model: str) -> ModelRun:
@@ -183,7 +186,9 @@ def run_policy(
             answers=dict(gateway.answers),
             errors=dict(gateway.errors),
             logs={key: list(lines) for key, lines in gateway.logs.items()},
-            per_question={key: dict(value) for key, value in gateway.per_question.items()},
+            per_question={
+                key: dict(value) for key, value in gateway.per_question.items()
+            },
             calls=list(gateway.calls),
             calls_used=gateway.used,
             calls_reserved=budget_per_model,
@@ -194,7 +199,9 @@ def run_policy(
             error=str(result.get("error") or ""),
         )
         if gateway.backend_failures and not gateway.backend_successes:
-            failed = next((call["error"] for call in gateway.calls if call["error"]), "")
+            failed = next(
+                (call["error"] for call in gateway.calls if call["error"]), ""
+            )
             run.infrastructure_error = f"the student never answered: {failed}"
         if not (run.load_error or run.error or run.answers or gateway.errors):
             run.error = (

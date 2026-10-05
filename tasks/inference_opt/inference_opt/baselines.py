@@ -17,8 +17,7 @@ __all__ = [
     "measure_baseline",
 ]
 
-#: The pinned zero-shot policy. Written to a temporary directory and run through
-#: the normal pipeline, so the baseline and every candidate share one code path.
+#: The pinned zero-shot policy. Written to a temporary directory and run through the normal pipeline, so the baseline and every candidate share one code path.
 BASELINE_POLICY_SOURCE = '''\
 """The pinned zero-shot baseline. One call, no system message, no demonstrations."""
 
@@ -180,8 +179,10 @@ def measure_baseline(
             time_limit_s=timeout_s,
         )[model]
 
-    failure = run.load_error or run.grading_error or (
-        run.infrastructure_error if not run.answers else ""
+    failure = (
+        run.load_error
+        or run.grading_error
+        or (run.infrastructure_error if not run.answers else "")
     )
     if failure:
         result.error = failure[:600]
@@ -191,10 +192,14 @@ def measure_baseline(
     result.n_unparseable = sum(
         1 for item_id in run.question_ids if not run.answers.get(item_id, "").strip()
     )
-    result.per_item = {item_id: run.correct.get(item_id, False) for item_id in run.question_ids}
+    result.per_item = {
+        item_id: run.correct.get(item_id, False) for item_id in run.question_ids
+    }
     by_topic: dict[str, dict[str, Any]] = {}
     for item in items:
-        bucket = by_topic.setdefault(item.category or "(none)", {"n": 0, "n_correct": 0})
+        bucket = by_topic.setdefault(
+            item.category or "(none)", {"n": 0, "n_correct": 0}
+        )
         bucket["n"] += 1
         bucket["n_correct"] += int(run.correct.get(item.item_id, False))
     result.per_topic = {
