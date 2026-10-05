@@ -301,6 +301,16 @@ class TestPolicyShapes:
         assert runs["m1"].logs["_run"] == ["True 'ANSWER: C'"]
         assert runs["m2"].logs["_run"] == ["False ''"]
 
+    def test_a_long_answer_keeps_its_end_where_the_marker_is(self, tmp_path):
+        _, runs = _run(
+            tmp_path,
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        ctx.answer(questions[0].id, 'x' * 20000 + ' ANSWER: B')\n",
+        )
+        answer = next(iter(runs["m"].answers.values()))
+        assert answer.endswith("ANSWER: B")
+
     def test_an_unmeasured_baseline_reply_is_none_not_empty(self, tmp_path):
         example = {
             **datasets.public_record(datasets.load_items(BENCHMARK, "examples")[0]),
@@ -449,6 +459,27 @@ class TestStudentClient:
             1000,
             MAX_TOKENS_CAP,
         ]
+
+    def test_a_completion_carries_its_reasoning_and_finish_reason(self, tmp_path):
+        def thinking(messages, **params):
+            del messages, params
+            return StudentCompletion(
+                "", finish_reason="length", reasoning="so far: B", output_tokens=8
+            )
+
+        workspace, runs = _run(
+            tmp_path,
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        one = ctx.student.generate('q')\n"
+            "        [two] = ctx.student.generate(['q'])\n"
+            "        for c in (one, two):\n"
+            "            ctx.log(f'{isinstance(c, str)} {c!r} {c.reasoning} {c.truncated}')\n",
+            backends={"m": thinking},
+        )
+        assert runs["m"].logs["_run"] == ["True '' so far: B True"] * 2
+        calls = (workspace / "runs/exp-1/m/student_calls.jsonl").read_text().splitlines()
+        assert json.loads(calls[0])["reasoning"] == "so far: B"
 
     def test_calls_cut_off_at_the_limit_are_counted(self, tmp_path):
         def still_reasoning(messages, **params):

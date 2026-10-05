@@ -149,6 +149,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             replies[model] = None if row is None else {
                 "correct": bool(row["correct"]),
                 "completion": str(row.get("completion", "")),
+                "reasoning": str(row.get("reasoning", "")),
                 "finish_reason": str(row.get("finish_reason", "")),
             }
         return {
@@ -243,18 +244,20 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         chosen = pool[:count]
         ledger.mark_revealed([item.item_id for item in chosen])
         new_records = [_example_record(item, targets, baselines) for item in chosen]
-        # A long reply is cut to its end, where the answer is, to keep the result
-        # readable; the stored copy and ctx.examples keep it whole.
+        # A long reply or reasoning is cut to its end, where the answer or the
+        # point it stopped is, to keep the result readable; the stored copy and
+        # ctx.examples keep both whole.
         for record in new_records:
             for reply in record["baseline"].values():
                 if reply is None:
                     continue
-                text = reply["completion"]
-                if len(text) > REPLY_PREVIEW_CHARS:
-                    reply["completion"] = (
-                        f"[last {REPLY_PREVIEW_CHARS} of {len(text)} characters] "
-                        + text[-REPLY_PREVIEW_CHARS:]
-                    )
+                for key in ("completion", "reasoning"):
+                    text = reply[key]
+                    if len(text) > REPLY_PREVIEW_CHARS:
+                        reply[key] = (
+                            f"[last {REPLY_PREVIEW_CHARS} of {len(text)} characters] "
+                            + text[-REPLY_PREVIEW_CHARS:]
+                        )
 
         # A copy for the agent to reread. Runs rebuild the examples from the
         # ledger, so editing or deleting this file changes nothing.
@@ -272,7 +275,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             },
             f"Revealed {len(new_records)} example(s) using strategy {strategy!r}. "
             "Every run's ctx.examples holds all of them. A baseline completion is "
-            "empty when the student ran out of tokens (finish_reason 'length')."
+            "empty when the student ran out of tokens (finish_reason 'length'); "
+            "its reasoning then shows how far it got."
             + (
                 f" No zero-shot reply was measured for {', '.join(unmeasured)}; "
                 "its baseline is null, which says nothing about the student."

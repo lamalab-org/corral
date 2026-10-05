@@ -127,6 +127,9 @@ def _example_for(example: dict[str, Any], model: str) -> dict[str, Any]:
     record["baseline_completion"] = (
         None if reply is None else str(reply.get("completion", ""))
     )
+    record["baseline_reasoning"] = (
+        None if reply is None else str(reply.get("reasoning", ""))
+    )
     return record
 
 

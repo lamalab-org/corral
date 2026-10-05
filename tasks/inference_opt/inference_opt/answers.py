@@ -10,7 +10,7 @@ __all__ = ["ANSWER_PREFIX", "MAX_COMPLETION_CHARS", "completion_for"]
 
 ANSWER_PREFIX = "ANSWER:"
 
-#: Longer completions are cut; the answer marker belongs at the end of a short reply.
+#: Longer answers keep their end, where the scorers look for the answer marker.
 MAX_COMPLETION_CHARS = 8192
 
 
@@ -23,4 +23,4 @@ def completion_for(raw: Any, benchmark: str) -> str:
             completion = f"{ANSWER_PREFIX} {raw.final}"
     else:
         completion = "" if raw is None else str(raw)
-    return completion[:MAX_COMPLETION_CHARS]
+    return completion[-MAX_COMPLETION_CHARS:]

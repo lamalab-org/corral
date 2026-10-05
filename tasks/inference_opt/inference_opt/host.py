@@ -21,6 +21,7 @@ from corral.runtime.service_channel import ServiceError
 from inference_opt.answers import completion_for
 from inference_opt.api import (
     BudgetExhausted,
+    Completion,
     LabeledExample,
     Question,
     RunContext,
@@ -115,7 +116,7 @@ class StudentClient:
         seed: int | None = None,
         question_id: str | None = None,
         component: str | None = None,
-    ) -> str | list[str]:
+    ) -> Completion | list[Completion]:
         defaults = {
             "system": system,
             "temperature": temperature,
@@ -136,7 +137,9 @@ class StudentClient:
         completions, _ = self._send([_entry(item, defaults) for item in entries])
         return completions
 
-    def _send(self, requests: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    def _send(
+        self, requests: list[dict[str, Any]]
+    ) -> tuple[list[Completion], list[str]]:
         reply = _call(
             {
                 "op": "generate",
@@ -145,7 +148,14 @@ class StudentClient:
             }
         )
         self._meter.update(int(reply["sent"]), int(reply["remaining"]))
-        return list(reply["completions"]), list(reply["errors"])
+        completions = [
+            Completion(text, reasoning, finish_reason)
+            for text, reasoning, finish_reason in zip(
+                reply["completions"], reply["reasoning"], reply["finish_reasons"],
+                strict=True,
+            )
+        ]
+        return completions, list(reply["errors"])
 
     @property
     def calls_used(self) -> int:
@@ -219,6 +229,7 @@ def _example(record: dict[str, Any]) -> LabeledExample:
         question=_question(record, 0, 1),
         answer=str(record.get("target", "")),
         baseline_completion=_optional(record.get("baseline_completion"), str),
+        baseline_reasoning=_optional(record.get("baseline_reasoning"), str),
         baseline_correct=_optional(record.get("baseline_correct"), bool),
     )
 

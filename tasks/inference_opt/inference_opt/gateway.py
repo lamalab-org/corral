@@ -28,8 +28,10 @@ _ROLES = frozenset({"system", "user", "assistant"})
 _MAX_LOG_LINES = 50
 _MAX_RUN_LOG_LINES = 200
 _MAX_PROMPT_CHARS = 200_000
-#: Entries in one generate request; the call budget is the real limit.
-_MAX_BATCH = 2048
+#: Entries in one generate request. A completion and its reasoning share one
+#: call's 8192 tokens (about 35 KB of JSON), so 1024 of them stay well inside
+#: the service channel's 64 MB message limit.
+_MAX_BATCH = 1024
 _REQUEST_FIELDS = frozenset(
     {
         "messages",
@@ -200,6 +202,10 @@ class StudentGateway:
         return {
             "completions": [completion.text for completion, _ in results]
             + [""] * skipped,
+            "reasoning": [completion.reasoning for completion, _ in results]
+            + [""] * skipped,
+            "finish_reasons": [completion.finish_reason or "" for completion, _ in results]
+            + [""] * skipped,
             "errors": errors,
             "sent": granted,
             "remaining": remaining,
@@ -276,6 +282,7 @@ class StudentGateway:
                     "messages": messages,
                     "params": params,
                     "completion": completion.text,
+                    "reasoning": completion.reasoning,
                     "finish_reason": completion.finish_reason,
                     "output_tokens": completion.output_tokens,
                     "seconds": round(time.monotonic() - started, 3),
@@ -288,7 +295,8 @@ class StudentGateway:
         question_id = self._question(body.get("question_id"))
         if question_id is None:
             raise ValueError("an answer needs a question_id")
-        answer = str(body.get("answer", ""))[:MAX_COMPLETION_CHARS]
+        # Keep the end of a long answer: the marker the scorers parse is there.
+        answer = str(body.get("answer", ""))[-MAX_COMPLETION_CHARS:]
         with self._lock:
             self.answers[question_id] = answer
             self.errors.pop(question_id, None)

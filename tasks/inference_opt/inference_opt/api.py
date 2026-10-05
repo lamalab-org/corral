@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, Self, runtime_checkable
 
 __all__ = [
     "Answer",
     "AnswerType",
     "Answerable",
     "BudgetExhausted",
+    "Completion",
     "LabeledExample",
     "Message",
     "PolicyManifest",
@@ -38,6 +39,31 @@ AnswerType = Literal["mcq", "numeric", "text"]
 
 class BudgetExhausted(RuntimeError):
     """Raised when the run has no student-model calls remaining."""
+
+
+class Completion(str):  # noqa: SLOT000 - str subclasses cannot take non-empty __slots__
+    """One student completion: the answer text, and how the student got there.
+
+    It is a ``str`` holding the answer, so it works wherever text does.
+    ``reasoning`` is the thinking the server returned separately from the answer,
+    empty if there was none. ``finish_reason`` is ``"stop"``, or ``"length"`` when
+    ``max_tokens`` ran out; a call cut off mid-reasoning has empty text but keeps
+    its partial ``reasoning``, which a follow-up call can build on.
+    """
+
+    reasoning: str
+    finish_reason: str
+
+    def __new__(cls, text: str = "", reasoning: str = "", finish_reason: str = "") -> Self:
+        completion = super().__new__(cls, text)
+        completion.reasoning = reasoning
+        completion.finish_reason = finish_reason
+        return completion
+
+    @property
+    def truncated(self) -> bool:
+        """Whether the call ended because it reached ``max_tokens``."""
+        return self.finish_reason == "length"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +106,8 @@ class LabeledExample:
     #: The student's zero-shot reply; empty when it ran out of tokens, ``None``
     #: when it was never measured.
     baseline_completion: str | None = None
+    #: The thinking behind that reply, if the server returned it separately.
+    baseline_reasoning: str | None = None
     #: Whether that reply was right; ``None`` when it was never measured.
     baseline_correct: bool | None = None
 
@@ -109,11 +137,11 @@ class StudentClient(Protocol):
         seed: int | None = None,
         question_id: str | None = None,
         component: str | None = None,
-    ) -> str | list[str]:
+    ) -> Completion | list[Completion]:
         """Complete one prompt, or a list of prompts sent side by side.
 
-        One prompt returns a ``str`` and charges one call; a failed request raises.
-        A list returns one ``str`` per entry, in order, and charges one call per entry; a failed entry comes back as ``""`` and is logged.
+        One prompt returns a ``Completion`` and charges one call; a failed request raises.
+        A list returns one ``Completion`` per entry, in order, and charges one call per entry; a failed entry comes back empty and is logged.
         The keyword settings apply to every entry that does not set its own.
         """
         ...

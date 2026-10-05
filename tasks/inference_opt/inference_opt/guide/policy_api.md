@@ -22,9 +22,9 @@ You can also give `Answer(final=...)` from `inference_opt.api`, which adds the r
 
 `ctx.student.generate(prompt, *, system=None, temperature=0.0, max_tokens=None, stop=None, seed=None, question_id=None, component=None)`
 
-- **One prompt** (a string, or a list of `{"role": ..., "content": ...}` messages) returns one completion as a `str`. A failed request raises.
-- **A list of prompts** returns a list of completions, in the same order, and sends them in a batch.
-A failed entry comes back as `""` and is logged.
+- **One prompt** (a string, or a list of `{"role": ..., "content": ...}` messages) returns one `Completion`. A failed request raises.
+- **A list of prompts**, at most 1024, returns a list of `Completion`s, in the same order, and sends them in a batch.
+A failed entry comes back empty and is logged.
 Each entry is a prompt, or a dict `{"prompt": ..., **settings}` that sets its own `system`, `temperature`, `max_tokens`, `stop`, `seed`, `question_id` or `component`.
 The keyword arguments apply to every entry that does not.
 
@@ -40,7 +40,16 @@ Every completion costs one call of the run's budget; `ctx.budget` says how many 
 A batch larger than what is left sends what fits and returns `""` for the rest; a call when nothing is left raises `BudgetExhausted`.
 
 No call generates more than 8192 tokens, reasoning included: the limit the zero-shot baseline was measured with.
-A call that reaches its limit while the student is still reasoning usually returns `""`; run results count these calls, and `student_calls.jsonl` shows `finish_reason: "length"` for each.
+
+A `Completion` is a `str` holding the answer text, so it works wherever text does, with two more attributes:
+
+- `reasoning`: the student's thinking, when the server returns it separately from the answer; otherwise `""`.
+- `finish_reason`: `"stop"`, or `"length"` when the call reached `max_tokens`; `completion.truncated` checks the latter.
+
+A call cut off while the student is still thinking returns empty text, but its partial `reasoning` is kept.
+A follow-up call can build on it, for example by passing that reasoning back and asking for the final answer only.
+Run results count the calls that were cut off, and `student_calls.jsonl` records each call's reasoning and `finish_reason`.
+
 `max_tokens=None` uses the manifest's `max_tokens_per_call`; a larger request is cut to 8192, and run results say how many were.
 How many requests run at once is set by the task, not the policy.
 `question_id` attributes a call to a question in the run's diagnostics; `component` labels it in `student_calls.jsonl`.
@@ -60,8 +69,8 @@ A later answer for the same question replaces the earlier one, and a question ne
 ## The context
 
 - `ctx.student`: the student, as above.
-- `ctx.examples`: the example questions you revealed, as objects with the attributes `question`, `answer` (gold), `baseline_completion` and `baseline_correct`.
-  The baseline fields are this run's student answering zero-shot; `baseline_completion` is empty when it ran out of tokens, and both are `None` if that reply was never measured.
+- `ctx.examples`: the example questions you revealed, as objects with the attributes `question`, `answer` (gold), `baseline_completion`, `baseline_reasoning` and `baseline_correct`.
+  The baseline fields are this run's student answering zero-shot; `baseline_completion` is empty when it ran out of tokens, and all three are `None` if that reply was never measured.
   Examples are separate from the train and test questions.
 - `ctx.answer(...)`: record answers, as above.
 - `ctx.budget`: student calls left for this run.

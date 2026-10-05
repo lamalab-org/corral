@@ -100,7 +100,9 @@ def _write_example_baselines(results: dict, models: dict[str, str]) -> Path:
             "model_spec": models[model],
             "item_id": item_id,
             "correct": correct,
-            **result.completions.get(item_id, {"completion": "", "finish_reason": ""}),
+            **result.completions.get(
+                item_id, {"completion": "", "reasoning": "", "finish_reason": ""}
+            ),
         }
         for (model, _benchmark, split), result in results.items()
         if split == "examples"

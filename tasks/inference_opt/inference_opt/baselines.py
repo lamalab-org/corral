@@ -73,8 +73,9 @@ class BaselineResult:
     n_unparseable: int = 0
     chance: float = 0.0
     per_item: dict[str, bool] = field(default_factory=dict)
-    #: The student's reply and why it ended (``"stop"``, or ``"length"`` when the
-    #: token limit ran out, often while it was still reasoning), per item.
+    #: The student's reply, its separate reasoning if any, and why it ended
+    #: (``"stop"``, or ``"length"`` when the token limit ran out, often while it
+    #: was still reasoning), per item.
     completions: dict[str, dict[str, str]] = field(default_factory=dict)
     per_topic: dict[str, Any] = field(default_factory=dict)
     error: str = ""
@@ -207,6 +208,7 @@ def measure_baseline(
     result.completions = {
         call["question_id"]: {
             "completion": call["completion"],
+            "reasoning": call["reasoning"],
             "finish_reason": call["finish_reason"],
         }
         for call in run.calls
