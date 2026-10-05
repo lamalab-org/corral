@@ -108,6 +108,10 @@ class StudentGateway:
 
         self.used = 0
         self.output_tokens = 0
+        #: Calls that ended because they reached ``max_tokens`` (finish reason "length").
+        self.truncated = 0
+        #: Requests that asked for more than ``max_tokens_cap`` and were lowered to it.
+        self.capped = 0
         self.backend_failures = 0
         self.backend_successes = 0
         self.exhausted = False
@@ -164,7 +168,8 @@ class StudentGateway:
             for request in requests[:granted]:
                 if request["question_id"] is not None:
                     bucket = self.per_question.setdefault(
-                        request["question_id"], {"calls": 0, "output_tokens": 0}
+                        request["question_id"],
+                        {"calls": 0, "output_tokens": 0, "truncated_calls": 0},
                     )
                     bucket["calls"] += 1
 
@@ -215,6 +220,9 @@ class StudentGateway:
                 raise ValueError("stop must be a list of at most 4 strings")
             stop = [str(entry)[:100] for entry in stop]
         seed = item.get("seed")
+        if requested and int(requested) > self.max_tokens_cap:
+            with self._lock:
+                self.capped += 1
         return {
             "messages": _conversation(item.get("messages")),
             "temperature": min(2.0, max(0.0, float(item.get("temperature") or 0.0))),
@@ -255,10 +263,12 @@ class StudentGateway:
             else:
                 self.backend_successes += 1
                 self.output_tokens += completion.output_tokens
+                truncated = completion.finish_reason == "length"
+                self.truncated += truncated
                 if question_id is not None:
-                    self.per_question[question_id]["output_tokens"] += (
-                        completion.output_tokens
-                    )
+                    bucket = self.per_question[question_id]
+                    bucket["output_tokens"] += completion.output_tokens
+                    bucket["truncated_calls"] += truncated
             self.calls.append(
                 {
                     "question_id": question_id,

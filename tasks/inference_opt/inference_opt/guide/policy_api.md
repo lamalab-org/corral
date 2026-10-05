@@ -40,7 +40,8 @@ Every completion costs one call of the run's budget; `ctx.budget` says how many 
 A batch larger than what is left sends what fits and returns `""` for the rest; a call when nothing is left raises `BudgetExhausted`.
 
 No call generates more than 8192 tokens, reasoning included: the limit the zero-shot baseline was measured with.
-`max_tokens=None` uses the manifest's `max_tokens_per_call`; a larger request is cut to 8192.
+A call that reaches its limit while the student is still reasoning usually returns `""`; run results count these calls, and `student_calls.jsonl` shows `finish_reason: "length"` for each.
+`max_tokens=None` uses the manifest's `max_tokens_per_call`; a larger request is cut to 8192, and run results say how many were.
 How many requests run at once is set by the task, not the policy.
 `question_id` attributes a call to a question in the run's diagnostics; `component` labels it in `student_calls.jsonl`.
 
@@ -60,7 +61,7 @@ A later answer for the same question replaces the earlier one, and a question ne
 
 - `ctx.student`: the student, as above.
 - `ctx.examples`: the example questions you revealed, as objects with the attributes `question`, `answer` (gold), `baseline_completion` and `baseline_correct`.
-  The baseline fields are this run's student answering zero-shot; `baseline_completion` is empty when it ran out of tokens.
+  The baseline fields are this run's student answering zero-shot; `baseline_completion` is empty when it ran out of tokens, and both are `None` if that reply was never measured.
   Examples are separate from the train and test questions.
 - `ctx.answer(...)`: record answers, as above.
 - `ctx.budget`: student calls left for this run.

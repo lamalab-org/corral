@@ -18,6 +18,17 @@ def environments(tmp_path):
 
 
 class TestConstruction:
+    def test_unmeasured_example_baselines_stop_the_build(self, tmp_path, monkeypatch):
+        """Otherwise every revealed example would show no zero-shot reply."""
+        from inference_opt import datasets
+
+        monkeypatch.delenv("CORRAL_INFERENCE_ALLOW_UNMEASURED")
+        monkeypatch.setattr(
+            datasets, "example_baselines_path", lambda *_: tmp_path / "none"
+        )
+        with pytest.raises(RuntimeError, match="measure_baselines.py --splits examples"):
+            create_environments(level=1, work_dir=str(tmp_path / "w"))
+
     @pytest.mark.parametrize("level", [1, 2])
     def test_ten_tasks_per_level(self, tmp_path, level):
         built = create_environments(level=level, work_dir=str(tmp_path / f"w{level}"))

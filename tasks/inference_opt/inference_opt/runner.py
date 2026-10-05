@@ -68,6 +68,11 @@ class ModelRun:
     calls_used: int = 0
     calls_reserved: int = 0
     output_tokens: int = 0
+    #: Student calls cut off at ``max_tokens``; their completions are often empty.
+    truncated_calls: int = 0
+    #: Requests that asked for more than ``max_tokens_cap`` and got the cap.
+    capped_requests: int = 0
+    max_tokens_cap: int = MAX_TOKENS_CAP
     budget_exhausted: bool = False
     manifest: dict[str, Any] = field(default_factory=dict)
     #: The policy could not be imported; nothing ran.
@@ -112,11 +117,16 @@ def private_root(work_dir: Path) -> Path:
 
 
 def _example_for(example: dict[str, Any], model: str) -> dict[str, Any]:
-    """An example as the host expects it, with ``model``'s own zero-shot reply."""
-    reply = (example.get("baseline") or {}).get(model) or {}
+    """An example as the host expects it, with ``model``'s own zero-shot reply.
+
+    Both baseline fields are ``None`` when that reply was never measured.
+    """
+    reply = (example.get("baseline") or {}).get(model)
     record = {key: value for key, value in example.items() if key != "baseline"}
-    record["baseline_correct"] = bool(reply.get("correct"))
-    record["baseline_completion"] = str(reply.get("completion", ""))
+    record["baseline_correct"] = None if reply is None else bool(reply.get("correct"))
+    record["baseline_completion"] = (
+        None if reply is None else str(reply.get("completion", ""))
+    )
     return record
 
 
@@ -202,6 +212,9 @@ def run_policy(
             calls_used=gateway.used,
             calls_reserved=budget_per_model,
             output_tokens=gateway.output_tokens,
+            truncated_calls=gateway.truncated,
+            capped_requests=gateway.capped,
+            max_tokens_cap=gateway.max_tokens_cap,
             budget_exhausted=gateway.exhausted,
             manifest=dict(result.get("manifest") or {}),
             load_error=str(result.get("load_error") or ""),
@@ -377,6 +390,7 @@ def _write_copy(run: ModelRun, folder: Path, run_id: str) -> None:
                 "correct": run.correct.get(item_id) if run.correct else None,
                 "calls": usage.get("calls", 0),
                 "output_tokens": usage.get("output_tokens", 0),
+                "truncated_calls": usage.get("truncated_calls", 0),
                 "error": run.errors.get(item_id, ""),
                 "log": run.logs.get(item_id, []),
             }
@@ -395,6 +409,9 @@ def _write_copy(run: ModelRun, folder: Path, run_id: str) -> None:
         "calls_used": run.calls_used,
         "calls_reserved": run.calls_reserved,
         "output_tokens": run.output_tokens,
+        "max_tokens_cap": run.max_tokens_cap,
+        "truncated_calls": run.truncated_calls,
+        "capped_requests": run.capped_requests,
         "budget_exhausted": run.budget_exhausted,
         "manifest": run.manifest,
         "load_error": run.load_error,

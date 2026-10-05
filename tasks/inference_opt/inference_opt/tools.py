@@ -71,6 +71,30 @@ def _idle_warning(runs: list[ModelRun]) -> str:
     return f"WARNING: the policy ran but {' and '.join(problems)}. " if problems else ""
 
 
+def _token_note(runs: list[ModelRun]) -> str:
+    """Say how many student calls reached the token limit, else ``""``.
+
+    A call cut off while the student is still reasoning usually returns an empty
+    completion, which the policy cannot tell apart from a bad answer.
+    """
+    calls = sum(run.calls_used for run in runs)
+    truncated = sum(run.truncated_calls for run in runs)
+    capped = sum(run.capped_requests for run in runs)
+    cap = runs[0].max_tokens_cap if runs else MAX_TOKENS_CAP
+    notes = []
+    if truncated:
+        notes.append(
+            f"{truncated} of {calls} student calls hit the {cap}-token limit before "
+            "finishing; their completions are often empty (finish_reason 'length' "
+            "in student_calls.jsonl)."
+        )
+    if capped:
+        notes.append(
+            f"{capped} request(s) asked for more than {cap} tokens and were lowered to {cap}."
+        )
+    return " ".join(notes)
+
+
 def _resolve(work_dir: str, policy_path: str) -> Path:
     root = Path(work_dir).resolve()
     candidate = (root / policy_path).resolve()
@@ -114,19 +138,23 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         targets: dict[str, str],
         baselines: dict[str, dict[str, dict[str, Any]]],
     ) -> dict[str, Any]:
-        """One example with its gold answer and each student's zero-shot reply."""
+        """One example with its gold answer and each student's zero-shot reply.
+
+        A student whose reply was never measured maps to ``None``, so a missing
+        measurement is never mistaken for an empty reply.
+        """
+        replies: dict[str, dict[str, Any] | None] = {}
+        for model in models:
+            row = baselines[model].get(item.item_id)
+            replies[model] = None if row is None else {
+                "correct": bool(row["correct"]),
+                "completion": str(row.get("completion", "")),
+                "finish_reason": str(row.get("finish_reason", "")),
+            }
         return {
             **datasets.public_record(item),
             "target": targets.get(item.item_id, ""),
-            "baseline": {
-                model: {
-                    "correct": row.get("correct"),
-                    "completion": str(row.get("completion", "")),
-                    "finish_reason": str(row.get("finish_reason", "")),
-                }
-                for model in models
-                for row in [baselines[model].get(item.item_id, {})]
-            },
+            "baseline": replies,
         }
 
     def _examples(ledger: StateLedger) -> list[dict[str, Any]]:
@@ -204,7 +232,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 key=lambda i: sum(
                     baselines[m].get(i.item_id, {}).get("correct") is False
                     for m in models
-                ),
+                ),  # an unmeasured reply counts as neither right nor wrong
                 reverse=True,
             )
         elif strategy == "hardest":
@@ -219,6 +247,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         # readable; the stored copy and ctx.examples keep it whole.
         for record in new_records:
             for reply in record["baseline"].values():
+                if reply is None:
+                    continue
                 text = reply["completion"]
                 if len(text) > REPLY_PREVIEW_CHARS:
                     reply["completion"] = (
@@ -230,6 +260,9 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         # ledger, so editing or deleting this file changes nothing.
         store = Path(work_dir) / "revealed" / "examples.jsonl"
         datasets.write_jsonl(store, _examples(ledger))
+        unmeasured = sorted(
+            {m for r in new_records for m, reply in r["baseline"].items() if reply is None}
+        )
         return _compact(
             {
                 "revealed": new_records,
@@ -239,7 +272,13 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             },
             f"Revealed {len(new_records)} example(s) using strategy {strategy!r}. "
             "Every run's ctx.examples holds all of them. A baseline completion is "
-            "empty when the student ran out of tokens (finish_reason 'length').",
+            "empty when the student ran out of tokens (finish_reason 'length')."
+            + (
+                f" No zero-shot reply was measured for {', '.join(unmeasured)}; "
+                "its baseline is null, which says nothing about the student."
+                if unmeasured
+                else ""
+            ),
             ledger,
         )
 
@@ -384,12 +423,16 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             headline = (
                 f"Dry run OK on {len(traces)} question(s); the policy runs end to end."
             )
+        if note := _token_note([run]):
+            headline += f" NOTE: {note}"
         return _compact(
             {
                 "run_id": run_id,
                 "manifest": run.manifest,
                 "traces": traces,
                 "calls_used": run.calls_used,
+                "truncated_calls": run.truncated_calls,
+                "capped_requests": run.capped_requests,
                 "artifacts": f"runs/{run_id}",
                 "error": error_tail(failed, 2000),
             },
@@ -462,6 +505,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         verdicts = "; ".join(
             f"{model}: {value['delta']:+.3f}" for model, value in results.items()
         )
+        if note := _token_note(list(runs.values())):
+            verdicts += f". NOTE: {note}"
         return _compact(
             {
                 "run_id": run_id,
@@ -493,6 +538,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             "baseline": round(baseline_value, 4),
             "delta": round(delta, 4),
             "calls_used": run.calls_used,
+            "truncated_calls": run.truncated_calls,
+            "capped_requests": run.capped_requests,
             "n_submitted": len(run.answers),
             "n_crashed": run.n_crashed,
             "budget_exhausted": run.budget_exhausted,

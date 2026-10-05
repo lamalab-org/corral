@@ -210,12 +210,16 @@ def _question(record: dict[str, Any], index: int, total: int) -> Question:
     )
 
 
+def _optional(value: Any, kind: type) -> Any:
+    return None if value is None else kind(value)
+
+
 def _example(record: dict[str, Any]) -> LabeledExample:
     return LabeledExample(
         question=_question(record, 0, 1),
         answer=str(record.get("target", "")),
-        baseline_completion=str(record.get("baseline_completion", "")),
-        baseline_correct=bool(record.get("baseline_correct", False)),
+        baseline_completion=_optional(record.get("baseline_completion"), str),
+        baseline_correct=_optional(record.get("baseline_correct"), bool),
     )
 
 

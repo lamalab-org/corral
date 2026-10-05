@@ -77,8 +77,11 @@ class LabeledExample:
 
     question: Question
     answer: str
-    baseline_completion: str = ""
-    baseline_correct: bool = False
+    #: The student's zero-shot reply; empty when it ran out of tokens, ``None``
+    #: when it was never measured.
+    baseline_completion: str | None = None
+    #: Whether that reply was right; ``None`` when it was never measured.
+    baseline_correct: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

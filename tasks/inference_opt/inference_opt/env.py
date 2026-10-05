@@ -20,6 +20,7 @@ from corral.core.environment import (
 )
 from corral.core.task import TaskDefinition
 from corral.report.logging import event, exception_fields
+from inference_opt import datasets
 from inference_opt.budget import LEDGER_RESOURCE, BudgetSpec, StateLedger
 from inference_opt.score import StateScorer
 from inference_opt.task_prompts import task_prompt
@@ -31,6 +32,10 @@ if TYPE_CHECKING:
 __all__ = ["InferenceOptEnvironment", "create_environments", "load_tasks_from_json"]
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", ".corral/workspaces")
+
+#: Set to 1 to build environments before the example baselines are measured
+#: (the tests do); revealed examples then show no zero-shot reply.
+ALLOW_UNMEASURED_ENV = "CORRAL_INFERENCE_ALLOW_UNMEASURED"
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 
@@ -122,6 +127,30 @@ def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSe
     )
 
 
+def _check_example_baselines(tasks: dict[str, TaskDefinition]) -> None:
+    """Refuse to run a task whose students have no measured reply to every example."""
+    if os.environ.get(ALLOW_UNMEASURED_ENV) == "1":
+        return
+    missing: set[str] = set()
+    for task in tasks.values():
+        benchmark = str(task.initial_input["benchmark"])
+        models = list(task.initial_input["models"])
+        try:
+            examples = datasets.load_items(benchmark, "examples")
+        except datasets.DatasetError:
+            return  # no dataset mounted: nothing can run, so nothing to check yet
+        wanted = {item.item_id for item in examples}
+        for model, rows in datasets.load_example_baselines(models).items():
+            if not wanted <= set(rows):
+                missing.add(f"{model} on {benchmark}")
+    if missing:
+        raise RuntimeError(
+            "no measured zero-shot reply to the example questions for "
+            f"{', '.join(sorted(missing))}. Run scripts/measure_baselines.py "
+            f"--splits examples, or set {ALLOW_UNMEASURED_ENV}=1 to run without them."
+        )
+
+
 def _scored_from_state(answer: Any) -> float:
     raise RuntimeError(
         "inference_opt is scored from committed state by StateScorer, not from "
@@ -183,6 +212,7 @@ def create_environments(
     )
     try:
         tasks = load_tasks_from_json(source)
+        _check_example_baselines(tasks)
         environments = {
             task_id: InferenceOptEnvironment(
                 task_id=task_id,

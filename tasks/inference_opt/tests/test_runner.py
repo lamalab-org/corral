@@ -301,6 +301,22 @@ class TestPolicyShapes:
         assert runs["m1"].logs["_run"] == ["True 'ANSWER: C'"]
         assert runs["m2"].logs["_run"] == ["False ''"]
 
+    def test_an_unmeasured_baseline_reply_is_none_not_empty(self, tmp_path):
+        example = {
+            **datasets.public_record(datasets.load_items(BENCHMARK, "examples")[0]),
+            "target": "C",
+            "baseline": {"m": None},
+        }
+        _, runs = _run(
+            tmp_path,
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        e = ctx.examples[0]\n"
+            "        ctx.log(f'{e.baseline_correct} {e.baseline_completion}')\n",
+            examples=[example],
+        )
+        assert runs["m"].logs["_run"] == ["None None"]
+
     def test_a_policy_that_does_not_load_is_reported(self, tmp_path):
         _, runs = _run(tmp_path, "raise ImportError('missing helper')\n")
         run = runs["m"]
@@ -434,6 +450,34 @@ class TestStudentClient:
             MAX_TOKENS_CAP,
         ]
 
+    def test_calls_cut_off_at_the_limit_are_counted(self, tmp_path):
+        def still_reasoning(messages, **params):
+            del messages
+            return StudentCompletion(
+                "", finish_reason="length", output_tokens=params["max_tokens"]
+            )
+
+        workspace, runs = _run(
+            tmp_path,
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        ctx.student.generate(\n"
+            "            [{'prompt': q.text, 'question_id': q.id} for q in questions],\n"
+            "            max_tokens=20000,\n"
+            "        )\n"
+            "        ctx.answer({q.id: 'ANSWER: A' for q in questions})\n",
+            backends={"m": still_reasoning},
+        )
+        run = runs["m"]
+        assert (run.truncated_calls, run.capped_requests) == (3, 3)
+        summary = json.loads((workspace / "runs/exp-1/m/summary.json").read_text())
+        assert summary["truncated_calls"] == 3
+        assert summary["capped_requests"] == 3
+        predictions = (workspace / "runs/exp-1/m/predictions.jsonl").read_text()
+        assert all(
+            json.loads(line)["truncated_calls"] == 1 for line in predictions.splitlines()
+        )
+
     def test_a_question_outside_the_run_is_refused(self, tmp_path):
         _, runs = _run(
             tmp_path,
@@ -470,6 +514,21 @@ def test_the_run_stops_at_its_time_limit(tmp_path):
     run = runs["m"]
     assert run.error.startswith("time limit")
     assert len(run.answers) == 1
+
+
+class TestTokenNote:
+    def test_run_results_say_how_many_calls_hit_the_limit(self):
+        from inference_opt.runner import ModelRun
+        from inference_opt.tools import _token_note
+
+        run = ModelRun(
+            model="m", split="train", question_ids=[], calls_used=10,
+            truncated_calls=4, capped_requests=2,
+        )
+        note = _token_note([run])
+        assert f"4 of 10 student calls hit the {MAX_TOKENS_CAP}-token limit" in note
+        assert "2 request(s) asked for more than" in note
+        assert _token_note([ModelRun(model="m", split="train", question_ids=[])]) == ""
 
 
 class TestGateway:
