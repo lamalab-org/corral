@@ -613,8 +613,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         if used >= spec.max_submissions:
             return _compact(
                 {"error": "no submissions left"},
-                f"NOT submitted: all {spec.max_submissions} submissions are used. "
-                "The last one stands; call submit_answer with exactly: submission.json",
+                "NOT submitted: a policy was already submitted and is used for final "
+                "scoring. Call submit_answer with exactly: submission.json",
                 ledger,
             )
         policy_hash = _policy_hash(policy_dir)
@@ -675,8 +675,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
                 "submit_answer_with": "submission.json",
             },
             "Submitted. Your policy ran on the held-out test questions; that result "
-            "is kept hidden until the episode is scored, and a later submission "
-            "replaces it. Now call submit_answer with exactly: submission.json",
+            "is kept hidden and is used for final scoring. Now call submit_answer "
+            "with exactly: submission.json",
             ledger,
         )
 

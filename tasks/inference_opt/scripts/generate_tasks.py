@@ -99,7 +99,7 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
                 "max_reveals": 4,
                 "max_probe_calls": 40,
                 "reveal_batch": 5,
-                "max_submissions": 3,
+                "max_submissions": 1,
             },
         },
     }

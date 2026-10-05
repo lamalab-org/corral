@@ -191,10 +191,18 @@ class TestSubmission:
         assert out.startswith("NOT submitted")
         assert ledger.get("submissions", 0) == 0 and ledger.get("final") is None
 
-    def test_submissions_are_capped(self, tmp_path):
-        ledger = {"submissions": 3}
-        out = self._submit(tmp_path, ledger)
-        assert out.startswith("NOT submitted: all 3 submissions are used")
+    def test_a_policy_can_be_submitted_only_once(self, tmp_path):
+        from inference_opt.tools import create_tools
+
+        workspace = _workspace_with_policy(tmp_path, self.POLICY)
+        submit = create_tools(_task_config(1, "mmlu_pro_a"), "")["submit_policy"]._func
+        ledger = {}
+        args = {"policy_path": "policy", "work_dir": str(workspace), "inference_state": ledger}
+        assert submit(**args).startswith("Submitted")
+        first = ledger["final"]
+        out = submit(**args)
+        assert out.startswith("NOT submitted: a policy was already submitted")
+        assert ledger["final"] == first and ledger["submissions"] == 1
 
 
 def test_a_refunded_run_keeps_its_folder_and_id(tmp_path):

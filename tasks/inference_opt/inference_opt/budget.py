@@ -29,8 +29,9 @@ class BudgetSpec:
     max_reveals: int = 4
     max_probe_calls: int = 30
     reveal_batch: int = 5
-    #: Test-split runs of a submitted policy; the score shown is the last one.
-    max_submissions: int = 3
+    #: Test-split runs of a submitted policy. One: submitting means "done", and a
+    #: second chance taught agents to submit early and stop.
+    max_submissions: int = 1
 
     @classmethod
     def from_mapping(cls, raw: dict[str, Any] | None) -> BudgetSpec:
