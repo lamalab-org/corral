@@ -108,7 +108,7 @@ class TestManifest:
     def test_defaults(self):
         manifest = manifest_from_mapping(None)
         assert manifest.name == "policy"
-        assert manifest.max_tokens_per_call == 16384
+        assert manifest.max_tokens_per_call == 8192
 
     @pytest.mark.parametrize(
         "key", ["sequential", "memory", "concurrent", "setup_calls", "components"]

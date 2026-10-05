@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from inference_opt.runner import MAX_TOKENS_CAP
+
 if TYPE_CHECKING:
     from corral.core.environment import Environment
     from corral.core.state import ExecutionState
@@ -60,6 +62,10 @@ def _budget_summary(config: dict) -> str:
         f"- {budget.get('max_student_calls', 250)} student model calls in total",
         f"- {budget.get('max_reveals', 4)} reveals of {budget.get('reveal_batch', 5)} "
         "labelled train questions each",
+        (
+            f"- at most {MAX_TOKENS_CAP} generated tokens per student call, reasoning "
+            "included (the limit the zero-shot baseline was measured with)"
+        ),
     ]
     final_calls = config.get("final_max_student_calls")
     if final_calls:

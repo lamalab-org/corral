@@ -272,6 +272,21 @@ class TestQueryStudent:
         assert "1 hit max_tokens=256" in summary
         assert data["reasoning_tail"] == ["...so 3/5 of 50 is", ""]
 
+    def test_max_tokens_is_capped_like_a_policy_call(self, environments, monkeypatch):
+        from inference_opt.client import StudentCompletion
+        from inference_opt.runner import MAX_TOKENS_CAP
+
+        requested = []
+
+        def probe(*_args, max_tokens, **_kwargs):
+            requested.append(max_tokens)
+            return [StudentCompletion("30", "stop")]
+
+        monkeypatch.setattr("inference_opt.tools.probe_student", probe)
+        query = environments["mmlu_pro_a"].tools["query_student"]._func
+        query(prompt="3/5 of 50?", max_tokens=10**6, work_dir="", inference_state={})
+        assert requested == [MAX_TOKENS_CAP]
+
 
 GROUPED_TRACEBACK = """  + Exception Group Traceback (most recent call last):
   |   File "/usr/local/lib/python3.12/site-packages/inspect_ai/_eval/eval.py", line 657, in eval_async

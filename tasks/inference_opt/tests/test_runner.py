@@ -13,7 +13,7 @@ import pytest
 from inference_opt import datasets
 from inference_opt.client import StudentCompletion
 from inference_opt.gateway import MockBackend, StudentGateway
-from inference_opt.runner import private_root, run_policy
+from inference_opt.runner import MAX_TOKENS_CAP, private_root, run_policy
 
 BENCHMARK = "mmlu_pro"
 
@@ -339,7 +339,10 @@ class TestStudentClient:
             "        ctx.student.generate('huge', max_tokens=10**9)\n",
             backends={"m": echo},
         )
-        assert [request["max_tokens"] for request in echo.requests] == [1000, 32768]
+        assert [request["max_tokens"] for request in echo.requests] == [
+            1000,
+            MAX_TOKENS_CAP,
+        ]
 
     def test_a_question_outside_the_run_is_refused(self, tmp_path):
         _, runs = _run(

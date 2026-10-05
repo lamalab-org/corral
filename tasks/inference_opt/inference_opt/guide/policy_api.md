@@ -66,13 +66,14 @@ Keep configuration in the same `policy.py`. All fields are optional:
 MANIFEST = {
     "name": "my-policy",
     "version": 1,
-    "max_tokens_per_call": 16384,
+    "max_tokens_per_call": 8192,
 }
 ```
 
-`max_tokens_per_call` (default 16384) is the default and ceiling for
-`max_tokens` on each call; the task caps it at 32768. Unknown fields are
-rejected.
+`max_tokens_per_call` (default 8192) is the default `max_tokens` for each
+call. No call can generate more than 8192 tokens, reasoning included: the
+same limit the zero-shot baseline was measured with. A larger request is cut
+to 8192. Unknown fields are rejected.
 
 ## What each run writes
 

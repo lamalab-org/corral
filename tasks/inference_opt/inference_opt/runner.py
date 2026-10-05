@@ -42,8 +42,10 @@ __all__ = [
 DEFAULT_STUDENT_CONCURRENCY = 16
 #: Wall clock for one run; answers submitted before it still count.
 DEFAULT_RUN_TIME_LIMIT_S = 3600
-#: Ceiling on ``max_tokens`` for any one student call.
-MAX_TOKENS_CAP = 32768
+#: Ceiling on ``max_tokens`` for any one student call. It matches the pinned
+#: zero-shot baseline, so a policy beats the baseline by strategy, not by
+#: letting the student reason for longer per call.
+MAX_TOKENS_CAP = 8192
 
 
 @dataclass

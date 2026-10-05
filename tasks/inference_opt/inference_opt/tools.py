@@ -16,7 +16,7 @@ from inference_opt import datasets
 from inference_opt.budget import LEDGER_RESOURCE, BudgetSpec, RunRecord, StateLedger
 from inference_opt.client import probe_student
 from inference_opt.errors import error_line, error_tail
-from inference_opt.runner import ModelRun, run_policy
+from inference_opt.runner import MAX_TOKENS_CAP, ModelRun, run_policy
 from inference_opt.score import HarnessError, final_result
 
 __all__ = ["create_tools"]
@@ -220,7 +220,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         prompt: str,
         system: str = "",
         temperature: float = 0.0,
-        max_tokens: int = 16384,
+        max_tokens: int = MAX_TOKENS_CAP,
         n: int = 1,
         work_dir: str = "",
         inference_state: Any = None,
@@ -231,7 +231,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             prompt: The user message to send.
             system: Optional system message.
             temperature: Sampling temperature; 0.0 is deterministic.
-            max_tokens: Maximum tokens to generate, reasoning included.
+            max_tokens: Maximum tokens to generate, reasoning included; at most
+                the per-call cap that policies get.
             n: How many samples to draw.
             work_dir: Task workspace, injected by the environment.
 
@@ -247,7 +248,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             prompt,
             system=system or None,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=max(1, min(int(max_tokens), MAX_TOKENS_CAP)),
             n=count,
             # Drop only the provider prefix: "vllm/Qwen/X" is served as "Qwen/X".
             served_name=model_specs.get(models[0], "").partition("/")[2] or None,
@@ -263,7 +264,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             summary += (
                 f" {len(truncated)} hit max_tokens={max_tokens} before finishing; an "
                 "empty completion means the student was still reasoning (reasoning "
-                "counts toward max_tokens). Raise max_tokens to see the answer."
+                f"counts toward max_tokens, and no call can exceed {MAX_TOKENS_CAP}). "
+                "Ask for a shorter answer, or raise max_tokens if it is below the cap."
             )
             # The end of the cut-off reasoning shows how far the student got.
             payload["reasoning_tail"] = [

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from inference_opt import datasets
-from inference_opt.runner import run_policy
+from inference_opt.runner import MAX_TOKENS_CAP, run_policy
 
 __all__ = [
     "BASELINE_POLICY_SOURCE",
@@ -165,7 +165,7 @@ def measure_baseline(
             budget_per_model=len(items) * 2,
             examples=[],
             write_copy=False,
-            max_tokens_cap=8192,
+            max_tokens_cap=MAX_TOKENS_CAP,
             time_limit_s=timeout_s,
         )[model]
 

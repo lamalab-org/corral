@@ -192,11 +192,11 @@ def probe_student(
     *,
     system: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 16384,
+    max_tokens: int,
     n: int = 1,
     served_name: str | None = None,
 ) -> list[StudentCompletion]:
-    """One ad-hoc query against a student model."""
+    """One ad-hoc query against a student model; the caller applies the token cap."""
     endpoint = StudentEndpoint(
         base_url=endpoint_for(model),
         model=served_name or model,

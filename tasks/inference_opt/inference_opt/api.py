@@ -160,8 +160,9 @@ class PolicyManifest:
 
     name: str = "policy"
     version: int = 1
-    #: Default and ceiling for ``max_tokens`` on each student call.
-    max_tokens_per_call: int = 16384
+    #: ``max_tokens`` for a student call that does not set its own. No call
+    #: generates more than ``runner.MAX_TOKENS_CAP`` tokens either way.
+    max_tokens_per_call: int = 8192
 
     def __post_init__(self) -> None:
         if self.max_tokens_per_call < 1:
