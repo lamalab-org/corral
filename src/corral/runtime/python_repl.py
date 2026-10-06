@@ -44,6 +44,18 @@ DEFAULT_MAX_OUTPUT_CHARS = 5_000 + len("...(output truncated)")
 DEFAULT_MAX_CODE_CHARS = 50_000
 DEFAULT_WORKER_ADDRESS_SPACE_BYTES = 2 * 1024**3
 _WORKER_ADDRESS_SPACE_HEADROOM_BYTES = 512 * 1024**2
+# Native maths libraries loaded inside a worker (SciPy's own OpenBLAS, for
+# one) start a thread per core. Every thread's stack and buffers count against
+# the worker's address-space limit, so on a many-core Linux host thread creation
+# fails partway and the import or fit breaks. Parallel trials gain nothing from
+# those threads either, so a worker gets one unless the host asks for more.
+_NATIVE_THREAD_VARIABLES = (
+    "OPENBLAS_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
 _NO_OUTPUT = (
     "No output. You likely forgot to print the result. "
     "Please use `print(...)` to see any output."
@@ -315,6 +327,13 @@ def execute_in_namespace(
     return result or _NO_OUTPUT
 
 
+def _reset_worker_environment() -> None:
+    """Drop the inherited environment, keeping native thread pools bounded."""
+    threads = {name: os.environ.get(name) or "1" for name in _NATIVE_THREAD_VARIABLES}
+    os.environ.clear()
+    os.environ.update(threads)
+
+
 def apply_worker_resource_limits(
     address_space_bytes: int = DEFAULT_WORKER_ADDRESS_SPACE_BYTES,
 ) -> None:
@@ -577,7 +596,7 @@ def _python_repl_worker(
 ) -> None:
     try:
         os.chdir(working_directory)
-        os.environ.clear()
+        _reset_worker_environment()
         namespace = _materialize_namespace(initial_data, namespace_factory)
         # NumPy loads the legacy RNG extension lazily. Map it before applying
         # RLIMIT_AS so snapshotting does not fail merely by importing it.
@@ -675,7 +694,7 @@ class _RestrictedPythonREPLTool(Tool):
     def execute(self, *, code: str, public_data: str, checkpoint: str | None) -> str:
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             raise RuntimeError("Docker Python REPL must run as an unprivileged worker")
-        os.environ.clear()
+        _reset_worker_environment()
         np.random.get_state()  # noqa: NPY002 - preload before RLIMIT_AS
         apply_worker_resource_limits(self.address_space_bytes)
         data = json.loads(public_data)

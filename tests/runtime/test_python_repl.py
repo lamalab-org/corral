@@ -72,6 +72,19 @@ def test_local_session_supports_initial_state_updates_and_exports():
         assert session.execute("print((total, status))") == "(6, 'updated')\n"
 
 
+def test_local_worker_bounds_native_thread_pools(monkeypatch):
+    monkeypatch.delenv("OPENBLAS_NUM_THREADS", raising=False)
+    monkeypatch.setenv("OMP_NUM_THREADS", "4")
+    monkeypatch.setenv("CORRAL_TEST_SECRET", "hidden")
+    with PythonREPLSession({}) as session:
+        output = session.execute(
+            "import os\n"
+            "print(os.environ.get('OPENBLAS_NUM_THREADS'), os.environ.get('OMP_NUM_THREADS'),"
+            " os.environ.get('CORRAL_TEST_SECRET'))"
+        )
+    assert output == "1 4 None\n"
+
+
 def test_repl_tool_factory_is_serial_and_controller_managed():
     repl = create_python_repl_tool(argument_name="code")
     assert repl.trusted is False
