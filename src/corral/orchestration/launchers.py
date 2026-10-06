@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import TypeAdapter
 
 from corral.core.state import ExecutionState, TaskOutput
+from corral.orchestration.defaults import resolve_max_iterations
 from corral.orchestration.models import (
     DockerSandboxSpec,
     RunTaskInput,
@@ -173,7 +174,7 @@ class LocalTaskLauncher:
             environment,
             execution_id=request.execution_id,
             started_at=datetime.fromisoformat(request.started_at),
-            max_iterations=request.max_iterations,
+            max_iterations=resolve_max_iterations(request.max_iterations, agent),
             dependency_outputs=dependencies,
             model_metadata={
                 **({"name": configured_model} if configured_model is not None else {}),
@@ -511,6 +512,11 @@ class DockerTaskLauncher:
         observation_context: ObservationContext | None = None,
     ) -> StateRef:
         del observation_context
+        if request.max_iterations is None and request.agent_runtime is not None:
+            request = replace(
+                request,
+                max_iterations=resolve_max_iterations(None, request.agent_runtime.name),
+            )
         docker = request.sandbox.docker
         if docker is None:
             raise ValueError("DockerTaskLauncher received a local sandbox request")

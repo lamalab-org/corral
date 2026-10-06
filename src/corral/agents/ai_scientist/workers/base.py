@@ -189,6 +189,55 @@ class LiteLLMStructuredModel:
         model: str | None,
         purpose: str,
     ) -> ResponseT:
+        while True:
+            response = self._request_response(
+                messages, response_model, model=model, purpose=purpose
+            )
+            content = response.content or ""
+            # Invalid completions still consumed tokens and a model turn.
+            self._record_response(messages, response, purpose=purpose)
+            try:
+                try:
+                    return response_model.model_validate_json(content.strip())
+                except ValidationError:
+                    return response_model.model_validate(_extract_object(content))
+            except ValueError as exc:
+                # JSONDecodeError and Pydantic ValidationError are ValueErrors.
+                # Only response parsing belongs in this handler: provider and
+                # budget failures must propagate without a correction request.
+                logger.warning(
+                    "Invalid {} response for {}; requesting a correction within "
+                    "the remaining LLM-call budget.",
+                    response_model.__name__,
+                    purpose,
+                )
+                feedback = (
+                    f"Your previous response could not be parsed or validated as "
+                    f"{response_model.__name__}. No action was executed from that "
+                    "response. Correct it using the original task and observations.\n\n"
+                    f"Validation error:\n{exc}\n\n"
+                    "Return one complete JSON object matching this schema, with "
+                    "no Markdown or surrounding prose. Properly escape JSON "
+                    "strings, including any JSON-encoded tool arguments.\n"
+                    f"{json.dumps(response_model.model_json_schema())}"
+                )
+                # Keep feedback local to this worker, including multimodal
+                # context. Each correction reserves a new call on the next
+                # loop, so repeated invalid output cannot exceed max_calls.
+                messages = [
+                    *messages,
+                    LiteLLMMessage(role="assistant", content=content),
+                    LiteLLMMessage(role="user", content=feedback),
+                ]
+
+    def _request_response(
+        self,
+        messages: list[LiteLLMMessage],
+        response_model: type[ResponseT],
+        *,
+        model: str | None,
+        purpose: str,
+    ) -> Any:
         self._reserve_request(purpose)
         with self._state_lock:
             use_structured_output = self.use_structured_output
@@ -233,12 +282,15 @@ class LiteLLMStructuredModel:
                 **self.llm_kwargs,
             )
 
-        content = response.content or ""
-        try:
-            parsed = response_model.model_validate_json(content.strip())
-        except ValidationError:
-            parsed = response_model.model_validate(_extract_object(content))
+        return response
 
+    def _record_response(
+        self,
+        messages: list[LiteLLMMessage],
+        response: Any,
+        *,
+        purpose: str,
+    ) -> None:
         # The worker contexts are intentionally isolated, but the full sequence
         # remains visible to Corral's normal verbose transcript machinery. Add
         # the same legal `name` to every role in the recorded call so node
@@ -256,7 +308,7 @@ class LiteLLMStructuredModel:
                     *recorded_messages,
                     LiteLLMMessage(
                         role="assistant",
-                        content=content,
+                        content=response.content or "",
                         id=getattr(response, "id", None),
                         name=purpose,
                     ),
@@ -269,7 +321,6 @@ class LiteLLMStructuredModel:
             record_usage = getattr(self.owner, "_record_turn_usage", None)
             if callable(record_usage):
                 record_usage(dict(response.usage or {}))
-        return parsed
 
     def _reserve_request(self, purpose: str) -> None:
         """Atomically reserve one physical provider request."""

@@ -218,7 +218,7 @@ class OpenHandsAgent(BaseAgent):
         api_endpoint (str, optional): Base URL for the harness `LLM` (mapped to
             the SDK `base_url`). Defaults to None.
         temperature (float, optional): Sampling temperature for the harness
-            `LLM`. Defaults to 0.7.
+            `LLM`. Defaults to 1.0.
         reasoning_effort (str, optional): Reasoning effort forwarded to the
             harness `LLM` (`"low"`, `"medium"`, `"high"`, `"xhigh"`, or
             `"none"`). If None, the OpenHands SDK default (`"high"`) applies and
@@ -245,7 +245,7 @@ class OpenHandsAgent(BaseAgent):
         model: str = "openai/gpt-5.6",
         api_key: str | None = None,
         api_endpoint: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 1.0,
         reasoning_effort: Literal["low", "medium", "high", "xhigh", "none"]
         | None = None,
         tool_timeout_s: float = _DEFAULT_TOOL_TIMEOUT_S,

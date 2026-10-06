@@ -7,6 +7,7 @@ import anyio
 import pytest
 from anyio.from_thread import BlockingPortal
 from tests.agents.commit_session import start_session
+from tests.agents.conftest import MockLLMResponse
 
 from corral.agents import INSPECT_SUBAGENT_TOOL_NAME, Agent, AIScientistAgent
 from corral.agents.ai_scientist import agent as agent_module
@@ -15,6 +16,8 @@ from corral.agents.ai_scientist.agent import (
     _call_llm_from_harness,
 )
 from corral.agents.ai_scientist.manager import ExperimentManager
+from corral.agents.ai_scientist.workers.base import LiteLLMStructuredModel
+from corral.agents.ai_scientist.workers.synthesizer import FinalAnswer
 from corral.agents.schema import AgentUsage
 from corral.agents.session import AgentSession
 from corral.core.action import Action
@@ -241,3 +244,53 @@ async def test_ai_scientist_instance_is_reentrant_across_sessions(monkeypatch):
     assert second.state.submission == second_id
     assert first.get_agent_state("ai_scientist")["status"] == "completed"
     assert second.get_agent_state("ai_scientist")["status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_correction_transcripts_keep_each_model_turn_and_its_usage(monkeypatch):
+    agent = AIScientistAgent(model="test-model")
+    session = await make_session([])
+    record_messages = AsyncMock(wraps=session.record_messages)
+    monkeypatch.setattr(session, "record_messages", record_messages)
+    replies = iter(
+        [
+            MockLLMResponse(content="invalid", usage={"total_tokens": 2}),
+            MockLLMResponse(content='{"final_answer":"42"}', usage={"total_tokens": 3}),
+            MockLLMResponse(content='{"final_answer":"42"}', usage={"total_tokens": 4}),
+        ]
+    )
+
+    def execute(_session, owner, _portal):
+        model = LiteLLMStructuredModel(
+            owner=owner,
+            default_model="test-model",
+            evaluator_model="test-model",
+            system_prompt="system",
+            temperature=1,
+            api_endpoint=None,
+            max_calls=3,
+            use_structured_output=True,
+            completion_runner=lambda **_kwargs: next(replies),
+        )
+        model.generate("First worker", FinalAnswer, purpose="first_worker")
+        answer = model.generate("Second worker", FinalAnswer, purpose="second_worker")
+        assert owner.cumulative_token_usage == {"total_tokens": 9}
+        return answer.final_answer, AgentUsage(llm_calls=model.call_count), {}
+
+    monkeypatch.setattr(agent, "_execute_session", execute)
+
+    outcome = await agent.run_session(session)
+
+    assert outcome.status == "completed"
+    assert session.state.submission == "42"
+    recorded = record_messages.call_args_list
+    assert [len(call.args[0]) for call in recorded] == [3, 5, 3]
+    assert [call.kwargs["usage"] for call in recorded] == [
+        {"total_tokens": 2},
+        {"total_tokens": 3},
+        {"total_tokens": 4},
+    ]
+    assert recorded[0].args[0][-1]["content"] == "invalid"
+    assert recorded[1].args[0][-2]["role"] == "user"
+    assert "Validation error" in recorded[1].args[0][-2]["content"]
+    assert [message["name"] for message in recorded[2].args[0]] == ["second_worker"] * 3

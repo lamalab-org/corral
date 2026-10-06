@@ -19,16 +19,16 @@ class AIScientistConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    initial_drafts: int = Field(default=3, ge=1)
-    preliminary_node_budget: int = Field(default=5, ge=1)
-    tuning_node_budget: int = Field(default=3, ge=0)
-    research_node_budget: int = Field(default=6, ge=1)
-    verification_node_budget: int = Field(default=4, ge=1)
-    verification_min_nodes: int = Field(default=4, ge=1)
+    initial_drafts: int = Field(default=2, ge=1)
+    preliminary_node_budget: int = Field(default=3, ge=1)
+    tuning_node_budget: int = Field(default=1, ge=0)
+    research_node_budget: int = Field(default=2, ge=1)
+    verification_node_budget: int = Field(default=2, ge=1)
+    verification_min_nodes: int = Field(default=2, ge=1)
 
     # Ordinary expansions should expose the configured worker parallelism. A
     # value of one made the search serial after the independent root drafts.
-    candidates_per_expansion: int = Field(default=3, ge=1, le=4)
+    candidates_per_expansion: int = Field(default=2, ge=1, le=4)
     max_children_per_node: int = Field(default=3, ge=1, le=16)
     tree_exploration_weight: float = Field(default=0.1, ge=0.0, le=1.0)
     # Corral's economical default creates several sibling proposals from one
@@ -51,7 +51,7 @@ class AIScientistConfig(BaseModel):
     # several independent repairs from the same failed ancestor.
     debug_leaf_only: bool = False
     parallel_llm_workers: int = Field(default=4, ge=1, le=16)
-    parallel_experiment_workers: int = Field(default=3, ge=1, le=16)
+    parallel_experiment_workers: int = Field(default=2, ge=1, le=16)
 
     # The manager can revise the experimental agenda within a main stage. The
     # first substage is deterministic; after this many additional search nodes
@@ -64,7 +64,7 @@ class AIScientistConfig(BaseModel):
     # Repeat the winning experiment at each main-stage boundary and reconcile
     # those repetitions before seeding the next stage. Set to zero for tasks
     # that are known to be deterministic or too expensive to repeat.
-    stage_boundary_replications: int = Field(default=3, ge=0, le=16)
+    stage_boundary_replications: int = Field(default=1, ge=0, le=16)
     aggregate_stage_replications: bool = True
     # Exact replication bypasses the adaptive experiment worker and replays the
     # selected node's realized actions in clean executions. When a tool schema
@@ -175,6 +175,7 @@ class SakanaAIScientistConfig(AIScientistConfig):
     max_children_per_node: int = Field(default=16, ge=1, le=16)
     max_actions_per_node: int = Field(default=16, ge=1)
     parallel_experiment_workers: int = Field(default=4, ge=1, le=16)
+    stage_boundary_replications: int = Field(default=3, ge=0, le=16)
     parallel_parent_selection: bool = True
     prefer_distinct_root_trees: bool = True
     parent_selection_mode: Literal["deterministic", "llm"] = "llm"
