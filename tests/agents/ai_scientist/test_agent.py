@@ -18,7 +18,7 @@ from corral.agents.ai_scientist.agent import (
 from corral.agents.ai_scientist.manager import ExperimentManager
 from corral.agents.ai_scientist.workers.base import LiteLLMStructuredModel
 from corral.agents.ai_scientist.workers.synthesizer import FinalAnswer
-from corral.agents.schema import AgentUsage
+from corral.agents.schema import AgentUsage, BudgetExhaustedError
 from corral.agents.session import AgentSession
 from corral.core.action import Action
 from corral.core.environment import Environment, Toolset
@@ -294,3 +294,51 @@ async def test_correction_transcripts_keep_each_model_turn_and_its_usage(monkeyp
     assert recorded[1].args[0][-2]["role"] == "user"
     assert "Validation error" in recorded[1].args[0][-2]["content"]
     assert [message["name"] for message in recorded[2].args[0]] == ["second_worker"] * 3
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [
+        (None, "iteration_limit"),
+        (TimeoutError("provider timed out"), "agent_failure"),
+        (BudgetExhaustedError("provider quota exhausted"), "budget_exhausted"),
+    ],
+)
+async def test_failed_corrections_preserve_transcripts_and_usage(
+    monkeypatch, failure, status
+):
+    agent = AIScientistAgent(model="test-model")
+    session = await make_session([], max_iterations=2 if failure is None else 3)
+    usages = [
+        {"prompt_tokens": 2, "completion_tokens": 1, "reasoning_tokens": 1},
+        {"prompt_tokens": 3, "completion_tokens": 2, "reasoning_tokens": 1},
+    ]
+    replies = [MockLLMResponse(content="invalid", usage=usage) for usage in usages]
+    if failure is not None:
+        replies.append(failure)
+    llm_call = AsyncMock(side_effect=replies)
+    monkeypatch.setattr(agent_module, "llm_call", llm_call)
+    record_messages = AsyncMock(wraps=session.record_messages)
+    monkeypatch.setattr(session, "record_messages", record_messages)
+
+    outcome = await agent.run_session(session)
+
+    assert outcome.usage == AgentUsage(
+        input_tokens=5, output_tokens=3, reasoning_tokens=2, llm_calls=2
+    )
+    assert outcome.status == status
+    assert session.get_agent_state("ai_scientist")["status"] == (
+        "failed" if status == "agent_failure" else status
+    )
+    assert llm_call.await_count == (2 if failure is None else 3)
+    recorded = record_messages.call_args_list
+    assert [len(call.args[0]) for call in recorded] == [3, 5]
+    assert [call.kwargs["usage"] for call in recorded] == usages
+    assert all(call.args[0][-1]["content"] == "invalid" for call in recorded)
+    assert "Validation error" in recorded[1].args[0][-2]["content"]
+    assert session.state.usage.input_tokens == 5
+    assert session.state.usage.output_tokens == 3
+    assert session.state.usage.reasoning_tokens == 2
+    assert session.state.usage.llm_calls == 2
+    assert session.state.submission is None

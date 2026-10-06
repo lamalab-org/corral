@@ -442,58 +442,51 @@ class AIScientistAgent(BaseAgent):
             _SCIENTIST_STATE_NAMESPACE,
             self._state_payload(None, (), status="running"),
         )
-        try:
-            async with BlockingPortal() as portal:
+        async with BlockingPortal() as portal:
+            try:
                 answer, usage, metadata = await anyio.to_thread.run_sync(
                     lambda: self._execute_session(session, owner, portal)
                 )
-        except LLMBudgetExceeded as exc:
-            error = concise_error_message(exc)
-            await session.set_agent_state(
-                _SCIENTIST_STATE_NAMESPACE,
-                {
-                    **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
-                    "status": "iteration_limit",
-                    "error": error,
-                },
-            )
-            return AgentOutcome(status="iteration_limit", error=error)
-        except BudgetExhaustedError as exc:
-            error = concise_error_message(exc)
-            await session.set_agent_state(
-                _SCIENTIST_STATE_NAMESPACE,
-                {
-                    **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
-                    "status": "budget_exhausted",
-                    "error": error,
-                },
-            )
-            return AgentOutcome(status="budget_exhausted", error=error)
-        except Exception as exc:
-            error = concise_error_message(exc)
-            await session.set_agent_state(
-                _SCIENTIST_STATE_NAMESPACE,
-                {
-                    **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
-                    "status": "failed",
-                    "error": error,
-                },
-            )
-            return AgentOutcome(status="agent_failure", error=error)
-
-        if owner.turn_usages:
-            start = 0
-            for end, turn_usage in zip(
-                owner.turn_message_ends, owner.turn_usages, strict=True
-            ):
-                await session.record_messages(
-                    owner.messages[start:end],
-                    usage=turn_usage,
+            except Exception as exc:
+                if isinstance(exc, LLMBudgetExceeded):
+                    status = "iteration_limit"
+                elif isinstance(exc, BudgetExhaustedError):
+                    status = "budget_exhausted"
+                else:
+                    status = "agent_failure"
+                error = concise_error_message(exc)
+                await session.set_agent_state(
+                    _SCIENTIST_STATE_NAMESPACE,
+                    {
+                        **dict(
+                            session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}
+                        ),
+                        "status": "failed" if status == "agent_failure" else status,
+                        "error": error,
+                    },
                 )
-                start = end
-        else:
-            for message in owner.messages:
-                await session.record_message(message)
+                return AgentOutcome(
+                    status=status,
+                    error=error,
+                    usage=self._usage(
+                        owner.cumulative_token_usage,
+                        llm_calls=len(owner.turn_usages),
+                    ),
+                )
+            finally:
+                if owner.turn_usages:
+                    start = 0
+                    for end, turn_usage in zip(
+                        owner.turn_message_ends, owner.turn_usages, strict=True
+                    ):
+                        await session.record_messages(
+                            owner.messages[start:end],
+                            usage=turn_usage,
+                        )
+                        start = end
+                else:
+                    for message in owner.messages:
+                        await session.record_message(message)
         answer = answer.strip()
         if not answer:
             await session.set_agent_state(
