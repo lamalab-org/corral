@@ -85,7 +85,7 @@ class ReActAgent(BaseAgent):
         system_prompt: str | None = None,
         user_prompt: str | None = None,
         surrender_prompt: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 1.0,
         **kwargs: Any,
     ) -> None:
         super().__init__(

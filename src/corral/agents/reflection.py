@@ -157,7 +157,7 @@ class ReflectionModule:
         self,
         model: str,
         reflection_prompt: str,
-        temperature: float = 0.0,  # Use deterministic reflection
+        temperature: float = 1.0,
         api_endpoint: str | None = None,
         reflection_system_prompt: str | None = None,
         **kwargs,

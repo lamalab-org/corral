@@ -66,7 +66,7 @@ class ReflexionAgent(BaseAgent):
             user_prompt=reflection_prompt or "reflexion/user_prompt",
             surrender_prompt=None,
             temperature=(
-                0.0 if reflection_temperature is None else reflection_temperature
+                1.0 if reflection_temperature is None else reflection_temperature
             ),
             **kwargs,
         )

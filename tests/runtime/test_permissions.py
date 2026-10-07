@@ -793,6 +793,203 @@ def test_real_sdk_runtime(workspace, sdk):
     assert secret.read_text() == "must not reach SDK descendants"
 
 
+@tool
+def openhands_browser_probe() -> str:
+    """Initialize the default SDK tools and render a page as a restricted UID."""
+    import json
+    import os
+    import tempfile
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from openhands.sdk import LLM, Agent, LocalConversation
+    from openhands.tools.browser_use.impl import BrowserToolExecutor
+    from openhands.tools.preset.default import get_default_tools
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = (
+                b"<html><body><p id='result'>loading</p><script>"
+                b"document.getElementById('result').textContent="
+                b"'CORRAL_BROWSER_READY';</script></body></html>"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    chromium = BrowserToolExecutor.check_chromium_available()
+    assert chromium is not None, "OpenHands cannot discover installed Chromium"
+    with HTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        conversation = None
+        try:
+            agent = Agent(
+                llm=LLM(model="openrouter/moonshotai/kimi-k3", api_key="offline-test"),
+                tools=get_default_tools(),
+            )
+            conversation = LocalConversation(
+                agent=agent,
+                workspace=tempfile.mkdtemp(prefix="openhands-browser-probe-"),
+                persistence_dir=None,
+                visualizer=None,
+            )
+            conversation.send_message("Initialize tools without calling a model")
+            tools = conversation.state.agent.tools_map
+            expected = {
+                "terminal",
+                "file_editor",
+                "task_tracker",
+                "browser_navigate",
+                "browser_get_content",
+                "finish",
+                "think",
+            }
+            assert expected <= tools.keys()
+            navigate = tools["browser_navigate"]
+            observation = navigate(
+                navigate.action_from_arguments(
+                    {"url": f"http://127.0.0.1:{server.server_port}/"}
+                ),
+                conversation,
+            )
+            assert not observation.is_error, observation.text
+            content = tools["browser_get_content"]
+            observation = content(content.action_from_arguments({}), conversation)
+            assert not observation.is_error, observation.text
+            assert "CORRAL_BROWSER_READY" in observation.text, observation.text
+            return json.dumps({"uid": os.getuid(), "chromium": chromium})
+        finally:
+            if conversation is not None:
+                conversation.close()
+            server.shutdown()
+            thread.join(timeout=5)
+
+
+@pytest.mark.skipif(
+    os.environ.get("CORRAL_PERMISSION_SDK_TESTS") != "1",
+    reason="requires the pinned OpenHands extra and installed Chromium",
+)
+def test_openhands_default_browser_in_restricted_worker(workspace):
+    import json
+
+    result = permissions.execute_restricted_tool(openhands_browser_probe, {}, workspace)
+    payload = json.loads(result)
+    assert payload["uid"] != 0
+    assert payload["chromium"]
+
+
+@pytest.mark.skipif(
+    os.environ.get("CORRAL_PERMISSION_SDK_TESTS") != "1",
+    reason="requires the pinned OpenHands extra and installed Chromium",
+)
+@pytest.mark.anyio
+async def test_openhands_default_prompt_in_restricted_agent(workspace, tmp_path):
+    """Preserve the exact SDK prompt across sandbox entry and reach inference offline."""
+    from datetime import datetime, timezone
+
+    from corral.agents.hooks import HookPoint
+    from corral.agents.openhands import OpenHandsAgent
+    from corral.core.task import TaskDefinition
+    from corral.observability import NoOpObserver
+    from corral.persistence import SQLiteCommitStore
+    from corral.runtime.task_runner import TaskRuntime
+
+    adapter = OpenHandsAgent(
+        model="openrouter/moonshotai/kimi-k3",
+        api_key="offline-test",
+        reasoning_effort="medium",
+    )
+    # Import/build before confinement, as the Docker agent bootstrap does.
+    reference = adapter._build_agent(
+        adapter._make_llm(), "http://127.0.0.1:1/mcp", False
+    )
+    expected_prompt = reference.static_system_message
+    assert expected_prompt
+    assert reference.system_prompt is None
+
+    def prepare(_context):
+        import json
+        import os
+
+        from litellm.types.utils import ModelResponse
+        from openhands.sdk import LLM
+        from openhands.sdk.llm import LLMResponse, Message, MessageToolCall
+        from openhands.sdk.llm.utils.metrics import MetricsSnapshot
+
+        assert os.getuid() != 0
+        calls = 0
+
+        async def reply(_llm, *, messages, tools, **_kwargs):
+            nonlocal calls
+            calls += 1
+            system = next(message for message in messages if message.role == "system")
+            assert system.content[0].text == expected_prompt
+            assert {"submit_answer", "browser_navigate", "finish"} <= {
+                tool.name for tool in tools
+            }
+            name = "submit_answer" if calls == 1 else "finish"
+            arguments = (
+                {"answer": "default prompt available"}
+                if calls == 1
+                else {"message": "default prompt available"}
+            )
+            return LLMResponse(
+                message=Message(
+                    role="assistant",
+                    content=[],
+                    tool_calls=[
+                        MessageToolCall(
+                            id=f"offline-{calls}",
+                            name=name,
+                            arguments=json.dumps(arguments),
+                            origin="completion",
+                        )
+                    ],
+                ),
+                metrics=MetricsSnapshot(),
+                raw_response=ModelResponse(id=f"offline-{calls}"),
+            )
+
+        def unexpected_request(*_args, **_kwargs):
+            raise AssertionError("Unexpected external model request in offline test")
+
+        LLM.acompletion = reply
+        LLM.completion = unexpected_request
+        LLM.responses = unexpected_request
+        LLM.aresponses = unexpected_request
+
+    adapter.hooks.register(HookPoint.BEFORE_TASK, prepare)
+    task = TaskDefinition(
+        name="openhands-prompt-probe",
+        description="Check that the default OpenHands prompt is available.",
+        tools=[],
+        scoring_fn=lambda answer: 1.0,
+        submission_format={},
+        resolve_answer=False,
+    )
+    environment = Environment(
+        "probe", task, base_work_dir=workspace, task_execution_id="prompt-probe"
+    )
+    async with SQLiteCommitStore(
+        tmp_path / "prompt.sqlite3", execution_id="prompt-probe"
+    ) as store:
+        state = await TaskRuntime(store, NoOpObserver()).run(
+            adapter,
+            environment,
+            execution_id="prompt-probe",
+            max_iterations=3,
+            started_at=datetime.now(timezone.utc),
+        )
+        assert state.submission is not None, state.runtime.model_dump()
+        assert state.submission == "default prompt available"
+
+
 def test_snapshot_rejects_a_symlink_swap(workspace, tmp_path, monkeypatch):
     import errno
     from pathlib import Path
