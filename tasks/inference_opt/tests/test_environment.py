@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 
 import pytest
+from inference_opt import datasets
 from inference_opt.env import create_environments, load_tasks_from_json
+from inference_opt.score import template_of
 
 TASK_BENCHMARKS = {
-    "math_algebra",
-    "math_prealgebra",
-    "math_number_theory",
-    "math_counting_probability",
-    "math_geometry",
+    1: {
+        "math_algebra",
+        "math_prealgebra",
+        "math_number_theory",
+        "math_counting_probability",
+        "math_geometry",
+    },
+    2: {"gsm_symbolic", "gsm_p1", "gsm_p2"},
 }
 
 
@@ -43,14 +47,16 @@ class TestConstruction:
             len(environment.current_task.initial_input["models"])
             for environment in built.values()
         }
-        assert models == ({1} if level == 1 else {2})
+        assert models == {1}
 
-    def test_every_benchmark_is_covered(self, environments):
+    @pytest.mark.parametrize("level", [1, 2])
+    def test_every_benchmark_of_the_level_is_covered(self, tmp_path, level):
+        built = create_environments(level=level, work_dir=str(tmp_path / f"w{level}"))
         covered = {
             environment.current_task.initial_input["benchmark"]
-            for environment in environments.values()
+            for environment in built.values()
         }
-        assert covered == TASK_BENCHMARKS
+        assert covered == TASK_BENCHMARKS[level]
 
     def test_building_needs_no_server_or_dataset(self, tmp_path, monkeypatch):
         """Corral's contract suite builds every task with no GPU and no network."""
@@ -58,12 +64,14 @@ class TestConstruction:
         monkeypatch.delenv("CORRAL_VLLM_URL", raising=False)
         assert create_environments(level=1, work_dir=str(tmp_path / "w")) != {}
 
-    def test_level_two_tasks_are_joint(self, tmp_path):
-        built = create_environments(level=2, work_dir=str(tmp_path / "w2"))
-        assert all(
-            environment.current_task.initial_input["joint"]
-            for environment in built.values()
-        )
+    @pytest.mark.parametrize(("level", "metric"), [(1, "accuracy"), (2, "template_consistency")])
+    def test_each_level_matches_a_larger_model_on_its_own_metric(self, tmp_path, level, metric):
+        built = create_environments(level=level, work_dir=str(tmp_path / f"w{level}"))
+        for environment in built.values():
+            rule = environment.current_task.initial_input["pass_rule"]
+            assert rule["kind"] == "reference"
+            assert rule["metric"] == metric
+            assert bool(rule.get("no_regression")) == (level == 2)
 
 
 class TestToolSurface:
@@ -378,60 +386,98 @@ class TestPassRules:
         assert headroom_closed(12, 0.5, 30) < 0  # worse than the baseline
         assert headroom_closed(30, 1.0, 30) is None  # nothing left to improve
 
-    @pytest.mark.parametrize("rule", ["task", "headroom"])
     @pytest.mark.parametrize(
         ("level", "task_id", "outcome", "expected"),
         [
-            (1, "math_algebra_b", {"student_b": "all"}, 1.0),
-            (1, "math_algebra_b", {"student_b": "just_short"}, 0.0),
-            # Level 2 needs every student to pass: one perfect and one just short fails.
-            (2, "math_algebra_ab", {"student_a": "all", "student_b": "just_short"}, 0.0),
-            (2, "math_algebra_ab", {"student_a": "all", "student_b": "all"}, 1.0),
+            (1, "math_algebra_b", "all", 1.0),
+            (1, "math_algebra_b", "just_short", 0.0),
+            (2, "gsm_p1_d", "all", 1.0),
+            (2, "gsm_p1_d", "just_short", 0.0),
         ],
     )
-    def test_score_is_one_only_when_every_student_passes(
-        self, rule, level, task_id, outcome, expected
+    def test_score_is_one_only_when_the_student_matches_the_larger_model(
+        self, level, task_id, outcome, expected
     ):
-        """Level 1 tasks match a larger model, level 2 a fixed bar; both also run headroom."""
+        """Level 1 compares accuracy, level 2 template consistency."""
         from inference_opt.runner import ModelRun
         from inference_opt.score import final_result
 
         config = _task_config(level, task_id)
-        assert config["pass_rule"]["kind"] == ("reference" if level == 1 else "threshold")
-        if rule == "headroom":
-            config["pass_rule"] = {"kind": "headroom", "min_closed": 0.5}
-        question_ids = [f"q{i}" for i in range(30)]
-
-        def n_correct(model):
-            if outcome[model] == "all":
-                return 30
-            kind = config["pass_rule"]["kind"]
-            if kind == "headroom":
-                # One question fewer than closing half the headroom over the baseline.
-                baseline_correct = round(config["baselines"][model] * 30)
-                return baseline_correct + math.ceil((30 - baseline_correct) / 2) - 1
-            bar = (
-                config["pass_rule"]["references"][model]["test_accuracy"]
-                if kind == "reference"
-                else config["pass_rule"]["min_accuracy"]
-            )
-            # One question below the bar.
-            return math.ceil(bar * 30 - 1e-6) - 1
-
-        runs = {}
-        for model in config["models"]:
-            n = n_correct(model)
-            runs[model] = ModelRun(
+        rule = config["pass_rule"]
+        ((model, reference),) = rule["references"].items()
+        question_ids = [
+            item.item_id for item in datasets.load_items(config["benchmark"], "test")
+        ]
+        n = len(question_ids)
+        if outcome == "all":
+            correct = dict.fromkeys(question_ids, True)
+        elif rule["metric"] == "accuracy":
+            # One question below the larger model.
+            below = round(reference["test"] * n) - 1
+            correct = {qid: i < below for i, qid in enumerate(question_ids)}
+        else:
+            # Every instance right but one per template, in one template fewer
+            # than the larger model's share: accuracy stays high, consistency falls short.
+            templates = sorted({template_of(qid) for qid in question_ids})
+            solved = set(templates[: round(reference["test"] * len(templates)) - 1])
+            seen: set[str] = set()
+            correct = {}
+            for qid in question_ids:
+                template = template_of(qid)
+                first = template not in seen
+                seen.add(template)
+                correct[qid] = template in solved or not first
+        runs = {
+            model: ModelRun(
                 model=model,
                 split="test",
                 question_ids=question_ids,
                 answers=dict.fromkeys(question_ids, "ANSWER: 1"),
-                correct={qid: index < n for index, qid in enumerate(question_ids)},
-                calls_used=30,
+                correct=correct,
+                calls_used=n,
             )
+        }
         result = final_result(config, runs)
         assert result["score"] == expected
         assert result["metadata"]["metrics"]["passed"] == expected
+
+    def test_robustness_must_not_cost_accuracy(self):
+        """Matching the larger model's consistency is not enough if accuracy falls."""
+        from inference_opt.runner import ModelRun
+        from inference_opt.score import final_result
+
+        config = _task_config(2, "gsm_p1_d")
+        ((model, reference),) = config["pass_rule"]["references"].items()
+        question_ids = [item.item_id for item in datasets.load_items("gsm_p1", "test")]
+        templates = sorted({template_of(qid) for qid in question_ids})
+        # Exactly the larger model's share of templates solved, every other question wrong.
+        solved = set(templates[: round(reference["test"] * len(templates))])
+        correct = {qid: template_of(qid) in solved for qid in question_ids}
+        run = ModelRun(
+            model=model, split="test", question_ids=question_ids,
+            answers=dict.fromkeys(question_ids, "ANSWER: 1"), correct=correct,
+            calls_used=len(question_ids),
+        )
+        accuracy = sum(correct.values()) / len(correct)
+        result = final_result(config, {model: run})
+        assert result["metadata"]["per_model"][model]["template_consistency"] >= reference["test"]
+        assert result["score"] == (1.0 if accuracy >= config["baselines"][model] else 0.0)
+
+    @pytest.mark.parametrize("level", [1, 2])
+    def test_the_headroom_rule_still_scores(self, level):
+        from inference_opt.runner import ModelRun
+        from inference_opt.score import final_result
+
+        config = _task_config(level, "math_algebra_b" if level == 1 else "gsm_p1_d")
+        config["pass_rule"] = {"kind": "headroom", "min_closed": 0.5}
+        (model,) = config["models"]
+        question_ids = [f"q{i}" for i in range(30)]
+        run = ModelRun(
+            model=model, split="test", question_ids=question_ids,
+            answers=dict.fromkeys(question_ids, "ANSWER: 1"),
+            correct=dict.fromkeys(question_ids, True), calls_used=30,
+        )
+        assert final_result(config, {model: run})["score"] == 1.0
 
 
 def test_a_reference_task_passes_on_a_tie_with_the_larger_model():
@@ -439,7 +485,7 @@ def test_a_reference_task_passes_on_a_tie_with_the_larger_model():
     from inference_opt.score import final_result
 
     config = _task_config(1, "math_counting_probability_b")
-    bar = config["pass_rule"]["references"]["student_b"]["test_accuracy"]
+    bar = config["pass_rule"]["references"]["student_b"]["test"]
     question_ids = [f"q{i}" for i in range(30)]
     tie = round(bar * 30)
     run = ModelRun(
@@ -452,4 +498,4 @@ def test_a_reference_task_passes_on_a_tie_with_the_larger_model():
     )
     result = final_result(config, {"student_b": run})
     assert result["score"] == 1.0
-    assert "Llama 3.1 70B Instruct scored" in result["feedback"]
+    assert "(Llama 3.1 70B Instruct 33%)" in result["feedback"]

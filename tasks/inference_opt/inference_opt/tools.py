@@ -17,7 +17,7 @@ from inference_opt.budget import LEDGER_RESOURCE, BudgetSpec, RunRecord, StateLe
 from inference_opt.client import probe_student
 from inference_opt.errors import error_line, error_tail
 from inference_opt.runner import MAX_TOKENS_CAP, ModelRun, run_policy
-from inference_opt.score import HarnessError, final_result
+from inference_opt.score import HarnessError, final_result, template_consistency
 
 __all__ = ["create_tools"]
 
@@ -196,14 +196,21 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         summary = f"Zero-shot baseline on {benchmark} (train split): {best}."
         rule = dict(config.get("pass_rule") or {})
         if rule.get("kind") == "reference":
+            metric = str(rule.get("metric", "accuracy"))
             references = dict(rule.get("references") or {})
-            payload["reference_accuracy_train"] = {
-                m: {"model": references[m]["name"], "accuracy": references[m]["train_accuracy"]}
+            if metric == "template_consistency":
+                own = dict(config.get("baseline_template_consistency_train") or {})
+                payload["baseline_template_consistency_train"] = own
+                summary += " Template consistency: " + ", ".join(
+                    f"{m}={float(own.get(m, 0.0)):.3f}" for m in models
+                ) + "."
+            payload["reference_train"] = {
+                m: {"model": references[m]["name"], metric: references[m]["train"]}
                 for m in models
                 if m in references
             }
-            summary += " Larger model to match: " + ", ".join(
-                f"{references[m]['name']}={float(references[m]['train_accuracy']):.3f}"
+            summary += f" Larger model to match ({metric.replace('_', ' ')}): " + ", ".join(
+                f"{references[m]['name']}={float(references[m]['train']):.3f}"
                 for m in models
                 if m in references
             ) + "."
@@ -519,7 +526,13 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         )
         ledger.record_run(record)
         verdicts = "; ".join(
-            f"{model}: {value['delta']:+.3f}" for model, value in results.items()
+            f"{model}: accuracy {value['delta']:+.3f}"
+            + (
+                f", template consistency {value['template_consistency']:.3f}"
+                f" (baseline {value['baseline_template_consistency']:.3f})"
+                if "template_consistency" in value else ""
+            )
+            for model, value in results.items()
         )
         if note := _token_note(list(runs.values())):
             verdicts += f". NOTE: {note}"
@@ -549,7 +562,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             )
             bucket["n"] += 1
             bucket["n_correct"] += int(run.correct.get(item_id, False))
-        return {
+        result: dict[str, Any] = {
             "accuracy": round(run.accuracy, 4),
             "baseline": round(baseline_value, 4),
             "delta": round(delta, 4),
@@ -564,6 +577,14 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             ),
             "by_topic": by_topic,
         }
+        if dict(config.get("pass_rule") or {}).get("metric") == "template_consistency":
+            result["template_consistency"] = round(
+                template_consistency(run.correct, run.question_ids), 4
+            )
+            result["baseline_template_consistency"] = float(
+                (config.get("baseline_template_consistency_train") or {}).get(run.model, 0.0)
+            )
+        return result
 
     @tool(**_TOOL)
     def inspect_failures(

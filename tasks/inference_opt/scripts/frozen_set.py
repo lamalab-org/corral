@@ -77,3 +77,72 @@ def content_fingerprint(data: Path, benchmarks: list[str]) -> str:
         for row in rows
     )
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def replace_benchmarks(
+    data: Path,
+    version: str,
+    group: str,
+    public: dict[str, list[dict[str, Any]]],
+    labels: list[dict[str, Any]],
+    per_benchmark: dict[str, dict[str, Any]],
+    selection: dict[str, Any],
+) -> dict[str, Any]:
+    """Write some benchmarks of a frozen set and keep every other benchmark as it is.
+
+    ``group`` names the script's share of the set (``"math"``, ``"gsm"``): its
+    selection notes go under ``manifest["selection"][group]``. The manifest's
+    benchmark list keeps its order, new benchmarks are appended, and both
+    fingerprints are recomputed over the whole set. Returns the manifest.
+    """
+    (data / "public").mkdir(parents=True, exist_ok=True)
+    (data / "private").mkdir(parents=True, exist_ok=True)
+    for benchmark, rows in public.items():
+        (data / "public" / f"{benchmark}.jsonl").write_text(jsonl_text(rows), encoding="utf-8")
+
+    labels_path = data / "private" / "labels.jsonl"
+    kept = [
+        row for row in (read_jsonl(labels_path) if labels_path.is_file() else [])
+        if row["item_id"].split(":", 1)[0] not in public
+    ]
+    labels_path.write_text(jsonl_text(kept + labels), encoding="utf-8")
+
+    parquet = data / "items.parquet"
+    frames = [pd.DataFrame(rows) for rows in public.values()]
+    if parquet.is_file():
+        existing = pd.read_parquet(parquet)
+        frames.insert(0, existing[~existing.benchmark.isin(list(public))])
+    pd.concat(frames, ignore_index=True).to_parquet(parquet, index=False)
+
+    manifest_path = data / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
+    benchmarks = list(manifest.get("benchmarks", []))
+    benchmarks += [b for b in public if b not in benchmarks]
+    examples = [
+        row
+        for benchmark in benchmarks
+        for row in read_jsonl(data / "public" / f"{benchmark}.jsonl")
+        if row["split"] == "examples"
+    ]
+    examples_payload = "\n".join(
+        json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        for row in examples
+    )
+    manifest.update(
+        dataset_version=version,
+        schema_version=2,
+        benchmarks=benchmarks,
+        per_benchmark={**manifest.get("per_benchmark", {}), **per_benchmark},
+        # Notes are kept per group; flat notes from before groups existed are dropped.
+        selection={
+            **{k: v for k, v in manifest.get("selection", {}).items() if isinstance(v, dict)},
+            group: selection,
+        },
+        content_fingerprint=content_fingerprint(data, benchmarks),
+        examples_fingerprint=hashlib.sha256(examples_payload.encode()).hexdigest(),
+    )
+    for stale in ("seed", "items_per_benchmark", "train_per_benchmark",
+                  "test_per_benchmark", "examples_per_benchmark"):
+        manifest.pop(stale, None)
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest

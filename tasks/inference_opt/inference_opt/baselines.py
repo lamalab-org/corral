@@ -39,9 +39,18 @@ Remember to put your answer on its own line at the end in the form "ANSWER: $ANS
 """.strip()
 
 
+# GSM-Symbolic's evaluation prompt without its eight worked examples.
+GSM_TEMPLATE = """As an expert problem solver, solve step by step the following mathematical question.
+
+Q: {question}
+A: Let's think step by step."""
+
+
 def _prompt(question):
     if question.benchmark.startswith("math_"):
         return MATH_TEMPLATE.format(prompt=question.text)
+    if question.benchmark.startswith("gsm_"):
+        return GSM_TEMPLATE.format(question=question.text)
     prompt = question.text
     if question.choices:
         prompt += "\\n\\n" + question.rendered_choices()

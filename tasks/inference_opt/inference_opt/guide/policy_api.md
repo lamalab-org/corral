@@ -16,16 +16,21 @@ Keep any state you need in ordinary Python variables.
 
 ## How answers are graded
 
-Answers are graded exactly as Inspect's MATH eval grades them (`expression_exact_match_sympy` in `inspect_evals`):
+**MATH tasks** (`math_*`) are graded exactly as Inspect's MATH eval grades them (`expression_exact_match_sympy` in `inspect_evals`):
 
 - The answer is read from a line `ANSWER: <answer>`, and that line must be the last line of the text.
 - It is normalised and compared with the gold answer using sympy, so `ANSWER: \frac{1}{2}` and `ANSWER: 0.5` are the same answer.
 - Text with no final `ANSWER:` line is wrong, even if it contains the right answer, for example in `\boxed{...}`.
 
 Gold answers are numbers or expressions such as `\frac{3}{4}` or `1+2\sqrt{3}`.
-`question.answer_type` is `"text"` for every question, so it does not say which.
+`question.answer_type` is `"text"` for every MATH question, so it does not say which.
 
-You can also record `Answer(final=...)` from `inference_opt.api`, which writes the `ANSWER:` line for you.
+**GSM-Symbolic tasks** (`gsm_*`) are graded as GSM-Symbolic grades them: commas are removed, the **last number** in the text is the answer, and it is compared with the gold answer as a number.
+Every gold answer is a number, so `question.answer_type` is `"numeric"`.
+Each question is one instance of a template: the same problem with different names and numbers.
+`question.topic` names the template, so instances of one template can be recognised; the score counts a template only if all of its instances are right.
+
+You can also record `Answer(final=...)` from `inference_opt.api`, which writes an `ANSWER:` line for you; its value is then the last number for GSM-Symbolic too.
 `inference_opt.api` is the only `inference_opt` module a policy may import.
 
 ## Calling the student
@@ -73,8 +78,8 @@ A later answer for the same question replaces the earlier one, and a question ne
 ## Question
 
 `question` has `id`, `text`, `benchmark`, `answer_type`, `choices`, `choice_labels`, `topic`, `index` and `total`.
-`topic` is the MATH subject, and `index` and `total` give its position in the run.
-`choices` and `choice_labels` are `None`: MATH questions have no options.
+`topic` is the MATH subject, or the GSM-Symbolic template; `index` and `total` give the question's position in the run.
+`choices` and `choice_labels` are `None`: these questions have no options.
 
 ## The context
 

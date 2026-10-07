@@ -20,6 +20,8 @@ __all__ = [
     "StateScorer",
     "final_result",
     "headroom_closed",
+    "template_consistency",
+    "template_of",
 ]
 
 #: Fraction of crashed items at which a policy run is rejected.
@@ -30,8 +32,11 @@ CRASH_RATE_LIMIT = 0.5
 #: (``data/reference/math_leaderboard.csv``); otherwise it scores 0. A task can set
 #: ``{"kind": "headroom", "min_closed": 0.5}``: every student closes at least
 #: half the gap between its zero-shot baseline and a perfect score. Or
-#: ``{"kind": "reference", "references": {student: {...}}}``: every student
-#: matches the zero-shot test accuracy of a larger model of its own family.
+#: ``{"kind": "reference", "metric": ..., "references": {student: {...}}}``:
+#: every student matches, on ``metric`` (accuracy or template consistency), the
+#: zero-shot test score of a larger model of its own family; with
+#: ``"no_regression": true`` its accuracy must also not fall below its own
+#: zero-shot test accuracy.
 DEFAULT_PASS_RULE: dict[str, Any] = {
     "kind": "threshold",
     "min_accuracy": 0.7702,
@@ -45,6 +50,27 @@ def headroom_closed(n_correct: int, baseline: float, n_items: int) -> float | No
     if baseline_correct >= n_items:
         return None
     return (n_correct - baseline_correct) / (n_items - baseline_correct)
+
+
+def template_of(item_id: str) -> str:
+    """The template a question was rendered from.
+
+    GSM-Symbolic ids are ``<benchmark>:<template>-<instance>``; any other id is
+    its own template, so template consistency there equals accuracy.
+    """
+    return item_id.rsplit("-", 1)[0]
+
+
+def template_consistency(correct: dict[str, bool], question_ids: list[str]) -> float:
+    """Share of templates whose every instance in ``question_ids`` is answered correctly."""
+    templates: dict[str, bool] = {}
+    for item_id in question_ids:
+        key = template_of(item_id)
+        templates[key] = templates.get(key, True) and bool(correct.get(item_id, False))
+    return sum(templates.values()) / len(templates) if templates else 0.0
+
+
+METRIC_NAMES = {"accuracy": "accuracy", "template_consistency": "template consistency"}
 
 
 class ScoreOutcome(StrEnum):
@@ -83,7 +109,7 @@ class ScoreReport:
                 if "passed" in entry:
                     metrics["passed"] = float(entry["passed"])
                 continue
-            for key in ("accuracy", "baseline", "delta", "headroom_closed"):
+            for key in ("accuracy", "baseline", "delta", "headroom_closed", "template_consistency"):
                 if entry.get(key) is not None:
                     metrics[f"{model}_{key}"] = float(entry[key])
         return {
@@ -106,10 +132,14 @@ class ScoreReport:
         rule = (self.per_model.get("_aggregate") or {}).get("pass_rule") or {}
         if rule.get("kind") == "reference":
             references = rule.get("references") or {}
+            metric = str(rule.get("metric", "accuracy"))
             reached = [
-                f"{model} scored {entry['accuracy']:.0%} "
-                f"({references[model]['name']} scored "
-                f"{float(references[model]['test_accuracy']):.0%})"
+                f"{model} {METRIC_NAMES[metric]} {entry[metric]:.0%} "
+                f"({references[model]['name']} {float(references[model]['test']):.0%})"
+                + (
+                    f", accuracy {entry['accuracy']:.0%} (baseline {entry['baseline']:.0%})"
+                    if rule.get("no_regression") else ""
+                )
                 for model, entry in self.per_model.items()
                 if model != "_aggregate" and model in references
             ]
@@ -179,6 +209,9 @@ def final_result(config: dict[str, Any], runs: dict[str, ModelRun]) -> dict[str,
             "baseline": round(baseline_value, 4),
             "delta": round(delta, 4),
             "headroom_closed": headroom_closed(run.n_correct, baseline_value, n_items),
+            "template_consistency": round(
+                template_consistency(run.correct, run.question_ids), 4
+            ),
             "n_correct": run.n_correct,
             "n_items": n_items,
             "n_answered": len(run.answers),
@@ -230,13 +263,20 @@ def final_result(config: dict[str, Any], runs: dict[str, ModelRun]) -> dict[str,
     elif rule.get("kind") == "reference":
         # Each student must match a larger model of its family, run zero-shot
         # on the same test questions with the same prompt and scorer.
+        metric = str(rule.get("metric", "accuracy"))
+        if metric not in METRIC_NAMES:
+            raise HarnessError(f"unknown pass_rule metric: {metric!r}")
         references = dict(rule.get("references") or {})
         missing = [model for model in models if model not in references]
         if missing:
             raise HarnessError(f"pass_rule names no reference model for {missing}")
         passed = all(
-            report.per_model[model]["accuracy"]
-            >= float(references[model]["test_accuracy"]) - 1e-9
+            report.per_model[model][metric] >= float(references[model]["test"]) - 1e-9
+            and (
+                not rule.get("no_regression")
+                or report.per_model[model]["accuracy"]
+                >= report.per_model[model]["baseline"] - 1e-9
+            )
             for model in models
         )
         report.score = 1.0 if passed else 0.0

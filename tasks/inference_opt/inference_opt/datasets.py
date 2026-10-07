@@ -30,7 +30,8 @@ __all__ = [
 
 DATASET_VERSION = "v2"
 
-#: One benchmark per MATH subject, Level 5 only (``scripts/select_math_levels.py``).
+#: One benchmark per MATH subject, Level 5 only (``scripts/select_math_levels.py``),
+#: and the three GSM-Symbolic variants (``scripts/select_gsm_symbolic.py``).
 #: ``data/frozen/v1`` is the earlier mixed set (MMLU-Pro, BBH, GPQA, MATH,
 #: ChemBench, ARC); it is kept on disk but not used.
 BENCHMARKS: tuple[str, ...] = (
@@ -39,6 +40,9 @@ BENCHMARKS: tuple[str, ...] = (
     "math_number_theory",
     "math_counting_probability",
     "math_geometry",
+    "gsm_symbolic",
+    "gsm_p1",
+    "gsm_p2",
 )
 
 #: ``train`` is scored by experiments, ``test`` by the submission, and ``examples``

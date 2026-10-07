@@ -64,6 +64,10 @@ _ANSWER_FORMATS = {
         "may have one or more correct options; the answer is all of them, as "
         "comma-separated letters, and it is right only if the set is exact."
     ),
+    "gsm": (
+        "Answers are graded as GSM-Symbolic grades them: the last number in the text is "
+        "the answer, compared with the gold answer as a number (commas are ignored)."
+    ),
     "default": "End each answer with a line `ANSWER: <answer>`; the scorer reads that line.",
 }
 
@@ -72,6 +76,8 @@ def _answer_format(benchmark: str) -> str:
     """How the scorer for this benchmark reads an answer."""
     if benchmark.startswith("math_"):
         return _ANSWER_FORMATS["math"]
+    if benchmark.startswith("gsm_"):
+        return _ANSWER_FORMATS["gsm"]
     return _ANSWER_FORMATS.get(benchmark, _ANSWER_FORMATS["default"])
 
 
@@ -95,6 +101,31 @@ def _budget_summary(config: dict) -> str:
     return "\n".join(lines)
 
 
+def _reference_summary(config: dict, rule: dict) -> str:
+    """The pass rule of a task that must match a larger model of the student's family."""
+    references = dict(rule.get("references") or {})
+    consistency = rule.get("metric") == "template_consistency"
+    if consistency:
+        lines = [
+            "- Each question is one instance of a template: the same problem with different names and numbers. A template counts as solved only if every one of its test instances is answered correctly. Template consistency is the share of templates solved.",
+            "- Your submitted policy is run on the held-out test split, whose templates appear in no other split. The task passes (score 1) if, with your policy, the student's template consistency is at least that of a larger model of its own family run with no policy (one zero-shot call per question, the same prompt and scorer as the student's baseline), and the student's accuracy is not below its own zero-shot accuracy; otherwise it scores 0.",
+        ]
+    else:
+        lines = [
+            "- Your submitted policy is run on the held-out test split. The task passes (score 1) if, with your policy, the student answers at least as many test questions correctly as a larger model of its own family answers with no policy (one zero-shot call per question, the same prompt and scorer as the student's baseline); otherwise it scores 0.",
+        ]
+    measure = "template consistency" if consistency else "accuracy"
+    for model in config.get("models", []):
+        reference = references.get(model, {})
+        lines.append(
+            f"- The larger model is {reference.get('name', '?')}. On the train split its "
+            f"zero-shot {measure} is {float(reference.get('train', 0.0)):.1%}."
+        )
+    if len(config.get("models", [])) > 1:
+        lines.append("- With two student models, both must match their larger model to pass.")
+    return "\n".join(lines)
+
+
 def _scoring_summary(config: dict) -> str:
     """Describe the pass rule the scorer will apply to this task."""
     rule = dict(config.get("pass_rule") or DEFAULT_PASS_RULE)
@@ -109,19 +140,7 @@ def _scoring_summary(config: dict) -> str:
             )
         return "\n".join(lines)
     if rule.get("kind") == "reference":
-        references = dict(rule.get("references") or {})
-        lines = [
-            "- Your submitted policy is run on the held-out test split. The task passes (score 1) if, with your policy, the student answers at least as many test questions correctly as a larger model of its own family answers with no policy (one zero-shot call per question, the same prompt and scorer as the student's baseline); otherwise it scores 0.",
-        ]
-        for model in config.get("models", []):
-            reference = references.get(model, {})
-            lines.append(
-                f"- The larger model is {reference.get('name', '?')}. On the train split it scores "
-                f"{float(reference.get('train_accuracy', 0.0)):.1%} zero-shot."
-            )
-        if joint:
-            lines.append("- With two student models, both must match their larger model to pass.")
-        return "\n".join(lines)
+        return _reference_summary(config, rule)
     if rule.get("kind") == "threshold":
         bar = float(rule["min_accuracy"])
         lines = [

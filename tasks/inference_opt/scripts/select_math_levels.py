@@ -29,8 +29,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
-import json
 import re
 import sys
 from pathlib import Path
@@ -42,12 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from frozen_set import (  # noqa: E402
-    content_fingerprint,
-    jsonl_text,
-    rank,
-    reference_accuracy,
-)
+from frozen_set import rank, reference_accuracy, replace_benchmarks  # noqa: E402
 
 VERSION = "v2"
 LEVEL = "Level 5"
@@ -131,17 +124,10 @@ def main() -> None:
     args = parser.parse_args()
 
     pool = _pool(args.bp_root)
-    data = ROOT / "inference_opt" / "data" / "frozen" / VERSION
-    for old in (data / "public").glob("*.jsonl"):
-        old.unlink()
-    (data / "public").mkdir(parents=True, exist_ok=True)
-    (data / "private").mkdir(parents=True, exist_ok=True)
-
     total = sum(SIZES.values())
+    publics: dict[str, list[dict[str, Any]]] = {}
     labels: list[dict[str, Any]] = []
-    frames: list[pd.DataFrame] = []
     per_benchmark: dict[str, Any] = {}
-    examples_payload: list[dict[str, Any]] = []
     for benchmark, subject in SUBSETS.items():
         candidates = pool[pool.category == subject]
         if len(candidates) < total:
@@ -177,10 +163,7 @@ def main() -> None:
                 public.append(record)
                 labels.append({"answer_format": ANSWER_FORMAT, "item_id": record["item_id"],
                                "split": split, "target": row["answer"]})
-                if split == "examples":
-                    examples_payload.append(record)
-        (data / "public" / f"{benchmark}.jsonl").write_text(jsonl_text(public), encoding="utf-8")
-        frames.append(pd.DataFrame(public))
+        publics[benchmark] = public
 
         stats = {split: [r["irt"] for r in dealt[split]] for split in SIZES}
         per_benchmark[benchmark] = {
@@ -199,41 +182,20 @@ def main() -> None:
             f"{split} {len(dealt[split])} (irt {sum(stats[split]) / len(stats[split]):.2f})"
             for split in SIZES))
 
-    (data / "private" / "labels.jsonl").write_text(jsonl_text(labels), encoding="utf-8")
-    pd.concat(frames, ignore_index=True).to_parquet(data / "items.parquet", index=False)
-
-    benchmarks = list(SUBSETS)
-    examples_json = "\n".join(
-        json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        for row in examples_payload
-    )
-    manifest = {
-        "benchmarks": benchmarks,
-        "dataset_version": VERSION,
-        "schema_version": 1,
+    data = ROOT / "inference_opt" / "data" / "frozen" / VERSION
+    replace_benchmarks(data, VERSION, "math", publics, labels, per_benchmark, {
+        "rule": (f"{total} items per benchmark, one MATH subject each, all {LEVEL}; "
+                 "kept only if inspect_evals' MATH scorer grades the gold answer as "
+                 "matching itself"),
+        "answer_format": "every question is 'math'; graded by inspect_evals' "
+                         "expression_exact_match_sympy",
+        "level_source": f"MATH difficulty level matched from {SOURCE}",
+        "split": "sorted by bp IRT difficulty and dealt in blocks of eight "
+                 "(train, test, examples), forward then backward",
+        "examples": "revealed to the agent, never scored",
+        "reference_accuracy": "mean correctness of a 7-8B reference model cohort",
         "seed": SEED,
-        "items_per_benchmark": SIZES["train"] + SIZES["test"],
-        "train_per_benchmark": SIZES["train"],
-        "test_per_benchmark": SIZES["test"],
-        "examples_per_benchmark": SIZES["examples"],
-        "per_benchmark": per_benchmark,
-        "selection": {
-            "rule": (f"{total} items per benchmark, one MATH subject each, all {LEVEL}; "
-                     "kept only if inspect_evals' MATH scorer grades the gold answer as "
-                     "matching itself"),
-            "answer_format": "every question is 'math'; graded by inspect_evals' "
-                             "expression_exact_match_sympy",
-            "level_source": f"MATH difficulty level matched from {SOURCE}",
-            "split": "sorted by bp IRT difficulty and dealt in blocks of eight "
-                     "(train, test, examples), forward then backward",
-            "examples": "revealed to the agent, never scored",
-            "reference_accuracy": "mean correctness of a 7-8B reference model cohort",
-        },
-        "content_fingerprint": content_fingerprint(data, benchmarks),
-        "examples_fingerprint": hashlib.sha256(examples_json.encode()).hexdigest(),
-    }
-    (data / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    })
     print(f"wrote {data}")
 
 
