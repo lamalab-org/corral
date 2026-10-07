@@ -159,6 +159,7 @@ def measure_baseline(
     base_url: str | None = None,
     timeout_s: int = 3600,
     max_connections: int = 8,
+    options: dict[str, Any] | None = None,
 ) -> BaselineResult:
     """Run the pinned zero-shot policy over one split and grade it."""
     items = datasets.load_items(benchmark, split)  # type: ignore[arg-type]
@@ -186,6 +187,7 @@ def measure_baseline(
             "benchmark": benchmark,
             "model_specs": {model: model_spec or model},
             "base_urls": {model: base_url},
+            "student_options": {model: dict(options or {})},
             "student_concurrency": max(1, max_connections),
         }
         run = run_policy(

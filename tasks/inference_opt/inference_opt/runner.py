@@ -191,7 +191,10 @@ def run_policy(
         concurrency = student_concurrency(config, model)
         model_spec = str((config.get("model_specs") or {}).get(model, model))
         backend = (backends or {}).get(model) or backend_for(
-            model_spec, (config.get("base_urls") or {}).get(model), float(limit)
+            model_spec,
+            (config.get("base_urls") or {}).get(model),
+            float(limit),
+            (config.get("student_options") or {}).get(model),
         )
         gateway = StudentGateway(
             backend=backend,

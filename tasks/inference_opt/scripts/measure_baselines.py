@@ -66,7 +66,9 @@ def _parse_base_urls(values: list[str], models: dict[str, str]) -> dict[str, str
     return {model: per_model.get(model, shared) for model in models}
 
 
-def _write_example_baselines(results: dict, models: dict[str, str]) -> Path:
+def _write_example_baselines(
+    results: dict, models: dict[str, str], options: dict[str, dict]
+) -> Path:
     """Replace the rows of each measured model and benchmark; keep every other row."""
     path = datasets.example_baselines_path()
     measured = {
@@ -84,6 +86,7 @@ def _write_example_baselines(results: dict, models: dict[str, str]) -> Path:
         {
             "model": model,
             "model_spec": models[model],
+            "student_options": options[model],
             "item_id": item_id,
             "correct": correct,
             **result.completions.get(
@@ -103,6 +106,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", action="append", default=[],
                         help="name=served_spec, e.g. student_a=vllm/Qwen/Qwen2.5-7B-Instruct")
+    parser.add_argument("--no-reasoning", action="append", default=[], metavar="NAME",
+                        help="turn this student's thinking off on every call (repeatable)")
     parser.add_argument("--base-url", action="append", default=[],
                         help="OpenAI-compatible endpoint ending in /v1, either shared "
                              "or name=url per model (repeatable)")
@@ -120,6 +125,10 @@ def main() -> None:
     args = parser.parse_args()
 
     models = _parse_models(args.model)
+    unknown = sorted(set(args.no_reasoning) - set(models))
+    if unknown:
+        raise SystemExit(f"--no-reasoning for unknown model(s): {unknown}")
+    options = {m: ({"reasoning": False} if m in args.no_reasoning else {}) for m in models}
     if not models:
         raise SystemExit("at least one --model name=spec is required")
     scored = [split for split in args.splits if split != "examples"]
@@ -144,6 +153,7 @@ def main() -> None:
             result = measure_baseline(
                 benchmark, model, split,
                 model_spec=models[model], base_url=base_urls[model],
+                options=options[model],
                 max_connections=args.max_connections,
             )
         with print_lock:
@@ -162,7 +172,7 @@ def main() -> None:
         raise SystemExit("baseline runs failed:\n\n" + "\n\n".join(failures))
 
     if "examples" in args.splits:
-        print(f"\nwrote {_write_example_baselines(results, models)}")
+        print(f"\nwrote {_write_example_baselines(results, models, options)}")
     if not scored:
         return
 
@@ -186,14 +196,17 @@ def main() -> None:
     # Merge with any prior run's artifact so re-running for one model (e.g. to add
     # student_b after student_a) doesn't drop earlier students' results.
     prior_models: dict[str, str] = {}
+    prior_options: dict[str, dict] = {}
     if args.out.exists():
         prior = json.loads(args.out.read_text(encoding="utf-8"))
         prior_models = prior.get("models", {})
+        prior_options = prior.get("student_options", {})
         for model, per_benchmark in prior.get("results", {}).items():
             measured.setdefault(model, {}).update(
                 {b: e for b, e in per_benchmark.items() if b not in measured.get(model, {})}
             )
     models = {**prior_models, **models}
+    options = {**prior_options, **options}
 
     print(f"\n{'benchmark':16}{'model':14}{'acc':>7}{'headroom':>10}"
           f"{'floor':>8}  verdict")
@@ -215,6 +228,7 @@ def main() -> None:
                     "shots": 0, "calls_per_question": 1,
                 },
                 "models": models,
+                "student_options": options,
                 "results": measured,
             },
             indent=2, sort_keys=True,

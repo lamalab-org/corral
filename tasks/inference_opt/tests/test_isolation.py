@@ -175,7 +175,7 @@ def test_tools_run_the_policy_jailed_through_corrals_executor(monkeypatch):
         "inference_opt.runner.backend_for", lambda *args: MockBackend("ANSWER: A")
     )
     base = tempfile.mkdtemp(prefix="inference-opt-executor-", dir="/workspace")
-    environment = create_environments(level=1, work_dir=base)["math_algebra_a"].for_task(
+    environment = create_environments(level=1, work_dir=base)["math_algebra_b"].for_task(
         "executor-test"
     )
     workspace = Path(environment.workspace_path)
@@ -220,4 +220,4 @@ def test_tools_run_the_policy_jailed_through_corrals_executor(monkeypatch):
     ledger = result.environment["resources"]["inference_state"]
     assert ledger["debug_runs"] == 1
     assert ledger["student_calls"] == 2
-    assert (workspace / "runs" / "dry-1" / "student_a" / "summary.json").is_file()
+    assert (workspace / "runs" / "dry-1" / "student_b" / "summary.json").is_file()

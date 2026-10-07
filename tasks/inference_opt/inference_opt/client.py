@@ -55,7 +55,10 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1"
 
 
 def student_endpoint(
-    model_spec: str, base_url: str | None = None, timeout: float | None = None
+    model_spec: str,
+    base_url: str | None = None,
+    timeout: float | None = None,
+    options: dict[str, Any] | None = None,
 ) -> StudentEndpoint:
     """The endpoint that serves one student.
 
@@ -64,7 +67,12 @@ def student_endpoint(
     sent to OpenRouter with ``OPENROUTER_API_KEY``, and OpenRouter may route it
     only to the provider after ``@``: without fallbacks, a student is the same
     deployment in every run, or the request fails.
+
+    ``options`` are a task's ``student_options`` for this student. Only
+    ``{"reasoning": False}`` is defined: it turns a reasoning model's thinking
+    off on every call, so a policy cannot turn it back on.
     """
+    reasoning = (options or {}).get("reasoning")
     name = model_spec.partition("/")[2] or model_spec
     name, _, provider = name.partition("@")
     if model_spec.startswith("openrouter/"):
@@ -76,12 +84,13 @@ def student_endpoint(
             timeout=timeout,
             api_key=os.environ.get("OPENROUTER_API_KEY"),
             provider=provider or None,
+            reasoning=reasoning,
         )
     if not base_url:
         raise ValueError(f"no endpoint configured for student {model_spec!r}")
     return StudentEndpoint(
         base_url=base_url, model=name, timeout=timeout,
-        api_key=os.environ.get("VLLM_API_KEY"),
+        api_key=os.environ.get("VLLM_API_KEY"), reasoning=reasoning,
     )
 
 
@@ -110,6 +119,9 @@ class StudentEndpoint:
     api_key: str | None = None
     #: OpenRouter only: the one provider allowed to serve the request.
     provider: str | None = None
+    #: ``False`` turns a reasoning model's thinking off; ``None`` leaves the
+    #: model's default.
+    reasoning: bool | None = None
 
     @property
     def completions_url(self) -> str:
@@ -177,6 +189,12 @@ class StudentEndpoint:
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         if self.provider:
             body = {**body, "provider": {"order": [self.provider], "allow_fallbacks": False}}
+        if self.reasoning is False:
+            # OpenRouter's switch, or vLLM's chat-template switch for Qwen-style models.
+            if self.base_url == OPENROUTER_URL:
+                body = {**body, "reasoning": {"enabled": False}}
+            else:
+                body = {**body, "chat_template_kwargs": {"enable_thinking": False}}
         # Assume a slow floor of 5 tokens/s: a busy server can drop well below 20.
         timeout = self.timeout or min(1800.0, 120.0 + int(body["max_tokens"]) / 5)
         payload = self._post_with_retries(body, headers, timeout)
@@ -200,9 +218,10 @@ class StudentEndpoint:
     ) -> dict[str, Any]:
         """POST, retrying rate limits, server errors and dropped connections.
 
-        A hosted provider answers bursts with 429, and OpenRouter can report a
-        provider failure as an ``error`` body with no choices. Without retries
-        each of these would become an empty answer, graded wrong.
+        A hosted provider answers bursts with 429, and OpenRouter reports a
+        provider failure as an ``error`` body with no choices, or as a partial
+        reply with finish_reason ``error``. Without retries each of these would
+        become an empty or cut-off answer, graded wrong.
         """
         for attempt in range(RETRIES + 1):
             last = attempt == RETRIES
@@ -227,7 +246,13 @@ class StudentEndpoint:
                     f"could not reach the student at {self.completions_url}: {exc}"
                 ) from exc
             payload: dict[str, Any] = response.json()
-            if payload.get("choices") or not payload.get("error"):
+            choices = payload.get("choices") or []
+            # OpenRouter reports a provider failing part-way through a reply as
+            # finish_reason "error", with the partial text: retry it too.
+            failed_midway = bool(choices) and choices[0].get("finish_reason") == "error"
+            if (choices and not failed_midway) or (not choices and not payload.get("error")):
+                return payload
+            if failed_midway and last:
                 return payload
             if last:
                 raise RuntimeError(
@@ -277,11 +302,13 @@ def probe_student(
     max_tokens: int,
     n: int = 1,
     model_spec: str | None = None,
+    options: dict[str, Any] | None = None,
 ) -> list[StudentCompletion]:
     """One ad-hoc query against a student model; the caller applies the token cap."""
     spec = model_spec or f"vllm/{model}"
     endpoint = student_endpoint(
-        spec, None if spec.startswith("openrouter/") else endpoint_for(model)
+        spec, None if spec.startswith("openrouter/") else endpoint_for(model),
+        options=options,
     )
     return endpoint.complete(
         prompt, system=system, temperature=temperature, max_tokens=max_tokens, n=n

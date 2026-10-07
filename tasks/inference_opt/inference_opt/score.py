@@ -29,7 +29,9 @@ CRASH_RATE_LIMIT = 0.5
 #: test split, the mean MATH score of the 50 models on a public leaderboard
 #: (``data/reference/math_leaderboard.csv``); otherwise it scores 0. A task can set
 #: ``{"kind": "headroom", "min_closed": 0.5}``: every student closes at least
-#: half the gap between its zero-shot baseline and a perfect score.
+#: half the gap between its zero-shot baseline and a perfect score. Or
+#: ``{"kind": "reference", "references": {student: {...}}}``: every student
+#: matches the zero-shot test accuracy of a larger model of its own family.
 DEFAULT_PASS_RULE: dict[str, Any] = {
     "kind": "threshold",
     "min_accuracy": 0.7702,
@@ -102,6 +104,16 @@ class ScoreReport:
         if self.outcome != ScoreOutcome.OK:
             return f"{self.outcome}: " + "; ".join(self.notes[-1:])
         rule = (self.per_model.get("_aggregate") or {}).get("pass_rule") or {}
+        if rule.get("kind") == "reference":
+            references = rule.get("references") or {}
+            reached = [
+                f"{model} scored {entry['accuracy']:.0%} "
+                f"({references[model]['name']} scored "
+                f"{float(references[model]['test_accuracy']):.0%})"
+                for model, entry in self.per_model.items()
+                if model != "_aggregate" and model in references
+            ]
+            return f"score {self.score:g}: " + ", ".join(reached)
         if rule.get("kind") == "threshold":
             reached = [
                 f"{model} scored {entry['accuracy']:.0%} "
@@ -213,6 +225,20 @@ def final_result(config: dict[str, Any], runs: dict[str, ModelRun]) -> dict[str,
                 )
         # A tiny tolerance keeps exact halves (e.g. 1 of 2) from failing on floats.
         passed = all(v is not None and v >= threshold - 1e-9 for v in closed.values())
+        report.score = 1.0 if passed else 0.0
+        aggregate["passed"] = passed
+    elif rule.get("kind") == "reference":
+        # Each student must match a larger model of its family, run zero-shot
+        # on the same test questions with the same prompt and scorer.
+        references = dict(rule.get("references") or {})
+        missing = [model for model in models if model not in references]
+        if missing:
+            raise HarnessError(f"pass_rule names no reference model for {missing}")
+        passed = all(
+            report.per_model[model]["accuracy"]
+            >= float(references[model]["test_accuracy"]) - 1e-9
+            for model in models
+        )
         report.score = 1.0 if passed else 0.0
         aggregate["passed"] = passed
     elif rule.get("kind") == "threshold":

@@ -132,7 +132,7 @@ def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSe
 
 def _check_example_baselines(tasks: dict[str, TaskDefinition]) -> None:
     """Refuse to run a task unless each student's reply to every example was measured
-    on the deployment the task uses (the same model spec)."""
+    on the deployment and options the task uses."""
     if os.environ.get(ALLOW_UNMEASURED_ENV) == "1":
         return
     missing: set[str] = set()
@@ -140,6 +140,7 @@ def _check_example_baselines(tasks: dict[str, TaskDefinition]) -> None:
         benchmark = str(task.initial_input["benchmark"])
         models = list(task.initial_input["models"])
         specs = dict(task.initial_input.get("model_specs") or {})
+        options = dict(task.initial_input.get("student_options") or {})
         try:
             examples = datasets.load_items(benchmark, "examples")
         except datasets.DatasetError:
@@ -148,7 +149,11 @@ def _check_example_baselines(tasks: dict[str, TaskDefinition]) -> None:
         for model, rows in datasets.load_example_baselines(models).items():
             measured = {
                 item_id for item_id, row in rows.items()
-                if model not in specs or row.get("model_spec") == specs[model]
+                if model not in specs
+                or (
+                    row.get("model_spec") == specs[model]
+                    and (row.get("student_options") or {}) == (options.get(model) or {})
+                )
             }
             if not wanted <= measured:
                 missing.add(f"{model} ({specs.get(model, '?')}) on {benchmark}")

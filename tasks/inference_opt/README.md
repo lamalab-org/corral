@@ -5,16 +5,38 @@ The policy defines `run(questions, ctx)`; `inference_opt/guide/policy_api.md` is
 
 ## Tasks
 
-There are ten tasks per level, two for each of five MATH subjects.
-A level 1 task has one student; a level 2 task runs the same policy on two students, and both must pass.
+There are ten tasks per level.
 
-A task scores 1 if, on the 30 held-out test questions, every student reaches **77.02%** accuracy with the submitted policy, and 0 otherwise.
-77.02% is the mean MATH score of the 50 models in a public leaderboard snapshot (`inference_opt/data/reference/math_leaderboard.csv`); with 30 questions it means 24 correct.
-The rule is `pass_rule` in each task JSON.
-`{"kind": "headroom", "min_closed": 0.5}` instead requires every student to close half the gap between its baseline and a perfect score, and `{"kind": "continuous"}` scores the improvement itself; `scripts/generate_tasks.py --pass-rule headroom` writes the former.
+**Level 1** pairs one MATH subset with one student.
+A task scores 1 if, on the 30 held-out test questions, the student with the submitted policy answers at least as many questions correctly as a larger model of its own family answers zero-shot, and 0 otherwise.
+The larger model is run once per question with the same prompt, token limit and scorer as the student's own baseline, so the two are compared on equal terms.
+The agent is told which model it has to match and that model's train accuracy; its test accuracy stays hidden, like the student's.
+
+| task | student | larger model | student test | larger model test |
+| --- | --- | --- | --- | --- |
+| `math_algebra_b` | Llama 3.1 8B | Llama 3.1 70B | 0.33 | 0.53 |
+| `math_algebra_d` | Ministral 3 3B | Ministral 3 14B | 0.47 | 0.70 |
+| `math_prealgebra_b` | Llama 3.1 8B | Llama 3.1 70B | 0.27 | 0.63 |
+| `math_prealgebra_d` | Ministral 3 3B | Ministral 3 14B | 0.50 | 0.73 |
+| `math_number_theory_b` | Llama 3.1 8B | Llama 3.1 70B | 0.20 | 0.40 |
+| `math_number_theory_a` | Qwen 2.5 7B | Qwen 2.5 72B | 0.13 | 0.73 |
+| `math_counting_probability_b` | Llama 3.1 8B | Llama 3.1 70B | 0.17 | 0.33 |
+| `math_counting_probability_a` | Qwen 2.5 7B | Qwen 2.5 72B | 0.10 | 0.27 |
+| `math_geometry_d` | Ministral 3 3B | Ministral 3 14B | 0.20 | 0.37 |
+| `math_geometry_a` | Qwen 2.5 7B | Qwen 2.5 72B | 0.10 | 0.27 |
+
+These are the pairs where the larger model leads by at least 0.13 on test and also leads on train.
+A tie passes.
+
+**Level 2** runs one policy on two students, and both must reach **77.02%** on test: the mean MATH score of the 50 models in a public leaderboard snapshot (`inference_opt/data/reference/math_leaderboard.csv`).
+This is the earlier design and is due to be replaced.
+
+The rule is `pass_rule` in each task JSON: `reference` (level 1), `threshold` (level 2), or `headroom`, which requires every student to close half the gap between its baseline and a perfect score.
+`scripts/generate_tasks.py --pass-rule headroom` gives level 2 the headroom rule.
 
 Every run is limited by its student-call budget, 8192 generated tokens per call (reasoning included) and its wall clock (`run_time_limit_s`, default one hour).
-`student_concurrency` in the task JSON caps the requests one run has in flight, as one number or one per student (default 16). The tasks hold Llama 3.2 3B to 8, because its only provider rate-limits bursts, and the other students to 32.
+`student_concurrency` in the task JSON caps the requests one run has in flight, as one number or one per student (default 16).
+The tasks hold Llama 3.2 3B, which appears only in level 2, to 8 because its only provider rate-limits bursts, and the other students to 32.
 
 ## Questions
 
@@ -44,14 +66,17 @@ A reply whose last line is not an `ANSWER:` line is wrong, even if it contains t
 The zero-shot baseline sends each question in Inspect's MATH prompt, word for word, at temperature 0, seed 0 and at most 8192 tokens.
 Policies may prompt and sample however they like; only grading is fixed.
 
-## Students
+## Students and larger models
 
-| student | model | served by |
-| --- | --- | --- |
-| `student_a` | Qwen 2.5 7B Instruct | `openrouter/qwen/qwen-2.5-7b-instruct@phala` |
-| `student_b` | Llama 3.1 8B Instruct | `openrouter/meta-llama/llama-3.1-8b-instruct@coreweave` |
-| `student_c` | Llama 3.2 3B Instruct | `openrouter/meta-llama/llama-3.2-3b-instruct@parasail` |
-| `student_d` | Ministral 3 3B (2512) | `openrouter/mistralai/ministral-3b-2512@mistral` |
+| student | model | served by | larger model, served by |
+| --- | --- | --- | --- |
+| `student_a` | Qwen 2.5 7B Instruct | `openrouter/qwen/qwen-2.5-7b-instruct@phala` | Qwen 2.5 72B Instruct, `@novita` |
+| `student_b` | Llama 3.1 8B Instruct | `openrouter/meta-llama/llama-3.1-8b-instruct@coreweave` | Llama 3.1 70B Instruct, `@amazon-bedrock` |
+| `student_c` | Llama 3.2 3B Instruct (level 2 only) | `openrouter/meta-llama/llama-3.2-3b-instruct@parasail` | none |
+| `student_d` | Ministral 3 3B (2512) | `openrouter/mistralai/ministral-3b-2512@mistral` | Ministral 3 14B (2512), `@mistral` |
+
+The larger models are stored in `v2.json` as `reference_a`, `reference_b` and `reference_d`.
+They are only measured, never called during a task.
 
 A model spec names where a student is served:
 
@@ -59,19 +84,12 @@ A model spec names where a student is served:
   A provider can serve a different quantisation or build of the same model, so pinning it keeps the student the same across runs.
 - `vllm/<served model>` is sent to a vLLM server at `CORRAL_VLLM_URL`, or at a per-student `CORRAL_VLLM_URL_STUDENT_A`, with `VLLM_API_KEY` if set.
 
-Requests that hit a rate limit, a server error or a dropped connection are retried with backoff for about four minutes before the call fails.
+`student_options` in a task JSON can turn a reasoning model's thinking off on every call, `{"student_c": {"reasoning": false}}`; a policy cannot turn it back on.
+`measure_baselines.py --no-reasoning NAME` measures a model the same way.
 
-Test baselines, which the pass rule does not use but which show how far each task has to go:
+Requests that hit a rate limit, a server error, a dropped connection, or a provider failing part-way through a reply are retried with backoff for about four minutes before the call fails.
 
-| student | algebra | prealgebra | number theory | counting & probability | geometry |
-| --- | --- | --- | --- | --- | --- |
-| `student_a` | 0.43 | 0.37 | 0.13 | 0.10 | 0.10 |
-| `student_b` | 0.33 | 0.27 | 0.20 | 0.17 | 0.07 |
-| `student_c` | 0.43 | 0.20 | 0.20 | 0.20 | 0.13 |
-| `student_d` | 0.47 | 0.50 | 0.77 | 0.43 | 0.20 |
-
-Each task is paired with students below the bar; see `LEVEL_1` and `LEVEL_2` in `scripts/generate_tasks.py`.
-Qwen 2.5 often ends with `\boxed{}` instead of the requested `ANSWER:` line, so part of its headroom is following the format.
+Qwen 2.5 7B often ends with `\boxed{}` instead of the requested `ANSWER:` line, so part of its gap to Qwen 2.5 72B is following the format.
 
 ## Run
 
@@ -104,12 +122,14 @@ Labels ship in `inference_opt/data/frozen/v2/private/`; `CORRAL_INFERENCE_LABELS
 ```bash
 uv run python scripts/select_math_levels.py --bp-root /path/to/bp
 uv run python scripts/measure_baselines.py --model student_a=openrouter/... ... --runs-per-model 2
+uv run python scripts/measure_baselines.py --model reference_a=openrouter/... ... --runs-per-model 2
 uv run python scripts/measure_baselines.py --model student_a=openrouter/... ... --runs-per-model 2 --splits examples
 uv run python scripts/generate_tasks.py
 ```
 
 `measure_baselines.py` writes `inference_opt/data/baselines/v2.json` (train and test) and `examples_v2.jsonl` (each student's reply to every example, shown to the agent when it reveals one).
-`generate_tasks.py` reads the baselines and model specs from `v2.json`, so a task always matches what was measured.
+Only students need the `--splits examples` run; larger models need train and test.
+`generate_tasks.py` reads the baselines, the larger models' results and the model specs from `v2.json`, so a task always matches what was measured.
 
 | script | purpose |
 | --- | --- |

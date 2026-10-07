@@ -193,9 +193,21 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             "n_test": int(config.get("n_test", 30)),
         }
         best = ", ".join(f"{m}={baselines_train.get(m, 0.0):.3f}" for m in models)
-        return _compact(
-            payload, f"Zero-shot baseline on {benchmark} (train split): {best}.", ledger
-        )
+        summary = f"Zero-shot baseline on {benchmark} (train split): {best}."
+        rule = dict(config.get("pass_rule") or {})
+        if rule.get("kind") == "reference":
+            references = dict(rule.get("references") or {})
+            payload["reference_accuracy_train"] = {
+                m: {"model": references[m]["name"], "accuracy": references[m]["train_accuracy"]}
+                for m in models
+                if m in references
+            }
+            summary += " Larger model to match: " + ", ".join(
+                f"{references[m]['name']}={float(references[m]['train_accuracy']):.3f}"
+                for m in models
+                if m in references
+            ) + "."
+        return _compact(payload, summary, ledger)
 
     @tool(**_TOOL)
     def reveal_examples(
@@ -322,6 +334,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             max_tokens=max(1, min(int(max_tokens), MAX_TOKENS_CAP)),
             n=count,
             model_spec=model_specs.get(models[0]) or None,
+            options=(config.get("student_options") or {}).get(models[0]),
         )
         payload: dict[str, Any] = {
             "model": "student",

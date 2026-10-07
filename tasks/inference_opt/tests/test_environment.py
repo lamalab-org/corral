@@ -69,11 +69,11 @@ class TestConstruction:
 class TestToolSurface:
     def test_the_agent_can_write_its_policy(self, environments):
         """Without workspace tools the agent cannot produce a submission at all."""
-        tools = environments["math_algebra_a"].tools
+        tools = environments["math_algebra_b"].tools
         assert {"write_file", "read_file", "list_files"} <= set(tools)
 
     def test_all_nine_task_tools_are_present(self, environments):
-        tools = environments["math_algebra_a"].tools
+        tools = environments["math_algebra_b"].tools
         assert {
             "get_baseline", "reveal_examples", "query_student",
             "dry_run_policy", "evaluate_candidate", "inspect_failures",
@@ -82,7 +82,7 @@ class TestToolSurface:
 
     def test_inference_tools_are_trusted(self, environments):
         """The environment uses trusted tools and committed session state."""
-        tools = environments["math_algebra_a"].tools
+        tools = environments["math_algebra_b"].tools
         trusted = {name for name, tool in tools.items() if getattr(tool, "trusted", False)}
         assert trusted == {
             "get_baseline", "reveal_examples", "query_student",
@@ -92,8 +92,8 @@ class TestToolSurface:
 
     def test_tools_are_bound_to_their_own_task(self, environments):
         """One shared pool would bind every task to whichever was built last."""
-        first = environments["math_algebra_a"].tools["get_baseline"]
-        second = environments["math_prealgebra_a"].tools["get_baseline"]
+        first = environments["math_algebra_b"].tools["get_baseline"]
+        second = environments["math_prealgebra_d"].tools["get_baseline"]
         assert first is not second
 
 
@@ -101,19 +101,20 @@ class TestPrompt:
     def test_prompt_states_the_rule_and_how_to_finish(self, environments):
         from corral.core.state import ExecutionState
 
-        environment = environments["math_algebra_a"]
+        environment = environments["math_algebra_b"]
         prompt = environment.current_task.prompt_fn(environment, ExecutionState)
         assert "submit_answer" in prompt
         assert "modify model weights" in prompt
         assert "frozen student model" in prompt
         assert "math_algebra" in prompt
-        assert "77.02%" in prompt
+        assert "Llama 3.1 70B Instruct" in prompt
+        assert "76.7%" in prompt  # the larger model's train accuracy, the target
 
     def test_prompt_does_not_name_strategies(self, environments):
         """The prompt leaves strategy choice to the policy."""
         from corral.core.state import ExecutionState
 
-        environment = environments["math_algebra_a"]
+        environment = environments["math_algebra_b"]
         prompt = environment.current_task.prompt_fn(environment, ExecutionState).lower()
         for leak in ("self-consistency", "majority vote", "debate", "chain of thought"):
             assert leak not in prompt
@@ -146,7 +147,7 @@ class TestSubmission:
         from inference_opt.tools import create_tools
 
         workspace = _workspace_with_policy(tmp_path, source)
-        submit = create_tools(_task_config(1, "math_algebra_a"), "")["submit_policy"]._func
+        submit = create_tools(_task_config(1, "math_algebra_b"), "")["submit_policy"]._func
         return submit(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
 
     def _state(self, ledger):
@@ -182,7 +183,7 @@ class TestSubmission:
             StateScorer().evaluate_state(self._state(ledger))
         )
         metrics = details.metadata["metrics"]
-        assert {"student_a_accuracy", "student_a_delta", "raw_delta"} <= set(metrics)
+        assert {"student_b_accuracy", "student_b_delta", "raw_delta"} <= set(metrics)
         assert details.metadata["outcome"] == "ok"
         assert details.metadata["policy_hash"] == ledger["final"]["policy_hash"]
         assert details.feedback.startswith("score ")
@@ -218,7 +219,7 @@ class TestSubmission:
         from inference_opt.tools import create_tools
 
         workspace = _workspace_with_policy(tmp_path, self.POLICY)
-        submit = create_tools(_task_config(1, "math_algebra_a"), "")["submit_policy"]._func
+        submit = create_tools(_task_config(1, "math_algebra_b"), "")["submit_policy"]._func
         ledger = {}
         args = {"policy_path": "policy", "work_dir": str(workspace), "inference_state": ledger}
         assert submit(**args).startswith("Submitted")
@@ -232,7 +233,7 @@ def test_a_refunded_run_keeps_its_folder_and_id(tmp_path):
     from inference_opt.tools import create_tools
 
     workspace = _workspace_with_policy(tmp_path, "raise ImportError('nope')\n")
-    dry_run = create_tools(_task_config(1, "math_algebra_a"), "")["dry_run_policy"]._func
+    dry_run = create_tools(_task_config(1, "math_algebra_b"), "")["dry_run_policy"]._func
     ledger = {}
     dry_run(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
     (workspace / "policy" / "policy.py").write_text(TestSubmission.POLICY)
@@ -260,7 +261,7 @@ def test_a_dry_run_that_never_reaches_the_student_is_not_ok(tmp_path, source, wa
     from inference_opt.tools import create_tools
 
     workspace = _workspace_with_policy(tmp_path, source)
-    dry_run = create_tools(_task_config(1, "math_algebra_a"), "")["dry_run_policy"]._func
+    dry_run = create_tools(_task_config(1, "math_algebra_b"), "")["dry_run_policy"]._func
 
     headline = dry_run(
         policy_path="policy", work_dir=str(workspace), inference_state={}
@@ -285,7 +286,7 @@ class TestQueryStudent:
                 StudentCompletion("30", "stop"),
             ],
         )
-        query = environments["math_algebra_a"].tools["query_student"]._func
+        query = environments["math_algebra_b"].tools["query_student"]._func
         out = query(prompt="3/5 of 50?", max_tokens=256, n=2, work_dir="", inference_state={})
         summary, payload = out.split("\n")[:2]
         data = json.loads(payload)
@@ -306,7 +307,7 @@ class TestQueryStudent:
             return [StudentCompletion("30", "stop")]
 
         monkeypatch.setattr("inference_opt.tools.probe_student", probe)
-        query = environments["math_algebra_a"].tools["query_student"]._func
+        query = environments["math_algebra_b"].tools["query_student"]._func
         query(prompt="3/5 of 50?", max_tokens=10**6, work_dir="", inference_state={})
         assert requested == [MAX_TOKENS_CAP]
 
@@ -357,7 +358,7 @@ class TestToolErrors:
                 for model in kwargs["models"]
             },
         )
-        dry = environments["math_algebra_a"].tools["dry_run_policy"]._func
+        dry = environments["math_algebra_b"].tools["dry_run_policy"]._func
         workspace = _workspace_with_policy(
             tmp_path, "def run(questions, ctx):\n    ctx.answer(questions[0].id, 'A')\n"
         )
@@ -377,12 +378,12 @@ class TestPassRules:
         assert headroom_closed(12, 0.5, 30) < 0  # worse than the baseline
         assert headroom_closed(30, 1.0, 30) is None  # nothing left to improve
 
-    @pytest.mark.parametrize("rule", ["threshold", "headroom"])
+    @pytest.mark.parametrize("rule", ["task", "headroom"])
     @pytest.mark.parametrize(
         ("level", "task_id", "outcome", "expected"),
         [
-            (1, "math_algebra_a", {"student_a": "all"}, 1.0),
-            (1, "math_algebra_a", {"student_a": "just_short"}, 0.0),
+            (1, "math_algebra_b", {"student_b": "all"}, 1.0),
+            (1, "math_algebra_b", {"student_b": "just_short"}, 0.0),
             # Level 2 needs every student to pass: one perfect and one just short fails.
             (2, "math_algebra_ab", {"student_a": "all", "student_b": "just_short"}, 0.0),
             (2, "math_algebra_ab", {"student_a": "all", "student_b": "all"}, 1.0),
@@ -391,11 +392,12 @@ class TestPassRules:
     def test_score_is_one_only_when_every_student_passes(
         self, rule, level, task_id, outcome, expected
     ):
+        """Level 1 tasks match a larger model, level 2 a fixed bar; both also run headroom."""
         from inference_opt.runner import ModelRun
         from inference_opt.score import final_result
 
         config = _task_config(level, task_id)
-        assert config["pass_rule"]["kind"] == "threshold"
+        assert config["pass_rule"]["kind"] == ("reference" if level == 1 else "threshold")
         if rule == "headroom":
             config["pass_rule"] = {"kind": "headroom", "min_closed": 0.5}
         question_ids = [f"q{i}" for i in range(30)]
@@ -403,12 +405,18 @@ class TestPassRules:
         def n_correct(model):
             if outcome[model] == "all":
                 return 30
-            if rule == "threshold":
-                # One question below the bar: 23 of 30 is 76.7%, under 77.02%.
-                return math.ceil(config["pass_rule"]["min_accuracy"] * 30) - 1
-            # One question fewer than closing half the headroom over the baseline.
-            baseline_correct = round(config["baselines"][model] * 30)
-            return baseline_correct + math.ceil((30 - baseline_correct) / 2) - 1
+            kind = config["pass_rule"]["kind"]
+            if kind == "headroom":
+                # One question fewer than closing half the headroom over the baseline.
+                baseline_correct = round(config["baselines"][model] * 30)
+                return baseline_correct + math.ceil((30 - baseline_correct) / 2) - 1
+            bar = (
+                config["pass_rule"]["references"][model]["test_accuracy"]
+                if kind == "reference"
+                else config["pass_rule"]["min_accuracy"]
+            )
+            # One question below the bar.
+            return math.ceil(bar * 30 - 1e-6) - 1
 
         runs = {}
         for model in config["models"]:
@@ -424,3 +432,24 @@ class TestPassRules:
         result = final_result(config, runs)
         assert result["score"] == expected
         assert result["metadata"]["metrics"]["passed"] == expected
+
+
+def test_a_reference_task_passes_on_a_tie_with_the_larger_model():
+    from inference_opt.runner import ModelRun
+    from inference_opt.score import final_result
+
+    config = _task_config(1, "math_counting_probability_b")
+    bar = config["pass_rule"]["references"]["student_b"]["test_accuracy"]
+    question_ids = [f"q{i}" for i in range(30)]
+    tie = round(bar * 30)
+    run = ModelRun(
+        model="student_b",
+        split="test",
+        question_ids=question_ids,
+        answers=dict.fromkeys(question_ids, "ANSWER: 1"),
+        correct={qid: index < tie for index, qid in enumerate(question_ids)},
+        calls_used=30,
+    )
+    result = final_result(config, {"student_b": run})
+    assert result["score"] == 1.0
+    assert "Llama 3.1 70B Instruct scored" in result["feedback"]

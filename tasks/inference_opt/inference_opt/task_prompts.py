@@ -108,6 +108,20 @@ def _scoring_summary(config: dict) -> str:
                 "- For two student models, the score is the smaller improvement."
             )
         return "\n".join(lines)
+    if rule.get("kind") == "reference":
+        references = dict(rule.get("references") or {})
+        lines = [
+            "- Your submitted policy is run on the held-out test split. The task passes (score 1) if, with your policy, the student answers at least as many test questions correctly as a larger model of its own family answers with no policy (one zero-shot call per question, the same prompt and scorer as the student's baseline); otherwise it scores 0.",
+        ]
+        for model in config.get("models", []):
+            reference = references.get(model, {})
+            lines.append(
+                f"- The larger model is {reference.get('name', '?')}. On the train split it scores "
+                f"{float(reference.get('train_accuracy', 0.0)):.1%} zero-shot."
+            )
+        if joint:
+            lines.append("- With two student models, both must match their larger model to pass.")
+        return "\n".join(lines)
     if rule.get("kind") == "threshold":
         bar = float(rule["min_accuracy"])
         lines = [

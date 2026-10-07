@@ -61,11 +61,16 @@ class MockBackend:
         return StudentCompletion(text=self.reply, finish_reason="stop", output_tokens=1)
 
 
-def backend_for(model_spec: str, base_url: str | None, timeout: float | None) -> Backend:
+def backend_for(
+    model_spec: str,
+    base_url: str | None,
+    timeout: float | None,
+    options: dict[str, Any] | None = None,
+) -> Backend:
     """``mockllm/...`` answers locally; any other spec goes to its endpoint (``client.student_endpoint``)."""
     if model_spec.startswith("mockllm/"):
         return MockBackend()
-    return student_endpoint(model_spec, base_url, timeout).chat
+    return student_endpoint(model_spec, base_url, timeout, options).chat
 
 
 class StudentGateway:

@@ -1,10 +1,16 @@
 """Generate the level 1 and level 2 task definitions.
 
-Each task pairs one MATH subset with students whose zero-shot test baseline
-leaves room to reach the pass bar (mostly 0.2-0.65; a few harder pairings are
-kept so every subset has two tasks per level). Baselines and model specs are
-read from ``inference_opt/data/baselines/<version>.json``, so run
-``measure_baselines.py`` first.
+Level 1 pairs one MATH subset with one student. The task passes if the student,
+with the agent's policy, matches the zero-shot test accuracy of a larger model
+of its own family (``REFERENCES``). The pairs are those where that model leads
+the student by at least 0.13 on test and also leads on train.
+
+Level 2 keeps the earlier design, two students per task against a fixed bar
+(``--pass-rule``), until it is replaced.
+
+Baselines, reference results and model specs are read from
+``inference_opt/data/baselines/<version>.json``, so run ``measure_baselines.py``
+for the students and the reference models first.
 
 Usage::
 
@@ -36,18 +42,26 @@ BENCHMARK_LABELS = {
     "math_geometry": "MATH Level 5 geometry",
 }
 
+#: Each student's larger model of the same family: the name in the baselines
+#: file and the name shown to the agent.
+REFERENCES = {
+    "student_a": ("reference_a", "Qwen 2.5 72B Instruct"),
+    "student_b": ("reference_b", "Llama 3.1 70B Instruct"),
+    "student_d": ("reference_d", "Ministral 3 14B"),
+}
+
 #: (benchmark, students) per task.
 LEVEL_1 = [
-    ("math_algebra", ["student_a"]),
     ("math_algebra", ["student_b"]),
+    ("math_algebra", ["student_d"]),
+    ("math_prealgebra", ["student_b"]),
     ("math_prealgebra", ["student_d"]),
-    ("math_prealgebra", ["student_a"]),
     ("math_number_theory", ["student_b"]),
-    ("math_number_theory", ["student_c"]),
-    ("math_counting_probability", ["student_d"]),
-    ("math_counting_probability", ["student_c"]),
+    ("math_number_theory", ["student_a"]),
+    ("math_counting_probability", ["student_b"]),
+    ("math_counting_probability", ["student_a"]),
     ("math_geometry", ["student_d"]),
-    ("math_geometry", ["student_c"]),
+    ("math_geometry", ["student_a"]),
 ]
 LEVEL_2 = [
     ("math_algebra", ["student_a", "student_b"]),
@@ -66,6 +80,21 @@ LEVEL_2 = [
 #: models on a public leaderboard (``data/reference/math_leaderboard.csv``). ``headroom``: every
 #: student closes at least half the gap between its baseline and a perfect score.
 PASS_RULES = {"threshold": DEFAULT_PASS_RULE, "headroom": {"kind": "headroom", "min_closed": 0.5}}
+
+
+def _reference_rule(benchmark: str, models: list[str], measured: dict) -> dict:
+    """Pass if every student matches its larger model's zero-shot test accuracy."""
+    references = {}
+    for model in models:
+        name, label = REFERENCES[model]
+        result = measured["results"][name][benchmark]
+        references[model] = {
+            "name": label,
+            "model_spec": measured["models"][name],
+            "test_accuracy": result["test"]["accuracy"],
+            "train_accuracy": result["train"]["accuracy"],
+        }
+    return {"kind": "reference", "references": references}
 
 #: Requests one run keeps in flight per student. OpenRouter's rate limits are
 #: per account and per provider: at 64 requests at once, Parasail (student_c)
@@ -129,6 +158,9 @@ def _task(
                 m: results[m][benchmark]["train"]["accuracy"] for m in models
             },
             "model_specs": {m: measured["models"][m] for m in models},
+            "student_options": {
+                m: measured.get("student_options", {}).get(m, {}) for m in models
+            },
             "base_urls": {},
             "final_max_student_calls": N_TEST * 12,
             "student_concurrency": {m: STUDENT_CONCURRENCY[m] for m in models},
@@ -155,7 +187,11 @@ def main() -> None:
     measured = json.loads(baselines.read_text(encoding="utf-8"))
     for level, roster in ((1, LEVEL_1), (2, LEVEL_2)):
         tasks = [
-            _task(benchmark, models, level, measured, PASS_RULES[args.pass_rule])
+            _task(
+                benchmark, models, level, measured,
+                _reference_rule(benchmark, models, measured)
+                if level == 1 else PASS_RULES[args.pass_rule],
+            )
             for benchmark, models in roster
         ]
         target = ROOT / "environments" / f"level_{level}" / "tasks_json"
@@ -168,7 +204,12 @@ def main() -> None:
         print(f"level {level}: wrote {len(tasks)} task files to {target.relative_to(ROOT)}")
         for task in tasks:
             config = task["initial_input"]
-            print(f"   {task['id']:34} test baselines {config['baselines']}")
+            rule = config["pass_rule"]
+            bar = (
+                {m: r["test_accuracy"] for m, r in rule["references"].items()}
+                if rule["kind"] == "reference" else rule.get("min_accuracy")
+            )
+            print(f"   {task['id']:32} test baselines {config['baselines']}  bar {bar}")
 
 
 if __name__ == "__main__":
