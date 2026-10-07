@@ -14,7 +14,7 @@ The rule is `pass_rule` in each task JSON.
 `{"kind": "headroom", "min_closed": 0.5}` instead requires every student to close half the gap between its baseline and a perfect score, and `{"kind": "continuous"}` scores the improvement itself; `scripts/generate_tasks.py --pass-rule headroom` writes the former.
 
 Every run is limited by its student-call budget, 8192 generated tokens per call (reasoning included) and its wall clock (`run_time_limit_s`, default one hour).
-`student_concurrency` in the task JSON (default 16) caps the requests one run has in flight.
+`student_concurrency` in the task JSON caps the requests one run has in flight, as one number or one per student (default 16). The tasks hold Llama 3.2 3B to 8, because its only provider rate-limits bursts, and the other students to 32.
 
 ## Questions
 

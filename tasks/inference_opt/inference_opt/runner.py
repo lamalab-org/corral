@@ -44,6 +44,19 @@ __all__ = [
 #: Student requests one run has in flight when the task config does not set
 #: ``student_concurrency``. The controller enforces it; a policy never sets it.
 DEFAULT_STUDENT_CONCURRENCY = DEFAULT_CONCURRENCY
+
+
+def student_concurrency(config: dict[str, Any], model: str) -> int:
+    """Requests in flight for one student.
+
+    ``student_concurrency`` is one number for every student, or a mapping from
+    student to number, so a student behind a rate-limited provider can be held
+    lower than the rest. Students missing from the mapping use the default.
+    """
+    value = config.get("student_concurrency", DEFAULT_STUDENT_CONCURRENCY)
+    if isinstance(value, dict):
+        value = value.get(model, DEFAULT_STUDENT_CONCURRENCY)
+    return max(1, int(value))
 #: Wall clock for one run; answers submitted before it still count.
 DEFAULT_RUN_TIME_LIMIT_S = 3600
 #: Ceiling on ``max_tokens`` for any one student call. It matches the pinned
@@ -174,9 +187,8 @@ def run_policy(
     limit = int(
         time_limit_s or config.get("run_time_limit_s", DEFAULT_RUN_TIME_LIMIT_S)
     )
-    concurrency = int(config.get("student_concurrency", DEFAULT_STUDENT_CONCURRENCY))
-
     def one(model: str) -> ModelRun:
+        concurrency = student_concurrency(config, model)
         model_spec = str((config.get("model_specs") or {}).get(model, model))
         backend = (backends or {}).get(model) or backend_for(
             model_spec, (config.get("base_urls") or {}).get(model), float(limit)

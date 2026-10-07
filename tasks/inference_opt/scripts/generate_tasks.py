@@ -67,6 +67,11 @@ LEVEL_2 = [
 #: student closes at least half the gap between its baseline and a perfect score.
 PASS_RULES = {"threshold": DEFAULT_PASS_RULE, "headroom": {"kind": "headroom", "min_closed": 0.5}}
 
+#: Requests one run keeps in flight per student. OpenRouter's rate limits are
+#: per account and per provider: at 64 requests at once, Parasail (student_c)
+#: refused about half, CoreWeave (student_b) a fifth, Phala and Mistral none.
+STUDENT_CONCURRENCY = {"student_a": 32, "student_b": 32, "student_c": 8, "student_d": 32}
+
 TOOLS = [
     "get_baseline",
     "reveal_examples",
@@ -126,9 +131,7 @@ def _task(
             "model_specs": {m: measured["models"][m] for m in models},
             "base_urls": {},
             "final_max_student_calls": N_TEST * 12,
-            # Requests one run keeps in flight. OpenRouter rate limits are per
-            # account, and Parasail refuses about half of 64 requests at once.
-            "student_concurrency": 8,
+            "student_concurrency": {m: STUDENT_CONCURRENCY[m] for m in models},
             "scale": 1.0,
             "pass_rule": pass_rule,
             "budget": {

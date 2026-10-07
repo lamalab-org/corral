@@ -642,3 +642,13 @@ class TestGateway:
             thread.join()
         assert gateway.used == 30
         assert state["most"] == 3
+
+
+def test_student_concurrency_is_one_number_or_one_per_student():
+    from inference_opt.runner import DEFAULT_STUDENT_CONCURRENCY, student_concurrency
+
+    assert student_concurrency({}, "student_a") == DEFAULT_STUDENT_CONCURRENCY
+    assert student_concurrency({"student_concurrency": 4}, "student_a") == 4
+    per_student = {"student_concurrency": {"student_a": 32, "student_c": 8}}
+    assert student_concurrency(per_student, "student_c") == 8
+    assert student_concurrency(per_student, "student_b") == DEFAULT_STUDENT_CONCURRENCY
