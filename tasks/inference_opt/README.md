@@ -47,9 +47,11 @@ A tie passes.
 Llama 3.2 3B has no larger Llama 3.2 text model, so it is held to Llama 3.1 70B.
 
 The rule is `pass_rule` in each task JSON: `{"kind": "reference", "metric": "accuracy" | "template_consistency", ...}`.
-The scorer also accepts `threshold` (a fixed accuracy, such as the 77.02% mean of the 50 models in `inference_opt/data/reference/math_leaderboard.csv`) and `headroom` (close half the gap between the baseline and a perfect score).
+The scorer also accepts `threshold` (a fixed accuracy), `headroom` (close half the gap between the baseline and a perfect score) and `continuous` (the improvement itself); see `inference_opt/score.py`.
 
-Every run is limited by its student-call budget, 8192 generated tokens per call (reasoning included) and its wall clock (`run_time_limit_s`, default one hour).
+An agent may spend 1,200 student calls on a level 1 task, and 3,200 (GSM-Symbolic, GSM-P1) or 2,400 (GSM-P2) on a level 2 task, about 40, 21 and 24 per train question.
+The submitted policy may use 12 calls per test question.
+Every run is also limited to 8192 generated tokens per call (reasoning included) and by its wall clock (`run_time_limit_s`, default one hour).
 `student_concurrency` in the task JSON caps the requests one run has in flight, as one number or one per student (default 16): 8 for Llama 3.2 3B and 16 for Qwen 3.5 9B, whose providers rate-limit bursts, and 32 for the others.
 
 ## Questions
@@ -184,12 +186,12 @@ Besides Corral's file tools for editing `policy/policy.py`:
 
 | tool | purpose |
 | --- | --- |
-| `get_baseline` | The measured train baseline, by topic. |
+| `get_baseline` | The student's train baseline, and the larger model's train score it has to match. |
 | `reveal_examples` | Spend a reveal on labelled example questions, with each student's zero-shot reply. |
 | `query_student` | Probe the student directly, from the probe budget. |
 | `dry_run_policy` | Run the policy on two train questions. |
-| `evaluate_candidate` | Run and record a full train experiment. |
+| `evaluate_candidate` | Run and record a full train experiment: accuracy, and template consistency on level 2. |
 | `inspect_failures` | Answers, logs and errors from an earlier run. |
-| `compare_runs` | Recorded experiments and the best so far. |
+| `compare_runs` | Recorded experiments, ranked by the task's pass metric, and the best so far. |
 | `get_budget` | What is left of each budget. |
 | `submit_policy` | Run the policy once on the test split; the result stays hidden until scoring. A task allows one submission; the agent then ends the episode with Corral's `submit_answer`. |

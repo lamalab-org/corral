@@ -186,7 +186,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON with the train-split baseline accuracy per model and per topic.
+            JSON with each student's train accuracy (and, on level 2, template
+            consistency), and the train score of the larger model it must match.
         """
         ledger = _ledger(inference_state)
         payload = {
@@ -484,7 +485,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON with accuracy, delta over baseline, and the path to run artifacts.
+            JSON with accuracy and its change over the baseline, template
+            consistency on level 2, per-topic counts, and the path to run artifacts.
         """
         ledger = _ledger(inference_state)
         policy_dir = _resolve(work_dir, policy_path)
@@ -676,7 +678,8 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON with the experiment ledger and the best run so far.
+            JSON with the experiments ranked by their change on the task's pass
+            metric, and the best run so far.
         """
         ledger = _ledger(inference_state)
         experiments = [

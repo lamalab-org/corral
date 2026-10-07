@@ -49,7 +49,10 @@ The ledger is a Corral resource (`inference_state`, `InferenceLedgerAdapter`
 in `env.py`), seeded through `resource_states` and committed after every tool
 call. It holds the budget counters, revealed question ids, run records, the
 submission count, and the hidden test result of the one submission a task
-allows.
+allows. Each experiment records `target_delta`, its change on the task's pass
+metric; the ledger's best run, reported by `evaluate_candidate`,
+`compare_runs` and `get_budget`, is the one with the largest. It is only
+advice to the agent: scoring uses the submitted policy alone.
 
 Each run's graded files (predictions, student calls and the Inspect log with
 the targets) are packed into one archive and stored in the trial's artifact
@@ -77,7 +80,10 @@ container never mixes old and new results.
 
 `submit_policy` runs the policy on the test split exactly like an experiment,
 computes the pass rule (`score.final_result`), and stores the result in the
-ledger. The reply shows nothing about it. Corral's evaluation step calls
+ledger. Every shipped task uses the `reference` rule: the student's test score
+is compared with a larger model's zero-shot test score stored in the task JSON,
+on accuracy (level 1) or on template consistency (level 2, with the extra
+condition that accuracy does not fall below the student's own baseline). The reply shows nothing about it. Corral's evaluation step calls
 `StateScorer`, which only reads that stored result, so no agent code runs on the
 host that scores the episode. A task with no submission scores 0; an
 environment fault raises `HarnessError` instead of scoring.

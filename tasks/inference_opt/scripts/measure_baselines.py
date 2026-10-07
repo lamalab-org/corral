@@ -1,29 +1,34 @@
-"""Measure each student's zero-shot baseline on the frozen question set.
+"""Measure zero-shot baselines on the frozen question set.
 
-The baseline is the pinned zero-shot policy in ``inference_opt/baselines.py``:
-one call per question with Inspect's MATH prompt, temperature 0, seed 0 and at
-most 8192 tokens, graded by the same scorer as every policy run.
+A baseline is the pinned zero-shot policy in ``inference_opt/baselines.py``: one
+call per question at temperature 0, seed 0 and at most 8192 tokens, with
+Inspect's MATH prompt for MATH and GSM-Symbolic's prompt (without its worked
+examples) for GSM-Symbolic, graded by the same scorer as every policy run. The
+same command measures students and the larger models they are compared with.
 
 Train and test are measured together and written to
-``inference_opt/data/baselines/<version>.json``; results for students not in
-this run are kept. ``scripts/generate_tasks.py`` reads the task baselines from
-that file. The agent is shown the train baseline; the scorer uses the test one.
+``inference_opt/data/baselines/<version>.json``, merged with the results already
+there. ``scripts/generate_tasks.py`` reads task baselines and pass bars from
+that file. The agent is shown train scores; the scorer uses test scores.
 
-``--splits examples`` instead records each student's reply to the example
-questions in ``inference_opt/data/baselines/examples_<version>.jsonl``, which
-the agent sees when it reveals them. Rows for other students are kept.
+``--splits examples`` records each student's reply to the example questions in
+``inference_opt/data/baselines/examples_<version>.jsonl``, shown to the agent
+when it reveals them. Only students need it. Rows for other students and
+benchmarks are kept.
 
     export OPENROUTER_API_KEY=...
     uv run python scripts/measure_baselines.py \\
-        --model student_a=openrouter/qwen/qwen-2.5-7b-instruct@phala \\
-        --model student_d=openrouter/mistralai/ministral-3b-2512@mistral \\
+        --model student_b=openrouter/meta-llama/llama-3.1-8b-instruct@coreweave \\
+        --model reference_b=openrouter/meta-llama/llama-3.1-70b-instruct@amazon-bedrock \\
         --runs-per-model 2
-    uv run python scripts/measure_baselines.py ... --splits examples
+    uv run python scripts/measure_baselines.py --model student_b=... --splits examples
 
-A vLLM student is given as ``name=vllm/<served model>`` with
-``--base-url name=http://host:port/v1``. Students are measured in parallel;
-``--runs-per-model`` sets how many benchmark/split evaluations run side by
-side for one student.
+``--no-reasoning NAME`` turns a reasoning model's thinking off on every call, as
+the tasks do for Qwen 3.5. ``--benchmarks`` limits the run to some benchmarks.
+A vLLM model is given as ``name=vllm/<served model>`` with
+``--base-url name=http://host:port/v1``. Models are measured in parallel;
+``--runs-per-model`` sets how many benchmark/split evaluations run side by side
+for one model.
 """
 
 from __future__ import annotations

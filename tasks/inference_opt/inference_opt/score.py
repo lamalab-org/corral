@@ -27,16 +27,20 @@ __all__ = [
 #: Fraction of crashed items at which a policy run is rejected.
 CRASH_RATE_LIMIT = 0.5
 
-#: By default a task passes (score 1) when every student reaches 0.7702 on the
-#: test split, the mean MATH score of the 50 models on a public leaderboard
-#: (``data/reference/math_leaderboard.csv``); otherwise it scores 0. A task can set
-#: ``{"kind": "headroom", "min_closed": 0.5}``: every student closes at least
-#: half the gap between its zero-shot baseline and a perfect score. Or
-#: ``{"kind": "reference", "metric": ..., "references": {student: {...}}}``:
-#: every student matches, on ``metric`` (accuracy or template consistency), the
-#: zero-shot test score of a larger model of its own family; with
-#: ``"no_regression": true`` its accuracy must also not fall below its own
-#: zero-shot test accuracy.
+#: Pass rules a task can set in ``pass_rule``; each scores 1 or 0.
+#:
+#: - ``reference`` (every shipped task): each student matches, on ``metric``
+#:   (``accuracy`` or ``template_consistency``), the zero-shot test score of a
+#:   larger model of its own family, stored in ``references``. With
+#:   ``"no_regression": true`` its accuracy must also stay at or above its own
+#:   zero-shot test accuracy.
+#: - ``threshold``: each student reaches ``min_accuracy``.
+#: - ``headroom``: each student closes ``min_closed`` of the gap between its
+#:   zero-shot baseline and a perfect score.
+#: - ``continuous``: the score is the improvement itself, clipped to [0, 1].
+#:
+#: A task without ``pass_rule`` uses a fixed bar: the mean MATH score of the 50
+#: models in ``data/reference/math_leaderboard.csv``.
 DEFAULT_PASS_RULE: dict[str, Any] = {
     "kind": "threshold",
     "min_accuracy": 0.7702,
@@ -238,8 +242,8 @@ def final_result(config: dict[str, Any], runs: dict[str, ModelRun]) -> dict[str,
         if run.budget_exhausted:
             report.outcome = ScoreOutcome.BUDGET_EXHAUSTED
 
-    # Level 2 judges the weaker of the two students, so a policy has to help
-    # both models rather than trading one off against the other.
+    # A task with several students is judged on the weaker one, so a policy has
+    # to help all of them rather than trading one off against another.
     raw = min(deltas.values()) if config.get("joint") else deltas[models[0]]
     rule = dict(config.get("pass_rule") or DEFAULT_PASS_RULE)
     aggregate: dict[str, Any] = {

@@ -1,4 +1,9 @@
-"""Select Inspect or Inspect Evals scorers without parsing completions."""
+"""The Inspect scorer for each benchmark.
+
+MATH uses inspect_evals' ``expression_exact_match_sympy`` unchanged; GSM-Symbolic
+uses its repository's last-number rule (``last_number``); the v1 benchmarks use
+Inspect's ``choice`` and ``match`` and inspect_evals' ChemBench scorer.
+"""
 
 from __future__ import annotations
 
