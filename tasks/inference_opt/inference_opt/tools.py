@@ -17,7 +17,12 @@ from inference_opt.budget import LEDGER_RESOURCE, BudgetSpec, RunRecord, StateLe
 from inference_opt.client import probe_student
 from inference_opt.errors import error_line, error_tail
 from inference_opt.runner import MAX_TOKENS_CAP, ModelRun, run_policy
-from inference_opt.score import HarnessError, final_result, template_consistency
+from inference_opt.score import (
+    HarnessError,
+    final_result,
+    template_consistency,
+    template_of,
+)
 
 __all__ = ["create_tools"]
 
@@ -513,12 +518,14 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
 
         results = {model: _train_result(run) for model, run in runs.items()}
         deltas = [value["delta"] for value in results.values()]
+        targets = [_target_delta(value) for value in results.values()]
         record = RunRecord(
             run_id=run_id,
             kind="experiment",
             policy_dir=policy_path,
             score=round(sum(deltas) / len(deltas), 4) if deltas else 0.0,
             delta=round(min(deltas), 4) if deltas else 0.0,
+            target_delta=round(min(targets), 4) if targets else 0.0,
             n_items=next(iter(runs.values())).n_items,
             calls_used=used,
             note=note[:200],
@@ -547,6 +554,12 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             f"Experiment {run_id} on {record.n_items} train questions - {verdicts}",
             ledger,
         )
+
+    def _target_delta(result: dict[str, Any]) -> float:
+        """The change on the task's pass metric, from one student's train result."""
+        if "template_consistency" in result:
+            return result["template_consistency"] - result["baseline_template_consistency"]
+        return result["delta"]
 
     def _train_result(run: ModelRun) -> dict[str, Any]:
         baseline_value = float(baselines_train.get(run.model, 0.0))
@@ -671,19 +684,31 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             for run in ledger.runs
             if run.get("kind") == "experiment"
         ]
-        ordered = sorted(
-            experiments, key=lambda run: run.get("delta") or -9.9, reverse=True
+        def gain(run: dict[str, Any]) -> float:
+            value = run.get("target_delta")
+            value = run.get("delta") if value is None else value
+            return -9.9 if value is None else float(value)
+
+        ordered = sorted(experiments, key=gain, reverse=True)
+        consistency = dict(config.get("pass_rule") or {}).get("metric") == "template_consistency"
+        n_units = (
+            len({template_of(i.item_id) for i in datasets.load_items(benchmark, "train")})
+            if consistency
+            else int(config.get("n_train", 30))
         )
-        n_items = int(config.get("n_train", 30))
-        resolution = 2 * (0.5 / max(1, n_items) ** 0.5)
+        unit = "templates" if consistency else "questions"
+        resolution = 2 * (0.5 / max(1, n_units) ** 0.5)
         return _compact(
             {
                 "runs": ordered,
                 "best_run_id": ledger.best_run_id,
+                "ranked_by": "template consistency" if consistency else "accuracy",
                 "note": (
-                    f"With {n_items} questions, two deltas differing by less than "
-                    f"about {resolution:.2f} are not distinguishable. Prefer a policy "
-                    "whose gain comes from many changed questions, not two lucky ones."
+                    f"Runs are ranked by target_delta, the change in "
+                    f"{'template consistency' if consistency else 'accuracy'}. With "
+                    f"{n_units} {unit}, two values differing by less than about "
+                    f"{resolution:.2f} are not distinguishable. Prefer a policy whose "
+                    f"gain comes from many changed {unit}, not two lucky ones."
                 ),
             },
             f"{len(ordered)} experiment(s); best is {ledger.best_run_id or 'none'}.",

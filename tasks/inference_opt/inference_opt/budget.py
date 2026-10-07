@@ -43,6 +43,12 @@ class BudgetSpec:
         return cls(**known)
 
 
+def _target_gain(run: dict[str, Any]) -> float | None:
+    """A run's change on the task's pass metric; runs recorded before it existed use ``delta``."""
+    value = run.get("target_delta")
+    return run.get("delta") if value is None else value
+
+
 @dataclass
 class RunRecord:
     """One policy evaluation recorded in session state."""
@@ -53,6 +59,9 @@ class RunRecord:
     score: float | None = None
     baseline: float | None = None
     delta: float | None = None
+    #: Change on the task's pass metric (accuracy, or template consistency on
+    #: level 2), the smaller one across students; the best run is chosen by it.
+    target_delta: float | None = None
     n_items: int = 0
     n_correct: int = 0
     calls_used: int = 0
@@ -145,10 +154,11 @@ class StateLedger:
 
     def record_run(self, record: RunRecord) -> None:
         self.runs.append(asdict(record))
-        if record.kind == "experiment" and record.delta is not None:
+        gain = _target_gain(asdict(record))
+        if record.kind == "experiment" and gain is not None:
             best = self.best_run()
-            best_delta = None if best is None else best.get("delta")
-            if best_delta is None or record.delta > best_delta:
+            best_gain = None if best is None else _target_gain(best)
+            if best_gain is None or gain > best_gain:
                 self.state["best_run_id"] = record.run_id
 
     def best_run(self) -> dict[str, Any] | None:

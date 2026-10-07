@@ -41,3 +41,19 @@ def test_state_ledger_keeps_zero_delta_above_negative_delta():
     ledger.record_run(RunRecord("zero", "experiment", "policy", delta=0.0))
     ledger.record_run(RunRecord("negative", "experiment", "policy", delta=-0.01))
     assert ledger.best_run_id == "zero"
+
+
+def test_the_best_run_is_chosen_by_the_tasks_own_metric():
+    """On level 2 a run with better accuracy but worse consistency is not the best."""
+    ledger = StateLedger({}, BudgetSpec())
+    ledger.record_run(RunRecord("exp-1", "experiment", "policy", delta=0.10, target_delta=0.00))
+    ledger.record_run(RunRecord("exp-2", "experiment", "policy", delta=0.02, target_delta=0.07))
+    ledger.record_run(RunRecord("exp-3", "experiment", "policy", delta=0.20, target_delta=-0.03))
+    assert ledger.best_run_id == "exp-2"
+
+
+def test_a_run_recorded_without_a_target_delta_is_ranked_by_its_delta():
+    ledger = StateLedger({}, BudgetSpec())
+    ledger.record_run(RunRecord("exp-1", "experiment", "policy", delta=0.10))
+    ledger.record_run(RunRecord("exp-2", "experiment", "policy", delta=0.05, target_delta=0.05))
+    assert ledger.best_run_id == "exp-1"
