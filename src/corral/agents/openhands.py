@@ -8,6 +8,7 @@ import tempfile
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from pathlib import Path
 from typing import Any, Literal
 
 from corral.report.logging import logger
@@ -24,6 +25,7 @@ try:
         LLMConvertibleEvent,
         LocalConversation,
     )
+    from openhands.sdk.agent import base as sdk_agent_base
     from openhands.sdk.conversation.state import ConversationExecutionStatus
     from openhands.sdk.event import (
         ActionEvent,
@@ -335,6 +337,8 @@ class OpenHandsAgent(BaseAgent):
             llm_kwargs["api_key"] = SecretStr(key)
         if self.api_endpoint:
             llm_kwargs["base_url"] = self.api_endpoint
+        if "litellm_extra_body" in self.kwargs:
+            llm_kwargs["litellm_extra_body"] = self.kwargs["litellm_extra_body"]
         return LLM(**llm_kwargs)
 
     def _build_agent(
@@ -345,6 +349,13 @@ class OpenHandsAgent(BaseAgent):
         mcp_tool_names: set[str] | None = None,
     ) -> Any:
         """Assemble the reproducible OpenHands `Agent` for a run."""
+        # SDK 1.35 caches this path before Corral enters the worker filesystem.
+        # Resolve it again in the current namespace so the SDK recognizes its
+        # built-in prompt registry instead of looking for a removed Jinja file.
+        # The registry, prompt contents, and agent defaults remain SDK-owned.
+        sdk_agent_base._BUILTIN_PROMPT_DIR = str(
+            Path(sdk_agent_base._BUILTIN_PROMPT_DIR).resolve()
+        )
         # Docker provides a task-scoped terminal through MCP. The SDK rejects
         # duplicate tool names, so prefer the task capability when it overlaps
         # with a native tool, while retaining the rest of the standard preset.
