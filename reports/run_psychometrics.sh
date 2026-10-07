@@ -31,11 +31,16 @@ AGENT="${AGENT:-react}"
 REASONING="${REASONING:-medium}"
 # A reasoning model rejects any temperature but 1 while reasoning is active, and
 # the react agent would otherwise send its own default of 0.7.
-TEMPERATURE="${TEMPERATURE:-1}"
+TEMPERATURE="${TEMPERATURE-1}"
 TRIALS="${TRIALS:-1}"
 MAX_PARALLEL="${MAX_PARALLEL:-4}"
 MAX_ITERATIONS="${MAX_ITERATIONS:-20}"
 SANDBOX="${SANDBOX:-local}"
+# Docker image for --sandbox docker. Empty uses Corral's default image, which
+# lacks the psychometrics stack; build one with
+#   docker build -f docker/benchmark.Dockerfile --build-arg CORRAL_TASK=psychometrics \
+#     --build-arg CORRAL_EXTRAS=openhands -t corral-psychometrics-openhands .
+SANDBOX_IMAGE="${SANDBOX_IMAGE:-}"
 LEVELS="${LEVELS:-1 2}"
 STAMP="${STAMP:-$(date +%Y%m%d-%H%M%S)}"
 OUT_ROOT="${OUT_ROOT:-$ROOT/reports}"
@@ -45,11 +50,47 @@ VERBOSE="${VERBOSE:-1}"
 REPL_TIMEOUT_MINUTES="${REPL_TIMEOUT_MINUTES:-15}"
 # Seconds LiteLLM waits on a silent model stream before retrying it. Healthy
 # calls here finish in under ~140s; LiteLLM's own default is 600s.
-REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-180}"
+REQUEST_TIMEOUT="${REQUEST_TIMEOUT-180}"
+# LiteLLM also reads REQUEST_TIMEOUT from the environment as its global
+# default, and fails on an empty value; keep ours out of child processes.
+export -n REQUEST_TIMEOUT
 # Space-separated task ids to run instead of every task, e.g.
 #   TASKS="psy_l1_t09_careless_responding psy_l2_t02_out_of_sample_generalization"
 # Each id goes to its own level; a level with none of them is skipped.
 TASKS="${TASKS:-}"
+# JSON object merged into the agent's constructor options, e.g. to pin an
+# OpenRouter provider:
+#   EXTRA_AGENT_KWARGS='{"extra_body": {"provider": {"order": ["moonshotai"], "allow_fallbacks": false}}}'
+EXTRA_AGENT_KWARGS="${EXTRA_AGENT_KWARGS:-}"
+[[ -z "$EXTRA_AGENT_KWARGS" ]] && EXTRA_AGENT_KWARGS="{}"
+# An empty REQUEST_TIMEOUT leaves the timeout out, for agents such as
+# claude-code that do not take one.
+AGENT_KWARGS="$(python3 -c '
+import json, sys
+base = {"reasoning_effort": sys.argv[1]}
+if sys.argv[2]:
+    base["timeout"] = json.loads(sys.argv[2])
+base.update(json.loads(sys.argv[3]))
+print(json.dumps(base))' "$REASONING" "$REQUEST_TIMEOUT" "$EXTRA_AGENT_KWARGS")"
+# An empty TEMPERATURE sends none, for agents that reject it (claude-code, codex).
+TEMPERATURE_FLAG=()
+SANDBOX_IMAGE_FLAG=()
+[[ -n "$SANDBOX_IMAGE" ]] && SANDBOX_IMAGE_FLAG=(--sandbox-image "$SANDBOX_IMAGE")
+[[ -n "$TEMPERATURE" ]] && TEMPERATURE_FLAG=(--temperature "$TEMPERATURE")
+# Agents backed by an optional SDK need it installed alongside langfuse. The
+# Claude Agent SDK must bundle Claude Code >= 2.1.280 for Opus 5.5; this is
+# corral[claude]'s pin (0.2.164, bundling 2.1.292).
+WITH_FLAGS=(--with "langfuse>=4,<5")
+[[ "$AGENT" == "claude-code" ]] && WITH_FLAGS+=(--with "claude-agent-sdk==0.2.164")
+# The corral[codex] pins; the pre-release runtime has to be named directly.
+[[ "$AGENT" == "codex" ]] && WITH_FLAGS+=(--with "openai-codex==0.1.0b3" --with "openai-codex-cli-bin==0.137.0a4")
+# The corral[openhands] pins. OpenHands brings its own terminal, file editor and
+# browser, which only Docker isolates: under --sandbox local they run as you.
+[[ "$AGENT" == "openhands" ]] && WITH_FLAGS+=(--with "openhands-sdk==1.35.0" --with "openhands-tools==1.35.0" --with "playwright>=1.49.0,<2")
+if [[ "$AGENT" == "openhands" && "$SANDBOX" != "docker" ]]; then
+  echo "warning: OpenHands' native terminal is not isolated under --sandbox $SANDBOX;" >&2
+  echo "         it can read any file you can, including tasks/psychometrics/truth/" >&2
+fi
 
 if [[ ! -f "$ROOT/.env" ]]; then
   echo "error: no .env at $ROOT/.env; Langfuse and OPENAI_API_KEY come from it" >&2
@@ -84,8 +125,9 @@ if [[ "$SANDBOX" == "docker" ]]; then
 fi
 
 echo "model=$MODEL agent=$AGENT reasoning=$REASONING temperature=$TEMPERATURE trials=$TRIALS"
-echo "levels=$LEVELS max_parallel=$MAX_PARALLEL max_iterations=$MAX_ITERATIONS sandbox=$SANDBOX verbose=$VERBOSE"
+echo "levels=$LEVELS max_parallel=$MAX_PARALLEL max_iterations=$MAX_ITERATIONS sandbox=$SANDBOX${SANDBOX_IMAGE:+ image=$SANDBOX_IMAGE} verbose=$VERBOSE"
 echo "repl_timeout_minutes=$REPL_TIMEOUT_MINUTES request_timeout=${REQUEST_TIMEOUT}s"
+echo "agent_kwargs=$AGENT_KWARGS"
 [[ -n "$TASKS" ]] && echo "tasks=$TASKS"
 echo "output=$OUT_ROOT/<level>/$STAMP"
 echo
@@ -109,17 +151,18 @@ run_level() {
   # venv still loads the task package, so every model-fitting scorer silently
   # returns 0 instead of failing. langfuse is a corral extra rather than a task
   # dependency, so it comes in with --with.
-  uv run --project tasks/psychometrics --with "langfuse>=4,<5" corral bench \
+  uv run --project tasks/psychometrics "${WITH_FLAGS[@]}" corral bench \
     --environment psychometrics \
     --env-kwargs "{\"level\": $level, \"repl_timeout_minutes\": $REPL_TIMEOUT_MINUTES}" \
     --agent "$AGENT" \
     --model "$MODEL" \
-    --agent-kwargs "{\"reasoning_effort\": \"$REASONING\", \"timeout\": $REQUEST_TIMEOUT}" \
-    --temperature "$TEMPERATURE" \
+    --agent-kwargs "$AGENT_KWARGS" \
+    ${TEMPERATURE_FLAG[@]+"${TEMPERATURE_FLAG[@]}"} \
     --trials "$TRIALS" \
     --max-parallel "$MAX_PARALLEL" \
     --max-iterations "$MAX_ITERATIONS" \
     --sandbox "$SANDBOX" \
+    ${SANDBOX_IMAGE_FLAG[@]+"${SANDBOX_IMAGE_FLAG[@]}"} \
     --run-id "psychometrics-l${level}-${STAMP}" \
     --output-dir "$out/state" \
     --report "$out/report.json" \
