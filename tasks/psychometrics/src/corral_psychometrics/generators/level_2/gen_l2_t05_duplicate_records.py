@@ -69,7 +69,7 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<complete lavaan/semopy model>",
+  "model_syntax": "<complete semopy model>",
   "diagnosis": "repeated_delivery_only|chance_collisions_only|both_mechanisms",
   "duplicate_key": ["<column>", "..."]
 }

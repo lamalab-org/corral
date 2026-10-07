@@ -105,7 +105,7 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<a model covering both instruments, in lavaan notation>",
+  "model_syntax": "<a model covering both instruments, in semopy syntax>",
   "correlations": [["<dimension>", "<dimension>", <float>], ...]
 }
 

@@ -115,12 +115,12 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<complete lavaan/semopy model>",
+  "model_syntax": "<complete semopy model>",
   "correlations": [["<factor>", "<factor>", <float>], ...],
   "not_distinguishable": [["<factor>", "<factor>"], ...]
 }
 
-`model_syntax` is the model you used, in lavaan notation (`=~` loadings, `~~`
+`model_syntax` is the model you used, in semopy syntax (`=~` loadings, `~~`
 (co)variances). It is re-fitted during evaluation, so it must be complete and runnable.
 
 Name your factors whatever you like and refer to them by those names: dimensions are

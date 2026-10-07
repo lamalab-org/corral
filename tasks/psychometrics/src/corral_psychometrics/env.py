@@ -182,15 +182,25 @@ CLOSING_INSTRUCTION = (
     "Before you answer, make sure nothing in the data would change your conclusions."
 )
 
+#: Added to every task that asks for a model. semopy and lavaan read the same
+#: syntax differently here, and the scorer fits with semopy.
+SEMOPY_NOTE = (
+    "Submitted models are fitted with semopy. When two factors are both regressed "
+    "on something (for example `F1 ~ gender` and `F2 ~ gender`), semopy fixes their "
+    "correlation to zero unless you add `F1 ~~ F2`; lavaan would estimate it by default."
+)
+
 
 def _task_prompt(env: Environment, state: ExecutionState) -> str:
     """The task text the agent sees, with its workspace file list."""
     del state
     task = env.current_task
     files = sorted(task.initial_input.get("public_inputs", ()))
+    note = f"{SEMOPY_NOTE}\n\n" if "model_syntax" in task.submission_format else ""
     prompt = (
         f"{task.description}\n\n"
         f"Required submission format:\n{task.submission_format}\n\n"
+        f"{note}"
         "Available workspace files:\n"
         + "\n".join(f"- {name}" for name in files)
         + f"\n\n{CLOSING_INSTRUCTION}"

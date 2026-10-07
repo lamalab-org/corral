@@ -88,12 +88,12 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<complete lavaan/semopy model>",
+  "model_syntax": "<complete semopy model>",
   "loadings": {"<item>": <float>, ...},
   "factor_correlation": <float or null>
 }
 
-`model_syntax` uses lavaan notation (`=~` loadings, `~~` (co)variances, `0*` to fix a
+`model_syntax` uses semopy syntax (`=~` loadings, `~~` (co)variances, `0*` to fix a
 parameter to zero).
 
 `loadings` gives, for each item you analysed, the largest absolute standardised loading that item has on any factor in your model.

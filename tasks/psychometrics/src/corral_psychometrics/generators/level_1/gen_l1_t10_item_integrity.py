@@ -91,7 +91,7 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<a model for the instrument, in lavaan notation>",
+  "model_syntax": "<a model for the instrument, in semopy syntax>",
   "item_quality": {"<item>": "<class>", ...}
 }
 

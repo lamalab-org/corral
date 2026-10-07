@@ -103,7 +103,7 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<complete lavaan/semopy model>",
+  "model_syntax": "<complete semopy model>",
   "comparisons": {
     "latent_means": <true|false>, "loadings": <true|false>,
     "observed_score_means": <true|false>, "factor_structure": <true|false>,
@@ -113,7 +113,7 @@ A single JSON object:
   "trait_correlation_women": <float>
 }
 
-`model_syntax` is the measurement model you used, in lavaan notation (`=~` loadings,
+`model_syntax` is the measurement model you used, in semopy syntax (`=~` loadings,
 `~~` (co)variances). It is re-fitted during evaluation, so it must be complete and
 runnable.
 """

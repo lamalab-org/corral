@@ -16,7 +16,7 @@ The Dirty Dozen items are present but are not part of this task. Responses are f
 
 ## What to report
 
-Submit a complete lavaan/semopy model for the HSNS and a classification for every HSNS item.
+Submit a complete semopy model for the HSNS and a classification for every HSNS item.
 
 ## Why this is non-trivial
 

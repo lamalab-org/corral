@@ -117,7 +117,7 @@ A single JSON object:
 
 {
   "model_syntax": "<the model you calibrated on the United States, covering both
-                    instruments, in lavaan notation>",
+                    instruments, in semopy syntax>",
   "scoring": {"hsns": "<class>", "dirty_dozen": "<class>"}
 }
 

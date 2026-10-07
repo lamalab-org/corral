@@ -134,12 +134,12 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<lavaan syntax for the instrument you report the difference on>",
+  "model_syntax": "<semopy syntax for the instrument you report the difference on>",
   "latent_difference": <float, or null if neither instrument supports the comparison>,
   "biased_items": ["<item>", ...]
 }
 
-`model_syntax` uses lavaan notation (`=~` loadings, `~` regressions, `~~`
+`model_syntax` uses semopy syntax (`=~` loadings, `~` regressions, `~~`
 (co)variances, `0*` to fix a parameter to zero).
 """
 

@@ -12,7 +12,7 @@ Responses are five-point ratings and `0` denotes a missing response. The target 
 
 ## What to report
 
-Submit a complete lavaan/semopy model for the 12 Dirty Dozen items and one standardised loading for every item.
+Submit a complete semopy model for the 12 Dirty Dozen items and one standardised loading for every item.
 
 ## Why this is non-trivial
 
