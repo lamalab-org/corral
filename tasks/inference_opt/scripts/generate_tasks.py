@@ -87,6 +87,10 @@ LEVEL_2 = [
 ]
 METRICS = {1: "accuracy", 2: "template_consistency"}
 
+#: Student calls a level 2 agent may spend in total, about 21 per train question
+#: on GSM-Symbolic and GSM-P1 and 24 on GSM-P2. Level 1 gets 40 per question.
+LEVEL_2_BUDGET = {"gsm_symbolic": 3200, "gsm_p1": 3200, "gsm_p2": 2400}
+
 #: Requests one run keeps in flight per student. OpenRouter's rate limits are
 #: per account and per provider: at 64 requests at once, Parasail (student_c)
 #: refused about half, CoreWeave (student_b) a fifth, Phala and Mistral none;
@@ -171,7 +175,9 @@ def _task(benchmark: str, model: str, level: int, measured: dict) -> dict:
         "budget": {
             "max_experiments": 20,
             "max_debug_runs": 10,
-            "max_student_calls": 20 * n_train * calls_per_question // 4,
+            "max_student_calls": LEVEL_2_BUDGET.get(
+                benchmark, 20 * n_train * calls_per_question // 4
+            ),
             "max_reveals": 4,
             "max_probe_calls": 40,
             "reveal_batch": 5,
