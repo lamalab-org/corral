@@ -179,8 +179,12 @@ async def test_preflight_builds_selected_task_and_extra_only_when_image_is_missi
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("private_data", [False, True])
+@pytest.mark.parametrize(
+    ("agent_name", "default_limit"), [("react", 50), ("ai_scientist", 100)]
+)
+@pytest.mark.parametrize("max_iterations", [None, 7])
 async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
-    monkeypatch, tmp_path, private_data
+    monkeypatch, tmp_path, private_data, agent_name, default_limit, max_iterations
 ):
     store = ShardedCommitStore(tmp_path / ".corral")
     private_root = tmp_path / "private-bank"
@@ -245,6 +249,7 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
         task_id="task-a",
         environment_id="task-a",
         agent_id="agent",
+        max_iterations=max_iterations,
         started_at="2026-01-01T00:00:00+00:00",
         benchmark_run_id="benchmark",
         trial_index=2,
@@ -257,7 +262,10 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
             ),
         ),
         agent_runtime=AgentRuntimeDefinition(
-            name="react", model="test-model", temperature=0.2, reasoning_effort="high"
+            name=agent_name,
+            model="test-model",
+            temperature=0.2,
+            reasoning_effort="high",
         ),
         environment_runtime=EnvironmentRuntimeDefinition(
             name="samplemath",
@@ -272,6 +280,9 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
     assert result.metadata["recovered"] is False
     saved_request = json.loads((execution_dir / "request.json").read_text())
     assert saved_request["execution_id"] == execution_id
+    assert saved_request["max_iterations"] == (
+        default_limit if max_iterations is None else max_iterations
+    )
     assert saved_request["agent_runtime"]["temperature"] == 0.2
     assert saved_request["agent_runtime"]["reasoning_effort"] == "high"
     durable_metadata = json.loads((execution_dir / "metadata.json").read_text())

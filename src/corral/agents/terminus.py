@@ -125,7 +125,7 @@ class TerminusAgent(BaseAgent):
         system_prompt: str | None = None,
         user_prompt: str | None = None,
         surrender_prompt: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 1.0,
         **kwargs: Any,
     ) -> None:
         if max_actions_per_turn < 1:
@@ -285,7 +285,7 @@ Rules:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 tools=None,
-                temperature=0.0,
+                temperature=self.temperature,
                 api_endpoint=self.api_endpoint,
                 kwargs=self._call_kwargs(),
             )

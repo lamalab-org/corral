@@ -19,9 +19,9 @@ Task Guide: **`{{task_guide}}`**
 
 **`{{examples}}`**
 
-Think about what to do next and respond in the following format:
+Choose the next action and respond in the following format:
 
-<thought>[your reasoning]</thought>
+<thought>[brief summary of the next action and the reason why this action or these actions were chosen]</thought>
 <action>[tool name]</action>
 <action_input>[tool arguments as JSON]</action_input>. For tool calls without arguments, use `<action_input>{}</action_input>`
 

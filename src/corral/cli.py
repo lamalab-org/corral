@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 
 import corral.orchestration as orchestration
 from corral.observability.langfuse import langfuse_enabled
+from corral.orchestration.defaults import resolve_max_iterations
 from corral.persistence import ShardedCommitStore, SQLiteCommitStore
 from corral.run import CorralRunner, execute_task
 from corral.runtime.environment_loader import (
@@ -523,7 +524,7 @@ async def run_benchmark(
             environments=environments,
             agent_id=canonical_agent,
             model=model,
-            max_iterations=args.max_iterations,
+            max_iterations=resolve_max_iterations(args.max_iterations, canonical_agent),
             state_store=store,
             sandbox=sandbox,
             agent_runtime=orchestration.AgentRuntimeDefinition(
@@ -634,7 +635,9 @@ async def run_task(args: argparse.Namespace) -> int:
                 environment_id=args.task,
                 agent_id=canonical_agent,
                 model=model,
-                max_iterations=args.max_iterations,
+                max_iterations=resolve_max_iterations(
+                    args.max_iterations, canonical_agent
+                ),
                 enable_surrender=args.enable_surrender,
             ),
         )
@@ -694,7 +697,13 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="JSON",
         help="Additional constructor options for the selected agent.",
     )
-    agent.add_argument("--max-iterations", type=int, default=20)
+    agent.add_argument(
+        "--max-iterations",
+        type=int,
+        help=(
+            "Per-task trial budget; default: 100 for AI Scientist, 50 for other agents."
+        ),
+    )
     agent.add_argument("--enable-surrender", action="store_true")
 
 

@@ -205,7 +205,7 @@ class RunTaskInput:
     started_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    max_iterations: int = 10
+    max_iterations: int | None = None
     model: str | None = None
     dependency_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     enable_surrender: bool = False
@@ -220,7 +220,7 @@ class RunTaskInput:
             raise ValueError("execution_id cannot be empty")
         if self.trial_index < 0:
             raise ValueError("trial_index cannot be negative")
-        if self.max_iterations < 1:
+        if self.max_iterations is not None and self.max_iterations < 1:
             raise ValueError("max_iterations must be at least 1")
         if self.model == "":
             raise ValueError("model cannot be empty")

@@ -17,6 +17,7 @@ from corral.observability import (
     ObservationContext,
     observer_from_env,
 )
+from corral.orchestration.defaults import resolve_max_iterations
 from corral.orchestration.evaluation import evaluate_task
 from corral.orchestration.launchers import LocalTaskLauncher
 from corral.orchestration.models import (
@@ -118,7 +119,7 @@ class BenchmarkTaskMetadata:
     agent_id: str
     environment_id: str
     dependencies: tuple[str, ...] = ()
-    max_iterations: int = 10
+    max_iterations: int | None = None
     model: str | None = None
     sandbox: SandboxProfile = field(default_factory=SandboxProfile.local)
     agent_runtime: AgentRuntimeDefinition | None = None
@@ -133,7 +134,7 @@ class BenchmarkTaskMetadata:
             raise TypeError("dependencies must be an iterable of task IDs")
         dependencies = tuple(self.dependencies)
         object.__setattr__(self, "dependencies", dependencies)
-        if self.max_iterations < 1:
+        if self.max_iterations is not None and self.max_iterations < 1:
             raise ValueError("max_iterations must be at least 1")
         if any(not dependency for dependency in dependencies):
             raise ValueError("dependencies cannot contain an empty task ID")
@@ -181,7 +182,7 @@ def _metadata_from_environments(
     *,
     agent_id: str,
     model: str | None,
-    max_iterations: int,
+    max_iterations: int | None,
     sandbox: SandboxProfile,
     agent_runtime: AgentRuntimeDefinition | None,
     environment_runtime: EnvironmentRuntimeDefinition | None,
@@ -191,7 +192,7 @@ def _metadata_from_environments(
         raise ValueError("CorralRunner requires at least one environment")
     if not agent_id:
         raise ValueError("agent_id cannot be empty")
-    if max_iterations < 1:
+    if max_iterations is not None and max_iterations < 1:
         raise ValueError("max_iterations must be at least 1")
     if model == "":
         raise ValueError("model cannot be empty")
@@ -369,7 +370,7 @@ class CorralRunner:
         environments: Mapping[str, Environment] | None = None,
         agent_id: str = "agent",
         model: str | None = None,
-        max_iterations: int = 10,
+        max_iterations: int | None = None,
         state_store: CommitStore,
         observer: Observer | None = None,
         docker_launcher: DockerTaskLauncher | None = None,
@@ -430,6 +431,17 @@ class CorralRunner:
             include_dependencies=include_dependencies,
         )
         metadata = {task_id: self.tasks[task_id] for task_id in selected}
+        iteration_limits: dict[str, int] = {}
+        for task_id, task in metadata.items():
+            agent: object = task.agent_id
+            if task.max_iterations is None:
+                if task.agent_runtime is not None:
+                    agent = task.agent_runtime.name
+                elif self.registry is not None and task.sandbox.mode == "local":
+                    agent = self.registry.agent(task.agent_id)
+            iteration_limits[task_id] = resolve_max_iterations(
+                task.max_iterations, agent
+            )
         profiles = [task.sandbox for task in metadata.values()]
         sandbox = profiles[0]
         if any(profile != sandbox for profile in profiles[1:]):
@@ -449,9 +461,7 @@ class CorralRunner:
             dependency_graph={
                 task_id: task.dependencies for task_id, task in metadata.items()
             },
-            max_iterations_by_task={
-                task_id: task.max_iterations for task_id, task in metadata.items()
-            },
+            max_iterations_by_task=iteration_limits,
             model_by_task={
                 task_id: task.model
                 for task_id, task in metadata.items()
@@ -569,9 +579,7 @@ class CorralRunner:
                             benchmark_run_id=request.benchmark_run_id,
                             trial_index=trial_index,
                             dependency_outputs=dependencies,
-                            max_iterations=request.max_iterations_by_task.get(
-                                task_id, 10
-                            ),
+                            max_iterations=request.max_iterations_by_task.get(task_id),
                             model=model,
                             enable_surrender=request.enable_surrender,
                             sandbox=request.sandbox,

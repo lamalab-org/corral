@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from types import SimpleNamespace
 
+from corral.agents.ai_scientist.agent import _GatewayOwner
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentDecision,
     ExperimentNode,
@@ -10,6 +12,7 @@ from corral.agents.ai_scientist.search.nodes import (
 )
 from corral.agents.ai_scientist.state import TaskFormulation
 from corral.agents.ai_scientist.tools import CorralExecutor
+from corral.agents.ai_scientist.workers.base import LiteLLMStructuredModel
 from corral.agents.ai_scientist.workers.experimenter import Experimenter
 from corral.core.action import Action
 
@@ -282,3 +285,69 @@ def test_experiment_worker_can_recover_from_a_failed_action_within_the_node():
         True,
     ]
     assert execute_action.calls == [{"value": 3}]
+
+
+def test_experiment_worker_corrects_act_and_finish_without_repeating_tools():
+    execute_action = AdaptiveActionExecutor()
+    replies = iter(
+        [
+            '{"decision":"act" "rationale":"measure"}',
+            ExperimentDecision(
+                decision="act",
+                rationale="measure once",
+                purpose="measure",
+                tool_name="measure",
+                arguments={"value": 3},
+                expected_information="a measurement",
+            ).model_dump_json(),
+            '{"decision":"finish","rationale" "done"}',
+            ExperimentDecision(
+                decision="finish", rationale="done", conclusion="Measured 3."
+            ).model_dump_json(),
+        ]
+    )
+    requests = []
+
+    def complete(**kwargs):
+        requests.append(kwargs)
+        assert execute_action.calls == ([] if len(requests) <= 2 else [{"value": 3}])
+        return SimpleNamespace(content=next(replies), usage={}, id=None)
+
+    model = LiteLLMStructuredModel(
+        owner=_GatewayOwner(),
+        default_model="test-model",
+        evaluator_model="test-model",
+        system_prompt="system",
+        temperature=1,
+        api_endpoint=None,
+        max_calls=4,
+        use_structured_output=True,
+        completion_runner=complete,
+    )
+    result = Experimenter(
+        model,
+        max_actions_per_node=1,
+        max_journal_chars=2_000,
+        max_tool_schema_chars=2_000,
+    ).execute(
+        ExperimentNode(
+            id="node_0001",
+            stage=ResearchStage.RESEARCH,
+            node_type=NodeType.RESEARCH,
+            hypothesis="One measurement suffices",
+            rationale="Measure once",
+        ),
+        CorralExecutor(execute_action=execute_action, tools=TOOLS, max_tool_calls=1),
+        task_prompt="Measure once.",
+        formulation=TaskFormulation(objective="measure", required_answer="value"),
+        tools=TOOLS,
+        journal_context="{}",
+    )
+
+    assert result.status == NodeStatus.SUCCESSFUL
+    assert result.termination_reason == ExperimentTermination.WORKER_FINISHED
+    assert result.worker_conclusion == "Measured 3."
+    assert model.call_count == 4
+    assert execute_action.calls == [{"value": 3}]
+    assert len(result.trajectory) == 2
+    assert "measured:3" in requests[-1]["messages"][1]["content"]

@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from corral import ENVIRONMENT_NAMES
 from corral.cli import run_benchmark
+from corral.orchestration.defaults import resolve_max_iterations
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -114,7 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--agent-kwargs", type=_json_object, default={}, metavar="JSON")
     agent.add_argument("--api-endpoint")
     agent.add_argument("--temperature", type=float, default=1.0)
-    agent.add_argument("--max-iterations", type=int, default=20)
+    agent.add_argument(
+        "--max-iterations", type=int, default=resolve_max_iterations(None, AGENT_ID)
+    )
     agent.add_argument("--enable-surrender", action="store_true")
 
     execution = parser.add_argument_group("execution")
