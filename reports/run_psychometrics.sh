@@ -41,6 +41,11 @@ SANDBOX="${SANDBOX:-local}"
 #   docker build -f docker/benchmark.Dockerfile --build-arg CORRAL_TASK=psychometrics \
 #     --build-arg CORRAL_EXTRAS=openhands -t corral-psychometrics-openhands .
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-}"
+# Extra host variables to forward into Docker trials, space-separated. Corral's
+# allowlist covers OpenAI, Anthropic, Azure and Langfuse only; an openrouter/
+# model's key is added automatically.
+SANDBOX_ENV="${SANDBOX_ENV:-}"
+[[ "$MODEL" == openrouter/* && " $SANDBOX_ENV " != *" OPENROUTER_API_KEY "* ]] && SANDBOX_ENV="$SANDBOX_ENV OPENROUTER_API_KEY"
 LEVELS="${LEVELS:-1 2}"
 STAMP="${STAMP:-$(date +%Y%m%d-%H%M%S)}"
 OUT_ROOT="${OUT_ROOT:-$ROOT/reports}"
@@ -76,6 +81,11 @@ print(json.dumps(base))' "$REASONING" "$REQUEST_TIMEOUT" "$EXTRA_AGENT_KWARGS")"
 TEMPERATURE_FLAG=()
 SANDBOX_IMAGE_FLAG=()
 [[ -n "$SANDBOX_IMAGE" ]] && SANDBOX_IMAGE_FLAG=(--sandbox-image "$SANDBOX_IMAGE")
+if [[ "$SANDBOX" == "docker" ]]; then
+  for name in $SANDBOX_ENV; do
+    SANDBOX_IMAGE_FLAG+=(--sandbox-env "$name")
+  done
+fi
 [[ -n "$TEMPERATURE" ]] && TEMPERATURE_FLAG=(--temperature "$TEMPERATURE")
 # Agents backed by an optional SDK need it installed alongside langfuse. The
 # Claude Agent SDK must bundle Claude Code >= 2.1.280 for Opus 5.5; this is
@@ -93,13 +103,18 @@ if [[ "$AGENT" == "openhands" && "$SANDBOX" != "docker" ]]; then
 fi
 
 if [[ ! -f "$ROOT/.env" ]]; then
-  echo "error: no .env at $ROOT/.env; Langfuse and OPENAI_API_KEY come from it" >&2
+  echo "error: no .env at $ROOT/.env; Langfuse and the model's API key come from it" >&2
   exit 1
 fi
 
-# Fail before spending tokens if the key is missing from .env.
-if ! grep -qE '^\s*OPENAI_API_KEY=.+' "$ROOT/.env"; then
-  echo "error: OPENAI_API_KEY is not set in $ROOT/.env" >&2
+# Fail before spending tokens if the model's key is missing from .env.
+case "$MODEL" in
+  openrouter/*) KEY_NAME=OPENROUTER_API_KEY ;;
+  anthropic/* | claude-*) KEY_NAME=ANTHROPIC_API_KEY ;;
+  *) KEY_NAME=OPENAI_API_KEY ;;
+esac
+if ! grep -qE "^\s*${KEY_NAME}=.+" "$ROOT/.env"; then
+  echo "error: $KEY_NAME is not set in $ROOT/.env (needed for $MODEL)" >&2
   exit 1
 fi
 if ! grep -qE '^\s*LANGFUSE_SECRET_KEY=.+' "$ROOT/.env"; then
@@ -126,6 +141,7 @@ fi
 
 echo "model=$MODEL agent=$AGENT reasoning=$REASONING temperature=$TEMPERATURE trials=$TRIALS"
 echo "levels=$LEVELS max_parallel=$MAX_PARALLEL max_iterations=$MAX_ITERATIONS sandbox=$SANDBOX${SANDBOX_IMAGE:+ image=$SANDBOX_IMAGE} verbose=$VERBOSE"
+[[ "$SANDBOX" == "docker" && -n "${SANDBOX_ENV// /}" ]] && echo "forwarded into containers:$SANDBOX_ENV"
 echo "repl_timeout_minutes=$REPL_TIMEOUT_MINUTES request_timeout=${REQUEST_TIMEOUT}s"
 echo "agent_kwargs=$AGENT_KWARGS"
 [[ -n "$TASKS" ]] && echo "tasks=$TASKS"
