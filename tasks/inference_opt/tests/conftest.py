@@ -4,6 +4,6 @@ from __future__ import annotations
 
 import os
 
-# The tests build environments without the measured example baselines, which
-# need live student servers.
+# Environments in tests may be built without measured example baselines, which
+# take live students to measure.
 os.environ.setdefault("CORRAL_INFERENCE_ALLOW_UNMEASURED", "1")

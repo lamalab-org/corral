@@ -14,35 +14,13 @@ so the examples follow the new train mix, and re-measure the benchmark's baselin
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
 import pandas as pd
+from frozen_set import content_fingerprint, jsonl_text, read_jsonl, reference_accuracy
 from inference_opt import datasets
-from select_examples import (
-    _candidates,
-    _hf_categories,
-    _irt,
-    _jsonl,
-    _read_jsonl,
-    _reference_accuracy,
-)
-
-
-def _fingerprint(data: Path, benchmarks: list[str]) -> str:
-    """sha256 of every train and test record, in file order, as the set was built."""
-    rows = [
-        row
-        for benchmark in benchmarks
-        for row in _read_jsonl(data / "public" / f"{benchmark}.jsonl")
-        if row["split"] != "examples"
-    ]
-    payload = "\n".join(
-        json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        for row in rows
-    )
-    return hashlib.sha256(payload.encode()).hexdigest()
+from select_examples import _candidates, _hf_categories, _irt
 
 
 def main() -> None:
@@ -55,7 +33,7 @@ def main() -> None:
     data = datasets.data_root()
     manifest = datasets.load_manifest()
     public_path = data / "public" / f"{args.benchmark}.jsonl"
-    public = _read_jsonl(public_path)
+    public = read_jsonl(public_path)
     dropped = [r for r in public if r["split"] != "examples" and r["category"] == args.category]
     if not dropped:
         raise SystemExit(f"{args.benchmark} has no {args.category!r} questions in train or test")
@@ -79,13 +57,13 @@ def main() -> None:
         best = min(candidates, key=lambda row: (abs(row["irt"] - target), row["record"]["item_id"]))
         candidates.remove(best)
         replacements[record["item_id"]] = {**best, "split": record["split"]}
-    reference = _reference_accuracy(
+    reference = reference_accuracy(
         args.bp_root, args.benchmark,
         {row["record"]["item_id"] for row in replacements.values()},
     )
 
     labels_path = data / "private" / "labels.jsonl"
-    labels = _read_jsonl(labels_path)
+    labels = read_jsonl(labels_path)
     new_public, new_labels = [], []
     for record in public:
         row = replacements.get(record["item_id"])
@@ -101,8 +79,8 @@ def main() -> None:
             "split": row["split"],
             "target": row["answer"],
         })
-    public_path.write_text(_jsonl(new_public), encoding="utf-8")
-    labels_path.write_text(_jsonl(new_labels), encoding="utf-8")
+    public_path.write_text(jsonl_text(new_public), encoding="utf-8")
+    labels_path.write_text(jsonl_text(new_labels), encoding="utf-8")
 
     parquet = data / "items.parquet"
     frame = pd.read_parquet(parquet)
@@ -119,7 +97,7 @@ def main() -> None:
     entry["irt_difficulty_cutoff"] = min(difficulty[r["item_id"]] for r in scored)
     entry["max_irt_difficulty"] = max(difficulty[r["item_id"]] for r in scored)
     entry["dropped_categories"] = sorted({*entry.get("dropped_categories", []), args.category})
-    manifest["content_fingerprint"] = _fingerprint(data, manifest["benchmarks"])
+    manifest["content_fingerprint"] = content_fingerprint(data, manifest["benchmarks"])
     (data / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     for old, row in replacements.items():

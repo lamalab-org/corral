@@ -321,8 +321,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             temperature=temperature,
             max_tokens=max(1, min(int(max_tokens), MAX_TOKENS_CAP)),
             n=count,
-            # Drop only the provider prefix: "vllm/Qwen/X" is served as "Qwen/X".
-            served_name=model_specs.get(models[0], "").partition("/")[2] or None,
+            model_spec=model_specs.get(models[0]) or None,
         )
         payload: dict[str, Any] = {
             "model": "student",

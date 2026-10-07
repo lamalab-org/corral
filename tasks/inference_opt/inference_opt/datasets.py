@@ -28,16 +28,17 @@ __all__ = [
     "write_jsonl",
 ]
 
-DATASET_VERSION = "v1"
+DATASET_VERSION = "v2"
 
-#: The benchmarks included in the frozen set.
+#: One benchmark per MATH subject, Level 5 only (``scripts/select_math_levels.py``).
+#: ``data/frozen/v1`` is the earlier mixed set (MMLU-Pro, BBH, GPQA, MATH,
+#: ChemBench, ARC); it is kept on disk but not used.
 BENCHMARKS: tuple[str, ...] = (
-    "mmlu_pro",
-    "bbh",
-    "gpqa_diamond",
-    "math",
-    "chembench",
-    "arc_challenge",
+    "math_algebra",
+    "math_prealgebra",
+    "math_number_theory",
+    "math_counting_probability",
+    "math_geometry",
 )
 
 #: ``train`` is scored by experiments, ``test`` by the submission, and ``examples``

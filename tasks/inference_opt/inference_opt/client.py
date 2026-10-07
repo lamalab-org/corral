@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import random
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
@@ -11,7 +13,13 @@ from urllib.parse import urlparse
 
 import requests
 
-__all__ = ["StudentCompletion", "StudentEndpoint", "endpoint_for", "probe_student"]
+__all__ = [
+    "StudentCompletion",
+    "StudentEndpoint",
+    "endpoint_for",
+    "probe_student",
+    "student_endpoint",
+]
 
 
 def _check_url(url: str, api_key: str | None) -> None:
@@ -43,6 +51,40 @@ def endpoint_for(model: str) -> str:
     )
 
 
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
+
+
+def student_endpoint(
+    model_spec: str, base_url: str | None = None, timeout: float | None = None
+) -> StudentEndpoint:
+    """The endpoint that serves one student.
+
+    ``vllm/Qwen/Qwen3-8B`` is requested as ``Qwen/Qwen3-8B`` from ``base_url``,
+    with ``VLLM_API_KEY``. ``openrouter/mistralai/ministral-3b-2512@mistral`` is
+    sent to OpenRouter with ``OPENROUTER_API_KEY``, and OpenRouter may route it
+    only to the provider after ``@``: without fallbacks, a student is the same
+    deployment in every run, or the request fails.
+    """
+    name = model_spec.partition("/")[2] or model_spec
+    name, _, provider = name.partition("@")
+    if model_spec.startswith("openrouter/"):
+        # Tasks bind every student to the vLLM default URL; an OpenRouter
+        # student, and its key, only ever go to OpenRouter.
+        return StudentEndpoint(
+            base_url=OPENROUTER_URL,
+            model=name,
+            timeout=timeout,
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
+            provider=provider or None,
+        )
+    if not base_url:
+        raise ValueError(f"no endpoint configured for student {model_spec!r}")
+    return StudentEndpoint(
+        base_url=base_url, model=name, timeout=timeout,
+        api_key=os.environ.get("VLLM_API_KEY"),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class StudentCompletion:
     """One student answer, with how it ended."""
@@ -66,6 +108,8 @@ class StudentEndpoint:
     #: from a loaded server are not cut off.
     timeout: float | None = None
     api_key: str | None = None
+    #: OpenRouter only: the one provider allowed to serve the request.
+    provider: str | None = None
 
     @property
     def completions_url(self) -> str:
@@ -131,24 +175,11 @@ class StudentEndpoint:
 
     def _request(self, body: dict[str, Any]) -> list[StudentCompletion]:
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        if self.provider:
+            body = {**body, "provider": {"order": [self.provider], "allow_fallbacks": False}}
         # Assume a slow floor of 5 tokens/s: a busy server can drop well below 20.
         timeout = self.timeout or min(1800.0, 120.0 + int(body["max_tokens"]) / 5)
-        try:
-            response = requests.post(
-                self.completions_url, json=body, timeout=timeout, headers=headers
-            )
-            response.raise_for_status()
-        except requests.HTTPError as exc:
-            raise RuntimeError(
-                f"the student at {self.completions_url} rejected the request "
-                f"({exc.response.status_code}): {_server_message(exc.response)}"
-            ) from exc
-        except requests.RequestException as exc:
-            raise RuntimeError(
-                f"could not reach the student at {self.completions_url}: {exc}"
-            ) from exc
-
-        payload: dict[str, Any] = response.json()
+        payload = self._post_with_retries(body, headers, timeout)
         choices = payload.get("choices") or []
         completions = [_completion(choice) for choice in choices]
         if len(completions) == 1:
@@ -163,6 +194,57 @@ class StudentEndpoint:
                 )
             ]
         return completions or [StudentCompletion("")]
+
+    def _post_with_retries(
+        self, body: dict[str, Any], headers: dict[str, str], timeout: float
+    ) -> dict[str, Any]:
+        """POST, retrying rate limits, server errors and dropped connections.
+
+        A hosted provider answers bursts with 429, and OpenRouter can report a
+        provider failure as an ``error`` body with no choices. Without retries
+        each of these would become an empty answer, graded wrong.
+        """
+        for attempt in range(RETRIES + 1):
+            last = attempt == RETRIES
+            try:
+                response = requests.post(
+                    self.completions_url, json=body, timeout=timeout, headers=headers
+                )
+                if response.status_code in RETRY_STATUSES and not last:
+                    time.sleep(_backoff(attempt))
+                    continue
+                response.raise_for_status()
+            except requests.HTTPError as exc:
+                raise RuntimeError(
+                    f"the student at {self.completions_url} rejected the request "
+                    f"({exc.response.status_code}): {_server_message(exc.response)}"
+                ) from exc
+            except requests.RequestException as exc:
+                if not last:
+                    time.sleep(_backoff(attempt))
+                    continue
+                raise RuntimeError(
+                    f"could not reach the student at {self.completions_url}: {exc}"
+                ) from exc
+            payload: dict[str, Any] = response.json()
+            if payload.get("choices") or not payload.get("error"):
+                return payload
+            if last:
+                raise RuntimeError(
+                    f"the student at {self.completions_url} failed: "
+                    f"{str(payload['error'])[:300]}"
+                )
+            time.sleep(_backoff(attempt))
+        raise AssertionError("unreachable")
+
+
+#: Retries after the first attempt; the backoff adds up to about four minutes.
+RETRIES = 6
+RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+
+
+def _backoff(attempt: int) -> float:
+    return min(60.0, 2.0 * 2**attempt) * random.uniform(0.75, 1.25)
 
 
 def _completion(choice: dict[str, Any]) -> StudentCompletion:
@@ -194,13 +276,12 @@ def probe_student(
     temperature: float = 0.0,
     max_tokens: int,
     n: int = 1,
-    served_name: str | None = None,
+    model_spec: str | None = None,
 ) -> list[StudentCompletion]:
     """One ad-hoc query against a student model; the caller applies the token cap."""
-    endpoint = StudentEndpoint(
-        base_url=endpoint_for(model),
-        model=served_name or model,
-        api_key=os.environ.get("VLLM_API_KEY"),
+    spec = model_spec or f"vllm/{model}"
+    endpoint = student_endpoint(
+        spec, None if spec.startswith("openrouter/") else endpoint_for(model)
     )
     return endpoint.complete(
         prompt, system=system, temperature=temperature, max_tokens=max_tokens, n=n

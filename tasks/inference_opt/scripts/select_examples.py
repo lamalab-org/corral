@@ -31,14 +31,15 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from frozen_set import jsonl_text, rank, read_jsonl, reference_accuracy  # noqa: E402
 from inference_opt import datasets  # noqa: E402
 
 SPLIT = "examples"
 N_EXAMPLES = 30
 SEED = 20261005
 NUMERIC = re.compile(r"-?\d+(\.\d+)?")
-COHORT = re.compile(r"(?<![\d.])[78](?:\.\d+)?b(?![a-z])", re.IGNORECASE)
 
 
 def _irt(bp: Path, benchmark: str) -> pd.DataFrame:
@@ -119,7 +120,7 @@ def _candidates(
 
 
 def _rank(item_id: str) -> str:
-    return hashlib.sha256(f"{SEED}:{item_id}".encode()).hexdigest()
+    return rank(SEED, item_id)
 
 
 def _choose(
@@ -149,41 +150,6 @@ def _choose(
     return chosen, sum(row["irt"] < cutoff for row in chosen)
 
 
-def _reference_accuracy(bp: Path, benchmark: str, ids: set[str]) -> dict[str, float]:
-    """Mean correctness of 7-8B models in bp, or of every respondent where too few."""
-    responses = pd.read_parquet(
-        bp / "datasets" / benchmark / "responses.parquet",
-        columns=["item_id", "source_model_name", "correct"],
-    )
-    responses = responses[responses.item_id.isin(ids)]
-    cohort = responses[responses.source_model_name.fillna("").str.contains(COHORT)]
-    overall = responses.groupby("item_id").correct.mean()
-    grouped = cohort.groupby("item_id").correct.agg(["mean", "size"])
-    result = {}
-    for item_id in ids:
-        if item_id in grouped.index and grouped.loc[item_id, "size"] >= 5:
-            result[item_id] = round(float(grouped.loc[item_id, "mean"]), 4)
-        elif item_id in overall.index:
-            result[item_id] = round(float(overall.loc[item_id]), 4)
-    return result
-
-
-_LINE_BREAKS = {c: f"\\u{ord(c):04x}" for c in "\x0b\x0c\x1c\x1d\x1e\x85  "}
-
-
-def _jsonl(rows: list[dict[str, Any]]) -> str:
-    """JSONL whose lines survive ``str.splitlines``, which also splits on U+2028."""
-    lines = []
-    for row in rows:
-        line = json.dumps(row, ensure_ascii=False, sort_keys=True)
-        lines.append("".join(_LINE_BREAKS.get(c, c) for c in line) + "\n")
-    return "".join(lines)
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bp-root", type=Path, required=True,
@@ -193,13 +159,13 @@ def main() -> None:
     data = datasets.data_root()
     manifest = datasets.load_manifest()
     labels_path = data / "private" / "labels.jsonl"
-    labels = [row for row in _read_jsonl(labels_path) if row["split"] != SPLIT]
+    labels = [row for row in read_jsonl(labels_path) if row["split"] != SPLIT]
     categories = _hf_categories()
     added: list[dict[str, Any]] = []
 
     for benchmark in manifest["benchmarks"]:
         public_path = data / "public" / f"{benchmark}.jsonl"
-        public = [row for row in _read_jsonl(public_path) if row["split"] != SPLIT]
+        public = [row for row in read_jsonl(public_path) if row["split"] != SPLIT]
         entry = manifest["per_benchmark"][benchmark]
         dropped = set(entry.get("dropped_categories", []))
         candidates = [
@@ -215,14 +181,14 @@ def main() -> None:
         chosen, below = _choose(candidates, mix, entry["irt_difficulty_cutoff"])
         if len(chosen) != N_EXAMPLES:
             raise RuntimeError(f"{benchmark}: only {len(chosen)} unused items")
-        reference = _reference_accuracy(
+        reference = reference_accuracy(
             args.bp_root, benchmark, {row["record"]["item_id"] for row in chosen})
         chosen.sort(key=lambda r: (-r["irt"], r["record"]["item_id"]))
         records = [
             {**row["record"], "reference_accuracy": reference.get(row["record"]["item_id"])}
             for row in chosen
         ]
-        public_path.write_text(_jsonl(public + records), encoding="utf-8")
+        public_path.write_text(jsonl_text(public + records), encoding="utf-8")
         labels += [
             {"answer_format": row["record"]["answer_format"], "item_id": row["record"]["item_id"],
              "split": SPLIT, "target": row["answer"]}
@@ -237,7 +203,7 @@ def main() -> None:
               f"mean irt {entry[f'{SPLIT}_mean_irt_difficulty']:.2f} "
               f"(train {entry['train_mean_irt_difficulty']:.2f})")
 
-    labels_path.write_text(_jsonl(labels), encoding="utf-8")
+    labels_path.write_text(jsonl_text(labels), encoding="utf-8")
     parquet = data / "items.parquet"
     frame = pd.read_parquet(parquet)
     frame = pd.concat([frame[frame.split != SPLIT], pd.DataFrame(added)], ignore_index=True)

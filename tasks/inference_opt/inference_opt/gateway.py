@@ -14,7 +14,7 @@ from typing import Any
 
 from inference_opt.answers import MAX_COMPLETION_CHARS
 from inference_opt.api import BudgetExhausted
-from inference_opt.client import StudentCompletion, StudentEndpoint
+from inference_opt.client import StudentCompletion, student_endpoint
 
 __all__ = [
     "DEFAULT_CONCURRENCY",
@@ -61,22 +61,11 @@ class MockBackend:
         return StudentCompletion(text=self.reply, finish_reason="stop", output_tokens=1)
 
 
-def backend_for(
-    model_spec: str, base_url: str | None, api_key: str | None, timeout: float | None
-) -> Backend:
-    """``mockllm/...`` answers locally; anything else is a served model name."""
+def backend_for(model_spec: str, base_url: str | None, timeout: float | None) -> Backend:
+    """``mockllm/...`` answers locally; any other spec goes to its endpoint (``client.student_endpoint``)."""
     if model_spec.startswith("mockllm/"):
         return MockBackend()
-    if not base_url:
-        raise ValueError(f"no endpoint configured for student {model_spec!r}")
-    endpoint = StudentEndpoint(
-        base_url=base_url,
-        # "vllm/Qwen/Qwen3-8B" is served as "Qwen/Qwen3-8B".
-        model=model_spec.partition("/")[2] or model_spec,
-        api_key=api_key,
-        timeout=timeout,
-    )
-    return endpoint.chat
+    return student_endpoint(model_spec, base_url, timeout).chat
 
 
 class StudentGateway:

@@ -15,7 +15,7 @@ from inference_opt.client import StudentCompletion
 from inference_opt.gateway import MockBackend, StudentGateway
 from inference_opt.runner import MAX_TOKENS_CAP, private_root, run_policy
 
-BENCHMARK = "mmlu_pro"
+BENCHMARK = "math_algebra"
 
 
 class EchoBackend:
@@ -81,7 +81,7 @@ def _gold_policy(benchmark: str, wrong: set[str] = frozenset()) -> str:
         item.item_id: ("Z" if item.item_id in wrong else targets[item.item_id])
         for item in _items(benchmark)
     }
-    marker = "[ANSWER]{}[/ANSWER]" if benchmark == "chembench" else "ANSWER: {}"
+    marker = "ANSWER: {}"
     return (
         f"ANSWERS = {answers!r}\n"
         "class Policy:\n"
@@ -103,11 +103,21 @@ class TestGrading:
         }
         assert run.calls_used == 3
 
-    def test_chembench_is_graded_by_its_own_scorer(self, tmp_path):
-        _, runs = _run(tmp_path, _gold_policy("chembench"), benchmark="chembench")
-        run = runs["m"]
-        assert run.grading_error == ""
-        assert all(run.correct.values()), run.correct
+    def test_math_is_graded_by_inspect_evals_and_needs_the_answer_line(self, tmp_path):
+        """A boxed gold answer without the ANSWER line is wrong, as in inspect_evals."""
+        targets = datasets.load_targets(BENCHMARK, "train")
+        boxed = {item.item_id: "\\boxed{" + targets[item.item_id] + "}" for item in _items()}
+        source = (
+            f"ANSWERS = {boxed!r}\n"
+            "class Policy:\n"
+            "    def run(self, questions, ctx):\n"
+            "        for q in questions:\n"
+            "            ctx.student.generate(q.text, question_id=q.id)\n"
+            "            ctx.answer(q.id, ANSWERS[q.id])\n"
+        )
+        _, runs = _run(tmp_path, source)
+        assert runs["m"].grading_error == ""
+        assert not any(runs["m"].correct.values())
 
     def test_an_unsubmitted_question_counts_as_wrong(self, tmp_path):
         _, runs = _run(

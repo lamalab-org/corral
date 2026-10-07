@@ -9,7 +9,13 @@ from pathlib import Path
 import pytest
 from inference_opt.env import create_environments, load_tasks_from_json
 
-TASK_BENCHMARKS = {"mmlu_pro", "bbh", "gpqa_diamond", "math", "chembench"}
+TASK_BENCHMARKS = {
+    "math_algebra",
+    "math_prealgebra",
+    "math_number_theory",
+    "math_counting_probability",
+    "math_geometry",
+}
 
 
 @pytest.fixture
@@ -63,11 +69,11 @@ class TestConstruction:
 class TestToolSurface:
     def test_the_agent_can_write_its_policy(self, environments):
         """Without workspace tools the agent cannot produce a submission at all."""
-        tools = environments["mmlu_pro_a"].tools
+        tools = environments["math_algebra_a"].tools
         assert {"write_file", "read_file", "list_files"} <= set(tools)
 
     def test_all_nine_task_tools_are_present(self, environments):
-        tools = environments["mmlu_pro_a"].tools
+        tools = environments["math_algebra_a"].tools
         assert {
             "get_baseline", "reveal_examples", "query_student",
             "dry_run_policy", "evaluate_candidate", "inspect_failures",
@@ -76,7 +82,7 @@ class TestToolSurface:
 
     def test_inference_tools_are_trusted(self, environments):
         """The environment uses trusted tools and committed session state."""
-        tools = environments["mmlu_pro_a"].tools
+        tools = environments["math_algebra_a"].tools
         trusted = {name for name, tool in tools.items() if getattr(tool, "trusted", False)}
         assert trusted == {
             "get_baseline", "reveal_examples", "query_student",
@@ -86,8 +92,8 @@ class TestToolSurface:
 
     def test_tools_are_bound_to_their_own_task(self, environments):
         """One shared pool would bind every task to whichever was built last."""
-        first = environments["mmlu_pro_a"].tools["get_baseline"]
-        second = environments["chembench_a"].tools["get_baseline"]
+        first = environments["math_algebra_a"].tools["get_baseline"]
+        second = environments["math_prealgebra_a"].tools["get_baseline"]
         assert first is not second
 
 
@@ -95,18 +101,19 @@ class TestPrompt:
     def test_prompt_states_the_rule_and_how_to_finish(self, environments):
         from corral.core.state import ExecutionState
 
-        environment = environments["mmlu_pro_a"]
+        environment = environments["math_algebra_a"]
         prompt = environment.current_task.prompt_fn(environment, ExecutionState)
         assert "submit_answer" in prompt
         assert "modify model weights" in prompt
         assert "frozen student model" in prompt
-        assert "mmlu_pro" in prompt
+        assert "math_algebra" in prompt
+        assert "77.02%" in prompt
 
     def test_prompt_does_not_name_strategies(self, environments):
         """The prompt leaves strategy choice to the policy."""
         from corral.core.state import ExecutionState
 
-        environment = environments["mmlu_pro_a"]
+        environment = environments["math_algebra_a"]
         prompt = environment.current_task.prompt_fn(environment, ExecutionState).lower()
         for leak in ("self-consistency", "majority vote", "debate", "chain of thought"):
             assert leak not in prompt
@@ -139,7 +146,7 @@ class TestSubmission:
         from inference_opt.tools import create_tools
 
         workspace = _workspace_with_policy(tmp_path, source)
-        submit = create_tools(_task_config(1, "mmlu_pro_a"), "")["submit_policy"]._func
+        submit = create_tools(_task_config(1, "math_algebra_a"), "")["submit_policy"]._func
         return submit(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
 
     def _state(self, ledger):
@@ -211,7 +218,7 @@ class TestSubmission:
         from inference_opt.tools import create_tools
 
         workspace = _workspace_with_policy(tmp_path, self.POLICY)
-        submit = create_tools(_task_config(1, "mmlu_pro_a"), "")["submit_policy"]._func
+        submit = create_tools(_task_config(1, "math_algebra_a"), "")["submit_policy"]._func
         ledger = {}
         args = {"policy_path": "policy", "work_dir": str(workspace), "inference_state": ledger}
         assert submit(**args).startswith("Submitted")
@@ -225,7 +232,7 @@ def test_a_refunded_run_keeps_its_folder_and_id(tmp_path):
     from inference_opt.tools import create_tools
 
     workspace = _workspace_with_policy(tmp_path, "raise ImportError('nope')\n")
-    dry_run = create_tools(_task_config(1, "mmlu_pro_a"), "")["dry_run_policy"]._func
+    dry_run = create_tools(_task_config(1, "math_algebra_a"), "")["dry_run_policy"]._func
     ledger = {}
     dry_run(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
     (workspace / "policy" / "policy.py").write_text(TestSubmission.POLICY)
@@ -253,7 +260,7 @@ def test_a_dry_run_that_never_reaches_the_student_is_not_ok(tmp_path, source, wa
     from inference_opt.tools import create_tools
 
     workspace = _workspace_with_policy(tmp_path, source)
-    dry_run = create_tools(_task_config(1, "mmlu_pro_a"), "")["dry_run_policy"]._func
+    dry_run = create_tools(_task_config(1, "math_algebra_a"), "")["dry_run_policy"]._func
 
     headline = dry_run(
         policy_path="policy", work_dir=str(workspace), inference_state={}
@@ -278,7 +285,7 @@ class TestQueryStudent:
                 StudentCompletion("30", "stop"),
             ],
         )
-        query = environments["mmlu_pro_a"].tools["query_student"]._func
+        query = environments["math_algebra_a"].tools["query_student"]._func
         out = query(prompt="3/5 of 50?", max_tokens=256, n=2, work_dir="", inference_state={})
         summary, payload = out.split("\n")[:2]
         data = json.loads(payload)
@@ -299,7 +306,7 @@ class TestQueryStudent:
             return [StudentCompletion("30", "stop")]
 
         monkeypatch.setattr("inference_opt.tools.probe_student", probe)
-        query = environments["mmlu_pro_a"].tools["query_student"]._func
+        query = environments["math_algebra_a"].tools["query_student"]._func
         query(prompt="3/5 of 50?", max_tokens=10**6, work_dir="", inference_state={})
         assert requested == [MAX_TOKENS_CAP]
 
@@ -350,7 +357,7 @@ class TestToolErrors:
                 for model in kwargs["models"]
             },
         )
-        dry = environments["mmlu_pro_a"].tools["dry_run_policy"]._func
+        dry = environments["math_algebra_a"].tools["dry_run_policy"]._func
         workspace = _workspace_with_policy(
             tmp_path, "def run(questions, ctx):\n    ctx.answer(questions[0].id, 'A')\n"
         )
@@ -360,7 +367,7 @@ class TestToolErrors:
         assert "solver.py" in json.loads(payload)["error"]
 
 
-class TestHeadroomPassRule:
+class TestPassRules:
     def test_headroom_closed_counts_questions(self):
         from inference_opt.score import headroom_closed
 
@@ -370,28 +377,35 @@ class TestHeadroomPassRule:
         assert headroom_closed(12, 0.5, 30) < 0  # worse than the baseline
         assert headroom_closed(30, 1.0, 30) is None  # nothing left to improve
 
+    @pytest.mark.parametrize("rule", ["threshold", "headroom"])
     @pytest.mark.parametrize(
         ("level", "task_id", "outcome", "expected"),
         [
-            (1, "mmlu_pro_a", {"student_a": "all"}, 1.0),
-            (1, "mmlu_pro_a", {"student_a": "just_short"}, 0.0),
+            (1, "math_algebra_a", {"student_a": "all"}, 1.0),
+            (1, "math_algebra_a", {"student_a": "just_short"}, 0.0),
             # Level 2 needs every student to pass: one perfect and one just short fails.
-            (2, "mmlu_pro_ab", {"student_a": "all", "student_b": "just_short"}, 0.0),
-            (2, "mmlu_pro_ab", {"student_a": "all", "student_b": "all"}, 1.0),
+            (2, "math_algebra_ab", {"student_a": "all", "student_b": "just_short"}, 0.0),
+            (2, "math_algebra_ab", {"student_a": "all", "student_b": "all"}, 1.0),
         ],
     )
-    def test_score_is_one_only_when_every_student_closes_half(
-        self, level, task_id, outcome, expected
+    def test_score_is_one_only_when_every_student_passes(
+        self, rule, level, task_id, outcome, expected
     ):
         from inference_opt.runner import ModelRun
         from inference_opt.score import final_result
 
         config = _task_config(level, task_id)
+        assert config["pass_rule"]["kind"] == "threshold"
+        if rule == "headroom":
+            config["pass_rule"] = {"kind": "headroom", "min_closed": 0.5}
         question_ids = [f"q{i}" for i in range(30)]
 
         def n_correct(model):
             if outcome[model] == "all":
                 return 30
+            if rule == "threshold":
+                # One question below the bar: 23 of 30 is 76.7%, under 77.02%.
+                return math.ceil(config["pass_rule"]["min_accuracy"] * 30) - 1
             # One question fewer than closing half the headroom over the baseline.
             baseline_correct = round(config["baselines"][model] * 30)
             return baseline_correct + math.ceil((30 - baseline_correct) / 2) - 1
@@ -403,12 +417,10 @@ class TestHeadroomPassRule:
                 model=model,
                 split="test",
                 question_ids=question_ids,
-                answers=dict.fromkeys(question_ids, "ANSWER: A"),
+                answers=dict.fromkeys(question_ids, "ANSWER: 1"),
                 correct={qid: index < n for index, qid in enumerate(question_ids)},
                 calls_used=30,
             )
         result = final_result(config, runs)
         assert result["score"] == expected
         assert result["metadata"]["metrics"]["passed"] == expected
-        for model in config["models"]:
-            assert f"{model}_headroom_closed" in result["metadata"]["metrics"]

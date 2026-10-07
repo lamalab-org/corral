@@ -1,21 +1,19 @@
 """The shipped frozen question set.
 
-These run against the committed dataset, not a fixture: if it is ever rebuilt and
-the split sizes change, a target leaks into the public files, or the halves stop
-being matched, that silently corrupts every score measured afterwards.
+These run against the committed dataset, not a fixture: if it is rebuilt and a
+split changes size, a target leaks into the public files, or the splits stop
+being equally hard, every score measured afterwards is silently wrong.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections import Counter
 
 import pytest
 from inference_opt import datasets
 
-TRAIN_PER_BENCHMARK = 30
-TEST_PER_BENCHMARK = 30
-EXAMPLES_PER_BENCHMARK = 30
+SIZES = {"train": 30, "test": 30, "examples": 20}
 
 
 @pytest.fixture(scope="module")
@@ -26,56 +24,42 @@ def manifest():
 class TestShippedDataset:
     def test_manifest_records_the_protocol(self, manifest):
         assert manifest["dataset_version"] == datasets.DATASET_VERSION
+        assert manifest["benchmarks"] == list(datasets.BENCHMARKS)
         assert len(manifest["content_fingerprint"]) == 64
-        assert manifest["items_per_benchmark"] == 60
-        assert manifest["selection"]["rule"].startswith("60 items per benchmark")
+        assert manifest["train_per_benchmark"] == SIZES["train"]
+        assert manifest["test_per_benchmark"] == SIZES["test"]
+        assert manifest["examples_per_benchmark"] == SIZES["examples"]
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
-    def test_every_benchmark_has_a_matched_split(self, benchmark):
-        train = datasets.load_items(benchmark, "train")
-        test = datasets.load_items(benchmark, "test")
-        assert len(train) == TRAIN_PER_BENCHMARK
-        assert len(test) == TEST_PER_BENCHMARK
-        assert not {item.item_id for item in train} & {item.item_id for item in test}
+    def test_splits_have_their_size_and_do_not_overlap(self, benchmark):
+        splits = {split: datasets.load_items(benchmark, split) for split in SIZES}
+        assert {split: len(items) for split, items in splits.items()} == SIZES
+        ids = [item.item_id for items in splits.values() for item in items]
+        hashes = [item.question_hash for items in splits.values() for item in items]
+        assert len(set(ids)) == len(ids)
+        assert len(set(hashes)) == len(hashes)
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
-    def test_examples_are_separate_from_the_scored_questions(self, benchmark):
-        """Revealing an example must never show the answer to a scored question."""
-        examples = datasets.load_items(benchmark, "examples")
-        scored = datasets.load_items(benchmark, "train") + datasets.load_items(
-            benchmark, "test"
-        )
-        assert len(examples) == EXAMPLES_PER_BENCHMARK
-        assert not {item.item_id for item in examples} & {item.item_id for item in scored}
-        assert not {item.question_hash for item in examples if item.question_hash} & {
-            item.question_hash for item in scored if item.question_hash
-        }
+    def test_each_benchmark_is_one_level_5_subject(self, benchmark, manifest):
+        items = datasets.load_items(benchmark)
+        assert {item.category for item in items} == {manifest["per_benchmark"][benchmark]["subject"]}
+        assert {item.subcategory for item in items} == {"level 5"}
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
-    def test_examples_cover_the_same_topics_as_train(self, benchmark):
-        """bbh has no unused hyperbaton or snarks items, so two of its examples come
-        from other topics."""
-        train = Counter(item.category for item in datasets.load_items(benchmark, "train"))
-        examples = Counter(
-            item.category for item in datasets.load_items(benchmark, "examples")
-        )
-        assert set(examples) <= set(train)
-        assert sum((examples & train).values()) >= EXAMPLES_PER_BENCHMARK - 2
-
-    @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
-    def test_the_halves_are_equally_hard(self, benchmark, manifest):
+    def test_the_splits_are_equally_hard(self, benchmark, manifest):
         entry = manifest["per_benchmark"][benchmark]
-        gap = abs(
-            entry["train_mean_irt_difficulty"] - entry["test_mean_irt_difficulty"]
-        )
-        assert gap < 0.5, f"{benchmark}: halves differ by {gap:.3f}"
+        means = [entry[f"{split}_mean_irt_difficulty"] for split in SIZES]
+        assert max(means) - min(means) < 0.1, f"{benchmark}: split difficulty {means}"
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
     def test_every_item_has_a_label(self, benchmark):
-        for split in ("train", "test", "examples"):
-            items = datasets.load_items(benchmark, split)
+        for split in SIZES:
             targets = datasets.load_targets(benchmark, split)
-            missing = [item.item_id for item in items if item.item_id not in targets]
+            missing = [
+                item.item_id
+                for item in datasets.load_items(benchmark, split)
+                if item.item_id not in targets
+            ]
             assert not missing, f"{benchmark}/{split} missing labels: {missing[:3]}"
 
     @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
@@ -83,68 +67,48 @@ class TestShippedDataset:
         """The boundary the whole environment rests on."""
         path = datasets.data_root() / "public" / f"{benchmark}.jsonl"
         for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                record = json.loads(line)
-                assert "target" not in record
-                assert "answer" not in record
+            record = json.loads(line)
+            assert "target" not in record
+            assert "answer" not in record
 
-    @pytest.mark.parametrize("benchmark", datasets.BENCHMARKS)
-    def test_multiple_choice_items_carry_their_options(self, benchmark):
-        for item in datasets.load_items(benchmark):
-            if item.answer_format.startswith("mcq"):
-                assert item.options, f"{item.item_id} is mcq with no options"
+    def test_answer_format_never_says_whether_the_answer_is_a_number(self):
+        """A per-question numeric/expression label would hint at the answer."""
+        formats = {item.answer_format for b in datasets.BENCHMARKS for item in datasets.load_items(b)}
+        assert formats == {"math"}
+
+    def test_every_gold_answer_is_gradable_by_inspect_evals(self):
+        """Questions whose gold answer sympy cannot match to itself were excluded."""
+        from inspect_evals.math.utils import is_equiv_sympy, normalize_final_answer
+
+        async def gradable(target: str) -> bool:
+            normalized = await normalize_final_answer(target)
+            return bool(await is_equiv_sympy(normalized, normalized))
+
+        targets = [t for b in datasets.BENCHMARKS for t in datasets.load_targets(b).values()]
+        failing = [t for t in targets if not asyncio.run(gradable(t))]
+        assert not failing, failing[:5]
 
     def test_identifiers_trace_back_to_the_source_dataset(self):
         for benchmark in datasets.BENCHMARKS:
             for item in datasets.load_items(benchmark)[:5]:
                 assert item.item_id == f"{benchmark}:{item.sample_id}"
-
-    def test_bbh_questions_are_stripped_of_their_few_shot_scaffold(self):
-        """Source bbh rows ship as pre-rendered 3-shot prompts, not bare questions."""
-        for item in datasets.load_items("bbh"):
-            assert "QUESTION:" not in item.question
-
-    def test_chembench_never_says_how_many_options_are_correct(self):
-        """Every multiple-choice question asks for all correct options, as ChemBench does."""
-        items = datasets.load_items("chembench")
-        assert {i.answer_format for i in items if i.options} == {"mcq_multi"}
-        assert {i.answer_format for i in items if not i.options} <= {"numeric"}
-
-    def test_chembench_has_no_chemical_preference_questions(self):
-        assert not [
-            item for item in datasets.load_items("chembench")
-            if item.category == "chemical_preference"
-        ]
-
-    def test_categories_are_spread_not_clustered(self):
-        """A set drawn from two of bbh's subtasks would measure almost nothing."""
-        categories = {
-            item.category for item in datasets.load_items("bbh") if item.category
-        }
-        assert len(categories) >= 15
-
-    def test_selection_provenance_is_recorded_per_benchmark(self, manifest):
-        for benchmark in datasets.BENCHMARKS:
-            entry = manifest["per_benchmark"][benchmark]
-            assert entry["irt_difficulty_cutoff"] is not None
-            assert entry["selected"] == 60
+                assert item.sample_id.startswith("math_")
 
 
 class TestPolicyFacingQuestions:
-    def test_public_records_become_questions_with_their_options(self):
+    def test_public_records_become_questions(self):
         from inference_opt.host import _question
 
-        items = datasets.load_items("mmlu_pro", "test")
+        items = datasets.load_items("math_algebra", "test")
         records = [datasets.public_record(item) for item in items]
         questions = [_question(record, i, len(records)) for i, record in enumerate(records)]
         assert [question.index for question in questions] == list(range(len(questions)))
-        assert all(question.total == TEST_PER_BENCHMARK for question in questions)
-        rendered = questions[0].rendered_choices()
-        assert rendered.startswith("A) ")
-        assert len(rendered.splitlines()) == len(questions[0].choices or ())
+        assert all(question.total == SIZES["test"] for question in questions)
+        assert {question.answer_type for question in questions} == {"text"}
+        assert all(question.choices is None for question in questions)
 
     def test_public_record_never_carries_the_target(self):
-        item = datasets.load_items("gpqa_diamond", "test")[0]
+        item = datasets.load_items("math_geometry", "test")[0]
         record = datasets.public_record(item)
         assert "target" not in record
         assert record["item_id"] == item.item_id

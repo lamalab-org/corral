@@ -14,28 +14,27 @@ from __future__ import annotations
 import json
 
 import pandas as pd
-from drop_category import _fingerprint
+from frozen_set import content_fingerprint, jsonl_text, read_jsonl
 from inference_opt import datasets
-from select_examples import _jsonl, _read_jsonl
 
 
 def main() -> None:
     data = datasets.data_root()
     manifest = datasets.load_manifest()
     public_path = data / "public" / "chembench.jsonl"
-    public = _read_jsonl(public_path)
+    public = read_jsonl(public_path)
     multiple_choice = {row["item_id"] for row in public if row.get("options")}
     for row in public:
         if row["item_id"] in multiple_choice:
             row["answer_format"] = "mcq_multi"
-    public_path.write_text(_jsonl(public), encoding="utf-8")
+    public_path.write_text(jsonl_text(public), encoding="utf-8")
 
     labels_path = data / "private" / "labels.jsonl"
-    labels = _read_jsonl(labels_path)
+    labels = read_jsonl(labels_path)
     for row in labels:
         if row["item_id"] in multiple_choice:
             row["answer_format"] = "mcq_multi"
-    labels_path.write_text(_jsonl(labels), encoding="utf-8")
+    labels_path.write_text(jsonl_text(labels), encoding="utf-8")
 
     parquet = data / "items.parquet"
     frame = pd.read_parquet(parquet)
@@ -45,7 +44,7 @@ def main() -> None:
     manifest["per_benchmark"]["chembench"]["answer_formats"] = (
         "every multiple-choice question is mcq_multi: answer with all correct options"
     )
-    manifest["content_fingerprint"] = _fingerprint(data, manifest["benchmarks"])
+    manifest["content_fingerprint"] = content_fingerprint(data, manifest["benchmarks"])
     (data / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"chembench: {len(multiple_choice)} multiple-choice questions marked mcq_multi")

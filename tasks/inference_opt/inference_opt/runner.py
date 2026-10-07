@@ -179,10 +179,7 @@ def run_policy(
     def one(model: str) -> ModelRun:
         model_spec = str((config.get("model_specs") or {}).get(model, model))
         backend = (backends or {}).get(model) or backend_for(
-            model_spec,
-            (config.get("base_urls") or {}).get(model),
-            os.environ.get("VLLM_API_KEY"),
-            float(limit),
+            model_spec, (config.get("base_urls") or {}).get(model), float(limit)
         )
         gateway = StudentGateway(
             backend=backend,

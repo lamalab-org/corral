@@ -17,7 +17,8 @@ CONTROLLER (trusted, has the labels)          JAIL (agent code, no network)
     │   StudentGateway ◀── service channel ────── ctx.student / answer / log
     │     counts calls, stops at the budget,
     │     caps tokens and concurrency,
-    │     forwards to vLLM, records answers
+    │     forwards to the student endpoint
+    │     (vLLM or OpenRouter), records answers
     │
     └─ Grader: Inspect, replaying the answers,
        in its own process; its log stays outside the workspace
@@ -30,11 +31,15 @@ CONTROLLER (trusted, has the labels)          JAIL (agent code, no network)
 - `gateway.py` answers the channel. Requests are agent-written, so it checks
   every field: the budget, the question ids and the 8192-token cap per call.
   It also holds the run to `student_concurrency` requests in flight (default
-  16); the rest wait in the gateway, not in vLLM's queue. The vLLM address and
-  key never enter the jail.
-- `grading/` scores the submitted answers with Inspect's scorers. A replay
-  solver puts each answer on its sample; the log, which holds the targets, is
-  written beside the workspace, never inside it.
+  16); the rest wait in the gateway, not in the server's queue. Endpoint
+  addresses and API keys never enter the jail.
+- `client.py` sends each request to the student's endpoint: a vLLM server, or
+  OpenRouter pinned to one provider with fallbacks off. Rate limits, server
+  errors and dropped connections are retried with backoff before a call fails.
+- `grading/` scores the submitted answers with Inspect's scorers; MATH
+  answers with `inspect_evals`' `expression_exact_match_sympy`, unchanged. A
+  replay solver puts each answer on its sample; the log, which holds the
+  targets, is written beside the workspace, never inside it.
 - `runner.py` ties these together. Without Docker permission enforcement the
   host runs as a plain subprocess: metering still holds, privacy does not.
 
@@ -79,9 +84,9 @@ environment fault raises `HarnessError` instead of scoring.
 
 ## Known limits
 
-- Per-question right/wrong is shown for train runs, so a multiple-choice answer
-  marked correct reveals the gold option. Gold answers themselves are shown only
-  for the example split, which is never scored.
+- Per-question right/wrong is shown for train runs, so a train answer marked
+  correct reveals that the student's answer was the gold one. Gold answers
+  themselves are shown only for the example split, which is never scored.
 - Without Docker permission enforcement there is no jail; see `runner.py`.
 
 ## Source map
@@ -98,5 +103,7 @@ environment fault raises `HarnessError` instead of scoring.
 | Grading | `inference_opt/grading/` |
 | Pass rule and state scorer | `inference_opt/score.py` |
 | Frozen data | `inference_opt/datasets.py` |
+| Student endpoints | `inference_opt/client.py` |
+| Zero-shot baseline | `inference_opt/baselines.py` |
 | Service channel | `src/corral/runtime/service_channel.py` |
 | Restricted worker | `src/corral/runtime/permissions.py` |

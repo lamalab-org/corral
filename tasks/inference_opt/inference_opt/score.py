@@ -25,9 +25,16 @@ __all__ = [
 #: Fraction of crashed items at which a policy run is rejected.
 CRASH_RATE_LIMIT = 0.5
 
-#: A task passes (score 1) when every student closes at least half of the gap
-#: between its zero-shot baseline and a perfect score; otherwise it scores 0.
-DEFAULT_PASS_RULE: dict[str, Any] = {"kind": "headroom", "min_closed": 0.5}
+#: By default a task passes (score 1) when every student reaches 0.7702 on the
+#: test split, the mean MATH score of the 50 models on a public leaderboard
+#: (``data/reference/math_leaderboard.csv``); otherwise it scores 0. A task can set
+#: ``{"kind": "headroom", "min_closed": 0.5}``: every student closes at least
+#: half the gap between its zero-shot baseline and a perfect score.
+DEFAULT_PASS_RULE: dict[str, Any] = {
+    "kind": "threshold",
+    "min_accuracy": 0.7702,
+    "reference": "the mean MATH score of 50 models on a public leaderboard",
+}
 
 
 def headroom_closed(n_correct: int, baseline: float, n_items: int) -> float | None:
@@ -94,6 +101,15 @@ class ScoreReport:
     def _verdict(self) -> str:
         if self.outcome != ScoreOutcome.OK:
             return f"{self.outcome}: " + "; ".join(self.notes[-1:])
+        rule = (self.per_model.get("_aggregate") or {}).get("pass_rule") or {}
+        if rule.get("kind") == "threshold":
+            reached = [
+                f"{model} scored {entry['accuracy']:.0%} "
+                f"(needs {float(rule['min_accuracy']):.0%})"
+                for model, entry in self.per_model.items()
+                if model != "_aggregate"
+            ]
+            return f"score {self.score:g}: " + ", ".join(reached)
         closed = [
             f"{model} closed {entry['headroom_closed']:.0%} of headroom"
             if entry.get("headroom_closed") is not None
@@ -116,7 +132,7 @@ def final_result(config: dict[str, Any], runs: dict[str, ModelRun]) -> dict[str,
     if missing:
         raise HarnessError(
             f"no measured baseline for {missing} on {benchmark}; "
-            "run scripts/measure_baselines.py --write-tasks first"
+            "run scripts/measure_baselines.py, then scripts/generate_tasks.py"
         )
     try:
         manifest = datasets.load_manifest()
@@ -197,6 +213,14 @@ def final_result(config: dict[str, Any], runs: dict[str, ModelRun]) -> dict[str,
                 )
         # A tiny tolerance keeps exact halves (e.g. 1 of 2) from failing on floats.
         passed = all(v is not None and v >= threshold - 1e-9 for v in closed.values())
+        report.score = 1.0 if passed else 0.0
+        aggregate["passed"] = passed
+    elif rule.get("kind") == "threshold":
+        # A fixed bar from outside the task: every student must reach it.
+        bar = float(rule["min_accuracy"])
+        passed = all(
+            report.per_model[model]["accuracy"] >= bar - 1e-9 for model in models
+        )
         report.score = 1.0 if passed else 0.0
         aggregate["passed"] = passed
     elif rule.get("kind") == "continuous":

@@ -26,6 +26,65 @@ def test_free_text_uses_inspect_match_scorer():
     assert spec_for("bbh", "text").scorer_name == "match"
 
 
+def test_math_uses_inspect_evals_sympy_scorer():
+    assert spec_for("math_algebra", "numeric").scorer_name == "expression_exact_match_sympy"
+
+
+def test_math_baseline_prompt_is_inspect_evals_template():
+    """The pinned baseline asks exactly what inspect_evals' MATH eval asks."""
+    from inference_opt.baselines import BASELINE_POLICY_SOURCE
+    from inspect_evals.math.math import USER_PROMPT_TEMPLATE
+
+    namespace: dict = {}
+    exec(BASELINE_POLICY_SOURCE, namespace)
+
+    class Question:
+        benchmark = "math_algebra"
+        text = "What is $1 + {1}$?"
+        choices = None
+
+    assert namespace["_prompt"](Question()) == USER_PROMPT_TEMPLATE.format(
+        prompt=Question.text
+    )
+
+
+def test_math_reads_only_the_answer_line(tmp_path):
+    """As in inspect_evals: a boxed answer without an ANSWER line is not read."""
+    from inference_opt.grading import Grader, GradeSpec
+    from inference_opt.outcomes import read_outcomes
+
+    answers = {
+        "math_algebra:a": "so x = 1/2\nANSWER: \\frac{1}{2}",
+        "math_algebra:b": "ANSWER: 0.5",
+        "math_algebra:c": "\\[\n\\boxed{\\frac{1}{2}}\n\\]",
+        "math_algebra:d": "ANSWER: 3",
+    }
+    from inference_opt import datasets
+
+    datasets.write_jsonl(
+        tmp_path / "questions.jsonl",
+        [
+            {"item_id": item_id, "benchmark": "math_algebra", "question": "q",
+             "answer_format": "numeric"}
+            for item_id in answers
+        ],
+    )
+    (tmp_path / "answers.json").write_text(json.dumps(answers))
+    spec = GradeSpec(
+        run_id="math", questions_path=str(tmp_path / "questions.jsonl"),
+        answers_path=str(tmp_path / "answers.json"), out_dir=str(tmp_path),
+        benchmark="math_algebra", split="train",
+    )
+    targets = dict.fromkeys(answers, "\\frac{1}{2}")
+    [summary] = Grader().grade_many([(spec, targets)])
+    assert summary.ok, summary.error
+    correct = {o.item_id: o.correct for o in read_outcomes(spec.log_dir)}
+    assert correct == {
+        "math_algebra:a": True, "math_algebra:b": True,
+        "math_algebra:c": False, "math_algebra:d": False,
+    }
+
+
 def test_chembench_multi_answer_needs_every_correct_option(tmp_path):
     """A list target would credit one correct letter and refuse the full answer."""
     from inference_opt.grading import Grader, GradeSpec
@@ -69,7 +128,7 @@ def _gold_completion(benchmark: str, answer_format: str, target: str) -> str:
 def test_every_gold_answer_grades_as_correct(tmp_path):
     """Catches any mismatch between the samples we build and a scorer's conventions."""
     from inference_opt import datasets
-    from inference_opt.grading import GradeSpec, Grader
+    from inference_opt.grading import Grader, GradeSpec
     from inference_opt.outcomes import read_outcomes
 
     jobs = []

@@ -42,7 +42,7 @@ def _call(environment, state, name: str, arguments: dict[str, Any], action_id: s
 
 
 def test_initial_event_seeds_the_ledger(tmp_path):
-    environment = create_environments(level=1, work_dir=str(tmp_path))["mmlu_pro_a"]
+    environment = create_environments(level=1, work_dir=str(tmp_path))["math_algebra_a"]
     started = environment.initial_event(execution_id="ledger-test")
     ledger = started.environment["resources"][LEDGER_RESOURCE]
     assert ledger["reveals"] == 0
@@ -58,7 +58,7 @@ def test_each_run_keeps_its_graded_logs_out_of_the_workspace(tmp_path, monkeypat
     from inference_opt.gateway import MockBackend
 
     monkeypatch.setattr(runner, "backend_for", lambda *_args: MockBackend())
-    definition = create_environments(level=1, work_dir=str(tmp_path))["mmlu_pro_a"]
+    definition = create_environments(level=1, work_dir=str(tmp_path))["math_algebra_a"]
     environment = definition.for_task("ledger-test")
     seed = environment.initial_event(execution_id="ledger-test").environment
     state = _state(environment, dict(seed))
@@ -82,7 +82,7 @@ def test_each_run_keeps_its_graded_logs_out_of_the_workspace(tmp_path, monkeypat
 
 
 def test_charges_persist_between_tool_calls(tmp_path):
-    definition = create_environments(level=1, work_dir=str(tmp_path))["mmlu_pro_a"]
+    definition = create_environments(level=1, work_dir=str(tmp_path))["math_algebra_a"]
     environment = definition.for_task("ledger-test")
     seed = environment.initial_event(execution_id="ledger-test").environment
     state = _state(environment, dict(seed))
@@ -91,7 +91,7 @@ def test_charges_persist_between_tool_calls(tmp_path):
     committed = state.environment.values["resources"][LEDGER_RESOURCE]
     assert committed["reveals"] == 1
     assert len(committed["revealed_ids"]) == 5
-    examples = {item.item_id for item in datasets.load_items("mmlu_pro", "examples")}
+    examples = {item.item_id for item in datasets.load_items("math_algebra", "examples")}
     assert set(committed["revealed_ids"]) <= examples
 
     result, _ = _call(environment, state, "get_budget", {}, "budget")

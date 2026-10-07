@@ -76,7 +76,10 @@ def load_tasks_from_json(json_path: str | Path) -> dict[str, TaskDefinition]:
 
 
 def _bind_endpoints(models: list[str], configured: Any) -> dict[str, str]:
-    """Resolve task endpoints from config, falling back to startup environment."""
+    """Each student's vLLM address: the task's own, else ``CORRAL_VLLM_URL_<STUDENT>``, else ``CORRAL_VLLM_URL``.
+
+    OpenRouter students get an address too, and ignore it (``client.student_endpoint``).
+    """
     base_urls = dict(configured or {})
     default = os.environ.get("CORRAL_VLLM_URL", "http://127.0.0.1:8000")
     for model in models:
@@ -128,21 +131,27 @@ def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSe
 
 
 def _check_example_baselines(tasks: dict[str, TaskDefinition]) -> None:
-    """Refuse to run a task whose students have no measured reply to every example."""
+    """Refuse to run a task unless each student's reply to every example was measured
+    on the deployment the task uses (the same model spec)."""
     if os.environ.get(ALLOW_UNMEASURED_ENV) == "1":
         return
     missing: set[str] = set()
     for task in tasks.values():
         benchmark = str(task.initial_input["benchmark"])
         models = list(task.initial_input["models"])
+        specs = dict(task.initial_input.get("model_specs") or {})
         try:
             examples = datasets.load_items(benchmark, "examples")
         except datasets.DatasetError:
             return  # no dataset mounted: nothing can run, so nothing to check yet
         wanted = {item.item_id for item in examples}
         for model, rows in datasets.load_example_baselines(models).items():
-            if not wanted <= set(rows):
-                missing.add(f"{model} on {benchmark}")
+            measured = {
+                item_id for item_id, row in rows.items()
+                if model not in specs or row.get("model_spec") == specs[model]
+            }
+            if not wanted <= measured:
+                missing.add(f"{model} ({specs.get(model, '?')}) on {benchmark}")
     if missing:
         raise RuntimeError(
             "no measured zero-shot reply to the example questions for "

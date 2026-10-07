@@ -17,6 +17,12 @@ __all__ = ["ANSWER_PREFIX", "BenchmarkSpec", "scorer_for", "spec_for"]
 
 def scorer_for(benchmark: str, answer_format: str) -> Scorer:
     """Select the Inspect scorer appropriate to one answer format."""
+    if benchmark.startswith("math_"):
+        # inspect_evals' MATH scorer, unchanged: the answer is read from the last
+        # "ANSWER: ..." line only, and checked for equality with sympy.
+        from inspect_evals.math.math import expression_exact_match_sympy
+
+        return expression_exact_match_sympy()
     if benchmark == "chembench":
         from inspect_evals.chembench.chembench import chembench_scorer
 
@@ -43,6 +49,8 @@ class BenchmarkSpec:
             "mcq_multi": "choice",
             "numeric": "match_numeric",
         }.get(self.answer_format, "match")
+        if self.benchmark.startswith("math_"):
+            return "expression_exact_match_sympy"
         return "chembench" if self.benchmark == "chembench" else name
 
     def build_scorer(self) -> Scorer:

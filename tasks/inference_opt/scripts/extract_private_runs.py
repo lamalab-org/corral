@@ -5,7 +5,7 @@ logs with targets, answers, student calls) into the trial's artifact store and
 records the reference in the ledger. This writes one folder per run:
 
     uv run python scripts/extract_private_runs.py \\
-        <run-dir>/task-mmlu_pro_a/k-1 out/mmlu_pro_a
+        <run-dir>/task-math_algebra_a/k-1 out/math_algebra_a
 """
 
 from __future__ import annotations

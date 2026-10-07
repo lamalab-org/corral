@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from inference_opt.runner import MAX_TOKENS_CAP
+from inference_opt.score import DEFAULT_PASS_RULE
 
 if TYPE_CHECKING:
     from corral.core.environment import Environment
@@ -23,9 +24,7 @@ You can change the prompts, how many samples you draw, how they are combined, wh
 
 Write it as a Python policy in `{policy_dir}/policy.py`. The API is documented in `guide/policy_api.md`.
 
-Return the answer marker required by the benchmark scorer: use `ANSWER: <answer>` for every benchmark except ChemBench, which uses `[ANSWER]<answer>[/ANSWER]`.
-Every ChemBench multiple-choice question may have one or more correct options; the answer is all of them, as comma-separated letters, and it is right only if the set is exact.
-The scorer parses and grades these markers.
+{answer_format}
 
 Benchmark: {benchmark}
 Student model(s): {models}
@@ -54,6 +53,28 @@ A policy that is never submitted scores nothing, so submit before you run out of
 """
 
 
+_ANSWER_FORMATS = {
+    "math": (
+        "Answers are graded exactly as Inspect's MATH eval grades them: the answer is read "
+        "from an `ANSWER: <answer>` line, which must be the last line, and compared with "
+        "the gold answer using sympy. A `\\boxed{}` answer without that line is not read."
+    ),
+    "chembench": (
+        "End each answer with `[ANSWER]<answer>[/ANSWER]`. Every multiple-choice question "
+        "may have one or more correct options; the answer is all of them, as "
+        "comma-separated letters, and it is right only if the set is exact."
+    ),
+    "default": "End each answer with a line `ANSWER: <answer>`; the scorer reads that line.",
+}
+
+
+def _answer_format(benchmark: str) -> str:
+    """How the scorer for this benchmark reads an answer."""
+    if benchmark.startswith("math_"):
+        return _ANSWER_FORMATS["math"]
+    return _ANSWER_FORMATS.get(benchmark, _ANSWER_FORMATS["default"])
+
+
 def _budget_summary(config: dict) -> str:
     budget = dict(config.get("budget") or {})
     lines = [
@@ -76,7 +97,7 @@ def _budget_summary(config: dict) -> str:
 
 def _scoring_summary(config: dict) -> str:
     """Describe the pass rule the scorer will apply to this task."""
-    rule = dict(config.get("pass_rule") or {"kind": "headroom", "min_closed": 0.5})
+    rule = dict(config.get("pass_rule") or DEFAULT_PASS_RULE)
     joint = len(config.get("models", [])) > 1
     if rule.get("kind") == "continuous":
         lines = [
@@ -86,6 +107,15 @@ def _scoring_summary(config: dict) -> str:
             lines.append(
                 "- For two student models, the score is the smaller improvement."
             )
+        return "\n".join(lines)
+    if rule.get("kind") == "threshold":
+        bar = float(rule["min_accuracy"])
+        lines = [
+            f"- Your submitted policy is run on the held-out test split. The task passes (score 1) if the student answers at least {bar:.2%} of the test questions correctly with your policy; otherwise it scores 0.",
+            f"- {bar:.2%} is {rule.get('reference', 'a fixed reference score')}.",
+        ]
+        if joint:
+            lines.append("- With two student models, both must reach it to pass.")
         return "\n".join(lines)
     share = f"{float(rule.get('min_closed', 0.5)):.0%}"
     lines = [
@@ -104,6 +134,7 @@ def task_prompt(env: Environment, state: ExecutionState) -> str:
     return _TEMPLATE.format(
         description=task.description,
         benchmark=config.get("benchmark", "?"),
+        answer_format=_answer_format(str(config.get("benchmark", ""))),
         models=(
             "two frozen student models"
             if len(config.get("models", [])) > 1

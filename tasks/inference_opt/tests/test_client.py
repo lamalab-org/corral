@@ -4,6 +4,8 @@ from inference_opt.client import StudentEndpoint
 
 
 class EmptyResponse:
+    status_code = 200
+
     def raise_for_status(self):
         pass
 

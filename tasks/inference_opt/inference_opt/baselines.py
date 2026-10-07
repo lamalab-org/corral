@@ -17,7 +17,9 @@ __all__ = [
     "measure_baseline",
 ]
 
-#: The pinned zero-shot policy. Written to a temporary directory and run through the normal pipeline, so the baseline and every candidate share one code path.
+#: The pinned zero-shot policy. It runs through the same pipeline as every
+#: candidate policy, so the baseline and a candidate differ only in the policy.
+#: MATH questions get Inspect's MATH prompt; the other branches serve the v1 set.
 BASELINE_POLICY_SOURCE = '''\
 """The pinned zero-shot baseline. One call, no system message, no demonstrations."""
 
@@ -27,7 +29,19 @@ MANIFEST = {
 }
 
 
+# inspect_evals' MATH prompt, word for word (USER_PROMPT_TEMPLATE in inspect_evals.math).
+MATH_TEMPLATE = """
+Solve the following math problem step by step. The last line of your response should be of the form "ANSWER: $ANSWER" (without quotes) where $ANSWER is the answer to the problem.
+
+{prompt}
+
+Remember to put your answer on its own line at the end in the form "ANSWER: $ANSWER" (without quotes) where $ANSWER is the answer to the problem, and you do not need to use a \\\\boxed command.
+""".strip()
+
+
 def _prompt(question):
+    if question.benchmark.startswith("math_"):
+        return MATH_TEMPLATE.format(prompt=question.text)
     prompt = question.text
     if question.choices:
         prompt += "\\n\\n" + question.rendered_choices()

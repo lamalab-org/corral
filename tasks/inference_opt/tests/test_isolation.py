@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(
     reason="requires the real Docker trial permission boundary",
 )
 
-BENCHMARK = "mmlu_pro"
+BENCHMARK = "math_algebra"
 
 PROBING_POLICY = """
 import json, os, socket, sys
@@ -175,7 +175,7 @@ def test_tools_run_the_policy_jailed_through_corrals_executor(monkeypatch):
         "inference_opt.runner.backend_for", lambda *args: MockBackend("ANSWER: A")
     )
     base = tempfile.mkdtemp(prefix="inference-opt-executor-", dir="/workspace")
-    environment = create_environments(level=1, work_dir=base)["mmlu_pro_a"].for_task(
+    environment = create_environments(level=1, work_dir=base)["math_algebra_a"].for_task(
         "executor-test"
     )
     workspace = Path(environment.workspace_path)

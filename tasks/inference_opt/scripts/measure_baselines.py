@@ -1,26 +1,29 @@
-"""Measure zero-shot baselines and write them into task definitions.
+"""Measure each student's zero-shot baseline on the frozen question set.
 
-Needs a running vLLM server. Writes the baselines artifact, prints the headroom
-table, and with ``--write-tasks`` patches the ``baselines`` fields in the task
-JSONs, which ship as placeholder zeros until this has been run.
+The baseline is the pinned zero-shot policy in ``inference_opt/baselines.py``:
+one call per question with Inspect's MATH prompt, temperature 0, seed 0 and at
+most 8192 tokens, graded by the same scorer as every policy run.
 
-    uv run python scripts/measure_baselines.py \\
-        --model student_a=vllm/Qwen/Qwen3.5-9B \\
-        --model student_b=vllm/Qwen/Qwen3-8B \\
-        --base-url student_a=http://127.0.0.1:8086/v1 \\
-        --base-url student_b=http://127.0.0.1:8085/v1 --write-tasks
-
-``--base-url`` takes either one URL shared by every model or ``name=url`` per
-model. Models are measured in parallel; ``--runs-per-model`` additionally runs
-several benchmark/split evaluations side by side against the same server.
-
-The agent is shown the **train** baseline; the scorer subtracts the **test**
-baseline. Showing the test number would leak how hard the held-out split is.
+Train and test are measured together and written to
+``inference_opt/data/baselines/<version>.json``; results for students not in
+this run are kept. ``scripts/generate_tasks.py`` reads the task baselines from
+that file. The agent is shown the train baseline; the scorer uses the test one.
 
 ``--splits examples`` instead records each student's reply to the example
-questions, which the agent sees when it reveals them, in
-``inference_opt/data/baselines/examples_v1.jsonl``. Rows for other models and
-benchmarks are kept.
+questions in ``inference_opt/data/baselines/examples_<version>.jsonl``, which
+the agent sees when it reveals them. Rows for other students are kept.
+
+    export OPENROUTER_API_KEY=...
+    uv run python scripts/measure_baselines.py \\
+        --model student_a=openrouter/qwen/qwen-2.5-7b-instruct@phala \\
+        --model student_d=openrouter/mistralai/ministral-3b-2512@mistral \\
+        --runs-per-model 2
+    uv run python scripts/measure_baselines.py ... --splits examples
+
+A vLLM student is given as ``name=vllm/<served model>`` with
+``--base-url name=http://host:port/v1``. Students are measured in parallel;
+``--runs-per-model`` sets how many benchmark/split evaluations run side by
+side for one student.
 """
 
 from __future__ import annotations
@@ -61,29 +64,6 @@ def _parse_base_urls(values: list[str], models: dict[str, str]) -> dict[str, str
         else:
             shared = value.strip()
     return {model: per_model.get(model, shared) for model in models}
-
-
-def _patch_tasks(level: int, measured: dict, specs: dict[str, str]) -> int:
-    directory = ROOT / "environments" / f"level_{level}" / "tasks_json"
-    paths = sorted(directory.glob("task_*.json"))
-    tasks = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
-    patched = 0
-    for task in tasks:
-        config = task["initial_input"]
-        benchmark = config["benchmark"]
-        for model in config["models"]:
-            # The baselines are only valid against the deployment they measured.
-            if model in specs:
-                config.setdefault("model_specs", {})[model] = specs[model]
-            entry = measured.get(model, {}).get(benchmark)
-            if not entry:
-                continue
-            config["baselines"][model] = entry["test"]["accuracy"]
-            config["baselines_train"][model] = entry["train"]["accuracy"]
-            patched += 1
-    for path, task in zip(paths, tasks, strict=True):
-        path.write_text(json.dumps(task, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return patched
 
 
 def _write_example_baselines(results: dict, models: dict[str, str]) -> Path:
@@ -131,8 +111,8 @@ def main() -> None:
                         choices=["train", "test", "examples"],
                         help="train and test are measured together; examples on its own")
     parser.add_argument("--out", type=Path,
-                        default=ROOT / "inference_opt" / "data" / "baselines" / "v1.json")
-    parser.add_argument("--write-tasks", action="store_true")
+                        default=ROOT / "inference_opt" / "data" / "baselines"
+                        / f"{datasets.DATASET_VERSION}.json")
     parser.add_argument("--max-connections", type=int, default=8,
                         help="concurrent requests per evaluation run")
     parser.add_argument("--runs-per-model", type=int, default=1,
@@ -242,11 +222,6 @@ def main() -> None:
         encoding="utf-8",
     )
     print(f"\nwrote {args.out}")
-
-    if args.write_tasks:
-        for level in (1, 2):
-            count = _patch_tasks(level, measured, models)
-            print(f"level {level}: patched {count} baseline entries")
 
 
 if __name__ == "__main__":

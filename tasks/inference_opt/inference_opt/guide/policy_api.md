@@ -14,9 +14,19 @@ class Policy:
 Everything else can be defined by you: the order of questions, what is sent side by side, what is remembered between questions, and how the call budget is spread.
 Keep any state you need in ordinary Python variables.
 
-Answers are text ending in `ANSWER: <answer>`, or `[ANSWER]<answer>[/ANSWER]` for ChemBench.
-A ChemBench multiple-choice question may have one or more correct options, and nothing says how many: answer with every correct letter, separated by commas (`[ANSWER]A,C[/ANSWER]`); only the exact set counts.
-You can also give `Answer(final=...)` from `inference_opt.api`, which adds the right marker. `inference_opt.api` is the only `inference_opt` module a policy may import.
+## How answers are graded
+
+Answers are graded exactly as Inspect's MATH eval grades them (`expression_exact_match_sympy` in `inspect_evals`):
+
+- The answer is read from a line `ANSWER: <answer>`, and that line must be the last line of the text.
+- It is normalised and compared with the gold answer using sympy, so `ANSWER: \frac{1}{2}` and `ANSWER: 0.5` are the same answer.
+- Text with no final `ANSWER:` line is wrong, even if it contains the right answer, for example in `\boxed{...}`.
+
+Gold answers are numbers or expressions such as `\frac{3}{4}` or `1+2\sqrt{3}`.
+`question.answer_type` is `"text"` for every question, so it does not say which.
+
+You can also record `Answer(final=...)` from `inference_opt.api`, which writes the `ANSWER:` line for you.
+`inference_opt.api` is the only `inference_opt` module a policy may import.
 
 ## Calling the student
 
@@ -62,9 +72,9 @@ A later answer for the same question replaces the earlier one, and a question ne
 
 ## Question
 
-`question` has `id`, `text`, `benchmark`, `answer_type`, `choices`,
-`choice_labels`, `topic`, `index`, and `total`. Use
-`question.rendered_choices()` for multiple-choice prompts.
+`question` has `id`, `text`, `benchmark`, `answer_type`, `choices`, `choice_labels`, `topic`, `index` and `total`.
+`topic` is the MATH subject, and `index` and `total` give its position in the run.
+`choices` and `choice_labels` are `None`: MATH questions have no options.
 
 ## The context
 
