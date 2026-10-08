@@ -116,12 +116,14 @@ def load_tasks_from_json(json_path: str | Path) -> dict[str, TaskDefinition]:
 def create_environments(
     task_json_path: str | Path,
     taskgroup_common_tools: dict[str, Tool] | None = None,
+    work_dir: str = "",
 ) -> dict[str, Environment]:
     """Create environments for tasks defined in a JSON file
 
     Args:
         task_json_path: Path to the JSON file with task definitions
         taskgroup_common_tools: dictionary of Tools which are common for subtasks, for example file system tools
+        work_dir: Base directory for isolated task workspaces, supplied by the runtime.
     Returns:
         dictionary of environments keyed by task ID
     """
@@ -147,6 +149,7 @@ def create_environments(
         tasks = load_tasks_from_json(task_json_path)
         environments = build_environments(
             tasks,
+            base_work_dir=work_dir,
             name=name,
             toolset=Toolset(
                 pool=create_tools(),
