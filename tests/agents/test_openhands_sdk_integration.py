@@ -36,6 +36,7 @@ from corral.agents.openhands import (
 from corral.backend.mcp import open_mcp_host
 from corral.core.tool import ToolResponse
 from corral.core.tool_catalog import ToolCatalogSnapshot
+from corral.orchestration.parameters import model_parameter_metadata
 
 
 def test_action_arguments_reads_real_mcp_tool_action_data():
@@ -86,7 +87,7 @@ def test_invalid_tool_timeout_is_rejected(timeout):
         OpenHandsAgent(tool_timeout_s=timeout)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"])
 @pytest.mark.parametrize("tool_timeout", [1202, 1800])
 async def test_real_mcp_call_uses_configured_transport_and_executor_timeouts(
@@ -160,6 +161,15 @@ def test_reasoning_effort_is_applied_to_real_llm():
     # Unset defers to the SDK's own default rather than pinning a value here.
     default_llm = OpenHandsAgent(model="openai/gpt-5.6", api_key="x")._make_llm()
     assert default_llm.reasoning_effort == "high"
+    metadata = model_parameter_metadata(
+        OpenHandsAgent(model="openai/gpt-5.6"), model="openai/gpt-5.6"
+    )
+    assert metadata["reasoning_effort"] == default_llm.reasoning_effort
+    assert metadata["temperature"] == default_llm.temperature
+    assert metadata["parameter_sources"] == {
+        "temperature": "agent",
+        "reasoning_effort": "sdk_default",
+    }
 
 
 def test_invalid_reasoning_effort_is_rejected_by_sdk():

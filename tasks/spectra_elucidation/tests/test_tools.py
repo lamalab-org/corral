@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from spectra_elucidation.tools import (
+    NMRSHIFTDB2_DATABASE_PATH,
     carbon_nmr_spectra,
     get_formula_from_smiles,
     hsqc_nmr_spectra,
@@ -233,6 +234,7 @@ class TestSearchBySmiles:
         assert call_kwargs["query"] == "CCO"
         assert call_kwargs["top_k"] == 10
         assert call_kwargs["collection_name"] == "nmrshiftdb2"
+        assert call_kwargs["path"] == NMRSHIFTDB2_DATABASE_PATH
         assert call_kwargs["chemical_model"] == "ibm-research/MoLFormer-XL-both-10pct"
 
         # Check the result - tool decorator converts to string

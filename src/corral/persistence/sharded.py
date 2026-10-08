@@ -124,6 +124,10 @@ class ExecutionShard:
         )
         self._view = self._store.for_execution(execution_id)
 
+    @property
+    def path(self) -> Path:
+        return self._store.path
+
     async def aclose(self) -> None:
         await self._store.aclose()
 

@@ -17,6 +17,10 @@ from pathlib import Path
 
 import numpy as np
 
+# Isolated Python omits the script directory. Add only the installed trusted
+# code directory, never the submitted evidence or the writable working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 
 def file_hash(path):
     digest = hashlib.sha256()
@@ -270,8 +274,9 @@ def calculate(job, assets, evidence_root, cache=None):
         # This process and its entire sandbox are discarded after this one job.
         # There are no labels, expected predictions, scripts or credentials here.
         import pickle
-        from sklearn.pipeline import Pipeline
+
         from sklearn.linear_model import Ridge
+        from sklearn.pipeline import Pipeline
 
         path = Path(evidence_root) / parameters["checkpoint"]
         if (
@@ -372,7 +377,7 @@ def calculate(job, assets, evidence_root, cache=None):
                     value = value[0]
                 value = array(value).reshape(3 * len(atoms), 3 * len(atoms))
                 if postprocess is not None:
-                    from ground_truth import postprocess_hessian  # noqa: PLC0415
+                    from ground_truth import postprocess_hessian
 
                     value = postprocess_hessian(value, postprocess[index])
                 result[name] = value.tolist()

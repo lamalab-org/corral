@@ -209,14 +209,18 @@ class WorkflowScorer:
 def check_level2_workflow(
     task_number: int, verification_backend: str | None = None
 ) -> WorkflowScorer:
-    """Use isolated verification by default for Level 2 silver; allow overrides."""
+    """Use trusted readers for silicon restarts and verification for silver."""
     backend = verification_backend or os.getenv(
-        "CORRAL_MD_VERIFICATION", "modal" if task_number == 3 else "offline"
+        "CORRAL_MD_VERIFICATION", "modal" if task_number in (1, 3) else "offline"
     )
     if backend == "offline":
         return WorkflowScorer(task_number, level=2)
     if backend != "modal":
         raise ValueError("verification_backend must be 'offline' or 'modal'")
+    if task_number == 1:
+        from corral_md.workflow_scoring.restart_reader import ModalRestartReader
+
+        return WorkflowScorer(task_number, level=2, restart_reader=ModalRestartReader())
 
     from corral_md.workflow_scoring.verification import ModalVerifier
 

@@ -40,6 +40,12 @@ def _load_legacy_script():
 
 run_tool_calling = _load_legacy_script()
 
+
+@pytest.fixture(autouse=True)
+def _disable_langfuse_by_default(monkeypatch):
+    monkeypatch.setenv("CORRAL_LANGFUSE_ENABLED", "false")
+
+
 EXPECTED_AGENTS = (
     "ai-scientist",
     "claude-code",
@@ -265,7 +271,7 @@ def test_benchmark_parser_has_safe_docker_defaults():
     assert args.sandbox_memory == "4g"
     assert args.sandbox_pids_limit == 256
     assert args.sandbox_network == "bridge"
-    assert args.keep_sandboxes == "never"
+    assert args.keep_sandboxes == "on-failure"
     assert args.state_dir == ".corral/runs"
     assert args.max_parallel == 4
     assert args.max_parallel_evaluations is None
@@ -279,13 +285,16 @@ def test_legacy_benchmark_namespace_also_defaults_to_docker():
     assert sandbox.mode == "docker"
     assert sandbox.docker is not None
     assert sandbox.docker.image == "corral-benchmark:latest"
+    assert sandbox.docker.retention == "on-failure"
 
 
 @pytest.mark.parametrize("environment", cli.ENVIRONMENT_NAMES)
+@pytest.mark.parametrize("langfuse", [False, True])
 @pytest.mark.parametrize(
     ("agent", "options", "extra"),
     [
         ("react", {}, ""),
+        ("tool-calling", {}, ""),
         ("claude-code", {}, "claude"),
         ("codex", {}, "codex"),
         ("openhands", {}, "openhands"),
@@ -293,8 +302,11 @@ def test_legacy_benchmark_namespace_also_defaults_to_docker():
     ],
 )
 def test_benchmark_selects_image_task_and_extra_for_environment_and_harness(
-    monkeypatch, environment, agent, options, extra
+    monkeypatch, environment, agent, options, extra, langfuse
 ):
+    monkeypatch.setenv("CORRAL_LANGFUSE_ENABLED", str(langfuse).lower())
+    if langfuse:
+        extra = f"{extra},langfuse" if extra else "langfuse"
     monkeypatch.setattr(
         cli,
         "load_environment_group",
@@ -303,13 +315,15 @@ def test_benchmark_selects_image_task_and_extra_for_environment_and_harness(
     args = cli.build_parser().parse_args(
         ["bench", "--agent", agent, "--environment", environment]
     )
-    image_kind = "wetlab" if environment == "wetlab" else "benchmark"
+    image_kind = environment if environment in {"stargazer", "wetlab"} else "benchmark"
 
     class PreflightChecked(Exception):
         pass
 
     async def preflight(spec, **kwargs):
-        assert spec.image == f"corral-{environment}:{extra or 'latest'}"
+        assert (
+            spec.image == f"corral-{environment}:{extra.replace(',', '-') or 'latest'}"
+        )
         assert spec.registry_module is None
         assert (
             kwargs["dockerfile"]
@@ -330,7 +344,7 @@ def test_benchmark_selects_image_task_and_extra_for_environment_and_harness(
 
 
 @pytest.mark.parametrize("build", [False, True])
-@pytest.mark.parametrize("environment", ["samplemath", "wetlab"])
+@pytest.mark.parametrize("environment", ["samplemath", "stargazer", "wetlab"])
 def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environment):
     monkeypatch.setattr(
         cli,
@@ -356,7 +370,9 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
     async def preflight(spec, **kwargs):
         assert spec.image == "custom:test"
         if build:
-            image_kind = "wetlab" if environment == "wetlab" else "benchmark"
+            image_kind = (
+                environment if environment in {"stargazer", "wetlab"} else "benchmark"
+            )
             assert kwargs["dockerfile"].name == f"{image_kind}.Dockerfile"
             assert kwargs["build_context"] == kwargs["dockerfile"].parent.parent
             assert kwargs["build_args"] == {
@@ -374,20 +390,39 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
         asyncio.run(cli.run_benchmark(args))
 
 
-@pytest.mark.parametrize("agent", ["claude-code", "codex", "openhands", "reflexion"])
 @pytest.mark.parametrize(
-    ("model_args", "expected_model"),
+    "agent", ["ai-scientist", "claude-code", "codex", "openhands", "reflexion"]
+)
+@pytest.mark.parametrize("max_iterations", [None, 7])
+@pytest.mark.parametrize(
+    ("model_args", "expected_model", "expected_effort"),
     [
-        ([], None),
-        (["--agent-kwargs", '{"model": "kwargs-model"}'], "kwargs-model"),
+        ([], None, None),
         (
-            ["--model", "explicit-model", "--agent-kwargs", '{"model": "ignored"}'],
+            ["--agent-kwargs", '{"model": "kwargs-model", "reasoning_effort": "none"}'],
+            "kwargs-model",
+            "none",
+        ),
+        (
+            [
+                "--model",
+                "explicit-model",
+                "--agent-kwargs",
+                '{"model": "ignored", "reasoning_effort": "low"}',
+            ],
             "explicit-model",
+            "low",
         ),
     ],
 )
 def test_docker_benchmark_does_not_import_agent_on_host(
-    monkeypatch, tmp_path, agent, model_args, expected_model
+    monkeypatch,
+    tmp_path,
+    agent,
+    max_iterations,
+    model_args,
+    expected_model,
+    expected_effort,
 ):
     environments = {"task1": _environment("task1")}
     monkeypatch.setattr(cli, "load_environment_group", lambda *a, **kw: environments)
@@ -404,8 +439,13 @@ def test_docker_benchmark_does_not_import_agent_on_host(
     async def container_run(self, request, *, observation_context=None):
         requests.append(request)
         # Substitute a deterministic agent for the container's SDK execution.
+        container_agent = SubmitAgent()
+        container_agent.temperature = 0.7
+        container_agent.reasoning_effort = (
+            request.agent_runtime.reasoning_effort or "high"
+        )
         registry = cli.orchestration.RuntimeRegistry(
-            agents={request.agent_id: SubmitAgent()}, environments=environments
+            agents={request.agent_id: container_agent}, environments=environments
         )
         try:
             launcher = LocalTaskLauncher(self.state_store, registry, LoggingObserver())
@@ -430,6 +470,11 @@ def test_docker_benchmark_does_not_import_agent_on_host(
             "--output-dir",
             str(tmp_path),
             *model_args,
+            *(
+                []
+                if max_iterations is None
+                else ["--max-iterations", str(max_iterations)]
+            ),
         ]
     )
     options = {"actor": "ClaudeCodeAgent"} if agent == "reflexion" else {}
@@ -440,11 +485,24 @@ def test_docker_benchmark_does_not_import_agent_on_host(
     assert request.sandbox.mode == "docker"
     assert request.model == expected_model
     assert request.agent_runtime.name == agent
+    assert request.max_iterations == (
+        max_iterations
+        if max_iterations is not None
+        else (100 if agent == "ai-scientist" else 50)
+    )
     assert request.agent_runtime.model == expected_model
+    assert request.agent_runtime.reasoning_effort == expected_effort
     assert request.agent_runtime.options == {**args.agent_kwargs, **options}
     (report_path,) = tmp_path.rglob("report.json")
     report = json.loads(report_path.read_text())
     assert report["metadata"]["model"]["by_task"] == {"task1": expected_model}
+    runtime = report["metadata"]["agent"]["by_task"]["task1"]["runtime"]
+    assert runtime["reasoning_effort"] == (expected_effort or "high")
+    assert runtime["temperature"] == 0.7
+    assert runtime["parameter_sources"] == {
+        "temperature": "agent",
+        "reasoning_effort": "explicit" if expected_effort is not None else "agent",
+    }
     if expected_model is None:
         assert "__model-default__" in report_path.parent.name
 
@@ -518,9 +576,27 @@ def test_run_rejects_task_dependencies(monkeypatch):
 
 
 @pytest.mark.parametrize("agent_class", [SubmitAgent, FailingAgent])
+@pytest.mark.parametrize(
+    ("agent_name", "default_limit"), [("ai_scientist", 100), ("react", 50)]
+)
+@pytest.mark.parametrize("max_iterations", [None, 7])
 def test_run_executes_one_task_without_a_benchmark(
-    monkeypatch, tmp_path, capsys, agent_class
+    monkeypatch,
+    tmp_path,
+    capsys,
+    agent_class,
+    agent_name,
+    default_limit,
+    max_iterations,
 ):
+    iteration_limits = []
+    original_execute = cli.execute_task
+
+    async def record_execute(**kwargs):
+        iteration_limits.append(kwargs["task"].max_iterations)
+        return await original_execute(**kwargs)
+
+    monkeypatch.setattr(cli, "execute_task", record_execute)
     monkeypatch.setattr(
         cli,
         "load_environment_group",
@@ -531,7 +607,7 @@ def test_run_executes_one_task_without_a_benchmark(
         [
             "run",
             "--agent",
-            "react",
+            agent_name,
             "--environment",
             "samplemath",
             "--task",
@@ -540,11 +616,19 @@ def test_run_executes_one_task_without_a_benchmark(
             "cli-direct-task",
             "--commit-file",
             str(tmp_path / "run-commits.sqlite3"),
+            *(
+                []
+                if max_iterations is None
+                else ["--max-iterations", str(max_iterations)]
+            ),
         ]
     )
 
     result = asyncio.run(cli.run_task(args))
 
+    assert iteration_limits == [
+        default_limit if max_iterations is None else max_iterations
+    ]
     failed = agent_class is FailingAgent
     assert result == int(failed)
     output = capsys.readouterr().out
@@ -602,11 +686,42 @@ def test_legacy_script_defaults():
 
     assert args.model == "openai/gpt-5.6-terra"
     assert args.temperature == 1.0
-    assert args.max_iterations == 20
+    assert args.max_iterations == 50
     assert args.sandbox is None
+    assert args.keep_sandboxes == "on-failure"
     assert args.agent_kwargs == {}
     assert args.trials == 1
     assert args.max_parallel == 5
+
+
+def test_legacy_script_accepts_docker_resume_limits():
+    args = run_tool_calling.build_parser().parse_args(
+        [
+            "--environment",
+            "stargazer",
+            "--sandbox",
+            "docker",
+            "--sandbox-image",
+            "corral-stargazer:test",
+            "--sandbox-memory",
+            "12g",
+            "--sandbox-cpus",
+            "4",
+            "--sandbox-pids-limit",
+            "512",
+            "--keep-sandboxes",
+            "always",
+            "--run-id",
+            "existing-run",
+        ]
+    )
+    spec = cli._sandbox_profile(args).docker
+    assert spec.image == "corral-stargazer:test"
+    assert spec.memory == "12g"
+    assert spec.cpus == 4
+    assert spec.pids_limit == 512
+    assert spec.retention == "always"
+    assert args.run_id == "existing-run"
 
 
 def test_legacy_script_uses_local_sandbox_for_md(monkeypatch):

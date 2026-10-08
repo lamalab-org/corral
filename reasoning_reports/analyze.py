@@ -152,7 +152,7 @@ ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
     ),
     "uninformative_test": ("Test produces no observed evidence [T with no E]."),
     "fixed_belief_trace": (
-        "No hypothesis revision in the entire trace " "[No updates_to edges in trace]."
+        "No hypothesis revision in the entire trace [No updates_to edges in trace]."
     ),
     "disconnected_evidence": ("Evidence node with no edges [Isolated E]."),
     "one_sided_confirmation": (

@@ -90,7 +90,13 @@ class TaskScorer:
     scorer_version: str | None = None
 
     def evaluate(self, state: ExecutionState) -> EvaluationResult:
-        """Evaluate a successful runtime output and leave the projection unchanged."""
+        """Grade the final projection with matching protocol and bank versions."""
+        if (
+            self.task.execution_version is not None
+            and state.task.metadata.get("execution_version")
+            != self.task.execution_version
+        ):
+            raise ValueError("Cannot grade a different execution protocol or task bank")
         if state.submission is None or state.runtime.status == "surrendered":
             raise ValueError(
                 "only a completed, non-surrendered submission can be evaluated"
@@ -120,7 +126,9 @@ class TaskScorer:
             commit_hash=commit_hash,
             score=score,
             metrics={"score": score},
-            scorer_version=self.scorer_version or _callable_version(self.task),
+            scorer_version=self.scorer_version
+            or self.task.scorer_version
+            or _callable_version(self.task),
             feedback=details.feedback if details else None,
             metadata=details.metadata if details else {},
         )

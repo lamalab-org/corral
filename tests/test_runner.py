@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from corral.agents.ai_scientist import AIScientistAgent
+from corral.agents.tool_calling import ToolCallingAgent
 from corral.core import submit_answer_action
 from corral.core.environment import Environment, Toolset
 from corral.core.state import (
@@ -20,13 +22,14 @@ from corral.orchestration import (
     BenchmarkInput,
     EnvironmentRuntimeDefinition,
     EvaluationRef,
+    RuntimeRegistry,
     StateRef,
     TaskExecutionResult,
 )
 from corral.run import BenchmarkTaskMetadata, CorralRunner
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -192,6 +195,45 @@ def test_runner_infers_metadata_from_environments_by_default():
     }
 
 
+@pytest.mark.parametrize(
+    ("agent_class", "default_limit"), [(AIScientistAgent, 100), (ToolCallingAgent, 50)]
+)
+@pytest.mark.parametrize("max_iterations", [None, 7])
+@pytest.mark.parametrize("explicit_metadata", [False, True])
+def test_runner_resolves_iteration_budget_for_arbitrary_agent_id(
+    agent_class, default_limit, max_iterations, explicit_metadata
+):
+    environment = _environment("task")
+    registry = RuntimeRegistry(
+        agents={"experimenter": agent_class()}, environments={"task": environment}
+    )
+    options = (
+        {
+            "tasks": {
+                "task": BenchmarkTaskMetadata(
+                    agent_id="experimenter",
+                    environment_id="task",
+                    max_iterations=max_iterations,
+                )
+            }
+        }
+        if explicit_metadata
+        else {
+            "environments": {"task": environment},
+            "agent_id": "experimenter",
+            "max_iterations": max_iterations,
+        }
+    )
+    try:
+        runner = CorralRunner(registry, state_store=None, **options)
+        request = runner.build_input("defaults")
+        assert request.max_iterations_by_task == {
+            "task": default_limit if max_iterations is None else max_iterations
+        }
+    finally:
+        registry.close()
+
+
 def test_runner_requires_one_metadata_source():
     result = BenchmarkExecutionResult("benchmark", (), 1, ())
     executor = RecordingExecutor(result)
@@ -328,7 +370,7 @@ def test_runner_includes_dependencies_by_default():
     assert request.task_ids == ("upstream", "downstream")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_invalid_reporting_metadata_does_not_start_benchmark():
     result = BenchmarkExecutionResult("benchmark", ("upstream",), 1, ())
     executor = RecordingExecutor(result)
@@ -343,7 +385,7 @@ async def test_invalid_reporting_metadata_does_not_start_benchmark():
     assert executor.requests == []
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_runner_delegates_once_and_projects_state_for_reporting():
     state = _submitted_state()
     state_ref = StateRef(
@@ -427,6 +469,7 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
             "model": "model-a",
             "api_endpoint": None,
             "temperature": None,
+            "reasoning_effort": None,
             "options": {"api_key": "[REDACTED]", "seed": 7},
         },
     }
@@ -444,7 +487,7 @@ async def test_runner_delegates_once_and_projects_state_for_reporting():
     assert report.metadata["benchmark"]["max_parallel_evaluations_by_environment"] == {}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_unreachable_trials_project_without_loading_state():
     workflow_result = BenchmarkExecutionResult(
         benchmark_run_id="benchmark-2",

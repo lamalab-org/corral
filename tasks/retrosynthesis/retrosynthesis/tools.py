@@ -24,7 +24,7 @@ from corral.core.tool import Tool, tool
 
 
 # TODO: Include reaction type in the search_template_catalog tool
-@tool
+@tool(trusted=True)
 def search_template_catalog_by_criteria(
     molecule_smiles: str,
     functional_groups_broken: list[str] | None = None,
@@ -241,7 +241,7 @@ def search_template_catalog_by_criteria(
     )
 
 
-@tool
+@tool(trusted=True)
 def get_template(template_id: str) -> str:
     """[BRIEF] Retrieves a retrosynthetic template and other information by its ID. [/BRIEF]
 
@@ -361,7 +361,7 @@ def get_available_functional_groups() -> str:
     return str(FUNCTIONAL_GROUPS)
 
 
-@tool
+@tool(trusted=True)
 def apply_template(
     molecule_smiles: str, template_id: str
 ) -> tuple[tuple[str, ...], ...]:
@@ -440,7 +440,7 @@ def apply_template(
     return apply_template_retro(molecule_smiles, template_id)
 
 
-@tool
+@tool(trusted=True)
 def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -> bool:
     """
     [BRIEF] Verifies if a retrosynthetic step is valid. This tool might fail for intramolecular reactions. [/BRIEF]
@@ -602,9 +602,14 @@ def verify_route(route: str) -> tuple[bool, str]:
         return False, f"Unexpected error: {e!s}"
 
 
-@tool
+@tool(
+    hidden_args=["buyables_database"],
+    resources=("buyables_database",),
+)
 def search_catalog_by_smiles(
-    smiles_list: list[str], limit: int = 5
+    smiles_list: list[str],
+    limit: int = 5,
+    buyables_database: str | None = None,
 ) -> dict[str, list[dict[str, Any]]] | str:
     """
     [BRIEF] Searches a catalog for available precursors. [/BRIEF]
@@ -670,7 +675,7 @@ def search_catalog_by_smiles(
     - Matching is an exact canonical-SMILES lookup; partial matches and synonyms are not supported.
     [/LIMITATIONS]
     """
-    chemicals = check_price(smiles_list, limit)
+    chemicals = check_price(smiles_list, limit, db_path=buyables_database)
     if any(chemicals.values()):
         return chemicals
 
@@ -678,8 +683,13 @@ def search_catalog_by_smiles(
     return f"No chemicals available in the catalogue with SMILES {quoted_smiles}."
 
 
-@tool
-def is_buyable(smiles_list: list[str]) -> list[bool]:
+@tool(
+    hidden_args=["buyables_database"],
+    resources=("buyables_database",),
+)
+def is_buyable(
+    smiles_list: list[str], buyables_database: str | None = None
+) -> list[bool]:
     """
     [BRIEF] Checks if a list of molecules are commercially available. [/BRIEF]
 
@@ -739,7 +749,7 @@ def is_buyable(smiles_list: list[str]) -> list[bool]:
     - Matching is an exact canonical-SMILES lookup.
     [/LIMITATIONS]
     """
-    return _is_buyable(smiles_list)
+    return _is_buyable(smiles_list, db_path=buyables_database)
 
 
 @tool
@@ -1095,7 +1105,7 @@ def map_reaction_smiles(reaction_smiles: str) -> str:
     return results[0]["mapped_rxn"]
 
 
-@tool
+@tool(trusted=True)
 def check_smiles_reaction_template_matching(smiles: str, template_id: str) -> bool:
     """[BRIEF] Checks if the SMARTS of a reaction template matches any substructure in the given SMILES. [/BRIEF]
 

@@ -1,6 +1,7 @@
 """Portable checks for the data allowed to cross the worker boundary."""
 
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -15,17 +16,22 @@ from corral.core.state import EnvironmentState, ExecutionState
 from corral.core.task import TaskDefinition
 from corral.core.tool import tool
 from corral.core.transition import ToolExecutionResult
-from corral.runtime import permissions
+from corral.runtime import agent_worker, permissions
 from corral.runtime.agent_worker import RemoteSession, _snapshot
+from corral.runtime.tool_execution import (
+    PreparedToolCall,
+    execute_prepared_background_call,
+)
+from corral.tools.python_repl import create_python_repl_tool
 from corral.workspace import WorkspaceFilesystem, build_terminal_tool
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_planner_delegates_without_reopening_packaged_prompts(monkeypatch):
     planner = LLMPlanner(model="offline-test")
     payload = permissions.serialize(planner)
@@ -75,7 +81,7 @@ async def test_planner_delegates_without_reopening_packaged_prompts(monkeypatch)
         await session._test_commit_store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_agent_snapshot_contains_no_private_projection():
     secret = str(uuid4())
     task = TaskDefinition(
@@ -113,7 +119,7 @@ async def test_agent_snapshot_contains_no_private_projection():
         await session._test_commit_store.aclose()
 
 
-@pytest.fixture()
+@pytest.fixture
 def private_state():
     return ExecutionState(
         execution_id="private",
@@ -136,10 +142,31 @@ def test_serialization_rejects_private_objects_in_agent_closures(private_state):
         permissions.serialize({"nested": [private_state]})
 
 
+def test_run_worker_defaults_to_no_workspace_access(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    accesses = []
+
+    def run(kind, payload, assigned_workspace, workspace_fd, **kwargs):
+        del payload, workspace_fd
+        assert assigned_workspace == str(workspace)
+        accesses.append((kind, kwargs["workspace_access"]))
+        return {"kind": kind}, {}
+
+    monkeypatch.setattr(permissions, "_enabled", True)
+    monkeypatch.setattr(permissions, "_root", tmp_path)
+    monkeypatch.setattr(permissions, "_run_worker", run)
+
+    assert permissions.run_worker("tool", object(), str(workspace)) == {"kind": "tool"}
+    assert permissions.run_worker("agent", object(), str(workspace)) == {
+        "kind": "agent"
+    }
+    assert accesses == [("tool", "none"), ("agent", "scratch")]
+
+
 def test_shell_payload_is_only_command_options(tmp_path, private_state, monkeypatch):
     terminal = build_terminal_tool(WorkspaceFilesystem(tmp_path))
     terminal.accidentally_captured_state = private_state
-    environment = SimpleNamespace(workspace_path=str(tmp_path), private=private_state)
     requests = []
 
     def run(kind, payload, workspace, **kwargs):
@@ -148,9 +175,7 @@ def test_shell_payload_is_only_command_options(tmp_path, private_state, monkeypa
 
     monkeypatch.setattr(permissions, "run_worker", run)
     assert (
-        permissions.execute_tool(
-            environment, private_state, terminal, {"command": "pwd"}
-        )
+        permissions.execute_restricted_tool(terminal, {"command": "pwd"}, str(tmp_path))
         == "public output"
     )
     assert requests == [("terminal", {"command": "pwd"}, str(tmp_path))]
@@ -174,13 +199,17 @@ def test_untrusted_tools_with_private_inputs_fail_closed(
     arguments = {"code": "print('public')", "secret": str(uuid4())}
     with pytest.raises(PermissionError, match="cannot receive hidden arguments"):
         if background:
-            permissions.execute_job(private_code_tool, arguments, str(tmp_path))
+            execute_prepared_background_call(
+                PreparedToolCall.capture(
+                    private_code_tool,
+                    arguments,
+                    workspace=str(tmp_path),
+                    execution_kind="restricted",
+                )
+            )
         else:
-            permissions.execute_tool(
-                SimpleNamespace(workspace_path=str(tmp_path)),
-                None,
-                private_code_tool,
-                arguments,
+            permissions.execute_restricted_tool(
+                private_code_tool, arguments, str(tmp_path)
             )
 
 
@@ -195,13 +224,21 @@ def test_workspace_binding_is_rebuilt_without_private_inputs(tmp_path, monkeypat
 
     def run(kind, payload, workspace, **kwargs):
         assert secret.encode() not in permissions.serialize(payload)
-        assert payload[1] == {"work_dir": str(tmp_path)}
-        return {"content": str(tmp_path)}
+        assert payload[1] == {"work_dir": "/workspace"}
+        return {"content": "/workspace"}
 
     monkeypatch.setattr(permissions, "run_worker", run)
-    assert permissions.execute_job(
-        workspace_tool, {"work_dir": secret}, str(tmp_path)
-    ) == str(tmp_path)
+    assert (
+        execute_prepared_background_call(
+            PreparedToolCall.capture(
+                workspace_tool,
+                {"work_dir": secret},
+                workspace=str(tmp_path),
+                execution_kind="restricted",
+            )
+        )
+        == "/workspace"
+    )
 
 
 def test_public_schema_rejects_injected_hidden_arguments():
@@ -223,7 +260,9 @@ def test_background_result_cannot_publish_private_state(tmp_path):
         )
 
     with pytest.raises(ValueError, match="must execute in the foreground"):
-        permissions.execute_job(private_result, {}, str(tmp_path))
+        execute_prepared_background_call(
+            PreparedToolCall.capture(private_result, {}, workspace=str(tmp_path))
+        )
 
 
 def test_node_creation_and_copy_reject_symlink_ancestors(tmp_path):
@@ -242,3 +281,91 @@ def test_node_creation_and_copy_reject_symlink_ancestors(tmp_path):
         permissions.copy_workspace(nodes / "nested", destination)
     assert not list(destination.iterdir())
     assert (outside / "secret.txt").read_text() == "private data"
+
+
+def test_worker_response_ceiling_is_configurable(monkeypatch):
+    """The control-reply ceiling is tunable in either direction."""
+    monkeypatch.delenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", raising=False)
+    assert (
+        permissions.max_worker_response_bytes()
+        == permissions.DEFAULT_MAX_WORKER_RESPONSE_BYTES
+    )
+
+    monkeypatch.setenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", str(4 * 1024**3))
+    assert permissions.max_worker_response_bytes() == 4 * 1024**3
+    # The session channel carries snapshots, so it follows the same setting.
+    assert agent_worker._max_message() == 4 * 1024**3
+
+
+def test_bulk_ceiling_is_separate_and_larger_than_the_reply_ceiling(monkeypatch):
+    """Bulk payloads spool to disk, so they get their own, far higher ceiling.
+
+    Keeping them apart is what lets the reply ceiling stay small enough to be a
+    real memory guard while an environment's session grows as large as it needs.
+    """
+    monkeypatch.delenv("CORRAL_MAX_WORKER_BULK_BYTES", raising=False)
+    monkeypatch.delenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", raising=False)
+    assert (
+        permissions.max_worker_bulk_bytes() == permissions.DEFAULT_MAX_WORKER_BULK_BYTES
+    )
+    assert permissions.max_worker_bulk_bytes() > permissions.max_worker_response_bytes()
+
+    monkeypatch.setenv("CORRAL_MAX_WORKER_BULK_BYTES", str(2 * 1024**3))
+    assert permissions.max_worker_bulk_bytes() == 2 * 1024**3
+
+
+@pytest.mark.parametrize("value", ["nonsense", "0", "-1"])
+def test_bulk_ceiling_rejects_unusable_values(monkeypatch, value):
+    monkeypatch.setenv("CORRAL_MAX_WORKER_BULK_BYTES", value)
+    with pytest.raises(ValueError, match="CORRAL_MAX_WORKER_BULK_BYTES"):
+        permissions.max_worker_bulk_bytes()
+
+
+def test_control_reply_carries_a_length_prefix():
+    """The prefix is what lets the controller refuse a reply before reading it."""
+    framed = permissions.framed_reply({"ok": True, "result": {"content": "hello"}})
+    (length,) = permissions._REPLY_PREFIX.unpack(
+        framed[: permissions._REPLY_PREFIX.size]
+    )
+    body = framed[permissions._REPLY_PREFIX.size :]
+    assert length == len(body)
+    assert json.loads(body)["result"]["content"] == "hello"
+
+
+def test_send_bulk_refuses_when_no_channel_is_installed():
+    """Outside a worker there is no bulk descriptor, and that must not pass quietly."""
+    assert permissions._bulk_fd is None
+    with pytest.raises(RuntimeError, match="no bulk channel"):
+        permissions.send_bulk("checkpoint", "payload")
+
+
+def test_send_bulk_frames_name_and_payload(tmp_path):
+    """A record names its payload and states its length before the bytes."""
+    spool = tmp_path / "bulk"
+    descriptor = os.open(spool, os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        permissions.set_bulk_channel(descriptor)
+        permissions.send_bulk("checkpoint", "opaque-base64")
+    finally:
+        permissions.set_bulk_channel(None)
+        os.close(descriptor)
+    written = spool.read_bytes()
+    header = permissions._BULK_RECORD.size
+    name_length, length = permissions._BULK_RECORD.unpack(written[:header])
+    assert written[header : header + name_length] == b"checkpoint"
+    assert written[header + name_length :] == b"opaque-base64"
+    assert length == len(b"opaque-base64")
+
+
+@pytest.mark.parametrize("value", ["nonsense", "0", "-1"])
+def test_worker_response_ceiling_rejects_unusable_values(monkeypatch, value):
+    monkeypatch.setenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", value)
+    with pytest.raises(ValueError, match="CORRAL_MAX_WORKER_RESPONSE_BYTES"):
+        permissions.max_worker_response_bytes()
+
+
+def test_repl_tool_carries_its_own_response_ceiling():
+    """An environment can raise the ceiling without changing it globally."""
+    repl = create_python_repl_tool(name="PythonREPL", max_response_bytes=1024**3)
+    assert repl.max_response_bytes == 1024**3
+    assert create_python_repl_tool(name="PythonREPL").max_response_bytes is None

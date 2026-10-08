@@ -1,54 +1,33 @@
-# AFM Task Environment
+# AFM benchmarks with Corral
 
-This directory contains the atomic force microscopy task environment for Corral. It provides hardware-in-the-loop AFM benchmarks where agents configure scan parameters, capture `.nid` scans from a Nanosurf instrument, optimize image quality, and analyze the resulting images.
+Run agents against a Nanosurf atomic force microscope and score their saved scans. The benchmark has 20 independent tasks: ten in [level 1](environments/level_1/tasks_json/) requiring one image each, and ten in [level 2](environments/level_2/tasks_json/) requiring three images each.
 
-## Important Limitation
+From the repository root, with the workstation's AFM Python environment activated and API credentials configured, run these commands sequentially in **Windows Command Prompt (`cmd.exe`)** to execute the entire benchmark:
 
-This environment can only be run on a Windows machine that has the required AFM equipment and vendor software installed.
+```bat
+corral bench --agent tool-calling --environment afm --model openai/gpt-4o --env-kwargs "{\"level\": 1}" --sandbox local --trials 1 --max-parallel 1 --max-attempts 1 --output-dir .corral\afm-runs
+corral bench --agent tool-calling --environment afm --model openai/gpt-4o --env-kwargs "{\"level\": 2}" --sandbox local --trials 1 --max-parallel 1 --max-attempts 1 --output-dir .corral\afm-runs
+```
 
-- The task code uses the `nanosurf` Python API and Windows COM initialization.
-- The task expects access to a connected Nanosurf AFM instrument.
-- The current runner and helper scripts assume a lab workstation layout and local Windows paths.
+Keep `--sandbox local` for access to Nanosurf/COM. AFM enforces one task at a time within a process; use only one Corral process per instrument. These commands run one trial per task without automatic retries.
 
-This task is therefore not expected to run on macOS, Linux, or on machines that do not have the AFM hardware and supporting software stack already installed.
+Change `--agent`, `--model`, or `--trials` as needed. To run a specific task, add its full ID, such as `--task afm_experiment_level_1_task_1`, with the matching level.
 
 ## Setup
 
-Set up this environment only on the supported Windows workstation that has the AFM software stack installed.
-
-Typical requirements include:
-
-- A Windows Python environment for the AFM task.
-- The `nanosurf` package and its dependencies.
-- The vendor-side AFM control software and any required COM integrations.
-- Access to the physical AFM instrument used by the lab setup.
-
-The repository also includes Windows helper scripts:
-
-- `env.bat`: Opens a command shell in the AFM task environment.
-- `report.bat`: Opens a command shell in the AFM reports environment.
-
-## Inspect The Environment Definitions
-
-Build and list the AFM environment definitions from the supported Windows workstation after activating the correct environment:
+Use the Windows workstation's existing Python 3.11+ AFM environment and compatible Nanosurf/COM installation. AFM dependencies are declared in [pyproject.toml](pyproject.toml). Install the current Corral framework into that same environment and configure credentials and scan storage:
 
 ```bat
-cd tasks\afm\src
-python env.py
+cd /d C:\path\to\corral
+python -m pip install -e .
+set "OPENAI_API_KEY=your-api-key"
+set "CORRAL_WORK_DIR=C:\AFM\workspaces"
 ```
 
-The script reads these environment variables:
+Replace the checkout path and API key. Document retrieval requires `OPENAI_API_KEY` even when the agent uses another provider; configure that provider's credentials too. If `corral` is unavailable on PATH, use `python -m corral.cli`.
 
-- `LLM_MODEL`: Used to build the per-run output directory.
+## Results and scans
 
-## Task Layout
+Each benchmark command prints its output directory under `.corral\afm-runs`. Open `report.json` for scores and errors. Keep the complete run directory to retain execution histories and saved scan snapshots.
 
-- Benchmark task definitions are stored under `environments/level_1` through `environments/level_4`.
-- Both `tasks_json` and `subtasks_json` variants are included in the repository.
-- The current `src/env.py` entrypoint uses an internal workstation-specific configuration rather than a portable CLI for selecting level or mode.
-
-## Notes
-
-- AFM scans are saved as `.nid` files and are used directly for scoring and downstream image analysis.
-- Available task tools include document retrieval for AFM control snippets, direct code execution against the instrument, scan optimization, grain-level rescanning, and image analysis.
-- Because these tools can operate real hardware, this environment should only be used on the intended instrument workstation.
+Scans go into a separate task workspace under `CORRAL_WORK_DIR`, whose full path appears in the agent's prompt. Full Windows and UNC paths remain supported in submissions. Follow each task's submission format and save `.nid` files inside that workspace; evaluation reads the saved snapshots even if the original files are moved or removed.

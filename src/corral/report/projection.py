@@ -177,7 +177,13 @@ async def _project_trial(
     return TaskTrialResult(
         task_id=result.task_id,
         trial_id=result.execution_id,
-        score=evaluation.score if evaluation is not None else 0.0,
+        score=(
+            evaluation.score
+            if evaluation is not None
+            else None
+            if result.evaluation_error is not None
+            else 0.0
+        ),
         state=state_data,
         tool_statistics=_tool_statistics(state),
         output=output,

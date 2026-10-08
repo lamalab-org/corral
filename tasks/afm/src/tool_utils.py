@@ -18,7 +18,10 @@ embeddings = OpenAIEmbeddings(
     model="text-embedding-3-large",
 )
 
-db_new = Chroma(persist_directory="aila_db", embedding_function=embeddings)
+db_new = Chroma(
+    persist_directory=str(Path(__file__).resolve().parent / "aila_db"),
+    embedding_function=embeddings,
+)
 
 retriever_wo = db_new.as_retriever(
     search_type="similarity",

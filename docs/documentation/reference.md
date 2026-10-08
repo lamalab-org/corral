@@ -110,6 +110,49 @@ commit hash. Load the full projection with
 Agents and environments are registered with `RuntimeRegistry`. Benchmarks use
 the same function for every trial, then evaluate the persisted result.
 
+## Restricted worker limits
+
+Under Docker, agent and tool code runs in a restricted worker, and a worker
+hands back two kinds of thing on two separate descriptors. Control replies are
+JSON and stay small. Bulk payloads — a `PythonREPL` checkpoint, or anything else
+whose size follows the agent's data rather than its output — travel beside them
+and are spooled to a controller-private file as they arrive. Each channel has
+its own ceiling:
+
+| setting | default | bounds |
+| --- | --- | --- |
+| `CORRAL_MAX_WORKER_RESPONSE_BYTES` | 64 MiB | a worker's JSON control reply, and the session channel that carries state snapshots |
+| `CORRAL_MAX_WORKER_BULK_BYTES` | 1 GiB | one bulk payload, such as a REPL checkpoint |
+
+Both are read from the length prefix ahead of the body, so an oversize payload
+is refused before the controller allocates for it. That is what keeps the reply
+ceiling a memory-safety limit rather than a budget, and why it can stay low: an
+environment that holds a whole dataset in its REPL session is bounded by the
+bulk ceiling, which costs disk, not by the reply ceiling, which costs memory.
+Neither limit needs raising for an ordinary session; raise the bulk ceiling for
+an unusually large one, and lower the reply ceiling on a small host.
+`create_python_repl_tool(max_response_bytes=...)` overrides the reply ceiling
+for one tool, as `address_space_bytes` does for worker memory.
+
+A tool that runs in a worker can send a bulk payload itself with
+`permissions.send_bulk(name, payload)`, and the controller receives it from
+`permissions.run_worker_with_bulk(...)`, which returns the JSON result and a
+mapping of payload name to bytes. Prefer it to a large return value: a value
+returned the ordinary way is JSON-encoded and held whole in controller memory.
+
+Corral's launcher grants a trial container exactly the capabilities the worker
+needs — `SETUID`, `SETGID`, `CHOWN`, `DAC_OVERRIDE`, `KILL`, `SYS_ADMIN` and
+`SYS_CHROOT` over a `--cap-drop ALL` baseline, with `apparmor=unconfined` so the
+trusted bootstrap can build the worker filesystem. Running a trial image by hand
+needs the same grants, or the worker fails with `cannot create worker mount
+namespace`:
+
+```bash
+docker run --rm --cap-add SYS_ADMIN --security-opt apparmor=unconfined \
+  -e CORRAL_PERMISSION_TESTS=1 <image> \
+  python -m pytest tests/runtime/test_permissions.py
+```
+
 ## Core transition API
 
 The low-level transition boundary produces events and effects:

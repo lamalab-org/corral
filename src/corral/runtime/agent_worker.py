@@ -23,7 +23,17 @@ from corral.core.actors import ActorRef
 from corral.core.tool import ToolConnection, ToolResponse
 from corral.runtime import permissions
 
-_MAX_MESSAGE = 64 * 1024 * 1024
+
+def _max_message() -> int:
+    """Session-channel ceiling.
+
+    A snapshot carries the environment state, so an environment with large REPL
+    checkpoints needs this raised; `$CORRAL_MAX_WORKER_RESPONSE_BYTES`
+    configures it and the worker response channel together.
+    """
+    return permissions.max_worker_response_bytes()
+
+
 _METHODS = frozenset(
     {
         "execute",
@@ -92,6 +102,13 @@ def _snapshot(session: AgentSession) -> dict[str, Any]:
         "_require_submission",
     )
     snapshot = {name: _json(getattr(session, name)) for name in fields}
+    # Controller materialization names are capabilities, not public context.
+    # Native agents receive a separate scratch mount at this stable path; task
+    # workspace mutations must go through authorized Corral tools.
+    if snapshot.get("workspace") is not None:
+        snapshot["workspace"] = "/workspace"
+    if snapshot.get("execution_workspace") is not None:
+        snapshot["execution_workspace"] = "/workspace"
     # Evaluation records can contain private scoring inputs and diagnostics.
     # Reflexion needs only the public score and attempt identifier.
     evaluation = session.previous_evaluation
@@ -195,12 +212,12 @@ class RemoteSession:
                 "arguments": arguments,
             }
         ).encode()
-        if len(request) > _MAX_MESSAGE:
+        if len(request) > _max_message():
             raise ValueError("session request is too large")
         with socket.create_connection(self._endpoint) as stream:
             stream.sendall(struct.pack("!I", len(request)) + request)
             length = struct.unpack("!I", self._read(stream, 4))[0]
-            if length > _MAX_MESSAGE:
+            if length > _max_message():
                 raise RuntimeError("session response is too large")
             response = json.loads(self._read(stream, length))
         if not response["ok"]:
@@ -220,6 +237,10 @@ class RemoteSession:
         return self._sync_call(
             "get_agent_state", {"namespace": namespace, "previous": previous}
         )
+
+    def _workspace_reference(self) -> str:
+        """Return an opaque broker capability, never a controller path."""
+        return f"corral-branch:{self._handle}"
 
     run_hooks = AgentSession.run_hooks
 
@@ -243,7 +264,7 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
         tasks.add(task)
         try:
             length = struct.unpack("!I", await reader.readexactly(4))[0]
-            if length > _MAX_MESSAGE:
+            if length > _max_message():
                 raise ValueError("session request is too large")
             request = json.loads(await reader.readexactly(length))
             if not secrets.compare_digest(request["token"], token):
@@ -254,11 +275,24 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
                 raise PermissionError("session operation is not permitted")
             arguments = request["arguments"]
             if method == "fork_branch":
-                arguments.setdefault("workspace_parent", workspace)
-                if arguments["workspace_parent"] != workspace:
+                supplied_parent = arguments.get("workspace_parent")
+                if supplied_parent not in {None, "/workspace", workspace}:
                     raise PermissionError(
                         "node workspaces must belong to the calling agent"
                     )
+                arguments["workspace_parent"] = workspace
+            elif method == "promote_artifacts":
+                reference = arguments.get("source_workspace")
+                prefix = "corral-branch:"
+                if not isinstance(reference, str) or not reference.startswith(prefix):
+                    raise PermissionError(
+                        "artifact promotion requires an opaque branch capability"
+                    )
+                source_handle = reference.removeprefix(prefix)
+                source_session = sessions.get(source_handle)
+                if source_session is None or source_session.workspace is None:
+                    raise PermissionError("unknown branch workspace capability")
+                arguments["source_workspace"] = source_session.workspace
             if method == "execute":
                 arguments["action"] = TypeAdapter(Action).validate_python(
                     arguments["action"]
@@ -304,8 +338,13 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
             response = {"ok": False, "error": str(exc)}
         try:
             data = json.dumps(response).encode()
-            if len(data) > _MAX_MESSAGE:
-                data = b'{"ok":false,"error":"session response is too large"}'
+            if len(data) > _max_message():
+                detail = (
+                    f"session response is {len(data):,} bytes, over the "
+                    f"{_max_message():,} byte limit; raise "
+                    "$CORRAL_MAX_WORKER_RESPONSE_BYTES"
+                )
+                data = json.dumps({"ok": False, "error": detail}).encode()
             writer.write(struct.pack("!I", len(data)) + data)
             await writer.drain()
         finally:

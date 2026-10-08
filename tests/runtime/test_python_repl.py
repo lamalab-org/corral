@@ -4,7 +4,7 @@ import json
 
 import numpy as np
 
-from corral.core.tool import ToolConcurrency
+from corral.core.tool import ToolConcurrency, WorkspaceAccess
 from corral.runtime import permissions
 from corral.runtime.python_repl import (
     PythonREPLSession,
@@ -74,8 +74,10 @@ def test_local_session_supports_initial_state_updates_and_exports():
 
 def test_repl_tool_factory_is_serial_and_controller_managed():
     repl = create_python_repl_tool(argument_name="code")
-    assert repl.trusted is True
+    assert repl.trusted is False
+    assert repl.controller_dispatch is True
     assert repl.concurrency == ToolConcurrency.SERIAL
+    assert repl.workspace_access == WorkspaceAccess.NONE
     assert repl.hidden_args == {}
     assert repl.params_json_schema["required"] == ["code"]
 
@@ -85,20 +87,16 @@ def test_restricted_dispatch_sends_only_public_json_and_opaque_checkpoint(
 ):
     requests = []
 
-    def run_worker(kind, payload, workspace, **kwargs):
+    def run_worker_with_bulk(kind, payload, workspace, **kwargs):
         worker_tool, arguments = payload
         requests.append((kind, worker_tool, arguments, workspace, kwargs))
-        return {
-            "content": json.dumps(
-                {
-                    "output": "6\n",
-                    "checkpoint": "replacement",
-                    "status_export": "updated",
-                }
-            )
-        }
+        # The checkpoint arrives on the bulk channel, not inside the JSON reply.
+        return (
+            {"content": json.dumps({"output": "6\n", "status_export": "updated"})},
+            {"checkpoint": b"replacement"},
+        )
 
-    monkeypatch.setattr(permissions, "run_worker", run_worker)
+    monkeypatch.setattr(permissions, "run_worker_with_bulk", run_worker_with_bulk)
     result = execute_python_repl(
         code="values.sum()",
         initial_data={"values": [1, 2, 3]},
@@ -120,6 +118,7 @@ def test_restricted_dispatch_sends_only_public_json_and_opaque_checkpoint(
     assert not worker_tool.hidden_args
     assert workspace == str(tmp_path)
     assert kwargs["cancel"] is None
+    assert kwargs["workspace_access"] == "none"
     assert arguments == {
         "code": "values.sum()",
         "public_data": json.dumps({"values": [1, 2, 3], "status": "updated"}),

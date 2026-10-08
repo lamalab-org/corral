@@ -152,8 +152,8 @@ class UnsupportedMethod(UnsupportedEvidence):
     pass
 
 
-def _reconstruct(e, frames, data):
-    cell, cells, indices, reference, source = _geometry(frames, data)
+def _reconstruct_derivative(e, frames, data):
+    cell, _cells, indices, reference, source = _geometry(frames, data)
     derivative = data["derivative"]
     method = derivative["method"]
     if method == "central_finite_difference":
@@ -252,17 +252,58 @@ def _reconstruct(e, frames, data):
         raise UnsupportedMethod(
             "Unsupported derivative adapter; numerical reconstruction is unverified"
         )
-    raw = phi.copy()
+    return phi
+
+
+def _cubic_symmetry(phi, cell, cells, transform):
+    """Average Cartesian force-constant tensors over the full FCC point group.
+
+    Generate the group from the trusted cubic lattice, independently of any
+    submitted symmetry matrices or scripts. For each operation Q, send the
+    block at R to Q R and transform both Cartesian indices as Q Phi(R) Q.T.
+    The 5x5x5 lattice mapping is periodic and independent of the site's order.
+    """
+    orientation = np.linalg.solve(transform @ STANDARD, cell)
+    inverse_cell = np.linalg.inv(cell)
+    lookup = {tuple(site % 5): index for index, site in enumerate(cells)}
+    averaged = np.zeros_like(phi)
+    for permutation in itertools.permutations(range(3)):
+        for signs in itertools.product((-1, 1), repeat=3):
+            cubic = np.eye(3)[list(permutation)] * np.asarray(signs)[:, None]
+            rotation = orientation.T @ cubic @ orientation
+            lattice_map = cell @ rotation.T @ inverse_cell
+            rounded = np.rint(lattice_map)
+            if not np.allclose(lattice_map, rounded, atol=1e-7, rtol=0):
+                raise EvidenceError("Cubic symmetry does not preserve the FCC lattice")
+            destinations = [
+                lookup[tuple(site % 5)] for site in cells @ rounded.astype(int)
+            ]
+            if len(set(destinations)) != 125:
+                raise EvidenceError("Cubic symmetry does not permute all 125 sites")
+            averaged[destinations] += rotation @ phi @ rotation.T
+    return averaged / 48
+
+
+def _apply_corrections(raw, data):
+    cell, transform = _basis(data)
+    cells = _translations(data)
+    phi = raw.copy()
     origin = np.where(np.all(cells == 0, axis=1))[0][0]
     for operation in data.get("corrections", []):
         label = operation.lower() if isinstance(operation, str) else ""
-        if operation in ("pair_symmetry", "inversion-transpose pair average") or (
-            "average" in label and "pair-interchanged" in label
-        ):
+        if label in ("cubic_symmetry", "48-operation cubic o_h group projection"):
+            phi = _cubic_symmetry(phi, cell, cells, transform)
+        elif label in (
+            "pair_symmetry",
+            "inversion-transpose pair average",
+            "pair projection phi(r)=phi(-r)^t",
+        ) or ("average" in label and "pair-interchanged" in label):
             phi = (phi + phi[_opposites(cells)].swapaxes(1, 2)) / 2
-        elif operation in ("acoustic_sum_rule", "acoustic on-site subtraction") or all(
-            word in label for word in ("subtract", "onsite", "acoustic")
-        ):
+        elif label in (
+            "acoustic_sum_rule",
+            "acoustic on-site subtraction",
+            "onsite replacement enforcing acoustic sum rule",
+        ) or all(word in label for word in ("subtract", "onsite", "acoustic")):
             phi[origin] -= phi.sum(axis=0)
         elif isinstance(operation, dict) and set(operation) == {"cutoff_A"}:
             cutoff = float(operation["cutoff_A"])
@@ -273,7 +314,7 @@ def _reconstruct(e, frames, data):
             raise UnsupportedMethod(
                 "Unsupported force-constant correction; transformation is unverified"
             )
-    return raw, phi
+    return phi
 
 
 def _energies(data, phi, qpoints):
@@ -396,6 +437,8 @@ def evaluate(
             return None, str(exc)
 
     def identities():
+        from .level1_trusted import teacher_digest_matches
+
         s = e.settings
         shared = (
             isinstance(s.get("checkpoint"), str)
@@ -407,6 +450,7 @@ def evaluate(
             return shared
         return (
             shared
+            and teacher_digest_matches(e, 4)
             and isinstance(s.get("checkpoint_sha256"), str)
             and re.fullmatch(r"[0-9a-fA-F]{64}", s["checkpoint_sha256"]) is not None
             and isinstance(s.get("software_versions"), dict)
@@ -439,7 +483,7 @@ def evaluate(
 
     @lru_cache(None)
     def reconstructed():
-        return _reconstruct(e, frames(), data())
+        return _reconstruct_derivative(e, frames(), data())
 
     records_ok = shared_check(
         "raw_energy_force_records",
@@ -450,13 +494,17 @@ def evaluate(
     shared_check(
         "derivative_reconstruction",
         12,
-        lambda: supported(lambda: reconstructed()[0].shape == (125, 3, 3)),
+        lambda: supported(lambda: reconstructed().shape == (125, 3, 3)),
         "Displacements and derivative weights/Hessian agree with the recorded geometry",
     )
     shared_check(
         "force_constant_transformations",
         12,
-        lambda: supported(lambda: result_close(reconstructed()[1], phi(), atol=1e-7)),
+        lambda: supported(
+            lambda: result_close(
+                _apply_corrections(reconstructed(), data()), phi(), atol=1e-7
+            )
+        ),
         "Recorded corrections reproduce the supplied final force constants",
     )
     # An unsupported adapter is distinct from evidence that contradicts a

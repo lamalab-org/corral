@@ -21,7 +21,7 @@ from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -55,7 +55,7 @@ class Session:
         self.messages.append(message)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_codex_uses_session_mcp_and_returns_typed_outcome(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     captured = {}
@@ -121,7 +121,7 @@ def test_codex_extracts_usage_from_nested_total():
     assert usage.llm_calls == 1
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_codex_plain_text_answer_is_not_a_submission(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -136,7 +136,7 @@ async def test_codex_plain_text_answer_is_not_a_submission(monkeypatch):
     assert "without calling submit_answer" in outcome.error
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_codex_maps_native_timeout(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -163,7 +163,7 @@ def test_codex_configuration_keeps_native_tools_and_scopes_task_mcp_tools():
     assert 'enabled_tools = ["read_file", "submit_answer"]' in config
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_codex_never_receives_the_physical_task_workspace(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     task_workspace = tmp_path / "task-a"
@@ -192,7 +192,7 @@ async def test_codex_never_receives_the_physical_task_workspace(monkeypatch, tmp
     assert outcome.metadata["codex_cwd_is_execution_workspace"] is False
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_codex_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 

@@ -24,6 +24,8 @@ def source_paths(task_root: Path) -> tuple[Path, ...]:
         task_root / "modal_app/trusted_md.py",
         task_root / "modal_app/verification_requirements.txt",
         task_root / "src/corral_md/workflow_scoring/verification.py",
+        task_root / "src/corral_md/provenance.py",
+        task_root / "src/corral_md/calculator_settings.py",
         task_root / "src/corral_md/modal_workspace.py",
         task_root / "src/corral_md/workspace.py",
         task_root / "src/corral_md/tools.py",

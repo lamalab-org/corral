@@ -30,7 +30,7 @@ from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -41,7 +41,7 @@ def echo(text: str) -> str:
     return text
 
 
-@pytest.fixture()
+@pytest.fixture
 async def runtime(tmp_path):
     async with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
         yield TaskRuntime(store, NoOpObserver())
@@ -109,7 +109,7 @@ def track_hosts(monkeypatch):
     return hosts
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("standalone", [False, True])
 async def test_python_agent_runs_without_a_listener(runtime, monkeypatch, standalone):
     hosts = track_hosts(monkeypatch)
@@ -154,7 +154,7 @@ async def test_python_agent_runs_without_a_listener(runtime, monkeypatch, standa
         assert not host._bindings
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("parent_transport", ["python", "mcp"])
 @pytest.mark.parametrize("delegate_transport", ["python", "mcp"])
 async def test_delegate_transport_is_scoped_and_restores_the_caller(
@@ -207,7 +207,7 @@ async def test_delegate_transport_is_scoped_and_restores_the_caller(
     await assert_closed(parent.connection.url)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("parent_transport", ["python", "mcp"])
 async def test_mcp_subagents_get_their_own_catalogs_and_record_their_own_calls(
     runtime, monkeypatch, parent_transport
@@ -280,7 +280,7 @@ async def test_mcp_subagents_get_their_own_catalogs_and_record_their_own_calls(
         await assert_closed(child.connection.url)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_runtime_releases_mcp_when_an_agent_raises(runtime):
     class FailingAgent:
         tool_transport = "mcp"
@@ -298,7 +298,7 @@ async def test_runtime_releases_mcp_when_an_agent_raises(runtime):
     await assert_closed(agent.url)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_runtime_releases_mcp_when_an_agent_is_cancelled(runtime):
     class CancelledAgent:
         tool_transport = "mcp"
@@ -316,7 +316,7 @@ async def test_runtime_releases_mcp_when_an_agent_is_cancelled(runtime):
     await assert_closed(agent.url)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_before_task_cancellation_starts_no_listener(runtime, monkeypatch):
     hosts = track_hosts(monkeypatch)
 
@@ -346,7 +346,7 @@ async def test_before_task_cancellation_starts_no_listener(runtime, monkeypatch)
     assert not hosts[0]._bindings
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_invalid_transport_is_rejected_before_calling_the_agent(runtime):
     class InvalidAgent:
         tool_transport = "unsupported"
@@ -359,7 +359,7 @@ async def test_invalid_transport_is_rejected_before_calling_the_agent(runtime):
     assert "Unsupported agent tool_transport" in state.runtime.metadata["error"]
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_concurrent_executions_on_one_runtime_have_independent_hosts(
     runtime, monkeypatch
 ):
@@ -398,7 +398,7 @@ async def test_concurrent_executions_on_one_runtime_have_independent_hosts(
         await assert_closed(agent.connection.url)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_submit_response_and_sdk_cleanup_precede_server_shutdown(
     runtime, monkeypatch
 ):
@@ -439,7 +439,7 @@ async def test_submit_response_and_sdk_cleanup_precede_server_shutdown(
     assert commits[-1] == ("execution.completed", True)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_recovery_uses_fresh_binding_and_completed_state_starts_no_host(
     runtime, monkeypatch
 ):
@@ -487,7 +487,7 @@ async def test_recovery_uses_fresh_binding_and_completed_state_starts_no_host(
         await assert_closed(url)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("invocation", ["direct", "delegate", "subagent"])
 async def test_standalone_mcp_requires_a_caller_owned_host(monkeypatch, invocation):
     def unexpected_socket(*args, **kwargs):
@@ -523,7 +523,7 @@ async def test_standalone_mcp_requires_a_caller_owned_host(monkeypatch, invocati
         await session.state_store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("parent_transport", ["python", "mcp"])
 async def test_standalone_session_borrows_host_shared_with_delegates(parent_transport):
     class Delegate:
@@ -564,7 +564,7 @@ async def test_standalone_session_borrows_host_shared_with_delegates(parent_tran
         await session.state_store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("child_transport", ["python", "mcp"])
 async def test_handled_child_failure_preserves_parent_completion(
@@ -619,7 +619,7 @@ async def test_handled_child_failure_preserves_parent_completion(
         await session.state_store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_unobserved_child_failure_still_propagates_at_completion():
     class FailedChild:
         async def run_session(self, session):
@@ -645,7 +645,7 @@ async def test_unobserved_child_failure_still_propagates_at_completion():
         await session.state_store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_fork_borrows_host_and_dispatches_to_its_branch(runtime, monkeypatch):
     hosts = track_hosts(monkeypatch)
 
@@ -681,7 +681,7 @@ async def test_fork_borrows_host_and_dispatches_to_its_branch(runtime, monkeypat
     assert len(hosts) == 1
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_mcp_delegate_dispatch_preserves_its_iteration_budget(
     runtime, monkeypatch
 ):
@@ -715,7 +715,7 @@ async def test_mcp_delegate_dispatch_preserves_its_iteration_budget(
     assert budgets == [3, 20]
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("transport", ["python", "mcp"])
 async def test_runtime_cancellation_waits_for_synchronous_tool(
     runtime, transport, monkeypatch
@@ -758,7 +758,7 @@ async def test_runtime_cancellation_waits_for_synchronous_tool(
         await asyncio.gather(owner, return_exceptions=True)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_parent_cancellation_cleans_up_descendant_bindings(runtime, monkeypatch):
     hosts = track_hosts(monkeypatch)
     ready = asyncio.Event()
@@ -801,7 +801,7 @@ async def test_parent_cancellation_cleans_up_descendant_bindings(runtime, monkey
         await assert_closed(url)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_recovered_submission_stops_host_before_final_commit(
     runtime, monkeypatch
 ):
@@ -844,7 +844,7 @@ async def test_recovered_submission_stops_host_before_final_commit(
     assert state.tool_statistics == {"submit_answer": 1}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_agent_completion_waits_for_unawaited_mcp_request(runtime):
     started = asyncio.Event()
     release = threading.Event()

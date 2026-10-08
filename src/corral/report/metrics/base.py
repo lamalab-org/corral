@@ -4,7 +4,7 @@ from typing import Any, Protocol, runtime_checkable
 from pydantic import BaseModel, Field, validator
 
 # Type alias for metric values
-MetricValue = float | int | dict[str, Any]
+MetricValue = float | int | dict[str, Any] | None
 
 
 @runtime_checkable

@@ -373,6 +373,46 @@ def test_analytic_derivatives_npy_and_changed_processing_convention(submission):
     assert score(submission).score == pytest.approx(0.9)
 
 
+@pytest.mark.parametrize(
+    "mutation", [None, "raw_values", "conflicting_arrays", "conflicting_kind"]
+)
+def test_described_energy_hessian_schema_is_reconstructed(submission, mutation):
+    path = submission.parent / "calculations.json"
+    records = load(path)
+    translations = np.tile(np.eye(3), (2, 1))
+    asymmetric = np.arange(36).reshape(6, 6) * 0.001
+    for record in records:
+        record["method"] = (
+            "MACE analytical Cartesian energy Hessian (automatic differentiation)"
+        )
+        # These extra terms must be removed by the declared operations.
+        raw = (
+            np.asarray(record["force_constants_eV_A2"])
+            + asymmetric - asymmetric.T
+            + 0.13 * translations @ translations.T
+        )
+        record["raw_analytical_hessian_eV_A2"] = raw.tolist()
+        record["symmetrization"] = "H_sym = (H_raw + H_raw^T)/2"
+        record["acoustic_sum_rule"] = (
+            "Cartesian orthogonal projection H = P H_sym P, "
+            "P removes the three uniform translations"
+        )
+    if mutation == "raw_values":
+        records[0]["raw_analytical_hessian_eV_A2"][0][0] += 10
+    elif mutation == "conflicting_arrays":
+        records[0]["raw_derivatives_eV_A2"] = (np.eye(6) * 100).tolist()
+    elif mutation == "conflicting_kind":
+        records[0]["derivative_kind"] = "force_jacobian"
+    write(path, records)
+    result = score(submission)
+    reconstruction = check(result, "force_constants_reconstructed_from_raw_evidence")
+    if mutation is None:
+        assert result.score == pytest.approx(0.9), result.checks
+        assert reconstruction["status"] == "passed"
+    else:
+        assert reconstruction["status"] == "failed", reconstruction
+
+
 def test_imaginary_mode_is_not_made_positive_by_absolute_value(submission):
     directory = submission.parent
     records = load(directory / "calculations.json")

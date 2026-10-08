@@ -8,7 +8,7 @@ import more_itertools
 import tiktoken
 
 from corral.report.logging import event, logger
-from corral.utils.tool_helpers import embed_text
+from corral.utils.tool_helpers import DEFAULT_CHEMICAL_EMBEDDING_MODEL, embed_text
 
 
 def vector_database_search(
@@ -368,7 +368,7 @@ def create_vector_database(
     metadatas: list[dict] | None = None,
     model: str = "openai/text-embedding-3-large",
     chemical: list[str] | None = None,
-    chemical_model: str = "ibm-research/MoLFormer-XL-both-10pct",
+    chemical_model: str = DEFAULT_CHEMICAL_EMBEDDING_MODEL,
 ) -> str:
     """Create or update a vector database from text instructions. If chemical data is provided,
     it will be used to generate embeddings instead of the text chunks. The database will be build

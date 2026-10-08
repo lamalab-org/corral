@@ -20,9 +20,10 @@ def test_all_shipped_tasks_load_from_unrelated_cwd(
     source, count, tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    tasks = env.load_tasks_from_json(env.PACKAGE_DATA_ROOT / source, str(tmp_path))
+    tasks = env.load_tasks_from_json(env.PACKAGE_DATA_ROOT / source)
     assert len(tasks) == count
     assert all(callable(task.scoring_fn) for task in tasks.values())
+    assert all("work_dir" not in task.initial_input for task in tasks.values())
     expected_level = int(source.split("/")[0].removeprefix("level_"))
     assert all(task.scoring_fn.level == expected_level for task in tasks.values())
 
@@ -60,6 +61,10 @@ for level in (1, 2):
         work_dir=str(installed.parent / "work"), level=level
     )
     assert len(environments) == 10
+    for environment in environments.values():
+        simulation = environment.tools["run_lammps"]
+        assert simulation.trusted
+        assert "corral_action_id" in simulation.hidden_args
     for number in range(1, 11):
         assert load_example(number, level=level)["manifest"]
 assert len(supplied_cu32_cell()) == 32
@@ -76,7 +81,7 @@ assert len(supplied_cu32_cell()) == 32
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_removed_subtasks_create_no_environments(tmp_path, monkeypatch):
+def test_removed_subtasks_are_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(env, "PACKAGE_DATA_ROOT", tmp_path)
     monkeypatch.setattr(
         env,
@@ -84,11 +89,10 @@ def test_removed_subtasks_create_no_environments(tmp_path, monkeypatch):
         lambda *args, **kwargs: pytest.fail("No removed subtasks should be built"),
     )
 
-    environments = env.create_environments(
-        work_dir=str(tmp_path / "work"), subtask_level=True, level=1
-    )
-
-    assert environments == {}
+    with pytest.raises(ValueError, match="no subtasks; select level 1 or 2"):
+        env.create_environments(
+            work_dir=str(tmp_path / "work"), subtask_level=True, level=1
+        )
 
 
 @pytest.mark.parametrize("level", ["level_1", "level_2"])

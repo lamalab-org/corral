@@ -237,6 +237,12 @@ def evaluate(e: Evidence, r: Rubric):
         )
 
     def identities():
+        from .dynamics import sampled_motion
+
+        for index in range(8):
+            frames = selected(index)
+            if not sampled_motion(frames, [_time(a) for a in frames]):
+                return False
         ref = initial()
         ids = [a.info["stage"] for a in production()]
         ordered = [s["id"] for s in stages()]

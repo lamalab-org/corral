@@ -324,7 +324,7 @@ def evaluate(e: Evidence, r: Rubric) -> None:
 
     @lru_cache(None)
     def raw(sid):
-        info, frames, times = stage(sid)
+        _, frames, _ = stage(sid)
         dof = e.settings["temperature_dof"]
         if dof not in (321, 324):
             raise UnsupportedMethod("Temperature DOF must be documented as 321 or 324")
@@ -495,7 +495,11 @@ def evaluate(e: Evidence, r: Rubric) -> None:
             return False
         previous = None
         for info in records:
-            _, frames, _ = stage(info["id"])
+            from .dynamics import sampled_motion
+
+            _, frames, times = stage(info["id"])
+            if not sampled_motion(frames, times):
+                return False
             if previous is not None and not _same_state(previous, frames[0]):
                 return False
             for a in frames:

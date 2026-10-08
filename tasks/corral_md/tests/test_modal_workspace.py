@@ -17,12 +17,14 @@ from corral_md.env import MolecularDynamicsEnvironment, _md_file_tools, _md_task
 from corral.agents.schema import AgentOutcome
 from corral.core import Action
 from corral.core.environment import Toolset
+from corral.core.state import EnvironmentState, ExecutionState, TaskState
 from corral.core.task import TaskDefinition
 from corral.core.transition import ToolRecoveryPending
 from corral.observability import NoOpObserver
 from corral.persistence import SQLiteCommitStore
 from corral.persistence.workspace import WorkspaceManager
-from corral.runtime import TaskRuntime, permissions
+from corral.runtime import TaskRuntime
+from corral.runtime.tool_execution import ToolExecutor
 from corral.runtime.permissions import NODE_WORKSPACE_DIR, SCRATCH_PREFIX
 
 
@@ -457,7 +459,7 @@ def test_md_io_tools_are_bound_to_local_workspace(tmp_path: Path) -> None:
     assert tools["run_verified_md"].trusted
     assert tools["list_files"].trusted
     assert tools["copy_file"].trusted
-    assert not tools["write_file"].trusted
+    assert tools["write_file"].trusted
 
 
 def test_md_lammps_tool_receives_private_action_id(tmp_path: Path, monkeypatch) -> None:
@@ -474,16 +476,28 @@ def test_md_lammps_tool_receives_private_action_id(tmp_path: Path, monkeypatch) 
 
     monkeypatch.setattr(md_tools, "_run_lammps_for_workspace", run)
     tool = _md_file_tools(str(workspace))["run_lammps"]
-    environment = SimpleNamespace(
+    environment = MolecularDynamicsEnvironment(
+        "md",
+        TaskDefinition(
+            name="md", description="md", tools=[], scoring_fn=lambda _: 1.0,
+            submission_format={}, resolve_answer=False,
+        ),
+        base_work_dir=str(tmp_path),
         workspace_path=str(workspace),
-        execute_tool=lambda _state, selected, arguments: selected.execute(**arguments),
+        toolset=Toolset(common={tool.name: tool}, workspace_factory=None),
     )
-
-    result = permissions.execute_tool(
-        environment,
-        None,
+    started = environment.initial_event(execution_id="md-test")
+    state = ExecutionState(
+        through_commit_hash="0" * 64, execution_id="md-test", branch_id="main",
+        task=TaskState(environment=started.environment_metadata),
+        environment=EnvironmentState(values=started.environment),
+        workspace=started.workspace,
+    )
+    result = ToolExecutor(environment).execute(
+        state,
         tool,
-        {"input_file": "/workspace/input/run.in", "corral_action_id": "action-1"},
+        {"input_file": "/workspace/input/run.in"},
+        action_id="action-1",
     )
 
     assert result == "simulation completed"
@@ -494,6 +508,7 @@ def test_md_prompt_requires_absolute_workspace_paths(tmp_path: Path) -> None:
     task = TaskDefinition(
         name="md", description="md", tools=[], scoring_fn=lambda _answer: 1.0,
         submission_format={}, prompt_fn=_md_task_prompt, resolve_answer=False,
+        initial_input={"temperature": 300},
     )
     environment = MolecularDynamicsEnvironment(
         "md", task, base_work_dir=str(tmp_path), task_execution_id="execution",
@@ -501,7 +516,12 @@ def test_md_prompt_requires_absolute_workspace_paths(tmp_path: Path) -> None:
     )
     started = environment.initial_event(execution_id="execution")
     prompt = started.task["prompt"]
-    assert "accept only absolute POSIX paths under /workspace" in prompt
+    assert prompt.count("canonical absolute paths under `/workspace`") == 1
+    assert prompt.count("Available input data:") == 1
+    assert "- temperature: 300" in prompt
+    assert "read-only catalogs" in prompt
+    assert "execute_python_script(use_gpu=True)" in prompt
+    assert "Step, Temperature, Pressure, and Density" in prompt
     assert str(environment.workspace_path) not in prompt
     assert "corral_md_release_id" not in started.runtime.metadata
     assert (Path(environment.workspace_path) / "input").is_dir()
@@ -517,15 +537,14 @@ def test_md_domain_tool_paths_cannot_target_a_sibling_workspace(tmp_path: Path) 
         "md", task, base_work_dir=str(tmp_path), task_execution_id="execution",
         toolset=Toolset(workspace_factory=None),
     )
-    workspace = Path(environment.workspace_path or "")
     sibling = tmp_path / "sibling"
     sibling.mkdir()
     parsed = environment.preprocess_arguments(
         "convert_structure_to_lammps_data",
         {"structure_path": "/workspace/input.cif", "output_file": "/workspace/output.data"},
     )
-    assert Path(parsed["structure_path"]).parent == workspace
-    assert Path(parsed["output_file"]).parent == workspace
+    assert parsed["structure_path"] == "/workspace/input.cif"
+    assert parsed["output_file"] == "/workspace/output.data"
     for path in ("../sibling/secret.cif", str(sibling / "secret.cif")):
         with pytest.raises(ValueError, match="workspace"):
             environment.preprocess_arguments(

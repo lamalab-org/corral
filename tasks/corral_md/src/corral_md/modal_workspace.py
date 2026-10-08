@@ -690,7 +690,7 @@ def run_python_gpu_in_modal(
     initializer: Any | None = None,
     call_factory: Any | None = None,
     job_id: str | None = None,
-    timeout: int = 600,
+    timeout: int = 900,
     working_dir: str = "/workspace",
 ) -> int:
     """Run isolated GPU Python and recover its committed outputs."""

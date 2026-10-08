@@ -11,7 +11,7 @@ from ase.build import bulk
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.io import write
 
-from corral_md.workflow_scoring.common import Evidence, Rubric
+from corral_md.workflow_scoring.common import Evidence, Rubric, UnsupportedEvidence
 from corral_md.workflow_scoring.level1_trusted import (
     MODEL_TARGET,
     PINNED_TEACHER_SHA256,
@@ -141,7 +141,18 @@ def test_digest_rejects_wrong_or_conflicting_claims(tmp_path):
     assert not teacher_digest_matches(evidence, 4)
 
 
-def test_task8_recorded_default_rng_replays_all_structures(tmp_path):
+@pytest.mark.parametrize(
+    "generation",
+    [
+        {"library": "NumPy default_rng"},
+        {
+            "library": "ASE + NumPy",
+            "random_generator": "numpy.random.Generator(PCG64)",
+        },
+        {"library": "NumPy", "rng": "numpy.random.Generator(PCG64)"},
+    ],
+)
+def test_task8_recorded_default_rng_replays_all_structures(tmp_path, generation):
     ideal = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
     rng = np.random.default_rng(20250308)
     frames = []
@@ -161,12 +172,30 @@ def test_task8_recorded_default_rng_replays_all_structures(tmp_path):
     (tmp_path / "regression.json").write_text(json.dumps(data))
     evidence = _document(
         tmp_path,
-        {"generation": {"train": {"seed": 20250308, "library": "NumPy default_rng"}}},
+        {"generation": {"train": {"seed": 20250308, **generation}}},
         {"train_structures": "frames.extxyz", "regression_data": "regression.json"},
     )
     assert replay_task8_default_rng(evidence)
     evidence.trajectory("train_structures")[37].positions[3, 1] += 0.001
     assert not replay_task8_default_rng(evidence)
+
+
+def test_task8_unknown_explicit_generator_is_not_replayed_as_default(tmp_path):
+    evidence = _document(
+        tmp_path,
+        {
+            "generation": {
+                "train": {
+                    "seed": 20250308,
+                    "library": "NumPy default_rng",
+                    "random_generator": "numpy.random.Generator(Philox)",
+                }
+            }
+        },
+        {},
+    )
+    with pytest.raises(UnsupportedEvidence, match="generator"):
+        replay_task8_default_rng(evidence)
 
 
 def test_task6_unlabeled_trajectory_uses_aligned_raw_trace_energy(tmp_path):

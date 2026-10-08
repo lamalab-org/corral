@@ -694,7 +694,7 @@ def _task_7(e: Evidence, r: Rubric) -> None:
                     "Production interval must select at least two frames"
                 )
         elif len(interval) >= len(frames) and all(
-            type(entry) is int or isinstance(entry, dict) and "step" in entry
+            type(entry) is int or (isinstance(entry, dict) and "step" in entry)
             for entry in interval
         ):
             recorded_times = finite_array(
@@ -1243,7 +1243,7 @@ def _task_9(e: Evidence, r: Rubric) -> None:
         method = str(item["method"]).lower()
         supported_method = method == "first_crossing" or (
             "first" in method
-            and ("crossing" in method or "lag" in method and "1/e" in method)
+            and ("crossing" in method or ("lag" in method and "1/e" in method))
         )
         if "interpolat" in method and "linear" not in method:
             supported_method = False

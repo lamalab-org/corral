@@ -23,6 +23,8 @@ from corral.backend.jobs import JobManager, JobStatus, ThreadExecutor
 from corral.core.environment import Toolset, build_environments
 from corral.core.task import TaskDefinition
 from corral.core.tool import tool
+from corral.runtime import permissions
+from corral.runtime.tool_execution import PreparedToolCall
 
 
 class _FakeTool:
@@ -36,6 +38,21 @@ class _FakeTool:
 
     def execute(self, **kwargs):
         return self._fn(**kwargs)
+
+
+def _prepared(
+    tool_obj,
+    call_arguments=None,
+    *,
+    visible_arguments=None,
+    workspace=None,
+):
+    return PreparedToolCall.capture(
+        tool_obj,
+        call_arguments or {},
+        visible_arguments=visible_arguments,
+        workspace=workspace,
+    )
 
 
 def _wait_until(predicate, timeout=2.0, interval=0.005):
@@ -57,11 +74,7 @@ def test_submit_returns_immediately_then_succeeds():
         release.wait(2.0)
         return "done"
 
-    record = manager.submit(
-        _FakeTool("work", _work),
-        visible_arguments={},
-        call_arguments={},
-    )
+    record = manager.submit(_prepared(_FakeTool("work", _work)))
     # The handle comes back before the tool finishes.
     assert started.wait(2.0)
     assert manager.status(record.context.job_id) == JobStatus.RUNNING
@@ -84,9 +97,7 @@ def test_failed_job_records_error():
     def _boom(**_):
         raise RuntimeError("kaboom")
 
-    record = manager.submit(
-        _FakeTool("boom", _boom), visible_arguments={}, call_arguments={}
-    )
+    record = manager.submit(_prepared(_FakeTool("boom", _boom)))
     final = manager.result(record.context.job_id, wait=True, timeout=2.0)
     assert final["status"] == JobStatus.FAILED.value
     assert "kaboom" in final["error"]
@@ -99,9 +110,7 @@ def test_wait_timeout_returns_running_view_without_raising():
     release = threading.Event()
 
     record = manager.submit(
-        _FakeTool("slow", lambda **_: release.wait(2.0) or "ok"),
-        visible_arguments={},
-        call_arguments={},
+        _prepared(_FakeTool("slow", lambda **_: release.wait(2.0) or "ok"))
     )
     view = manager.result(record.context.job_id, wait=True, timeout=0.05)
     assert view["status"] == JobStatus.RUNNING.value
@@ -132,14 +141,10 @@ def test_cancel_queued_job_never_runs():
     ran_second = threading.Event()
 
     first = manager.submit(
-        _FakeTool("first", lambda **_: release.wait(2.0) or "1"),
-        visible_arguments={},
-        call_arguments={},
+        _prepared(_FakeTool("first", lambda **_: release.wait(2.0) or "1"))
     )
     second = manager.submit(
-        _FakeTool("second", lambda **_: ran_second.set() or "2"),
-        visible_arguments={},
-        call_arguments={},
+        _prepared(_FakeTool("second", lambda **_: ran_second.set() or "2"))
     )
     # Second is waiting in the pool queue, not running.
     assert _wait_until(
@@ -169,16 +174,8 @@ def test_same_concurrency_key_serialises():
         time.sleep(0.1)
         return "ok"
 
-    r1 = manager.submit(
-        _FakeTool("t1", _work, concurrency_key="gpu"),
-        visible_arguments={},
-        call_arguments={},
-    )
-    r2 = manager.submit(
-        _FakeTool("t2", _work, concurrency_key="gpu"),
-        visible_arguments={},
-        call_arguments={},
-    )
+    r1 = manager.submit(_prepared(_FakeTool("t1", _work, concurrency_key="gpu")))
+    r2 = manager.submit(_prepared(_FakeTool("t2", _work, concurrency_key="gpu")))
     v1 = manager.result(r1.context.job_id, wait=True, timeout=3.0)
     v2 = manager.result(r2.context.job_id, wait=True, timeout=3.0)
     assert not _intervals_overlap(v1, v2)
@@ -192,16 +189,8 @@ def test_different_concurrency_keys_overlap():
         time.sleep(0.1)
         return "ok"
 
-    r1 = manager.submit(
-        _FakeTool("t1", _work, concurrency_key="a"),
-        visible_arguments={},
-        call_arguments={},
-    )
-    r2 = manager.submit(
-        _FakeTool("t2", _work, concurrency_key="b"),
-        visible_arguments={},
-        call_arguments={},
-    )
+    r1 = manager.submit(_prepared(_FakeTool("t1", _work, concurrency_key="a")))
+    r2 = manager.submit(_prepared(_FakeTool("t2", _work, concurrency_key="b")))
     v1 = manager.result(r1.context.job_id, wait=True, timeout=3.0)
     v2 = manager.result(r2.context.job_id, wait=True, timeout=3.0)
     assert _intervals_overlap(v1, v2)
@@ -210,15 +199,19 @@ def test_different_concurrency_keys_overlap():
 
 def test_job_context_redacts_hidden_values():
     manager = JobManager()
+    job_tool = _FakeTool("t", lambda **_: "ok")
+    job_tool.hidden_args = {"secret": None}
     record = manager.submit(
-        _FakeTool("t", lambda **_: "ok"),
-        visible_arguments={"x": 1},
-        call_arguments={"x": 1, "secret": "s3cr3t"},
-        hidden_arg_names=("secret",),
-        workspace="/tmp/ws",
+        _prepared(
+            job_tool,
+            {"x": 1, "secret": "s3cr3t"},
+            visible_arguments={"x": 1},
+            workspace="/tmp/ws",
+        )
     )
     view = manager.result(record.context.job_id, wait=True, timeout=2.0)
-    assert view["workspace"] == "/tmp/ws"
+    assert view["workspace"] == "/workspace"
+    assert "/tmp/ws" not in json.dumps(view)
     assert view["arguments"] == {"x": 1}
     assert view["hidden_arg_names"] == ["secret"]
     # The secret value must never appear anywhere in the serialised job.
@@ -229,12 +222,40 @@ def test_job_context_redacts_hidden_values():
 def test_thread_executor_is_pluggable():
     executor = ThreadExecutor(max_workers=2)
     manager = JobManager(executor=executor)
-    record = manager.submit(
-        _FakeTool("t", lambda **_: "ok"), visible_arguments={}, call_arguments={}
-    )
+    record = manager.submit(_prepared(_FakeTool("t", lambda **_: "ok")))
     assert (
         manager.result(record.context.job_id, wait=True, timeout=2.0)["result"] == "ok"
     )
+    manager.shutdown()
+
+
+def test_queued_job_cannot_gain_trust_from_live_tool_mutation(monkeypatch):
+    monkeypatch.setattr(permissions, "_enabled", True)
+    started = threading.Event()
+    release = threading.Event()
+
+    def run_restricted(_tool, _arguments, _workspace, *, prepared, **_kwargs):
+        if prepared.tool_name == "blocker":
+            started.set()
+            release.wait(2.0)
+        return f"restricted:{prepared.tool_name}:{prepared.trusted}"
+
+    monkeypatch.setattr(permissions, "execute_restricted_tool", run_restricted)
+    manager = JobManager(max_concurrency=1)
+    blocker = _FakeTool("blocker", lambda **_: "must not run")
+    target = _FakeTool("target", lambda **_: "controller execution")
+    first = manager.submit(_prepared(blocker))
+    assert started.wait(2.0)
+    second = manager.submit(_prepared(target))
+    assert manager.status(second.context.job_id) == JobStatus.QUEUED
+
+    # The queued call has already frozen restricted authority. Mutating the
+    # live Tool must not change its route when a worker eventually starts it.
+    target.trusted = True
+    release.set()
+    manager.result(first.context.job_id, wait=True, timeout=2.0)
+    result = manager.result(second.context.job_id, wait=True, timeout=2.0)
+    assert result["result"] == "restricted:target:False"
     manager.shutdown()
 
 

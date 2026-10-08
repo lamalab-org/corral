@@ -3,21 +3,30 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
+from contextvars import ContextVar
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from corral.core.events import (
     AgentStarted,
     AgentTurnRecorded,
+    ExecutionCompleted,
+    ExecutionFailed,
     ExecutionStarted,
+    SubmissionAccepted,
     ToolCompleted,
     ToolFailed,
     ToolStarted,
     UsageDelta,
 )
+from corral.observability._langfuse_delivery import GenerationDelivery, task_exporter
 from corral.observability.base import (
     CompositeObserver,
     NoOpObserver,
@@ -54,6 +63,23 @@ _SENSITIVE_TOKEN_KEYS = {
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
 _KEY_PATTERN = re.compile(r"\b(?:sk|pk)-[A-Za-z0-9_-]{8,}\b")
 _EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
+_SELECTED_TRACE: ContextVar[str | None] = ContextVar("corral_trace", default=None)
+
+
+@lru_cache
+def _task_tracer_provider(public_key: str | None) -> Any:
+    # Langfuse shares its exporter by public key, so observers must share the
+    # provider too. Otherwise only the first observer's spans are exported.
+    del public_key
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
+
+    class TaskIdGenerator(RandomIdGenerator):
+        def generate_trace_id(self) -> int:
+            value = _SELECTED_TRACE.get()
+            return int(value, 16) if value else super().generate_trace_id()
+
+    return TracerProvider(id_generator=TaskIdGenerator())
 
 
 def _sensitive_key(key: object) -> bool:
@@ -133,6 +159,52 @@ def _execution_started_messages(started: ExecutionStarted) -> list[Mapping[str, 
     return [{"role": "user", "content": prompt}]
 
 
+class _EvaluationSpan:
+    """Consume the existing task.evaluate callback without changing Observer."""
+
+    def __init__(self, observer: LangfuseObserver, context: ObservationContext) -> None:
+        self.observer = observer
+        self.context = context
+        self.result: Mapping[str, Any] | None = None
+
+    def update(self, *, commit=None, output=None, metadata=None) -> None:
+        del commit, metadata
+        self.result = output
+
+    def end(self, error: BaseException | None = None) -> None:
+        if error is not None or self.result is None or self.result.get("score") is None:
+            return
+        result = self.result
+        identity = f"{self.context.execution_id}:{result['commit_hash']}:{result['scorer_version']}"
+        self.observer.client.create_score(
+            trace_id=deterministic_trace_id(self.context.execution_id),
+            score_id=hashlib.sha256(identity.encode()).hexdigest(),
+            name="benchmark_score",
+            value=float(result["score"]),
+            data_type="NUMERIC",
+            comment=self.observer._mask(data=result.get("feedback")),
+            metadata=self.observer._mask(
+                data={
+                    "commit_hash": result["commit_hash"],
+                    "scorer_version": result["scorer_version"],
+                }
+            ),
+            timestamp=self.observer._last_times.get(
+                self.context.execution_id, datetime.now(timezone.utc)
+            ),
+        )
+        self.result = None
+
+
+@dataclass
+class _RestoredGeneration:
+    commit: Commit
+    context: ObservationContext
+    started_at: datetime
+    arguments: dict[str, Any]
+    step_number: int
+
+
 class LangfuseObserver:
     def __init__(
         self,
@@ -141,11 +213,18 @@ class LangfuseObserver:
         mask: Callable[..., Any] = mask_sensitive_data,
         attribute_scope_factory: Callable[..., AbstractContextManager[Any]]
         | None = None,
+        tracer_provider: Any = None,
     ) -> None:
+        self._public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+        self._provider = tracer_provider or _task_tracer_provider(self._public_key)
+        self._exporter = None
         if client is None:
             from langfuse import Langfuse, propagate_attributes
 
-            client = Langfuse(mask=mask)
+            self._exporter = task_exporter(self._public_key)
+            client = Langfuse(
+                mask=mask, tracer_provider=self._provider, span_exporter=self._exporter
+            )
             attribute_scope_factory = propagate_attributes
         elif attribute_scope_factory is None:
             attribute_scope_factory = _null_attribute_scope
@@ -153,16 +232,205 @@ class LangfuseObserver:
         self._mask = mask
         self._attribute_scope_factory = attribute_scope_factory
         self._recorded_hashes: set[str] = set()
+        self._restoring = False
+        self._restored_steps: set[tuple[str, str]] = set()
+        self._restored_generations: dict[tuple[str, str], _RestoredGeneration] = {}
+        self._completed_generations: list[_RestoredGeneration] = []
+        self._deliveries: dict[str, GenerationDelivery] = {}
+        self._task_starts: dict[str, datetime] = {}
+        self._task_ends: dict[str, Commit] = {}
         self._noop = NoOpObserver()
         self._models: dict[str, str] = {}
         self._agents: dict[tuple[str, str], str] = {}
         self._tools: dict[tuple[str, str], str] = {}
         self._pending_inputs: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+        self._roots: dict[str, Any] = {}
+        self._steps: dict[tuple[str, str], Any] = {}
+        self._step_numbers: dict[tuple[str, str], int] = {}
+        self._generations: dict[
+            tuple[str, str], tuple[Any, dict[str, Any], datetime]
+        ] = {}
+        self._actions: dict[tuple[str, str], Mapping[str, Any]] = {}
+        self._tool_starts: dict[tuple[str, str], datetime] = {}
+        self._task_inputs: dict[str, list[Mapping[str, Any]]] = {}
+        self._last_times: dict[Any, datetime] = {}
 
     def start(self, observation: Observation) -> ObservationSpan:
+        if observation.name == "task.evaluate":
+            return _EvaluationSpan(self, observation.context)
         # Runtime/task/tool spans are intentionally local-only. Persisted model
         # turns below are the sole Langfuse export boundary.
         return self._noop.start(observation)
+
+    def _start_span(self, context, *, name, as_type, started_at, parent=None, **kwargs):
+        # The SDK's high-level start method cannot set a historical start time.
+        # Use its public OTEL provider and public observation wrappers; export,
+        # masking, batching, and scoring remain owned by the Langfuse SDK.
+        from langfuse import (
+            LangfuseAgent,
+            LangfuseGeneration,
+            LangfuseSpan,
+            LangfuseTool,
+        )
+        from opentelemetry.context import Context
+        from opentelemetry.trace import (
+            NonRecordingSpan,
+            SpanContext,
+            TraceFlags,
+            set_span_in_context,
+        )
+
+        parent_context = Context()
+        if parent is not None:
+            parent_context = set_span_in_context(
+                NonRecordingSpan(
+                    SpanContext(
+                        trace_id=int(parent.trace_id, 16),
+                        span_id=int(parent.id, 16),
+                        is_remote=False,
+                        trace_flags=TraceFlags(1),
+                    )
+                ),
+                parent_context,
+            )
+        token = _SELECTED_TRACE.set(deterministic_trace_id(context.execution_id))
+        try:
+            tracer = self._provider.get_tracer(
+                "langfuse-sdk",
+                attributes={
+                    "public_key": self._public_key,
+                },
+            )
+            otel_span = tracer.start_span(
+                name,
+                context=parent_context,
+                start_time=int(started_at.timestamp() * 1e9),
+                attributes={
+                    "langfuse.trace.name": f"corral.task.{context.task_id or context.execution_id}",
+                    "session.id": context.benchmark_run_id or context.execution_id,
+                    "langfuse.trace.metadata.execution_id": context.execution_id,
+                },
+            )
+            wrapper = {
+                "agent": LangfuseAgent,
+                "span": LangfuseSpan,
+                "generation": LangfuseGeneration,
+                "tool": LangfuseTool,
+            }[as_type]
+            return wrapper(otel_span=otel_span, langfuse_client=self.client, **kwargs)
+        finally:
+            _SELECTED_TRACE.reset(token)
+
+    def _end_step(self, key: tuple[str, str]) -> None:
+        self._restored_steps.discard(key)
+        self._finish_restored_generation(key)
+        generation = self._generations.pop(key, None)
+        if generation is not None:
+            span, output, ended_at = generation
+            span.update(output=self._mask(data=output))
+            span.end(end_time=int(ended_at.timestamp() * 1e9))
+        step = self._steps.pop(key, None)
+        if step is not None:
+            step.end(end_time=int(self._last_times[key].timestamp() * 1e9))
+
+    def _finish_restored_generation(self, key: tuple[str, str]) -> None:
+        restored = self._restored_generations.pop(key, None)
+        if restored is not None and key[0] in self._deliveries:
+            self._completed_generations.append(restored)
+
+    def _needs_export(self, generation: _RestoredGeneration) -> bool | None:
+        store = self._deliveries.get(generation.commit.execution_id)
+        if store is None:
+            return True  # Compatibility with checkpoints predating delivery tracking.
+        status, observation_id = store.receipt(generation.commit.hash)
+        if status == "pending":
+            return True
+        if status == "sending":
+            # An absent result is not proof of non-delivery: ingestion may lag.
+            try:
+                result = self.client.api.observations.get_many(
+                    fields="core",
+                    limit=1,
+                    filter=json.dumps(
+                        [
+                            {
+                                "type": "string",
+                                "column": "id",
+                                "operator": "=",
+                                "value": observation_id,
+                            }
+                        ]
+                    ),
+                )
+                if any(row.id == observation_id for row in result.data):
+                    store.confirm(generation.commit.hash)
+                    return False
+            except Exception as exc:
+                event(
+                    "WARNING",
+                    "observability.reconciliation_failed",
+                    subsystem="observability",
+                    **exception_fields(exc),
+                )
+            else:
+                event(
+                    "WARNING",
+                    "observability.delivery_unresolved",
+                    subsystem="observability",
+                    execution_id=generation.commit.execution_id,
+                    commit_hash=generation.commit.hash,
+                    observation_id=observation_id,
+                    message="Langfuse delivery remains uncertain; withholding resend",
+                )
+            return None
+        return False
+
+    def _recover_completed_generations(self) -> None:
+        remaining = []
+        for generation in self._completed_generations:
+            try:
+                needed = self._needs_export(generation)
+                if needed is None:
+                    remaining.append(generation)
+                elif needed:
+                    key = (
+                        generation.commit.execution_id,
+                        generation.arguments["run_id"],
+                    )
+                    last_time = self._last_times[key]
+                    step_number = self._step_numbers[key]
+                    restored_step = key in self._restored_steps
+                    # The pending current turn must survive opening an older step.
+                    current = self._restored_generations.pop(key, None)
+                    self._last_times[key] = generation.started_at
+                    self._step_numbers[key] = generation.step_number - 1
+                    try:
+                        self._record_delta(
+                            generation.commit,
+                            generation.context,
+                            **generation.arguments,
+                        )
+                        self._end_step(key)
+                    finally:
+                        self._last_times[key] = last_time
+                        self._step_numbers[key] = step_number
+                        if restored_step:
+                            self._restored_steps.add(key)
+                        if current is not None:
+                            self._restored_generations[key] = current
+            except Exception as exc:
+                remaining.append(generation)
+                event(
+                    "WARNING",
+                    "observability.recovery_failed",
+                    subsystem="observability",
+                    **exception_fields(exc),
+                )
+        self._completed_generations = remaining
+        for execution_id, commit in self._task_ends.items():
+            root = self._roots.pop(execution_id, None)
+            if root is not None:
+                root.end(end_time=int(commit.occurred_at.timestamp() * 1e9))
 
     def _metadata(self, commit: Commit, *, run_id: str | None = None) -> dict[str, Any]:
         selected_run = run_id or commit.author.run_id
@@ -184,49 +452,122 @@ class LangfuseObserver:
         as_type: str,
         output: Mapping[str, Any],
         run_id: str,
-        input_messages: list[Mapping[str, Any]] | None = None,
+        input_messages: Any = None,
         usage: UsageDelta | None = None,
         set_trace_input: bool = False,
     ) -> None:
-        trace_id = deterministic_trace_id(context.execution_id)
-        attributes: dict[str, Any] = {
-            "trace_name": (
-                f"corral.task.{context.task_id}" if context.task_id else "corral.task"
-            ),
-        }
-        if context.benchmark_run_id is not None:
-            attributes["session_id"] = context.benchmark_run_id
-        attribute_scope = self._attribute_scope_factory(**attributes)
-        with attribute_scope:
-            metadata = self._metadata(commit, run_id=run_id)
-            model = self._models.get(commit.execution_id)
-            args: dict[str, Any] = {
-                "name": name,
-                "as_type": as_type,
-                "metadata": self._mask(data=metadata),
-            }
-            if input_messages:
-                args["input"] = self._mask(data=input_messages)
-            if as_type == "generation" and model is not None:
-                args["model"] = model
-            get_current_trace_id = getattr(self.client, "get_current_trace_id", None)
-            current_trace_id = (
-                get_current_trace_id() if get_current_trace_id is not None else None
+        key = (commit.execution_id, run_id)
+        if self._restoring:
+            if set_trace_input:
+                self._last_times[commit.execution_id] = commit.occurred_at
+                return
+            if as_type == "generation":
+                self._finish_restored_generation(key)
+                self._restored_steps.discard(key)
+                self._restored_generations[key] = _RestoredGeneration(
+                    commit,
+                    context,
+                    self._last_times.get(key, commit.occurred_at),
+                    {
+                        "name": name,
+                        "as_type": as_type,
+                        "output": json.loads(json.dumps(output)),
+                        "run_id": run_id,
+                        "input_messages": input_messages,
+                        "usage": usage,
+                    },
+                    self._step_numbers.get(key, 0) + 1,
+                )
+            if key not in self._restored_steps:
+                self._step_numbers[key] = self._step_numbers.get(key, 0) + 1
+                self._restored_steps.add(key)
+            if as_type == "tool":
+                self._tool_starts.pop(
+                    (commit.execution_id, commit.event.invocation_id), None
+                )
+            self._last_times[key] = commit.occurred_at
+            return
+        metadata = self._metadata(commit, run_id=run_id)
+        root = self._roots.get(commit.execution_id)
+        if root is None:
+            root = self._start_span(
+                context,
+                name=f"Task · {context.task_id or commit.execution_id}",
+                as_type="agent",
+                started_at=self._task_starts.get(
+                    commit.execution_id, commit.occurred_at
+                ),
+                input=self._mask(
+                    data=input_messages
+                    if set_trace_input
+                    else self._task_inputs.get(commit.execution_id)
+                ),
+                metadata=self._mask(data=metadata),
             )
-            if current_trace_id != trace_id:
-                args["trace_context"] = {"trace_id": trace_id}
-            with self.client.start_as_current_observation(**args) as span:
-                if set_trace_input and input_messages:
-                    set_trace_io = getattr(span, "set_trace_io", None)
-                    if set_trace_io is not None:
-                        set_trace_io(input=self._mask(data=input_messages))
-                update: dict[str, Any] = {
-                    "output": self._mask(data=dict(output)),
-                }
-                usage_details = _usage_details(usage) if usage is not None else None
-                if usage_details is not None:
-                    update["usage_details"] = usage_details
-                span.update(**update)
+            self._roots[commit.execution_id] = root
+            self._last_times[commit.execution_id] = commit.occurred_at
+        if set_trace_input:
+            return
+        if as_type == "generation":
+            metadata["commit_hash"] = commit.hash
+            self._end_step(key)
+        if key not in self._steps:
+            if key not in self._restored_steps:
+                self._step_numbers[key] = self._step_numbers.get(key, 0) + 1
+            self._restored_steps.discard(key)
+            self._steps[key] = self._start_span(
+                context,
+                name=f"Step {self._step_numbers[key]:02d}",
+                as_type="span",
+                parent=root,
+                started_at=self._last_times.get(key, commit.occurred_at),
+            )
+        started_at = self._last_times.get(key, commit.occurred_at)
+        if as_type == "tool":
+            started_at = self._tool_starts.pop(
+                (commit.execution_id, commit.event.invocation_id), commit.occurred_at
+            )
+            metadata.update(
+                execution_duration_ms=commit.event.duration_ms,
+                timing_source="tool_start_and_completion_commits",
+            )
+        else:
+            metadata.update(
+                timing_source="estimated_between_commits",
+                input_source="reconstructed_conversation",
+            )
+        args: dict[str, Any] = {}
+        if as_type == "generation":
+            args["model"] = self._models.get(commit.execution_id)
+            args["usage_details"] = _usage_details(usage) if usage is not None else None
+        span = self._start_span(
+            context,
+            name=name,
+            as_type=as_type,
+            parent=self._steps[key],
+            started_at=started_at,
+            input=self._mask(data=input_messages),
+            metadata=self._mask(data=metadata),
+            **args,
+        )
+        if as_type == "generation":
+            # A provider response can arrive as multiple action commits. Keep
+            # its output editable until the step is complete, then export once.
+            self._generations[key] = (
+                span,
+                json.loads(json.dumps(output)),
+                commit.occurred_at,
+            )
+        else:
+            failed = (
+                isinstance(commit.event, ToolFailed) or commit.event.status != "success"
+            )
+            span.update(
+                output=self._mask(data=dict(output)),
+                level="ERROR" if failed else "DEFAULT",
+            )
+            span.end(end_time=int(commit.occurred_at.timestamp() * 1e9))
+        self._last_times[key] = commit.occurred_at
 
     def _record_agent_messages(
         self,
@@ -248,16 +589,36 @@ class LangfuseObserver:
             return
         output_index = assistant_indexes[-1]
         inputs = [
-            *self._pending_inputs.pop(key, []),
+            *self._pending_inputs.get(key, []),
             *messages[:output_index],
         ]
         output = messages[output_index]
         trailing = messages[output_index + 1 :]
-        if event.usage_delta.llm_calls == 0 and output.get("content") is None:
+        if (
+            event.usage_delta.llm_calls == 0
+            and event.actions
+            and (key in self._steps or key in self._restored_steps)
+        ):
             self._pending_inputs[key] = [*inputs, output, *trailing]
+            generation = self._generations.get(key)
+            restored = self._restored_generations.get(key)
+            generation_output = (
+                generation[1]
+                if generation is not None
+                else restored.arguments["output"]
+                if restored is not None
+                else None
+            )
+            if generation_output is not None:
+                calls = generation_output.setdefault("tool_calls", [])
+                known = {call.get("id") for call in calls}
+                calls.extend(
+                    action.to_tool_call()
+                    for action in event.actions
+                    if action.id not in known
+                )
             return
-        if trailing:
-            self._pending_inputs.setdefault(key, []).extend(trailing)
+        self._pending_inputs[key] = [*inputs, output, *trailing]
         self._record_delta(
             commit,
             context,
@@ -294,20 +655,74 @@ class LangfuseObserver:
             name=tool_name,
             as_type="tool",
             output=message,
+            input_messages=self._actions.pop(
+                (commit.execution_id, event.action_id), None
+            ),
             run_id=event.requested_by_run_id,
         )
+
+    def restore_commit(
+        self, commit: Commit, *, context: ObservationContext | None = None
+    ) -> None:
+        """Rebuild context, retaining the generation interrupted before export."""
+        self._restoring = True
+        try:
+            self.record_commit(commit, context=context)
+        finally:
+            self._restoring = False
 
     def record_commit(
         self, commit: Commit, *, context: ObservationContext | None = None
     ) -> None:
         if commit.hash in self._recorded_hashes:
             return
-        self._recorded_hashes.add(commit.hash)
         selected_context = context or ObservationContext(
             execution_id=commit.execution_id
         )
+        if self._exporter is not None and selected_context.state_db_path is not None:
+            store = self._exporter.stores.get(commit.execution_id)
+            if store is None:
+                store = GenerationDelivery(
+                    selected_context.state_db_path,
+                    self._exporter.destination,
+                    commit.execution_id,
+                )
+                self._exporter.stores[commit.execution_id] = store
+            # Enroll fresh executions even if they stopped before the initial
+            # notification. Existing histories without receipts stay on the
+            # legacy path: absence of a receipt does not prove non-delivery.
+            if not self._restoring and not any(
+                key[0] == commit.execution_id for key in self._step_numbers
+            ):
+                store.track()
+            if store.tracked():
+                self._deliveries[commit.execution_id] = store
+        if not self._restoring:
+            self._recover_completed_generations()
+            for key, generation in list(self._restored_generations.items()):
+                if key[0] != commit.execution_id:
+                    continue
+                needed = self._needs_export(generation)
+                if needed is None:
+                    continue
+                self._restored_generations.pop(key)
+                if not needed:
+                    continue
+                last_time = self._last_times[key]
+                self._last_times[key] = generation.started_at
+                # _record_delta opens this same step, rather than a new one.
+                self._step_numbers[key] -= 1
+                self._record_delta(
+                    generation.commit, generation.context, **generation.arguments
+                )
+                self._last_times[key] = last_time
+        self._recorded_hashes.add(commit.hash)
         commit_event = commit.event
         if isinstance(commit_event, ExecutionStarted):
+            self._task_starts[commit.execution_id] = commit.occurred_at
+            self._task_inputs[commit.execution_id] = _execution_started_messages(
+                commit_event
+            )
             model = commit_event.model.get("name")
             if isinstance(model, str) and model:
                 self._models[commit.execution_id] = model
@@ -323,36 +738,81 @@ class LangfuseObserver:
             )
             return
         if isinstance(commit_event, AgentStarted):
+            key = (commit.execution_id, commit_event.agent_run_id)
+            self._last_times[key] = commit.occurred_at
+            self._pending_inputs[key] = list(
+                self._task_inputs.get(commit.execution_id, [])
+            )
             self._agents[(commit.execution_id, commit_event.agent_run_id)] = (
                 commit_event.agent_id
             )
             return
         if isinstance(commit_event, ToolStarted):
+            self._tool_starts[(commit.execution_id, commit_event.invocation_id)] = (
+                commit.occurred_at
+            )
             self._tools[(commit.execution_id, commit_event.invocation_id)] = (
                 commit_event.tool_name
             )
             return
         if isinstance(commit_event, AgentTurnRecorded):
+            for action in commit_event.actions:
+                self._actions[(commit.execution_id, action.id)] = dict(action.arguments)
             self._record_agent_messages(commit, commit_event, selected_context)
             return
         if isinstance(commit_event, ToolCompleted | ToolFailed):
             self._record_tool_result(commit, commit_event, selected_context)
+            return
+        if isinstance(commit_event, SubmissionAccepted):
+            root = self._roots.get(commit.execution_id)
+            if root is not None:
+                root.update(
+                    output=self._mask(
+                        data={
+                            "answer": commit_event.answer,
+                            "status": "surrendered"
+                            if commit_event.surrendered
+                            else "submitted",
+                        }
+                    )
+                )
+            return
+        if isinstance(commit_event, ExecutionCompleted | ExecutionFailed):
+            self._task_ends[commit.execution_id] = commit
+            for key in self._steps.keys() | self._restored_steps:
+                if key[0] == commit.execution_id:
+                    self._end_step(key)
+            root = self._roots.pop(commit.execution_id, None)
+            if root is not None:
+                if isinstance(commit_event, ExecutionFailed):
+                    root.update(
+                        output=self._mask(data={"error": commit_event.error}),
+                        level="ERROR",
+                    )
+                root.end(end_time=int(commit.occurred_at.timestamp() * 1e9))
+            self._last_times[commit.execution_id] = commit.occurred_at
 
     def flush(self) -> None:
+        self._recover_completed_generations()
         flush = getattr(self.client, "flush", None)
         if flush is not None:
             flush()
 
 
-def observer_from_env() -> Observer:
-    local = LoggingObserver()
+def langfuse_enabled() -> bool:
+    """Whether environment configuration requests Langfuse export."""
     enabled = os.getenv("CORRAL_LANGFUSE_ENABLED", "").strip().lower()
     if enabled in {"0", "false", "no", "off"}:
-        return local
+        return False
     configured = bool(os.getenv("LANGFUSE_PUBLIC_KEY")) and bool(
         os.getenv("LANGFUSE_SECRET_KEY")
     )
-    if not configured and enabled not in {"1", "true", "yes", "on"}:
+    return configured or enabled in {"1", "true", "yes", "on"}
+
+
+def observer_from_env() -> Observer:
+    local = LoggingObserver()
+    if not langfuse_enabled():
         return local
     try:
         remote = LangfuseObserver()
@@ -371,6 +831,7 @@ def observer_from_env() -> Observer:
 __all__ = [
     "LangfuseObserver",
     "deterministic_trace_id",
+    "langfuse_enabled",
     "mask_sensitive_data",
     "observer_from_env",
 ]

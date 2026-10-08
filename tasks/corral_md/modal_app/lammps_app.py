@@ -392,20 +392,39 @@ def _run_sandbox(
                 "/assets/structures": volume_struct.read_only(),
             },
         )
+        timeout_error = None
         try:
             _write(working.parent / "sandbox.json", {"sandbox_id": sandbox.object_id})
             volume_sim.commit()
-            stdout = sandbox.stdout.read()
-            stderr = sandbox.stderr.read()
             sandbox.wait()
+        except modal.exception.SandboxTimeoutError as exc:
+            timeout_error = exc
         finally:
             # Wait for termination and the final Volume commit before reading
             # outputs. No background child may keep writing during collection.
-            sandbox.terminate(wait=True)
-        _collect_workspace(task_volume, working)
+            try:
+                sandbox.terminate(wait=True)
+            except modal.exception.SandboxTimeoutError as exc:
+                # terminate(wait=True) waits again and re-raises a settled
+                # timeout in the Modal SDK. Still retain the captured logs.
+                timeout_error = exc
+        stdout = sandbox.stdout.read()
+        stderr = sandbox.stderr.read()
+        if timeout_error is None:
+            _collect_workspace(task_volume, working)
         (working / "output").mkdir(exist_ok=True)
         (working / "output" / f"{log_stem}.stdout.txt").write_text(stdout)
         (working / "output" / f"{log_stem}.stderr.txt").write_text(stderr)
+        if timeout_error is not None:
+            raise modal.exception.SandboxTimeoutError(
+                f"Sandbox exceeded its {timeout}-second wall-clock timeout, "
+                "including Python startup and model loading. Reduce the work per call "
+                "and continue from a previously synchronized restart state. "
+                "Outputs from this failed call were not synchronized. "
+                "Captured logs are retained with the failed attempt.\n"
+                f"stdout (last 4000 characters):\n{stdout[-4000:]}\n"
+                f"stderr (last 4000 characters):\n{stderr[-4000:]}"
+            ) from timeout_error
         if sandbox.returncode and check_exit:
             raise ValueError(
                 f"Simulation failed (exit {sandbox.returncode}):\n"
@@ -460,7 +479,7 @@ def _run_python(
     execution_options: dict | None = None,
 ) -> None:
     options = execution_options or {}
-    timeout = options.get("timeout", 600)
+    timeout = options.get("timeout", 900)
     directory = options.get("working_dir", "/workspace")
     if type(timeout) is not int or not 1 <= timeout <= 7200:
         raise ValueError("Invalid Python timeout")
@@ -473,6 +492,7 @@ def _run_python(
     _run_sandbox(
         [
             "python",
+            "-u",
             "/workspace/" + script_path.relative_to(remote_root).as_posix(),
             *args,
         ],
@@ -574,7 +594,8 @@ def _execute(
             "request_sha256": request_hash,
             "call_id": call_id,
             "attempt_id": attempt_id,
-            "error": str(exc),
+            "error": str(exc) or type(exc).__name__,
+            "error_type": type(exc).__name__,
             "attempt": str(attempt),
         }
         _write(attempt / "failure.json", failure)

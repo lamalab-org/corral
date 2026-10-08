@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 import cloudpickle
 import numpy as np
 
-from corral.core.tool import Tool
+from corral.core.tool import Tool, WorkspaceAccess
 from corral.runtime import permissions
 
 if TYPE_CHECKING:
@@ -619,6 +619,7 @@ class _RestrictedPythonREPLTool(Tool):
         export_result_names: Mapping[str, str],
         max_output_chars: int,
         address_space_bytes: int,
+        network_access: str = "allowed",
     ):
         super().__init__(
             name="_corral_python_repl_step",
@@ -633,6 +634,7 @@ class _RestrictedPythonREPLTool(Tool):
                 "required": ["code", "public_data", "checkpoint"],
             },
         )
+        self.network_access = network_access
         self.namespace_factory = namespace_factory
         self.code_executor = code_executor
         self.synchronized_names = synchronized_names
@@ -664,10 +666,10 @@ class _RestrictedPythonREPLTool(Tool):
         except BaseException:
             output = traceback.format_exc(limit=8)
         exports = _export_namespace(namespace, self.export_names)
-        result: dict[str, Any] = {
-            "output": output[: self.max_output_chars],
-            "checkpoint": snapshot_namespace(namespace),
-        }
+        # The checkpoint's size follows the agent's data rather than its output,
+        # so it leaves on the bulk channel and never enters this JSON reply.
+        permissions.send_bulk("checkpoint", snapshot_namespace(namespace))
+        result: dict[str, Any] = {"output": output[: self.max_output_chars]}
         if self.export_result_names:
             result.update(
                 {
@@ -696,6 +698,9 @@ def execute_python_repl(
     max_code_chars: int = DEFAULT_MAX_CODE_CHARS,
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
     address_space_bytes: int = DEFAULT_WORKER_ADDRESS_SPACE_BYTES,
+    max_response_bytes: int | None = None,
+    workspace_access: WorkspaceAccess | str = WorkspaceAccess.NONE,
+    network_access: str = "allowed",
 ) -> PythonREPLResult:
     """Execute and checkpoint Python in Corral's restricted worker.
 
@@ -703,6 +708,8 @@ def execute_python_repl(
     Initial data is materialized only when no checkpoint exists; on restoration,
     only bindings named by `synchronized_names` are refreshed.
     """
+    if network_access not in {"allowed", "none"}:
+        raise ValueError("network_access must be allowed or none")
     if len(code) > max_code_chars:
         raise ValueError(
             f"Python REPL code is limited to {max_code_chars:,} characters"
@@ -739,8 +746,9 @@ def execute_python_repl(
         export_result_names=result_names,
         max_output_chars=max_output_chars,
         address_space_bytes=address_space_bytes,
+        network_access=network_access,
     )
-    response = permissions.run_worker(
+    reply, bulk = permissions.run_worker_with_bulk(
         "tool",
         (
             worker_tool,
@@ -752,18 +760,19 @@ def execute_python_repl(
         ),
         workspace,
         cancel=cancel,
-    )["content"]
-    result = json.loads(response)
-    expected = (
-        {"output", "checkpoint", *result_names.values()}
-        if result_names
-        else {"output", "checkpoint", "exports"}
+        max_response_bytes=max_response_bytes,
+        workspace_access=WorkspaceAccess(workspace_access).value,
     )
+    result = json.loads(reply["content"])
+    expected = (
+        {"output", *result_names.values()} if result_names else {"output", "exports"}
+    )
+    checkpoint_payload = bulk.get("checkpoint")
     if (
         not isinstance(result, dict)
         or set(result) != expected
         or not isinstance(result.get("output"), str)
-        or not isinstance(result.get("checkpoint"), str)
+        or not isinstance(checkpoint_payload, bytes)
     ):
         raise RuntimeError("Invalid Python REPL worker result")
     exports = (
@@ -777,7 +786,9 @@ def execute_python_repl(
     if not isinstance(exports, dict) or set(exports) != set(export_names):
         raise RuntimeError("Invalid Python REPL worker exports")
     return PythonREPLResult(
-        output=result["output"], checkpoint=result["checkpoint"], exports=exports
+        output=result["output"],
+        checkpoint=checkpoint_payload.decode(),
+        exports=exports,
     )
 
 

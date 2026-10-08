@@ -1,14 +1,12 @@
 """Trusted bootstrap. No model-controlled callable runs before dropping UID."""
 
 # Optional agent imports must occur only in agent bootstraps.
-# ruff: noqa: PLC0415
 
 from __future__ import annotations
 
 import asyncio
 import base64
 import importlib
-import json
 import os
 import sys
 from contextlib import suppress
@@ -17,18 +15,41 @@ from pathlib import Path
 import cloudpickle
 from pydantic import TypeAdapter
 
-from corral.runtime._worker_filesystem import bind_bootstrap_parent, enter_workspace
-from corral.runtime.permissions import DENIED, drop_privileges, private_controller_types
+from corral.runtime._worker_filesystem import (
+    bind_bootstrap_parent,
+    enter_workspace,
+    isolate_network,
+)
+from corral.runtime.permissions import (
+    DENIED,
+    drop_privileges,
+    framed_reply,
+    private_controller_types,
+    set_bulk_channel,
+)
 
 
 def main() -> None:
-    request, descriptor = sys.argv[1:]
+    request, descriptor, bulk_descriptor = sys.argv[1:]
     # This file is written by the root controller in its private directory.
     with Path(request).open("rb") as stream:
-        kind, payload, uid, gid, workspace, workspace_fd = cloudpickle.load(stream)
+        (
+            kind,
+            payload,
+            uid,
+            gid,
+            workspace,
+            workspace_fd,
+            workspace_access,
+            resource_mounts,
+        ) = cloudpickle.load(stream)
     Path(request).unlink()
-    output = os.fdopen(int(descriptor), "w")
+    output = os.fdopen(int(descriptor), "wb")
     os.set_inheritable(output.fileno(), False)
+    # Bulk payloads leave on their own descriptor. Like the reply channel it is
+    # a bare pipe, so it crosses unshare and chroot without any shared path.
+    bulk = int(bulk_descriptor)
+    os.set_inheritable(bulk, False)
     if kind == "agent":
         from corral.agents.ai_scientist.prompts import load_prompt
         from corral.agents.session import _run_agent_lifecycle
@@ -57,10 +78,19 @@ def main() -> None:
     elif kind == "tool":
         tool, arguments = payload
     elif kind == "terminal":
-        from corral.workspace import WorkspaceFilesystem, build_terminal_tool
+        from corral.workspace import AbsoluteWorkspaceFilesystem, build_terminal_tool
 
-        tool = build_terminal_tool(WorkspaceFilesystem(workspace))
+        tool = build_terminal_tool(AbsoluteWorkspaceFilesystem("/workspace"))
         arguments = payload
+    elif kind == "workspace_tool":
+        from corral.workspace import AbsoluteWorkspaceFilesystem, build_workspace_tools
+
+        name, arguments = payload
+        tools = build_workspace_tools(AbsoluteWorkspaceFilesystem("/workspace"))
+        try:
+            tool = tools[name]
+        except KeyError as exc:
+            raise ValueError(f"unknown workspace operation: {name!r}") from exc
     else:
         raise ValueError("unknown restricted worker kind")
     private_controller_types()
@@ -72,21 +102,39 @@ def main() -> None:
     child = os.fork()
     if child:
         output.close()
+        os.close(bulk)
         _, status = os.waitpid(child, 0)
         code = os.waitstatus_to_exitcode(status)
         os._exit(code if code >= 0 else 128 - code)
     bind_bootstrap_parent(parent_pid)
+    if kind == "tool" and getattr(tool, "network_access", "allowed") == "none":
+        isolate_network()
     scratch = enter_workspace(
         workspace,
         Path(request).parent / "root",
         uid,
         gid,
-        keep_fds={0, 1, 2, output.fileno()},
+        keep_fds={0, 1, 2, output.fileno(), bulk},
         workspace_fd=workspace_fd,
+        workspace_access=workspace_access,
+        resource_mounts=resource_mounts,
     )
-    drop_privileges(uid, gid, workspace, scratch=scratch)
+    # Erase controller-only path capabilities before model-controlled code can
+    # inspect this frame. The mount namespace now provides the complete view.
+    workspace = "/workspace"
+    workspace_fd = -1
+    resource_mounts = {}
+    request = "/.corral-request"
+    drop_privileges(
+        uid,
+        gid,
+        workspace,
+        scratch=scratch,
+        preserve_environment=kind == "agent",
+    )
     # Linux clears the parent-death signal when credentials change.
     bind_bootstrap_parent(parent_pid)
+    set_bulk_channel(bulk)
     try:
         if kind == "agent":
             if isinstance(agent, _DelegatedAgent):
@@ -114,7 +162,7 @@ def main() -> None:
     except Exception as exc:
         response = {"ok": False, "error": str(exc)}
     with output:
-        json.dump(response, output)
+        output.write(framed_reply(response))
 
 
 if __name__ == "__main__":

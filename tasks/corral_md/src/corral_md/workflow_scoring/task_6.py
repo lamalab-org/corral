@@ -10,6 +10,7 @@ from ase import units
 from scipy import signal
 from scipy.ndimage import gaussian_filter1d
 
+from . import dynamics
 from .common import (
     EvidenceError,
     UnsupportedEvidence,
@@ -322,12 +323,25 @@ def evaluate(e: Evidence, r: Rubric) -> None:
         ) and close(distances[:, 13:19], np.full((64, 6), 4.05), rtol=0, atol=1e-4)
 
     def fixed_cell():
-        eq, _ = stage("eq")
-        prod, _ = stage("prod")
-        return all(
-            close(a.cell.array, eq[0].cell.array, rtol=0, atol=1e-5)
-            and close(a.get_masses(), eq[0].get_masses(), rtol=0, atol=1e-7)
-            for a in eq + prod
+        eq, eq_times = stage("eq")
+        prod, prod_times = stage("prod")
+        # Production velocities may be supplied as a separate, unit-labelled
+        # array. Reconstruct momenta on copies for the shared state check.
+        restartable_prod = []
+        for atoms, velocity in zip(prod, values("prod")[1], strict=True):
+            copy = atoms.copy()
+            copy.calc = atoms.calc
+            copy.set_velocities(velocity)
+            restartable_prod.append(copy)
+        return (
+            dynamics.sampled_motion(eq, eq_times)
+            and dynamics.sampled_motion(restartable_prod, prod_times)
+            and dynamics.restartable_endpoint(e, restartable_prod[-1])
+            and all(
+                close(a.cell.array, eq[0].cell.array, rtol=0, atol=1e-5)
+                and close(a.get_masses(), eq[0].get_masses(), rtol=0, atol=1e-7)
+                for a in eq + prod
+            )
         )
 
     def initialization():
@@ -361,6 +375,7 @@ def evaluate(e: Evidence, r: Rubric) -> None:
             and config["production_ensemble"].upper() == "NVE"
             and is_teacher_model(e.settings["model"])
             and isinstance(e.settings["model_settings"], dict)
+            and dynamics.recorded_velocity_protocol(e)
         )
 
     def continuity():
@@ -460,7 +475,14 @@ def evaluate(e: Evidence, r: Rubric) -> None:
     r.check(
         "kinetic_temperature_trace",
         6,
-        lambda: logged(["temperature_K", "kinetic_energy_eV"]),
+        lambda: (
+            logged(["temperature_K", "kinetic_energy_eV"])
+            and dynamics.fixed_cell_log_fields(
+                trace(),
+                stage("eq")[0],
+                timestep_fs=float(e.settings["md"]["timestep_fs"]),
+            )
+        ),
     )
     r.check(
         "energy_trace_and_drift",

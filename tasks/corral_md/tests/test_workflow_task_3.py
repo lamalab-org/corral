@@ -43,14 +43,18 @@ def test_level1_accepts_unit_labeled_dataset_records(submission):
         record["forces_eV_per_angstrom"] = record.pop("forces")
     _write(dataset_path, {"records": records})
 
-    result = check_level1_workflow(3, verification_backend="offline").evaluate(submission)
+    result = check_level1_workflow(3, verification_backend="offline").evaluate(
+        submission
+    )
     assert result["status"] == "pending_review", result["checks"]
     assert _check(result, "teacher_energy_and_force_labels")["status"] == "passed"
     assert _check(result, "independent_model_calculation")["status"] == "unverified"
 
     records[0]["energy"] = records[0]["energy_eV"] + 1
     _write(dataset_path, {"records": records})
-    result = check_level1_workflow(3, verification_backend="offline").evaluate(submission)
+    result = check_level1_workflow(3, verification_backend="offline").evaluate(
+        submission
+    )
     assert result["score"] == 0
 
 
@@ -80,7 +84,9 @@ def test_level1_binary_score_waits_for_independent_model_result(submission):
             }
 
     for status, expected in (("passed", 1.0), ("failed", 0.0), ("unverified", None)):
-        result = WorkflowScorer(3, level=1, verifier=StubVerifier(status)).evaluate(submission)
+        result = WorkflowScorer(3, level=1, verifier=StubVerifier(status)).evaluate(
+            submission
+        )
         assert result["score"] == expected
 
 
@@ -174,7 +180,7 @@ def submission(tmp_path):
     settings = {
         "teacher_model": "teacher.model",
         "student_model": "student.model",
-        "teacher_sha256": "a" * 64,
+        "teacher_sha256": PINNED_TEACHER_SHA256,
         "student_sha256": "b" * 64,
         "dispersion": True,
         "energy_unit": "eV",
@@ -258,7 +264,9 @@ def test_level1_scores_only_the_shared_teacher_dataset(submission):
     level1_manifest = submission.parent / "level1-manifest.json"
     level1_manifest.write_text(json.dumps(manifest))
 
-    report = check_level1_workflow(3, verification_backend="offline").evaluate(level1_manifest)
+    report = check_level1_workflow(3, verification_backend="offline").evaluate(
+        level1_manifest
+    )
     assert report["status"] == "pending_review"
     assert report["level"] == 1
     assert {check["name"] for check in report["checks"] if check["points"]} == {

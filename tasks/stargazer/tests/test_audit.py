@@ -23,8 +23,8 @@ def test_committed_audit_is_deterministic_and_official_references_pass():
         1: 10,
         2: 10,
     }
-    assert set(score_by_id) == set().union(*selected.values())
-    assert report["summary"]["by_source"] == {"synthetic": {"passing": 20, "total": 20}}
+    assert set().union(*selected.values()) <= set(score_by_id)
+    assert report["summary"]["by_source"] == {"synthetic": {"passing": 28, "total": 28}}
     assert all(
         score_by_id[task_id] == 1.0
         for task_ids in selected.values()
@@ -42,6 +42,8 @@ def test_audit_reports_no_reference_failures():
         "rms_gate",
         "physical_match_gate",
         "count_gate",
+        "complete_matching_gate",
+        "individual_match_gate",
     }
     assert all(count == 0 for count in reasons.values())
 
@@ -50,7 +52,7 @@ def test_audit_reports_no_reference_failures():
 def official_bank(tmp_path):
     selectors = {}
     records = []
-    for level, (minimum, maximum) in {1: (5, 7), 2: (8, 10)}.items():
+    for level, (minimum, maximum) in {1: (1, 5), 2: (8, 10)}.items():
         task_ids = [f"level_{level}_task_{index}" for index in range(10)]
         selector = {
             "source": "synthetic",
@@ -85,8 +87,8 @@ def test_official_bank_accepts_both_synthetic_difficulty_bands(official_bank):
     [
         ("task_ids", None, "explicit list"),
         ("source", "real", "only synthetic"),
-        ("difficulty_min", 4, "difficulties 5-7"),
-        ("difficulty_max", 8, "difficulties 5-7"),
+        ("difficulty_min", 5, "difficulties 1-5"),
+        ("difficulty_max", 7, "difficulties 1-5"),
     ],
 )
 def test_official_bank_rejects_invalid_selectors(official_bank, field, value, error):
@@ -141,8 +143,8 @@ def test_official_bank_requires_ten_tasks_per_level(official_bank):
     [
         ("task_id", "unknown_task", "missing from audit"),
         ("source", "real", "non-synthetic tasks"),
-        ("difficulty", 4, "outside difficulties 5-7"),
-        ("difficulty", 8, "outside difficulties 5-7"),
+        ("difficulty", 0, "outside difficulties 1-5"),
+        ("difficulty", 6, "outside difficulties 1-5"),
         ("score", 0.0, "reference-invalid tasks"),
     ],
 )

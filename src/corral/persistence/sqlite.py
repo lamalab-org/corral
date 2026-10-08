@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -58,6 +59,36 @@ if TYPE_CHECKING:
     from sqlalchemy.sql.elements import ColumnElement
 
     from corral.core.actors import ActorRef
+
+
+def _check_filesystem(path: Path) -> None:
+    """Reject Docker shared filesystems before SQLite can crash or corrupt data."""
+    try:
+        mounts = Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+    except OSError:
+        return  # No Linux mount table (for example, a native macOS runner).
+    resolved = path.resolve()
+    filesystem = ""
+    depth = -1
+    for line in mounts.splitlines():
+        fields, separator, details = line.partition(" - ")
+        if not separator:
+            continue
+        mount = Path(
+            re.sub(
+                r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), fields.split()[4]
+            )
+        )
+        if resolved.is_relative_to(mount) and len(mount.parts) > depth:
+            depth = len(mount.parts)
+            filesystem = details.split()[0]
+    if filesystem in {"fakeowner", "virtiofs", "9p", "fuse.grpcfuse", "fuse.osxfs"}:
+        raise ValueError(
+            f"SQLite checkpoint {path} is on a Docker shared filesystem "
+            f"({filesystem}), which can cause crashes or database corruption. "
+            "Mount the run directory on a Docker named volume and copy results "
+            "to the host after the container stops."
+        )
 
 
 def _configure_connection(connection: Any, _record: Any) -> None:
@@ -192,6 +223,10 @@ class _ExecutionSQLiteCommitStore:
         self._store = store
         self.execution_id = execution_id
 
+    @property
+    def path(self) -> Path:
+        return self._store.path
+
     def bind(
         self,
         author: ActorRef,
@@ -280,6 +315,7 @@ class SQLiteCommitStore:
         if snapshot_interval < 1:
             raise ValueError("snapshot_interval must be at least 1")
         self.path = Path(path).expanduser()
+        _check_filesystem(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.execution_id = execution_id
         self.snapshot_interval = snapshot_interval

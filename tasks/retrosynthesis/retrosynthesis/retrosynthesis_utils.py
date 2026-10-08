@@ -494,13 +494,13 @@ def _check_template_applicable(
         return False
 
 
-def _is_buyable(smiles: list[str]) -> list[bool]:
-    hits = lookup_prices(smiles)
+def _is_buyable(smiles: list[str], db_path: str | None = None) -> list[bool]:
+    hits = lookup_prices(smiles) if db_path is None else lookup_prices(smiles, db_path)
     return [hits[item] is not None for item in smiles]
 
 
 def check_price(
-    smiles_list: list[str], limit: int = 5
+    smiles_list: list[str], limit: int = 5, db_path: str | None = None
 ) -> dict[str, list[dict[str, Any]]]:
     """
     Check the price of chemicals given a list of SMILES strings.
@@ -512,7 +512,11 @@ def check_price(
     Returns:
         A dictionary mapping each input SMILES to zero or one frozen price entries.
     """
-    hits = lookup_prices(smiles_list)
+    hits = (
+        lookup_prices(smiles_list)
+        if db_path is None
+        else lookup_prices(smiles_list, db_path)
+    )
     results: dict[str, list[dict[str, Any]]] = {}
 
     for smiles in smiles_list:
@@ -750,75 +754,6 @@ def get_functional_groups(smiles: str) -> list[str]:
         raise Exception(
             f"Error detecting functional groups in SMILES '{smiles}': {e}"
         ) from e
-
-
-def summarize_groups_with_full_mapping(smiles: str, result_dict, use_collapsed=True):
-    """
-    Enhanced version that includes the full molecule SMILES with all functional group atoms mapped.
-    Returns a dict where:
-    - Keys are mapped SMILES fragments
-    - Values are dicts containing:
-      - 'group': functional group name
-      - 'positions': tuple of atom indices
-      - 'full_mapped_smiles': full molecule with all functional group atoms mapped
-    """
-    data = result_dict["collapsed"] if use_collapsed else result_dict["raw"]
-
-    if not data:
-        return {"groups": {}, "full_mapped_smiles": smiles}
-
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return {"groups": {}, "full_mapped_smiles": smiles}
-
-    # Get all positions for full mapping
-    all_positions = [hit["positions"] for hit in data]
-    full_mapped_smiles = _get_full_mapped_smiles(mol, all_positions)
-
-    groups = {}
-    for hit in data:
-        mapped_smiles = hit["mapped_smiles"]
-        groups[mapped_smiles] = {
-            "group": hit["group"],
-            "positions": hit["positions"],
-            "smarts": hit["smarts"],
-        }
-
-    return {"groups": groups, "full_mapped_smiles": full_mapped_smiles}
-
-
-def get_molecule_summary(smiles: str, result_dict, use_collapsed=True) -> str:
-    """
-    Format a molecule's functional group analysis as a formatted string.
-
-    Args:
-        name: Name/identifier for the molecule
-        smiles: The original SMILES string
-        result_dict: Result from detect_functional_groups()
-        use_collapsed: Whether to use collapsed results
-
-    Returns:
-        Formatted string with molecule info and functional groups
-    """
-    lines = []
-    lines.append(f"{smiles}")
-
-    # Using the enhanced version with full mapping
-    summary = summarize_groups_with_full_mapping(smiles, result_dict, use_collapsed)
-    lines.append(f"Full mapped SMILES: {summary['full_mapped_smiles']}")
-    lines.append("Groups found:")
-
-    if summary["groups"]:
-        for mapped_smiles, info in summary["groups"].items():
-            # Convert 0-based positions to 1-based to match the atom map numbers in SMILES
-            mapped_positions = tuple(pos + 1 for pos in info["positions"])
-            lines.append(
-                f"  - {info['group']:16s} pos={mapped_positions}  frag={mapped_smiles}"
-            )
-    else:
-        lines.append("  - No functional groups detected")
-
-    return "\n".join(lines)
 
 
 def return_matching(smiles, template_id):

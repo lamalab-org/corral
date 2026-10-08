@@ -14,6 +14,7 @@ import json
 import os
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -28,9 +29,100 @@ from uuid import uuid4
 import cloudpickle
 
 DENIED = "Permission denied: access outside the trial workspace is not permitted"
-POLICY_VERSION = "workspace-root-v1"
+
+#: Ceiling on a worker's JSON control reply. Bulk values travel on their own
+#: channel, so this bounds control messages alone: the controller reads the
+#: reply's length prefix first and refuses an oversize reply before allocating
+#: for it, which is what makes this a memory-safety limit rather than a budget.
+#: `$CORRAL_MAX_WORKER_RESPONSE_BYTES` tunes it in either direction.
+DEFAULT_MAX_WORKER_RESPONSE_BYTES = 64 * 1024 * 1024
+
+#: Ceiling on one bulk payload, such as a REPL checkpoint. Bulk bytes are
+#: spooled to a controller-private file as they arrive, so this bounds disk
+#: rather than controller memory and can stand far above the reply ceiling.
+#: `$CORRAL_MAX_WORKER_BULK_BYTES` tunes it in either direction.
+DEFAULT_MAX_WORKER_BULK_BYTES = 1024 * 1024 * 1024
+
+#: Length prefix on the JSON control reply, read before the reply itself.
+_REPLY_PREFIX = struct.Struct("!Q")
+#: One bulk record: name length, then payload length. The controller reads this
+#: header before the body, so an oversize payload is refused unspooled.
+_BULK_RECORD = struct.Struct("!IQ")
+#: Bulk payloads move in chunks rather than one write, so neither side needs a
+#: buffer the size of the payload.
+_BULK_CHUNK = 1024 * 1024
+
+
+def _configured_bytes(variable: str, default: int) -> int:
+    """Read one positive byte-count setting from the environment."""
+    configured = os.environ.get(variable, "").strip()
+    if not configured:
+        return default
+    try:
+        value = int(configured)
+    except ValueError as exc:
+        raise ValueError(f"{variable} must be an integer: {configured!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{variable} must be positive")
+    return value
+
+
+def max_worker_response_bytes() -> int:
+    """The configured ceiling on a worker's JSON control reply."""
+    return _configured_bytes(
+        "CORRAL_MAX_WORKER_RESPONSE_BYTES", DEFAULT_MAX_WORKER_RESPONSE_BYTES
+    )
+
+
+def max_worker_bulk_bytes() -> int:
+    """The configured ceiling on one bulk payload from a worker."""
+    return _configured_bytes(
+        "CORRAL_MAX_WORKER_BULK_BYTES", DEFAULT_MAX_WORKER_BULK_BYTES
+    )
+
+
+#: Worker-side write end of the bulk channel, installed by the trusted
+#: bootstrap. It crosses the mount namespace and chroot as a bare descriptor,
+#: exactly as the JSON reply channel does; no shared path is ever opened.
+_bulk_fd: int | None = None
+
+
+def set_bulk_channel(descriptor: int | None) -> None:
+    """Install this worker's bulk write descriptor (trusted bootstrap only)."""
+    global _bulk_fd  # noqa: PLW0603 - one bulk channel per worker process
+    _bulk_fd = descriptor
+
+
+def send_bulk(name: str, payload: str | bytes) -> None:
+    """Hand the controller one large value beside the JSON reply.
+
+    Called in a worker. A value sent this way is never embedded in JSON and is
+    never held whole in controller memory: the controller spools it straight to
+    a private file. Use it for a REPL checkpoint or any payload whose size
+    follows the agent's data rather than its output.
+    """
+    if _bulk_fd is None:
+        raise RuntimeError("no bulk channel is available in this worker")
+    data = payload.encode() if isinstance(payload, str) else payload
+    label = name.encode()
+    os.write(_bulk_fd, _BULK_RECORD.pack(len(label), len(data)) + label)
+    with memoryview(data) as view:
+        offset = 0
+        while offset < len(view):
+            with view[offset : offset + _BULK_CHUNK] as chunk:
+                offset += os.write(_bulk_fd, chunk)
+
+
+def framed_reply(response: Any) -> bytes:
+    """Serialize one control reply with the length prefix the controller reads."""
+    body = json.dumps(response).encode()
+    return _REPLY_PREFIX.pack(len(body)) + body
+
+
+POLICY_VERSION = "canonical-workspace-v2"
 SCRATCH_PREFIX = ".corral-runtime-"
 NODE_WORKSPACE_DIR = ".corral-nodes"
+RESOURCE_WORKSPACE_DIR = "resources"
 _enabled = False
 _identities = itertools.count(20000)
 _groups: dict[Path, int] = {}
@@ -133,7 +225,8 @@ def _entries(directory: int, prefix: str = ""):
         # SDK homes can contain sockets and executable aliases. They are private
         # scratch within the workspace, not task artifacts or shared task files.
         if not prefix and (
-            name.startswith(SCRATCH_PREFIX) or name == NODE_WORKSPACE_DIR
+            name.startswith(SCRATCH_PREFIX)
+            or name in {NODE_WORKSPACE_DIR, RESOURCE_WORKSPACE_DIR}
         ):
             continue
         descriptor = os.open(
@@ -174,7 +267,7 @@ def copy_workspace(
                         parent = next_parent
                     if stat.S_ISDIR(status.st_mode):
                         with suppress(FileExistsError):
-                            os.mkdir(parts[-1], mode=0o770, dir_fd=parent)  # noqa: PTH102 - Path.mkdir does not support dir_fd
+                            os.mkdir(parts[-1], mode=0o770, dir_fd=parent)
                         existing = os.open(parts[-1], directory_flags, dir_fd=parent)
                         try:
                             if enabled():
@@ -231,7 +324,7 @@ def create_node_workspace(parent: str, source: str) -> str:
     parent_fd = _open_directory(parent)
     try:
         with suppress(FileExistsError):
-            os.mkdir(NODE_WORKSPACE_DIR, mode=0o2770, dir_fd=parent_fd)  # noqa: PTH102 - Path.mkdir does not support dir_fd
+            os.mkdir(NODE_WORKSPACE_DIR, mode=0o2770, dir_fd=parent_fd)
         nodes_fd = os.open(
             NODE_WORKSPACE_DIR,
             os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
@@ -242,7 +335,7 @@ def create_node_workspace(parent: str, source: str) -> str:
                 os.fchown(nodes_fd, 0, _groups[parent_path])
                 os.fchmod(nodes_fd, 0o2770)
             name = uuid4().hex
-            os.mkdir(name, mode=0o2770, dir_fd=nodes_fd)  # noqa: PTH102 - Path.mkdir does not support dir_fd
+            os.mkdir(name, mode=0o2770, dir_fd=nodes_fd)
             node_fd = os.open(
                 name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=nodes_fd
             )
@@ -366,8 +459,6 @@ def workspace_identity(
     root = Path(os.path.abspath(workspace))  # noqa: PTH100 - do not follow links
     if root == Path("/workspace") or not root.is_relative_to("/workspace"):
         raise ValueError("workers require an assigned directory below /workspace")
-    if root.is_relative_to("/workspace/.corral-runtime-system"):
-        raise ValueError("the worker runtime path is reserved")
     with _lock:
         parent = _node_parents.get(root)
         if root not in _groups:
@@ -405,7 +496,12 @@ def _allow_workspace_group(descriptor: int, gid: int) -> None:
 
 
 def drop_privileges(
-    uid: int, gid: int, workspace: str, *, scratch: str | None = None
+    uid: int,
+    gid: int,
+    workspace: str,
+    *,
+    scratch: str | None = None,
+    preserve_environment: bool = False,
 ) -> None:
     """Irreversibly enter the worker identity before running supplied code."""
     if os.geteuid() != 0 or uid <= 0 or gid <= 0:
@@ -426,6 +522,22 @@ def drop_privileges(
     os.chdir(workspace)
     if scratch is None:
         scratch = tempfile.mkdtemp(prefix=SCRATCH_PREFIX, dir=workspace)
+    if not preserve_environment:
+        public_environment = {
+            name: os.environ[name]
+            for name in (
+                "LANG",
+                "LC_ALL",
+                "LD_LIBRARY_PATH",
+                "PATH",
+                "PYTHONPATH",
+                "REQUESTS_CA_BUNDLE",
+                "SSL_CERT_FILE",
+            )
+            if name in os.environ
+        }
+        os.environ.clear()
+        os.environ.update(public_environment)
     os.environ.update(HOME=scratch, TMPDIR=scratch, XDG_CACHE_HOME=scratch + "/.cache")
     tempfile.tempdir = scratch
 
@@ -458,14 +570,63 @@ def _kill_identity(uid: int) -> None:
 
 
 def run_worker(
-    kind: str, payload: Any, workspace: str, *, cancel: threading.Event | None = None
+    kind: str,
+    payload: Any,
+    workspace: str,
+    *,
+    cancel: threading.Event | None = None,
+    max_response_bytes: int | None = None,
+    workspace_access: str | None = None,
+    resource_mounts: dict[str, tuple[str, str]] | None = None,
 ) -> Any:
     """Run one trusted bootstrap, then accept an unprivileged JSON result."""
+    result, _ = run_worker_with_bulk(
+        kind,
+        payload,
+        workspace,
+        cancel=cancel,
+        max_response_bytes=max_response_bytes,
+        workspace_access=workspace_access,
+        resource_mounts=resource_mounts,
+    )
+    return result
+
+
+def run_worker_with_bulk(
+    kind: str,
+    payload: Any,
+    workspace: str,
+    *,
+    cancel: threading.Event | None = None,
+    max_response_bytes: int | None = None,
+    workspace_access: str | None = None,
+    resource_mounts: dict[str, tuple[str, str]] | None = None,
+) -> tuple[Any, dict[str, bytes]]:
+    """Run one worker, returning its JSON result and any bulk payloads it sent.
+
+    Bulk payloads arrive on a separate descriptor and are spooled to a private
+    file as they stream in, so a large one costs controller disk rather than a
+    multiple of itself in controller memory.
+    """
     if not enabled() or _root is None:
         raise RuntimeError("restricted workers require Docker permission enforcement")
     descriptor = _open_directory(workspace)
     try:
-        return _run_worker(kind, payload, workspace, descriptor, cancel=cancel)
+        return _run_worker(
+            kind,
+            payload,
+            workspace,
+            descriptor,
+            cancel=cancel,
+            max_response_bytes=max_response_bytes or max_worker_response_bytes(),
+            max_bulk_bytes=max_worker_bulk_bytes(),
+            workspace_access=(
+                ("scratch" if kind == "agent" else "none")
+                if workspace_access is None
+                else workspace_access
+            ),
+            resource_mounts=resource_mounts or {},
+        )
     finally:
         try:
             root = Path(workspace)
@@ -484,23 +645,89 @@ def _run_worker(
     workspace_fd: int,
     *,
     cancel: threading.Event | None,
-) -> Any:
+    workspace_access: str,
+    resource_mounts: dict[str, tuple[str, str]],
+    max_response_bytes: int,
+    max_bulk_bytes: int,
+) -> tuple[Any, dict[str, bytes]]:
     uid, gid = workspace_identity(workspace, descriptor=workspace_fd)
     with tempfile.TemporaryDirectory(dir=_root) as directory:
         request = Path(directory) / "input.pkl"
         request.write_bytes(
-            serialize((kind, payload, uid, gid, workspace, workspace_fd))
+            serialize(
+                (
+                    kind,
+                    payload,
+                    uid,
+                    gid,
+                    workspace,
+                    workspace_fd,
+                    workspace_access,
+                    resource_mounts,
+                )
+            )
         )
         request.chmod(0o600)
         reader, writer = os.pipe()
+        bulk_reader, bulk_writer = os.pipe()
         output: list[bytes] = []
+        bulk: dict[str, bytes] = {}
+        refused: list[str] = []
 
         def read_result() -> None:
+            # The length prefix is read first so an oversize reply is refused
+            # before the controller allocates room for it.
             with os.fdopen(reader, "rb") as stream:
-                output.append(stream.read(64 * 1024 * 1024 + 1))
+                header = stream.read(_REPLY_PREFIX.size)
+                if len(header) < _REPLY_PREFIX.size:
+                    # A worker that died before replying leaves an empty result,
+                    # which the caller reports with the worker's own log.
+                    output.append(b"")
+                    return
+                (length,) = _REPLY_PREFIX.unpack(header)
+                if length > max_response_bytes:
+                    refused.append(
+                        f"control reply is {length:,} bytes, over the "
+                        f"{max_response_bytes:,} byte limit; raise "
+                        "$CORRAL_MAX_WORKER_RESPONSE_BYTES, or send the large "
+                        "value on the bulk channel instead"
+                    )
+                    return
+                output.append(stream.read(length))
+
+        def read_bulk() -> None:
+            with os.fdopen(bulk_reader, "rb") as stream:
+                while header := stream.read(_BULK_RECORD.size):
+                    if len(header) < _BULK_RECORD.size:
+                        refused.append("bulk record header was truncated")
+                        return
+                    name_length, length = _BULK_RECORD.unpack(header)
+                    if length > max_bulk_bytes:
+                        refused.append(
+                            f"bulk payload is {length:,} bytes, over the "
+                            f"{max_bulk_bytes:,} byte limit; raise "
+                            "$CORRAL_MAX_WORKER_BULK_BYTES"
+                        )
+                        return
+                    name = stream.read(name_length).decode(errors="replace")
+                    spool = Path(directory) / f"bulk-{len(bulk)}.bin"
+                    remaining = length
+                    with spool.open("wb") as sink:
+                        while remaining:
+                            chunk = stream.read(min(remaining, _BULK_CHUNK))
+                            if not chunk:
+                                refused.append(f"bulk payload {name!r} was truncated")
+                                return
+                            sink.write(chunk)
+                            remaining -= len(chunk)
+                    # One copy, made after the payload is safely on disk.
+                    bulk[name] = spool.read_bytes()
+                    spool.unlink()
 
         thread = threading.Thread(target=read_result, daemon=True)
         thread.start()
+        bulk_thread = threading.Thread(target=read_bulk, daemon=True)
+        bulk_thread.start()
         try:
             with tempfile.TemporaryFile(dir=_root) as log:
                 process = subprocess.Popen(
@@ -510,6 +737,7 @@ def _run_worker(
                         "corral.runtime._permission_worker",
                         str(request),
                         str(writer),
+                        str(bulk_writer),
                     ],
                     stdin=subprocess.DEVNULL,
                     # A write-only pipe is the only log handle inherited by the
@@ -519,7 +747,7 @@ def _run_worker(
                     # Environment factories may add private task import roots.
                     # The fresh trusted bootstrap needs the same module paths.
                     env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
-                    pass_fds=(writer, workspace_fd),
+                    pass_fds=(writer, bulk_writer, workspace_fd),
                     start_new_session=True,
                 )
 
@@ -532,6 +760,8 @@ def _run_worker(
                 log_thread.start()
                 os.close(writer)
                 writer = -1
+                os.close(bulk_writer)
+                bulk_writer = -1
                 try:
                     while True:
                         try:
@@ -548,10 +778,15 @@ def _run_worker(
                 finally:
                     _kill_identity(uid)
                     thread.join(timeout=5)
+                    bulk_thread.join(timeout=5)
                     log_thread.join(timeout=5)
                 if log_thread.is_alive():
                     raise RuntimeError("restricted worker log stream did not close")
-                if thread.is_alive() or not output or len(output[0]) > 64 * 1024 * 1024:
+                if bulk_thread.is_alive():
+                    raise RuntimeError("restricted worker bulk stream did not close")
+                if refused:
+                    raise RuntimeError(f"restricted worker {refused[0]}")
+                if not output or thread.is_alive():
                     raise RuntimeError("restricted worker returned an invalid response")
                 if process.returncode or not output[0]:
                     log.seek(0, os.SEEK_END)
@@ -563,29 +798,35 @@ def _run_worker(
                 response = json.loads(output[0])
                 if not response["ok"]:
                     raise RuntimeError(response["error"])
-                return response["result"]
+                return response["result"], bulk
         finally:
-            if writer >= 0:
-                os.close(writer)
+            for descriptor in (writer, bulk_writer):
+                if descriptor >= 0:
+                    os.close(descriptor)
 
 
-def execute_tool(
-    environment: Any, state: Any, tool: Any, arguments: dict[str, Any]
+def execute_restricted_tool(
+    tool: Any,
+    arguments: dict[str, Any],
+    workspace: str,
+    *,
+    resource_mounts: dict[str, tuple[str, str]] | None = None,
+    cancel: threading.Event | None = None,
+    prepared: Any | None = None,
 ) -> Any:
-    """Keep private task logic here; give code workers only public arguments."""
-    from corral.backend.background_tools import (  # - avoid tool import cycle
-        _CallableTool,
+    """Execute an untrusted tool with exactly its declared OS capabilities."""
+    return _run_public_tool(
+        tool,
+        arguments,
+        workspace,
+        resource_mounts=resource_mounts or {},
+        cancel=cancel,
+        prepared=prepared,
     )
-
-    # Job controls and explicitly trusted scientific functions never evaluate
-    # model-controlled code. They alone may receive the execution projection.
-    if isinstance(tool, _CallableTool) or getattr(tool, "trusted", False):
-        return environment.execute_tool(state, tool, arguments)
-    return _run_public_tool(tool, arguments, environment.workspace_path)
 
 
 def visible_argument_error(tool: Any, arguments: dict[str, Any]) -> str | None:
-    """Validate the public schema before preprocessing or injecting private data."""
+    """Validate normalized public arguments before injecting private data."""
     from jsonschema import Draft202012Validator
 
     schema = {
@@ -603,45 +844,76 @@ def _run_public_tool(
     workspace: str,
     *,
     cancel: threading.Event | None = None,
+    resource_mounts: dict[str, tuple[str, str]] | None = None,
+    prepared: Any | None = None,
 ) -> Any:
-    workspace_args = set(getattr(tool, "workspace_args", ()))
-    if set(tool.hidden_args) - workspace_args:
+    hidden_arg_names = set(
+        prepared.hidden_arg_names
+        if prepared is not None
+        else getattr(tool, "hidden_args", ())
+    )
+    workspace_args = set(
+        prepared.workspace_args
+        if prepared is not None
+        else getattr(tool, "workspace_args", ())
+    )
+    resources = set(
+        prepared.resources if prepared is not None else getattr(tool, "resources", ())
+    )
+    resource_args = resources & hidden_arg_names
+    if hidden_arg_names - workspace_args - resource_args:
         raise PermissionError(
             "restricted tools cannot receive hidden arguments; "
             "private inputs require explicitly trusted task logic"
         )
     public = {
-        name: value for name, value in arguments.items() if name not in tool.hidden_args
+        name: value for name, value in arguments.items() if name not in hidden_arg_names
     }
-    if error := visible_argument_error(tool, public):
+    if prepared is None and (error := visible_argument_error(tool, public)):
         raise ValueError(error)
-    public.update(dict.fromkeys(workspace_args, workspace))
-    operation = getattr(tool, "worker_operation", None)
+    public.update(dict.fromkeys(workspace_args, "/workspace"))
+    public.update(
+        {name: arguments[name] for name in resource_args if name in arguments}
+    )
+    access: Any = (
+        prepared.workspace_access
+        if prepared is not None
+        else getattr(tool, "workspace_access", "none")
+    )
+    access = access.value if hasattr(access, "value") else str(access)
+    operation = (
+        prepared.worker_operation
+        if prepared is not None
+        else getattr(tool, "worker_operation", None)
+    )
     if operation == "terminal":
-        result = run_worker("terminal", public, workspace, cancel=cancel)
+        result = run_worker(
+            "terminal",
+            public,
+            workspace,
+            cancel=cancel,
+            workspace_access=access,
+            resource_mounts=resource_mounts,
+        )
+    elif isinstance(operation, str) and operation.startswith("workspace:"):
+        result = run_worker(
+            "workspace_tool",
+            (operation.removeprefix("workspace:"), public),
+            workspace,
+            cancel=cancel,
+            workspace_access=access,
+            resource_mounts=resource_mounts,
+        )
     else:
-        result = run_worker("tool", (tool, public), workspace, cancel=cancel)
+        result = run_worker(
+            "tool",
+            (tool, public),
+            workspace,
+            cancel=cancel,
+            workspace_access=access,
+            resource_mounts=resource_mounts,
+        )
     return result["content"]
-
-
-def execute_job(
-    tool: Any,
-    arguments: dict[str, Any],
-    workspace: str,
-    *,
-    cancel: threading.Event | None = None,
-) -> Any:
-    """Background jobs obey the same trust classification as foreground tools."""
-    if getattr(tool, "trusted", False):
-        from corral.core.transition import ToolExecutionResult
-
-        result = tool.execute(**arguments)
-        if isinstance(result, ToolExecutionResult):
-            if result.environment is not None:
-                raise ValueError("stateful task tools must execute in the foreground")
-            return result.content
-        return result
-    return _run_public_tool(tool, arguments, workspace, cancel=cancel)
 
 
 if __name__ == "__main__":

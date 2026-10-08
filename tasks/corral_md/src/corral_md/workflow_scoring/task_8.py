@@ -393,6 +393,8 @@ def evaluate(e, r):
         )
 
     def recorded_inputs():
+        from .level1_trusted import replay_task8_default_rng, teacher_digest_matches
+
         for name in _NAMES:
             dataset(name)
         s = e.settings
@@ -422,7 +424,11 @@ def evaluate(e, r):
                 "Record RNG library and method",
             )
             seeds.append(config["seed"])
-        return len(set(seeds)) == 3
+        return (
+            len(set(seeds)) == 3
+            and teacher_digest_matches(e, 8, required=False)
+            and replay_task8_default_rng(e)
+        )
 
     r.check(
         "training_and_id_geometry",

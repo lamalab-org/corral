@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import PurePosixPath
 from typing import Any
 
 RUNTIME_PROTOCOL_VERSION = "4"
@@ -41,19 +42,21 @@ class DockerSandboxSpec:
         "ANTHROPIC_BASE_URL",
         "AZURE_OPENAI_API_KEY",
         "AZURE_OPENAI_ENDPOINT",
-        "HF_TOKEN",
-        "OPENAI_API_KEY",
-        "OPENAI_BASE_URL",
-        # Tracing runs inside the task container (see observer_from_env).
         "CORRAL_LANGFUSE_ENABLED",
-        "LANGFUSE_PUBLIC_KEY",
-        "LANGFUSE_SECRET_KEY",
+        "HF_TOKEN",
         "LANGFUSE_BASE_URL",
         "LANGFUSE_HOST",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_TRACING_ENABLED",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
     )
-    retention: str = SandboxRetention.NEVER.value
+    retention: str = SandboxRetention.ON_FAILURE.value
     registry_module: str | None = None
     runtime_protocol_version: str = RUNTIME_PROTOCOL_VERSION
+    # Read-only controller inputs, mounted outside every worker filesystem.
+    private_directories: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "retention", SandboxRetention(self.retention).value)
@@ -86,6 +89,15 @@ class DockerSandboxSpec:
                 raise ValueError(f"invalid environment variable name {name!r}")
         if len(set(self.environment_allowlist)) != len(self.environment_allowlist):
             raise ValueError("environment_allowlist cannot contain duplicates")
+        for directory in self.private_directories:
+            if (
+                not PurePosixPath(directory).is_absolute()
+                or "," in directory
+                or ".." in PurePosixPath(directory).parts
+            ):
+                raise ValueError(
+                    "private_directories must be absolute paths without commas or parent traversal"
+                )
 
     @property
     def immutable_image(self) -> str:
@@ -121,10 +133,17 @@ class AgentRuntimeDefinition:
     api_endpoint: str | None = None
     temperature: float | None = None
     options: dict[str, Any] = field(default_factory=dict)
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("agent runtime name cannot be empty")
+        # Promote --agent-kwargs (and older saved definitions) into the common
+        # parameter summary without removing the original constructor options.
+        if self.reasoning_effort is None:
+            object.__setattr__(
+                self, "reasoning_effort", self.options.get("reasoning_effort")
+            )
 
 
 @dataclass(frozen=True)
@@ -186,7 +205,7 @@ class RunTaskInput:
     started_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    max_iterations: int = 10
+    max_iterations: int | None = None
     model: str | None = None
     dependency_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     enable_surrender: bool = False
@@ -201,7 +220,7 @@ class RunTaskInput:
             raise ValueError("execution_id cannot be empty")
         if self.trial_index < 0:
             raise ValueError("trial_index cannot be negative")
-        if self.max_iterations < 1:
+        if self.max_iterations is not None and self.max_iterations < 1:
             raise ValueError("max_iterations must be at least 1")
         if self.model == "":
             raise ValueError("model cannot be empty")

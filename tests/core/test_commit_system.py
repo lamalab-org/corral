@@ -32,7 +32,7 @@ from corral.persistence import (
 )
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -74,7 +74,7 @@ async def initialized_store(tmp_path, execution_id="execution"):
     return store, root
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_linear_stale_appends_and_replay_use_small_events(tmp_path):
     store, root = await initialized_store(tmp_path)
     started = await append_runtime(
@@ -124,7 +124,7 @@ async def test_linear_stale_appends_and_replay_use_small_events(tmp_path):
     await reopened.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_idempotency_explicit_branching_and_author_binding(tmp_path):
     store, root = await initialized_store(tmp_path)
     main_started = await append_runtime(
@@ -177,7 +177,7 @@ async def test_idempotency_explicit_branching_and_author_binding(tmp_path):
     await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_shared_preconditions_reject_stale_tool_effects(tmp_path):
     store, root = await initialized_store(tmp_path)
     started = await append_runtime(
@@ -279,7 +279,7 @@ async def test_shared_preconditions_reject_stale_tool_effects(tmp_path):
     await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_submission_allows_only_cleanup_turns_until_execution_completion(
     tmp_path,
 ):
@@ -408,7 +408,7 @@ async def test_submission_allows_only_cleanup_turns_until_execution_completion(
     await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_agent_contexts_are_private_until_explicit_import(tmp_path):
     store, root = await initialized_store(tmp_path)
     started = await append_runtime(

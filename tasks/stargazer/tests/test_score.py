@@ -165,7 +165,7 @@ def test_seven_planet_runner_limit_truncates_extra_candidates(simple_task):
     assert len(normalized.planets) == simple_task.max_planets == 7
 
 
-def test_task_hint_overrides_are_used(simple_task, exact_submission):
+def test_task_hint_overrides_are_offline_legacy_only(simple_task, exact_submission):
     task = replace(
         simple_task,
         metadata={
@@ -174,6 +174,11 @@ def test_task_hint_overrides_are_used(simple_task, exact_submission):
         },
     )
     result = evaluate_submission(task, exact_submission)
+    assert result.maximum_rms_ms == 1.5
+    assert result.success
+    from stargazer.score import LEGACY_CRITERIA
+
+    result = evaluate_submission(task, exact_submission, LEGACY_CRITERIA)
     assert result.maximum_rms_ms == 0.01
     assert result.ok_rms
     assert not result.ok_match

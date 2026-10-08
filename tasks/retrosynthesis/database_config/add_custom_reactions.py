@@ -17,6 +17,7 @@ The script will prompt you to enter reaction SMILES, or you can modify
 the CUSTOM_REACTIONS list in the script directly.
 """
 
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,12 @@ CUSTOM_REACTIONS = [
     "Br[Br:7].[O:1]=[N+:2]([O-:3])[c:4]1[cH:5][cH:6][c:8]2[c:9]([cH:10]1)[CH2:11][CH2:12][C:13]1([CH2:14][CH2:15][CH2:16]1)[O:17]2>>[O:1]=[N+:2]([O-:3])[c:4]1[cH:5][c:6]([Br:7])[c:8]2[c:9]([cH:10]1)[CH2:11][CH2:12][C:13]1([CH2:14][CH2:15][CH2:16]1)[O:17]2",  # 10
     "O=[C:10]1[c:8]2[c:7]([cH:6][cH:5][c:4]([N+:2](=[O:1])[O-:3])[cH:9]2)[O:16][C:12]2([CH2:11]1)[CH2:13][CH2:14][CH2:15]2>>[O:1]=[N+:2]([O-:3])[c:4]1[cH:5][cH:6][c:7]2[c:8]([cH:9]1)[CH2:10][CH2:11][C:12]1([CH2:13][CH2:14][CH2:15]1)[O:16]2",  # 10
     "[O:1]=[C:2]([CH3:3])[c:17]1[c:9]([OH:8])[cH:10][cH:11][c:12]([N+:13](=[O:14])[O-:15])[cH:16]1.O=[C:4]1[CH2:5][CH2:6][CH2:7]1>>[O:1]=[C:2]1[CH2:3][C:4]2([CH2:5][CH2:6][CH2:7]2)[O:8][c:9]2[cH:10][cH:11][c:12]([N+:13](=[O:14])[O-:15])[cH:16][c:17]21",  # 10
+    # Template 1914400; https://patents.google.com/patent/AU2023303060A1/en; P10
+    "CC(C)(C)OC(=O)[N:11]1[CH2:10][CH:9]([c:8]2[cH:1][n:2][n:3]([CH:4]3[CH2:5][CH2:6]3)[cH:7]2)[O:14][CH2:13][CH2:12]1>>[cH:1]1[n:2][n:3]([CH:4]2[CH2:5][CH2:6]2)[cH:7][c:8]1[CH:9]1[CH2:10][NH:11][CH2:12][CH2:13][O:14]1",
+    # Template 1914401; https://patents.google.com/patent/WO2026086892A1/en; Q2
+    "CCO[C:9](=O)[C:10]([CH3:11])([F:12])[F:13].[CH3:1][O:2][c:3]1[cH:4][cH:5][cH:6][c:7]([NH2:8])[c:17]1[C:15]([NH2:14])=[O:16]>>[CH3:1][O:2][c:3]1[cH:4][cH:5][cH:6][c:7]2[n:8][c:9]([C:10]([CH3:11])([F:12])[F:13])[nH:14][c:15](=[O:16])[c:17]12",
+    # Template 1914402; https://patents.google.com/patent/WO2026086892A1/en; quinazoline
+    "O=[CH:19][CH:18]([O:17][c:16]1[c:15]2[c:7]([NH:8][c:9]3[cH:10][cH:11][cH:12][cH:13][cH:14]3)[n:6][c:5]([C:2]([CH3:1])([F:3])[F:4])[n:32][c:31]2[cH:30][cH:29][cH:28]1)[CH:25]1[CH2:26][CH2:27]1.CCOP(=O)(OCC)[CH2:20][S:21]([CH3:22])(=[O:23])=[O:24]>>[CH3:1][C:2]([F:3])([F:4])[c:5]1[n:6][c:7]([NH:8][c:9]2[cH:10][cH:11][cH:12][cH:13][cH:14]2)[c:15]2[c:16]([O:17][CH:18](/[CH:19]=[CH:20]/[S:21]([CH3:22])(=[O:23])=[O:24])[CH:25]3[CH2:26][CH2:27]3)[cH:28][cH:29][cH:30][c:31]2[n:32]1",
 ]
 
 
@@ -303,12 +310,28 @@ def insert_reaction_to_database(conn, result: dict[str, Any]) -> dict[str, Any] 
         logger.info("Checking if template already exists...")
         cursor.execute(
             """
-            SELECT reaction_id FROM reactions WHERE template_hash = %s
+            SELECT reaction_id, retro_smarts_template
+            FROM reactions WHERE template_hash = %s
         """,
             (templates["template_hash"],),
         )
 
         existing_row = cursor.fetchone()
+        # Fingerprint hashes can collide for different SMARTS constraints.
+        # Use an exact-SMARTS hash for collisions, and recognize rows already
+        # stored under that hash so reimporting does not duplicate them.
+        if existing_row is None or existing_row[1] != templates["retro_smarts"]:
+            exact_hash = hashlib.sha256(templates["retro_smarts"].encode()).hexdigest()
+            cursor.execute(
+                "SELECT reaction_id, retro_smarts_template FROM reactions WHERE template_hash = %s",
+                (exact_hash,),
+            )
+            exact_row = cursor.fetchone()
+            if exact_row is not None or existing_row is not None:
+                templates["template_hash"] = exact_hash
+            existing_row = exact_row
+        if existing_row and existing_row[1] != templates["retro_smarts"]:
+            raise ValueError("Template hash belongs to different retro SMARTS")
         if existing_row:
             existing_id = existing_row[0]
             logger.warning(

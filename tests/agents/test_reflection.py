@@ -223,7 +223,7 @@ class TestReflectionModule:
         )
 
         assert module.model == "test-model"
-        assert module.temperature == 0.0  # Deterministic by default
+        assert module.temperature == 1.0
 
     def test_module_custom_temperature(self):
         """Test module with custom temperature."""

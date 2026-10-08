@@ -5,7 +5,6 @@ import re
 import shutil
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from corral_md import env
@@ -27,20 +26,48 @@ def _state(submission):
     )
 
 
+@pytest.mark.parametrize("required", [False, True])
+def test_verified_cycle_requirement_is_explained_when_enabled(required):
+    from corral_md.workflow_scoring.verification import ModalVerifier
+
+    task = env.load_tasks_from_json(
+        env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_10.json"
+    )["level_2_task_10"]
+    task = replace(
+        task,
+        scoring_fn=WorkflowScorer(
+            10, level=2, verifier=ModalVerifier(require_provenance=required)
+        ),
+    )
+    environment = env.MolecularDynamicsEnvironment("task", task)
+    prompt = env._md_task_prompt(environment, _state("{}"))
+    assert ("This task requires trusted execution provenance" in prompt) is required
+    guide = example_files(10, level=2)["README.md"]
+    for text in (
+        "run_verified_md",
+        "random_seed",
+        "equilibration_steps",
+        "run_id",
+        "action_id",
+    ):
+        assert text in guide
+
+
 @pytest.mark.parametrize("number", range(1, 11))
 def test_shipped_workflow_contract_and_empty_evidence(number, tmp_path):
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / f"level_2/tasks_json/task_{number}.json", str(tmp_path)
+        env.PACKAGE_DATA_ROOT / f"level_2/tasks_json/task_{number}.json"
     )[f"level_2_task_{number}"]
     assert isinstance(task.scoring_fn, WorkflowScorer)
     assert task.scoring_fn.task_number == number
-    current = SimpleNamespace(
-        current_task=task,
-        task_id=f"level_2_task_{number}",
+    current = env.MolecularDynamicsEnvironment(
+        f"level_2_task_{number}",
+        replace(task, tools=[]),
+        base_work_dir=str(tmp_path),
         workspace_path=str(tmp_path),
-        resolve_inputs=lambda _state: {},
+        toolset=Toolset(workspace_factory=None),
     )
-    prompt = env._md_task_prompt(current, _state("{}"))
+    prompt = current.get_task_prompt(_state("{}"))
     manifest = json.loads(re.search(r"```json\n(.*?)\n```", prompt, re.S)[1])
     assert manifest == load_example(number)["manifest"]
     assert "Level_2" not in prompt
@@ -65,18 +92,19 @@ def test_shipped_workflow_contract_and_empty_evidence(number, tmp_path):
 @pytest.mark.parametrize("number", range(1, 11))
 def test_shipped_level1_contract_uses_only_level1_scorer(number, tmp_path):
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / f"level_1/tasks_json/task_{number}.json", str(tmp_path)
+        env.PACKAGE_DATA_ROOT / f"level_1/tasks_json/task_{number}.json"
     )[f"level_1_task_{number}"]
     assert isinstance(task.scoring_fn, WorkflowScorer)
     assert task.scoring_fn.task_number == number
     assert task.scoring_fn.level == 1
-    current = SimpleNamespace(
-        current_task=task,
-        task_id=f"level_1_task_{number}",
+    current = env.MolecularDynamicsEnvironment(
+        f"level_1_task_{number}",
+        replace(task, tools=[]),
+        base_work_dir=str(tmp_path),
         workspace_path=str(tmp_path),
-        resolve_inputs=lambda _state: {},
+        toolset=Toolset(workspace_factory=None),
     )
-    prompt = env._md_task_prompt(current, _state("{}"))
+    prompt = current.get_task_prompt(_state("{}"))
     manifest = json.loads(re.search(r"```json\n(.*?)\n```", prompt, re.S)[1])
     assert manifest == load_example(number, level=1)["manifest"]
     assert "Level_1" not in prompt
@@ -96,8 +124,7 @@ def test_examples_are_readable_and_survive_workspace_restoration(
 ):
     task_id = f"level_{level}_task_{number}"
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_{number}.json",
-        str(tmp_path),
+        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_{number}.json"
     )[task_id]
     environment = env.MolecularDynamicsEnvironment(
         task_id,
@@ -150,9 +177,9 @@ def test_level1_examples_omit_later_workflow_fields():
 
 
 @pytest.mark.parametrize("level", [1, 2])
-def test_unbound_prompt_includes_linked_file_examples(level, tmp_path):
+def test_unbound_prompt_includes_linked_file_examples(level):
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_1.json", str(tmp_path)
+        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_1.json"
     )[f"level_{level}_task_1"]
     environment = env.MolecularDynamicsEnvironment("task", task)
     prompt = env._md_task_prompt(environment, _state("{}"))
@@ -167,7 +194,7 @@ def test_unbound_prompt_includes_linked_file_examples(level, tmp_path):
 
 def test_missing_manifest_uses_existing_resolution_error(tmp_path):
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_1.json", str(tmp_path)
+        env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_1.json"
     )["level_2_task_1"]
     with pytest.raises(FileNotFoundError, match="missing"):
         TaskScorer(task, workspace=tmp_path).evaluate(_state("missing.json"))
@@ -177,7 +204,7 @@ def test_shared_scorer_propagates_pending_instead_of_recording_zero(
     tmp_path, monkeypatch
 ):
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_10.json", str(tmp_path)
+        env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_10.json"
     )["level_2_task_10"]
     monkeypatch.setattr(
         task.scoring_fn.module,
@@ -234,7 +261,7 @@ def test_partial_manifest_survives_workspace_restoration(tmp_path):
     }
     (outputs / "manifest.json").write_text(json.dumps(manifest))
     task = env.load_tasks_from_json(
-        env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_1.json", str(former)
+        env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_1.json"
     )["level_2_task_1"]
     result = TaskScorer(task, workspace=restored).evaluate(
         _state(str(former / "results/manifest.json"))

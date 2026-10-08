@@ -11,6 +11,7 @@ from ase.build import bulk
 from ase.calculators.singlepoint import SinglePointCalculator
 from corral_md.workflow_scoring.common import Evidence, Rubric
 from corral_md.workflow_scoring.level1 import evaluate as evaluate_level1
+from corral_md.workflow_scoring.level1_trusted import PINNED_TEACHER_SHA256
 from corral_md.workflow_scoring.regression import metrics, predict
 from corral_md.workflow_scoring.task_8 import evaluate
 from sklearn.decomposition import PCA
@@ -53,6 +54,7 @@ def submission(tmp_path):
     datasets, artifacts, features, targets = {}, {}, {}, {}
     for seed, name in enumerate(("train", "id_test", "strained_test"), 101):
         rng = np.random.default_rng(seed)
+        geometry_rng = np.random.default_rng(seed)
         row_ids = [f"{name}-{i}" for i in range(100)]
         sigma = (
             0.01 + 0.001 * np.arange(100)
@@ -74,7 +76,7 @@ def submission(tmp_path):
                 "symbols": ["Si"] * 64,
                 "positions": (
                     base.positions * (1 + strain[i])
-                    + rng.normal(scale=sigma[i], size=(64, 3))
+                    + geometry_rng.normal(scale=sigma[i], size=(64, 3))
                 ).tolist(),
                 "cell": (base.cell.array * (1 + strain[i])).tolist(),
                 "pbc": [True] * 3,
@@ -174,12 +176,12 @@ def predict(structures):
     artifacts["inference_entrypoint"] = str(script)
     settings = {
         "teacher_model": "/models/teacher.model",
-        "teacher_sha256": "a" * 64,
+        "teacher_sha256": PINNED_TEACHER_SHA256,
         "energy_unit": "eV",
         "length_unit": "Angstrom",
         "training_label_ids": train_rows,
         "generation": {
-            name: {"seed": seed, "library": "numpy", "method": "Generator.normal"}
+            name: {"seed": seed, "library": "numpy", "method": "default_rng.normal"}
             for seed, name in enumerate(datasets, 101)
         },
     }

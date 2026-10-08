@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from corral import ENVIRONMENT_NAMES
 from corral.cli import run_benchmark
+from corral.orchestration.defaults import resolve_max_iterations
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -60,9 +61,10 @@ def _print_results(run_id: str, result: Any) -> None:
         for trial in task_results.trials:
             status = "failed" if trial.error_message else "completed"
             output = json.dumps(trial.output, ensure_ascii=False, default=str)
+            score = "-" if trial.score is None else f"{trial.score:g}"
             lines.append(
                 f"- {task_id} [{trial.trial_id}]: {status}, "
-                f"score={trial.score:g}, output={output}"
+                f"score={score}, output={output}"
             )
     sys.stdout.write("\n".join(lines) + "\n")
 
@@ -113,7 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--agent-kwargs", type=_json_object, default={}, metavar="JSON")
     agent.add_argument("--api-endpoint")
     agent.add_argument("--temperature", type=float, default=1.0)
-    agent.add_argument("--max-iterations", type=int, default=20)
+    agent.add_argument(
+        "--max-iterations", type=int, default=resolve_max_iterations(None, AGENT_ID)
+    )
     agent.add_argument("--enable-surrender", action="store_true")
 
     execution = parser.add_argument_group("execution")
@@ -131,6 +135,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--sandbox", choices=("docker", "local"))
+    execution.add_argument("--sandbox-image")
+    execution.add_argument("--sandbox-cpus", type=float, default=2.0)
+    execution.add_argument("--sandbox-memory", default="4g")
+    execution.add_argument("--sandbox-pids-limit", type=int, default=256)
+    execution.add_argument(
+        "--keep-sandboxes",
+        choices=("never", "on-failure", "always"),
+        default="on-failure",
+        help="Keep failed Docker trials for resume; clean up completed trials by default.",
+    )
     execution.add_argument("--run-id")
     execution.add_argument("--max-attempts", type=int, default=3)
     execution.add_argument(

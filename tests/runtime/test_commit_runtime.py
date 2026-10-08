@@ -25,12 +25,12 @@ from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
 from corral.core.tool import tool
 from corral.core.transition import ToolRecoveryPending
-from corral.observability import NoOpObserver
+from corral.observability import CompositeObserver, NoOpObserver
 from corral.persistence import SQLiteCommitStore
 from corral.runtime import TaskRuntime
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -80,7 +80,7 @@ class ParallelAgent:
         return AgentOutcome(status="completed", answer="ok")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_parallel_results_keep_chronology_and_decision_order(tmp_path):
     def slow() -> str:
         """Finish after the fast tool."""
@@ -179,7 +179,7 @@ class ParentAgent:
         return AgentOutcome(status="completed", answer="done")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_subagent_trace_is_private_until_imported(tmp_path):
     store = SQLiteCommitStore(tmp_path / "subagent.sqlite3")
     agent = ParentAgent()
@@ -276,7 +276,7 @@ class SubmitThenRaiseAgent:
         raise RuntimeError("harness cleanup failed")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_accepted_submission_survives_cleanup_failure_and_retry(tmp_path):
     store = SQLiteCommitStore(tmp_path / "accepted.sqlite3")
     environment = environment_with_tools()
@@ -308,8 +308,9 @@ async def test_accepted_submission_survives_cleanup_failure_and_retry(tmp_path):
     await store.aclose()
 
 
-@pytest.mark.anyio()
-async def test_running_tool_resumes_with_stable_invocation_id(tmp_path):
+@pytest.mark.anyio
+@pytest.mark.parametrize("restore_fails", [False, True])
+async def test_running_tool_resumes_with_stable_invocation_id(tmp_path, restore_fails):
     calls: list[int] = []
 
     def increment(value: int) -> str:
@@ -389,7 +390,18 @@ async def test_running_tool_resumes_with_stable_invocation_id(tmp_path):
         )
     )
 
-    state = await TaskRuntime(store, NoOpObserver()).run(
+    restored = []
+
+    class RestoringObserver(NoOpObserver):
+        def restore_commit(self, commit, *, context=None):
+            assert calls == []
+            assert context.execution_id == execution_id
+            assert context.state_db_path == store.path
+            restored.append(commit.event.type)
+            if restore_fails:
+                raise RuntimeError("observer restore unavailable")
+
+    state = await TaskRuntime(store, CompositeObserver(RestoringObserver())).run(
         agent,
         environment,
         execution_id=execution_id,
@@ -397,6 +409,13 @@ async def test_running_tool_resumes_with_stable_invocation_id(tmp_path):
         max_iterations=3,
     )
 
+    assert restored == [
+        "execution.started",
+        "task.configured",
+        "agent.started",
+        "agent.turn_recorded",
+        "tool.started",
+    ]
     assert calls == [1]
     assert INSPECT_SUBAGENT_TOOL_NAME not in agent.tool_names
     assert state.tool_invocations[invocation_id].status == "completed"
@@ -425,7 +444,7 @@ class FailingObserver:
         raise RuntimeError("observer unavailable")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_observer_failure_never_rolls_back_commits(tmp_path):
     store = SQLiteCommitStore(tmp_path / "observer.sqlite3")
     state = await TaskRuntime(store, FailingObserver()).run(
@@ -435,7 +454,6 @@ async def test_observer_failure_never_rolls_back_commits(tmp_path):
         started_at=datetime.now(timezone.utc),
         max_iterations=2,
     )
-
     assert state.submission == "recovered"
     assert (await store.for_execution("observer").head("main")).hash == (
         state.through_commit_hash
@@ -443,7 +461,7 @@ async def test_observer_failure_never_rolls_back_commits(tmp_path):
     await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_adapter_cannot_close_execution_with_recoverable_tool_pending(tmp_path):
     attempts = []
 

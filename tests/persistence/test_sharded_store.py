@@ -13,12 +13,12 @@ from corral.core import (
 from corral.persistence import ShardedCommitStore
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_execution_shards_keep_state_and_snapshot_manifests_separate(tmp_path):
     store = ShardedCommitStore(tmp_path / ".corral")
     first_dir = store.execution_dir("benchmark:task:0")
@@ -59,7 +59,7 @@ async def test_execution_shards_keep_state_and_snapshot_manifests_separate(tmp_p
     await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_snapshot_manifest_is_published_only_after_blob_storage(tmp_path):
     store = ShardedCommitStore(tmp_path / ".corral")
     execution_id = "benchmark:task:0"
@@ -81,7 +81,7 @@ async def test_snapshot_manifest_is_published_only_after_blob_storage(tmp_path):
     await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_benchmark_run_uses_descriptive_task_and_k_directories(tmp_path):
     run_id = "agent-tool-calling__model-gpt-5.6__env-wetlab__k-2"
     run_dir = tmp_path / "runs" / run_id
@@ -99,7 +99,7 @@ async def test_benchmark_run_uses_descriptive_task_and_k_directories(tmp_path):
     await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_benchmark_shard_exports_periodic_and_final_state_snapshots(tmp_path):
     run_id = "benchmark"
     execution_id = f"{run_id}:task:0"

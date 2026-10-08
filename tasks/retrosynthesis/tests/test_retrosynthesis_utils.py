@@ -1,7 +1,11 @@
 """Tests for retrosynthesis_utils.py functions."""
 
-from unittest.mock import patch
+import hashlib
+import importlib
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+import pytest
 from rdkit import Chem
 from retrosynthesis.retrosynthesis_utils import (
     _fragment_mapped_smiles,
@@ -16,6 +20,45 @@ from retrosynthesis.retrosynthesis_utils import (
     validate_molecule,
     validate_reaction,
 )
+
+
+@pytest.mark.parametrize("already_imported", [False, True])
+def test_custom_import_preserves_a_different_template_with_the_same_hash(
+    monkeypatch, already_imported
+):
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "database_config"))
+    importer = importlib.import_module("add_custom_reactions")
+    result = importer.process_single_reaction(importer.CUSTOM_REACTIONS[-3])
+    smarts = result["templates"]["retro_smarts"]
+    # Template 70274 requires an N-methyl substituent; the new morpholine
+    # template has no methyl constraint, despite an identical fingerprint hash.
+    methyl_smarts = smarts.replace("[C:3]", "[C;D1;H3:3]")
+    assert methyl_smarts != smarts
+    conn = MagicMock()
+    cursor = conn.cursor.return_value
+    metadata_count = sum(len(values) for values in result["bonds"].values()) + sum(
+        len(values) for values in result["fgs"].values()
+    )
+    cursor.fetchone.side_effect = [
+        (70274, methyl_smarts),
+        (1914400, smarts) if already_imported else None,
+        *([] if already_imported else [(1914400,)]),
+        *([(1,)] * metadata_count),
+    ]
+
+    added = importer.insert_reaction_to_database(conn, result)
+
+    assert added["reaction_id"] == 1914400
+    assert added["template_hash"] == hashlib.sha256(smarts.encode()).hexdigest()
+    updates = [
+        call
+        for call in cursor.execute.call_args_list
+        if call.args[0].lstrip().startswith("UPDATE reactions")
+    ]
+    assert len(updates) == int(already_imported)
+    assert all(call.args[1][-1] == 1914400 for call in updates)
+    conn.commit.assert_called_once()
+    conn.rollback.assert_not_called()
 
 
 class TestValidSmiles:

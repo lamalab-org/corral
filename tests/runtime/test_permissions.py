@@ -5,7 +5,6 @@ missing root privileges or an incorrectly protected image a failure, not a skip.
 """
 
 # Exercise imports after privilege dropping; SDK extras are optional locally.
-# ruff: noqa: PLC0415
 
 import os
 import threading
@@ -17,6 +16,7 @@ from corral.agents.session import AgentSessionCapabilities
 from corral.core.environment import Environment
 from corral.core.tool import tool
 from corral.runtime import permissions
+from corral.runtime.tool_execution import PreparedToolCall
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("CORRAL_PERMISSION_TESTS") != "1",
@@ -34,14 +34,14 @@ def restricted_runtime(tmp_path):
     permissions._enabled = False
 
 
-@pytest.fixture()
+@pytest.fixture
 def workspace():
     import tempfile
 
     return tempfile.mkdtemp(prefix="permission-test-", dir="/workspace")
 
 
-@tool
+@tool(workspace_access="read_write")
 def permission_probe() -> str:
     """Attempt reads and writes both directly and through detached descendants."""
     import json
@@ -54,6 +54,7 @@ def permission_probe() -> str:
     for target in (
         "/opt/corral/pyproject.toml",
         "/opt/corral/tasks",
+        "/workspace/../opt/corral/pyproject.toml",
         "/corral-state",
         "/etc/passwd",
         "/proc/1/environ",
@@ -102,7 +103,7 @@ def assert_probe(result):
     probe = json.loads(result)
     assert probe["uid"] != 0
     assert probe["gids"] == []
-    assert len(probe["denials"]) == 7
+    assert len(probe["denials"]) == 8
     assert probe["workspace"] == "workspace access"
     assert probe["child_returncode"] != 0
     assert "Permission denied" in probe["child_error"]
@@ -111,9 +112,130 @@ def assert_probe(result):
 
 
 def test_foreground_tool_and_descendants(workspace):
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
-    assert_probe(permissions.execute_tool(environment, None, permission_probe, {}))
+    assert_probe(permissions.execute_restricted_tool(permission_probe, {}, workspace))
+
+
+@tool
+def no_workspace_probe() -> str:
+    """Verify the default worker sees an empty, immutable /workspace."""
+    import json
+    import os
+    from pathlib import Path
+
+    result = {"cwd": os.getcwd(), "read": False, "write": False}
+    try:
+        Path("/workspace/task.txt").read_text()
+    except (FileNotFoundError, PermissionError):
+        pass
+    else:
+        result["read"] = True
+    try:
+        Path("/workspace/created.txt").write_text("forbidden")
+    except OSError:
+        pass
+    else:
+        result["write"] = True
+    return json.dumps(result)
+
+
+@tool(workspace_access="read")
+def read_workspace_probe() -> str:
+    """Read the assigned workspace and verify it cannot be mutated."""
+    import json
+    import os
+    from pathlib import Path
+
+    task_file = Path("/workspace/task.txt")
+    result = {"cwd": os.getcwd(), "content": task_file.read_text()}
+    try:
+        task_file.write_text("replacement")
+    except OSError:
+        result["replace_denied"] = True
+    try:
+        Path("/workspace/created.txt").write_text("creation")
+    except OSError:
+        result["create_denied"] = True
+    try:
+        task_file.unlink()
+    except OSError:
+        result["delete_denied"] = True
+    return json.dumps(result)
+
+
+def test_none_and_read_workspace_modes_are_kernel_enforced(workspace):
+    import json
+    from pathlib import Path
+
+    Path(workspace, "task.txt").write_text("task data")
+    isolated = json.loads(
+        permissions.execute_restricted_tool(no_workspace_probe, {}, workspace)
+    )
+    assert isolated == {"cwd": "/workspace", "read": False, "write": False}
+
+    readonly = json.loads(
+        permissions.execute_restricted_tool(read_workspace_probe, {}, workspace)
+    )
+    assert readonly == {
+        "cwd": "/workspace",
+        "content": "task data",
+        "replace_denied": True,
+        "create_denied": True,
+        "delete_denied": True,
+    }
+    assert Path(workspace, "task.txt").read_text() == "task data"
+
+
+@tool(hidden_args=["database"], resources=("database",))
+def immutable_resource_probe(database: str) -> str:
+    """Read one declared resource and verify its mount is immutable."""
+    import json
+    from pathlib import Path
+
+    resource = Path(database)
+    result = {"content": resource.read_text(), "path": str(resource)}
+    try:
+        resource.write_text("replacement")
+    except OSError:
+        result["replace_denied"] = True
+    try:
+        resource.unlink()
+    except OSError:
+        result["delete_denied"] = True
+    try:
+        resource.with_name("undeclared.txt").read_text()
+    except OSError:
+        result["undeclared_sibling_denied"] = True
+    return json.dumps(result)
+
+
+def test_declared_resource_mount_is_read_only(workspace, tmp_path):
+    import json
+
+    source_root = tmp_path / "resource"
+    source_root.mkdir()
+    source = source_root / "database.txt"
+    source.write_text("immutable data")
+    source.chmod(0o444)
+    (source_root / "undeclared.txt").write_text("must stay private")
+    public = "/workspace/resources/database/database.txt"
+
+    result = json.loads(
+        permissions.execute_restricted_tool(
+            immutable_resource_probe,
+            {"database": public},
+            workspace,
+            resource_mounts={"database": (str(source), public)},
+        )
+    )
+
+    assert result == {
+        "content": "immutable data",
+        "path": public,
+        "replace_denied": True,
+        "delete_denied": True,
+        "undeclared_sibling_denied": True,
+    }
+    assert source.read_text() == "immutable data"
 
 
 def test_terminal_inherits_worker_permissions(workspace):
@@ -122,27 +244,25 @@ def test_terminal_inherits_worker_permissions(workspace):
 
     from corral.workspace import WorkspaceFilesystem, build_terminal_tool
 
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
     terminal = build_terminal_tool(WorkspaceFilesystem(workspace))
     result = json.loads(
-        permissions.execute_tool(
-            environment,
-            None,
+        permissions.execute_restricted_tool(
             terminal,
             {
-                "command": "id -u; printf 'workspace access' > allowed.txt; cat /opt/corral/pyproject.toml"
+                "command": "id -u; pwd; printf 'workspace access' > allowed.txt; cat /opt/corral/pyproject.toml"
             },
+            workspace,
         )
     )
 
     assert int(result["output"].splitlines()[0]) != 0
+    assert result["output"].splitlines()[1] == "/workspace"
     assert result["exit_code"] != 0
     assert "Permission denied" in result["output"]
     assert Path(workspace, "allowed.txt").read_text() == "workspace access"
 
 
-@tool
+@tool(workspace_access="read_write")
 def filesystem_root_probe() -> str:
     """Probe unpublished paths, runtime aliases, and descriptor escapes."""
     import ctypes
@@ -152,7 +272,7 @@ def filesystem_root_probe() -> str:
     import sys
     from pathlib import Path
 
-    runtime = Path("/workspace/.corral-runtime-system")
+    runtime = Path("/.corral-runtime-system")
     for alias in (
         "/usr",
         "/bin/sh",
@@ -198,12 +318,12 @@ def filesystem_root_probe() -> str:
             target = descriptor.readlink()
         except FileNotFoundError:
             continue
-        assert not str(target).startswith(
-            ("/corral-state", "/opt/corral", "/tmp/")
-        ), target
+        assert not str(target).startswith(("/corral-state", "/opt/corral", "/tmp/")), (
+            target
+        )
     for alias in ("/tmp", "/dev/shm"):
         target = Path(alias).resolve(strict=True)
-        assert target.is_relative_to(Path.cwd())
+        assert target.is_relative_to(Path("/.corral-scratch"))
         (target / "scratch-check").write_text("scratch")
     with pytest.raises(OSError) as error:
         Path("/usr/corral-write-check").write_text("forbidden")
@@ -218,9 +338,7 @@ def test_original_container_paths_are_not_mounted(workspace):
     # These sentinels are read-only mounts provided by the Docker test runner.
     assert Path("/outside-workspace.txt").is_file()
     assert Path("/opt/unrelated/data.txt").is_file()
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
-    result = permissions.execute_tool(environment, None, filesystem_root_probe, {})
+    result = permissions.execute_restricted_tool(filesystem_root_probe, {}, workspace)
     assert json.loads(result) == {"isolated_root": True}
 
 
@@ -304,17 +422,37 @@ def test_background_executor_preferences_cannot_bypass_permissions(
 
     permission_probe.executor = executor_name
     manager = JobManager()
-    executor = manager._resolve_executor(permission_probe)
+    prepared = PreparedToolCall.capture(permission_probe, {}, workspace=workspace)
+    executor = manager._resolve_executor(prepared)
     assert isinstance(executor, RestrictedExecutor)
-    work = JobWork(
-        job_id="probe",
-        tool_name=permission_probe.name,
-        tool=permission_probe,
-        call_arguments={},
-        workspace=workspace,
-    )
+    work = JobWork(job_id="probe", prepared=prepared)
     assert_probe(executor.run_tool(work, threading.Event()))
     manager.shutdown()
+
+
+def test_background_job_uses_the_same_read_only_workspace_policy(workspace):
+    import json
+    from pathlib import Path
+
+    from corral.backend.jobs import JobManager
+
+    Path(workspace, "task.txt").write_text("task data")
+    manager = JobManager()
+    try:
+        record = manager.submit(
+            PreparedToolCall.capture(read_workspace_probe, {}, workspace=workspace)
+        )
+        view = manager.result(record.context.job_id, wait=True, timeout=5)
+        assert view["status"] == "succeeded"
+        assert json.loads(view["result"]) == {
+            "cwd": "/workspace",
+            "content": "task data",
+            "replace_denied": True,
+            "create_denied": True,
+            "delete_denied": True,
+        }
+    finally:
+        manager.shutdown()
 
 
 class ProbeAgent:
@@ -485,12 +623,12 @@ class DeserializeProbeAgent:
         return AgentOutcome(status="completed", answer="denied")
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "agent_type",
     [
@@ -536,20 +674,51 @@ async def test_agent_and_subagent_execution(workspace, tmp_path, agent_type):
 
 @tool
 def sdk_permission_probe(sdk: str) -> str:
-    """Start actual SDK runtimes without making a model request."""
+    """Start actual SDK runtimes in scratch without making a model request."""
     import asyncio
     import json
     import os
+    import tempfile
     from pathlib import Path
 
-    workspace = os.getcwd()
+    workspace = tempfile.mkdtemp(prefix="sdk-permission-probe-")
     uid = os.getuid()
 
     def assert_identity(pid):
         status = Path(f"/proc/{pid}/status").read_text()
-        assert int(status.split("Uid:", 1)[1].split()[0]) == uid
+        fields = {
+            line.split(":", 1)[0]: line.split(":", 1)[1].strip()
+            for line in status.splitlines()
+            if ":" in line
+        }
+        assert {int(value) for value in fields["Uid"].split()} == {uid}
+        assert fields["Groups"] == ""
+        assert fields["NoNewPrivs"] == "1"
+        for name in ("CapInh", "CapPrm", "CapEff", "CapAmb"):
+            assert int(fields[name], 16) == 0
+        for target in (
+            "/workspace/task-secret.txt",
+            "/opt/corral/pyproject.toml",
+            "/corral-state/request.json",
+        ):
+            try:
+                Path(f"/proc/{pid}/root{target}").read_bytes()
+            except (FileNotFoundError, PermissionError):
+                pass
+            else:
+                raise AssertionError(f"SDK process can read private path {target}")
 
-    command = ["/bin/sh", "-c", "id -u; cat /opt/corral/pyproject.toml"]
+    command_text = (
+        "id -u; "
+        "grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || "
+        "echo NO_NEW_PRIVS_MISSING; "
+        "for field in CapInh CapPrm CapEff CapAmb; do "
+        'grep -q "^$field:[[:space:]]*0000000000000000$" '
+        "/proc/self/status || echo CAPABILITIES_PRESENT; done; "
+        "if test -e /workspace/task-secret.txt; then echo TASK_SECRET_VISIBLE; fi; "
+        "cat /opt/corral/pyproject.toml"
+    )
+    command = ["/bin/sh", "-c", command_text]
     if sdk == "codex":
         from openai_codex import Codex, CodexConfig
 
@@ -571,6 +740,9 @@ def sdk_permission_probe(sdk: str) -> str:
             )
             assert "Permission denied" in result["stderr"], result
             assert str(uid) in result["stdout"], result
+            assert "NO_NEW_PRIVS_MISSING" not in result["stdout"], result
+            assert "CAPABILITIES_PRESENT" not in result["stdout"], result
+            assert "TASK_SECRET_VISIBLE" not in result["stdout"], result
     elif sdk == "claude":
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
@@ -587,12 +759,15 @@ def sdk_permission_probe(sdk: str) -> str:
 
         executor = TerminalExecutor(working_dir=workspace)
         try:
-            result = executor(
-                TerminalAction(command="id -u; cat /opt/corral/pyproject.toml")
+            result = executor(TerminalAction(command=command_text))
+            output = "\n".join(
+                str(getattr(item, "text", "")) for item in result.content
             )
-            rendered = result.model_dump_json()
-            assert "Permission denied" in rendered, rendered
-            assert str(uid) in rendered, rendered
+            assert "Permission denied" in output, output
+            assert str(uid) in output, output
+            assert "NO_NEW_PRIVS_MISSING" not in output, output
+            assert "CAPABILITIES_PRESENT" not in output, output
+            assert "TASK_SECRET_VISIBLE" not in output, output
         finally:
             executor.close()
     return json.dumps({"sdk": sdk, "uid": uid})
@@ -604,9 +779,215 @@ def sdk_permission_probe(sdk: str) -> str:
 )
 @pytest.mark.parametrize("sdk", ["codex", "claude", "openhands"])
 def test_real_sdk_runtime(workspace, sdk):
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
-    permissions.execute_tool(environment, None, sdk_permission_probe, {"sdk": sdk})
+    import json
+    from pathlib import Path
+
+    secret = Path(workspace, "task-secret.txt")
+    secret.write_text("must not reach SDK descendants")
+    result = permissions.execute_restricted_tool(
+        sdk_permission_probe, {"sdk": sdk}, workspace
+    )
+    payload = json.loads(result)
+    assert payload["sdk"] == sdk
+    assert payload["uid"] != 0
+    assert secret.read_text() == "must not reach SDK descendants"
+
+
+@tool
+def openhands_browser_probe() -> str:
+    """Initialize the default SDK tools and render a page as a restricted UID."""
+    import json
+    import os
+    import tempfile
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from openhands.sdk import LLM, Agent, LocalConversation
+    from openhands.tools.browser_use.impl import BrowserToolExecutor
+    from openhands.tools.preset.default import get_default_tools
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = (
+                b"<html><body><p id='result'>loading</p><script>"
+                b"document.getElementById('result').textContent="
+                b"'CORRAL_BROWSER_READY';</script></body></html>"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    chromium = BrowserToolExecutor.check_chromium_available()
+    assert chromium is not None, "OpenHands cannot discover installed Chromium"
+    with HTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        conversation = None
+        try:
+            agent = Agent(
+                llm=LLM(model="openrouter/moonshotai/kimi-k3", api_key="offline-test"),
+                tools=get_default_tools(),
+            )
+            conversation = LocalConversation(
+                agent=agent,
+                workspace=tempfile.mkdtemp(prefix="openhands-browser-probe-"),
+                persistence_dir=None,
+                visualizer=None,
+            )
+            conversation.send_message("Initialize tools without calling a model")
+            tools = conversation.state.agent.tools_map
+            expected = {
+                "terminal",
+                "file_editor",
+                "task_tracker",
+                "browser_navigate",
+                "browser_get_content",
+                "finish",
+                "think",
+            }
+            assert expected <= tools.keys()
+            navigate = tools["browser_navigate"]
+            observation = navigate(
+                navigate.action_from_arguments(
+                    {"url": f"http://127.0.0.1:{server.server_port}/"}
+                ),
+                conversation,
+            )
+            assert not observation.is_error, observation.text
+            content = tools["browser_get_content"]
+            observation = content(content.action_from_arguments({}), conversation)
+            assert not observation.is_error, observation.text
+            assert "CORRAL_BROWSER_READY" in observation.text, observation.text
+            return json.dumps({"uid": os.getuid(), "chromium": chromium})
+        finally:
+            if conversation is not None:
+                conversation.close()
+            server.shutdown()
+            thread.join(timeout=5)
+
+
+@pytest.mark.skipif(
+    os.environ.get("CORRAL_PERMISSION_SDK_TESTS") != "1",
+    reason="requires the pinned OpenHands extra and installed Chromium",
+)
+def test_openhands_default_browser_in_restricted_worker(workspace):
+    import json
+
+    result = permissions.execute_restricted_tool(openhands_browser_probe, {}, workspace)
+    payload = json.loads(result)
+    assert payload["uid"] != 0
+    assert payload["chromium"]
+
+
+@pytest.mark.skipif(
+    os.environ.get("CORRAL_PERMISSION_SDK_TESTS") != "1",
+    reason="requires the pinned OpenHands extra and installed Chromium",
+)
+@pytest.mark.anyio
+async def test_openhands_default_prompt_in_restricted_agent(workspace, tmp_path):
+    """Preserve the exact SDK prompt across sandbox entry and reach inference offline."""
+    from datetime import datetime, timezone
+
+    from corral.agents.hooks import HookPoint
+    from corral.agents.openhands import OpenHandsAgent
+    from corral.core.task import TaskDefinition
+    from corral.observability import NoOpObserver
+    from corral.persistence import SQLiteCommitStore
+    from corral.runtime.task_runner import TaskRuntime
+
+    adapter = OpenHandsAgent(
+        model="openrouter/moonshotai/kimi-k3",
+        api_key="offline-test",
+        reasoning_effort="medium",
+    )
+    # Import/build before confinement, as the Docker agent bootstrap does.
+    reference = adapter._build_agent(
+        adapter._make_llm(), "http://127.0.0.1:1/mcp", False
+    )
+    expected_prompt = reference.static_system_message
+    assert expected_prompt
+    assert reference.system_prompt is None
+
+    def prepare(_context):
+        import json
+        import os
+
+        from litellm.types.utils import ModelResponse
+        from openhands.sdk import LLM
+        from openhands.sdk.llm import LLMResponse, Message, MessageToolCall
+        from openhands.sdk.llm.utils.metrics import MetricsSnapshot
+
+        assert os.getuid() != 0
+        calls = 0
+
+        async def reply(_llm, *, messages, tools, **_kwargs):
+            nonlocal calls
+            calls += 1
+            system = next(message for message in messages if message.role == "system")
+            assert system.content[0].text == expected_prompt
+            assert {"submit_answer", "browser_navigate", "finish"} <= {
+                tool.name for tool in tools
+            }
+            name = "submit_answer" if calls == 1 else "finish"
+            arguments = (
+                {"answer": "default prompt available"}
+                if calls == 1
+                else {"message": "default prompt available"}
+            )
+            return LLMResponse(
+                message=Message(
+                    role="assistant",
+                    content=[],
+                    tool_calls=[
+                        MessageToolCall(
+                            id=f"offline-{calls}",
+                            name=name,
+                            arguments=json.dumps(arguments),
+                            origin="completion",
+                        )
+                    ],
+                ),
+                metrics=MetricsSnapshot(),
+                raw_response=ModelResponse(id=f"offline-{calls}"),
+            )
+
+        def unexpected_request(*_args, **_kwargs):
+            raise AssertionError("Unexpected external model request in offline test")
+
+        LLM.acompletion = reply
+        LLM.completion = unexpected_request
+        LLM.responses = unexpected_request
+        LLM.aresponses = unexpected_request
+
+    adapter.hooks.register(HookPoint.BEFORE_TASK, prepare)
+    task = TaskDefinition(
+        name="openhands-prompt-probe",
+        description="Check that the default OpenHands prompt is available.",
+        tools=[],
+        scoring_fn=lambda answer: 1.0,
+        submission_format={},
+        resolve_answer=False,
+    )
+    environment = Environment(
+        "probe", task, base_work_dir=workspace, task_execution_id="prompt-probe"
+    )
+    async with SQLiteCommitStore(
+        tmp_path / "prompt.sqlite3", execution_id="prompt-probe"
+    ) as store:
+        state = await TaskRuntime(store, NoOpObserver()).run(
+            adapter,
+            environment,
+            execution_id="prompt-probe",
+            max_iterations=3,
+            started_at=datetime.now(timezone.utc),
+        )
+        assert state.submission is not None, state.runtime.model_dump()
+        assert state.submission == "default prompt available"
 
 
 def test_snapshot_rejects_a_symlink_swap(workspace, tmp_path, monkeypatch):
@@ -648,9 +1029,7 @@ def detached_process() -> str:
 def test_detached_descendant_is_stopped(workspace):
     from pathlib import Path
 
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
-    pid = permissions.execute_tool(environment, None, detached_process, {})
+    pid = permissions.execute_restricted_tool(detached_process, {}, workspace)
     try:
         status = Path(f"/proc/{pid}/status").read_text()
     except FileNotFoundError:
@@ -667,10 +1046,8 @@ def forbidden_read() -> str:
 
 
 def test_denial_message_reaches_the_tool_caller(workspace):
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
     with pytest.raises(RuntimeError, match="Permission denied:.*not permitted"):
-        permissions.execute_tool(environment, None, forbidden_read, {})
+        permissions.execute_restricted_tool(forbidden_read, {}, workspace)
 
 
 def test_sdk_scratch_is_not_a_task_artifact(workspace, tmp_path):
@@ -687,7 +1064,7 @@ def test_sdk_scratch_is_not_a_task_artifact(workspace, tmp_path):
     assert not (destination / scratch.name).exists()
 
 
-@tool
+@tool(workspace_access="read")
 def sibling_probe(path: str) -> str:
     """Try to read another assigned workspace."""
     from pathlib import Path
@@ -702,11 +1079,9 @@ def test_workers_cannot_read_a_different_workspace(workspace):
     other = Path(tempfile.mkdtemp(prefix="other-workspace-", dir="/workspace"))
     (other / "answer.txt").write_text("hidden")
     permissions.workspace_identity(other)
-    environment = object.__new__(Environment)
-    environment.workspace_path = workspace
     with pytest.raises(RuntimeError, match="Permission denied|No such file"):
-        permissions.execute_tool(
-            environment, None, sibling_probe, {"path": str(other / "answer.txt")}
+        permissions.execute_restricted_tool(
+            sibling_probe, {"path": str(other / "answer.txt")}, workspace
         )
 
 
@@ -724,12 +1099,12 @@ def test_worker_rejects_replaced_workspace_before_mount(workspace, monkeypatch):
 
     monkeypatch.setattr(permissions.subprocess, "Popen", replace_before_bootstrap)
     with pytest.raises(RuntimeError, match="workspace was replaced"):
-        permissions.run_worker("tool", (permission_probe, {}), workspace)
+        permissions.execute_restricted_tool(permission_probe, {}, workspace)
     assert not (root / "allowed.txt").exists()
     assert not (original / "allowed.txt").exists()
 
 
-@tool(background_capable=True)
+@tool(background_capable=True, workspace_access="read_write")
 def node_boundary_probe(parent_file: str, sibling_file: str) -> str:
     """Verify native and subprocess access is limited to this node's directory."""
     import json
@@ -807,7 +1182,18 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
         assert os.getuid() != 0
         with pytest.raises(PermissionError):
             Path("/opt/corral/pyproject.toml").read_text()
-        Path(session.workspace, "parent.txt").write_text("parent contents")
+        Path(session.workspace, "scratch-only.txt").write_text("agent scratch")
+        parent_write = portal.call(
+            session.execute,
+            Action(
+                name="write_file",
+                arguments={
+                    "path": "/workspace/parent.txt",
+                    "content": "parent contents",
+                },
+            ),
+        )
+        assert parent_write.success, parent_write
         sessions = _BranchSessionRegistry(session, portal)
         pool = ExecutionPool(
             sessions=sessions, tools=list(session.tools), max_tool_calls=30
@@ -830,23 +1216,38 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
                 return result.result
 
             assert (
-                invoke(first, "read_file", {"path": "parent.txt"}) == "parent contents"
+                invoke(first, "read_file", {"path": "/workspace/parent.txt"})
+                == "parent contents"
             )
             invoke(
-                first, "write_file", {"path": "model.txt", "content": "winning model"}
+                first,
+                "write_file",
+                {"path": "/workspace/model.txt", "content": "winning model"},
             )
             invoke(
-                second, "write_file", {"path": "model.txt", "content": "losing model"}
+                second,
+                "write_file",
+                {"path": "/workspace/model.txt", "content": "losing model"},
             )
             arguments = {
-                "parent_file": str(Path(session.workspace, "parent.txt")),
-                "sibling_file": str(Path(second.workspace, "model.txt")),
+                "parent_file": "/workspace/../parent.txt",
+                "sibling_file": "/workspace/../sibling/model.txt",
             }
             assert json.loads(invoke(first, "node_boundary_probe", arguments))[
                 "confined"
             ]
-            assert Path(first.workspace, "own.txt").read_text() == "node data"
-            assert Path(first.workspace, "results/plot.png").read_text() == "plot data"
+            assert (
+                invoke(first, "read_file", {"path": "/workspace/own.txt"})
+                == "node data"
+            )
+            assert (
+                invoke(
+                    first,
+                    "read_file",
+                    {"path": "/workspace/results/plot.png"},
+                )
+                == "plot data"
+            )
             job = json.loads(invoke(first, "start_node_boundary_probe", arguments))
             finished = json.loads(
                 invoke(first, "get_job_result", {"job_id": job["job_id"], "wait": True})
@@ -868,26 +1269,33 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
                 "No such file" in shell["output"]
                 or "Permission denied" in shell["output"]
             )
-            assert Path(first.workspace, "shell.txt").read_text() == "shell"
+            assert (
+                invoke(first, "read_file", {"path": "/workspace/shell.txt"}) == "shell"
+            )
 
             main_workspace = session.workspace
 
             class NodeAgent:
                 async def run_session(self, child_session):
                     from corral.agents.schema import AgentOutcome
+                    from corral.core.action import Action
 
-                    assert (
-                        Path(child_session.workspace, "model.txt").read_text()
-                        == "winning model"
+                    model = await child_session.execute(
+                        Action(
+                            name="read_file",
+                            arguments={"path": "/workspace/model.txt"},
+                        )
                     )
+                    assert model.success, model
+                    assert model.result == "winning model", model
                     with pytest.raises((PermissionError, FileNotFoundError)):
-                        Path(main_workspace, "parent.txt").read_text()
+                        Path(main_workspace, "scratch-only.txt").read_text()
                     with pytest.raises(RuntimeError, match="calling agent"):
-                        await child_session.fork_branch(workspace_parent=main_workspace)
+                        await child_session.fork_branch(
+                            workspace_parent="/tmp/not-parent"
+                        )
                     nested = await child_session.fork_branch()
-                    assert Path(nested.workspace).is_relative_to(
-                        child_session.workspace
-                    )
+                    assert nested.workspace == "/workspace"
                     return AgentOutcome(
                         status="iteration_limit", error="node agent verified"
                     )
@@ -899,23 +1307,50 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
 
             clone = sessions.clone_branch(first.execution_id)
             try:
-                assert len({branch.workspace for branch in (first, second, clone)}) == 3
-                for branch in (first, second, clone):
-                    assert Path(branch.workspace).parent == Path(
-                        session.workspace, ".corral-nodes"
+                assert {branch.workspace for branch in (first, second, clone)} == {
+                    "/workspace"
+                }
+                for branch in (first, second):
+                    invoke(
+                        branch,
+                        "write_file",
+                        {
+                            "path": "/workspace/from-main.txt",
+                            "content": "main can write",
+                        },
                     )
-                    if branch is not first:
-                        assert not Path(branch.workspace, ".corral-nodes").exists()
-                    Path(branch.workspace, "from-main.txt").write_text("main can write")
-                assert Path(clone.workspace, "model.txt").read_text() == "winning model"
+                clone_write = clone.execute(
+                    Action(
+                        name="write_file",
+                        arguments={
+                            "path": "/workspace/from-main.txt",
+                            "content": "main can write",
+                        },
+                    )
+                )
+                assert clone_write.success, clone_write
+                cloned_model = clone.execute(
+                    Action(
+                        name="read_file",
+                        arguments={"path": "/workspace/model.txt"},
+                    )
+                )
+                assert cloned_model.success, cloned_model
+                assert cloned_model.result == "winning model"
                 response = clone.execute(
                     Action(
                         name="write_file",
-                        arguments={"path": "model.txt", "content": "changed clone"},
+                        arguments={
+                            "path": "/workspace/model.txt",
+                            "content": "changed clone",
+                        },
                     )
                 )
                 assert response.success, response
-                assert Path(first.workspace, "model.txt").read_text() == "winning model"
+                assert (
+                    invoke(first, "read_file", {"path": "/workspace/model.txt"})
+                    == "winning model"
+                )
             finally:
                 sessions.close_branch(clone.execution_id)
 
@@ -927,8 +1362,17 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
                 hypothesis="independent artifacts",
                 rationale="probe",
             )
-            assert not Path(session.workspace, "model.txt").exists()
-            Path(session.workspace, "model.txt").write_text("stale main output")
+            stale = portal.call(
+                session.execute,
+                Action(
+                    name="write_file",
+                    arguments={
+                        "path": "/workspace/model.txt",
+                        "content": "stale main output",
+                    },
+                ),
+            )
+            assert stale.success, stale
             promotion = pool.promote_artifacts(
                 [node],
                 ExperimentTree(),
@@ -938,19 +1382,39 @@ class IsolatedWorkspaceScientist(AIScientistAgent):
             assert promotion.source_workspace == first.workspace
             assert promotion.destination_workspace == session.workspace
             assert "model.txt" in promotion.files
-            assert Path(session.workspace, "model.txt").read_text() == "winning model"
-            assert (
-                Path(session.workspace, "results/plot.png").read_text() == "plot data"
+            promoted_model = portal.call(
+                session.execute,
+                Action(
+                    name="read_file",
+                    arguments={"path": "/workspace/model.txt"},
+                ),
             )
-            assert Path(second.workspace, "model.txt").read_text() == "losing model"
+            assert promoted_model.success, promoted_model
+            assert promoted_model.result == "winning model"
+            promoted_plot = portal.call(
+                session.execute,
+                Action(
+                    name="read_file",
+                    arguments={"path": "/workspace/results/plot.png"},
+                ),
+            )
+            assert promoted_plot.success, promoted_plot
+            assert promoted_plot.result == "plot data"
+            assert (
+                invoke(second, "read_file", {"path": "/workspace/model.txt"})
+                == "losing model"
+            )
             pool.close(first.branch_id)
-            assert invoke(second, "read_file", {"path": "model.txt"}) == "losing model"
+            assert (
+                invoke(second, "read_file", {"path": "/workspace/model.txt"})
+                == "losing model"
+            )
         finally:
             assert pool.close_all() == []
         return "node isolation verified", AgentUsage(), {}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_scientist_node_workspaces_in_docker(workspace, tmp_path):
     from datetime import datetime, timezone
     from pathlib import Path
@@ -1010,7 +1474,7 @@ async def test_scientist_node_workspaces_in_docker(workspace, tmp_path):
             environment.shutdown_jobs()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_internal_entrypoint_protects_a_real_trial(tmp_path, monkeypatch):
     from corral.orchestration.internal import run_task_from_files
     from corral.orchestration.models import (
@@ -1079,13 +1543,10 @@ def permission_registry(request):
     )
 
 
-def test_wetlab_stateful_tool_retains_its_environment_update(workspace):
+def test_wetlab_resource_adapter_retains_tool_updates():
     engine_module = pytest.importorskip("wetlab.engine")
-    from wetlab.env import QualitativeAnalysisEnvironment
+    from wetlab.env import WetlabResourceAdapter
     from wetlab.tools import mix_two_solutions
-
-    from corral.core.state import EnvironmentState, ExecutionState
-    from corral.core.transition import ToolExecutionResult
 
     engine = engine_module.WetlabEngine(
         engine_module.ChemicalSystemSpec(elements="K S(+6)")
@@ -1095,37 +1556,24 @@ def test_wetlab_stateful_tool_retains_its_environment_update(workspace):
         "base": engine.stock_solution({"K+": 0.1, "OH-": 0.1}, description="base"),
     }
     initial = engine.snapshot(inventory).to_dict()
-    state = ExecutionState(
-        through_commit_hash="a" * 64,
-        execution_id="wetlab-permission",
-        branch_id="main",
-        environment=EnvironmentState(values={"hidden_arguments": {"wetlab": initial}}),
+    adapter = WetlabResourceAdapter()
+    runtime = adapter.restore(initial)
+    mix_two_solutions.execute(
+        wetlab=runtime,
+        sol1_label="acid",
+        sol2_label="base",
+        sol1_vol=5,
+        sol2_vol=5,
+        test_label="mixture",
     )
-    environment = object.__new__(QualitativeAnalysisEnvironment)
-    environment.workspace_path = workspace
-    result = permissions.execute_tool(
-        environment,
-        state,
-        mix_two_solutions,
-        {
-            "wetlab": initial,
-            "sol1_label": "acid",
-            "sol2_label": "base",
-            "sol1_vol": 5,
-            "sol2_vol": 5,
-            "test_label": "mixture",
-        },
-    )
-    assert isinstance(result, ToolExecutionResult)
-    assert result.environment["hidden_arguments"]["wetlab"] != initial
-    restored = engine_module.WetlabState.from_dict(
-        result.environment["hidden_arguments"]["wetlab"]
-    )
+    captured = adapter.capture(runtime)
+    assert captured != initial
+    restored = engine_module.WetlabState.from_dict(captured)
     restored_engine = engine_module.WetlabEngine(restored.chemical_system)
     assert "mixture" in restored_engine.restore(restored)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_wetlab_agent_can_use_scratch_but_cannot_read_private_state(
     workspace, tmp_path
 ):
@@ -1163,12 +1611,9 @@ async def test_wetlab_agent_can_use_scratch_but_cannot_read_private_state(
                 started_at=datetime.now(timezone.utc),
             )
             assert state.submission is not None, state.runtime.model_dump()
-            assert state.environment.values["hidden_arguments"]["wetlab"]  # noqa: PD011 - EnvironmentState mapping, not pandas
-            assert set(state.workspace.files) == {"notes.txt"}
-            assert (
-                Path(environment.workspace_path, "notes.txt").read_text()
-                == "scratch only"
-            )
+            assert state.environment.values["resources"]["wetlab"]
+            assert not state.workspace.files
+            assert not Path(environment.workspace_path, "notes.txt").exists()
     finally:
         registry.close()
 
@@ -1180,15 +1625,23 @@ class WaitingAgent:
         import os
         import subprocess
         import sys
-        from pathlib import Path
+
+        from corral.core.action import Action
 
         child = subprocess.Popen(  # noqa: ASYNC220 - exercise synchronous SDK spawning
             [sys.executable, "-c", "import time; time.sleep(300)"],
             start_new_session=True,
         )
-        Path(session.workspace, "started.json").write_text(
-            json.dumps([os.getpid(), child.pid])
+        response = await session.execute(
+            Action(
+                name="write_file",
+                arguments={
+                    "path": "/workspace/started.json",
+                    "content": json.dumps([os.getpid(), child.pid]),
+                },
+            )
         )
+        assert response.success, response
         await asyncio.sleep(300)
 
 
@@ -1208,21 +1661,23 @@ def public_python_probe(code: str) -> str:
 
 
 class PrivateProbeEnvironment(Environment):
-    def execute_tool(self, state, selected_tool, arguments):
+    def execute_controller_tool(self, state, prepared):
         from corral.core.transition import ToolExecutionResult
 
+        selected_tool = prepared.tool
+        arguments = prepared.arguments
         if selected_tool.name != "trusted_private_probe":
-            return super().execute_tool(state, selected_tool, arguments)
-        assert selected_tool.trusted
+            return super().execute_controller_tool(state, prepared)
+        assert prepared.trusted
         assert os.getuid() == 0
         assert (
             arguments["secret"]
-            == state.environment.values["hidden_arguments"]["secret"]  # noqa: PD011 - EnvironmentState mapping, not pandas
+            == state.environment.values["hidden_arguments"]["secret"]
         )
         return ToolExecutionResult(
             content=selected_tool.execute(**arguments),
             environment={
-                **state.environment.values,  # noqa: PD011 - EnvironmentState mapping, not pandas
+                **state.environment.values,
                 "private_update": arguments["secret"],
             },
         )
@@ -1352,7 +1807,7 @@ class StateBoundaryProbe:
         return AgentOutcome(status="completed", answer="boundary held")
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 @pytest.mark.parametrize("transport", ["python", "mcp"])
 async def test_private_state_stays_in_controller(
     workspace, tmp_path, monkeypatch, transport
@@ -1415,8 +1870,8 @@ async def test_private_state_stays_in_controller(
             started_at=datetime.now(timezone.utc),
         )
         assert state.submission == "boundary held", state.runtime.model_dump_json()
-        assert state.environment.values["hidden_arguments"]["secret"] == secret  # noqa: PD011 - EnvironmentState mapping, not pandas
-        assert state.environment.values["private_update"] == secret  # noqa: PD011 - EnvironmentState mapping, not pandas
+        assert state.environment.values["hidden_arguments"]["secret"] == secret
+        assert state.environment.values["private_update"] == secret
         assert secret not in state.model_dump_json(include={"conversations"})
         assert {"agent", "tool", "terminal"} <= set(requests)
     finally:
@@ -1424,7 +1879,7 @@ async def test_private_state_stays_in_controller(
         await store.aclose()
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_cancelled_agent_stops_its_descendants_before_returning(
     workspace, tmp_path
 ):
@@ -1433,6 +1888,7 @@ async def test_cancelled_agent_stops_its_descendants_before_returning(
     from datetime import datetime, timezone
     from pathlib import Path
 
+    from corral.core.environment import Toolset, default_file_tools
     from corral.core.task import TaskDefinition
     from corral.observability import NoOpObserver
     from corral.persistence import SQLiteCommitStore
@@ -1447,7 +1903,11 @@ async def test_cancelled_agent_stops_its_descendants_before_returning(
         resolve_answer=False,
     )
     environment = Environment(
-        "cancel", task, base_work_dir=workspace, task_execution_id="cancel"
+        "cancel",
+        task,
+        base_work_dir=workspace,
+        task_execution_id="cancel",
+        toolset=Toolset(workspace_factory=default_file_tools),
     )
     store = SQLiteCommitStore(tmp_path / "cancel.sqlite3", execution_id="cancel")
     running = asyncio.create_task(
@@ -1481,3 +1941,67 @@ async def test_cancelled_agent_stops_its_descendants_before_returning(
         running.cancel()
         await asyncio.gather(running, return_exceptions=True)
         await store.aclose()
+
+
+def test_session_larger_than_the_reply_ceiling_round_trips(workspace, monkeypatch):
+    """A checkpoint is bounded by the bulk channel, never by the reply ceiling.
+
+    The checkpoint is the one worker payload whose size follows the agent's data
+    rather than its output, so it travels beside the JSON reply. Pinning a reply
+    ceiling far below the checkpoint proves the two are genuinely decoupled: on
+    the old single-channel transport this call could not have returned.
+    """
+    from corral.runtime.python_repl import execute_python_repl
+
+    monkeypatch.setenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", str(64 * 1024))
+    first = execute_python_repl(
+        code=(
+            "import numpy as np\n"
+            "rng = np.random.default_rng(0)\n"
+            "block = rng.normal(size=(1200, 1200))\n"
+            "print('built')"
+        ),
+        workspace=workspace,
+    )
+    assert first.output.strip() == "built"
+    assert len(first.checkpoint) > 10 * 1024 * 1024
+    assert len(first.checkpoint) > permissions.max_worker_response_bytes()
+
+    # The same oversized state must survive being handed back to a new worker.
+    second = execute_python_repl(
+        code="print(block.shape, int(block[0][0] * 10**6))",
+        checkpoint=first.checkpoint,
+        workspace=workspace,
+    )
+    assert second.output.strip().startswith("(1200, 1200) ")
+
+
+def test_oversize_bulk_payload_is_refused_with_its_own_setting(workspace, monkeypatch):
+    """The bulk ceiling is enforced, and the error names the knob that raises it."""
+    from corral.runtime.python_repl import execute_python_repl
+
+    monkeypatch.setenv("CORRAL_MAX_WORKER_BULK_BYTES", str(4 * 1024 * 1024))
+    with pytest.raises(RuntimeError, match="CORRAL_MAX_WORKER_BULK_BYTES"):
+        execute_python_repl(
+            code="import numpy as np; pad = np.zeros((2000, 2000))",
+            workspace=workspace,
+        )
+
+
+def test_oversize_control_reply_is_refused_before_it_is_read(workspace, monkeypatch):
+    """An oversize reply is refused from its length prefix, not after buffering.
+
+    Tool output rides the control channel, so a tool returning more than the
+    ceiling is still rejected; the point is that the controller learns the size
+    from the prefix and never allocates for the body.
+    """
+    from corral.core.tool import tool
+
+    @tool
+    def chatty() -> str:
+        """Return more control-channel text than the ceiling allows."""
+        return "x" * (2 * 1024 * 1024)
+
+    monkeypatch.setenv("CORRAL_MAX_WORKER_RESPONSE_BYTES", str(64 * 1024))
+    with pytest.raises(RuntimeError, match="CORRAL_MAX_WORKER_RESPONSE_BYTES"):
+        permissions.run_worker("tool", (chatty, {}), workspace)

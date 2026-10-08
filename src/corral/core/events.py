@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
-from pydantic import Field, JsonValue, TypeAdapter, model_validator
+from pydantic import Field, JsonValue, model_validator
 
 from corral.core._immutable import FrozenModel
 from corral.core.action import Action
@@ -271,12 +271,6 @@ StateEvent: TypeAlias = Annotated[
 ]
 
 
-def event_from_dict(value: Mapping[str, Any]) -> StateEvent:
-    """Validate a serialized event through the discriminated union."""
-
-    return TypeAdapter(StateEvent).validate_python(value)
-
-
 __all__ = [
     "SPAWN_SUBAGENT_TOOL_NAME",
     "AgentCompleted",
@@ -299,5 +293,4 @@ __all__ = [
     "ToolStarted",
     "UsageDelta",
     "WorkspaceDelta",
-    "event_from_dict",
 ]

@@ -1,4 +1,4 @@
-"""Checks that bind the level-1 LAMMPS inputs to their saved states.
+"""Checks that bind both levels' LAMMPS inputs to their saved states.
 
 These checks inspect data and input files only. They cannot prove that a saved
 input was executed; execution evidence is handled by the workflow verifier.
@@ -21,7 +21,7 @@ from ase.io import read
 from scipy.spatial import cKDTree
 
 from .common import EvidenceError, UnsupportedEvidence
-from .task_2 import _commands, _state
+from .task_2 import _boundary_states, _commands
 
 # SHA-256 of the individual files in the benchmark's versioned asset archives.
 _SILICON_SW_SHA256 = "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
@@ -418,7 +418,7 @@ def supplied_silicate_initial_state(e) -> bool:
         difference -= np.rint(difference)
         if np.max(np.abs(difference @ original.cell.array)) >= 2e-4:
             return False
-    initial = _state(e.json("boundary_states", "stage_boundaries")["initial"])
+    initial = _boundary_states(e)["initial"]
     if len(atoms) != len(initial["ids"]):
         return False
     if not np.array_equal(atoms.arrays["id"], initial["ids"]):
@@ -494,6 +494,8 @@ def no_silicate_state_resets(e) -> bool:
 def cooled_endpoint_temperature(e) -> bool:
     """Check the measured endpoint against saved velocities and 300 K target."""
     trace = e.table("thermal_trace", "thermal_traces", "trace")
+    if "stage" in trace:
+        trace = trace.loc[trace["stage"] == "cooling"]
     measured = (
         trace["measured_temperature_K"]
         if "measured_temperature_K" in trace
@@ -502,7 +504,7 @@ def cooled_endpoint_temperature(e) -> bool:
     final = float(measured.iloc[-1])
     if not np.isfinite(final) or abs(final - 300) > 100:
         return False
-    state = _state(e.json("boundary_states", "stage_boundaries")["cooling_end"])
+    state = _boundary_states(e)["cooling_end"]
     velocities = np.asarray(state["velocities"], dtype=float) / units.fs
     masses = np.asarray(
         [atomic_masses[atomic_numbers[str(symbol)]] for symbol in state["species"]],

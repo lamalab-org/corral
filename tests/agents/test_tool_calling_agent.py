@@ -9,7 +9,7 @@ from corral.agents.session import ToolResponse
 from corral.agents.tool_calling import ToolCallingAgent
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -53,7 +53,7 @@ class Session:
         return ToolResponse(success=True, result="pong", error=None)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_multiple_provider_calls_are_serialized_before_submission(monkeypatch):
     responses = iter(
         [
@@ -85,7 +85,7 @@ async def test_multiple_provider_calls_are_serialized_before_submission(monkeypa
     assert {"role": "user", "content": "resume from canonical state"} in sent
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_plain_text_never_bypasses_runtime_submission(monkeypatch):
     monkeypatch.setattr(
         "corral.agents.base_agent.llm_call",

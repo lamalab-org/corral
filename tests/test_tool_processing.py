@@ -6,12 +6,18 @@ import pytest
 
 from corral.core.action import Action
 from corral.core.environment import Environment, Toolset
-from corral.core.state import ActionState, ExecutionState
+from corral.core.resources import RESOURCE_CATALOG_METADATA_KEY
+from corral.core.state import ActionState, ExecutionState, TaskState
 from corral.core.task import TaskDefinition
 from corral.core.tool import (
     Tool,
     ToolArgument,
     ToolConcurrency,
+    WorkspaceAccess,
+)
+from corral.core.tool_catalog import (
+    TOOL_CATALOG_METADATA_KEY,
+    TOOL_POLICY_METADATA_KEY,
 )
 from corral.core.transition import execute_action
 
@@ -110,7 +116,16 @@ class TestEnvironmentPreprocessing:
         }
         for name, tool_object in self.env.tools.items():
             tool_object.hidden_args = {}
+            tool_object.trusted = False
+            tool_object.workspace_access = WorkspaceAccess.NONE
+            tool_object.workspace_args = ()
+            tool_object.resources = ()
             tool_object.concurrency = ToolConcurrency.SERIAL
+            tool_object.params_json_schema = {
+                "type": "object",
+                "properties": {argument.name: {} for argument in tool_object.arguments},
+                "required": [argument.name for argument in tool_object.arguments],
+            }
             tool_object.get_openai_tool_format.return_value = {
                 "type": "function",
                 "function": {"name": name, "parameters": {}},
@@ -306,6 +321,17 @@ class TestEnvironmentPreprocessing:
                 through_commit_hash="a" * 64,
                 execution_id="execution",
                 branch_id="main",
+                task=TaskState(
+                    environment={
+                        TOOL_CATALOG_METADATA_KEY: self.env.tool_catalog_snapshot().model_dump(
+                            mode="json"
+                        ),
+                        TOOL_POLICY_METADATA_KEY: self.env.tool_policy_snapshot().model_dump(
+                            mode="json"
+                        ),
+                        RESOURCE_CATALOG_METADATA_KEY: {},
+                    }
+                ),
                 actions={
                     action.id: ActionState(
                         action=action,

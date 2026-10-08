@@ -8,7 +8,7 @@ import pytest
 from ase import units
 from ase.calculators.singlepoint import SinglePointCalculator
 from corral_md.workflow_scoring.common import Evidence, Rubric
-from corral_md.workflow_scoring.task_4 import evaluate
+from corral_md.workflow_scoring.task_4 import STANDARD, _apply_corrections, evaluate
 
 
 def _write(path, value):
@@ -153,7 +153,7 @@ def _submission(tmp_path, sign=1):
     )
     settings = {
         "checkpoint": "MACE-MP-0",
-        "checkpoint_sha256": "f" * 64,
+        "checkpoint_sha256": "01bfe22100139f424713cf921144e5509cbe353d67aa9fa1be9c6e1e0ed35845",
         "software_versions": {"ase": "saved-version"},
         "force_constant_method": "central displacement",
     }
@@ -463,6 +463,98 @@ def test_task4_unsupported_methods_are_unverified(submission):
     assert _check(result, "force_constant_transformations")["status"] == "unverified"
     assert _check(result, "band_path_and_signed_energies")["status"] == "passed"
     assert result.score is None
+
+
+@pytest.mark.parametrize("descriptive_labels", [False, True])
+@pytest.mark.parametrize("level", [1, 2])
+def test_task4_cubic_projection_reconstructs_known_nearest_neighbor_shell(
+    submission, descriptive_labels, level
+):
+    path = submission.parent / "force_constants.json"
+    data = json.loads(path.read_text())
+    cells = np.asarray(data["cell_translations"])
+    # Six primitive bonds distribute evenly over the 12 FCC nearest neighbors.
+    expected = np.zeros((125, 3, 3))
+    nearest = np.isclose(np.sum((cells @ STANDARD) ** 2, axis=1), 3.89**2 / 2)
+    assert nearest.sum() == 12
+    expected[nearest] = -0.5 * np.eye(3)
+    expected[np.all(cells == 0, axis=1)] = 6 * np.eye(3)
+    data["values_eV_A2"] = expected.tolist()
+    data["corrections"] = (
+        [
+            "48-operation cubic O_h group projection",
+            "pair projection Phi(R)=Phi(-R)^T",
+            "onsite replacement enforcing acoustic sum rule",
+        ]
+        if descriptive_labels
+        else ["cubic_symmetry", "pair_symmetry", "acoustic_sum_rule"]
+    )
+    _write(path, data)
+    rubric = Rubric(4)
+    evaluate(Evidence(submission), rubric, level=level)
+    assert _check(rubric, "derivative_reconstruction")["status"] == "passed"
+    assert _check(rubric, "force_constant_transformations")["status"] == "passed"
+    assert _check(rubric, "symmetry_and_acoustic_diagnostics")["status"] == "passed"
+
+    data["values_eV_A2"][0][0][0] += 0.1
+    _write(path, data)
+    rubric = Rubric(4)
+    evaluate(Evidence(submission), rubric, level=level)
+    assert _check(rubric, "force_constant_transformations")["status"] == "failed"
+
+
+@pytest.mark.parametrize("rotated", [False, True])
+@pytest.mark.parametrize("alternate_basis", [False, True])
+def test_cubic_projection_rotates_tensor_and_site_independently_of_basis(
+    rotated, alternate_basis
+):
+    cells = np.indices((5,) * 3).reshape(3, -1).T - 2
+    positions = cells @ STANDARD
+    transform = (
+        np.array([[1, 1, 0], [0, 1, 0], [0, 0, 1]])
+        if alternate_basis
+        else np.eye(3, dtype=int)
+    )
+    angle = 0.37 if rotated else 0
+    orientation = np.array(
+        [
+            [np.cos(angle), -np.sin(angle), 0],
+            [np.sin(angle), np.cos(angle), 0],
+            [0, 0, 1],
+        ]
+    )
+    # One radial bond has an orbit of 12 bonds with equal weight. This analytic
+    # expectation checks both Cartesian tensor indices, not just site mapping.
+    raw = np.zeros((125, 3, 3))
+    source = np.flatnonzero(np.all(cells == [1, 0, 0], axis=1))[0]
+    direction = positions[source] @ orientation
+    direction /= np.linalg.norm(direction)
+    raw[source] = np.outer(direction, direction)
+    nearest = np.isclose(np.sum(positions**2, axis=1), 3.89**2 / 2)
+    directions = positions[nearest] @ orientation / (3.89 / np.sqrt(2))
+    expected = np.zeros_like(raw)
+    expected[nearest] = np.einsum("ri,rj->rij", directions, directions) / 12
+    mapped_cells = np.rint(cells @ np.linalg.inv(transform)).astype(int) % 5
+    order = np.arange(125)[::-1]
+    data = {
+        "primitive_cell_A": (transform @ STANDARD @ orientation).tolist(),
+        "primitive_to_standard": transform.tolist(),
+        "cell_translations": mapped_cells[order].tolist(),
+        "corrections": ["cubic_symmetry"],
+    }
+    np.testing.assert_allclose(
+        _apply_corrections(raw[order], data), expected[order], atol=1e-14
+    )
+
+
+def test_unknown_correction_does_not_block_raw_derivative_check(submission):
+    _edit(
+        submission.parent / "force_constants.json",
+        lambda data: data.__setitem__("corrections", ["external_projection"]),
+    )
+    result = _score(submission)
+    assert _check(result, "derivative_reconstruction")["status"] == "passed"
+    assert _check(result, "force_constant_transformations")["status"] == "unverified"
 
 
 def test_task4_forward_stencil_is_an_equivalent_workflow(submission):

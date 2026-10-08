@@ -48,8 +48,7 @@ CATEGORY_LABELS = {
 
 CATEGORY_DESCRIPTIONS = {
     "evidence_non_uptake": (
-        "Agent gathers a result and does not incorporate it into "
-        "subsequent reasoning."
+        "Agent gathers a result and does not incorporate it into subsequent reasoning."
     ),
     "untested_claim": ("Hypothesis stated without a designed test to evaluate it."),
     "fixed_belief_trace": (
@@ -696,9 +695,7 @@ def _render_panel_tikz(panel: ExcerptPanel, panel_idx: int, row: int = 0) -> str
         item = f"    \\item[{role_tex}] {{\\scriptsize {main_text}}}"
         if len(lines) > 1:
             tool_text = _tex_escape(lines[1])
-            item += (
-                f"\n    {{\\newline\\tiny\\color{{gray}}" f"\\texttt{{{tool_text}}}}}"
-            )
+            item += f"\n    {{\\newline\\tiny\\color{{gray}}\\texttt{{{tool_text}}}}}"
         msg_items.append(item)
 
     msg_block = (
@@ -710,9 +707,7 @@ def _render_panel_tikz(panel: ExcerptPanel, panel_idx: int, row: int = 0) -> str
     )
 
     meta = (
-        f"{_tex_escape(panel.env)} / "
-        f"{_tex_escape(panel.level)} / "
-        f"trial\\,{panel.trial}"
+        f"{_tex_escape(panel.env)} / {_tex_escape(panel.level)} / trial\\,{panel.trial}"
     )
 
     return (
