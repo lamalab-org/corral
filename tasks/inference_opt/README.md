@@ -54,6 +54,13 @@ The submitted policy may use 12 calls per test question.
 Every run is also limited to 8192 generated tokens per call (reasoning included) and by its wall clock (`run_time_limit_s`, default one hour).
 `student_concurrency` in the task JSON caps the requests one run has in flight, as one number or one per student (default 16): 8 for Llama 3.2 3B and 16 for Qwen 3.5 9B, whose providers rate-limit bursts, and 32 for the others.
 
+Corral copies a trial's state into every branch an agent forks, so each branch would start with the full remaining budget.
+For agents that branch, such as the AI Scientist, pass `--env-kwargs '{"level": 1, "shared_budget": true}'`.
+Every branch then draws on one budget: student calls, experiments, dry runs, reveals and probes, through a locked file beside the trial's workspace.
+An experiment reserves at most 12 calls per train question, so branches can run at once.
+`submit_policy` copies every branch's runs and usage into the main ledger, and the score metadata reports them as `shared_ledger`.
+Agents that do not branch are unaffected; the option is off by default.
+
 ## Questions
 
 The frozen set is `inference_opt/data/frozen/v2`.

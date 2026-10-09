@@ -329,5 +329,8 @@ class StateScorer:
             metadata["private_artifact"] = final.get("private_artifact", "")
         # Every dry run and experiment, in order: how the policy improved on train.
         metadata["train_history"] = list(ledger.get("runs") or [])
+        if ledger.get("shared_ledger"):
+            # Usage and runs of every branch, when the trial shared one budget.
+            metadata["shared_ledger"] = ledger["shared_ledger"]
         result["metadata"] = metadata
         return result

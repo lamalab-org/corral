@@ -206,8 +206,13 @@ def create_environments(
     level: int = 1,
     task_type: str = "task",
     work_dir: str = BASE_WORK_DIR,
+    shared_budget: bool = False,
 ) -> dict[str, Environment]:
-    """Create the inference-optimization environments for one level."""
+    """Create the inference-optimization environments for one level.
+
+    ``shared_budget`` makes every branch of a trial draw on one budget, for
+    agents that fork branches; agents that do not are unaffected by it.
+    """
     root = Path(__file__).resolve().parents[1]
     if local_dir is not None:
         source = Path(local_dir)
@@ -235,7 +240,9 @@ def create_environments(
                 component_id=name,
                 resource_states={LEDGER_RESOURCE: _initial_ledger(task)},
                 toolset=Toolset(
-                    pool=create_tools(task.initial_input, work_dir),
+                    pool=create_tools(
+                        task.initial_input, work_dir, shared_budget=shared_budget
+                    ),
                     workspace_factory=default_file_tools,
                 ),
             )

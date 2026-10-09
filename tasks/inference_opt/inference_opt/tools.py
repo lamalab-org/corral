@@ -12,11 +12,18 @@ from typing import Any
 
 from corral.core.tool import Tool, tool
 from corral.core.transition import CORRAL_PRIVATE_ARTIFACTS_ARGUMENT
+from corral.runtime.permissions import NODE_WORKSPACE_DIR
 from inference_opt import datasets
-from inference_opt.budget import LEDGER_RESOURCE, BudgetSpec, RunRecord, StateLedger
+from inference_opt.budget import (
+    LEDGER_RESOURCE,
+    BudgetSpec,
+    RunRecord,
+    SharedLedger,
+    StateLedger,
+)
 from inference_opt.client import probe_student
 from inference_opt.errors import error_line, error_tail
-from inference_opt.runner import MAX_TOKENS_CAP, ModelRun, run_policy
+from inference_opt.runner import MAX_TOKENS_CAP, ModelRun, private_root, run_policy
 from inference_opt.score import (
     HarnessError,
     final_result,
@@ -120,11 +127,33 @@ def _policy_hash(policy_dir: Path) -> str:
     return digest.hexdigest()
 
 
-def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
+def _shared_ledger(work_dir: str) -> SharedLedger | None:
+    """The trial-wide ledger for ``work_dir``, a trial or one of its branches.
+
+    Agents that branch (the AI Scientist) give each branch a workspace inside
+    the trial's own, under ``NODE_WORKSPACE_DIR``. The file sits in the trial's
+    controller-only folder, which no branch's file tools can reach.
+    """
+    if not work_dir:
+        return None
+    workspace = Path(work_dir).resolve()
+    in_branch = workspace.parent.name == NODE_WORKSPACE_DIR
+    trial = workspace.parent.parent if in_branch else workspace
+    return SharedLedger(
+        private_root(trial) / "shared_ledger.json",
+        branch=workspace.name if in_branch else "",
+    )
+
+
+def create_tools(
+    config: dict[str, Any], work_dir: str, *, shared_budget: bool = False
+) -> dict[str, Tool]:
     """Build the tool set for one task.
 
     ``config`` is the task's immutable ``initial_input``. The ledger is a Corral
-    resource: restored before each call and committed after it.
+    resource: restored before each call and committed after it. With
+    ``shared_budget``, every branch of a trial draws on one budget
+    (``SharedLedger``); without branches it changes nothing.
     """
     del work_dir  # Corral passes the task's own folder on every call instead
     benchmark = str(config["benchmark"])
@@ -135,8 +164,12 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         config.get("baselines_train") or config.get("baselines") or {}
     )
 
-    def _ledger(inference_state: Any) -> StateLedger:
-        return StateLedger({} if inference_state is None else inference_state, spec)
+    def _ledger(inference_state: Any, work_dir: str) -> StateLedger:
+        return StateLedger(
+            {} if inference_state is None else inference_state,
+            spec,
+            _shared_ledger(work_dir) if shared_budget else None,
+        )
 
     def _example_record(
         item: datasets.FrozenItem,
@@ -189,7 +222,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             JSON with each student's train accuracy (and, on level 2, template
             consistency), and the train score of the larger model it must match.
         """
-        ledger = _ledger(inference_state)
+        ledger = _ledger(inference_state, work_dir)
         payload = {
             "benchmark": benchmark,
             "models": models,
@@ -241,7 +274,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             JSON with the newly revealed examples, their gold answers, and what
             each student answered zero-shot.
         """
-        ledger = _ledger(inference_state)
+        ledger = _ledger(inference_state, work_dir)
         count = max(1, min(int(count), spec.reveal_batch))
         ledger.reserve(reveals=1)
 
@@ -336,7 +369,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             JSON with the completions and why each ended ("stop", or "length"
             when max_tokens ran out; then the completion may be empty).
         """
-        ledger = _ledger(inference_state)
+        ledger = _ledger(inference_state, work_dir)
         count = max(1, min(int(n), 8))
         ledger.reserve(probe_calls=count, calls=count)
         completions = probe_student(
@@ -391,7 +424,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         Returns:
             JSON with per-question answers, whether each was right, and any errors.
         """
-        ledger = _ledger(inference_state)
+        ledger = _ledger(inference_state, work_dir)
         policy_dir = _resolve(work_dir, policy_path)
         wanted = [item.strip() for item in question_ids.split(",") if item.strip()]
         if not wanted:
@@ -488,10 +521,18 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             JSON with accuracy and its change over the baseline, template
             consistency on level 2, per-topic counts, and the path to run artifacts.
         """
-        ledger = _ledger(inference_state)
+        ledger = _ledger(inference_state, work_dir)
         policy_dir = _resolve(work_dir, policy_path)
         run_id = ledger.next_run_id("exp")
         model_budget = ledger.remaining()["student_calls"] // len(models)
+        if ledger.shared is not None:
+            # Reserve what one train run can use at the test rate, not the
+            # whole pool, so other branches can run at the same time.
+            per_question = int(config["final_max_student_calls"]) // max(
+                1, int(config.get("n_test", 30))
+            )
+            n_train = int(config.get("n_train", 30))
+            model_budget = min(model_budget, n_train * per_question)
         reserved = model_budget * len(models)
         ledger.reserve(experiments=1, calls=reserved)
         runs = run_policy(
@@ -621,7 +662,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             JSON with per-question answers, whether each was right, logs, call
             counts and errors. Gold answers of train questions are never shown.
         """
-        ledger = _ledger(inference_state)
+        ledger = _ledger(inference_state, work_dir)
         runs_root = Path(work_dir) / "runs"
         if run_id == "last":
             candidates = sorted(
@@ -681,7 +722,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             JSON with the experiments ranked by their change on the task's pass
             metric, and the best run so far.
         """
-        ledger = _ledger(inference_state)
+        ledger = _ledger(inference_state, work_dir)
         experiments = [
             {key: value for key, value in run.items() if key != "private_artifact"}
             for run in ledger.runs
@@ -729,7 +770,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             JSON with used and remaining experiments, dry runs, student calls,
             reveals and submissions.
         """
-        ledger = _ledger(inference_state)
+        ledger = _ledger(inference_state, work_dir)
         return _compact(ledger.snapshot(), ledger.advice(), ledger)
 
     @tool(**_RUN_TOOL)
@@ -751,7 +792,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             JSON confirming the submission. The test result is not shown; it is
             used when the episode is scored.
         """
-        ledger = _ledger(inference_state)
+        ledger = _ledger(inference_state, work_dir)
         policy_dir = _resolve(work_dir, policy_path)
         used = int(ledger.state["submissions"])
         if used >= spec.max_submissions:
@@ -797,6 +838,10 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
             final["harness_error"] = str(exc)
         ledger.state["final"] = final
         ledger.state["submissions"] = used + 1
+        if ledger.shared is not None:
+            # Every branch's usage and runs, for the analysis: the main ledger
+            # holds only what the main session did itself.
+            ledger.state["shared_ledger"] = ledger.shared.read(ledger.state)
         (Path(work_dir) / "submission.json").write_text(
             json.dumps(
                 {
