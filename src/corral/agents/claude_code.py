@@ -169,6 +169,10 @@ class ClaudeCodeAgent:
     and Edit alongside the explicit Corral MCP tools. Authentication requires
     `ANTHROPIC_API_KEY` or provider credentials; set `bare=False` to use a
     normal Claude subscription login and the full native tool preset.
+
+    `tool_timeout_s` is the per-call limit Claude Code applies to the corral
+    MCP tools. It defaults to 600 s, as in the Codex adapter; Claude Code's own
+    default stops an HTTP tool call that is silent for 5 minutes.
     """
 
     tool_transport = "mcp"
@@ -182,6 +186,7 @@ class ClaudeCodeAgent:
         reasoning_effort: str | None = "high",
         thinking: dict[str, Any] | None = None,
         wall_clock_timeout_s: float | None = None,
+        tool_timeout_s: float = 600.0,
         hooks: AgentHooks | None = None,
         bare: bool = True,
     ) -> None:
@@ -202,6 +207,7 @@ class ClaudeCodeAgent:
         self.reasoning_effort = reasoning_effort
         self.thinking = thinking
         self.wall_clock_timeout_s = wall_clock_timeout_s
+        self.tool_timeout_s = tool_timeout_s
         self.hooks = hooks or AgentHooks()
         self.bare = bare
 
@@ -321,6 +327,7 @@ class ClaudeCodeAgent:
             "thinking": self.thinking,
             "max_turns_configured": getattr(options, "max_turns", None),
             "wall_clock_timeout_s": self.wall_clock_timeout_s,
+            "tool_timeout_s": self.tool_timeout_s,
             "streaming_enabled": bool(
                 getattr(options, "include_partial_messages", False)
             ),
@@ -344,7 +351,13 @@ class ClaudeCodeAgent:
         run: _RunState,
     ) -> str:
         """Drive the Claude Code harness to completion and return its answer."""
-        server = {"type": "http", "url": mcp_url}
+        # The per-server timeout (ms) sets both Claude Code's per-call limit and
+        # its idle limit, which otherwise cuts off HTTP tool calls after 5 min.
+        server = {
+            "type": "http",
+            "url": mcp_url,
+            "timeout": round(self.tool_timeout_s * 1000),
+        }
         allowed_tools = [
             f"mcp__{_MCP_SERVER_NAME}__{t['function']['name']}"
             for t in tools

@@ -274,7 +274,11 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
         "mcp__corral__submit_answer",
     ]
     assert options.mcp_servers == {
-        "corral": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}
+        "corral": {
+            "type": "http",
+            "url": "http://127.0.0.1:8765/mcp",
+            "timeout": 600_000,
+        }
     }
     assert options.strict_mcp_config is True
     assert options.permission_mode == "auto"
@@ -465,7 +469,7 @@ async def test_bare_mode_real_sdk_preflight_exposes_corral_tools(tmp_path):
             ) as connection,
         ):
             options = agent._build_options(
-                server={"type": "http", "url": connection.url},
+                server={"type": "http", "url": connection.url, "timeout": 600_000},
                 allowed_tools=[
                     f"mcp__corral__{tool['function']['name']}" for tool in tools
                 ],
