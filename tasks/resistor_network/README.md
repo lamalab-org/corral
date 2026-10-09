@@ -21,97 +21,117 @@ If you prefer not to activate the environment, use `uv run` to prefix the comman
 
 ## Level separation
 
-The current pilot contains exactly ten tasks per level. The levels differ in
-both circuit size and how their cycles are connected:
+Each saved bank contains ten tasks with ten different **unlabeled graph
+structures**. Graph-isomorphic circuits are rejected even if node labels,
+terminal locations or resistor values differ. Internal node labels, resistor
+IDs and connection order are randomized after construction.
 
 | Property | Level 1 | Level 2 |
 |---|---|---|
-| Family | Two separate loop modules in series | One coupled bridge core |
-| Resistors | 12 | 16 |
-| Visible nodes | 11 | 14 |
-| Independent cycles | 2 | 3 |
-| Cycle organization | Two separate loop modules, one cycle each | All three cycles in one biconnected component |
-| Path lengths | Each loop has parallel paths of 2 and 3 resistors | Four outer paths of 3 resistors; cross-path and added A–B path of 2 each |
-| Terminal-preserving series/parallel reduction | Reduces to a single A–B edge | Leaves a K4 bridge core; cannot reduce to a single edge using series/parallel rules alone |
-| Edges outside cycles | 2 terminal resistors | 0 |
-| Published measurements in each saved task | 14 | 18 |
-| Recorded batch seed | 202610121 | 202610162 |
+| Family | Separable loop modules (cactus graphs) | One irreducible coupled bridge core |
+| Resistors | 8-12 | 10-14 |
+| Construction | Varied loop sizes, chain or branching arrangements, 0-2 terminal tails | Varied subdivisions of K4, four/five-rim wheel graphs and K5 minus one edge |
+| Cycle organization | Each biconnected component has at most one cycle | All cycles belong to one biconnected component |
+| Published measurements | 11-16 | 14-19 |
+| Default/saved batch seed | 202610101 | 202610102 |
 
-Each L1 loop has a two-resistor path in parallel with a three-resistor path.
-There is one resistor at each end of the two-loop chain. Terminal-preserving
-series/parallel reduction reaches a single A–B edge.
+The ranges overlap to distinguish reasoning about separable modules from
+coupled networks without making circuit size the only level distinction.
+Sizes increase deterministically across the batch. L1 has 2-4 independent
+loops; a branching arrangement may include loops outside the A-B current
+path, but their internal nodes remain measured and every resistor must affect
+the published measurements. L2 has no external tails and retains a bridge
+core after terminal-preserving series/parallel reduction.
 
-L2 starts from a Wheatstone bridge and adds an A–B path. Its four outer paths
-contain three resistors each; the cross-path and added A–B path contain two each.
-Suppressing degree-two internal nodes leaves K4, the complete graph on four
-nodes. All three cycles belong to one biconnected component, with no external
-tails.
+## Static sparse measurement policy
 
-All ten tasks within a level currently share the same labeled wiring. Resistor
-values and measured pairs vary, and task index does not represent increasing
-difficulty. Structural separation is enforced; a model success-rate gap on
-this exact bank still needs evaluation under matched agent and budget settings.
-See [the implementation status and evaluation plan](SAMPLER_LEVEL_PLAN.md).
+For a circuit with `m` resistors, publish exactly
 
-## Sampling and measurement checks
+```text
+m + ceil(m / 3)
+```
 
-`src/resistor_network/sampler.py` dispatches to `build_separable_loops()` for L1
-and `build_coupled_bridge()` for L2. These use `leaf_resistor()`, `leaf_bridge()`,
-`compose_series()`, `compose_parallel()` and `subdivide_edges()` to construct
-the configured families. `build_random_block()` remains available for primitive
-experiments and tests; benchmark generation uses the explicit family builders.
-`relabel_circuit()` names terminals A/B, internal nodes N1, N2, etc., and
-resistors R1, R2, etc. in construction order.
+unique node pairs. The policy never uses model scores or interaction budgets.
+A-B is always measured, every node occurs in at least two measurements, and
+at least one node pair remains unmeasured. A sample that cannot satisfy these
+rules within the budget is rejected rather than receiving more measurements.
 
-Every accepted sample must satisfy:
+The selector chooses a probe node, includes its measurements to every other
+node, and includes every physical edge's endpoint pair. It then adds decoy
+pairs, first resolving insufficient node coverage and then strengthening the
+weakest measurement-Jacobian direction, scaled by allowed-value spacing.
+Ties are randomized reproducibly.
 
-- The configured resistor/node counts, cycle structure and path lengths.
-- Connectivity, exact resistor usage, no self-loops or direct parallel edges,
-  and no dangling internal nodes.
-- Resistor values from `[10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100]` Ω.
-- A published measurement subset that includes A–B, covers every node and has
-  full local Jacobian rank for the resistor values given the topology.
-- Sensitivity of the published measurements to every resistor: both an
-  approximate open and an approximate short must change at least one
-  measurement by more than 2%.
-- No score-distinct circuit with identical three-decimal measurements found
-  by the bounded ambiguity audit described below.
+**The candidate-connection rule is explicitly stated in the agent input:**
+every resistor joins a published measurement pair, but some published pairs
+have no direct resistor. This reduces the topology search space without
+publishing the actual adjacency or resistor values. Resistances between a
+measured pair are effective network resistances, not necessarily the value
+of its direct resistor. A-B is always a candidate pair even when there is no
+A-B resistor. The selected pairs therefore contain both real edges and decoys.
 
-Measurements are calculated by `get_resistance_between_nodes()` in `utils.py`,
-the same nodal solver used by simulation and measurement-validation tools, and
-rounded to three decimals. Only a subset of node pairs is published. The
-selector covers nodes, adds pairs until it reaches full local rank, then adds
-two redundant pairs. The saved bank has 14/18 measurements per task; generation
-checks rank rather than imposing an exact measurement-count limit.
+Do not omit this rule from the prompt: the independent recovery check relies
+on this publicly disclosed constraint.
 
-The ambiguity audit searches single-resistor reconnection/value changes,
-pairwise value swaps and pairwise node-label swaps, keeping the visible node set
-and resistor count. Candidates use allowed values and are not restricted to
-the level families. Search coverage is stored in
-`sampling_metadata.ambiguity_audit`, with `exhaustive: false`. Full local rank
-and the absence of a witness in this neighborhood do not prove global uniqueness.
-The metadata is not included in the agent's initial input.
+## Recovery and ambiguity checks
+
+Every accepted circuit must satisfy:
+
+- Connectivity, the level's structural family, exact resistor usage, no
+  self-loops or direct parallel resistors, and no dangling internal nodes.
+- Values from `[10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100]` ohms.
+- The fixed measurement budget, node coverage and full local Jacobian rank.
+- A first-order worst-case bound on log-value error from three-decimal
+  rounding below one quarter of each resistor's nearest allowed log-value
+  spacing. This is stronger than checking rank alone, but remains local.
+- Sensitivity of every resistor to both approximate opening and shorting:
+  at least one published measurement must change by more than 2%.
+- Independent reconstruction using **only** published measurements, their
+  candidate pairs and the public resistor count. No hidden topology or value
+  seed is given to the recovery solver.
+- No score-distinct, rounded-measurement-equivalent witness in the bounded
+  ambiguity searches described below.
+
+`reconstruct_from_measurements()` minimizes
+`sum(conductance * measured_resistance) - log(det(grounded_laplacian))`
+over nonnegative conductances on the published candidate pairs. It uses two
+fixed starting points, removes conductances below half the minimum allowed
+physical conductance, snaps remaining resistances to the allowed pool, and
+requires agreement with every published measurement at three decimals.
+Generation additionally requires that this reconstructed graph and its
+values equal the hidden answer, ignoring resistor IDs.
+
+For unrounded consistent observations, this objective is strictly convex in
+the grounded Laplacian under the disclosed candidate-pair constraint. With
+rounded observations, successful recovery and local stability are acceptance
+checks, **not a certificate of global discrete uniqueness**.
+
+The ambiguity audit checks every single-resistor reconnection/value change
+within the published candidate set, pairwise value swaps and node-label swaps.
+It also checks up to 24 edge moves and 24 degree-preserving two-edge swaps,
+refitting all resistor values from two starts before discrete snapping.
+Candidates retain the node set and resistor count and obey the published-pair
+constraint, but need not belong to the level's graph family. Coverage,
+truncation, recovery results and stability bounds are stored in
+`sampling_metadata`; this metadata is not included in the agent's initial
+input. Audits explicitly record `exhaustive: false`.
+
+Measurements are generated by the same nodal solver used by the simulation
+and validation tools and rounded to three decimals. An analytic, batched
+Jacobian is used for offline selection and refitting.
 
 ### Regenerating tasks
 
-Each level has its own generator script:
-
 ```bash
 cd tasks/resistor_network
-source .venv/bin/activate
-python environments/level_1/generate_tasks.py --count 10 --seed 202610121
-python environments/level_2/generate_tasks.py --count 10 --seed 202610162
+uv run python environments/level_1/generate_tasks.py --seed 202610101
+uv run python environments/level_2/generate_tasks.py --seed 202610102
 ```
 
-`--count` defaults to 10 and must be exactly 10. `sample_circuit()` likewise
-requires exactly 12 resistors for L1 or 16 for L2. Smaller circuits can be built
-with the primitive helpers for experiments and tests.
-
-The commands above reproduce the saved tasks except for UUIDs. The scripts'
-default seeds remain 1 and 2, so omitting `--seed` produces different batches.
-The chosen seed is recorded in `sampling_metadata.batch_seed`. Re-running a
-generator replaces that level's entire `tasks_json/` directory after generation
-succeeds.
+These are also the default seeds. Each generator requires exactly ten tasks
+and replaces its bank only after successful generation. Seeds reproduce task
+content except UUIDs. `sample_circuit()` accepts any integer size in the
+configured level range; primitive helpers remain available for experiments.
 
 ## Visualizing Circuits
 
@@ -177,6 +197,7 @@ From this directory with the environment installed:
 uv run pytest tests
 ```
 
-The suite covers primitive circuits separately from benchmark families, fixed
-sizes and batch counts, seed reproducibility, measurement quality, saved task
-consistency, level structure, scoring and tools.
+The suite covers primitive circuits separately from benchmark families, size
+ranges and batch counts, graph diversity, seed reproducibility, sparse
+measurement quality, independent reconstruction, saved task consistency,
+level structure, scoring and tools.

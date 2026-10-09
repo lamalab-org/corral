@@ -1,4 +1,3 @@
-import itertools
 import json
 import math
 import random
@@ -10,7 +9,6 @@ from resistor_network.sampler import (
     SCORING_TOLERANCE,
     Block,
     _IdFactory,
-    _jacobian_rank,
     _measurement_jacobian,
     build_random_block,
     compose_parallel,
@@ -20,7 +18,11 @@ from resistor_network.sampler import (
     generate_level_tasks,
     leaf_bridge,
     leaf_resistor,
+    measurement_budget,
+    randomize_labels,
+    reconstruct_from_measurements,
     relabel_circuit,
+    rounding_stability,
     sample_circuit,
     select_published_pairs,
 )
@@ -125,67 +127,112 @@ class TestGroundTruthSimulation:
 
 
 class TestMeasurementSelection:
-    def test_selection_reaches_full_local_rank_with_small_redundancy(self):
+    def test_fixed_budget_coverage_and_stability(self, benchmark_batch):
+        _level, tasks = benchmark_batch
+        for task in tasks:
+            topology = task["scoring_params"]["expected_topology"]
+            pairs = [
+                (m["node_a"], m["node_b"])
+                for m in task["initial_input"]["measurements"]
+            ]
+            nodes = {
+                n for connection in topology["connections"] for n in connection[:2]
+            }
+            assert len(pairs) == measurement_budget(task["num_resistors"])
+            assert len(pairs) < math.comb(len(nodes), 2)
+            assert ("A", "B") in pairs
+            assert len(pairs) == len(set(pairs))
+            assert all(sum(node in pair for pair in pairs) >= 2 for node in nodes)
+            assert {tuple(sorted(c[:2])) for c in topology["connections"]} <= set(pairs)
+            assert rounding_stability(topology, pairs)["stable"]
+
+    def test_rejects_topology_that_cannot_fit_the_fixed_budget(self):
         ids = _IdFactory()
-        block = compose_series(
-            [leaf_resistor(random.Random(seed), ids) for seed in range(1, 5)]
-        )
-        topology = relabel_circuit(block)
-        pairs = select_published_pairs(random.Random(0), topology, redundancy=1)
-        all_pairs = list(
-            itertools.combinations(
-                sorted({n for c in topology["connections"] for n in c[:2]}), 2
+        topology = relabel_circuit(
+            compose_series(
+                [leaf_resistor(random.Random(seed), ids) for seed in range(4)]
             )
         )
-        jacobian = _measurement_jacobian(topology, all_pairs)
-        indexes = [all_pairs.index(pair) for pair in pairs]
-        assert _jacobian_rank(jacobian[indexes, :]) == len(topology["resistors"])
-        assert len(pairs) <= len(topology["resistors"]) + 1 + 3
+        assert select_published_pairs(random.Random(0), topology) is None
+
+    def test_analytic_jacobian_matches_independent_finite_differences(self):
+        topology = relabel_circuit(leaf_bridge(random.Random(5), _IdFactory()))
+        pairs = [("A", "B"), ("A", "N1"), ("N1", "N2")]
+        analytical = _measurement_jacobian(topology, pairs)
+        for column, rid in enumerate(topology["resistors"]):
+            low, high = (
+                json.loads(json.dumps(topology)),
+                json.loads(json.dumps(topology)),
+            )
+            low["resistors"][rid] *= math.exp(-1e-5)
+            high["resistors"][rid] *= math.exp(1e-5)
+            for row, pair in enumerate(pairs):
+                derivative = (
+                    get_resistance_between_nodes(json.dumps(high), list(pair))
+                    - get_resistance_between_nodes(json.dumps(low), list(pair))
+                ) / 2e-5
+                assert analytical[row, column] == pytest.approx(
+                    derivative, rel=1e-6, abs=1e-7
+                )
 
 
 class TestBenchmarkStructure:
     @pytest.mark.parametrize(
-        ("level", "num_resistors", "num_nodes"), [(1, 12, 11), (2, 16, 14)]
+        ("level", "num_resistors"), [(1, 8), (1, 12), (2, 10), (2, 14)]
     )
-    def test_sampled_circuits_have_fixed_size(self, level, num_resistors, num_nodes):
-        rng = random.Random(123)
-        topology, _measurements = sample_circuit(rng, LEVELS[level], num_resistors)
-        nodes = {n for conn in topology["connections"] for n in conn[:2]}
+    def test_sampled_circuits_have_requested_size(self, level, num_resistors):
+        topology, _measurements = sample_circuit(
+            random.Random(123), LEVELS[level], num_resistors
+        )
         assert (
             len(topology["resistors"]) == len(topology["connections"]) == num_resistors
         )
-        assert len(nodes) == num_nodes
 
     @pytest.mark.parametrize("level", [1, 2])
-    @pytest.mark.parametrize("num_resistors", [2, 5, 8, 10, 15, 18, True, 12.0])
+    @pytest.mark.parametrize("num_resistors", [2, 5, 15, 18, True, 12.0])
     def test_sample_circuit_rejects_unsupported_sizes(self, level, num_resistors):
-        with pytest.raises(ValueError, match="Pilot circuits must contain exactly"):
+        with pytest.raises(ValueError, match="circuits require"):
             sample_circuit(random.Random(0), LEVELS[level], num_resistors)
 
-    @pytest.mark.parametrize(("level", "num_resistors"), [(1, 16), (2, 12)])
+    @pytest.mark.parametrize(("level", "num_resistors"), [(1, 14), (2, 8)])
     def test_sample_circuit_rejects_other_levels_size(self, level, num_resistors):
-        with pytest.raises(ValueError, match="Pilot circuits must contain exactly"):
+        with pytest.raises(ValueError, match="circuits require"):
             sample_circuit(random.Random(0), LEVELS[level], num_resistors)
 
-    def test_published_measurements_cover_nodes_and_identify_values_locally(
-        self, benchmark_batch
-    ):
+    def test_reference_solver_recovers_from_public_input(self, benchmark_batch):
         _level, tasks = benchmark_batch
+        from resistor_network.score import check_conductance_topology
+
         for task in tasks:
-            topology = task["scoring_params"]["expected_topology"]
-            measurements = task["initial_input"]["measurements"]
-            pairs = [(m["node_a"], m["node_b"]) for m in measurements]
-            nodes = {
-                n for connection in topology["connections"] for n in connection[:2]
-            }
-            assert {n for pair in pairs for n in pair} == nodes
-            assert ("A", "B") in pairs
-            assert len(pairs) == len(set(pairs))
-            assert task["num_resistors"] + 2 <= len(pairs) < math.comb(len(nodes), 2)
-            assert (
-                _jacobian_rank(_measurement_jacobian(topology, pairs))
-                == task["num_resistors"]
+            recovered = reconstruct_from_measurements(
+                task["initial_input"]["measurements"], task["num_resistors"]
             )
+            assert recovered["recovered"]
+            assert (
+                check_conductance_topology(**task["scoring_params"])(
+                    json.dumps(recovered["topology"])
+                )
+                == 1
+            )
+            assert "some measured pairs have no direct resistor" in " ".join(
+                task["initial_input"]["notes"]
+            )
+
+    def test_relabeling_preserves_physics_and_hides_construction_order(self):
+        import networkx as nx
+
+        topology = relabel_circuit(leaf_bridge(random.Random(0), _IdFactory()))
+        shuffled = randomize_labels(topology, random.Random(7))
+        first, second = nx.Graph(), nx.Graph()
+        first.add_edges_from(c[:2] for c in topology["connections"])
+        second.add_edges_from(c[:2] for c in shuffled["connections"])
+        assert nx.is_isomorphic(first, second)
+        assert shuffled != topology
+        assert get_resistance_between_nodes(
+            json.dumps(shuffled), ["A", "B"]
+        ) == pytest.approx(
+            get_resistance_between_nodes(json.dumps(topology), ["A", "B"])
+        )
 
 
 class TestGenerateLevelTasks:
@@ -203,17 +250,19 @@ class TestGenerateLevelTasks:
         ):
             generate_level_tasks(level=level, count=count, seed=1)
 
-    def test_resistor_count_is_fixed_within_each_level(self, benchmark_batch):
+    def test_sizes_span_configured_range_and_graphs_are_distinct(self, benchmark_batch):
+        import networkx as nx
+
         level, tasks = benchmark_batch
-        expected_count = {1: 12, 2: 16}[level]
+        sizes = [task["num_resistors"] for task in tasks]
+        assert min(sizes) == LEVELS[level].resistor_range[0]
+        assert max(sizes) == LEVELS[level].resistor_range[1]
+        graphs = []
         for task in tasks:
-            assert task["num_resistors"] == expected_count
             topology = task["scoring_params"]["expected_topology"]
-            assert (
-                len(topology["resistors"])
-                == len(topology["connections"])
-                == expected_count
-            )
+            graph = nx.Graph([c[:2] for c in topology["connections"]])
+            assert not any(nx.is_isomorphic(graph, previous) for previous in graphs)
+            graphs.append(graph)
 
     def test_initial_input_states_resistor_count(self, benchmark_batch):
         _level, tasks = benchmark_batch
@@ -255,6 +304,9 @@ class TestGenerateLevelTasks:
             assert not audit["exhaustive"]
             assert not audit["ambiguous"]
             assert audit["witness"] is None
+            assert audit["reference_recovery"]["recovered"]
+            assert audit["rounding_stability"]["stable"]
+            assert "joint_refit" in audit
 
 
 class TestLoadBearingResistors:
@@ -289,7 +341,7 @@ class TestLoadBearingResistors:
 
         assert find_non_load_bearing_resistors(topology, measurements) == []
 
-    @pytest.mark.parametrize(("level", "num_resistors"), [(1, 12), (2, 16)])
+    @pytest.mark.parametrize(("level", "num_resistors"), [(1, 12), (2, 14)])
     def test_sample_circuit_never_returns_a_non_load_bearing_resistor(
         self, level, num_resistors
     ):

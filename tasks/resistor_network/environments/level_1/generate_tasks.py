@@ -4,9 +4,9 @@ Level 1 circuits are sampled by `resistor_network.sampler`. Ground truth measure
 simulating each sampled circuit, not from hand-derived formulas.
 
 Usage (from tasks/resistor_network, with the venv set up per README.md):
-    uv run python environments/level_1/generate_tasks.py [--count 10] [--seed 1]
+    uv run python environments/level_1/generate_tasks.py [--count 10] [--seed 202610101]
 
-The batch always contains ten 12-resistor tasks. See README.md for the seed
+The batch contains ten structurally distinct tasks with 8-12 resistors. See README.md for the seed
 that reproduces the saved benchmark bank.
 """
 
@@ -20,7 +20,7 @@ from resistor_network.sampler import generate_level_tasks
 
 LEVEL = 1
 DEFAULT_COUNT = 10
-DEFAULT_SEED = 1
+DEFAULT_SEED = 202610101
 
 
 def main() -> None:

@@ -8,8 +8,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Literal
 
+import networkx as nx
 import numpy as np
 from resistor_network.utils import get_resistance_between_nodes
+from scipy.optimize import least_squares, minimize
 
 RESISTOR_POOL: list[float] = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100]
 
@@ -18,6 +20,9 @@ TASKS_PER_LEVEL: int = 10
 
 SENSITIVITY_OPEN_MULTIPLIER: float = 1e4
 SENSITIVITY_SHORT_MULTIPLIER: float = 1e-4
+MEASUREMENT_ROUNDING_ERROR = 0.0005
+MAX_ROUNDING_GAP_FRACTION = 0.25
+MAX_REFIT_CANDIDATES = 48
 
 TOOLS: list[str] = [
     "calculate_series_resistance",
@@ -314,6 +319,139 @@ def relabel_circuit(block: Block) -> dict:
     return {"resistors": resistors, "connections": connections}
 
 
+def randomize_labels(topology: dict, rng: random.Random) -> dict:
+    """Hide construction order while keeping the two terminals fixed."""
+    internal = sorted(
+        {n for a, b, _ in topology["connections"] for n in (a, b)} - {"A", "B"}
+    )
+    shuffled = internal.copy()
+    rng.shuffle(shuffled)
+    names = dict(zip(internal, shuffled, strict=True))
+    ids = list(topology["resistors"])
+    shuffled_ids = ids.copy()
+    rng.shuffle(shuffled_ids)
+    resistor_names = dict(zip(ids, shuffled_ids, strict=True))
+    connections = [
+        [names.get(a, a), names.get(b, b), resistor_names[rid]]
+        for a, b, rid in topology["connections"]
+    ]
+    rng.shuffle(connections)
+    return {
+        "resistors": {
+            rid: topology["resistors"][old]
+            for old, rid in sorted(resistor_names.items(), key=lambda item: item[1])
+        },
+        "connections": connections,
+    }
+
+
+def _build_varied_loops(rng: random.Random, ids: _IdFactory, count: int) -> Block:
+    """A chain or branching cactus of independently separable loops."""
+    modules = rng.randint(2, min(4, count // 3))
+    tails = rng.randint(0, min(2, count - 3 * modules))
+    sizes = [3] * modules
+    for _ in range(count - tails - sum(sizes)):
+        sizes[rng.randrange(modules)] += 1
+    loops = []
+    for size in sizes:
+        first = rng.randint(1, size - 1)
+        loops.append(
+            compose_parallel(
+                [
+                    compose_series([leaf_resistor(rng, ids) for _ in range(length)])
+                    for length in (first, size - first)
+                ],
+                ids,
+            )
+        )
+    if rng.random() < 0.5:
+        core = compose_series(loops)
+    else:
+        hub = ids.node()
+        connections, resistors = [], {}
+        for loop in loops:
+            connections.extend(
+                (
+                    hub if a == loop.terminal_a else a,
+                    hub if b == loop.terminal_a else b,
+                    rid,
+                )
+                for a, b, rid in loop.connections
+            )
+            resistors.update(loop.resistors)
+        core = Block(resistors, connections, loops[0].terminal_b, loops[1].terminal_b)
+    before = rng.randint(0, tails)
+    return compose_series(
+        [
+            *[leaf_resistor(rng, ids) for _ in range(before)],
+            core,
+            *[leaf_resistor(rng, ids) for _ in range(tails - before)],
+        ]
+    )
+
+
+def _build_varied_bridge(rng: random.Random, ids: _IdFactory, count: int) -> Block:
+    """Subdivide varied irreducible cores, with no external terminal tails."""
+    cores = [nx.complete_graph(4), nx.wheel_graph(5), nx.wheel_graph(6)]
+    almost_complete = nx.complete_graph(5)
+    almost_complete.remove_edge(0, 1)
+    cores.append(almost_complete)
+    eligible = [g for g in cores if g.number_of_edges() <= count]
+    graph = rng.choice(eligible)
+    nodes = {n: ids.node() for n in graph.nodes}
+    a, b = rng.sample(list(graph.nodes), 2)
+    lengths = [1] * graph.number_of_edges()
+    for _ in range(count - sum(lengths)):
+        lengths[rng.randrange(len(lengths))] += 1
+    edges = []
+    for (x, y), length in zip(graph.edges, lengths, strict=True):
+        rid = ids.resistor()
+        edge = Block(
+            {rid: float(rng.choice(RESISTOR_POOL))},
+            [(nodes[x], nodes[y], rid)],
+            nodes[x],
+            nodes[y],
+        )
+        edges.append(subdivide_edges(edge, rng, ids, length))
+    return Block(
+        {rid: value for edge in edges for rid, value in edge.resistors.items()},
+        [connection for edge in edges for connection in edge.connections],
+        nodes[a],
+        nodes[b],
+    )
+
+
+def _network_response(
+    topology: dict, pairs: list[tuple[str, str]]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Batched nodal solution and analytic derivative with respect to log R."""
+    nodes = sorted({n for a, b, _ in topology["connections"] for n in (a, b)})
+    indexes = {n: i for i, n in enumerate(nodes[:-1])}
+    incidence = np.zeros((len(nodes) - 1, len(topology["connections"])))
+    values = []
+    for column, (a, b, rid) in enumerate(topology["connections"]):
+        if a in indexes:
+            incidence[indexes[a], column] = 1
+        if b in indexes:
+            incidence[indexes[b], column] = -1
+        values.append(topology["resistors"][rid])
+    values = np.asarray(values)
+    covariance = np.linalg.inv((incidence / values) @ incidence.T)
+    probes = np.zeros((len(pairs), len(nodes) - 1))
+    for row, (a, b) in enumerate(pairs):
+        if a in indexes:
+            probes[row, indexes[a]] = 1
+        if b in indexes:
+            probes[row, indexes[b]] = -1
+    voltages = probes @ covariance
+    resistance = np.sum(voltages * probes, axis=1)
+    derivatives = (voltages @ incidence) ** 2 / values
+    # Expose columns in resistor-dictionary order, matching the public helper.
+    connection_ids = [rid for _, _, rid in topology["connections"]]
+    columns = [connection_ids.index(rid) for rid in topology["resistors"]]
+    return resistance, derivatives[:, columns]
+
+
 def measure_pairs(topology: dict, pairs: list[tuple[str, str]]) -> list[dict]:
     """Measure selected node pairs."""
     topology_json = json.dumps(topology)
@@ -339,28 +477,9 @@ def compute_all_measurements(topology: dict) -> list[dict]:
     return measure_pairs(topology, all_node_pairs(topology))
 
 
-def _measurement_jacobian(
-    topology: dict, pairs: list[tuple[str, str]], step: float = 1e-5
-) -> np.ndarray:
-    """Estimate measurement sensitivity to resistor values."""
-    topology_json = json.dumps(topology)
-    resistor_ids = list(topology["resistors"])
-    jacobian = np.zeros((len(pairs), len(resistor_ids)), dtype=float)
-
-    for column, resistor_id in enumerate(resistor_ids):
-        value = topology["resistors"][resistor_id]
-        low = json.loads(topology_json)
-        high = json.loads(topology_json)
-        low["resistors"][resistor_id] = value * math.exp(-step)
-        high["resistors"][resistor_id] = value * math.exp(step)
-        low_json = json.dumps(low)
-        high_json = json.dumps(high)
-        for row, pair in enumerate(pairs):
-            low_measurement = get_resistance_between_nodes(low_json, list(pair))
-            high_measurement = get_resistance_between_nodes(high_json, list(pair))
-            jacobian[row, column] = (high_measurement - low_measurement) / (2 * step)
-
-    return jacobian
+def _measurement_jacobian(topology: dict, pairs: list[tuple[str, str]]) -> np.ndarray:
+    """Analytic sensitivity to log resistor values."""
+    return _network_response(topology, pairs)[1]
 
 
 def _jacobian_rank(jacobian: np.ndarray) -> int:
@@ -412,89 +531,206 @@ def _parallel_values_are_unique(
     return True
 
 
+def measurement_budget(num_resistors: int) -> int:
+    """Static one-third redundancy, independent of model or agent performance."""
+    return num_resistors + (num_resistors + 2) // 3
+
+
+def rounding_stability(topology: dict, pairs: list[tuple[str, str]]) -> dict:
+    """Bound first-order log-value error from any three-decimal rounding errors."""
+    jacobian = _measurement_jacobian(topology, pairs)
+    rank = _jacobian_rank(jacobian)
+    if rank != len(topology["resistors"]):
+        return {"stable": False, "rank": rank, "max_gap_fraction": None}
+    uncertainty = np.abs(np.linalg.pinv(jacobian)) @ np.full(
+        len(pairs), MEASUREMENT_ROUNDING_ERROR
+    )
+    gaps = np.asarray(
+        [
+            min(
+                abs(math.log(other / value))
+                for other in RESISTOR_POOL
+                if other != value
+            )
+            for value in topology["resistors"].values()
+        ]
+    )
+    fraction = float(np.max(uncertainty / gaps))
+    return {
+        "stable": fraction <= MAX_ROUNDING_GAP_FRACTION,
+        "rank": rank,
+        "max_gap_fraction": fraction,
+        "limit": MAX_ROUNDING_GAP_FRACTION,
+        "scope": "First-order local bound, not a global uniqueness proof.",
+    }
+
+
 def select_published_pairs(
     rng: random.Random,
     topology: dict,
-    redundancy: int = 2,
+    redundancy: int | None = None,
 ) -> list[tuple[str, str]] | None:
-    """Select node pairs with full local rank and small redundancy."""
+    """Publish a probe star, support-containing candidate pairs, and informative decoys.
+
+    Benchmark generation always uses m+ceil(m/3). The optional redundancy
+    override is for primitive experiments only; it never changes served banks.
+    Every physical edge is in the public candidate-pair set. This constraint
+    is explicitly disclosed to the agent and used by the independent solver.
+    """
     pairs = all_node_pairs(topology)
-    if not pairs:
-        return []
-
-    jacobian = _measurement_jacobian(topology, pairs)
-    num_unknowns = _effective_unknown_count(topology)
-    shuffled = list(pairs)
-    rng.shuffle(shuffled)
-    chosen: set[tuple[str, str]] = {("A", "B")} if ("A", "B") in pairs else set()
-
-    # Cover every node before selecting independent measurements.
-    covered: set[str] = {n for pair in chosen for n in pair}
-    for pair in shuffled:
-        if pair[0] not in covered or pair[1] not in covered:
-            chosen.add(pair)
-            covered.update(pair)
-
-    def current_rank(selected: set[tuple[str, str]]) -> int:
-        indexes = [pairs.index(pair) for pair in selected]
-        return _jacobian_rank(jacobian[indexes, :])
-
-    # Add pairs greedily by rank increase.
-    while current_rank(chosen) < num_unknowns:
-        candidates = [pair for pair in shuffled if pair not in chosen]
-        if not candidates:
-            break
-        ranked = [(current_rank(chosen | {pair}), pair) for pair in candidates]
-        best_rank = max(rank for rank, _pair in ranked)
-        best_pairs = [pair for rank, pair in ranked if rank == best_rank]
-        chosen.add(rng.choice(best_pairs))
-
-    # Add a small rounding margin.
-    remaining = [pair for pair in shuffled if pair not in chosen]
-    rng.shuffle(remaining)
-    chosen.update(remaining[: max(0, redundancy)])
-    if current_rank(chosen) < num_unknowns:
+    count = len(topology["resistors"])
+    budget = measurement_budget(count) if redundancy is None else count + redundancy
+    if budget >= len(pairs):
         return None
-    return sorted(chosen)
+    graph = nx.Graph()
+    graph.add_edges_from((a, b) for a, b, _ in topology["connections"])
+    roots = list(graph.nodes)
+    rng.shuffle(roots)
+    roots.sort(key=lambda node: graph.degree[node], reverse=True)
+    required = {tuple(sorted((a, b))) for a, b, _ in topology["connections"]} | {
+        ("A", "B")
+    }
+    chosen = None
+    for root in roots:
+        proposed = required | {
+            tuple(sorted((root, node))) for node in graph if node != root
+        }
+        if len(proposed) <= budget:
+            chosen = proposed
+            break
+    if chosen is None:
+        return None
+    jacobian = _measurement_jacobian(topology, pairs)
+    gaps = np.asarray(
+        [
+            min(
+                abs(math.log(other / value))
+                for other in RESISTOR_POOL
+                if other != value
+            )
+            for value in topology["resistors"].values()
+        ]
+    )
+    scaled = jacobian * gaps
+    order = pairs.copy()
+    rng.shuffle(order)
+    indexes = {pair: i for i, pair in enumerate(pairs)}
+    while len(chosen) < budget:
+        coverage = {node: sum(node in pair for pair in chosen) for node in graph}
+
+        def information(pair, coverage=coverage):
+            rows = [indexes[p] for p in sorted(chosen | {pair})]
+            singular = np.linalg.svd(scaled[rows], compute_uv=False)
+            weakest = float(singular[-1]) if len(singular) == count else 0.0
+            missing = sum(coverage[node] < 2 for node in pair)
+            return missing, weakest
+
+        chosen.add(max((pair for pair in order if pair not in chosen), key=information))
+    selected = sorted(chosen)
+    if any(sum(node in pair for pair in selected) < 2 for node in graph):
+        return None
+    if not rounding_stability(topology, selected)["stable"]:
+        return None
+    return selected
+
+
+def reconstruct_from_measurements(measurements: list[dict], num_resistors: int) -> dict:
+    """Recover a circuit using ONLY its public candidate-pair measurements.
+
+    Minimize sum(g_e * measured_R_e) - log(det(grounded_L(g))) over nonnegative
+    conductances on published pairs. Its strict convexity in the grounded
+    Laplacian gives a unique optimum for unrounded consistent observations
+    under the disclosed support constraint. Rounded-input acceptance additionally
+    requires discrete snapping and exact agreement at the published precision.
+    No hidden wiring or resistor values are supplied to this solver.
+    """
+    pairs = [(m["node_a"], m["node_b"]) for m in measurements]
+    nodes = sorted({node for pair in pairs for node in pair})
+    if len(nodes) < 2 or len(set(pairs)) != len(pairs):
+        return {"recovered": False, "reason": "Invalid measurement pairs"}
+    indexes = {node: i for i, node in enumerate(nodes[:-1])}
+    incidence = np.zeros((len(nodes) - 1, len(pairs)))
+    for column, (a, b) in enumerate(pairs):
+        if a in indexes:
+            incidence[indexes[a], column] = 1
+        if b in indexes:
+            incidence[indexes[b], column] = -1
+    targets = np.asarray([m["resistance"] for m in measurements])
+
+    def objective(conductances):
+        laplacian = (incidence * conductances) @ incidence.T
+        sign, determinant = np.linalg.slogdet(laplacian)
+        if sign <= 0:
+            return 1e30, np.zeros_like(conductances)
+        try:
+            covariance = np.linalg.inv(laplacian)
+        except np.linalg.LinAlgError:
+            return 1e30, np.zeros_like(conductances)
+        predicted = np.sum(incidence * (covariance @ incidence), axis=0)
+        return float(targets @ conductances - determinant), targets - predicted
+
+    attempts = []
+    for start in (0.02, 0.05):
+        result = minimize(
+            objective,
+            np.full(len(pairs), start),
+            jac=True,
+            method="L-BFGS-B",
+            bounds=[(0.0, 0.2)] * len(pairs),
+            options={"maxiter": 2000, "ftol": 1e-14, "gtol": 1e-7, "maxls": 50},
+        )
+        selected = [
+            (pair, value)
+            for pair, value in zip(pairs, result.x, strict=True)
+            if value >= 0.5 / max(RESISTOR_POOL)
+        ]
+        attempts.append(
+            {
+                "success": bool(result.success),
+                "iterations": int(result.nit),
+                "selected_resistors": len(selected),
+            }
+        )
+        if len(selected) != num_resistors:
+            continue
+        topology = {"resistors": {}, "connections": []}
+        for index, ((a, b), conductance) in enumerate(selected, 1):
+            rid = f"R{index}"
+            topology["resistors"][rid] = float(
+                min(RESISTOR_POOL, key=lambda value: abs(value - 1 / conductance))
+            )
+            topology["connections"].append([a, b, rid])
+        try:
+            matches = measure_pairs(topology, pairs) == measurements
+        except ValueError:
+            matches = False
+        if matches:
+            return {
+                "recovered": True,
+                "topology": topology,
+                "attempts": attempts,
+                "method": "Convex candidate-pair conductance recovery, then discrete snapping",
+            }
+    return {
+        "recovered": False,
+        "attempts": attempts,
+        "method": "Convex candidate-pair conductance recovery, then discrete snapping",
+    }
 
 
 @dataclass(frozen=True)
 class LevelConfig:
-    """Structural rules for a fixed-size pilot family."""
+    """Structural families with overlapping sizes and a static measurement policy."""
 
     level: int
     topology_family: Literal["separable_loops", "coupled_bridge"]
     resistor_range: tuple[int, int]
-    num_nodes: int
-    cycle_rank: int
-    loop_modules: int
-    max_tail_edges: int
-    measurement_redundancy: int = 2
-    loop_path_lengths: tuple[int, ...] = ()
-    bridge_path_lengths: tuple[int, ...] = ()
+    max_tail_edges: int = 2
 
 
 LEVELS: dict[int, LevelConfig] = {
-    1: LevelConfig(
-        level=1,
-        topology_family="separable_loops",
-        resistor_range=(12, 12),
-        num_nodes=11,
-        cycle_rank=2,
-        loop_modules=2,
-        max_tail_edges=2,
-        loop_path_lengths=(2, 3),
-    ),
-    2: LevelConfig(
-        level=2,
-        topology_family="coupled_bridge",
-        resistor_range=(16, 16),
-        num_nodes=14,
-        cycle_rank=3,
-        loop_modules=0,
-        max_tail_edges=0,
-        bridge_path_lengths=(3, 3, 3, 3, 2, 2),
-    ),
+    1: LevelConfig(1, "separable_loops", (8, 12)),
+    2: LevelConfig(2, "coupled_bridge", (10, 14), max_tail_edges=0),
 }
 
 
@@ -677,8 +913,6 @@ def _validate_sampled_topology(
         return False
     if not _parallel_values_are_unique(topology):
         return False
-    if len(nodes) != config.num_nodes:
-        return False
     if any(degrees[node] < 2 for node in nodes - {"A", "B"}):
         return False
 
@@ -694,64 +928,25 @@ def _validate_sampled_topology(
         return False
 
     quality = _sampled_topology_quality(topology)
-    if quality.cycle_rank != config.cycle_rank or quality.parallel_groups:
+    if quality.parallel_groups:
         return False
     if config.topology_family == "separable_loops":
-        if not (
-            len(config.loop_path_lengths) == 2
+        return (
+            2 <= quality.cycle_rank <= 4
             and all(rank <= 1 for rank in quality.component_cycle_ranks)
-            and quality.loop_sizes
-            == (sum(config.loop_path_lengths),) * config.loop_modules
-            and set(quality.reduced_edges) == {("A", "B")}
-            and degrees["A"] == degrees["B"] == 1
             and sum(rank == 0 for rank in quality.component_cycle_ranks)
             <= config.max_tail_edges
-        ):
-            return False
-        for component in _biconnected_components(adjacency):
-            if len(component) == 1:
-                continue
-            loop_nodes = {n for edge in component for n in edge}
-            attachments = sorted(n for n in loop_nodes if adjacency[n] - loop_nodes)
-            if len(attachments) != 2:
-                return False
-            start, end = attachments
-            loop_neighbors = {n: adjacency[n] & loop_nodes for n in loop_nodes}
-            lengths = []
-            for neighbor in sorted(loop_neighbors[start]):
-                previous, current, length = start, neighbor, 1
-                while current != end:
-                    following = next(iter(loop_neighbors[current] - {previous}))
-                    previous, current = current, following
-                    length += 1
-                lengths.append(length)
-            if sorted(lengths) != sorted(config.loop_path_lengths):
-                return False
-        return True
+        )
     if config.topology_family == "coupled_bridge":
-        if len(config.bridge_path_lengths) not in {5, 6}:
-            return False
-        reduced_nodes = {n for edge in quality.reduced_edges for n in edge}
-        junctions = reduced_nodes - {"A", "B"}
-        if len(junctions) != 2:
-            return False
-        x, y = sorted(junctions)
-        wheatstone_edges = {
-            tuple(sorted(pair))
-            for pair in [("A", x), ("A", y), ("B", x), ("B", y), (x, y)]
-        }
-        if len(config.bridge_path_lengths) == 6:
-            wheatstone_edges.add(("A", "B"))
-            if quality.reduced_edges.get(("A", "B")) != config.bridge_path_lengths[5]:
-                return False
+        graph = nx.Graph()
+        graph.add_edges_from(adjacency_edge for adjacency_edge in quality.reduced_edges)
         return (
-            quality.coupled_core_count == 1
-            and not quality.loop_sizes
-            and quality.tail_edges <= config.max_tail_edges
-            and set(quality.reduced_edges) == wheatstone_edges
-            and quality.reduced_edges[(x, y)] == config.bridge_path_lengths[4]
-            and sorted(quality.reduced_edges.values())
-            == sorted(config.bridge_path_lengths)
+            quality.cycle_rank >= 2
+            and quality.coupled_core_count == 1
+            and nx.is_biconnected(nx.Graph([(a, b) for a, b, _ in connections]))
+            and quality.tail_edges == 0
+            and len(graph) >= 4
+            and set(quality.reduced_edges) != {("A", "B")}
         )
     return False
 
@@ -802,14 +997,108 @@ def find_non_load_bearing_resistors(
     ]
 
 
+def _conductances(topology: dict) -> dict[tuple[str, str], float]:
+    result: dict[tuple[str, str], float] = {}
+    for a, b, rid in topology["connections"]:
+        pair = tuple(sorted((a, b)))
+        result[pair] = result.get(pair, 0.0) + 1 / topology["resistors"][rid]
+    return result
+
+
+def _refit_rewired_candidates(topology: dict, measurements: list[dict]) -> dict:
+    """Audit a bounded, reproducible mix of edge moves and degree-preserving swaps."""
+    pairs = [(m["node_a"], m["node_b"]) for m in measurements]
+    allowed = set(pairs)
+    connections = topology["connections"]
+    present = {tuple(sorted((a, b))) for a, b, _ in connections}
+    moves, swaps = [], []
+    for index, (_a, _b, rid) in enumerate(connections):
+        for a, b in sorted(allowed - present):
+            candidate = [list(edge) for edge in connections]
+            candidate[index] = [a, b, rid]
+            moves.append(candidate)
+    for first, second in itertools.combinations(range(len(connections)), 2):
+        a, b, rid = connections[first]
+        c, d, other_rid = connections[second]
+        if len({a, b, c, d}) != 4:
+            continue
+        for new_edges in (((a, c), (b, d)), ((a, d), (b, c))):
+            normalized = {tuple(sorted(edge)) for edge in new_edges}
+            if not normalized <= allowed or normalized & present:
+                continue
+            candidate = [list(edge) for edge in connections]
+            candidate[first] = [*new_edges[0], rid]
+            candidate[second] = [*new_edges[1], other_rid]
+            swaps.append(candidate)
+    audit_rng = random.Random(0)
+    audit_rng.shuffle(moves)
+    audit_rng.shuffle(swaps)
+    candidates = moves[: MAX_REFIT_CANDIDATES // 2] + swaps[: MAX_REFIT_CANDIDATES // 2]
+    report = {
+        "ambiguous": False,
+        "witness": None,
+        "candidates_available": len(moves) + len(swaps),
+        "candidates_checked": 0,
+        "complete": len(candidates) == len(moves) + len(swaps),
+        "scope": "At most 24 edge moves and 24 two-edge swaps, joint continuous refit from two starts, then allowed-value snapping. Not exhaustive.",
+    }
+    targets = np.asarray([m["resistance"] for m in measurements])
+    resistor_ids = list(topology["resistors"])
+    original_nodes = {n for pair in pairs for n in pair}
+    for edges in candidates:
+        graph = nx.Graph([(a, b) for a, b, _ in edges])
+        if set(graph) != original_nodes or not nx.is_connected(graph):
+            continue
+        report["candidates_checked"] += 1
+        candidate = {"resistors": dict(topology["resistors"]), "connections": edges}
+
+        def residual(log_values, candidate=candidate):
+            candidate["resistors"] = dict(
+                zip(resistor_ids, np.exp(log_values), strict=True)
+            )
+            return _network_response(candidate, pairs)[0] - targets
+
+        def jacobian(log_values, candidate=candidate):
+            candidate["resistors"] = dict(
+                zip(resistor_ids, np.exp(log_values), strict=True)
+            )
+            return _measurement_jacobian(candidate, pairs)
+
+        for start in (list(topology["resistors"].values()), [47.0] * len(resistor_ids)):
+            fitted = least_squares(
+                residual,
+                np.log(start),
+                jac=jacobian,
+                bounds=(math.log(min(RESISTOR_POOL)), math.log(max(RESISTOR_POOL))),
+                max_nfev=150,
+                ftol=1e-10,
+                xtol=1e-10,
+                gtol=1e-10,
+            )
+            candidate["resistors"] = {
+                rid: float(
+                    min(
+                        RESISTOR_POOL,
+                        key=lambda value: abs(value - math.exp(log_value)),
+                    )
+                )
+                for rid, log_value in zip(resistor_ids, fitted.x, strict=True)
+            }
+            if measure_pairs(candidate, pairs) == measurements:
+                report["ambiguous"] = True
+                report["witness"] = candidate
+                return report
+    return report
+
+
 def audit_measurement_ambiguity(topology: dict, measurements: list[dict]) -> dict:
     """Search a finite neighborhood for score-distinct, measurement-equivalent circuits.
 
     Candidates keep the visible node set and resistor count, and use only the
     allowed value pool. They are NOT restricted to either benchmark family.
     Search every single-resistor reconnection/value replacement, every pairwise
-    value swap, and every pairwise node-label swap. Other resistors retain their
-    values during a reconnection; joint rewiring/refitting is not exhaustive.
+    value swap, and every pairwise node-label swap, plus bounded joint refits.
+    All candidates respect the publicly disclosed measured-pair support.
 
     Equality means identical resistances after rounding to three decimals, not
     the scoring tolerance. The report records coverage and a concrete witness
@@ -829,9 +1118,9 @@ def audit_measurement_ambiguity(topology: dict, measurements: list[dict]) -> dic
         "neighborhood_complete": False,
         "precision_decimals": 3,
         "value_pool": list(RESISTOR_POOL),
-        "scope": "Same visible nodes and resistor count; no topology-family restriction. "
+        "scope": "Same visible nodes and resistor count; connections restricted to published pairs, no topology-family restriction. "
         "Single-resistor reconnection/value replacement with other values fixed, "
-        "pairwise value swaps, and pairwise node-label swaps only.",
+        "pairwise value swaps, pairwise node-label swaps, plus separately recorded bounded joint refits.",
         "candidates_checked": {
             "single_resistor_changes": 0,
             "value_swaps": 0,
@@ -842,14 +1131,7 @@ def audit_measurement_ambiguity(topology: dict, measurements: list[dict]) -> dic
         "witness": None,
     }
 
-    def conductances(candidate: dict) -> dict[tuple[str, str], float]:
-        merged: dict[tuple[str, str], float] = {}
-        for a, b, rid in candidate["connections"]:
-            pair = tuple(sorted((a, b)))
-            merged[pair] = merged.get(pair, 0.0) + 1 / candidate["resistors"][rid]
-        return merged
-
-    expected = conductances(topology)
+    expected = _conductances(topology)
 
     def candidates():
         for index, (a, b, rid) in enumerate(topology["connections"]):
@@ -857,7 +1139,7 @@ def audit_measurement_ambiguity(topology: dict, measurements: list[dict]) -> dic
                 "resistors": dict(topology["resistors"]),
                 "connections": [list(edge) for edge in topology["connections"]],
             }
-            for x, y in itertools.combinations(nodes, 2):
+            for x, y in pairs:
                 for value in RESISTOR_POOL:
                     if (x, y) == tuple(sorted((a, b))) and value == topology[
                         "resistors"
@@ -890,7 +1172,12 @@ def audit_measurement_ambiguity(topology: dict, measurements: list[dict]) -> dic
 
     for kind, candidate in candidates():
         report["candidates_checked"][kind] += 1
-        proposed = conductances(candidate)
+        proposed = _conductances(candidate)
+        if not set(proposed) <= set(pairs) or len(proposed) != len(
+            candidate["resistors"]
+        ):
+            report["invalid_candidates"] += 1
+            continue
         adjacency: dict[str, set[str]] = {}
         for a, b in proposed:
             adjacency.setdefault(a, set()).add(b)
@@ -910,16 +1197,19 @@ def audit_measurement_ambiguity(topology: dict, measurements: list[dict]) -> dic
         ):
             report["score_equivalent_candidates"] += 1
             continue
-        candidate_json = json.dumps(candidate)
+        predictions = _network_response(candidate, pairs)[0]
         if all(
-            round(get_resistance_between_nodes(candidate_json, list(pair)), 3)
-            == m["resistance"]
-            for pair, m in zip(pairs, measurements, strict=True)
+            round(float(value), 3) == m["resistance"]
+            for value, m in zip(predictions, measurements, strict=True)
         ):
             report["ambiguous"] = True
-            report["witness"] = json.loads(candidate_json)
+            report["witness"] = json.loads(json.dumps(candidate))
             return report
     report["neighborhood_complete"] = True
+    report["joint_refit"] = _refit_rewired_candidates(topology, measurements)
+    if report["joint_refit"]["ambiguous"]:
+        report["ambiguous"] = True
+        report["witness"] = report["joint_refit"]["witness"]
     return report
 
 
@@ -940,10 +1230,10 @@ def _sample_circuit(
     if (
         isinstance(num_resistors, bool)
         or not isinstance(num_resistors, int)
-        or config.resistor_range != (num_resistors, num_resistors)
+        or not config.resistor_range[0] <= num_resistors <= config.resistor_range[1]
     ):
         raise ValueError(
-            f"Pilot circuits must contain exactly {config.resistor_range[0]} resistors"
+            f"Level {config.level} circuits require {config.resistor_range[0]}-{config.resistor_range[1]} resistors"
         )
     if config.topology_family not in {"separable_loops", "coupled_bridge"}:
         raise ValueError(f"Unknown topology family: {config.topology_family}")
@@ -955,18 +1245,14 @@ def _sample_circuit(
     for _ in range(max_attempts):
         ids = _IdFactory()
         if config.topology_family == "separable_loops":
-            block = build_separable_loops(
-                rng, ids, config.loop_path_lengths, config.loop_modules
-            )
+            block = _build_varied_loops(rng, ids, num_resistors)
         else:
-            block = build_coupled_bridge(rng, ids, config.bridge_path_lengths)
-        topology = relabel_circuit(block)
+            block = _build_varied_bridge(rng, ids, num_resistors)
+        topology = randomize_labels(relabel_circuit(block), rng)
         if not _validate_sampled_topology(topology, config, num_resistors):
             continue
 
-        published = select_published_pairs(
-            rng, topology, redundancy=config.measurement_redundancy
-        )
+        published = select_published_pairs(rng, topology)
         if published is None:
             continue
         measurements = measure_pairs(topology, published)
@@ -979,7 +1265,15 @@ def _sample_circuit(
                 best_loadbearing_bad_count = len(bad_ids)
             continue
 
+        recovery = reconstruct_from_measurements(measurements, num_resistors)
+        if not recovery["recovered"] or _conductances(
+            recovery["topology"]
+        ) != _conductances(topology):
+            continue
+        recovery.pop("topology")
         audit = audit_measurement_ambiguity(topology, measurements)
+        audit["reference_recovery"] = recovery
+        audit["rounding_stability"] = rounding_stability(topology, published)
         if audit["ambiguous"]:
             ambiguous_count += 1
             continue
@@ -1021,9 +1315,23 @@ def build_task(
                 f"The circuit contains {len(topology['resistors'])} resistors.",
                 f"Allowed resistor values are {RESISTOR_POOL} ohms.",
                 "Assume ideal resistors. Measurements are exact to 3 decimal places.",
-                "Resistor ids (R1, R2, ...) are not assigned in any particular spatial "
-                "order; infer both the topology and the values from the measurements.",
-                "Not every node pair was measured.",
+                (
+                    "Resistor ids (R1, R2, ...) are not assigned in any particular spatial "
+                    "order; infer both the topology and the values from the measurements."
+                ),
+                (
+                    "Not every node pair was measured. Every physical resistor joins a pair "
+                    "that appears in the measurements; some measured pairs have no direct resistor."
+                ),
+                (
+                    "There are no direct parallel resistors. Submit the full circuit with every "
+                    "named node and resistor; a smaller equivalent circuit is not accepted."
+                ),
+                (
+                    "The circuit consists of separable loop modules (a cactus graph), with at most two terminal tails."
+                    if config.level == 1
+                    else "The circuit has one coupled bridge core and no external tails."
+                ),
             ],
         },
         "uuid": str(uuid.uuid4()),
@@ -1037,7 +1345,7 @@ def build_task(
 
 
 def generate_level_tasks(level: int, count: int, seed: int) -> list[dict]:
-    """Generate exactly ten fixed-size pilot tasks for one level."""
+    """Generate ten varied, non-isomorphic tasks with a deterministic size schedule."""
     if level not in LEVELS:
         raise ValueError(f"Unknown level: {level}. Available levels: {sorted(LEVELS)}")
     if (
@@ -1051,7 +1359,36 @@ def generate_level_tasks(level: int, count: int, seed: int) -> list[dict]:
 
     config = LEVELS[level]
     rng = random.Random(seed)
-    tasks = [build_task(rng, config, i, config.resistor_range[0]) for i in range(count)]
-    for task in tasks:
-        task["sampling_metadata"]["batch_seed"] = seed
+    tasks, graphs = [], []
+    for index in range(count):
+        size = config.resistor_range[0] + round(
+            index * (config.resistor_range[1] - config.resistor_range[0]) / (count - 1)
+        )
+        for _attempt in range(100):
+            task = build_task(rng, config, index, size)
+            graph = nx.Graph()
+            graph.add_edges_from(
+                (a, b)
+                for a, b, _ in task["scoring_params"]["expected_topology"][
+                    "connections"
+                ]
+            )
+            # Uncolored graph isomorphism rejects mere node-label/terminal changes.
+            if any(nx.is_isomorphic(graph, previous) for previous in graphs):
+                continue
+            graphs.append(graph)
+            task["sampling_metadata"]["batch_seed"] = seed
+            task["sampling_metadata"]["measurement_policy"] = {
+                "budget": measurement_budget(size),
+                "formula": "m + ceil(m / 3)",
+                "min_measurements_per_node": 2,
+                "candidate_connections": "published measurement pairs only",
+                "selection": "probe star + physical edges + weakest-direction decoys",
+            }
+            tasks.append(task)
+            break
+        else:
+            raise RuntimeError(
+                f"Could not find a structurally distinct level-{level} task of size {size}"
+            )
     return tasks
