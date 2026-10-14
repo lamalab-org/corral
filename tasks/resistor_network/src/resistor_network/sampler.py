@@ -14,6 +14,38 @@ from resistor_network.utils import get_resistance_between_nodes
 from scipy.optimize import least_squares, minimize
 
 RESISTOR_POOL: list[float] = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100]
+RESISTOR_POOL_30: tuple[float, ...] = (
+    10,
+    11,
+    12,
+    14,
+    15,
+    17,
+    19,
+    21,
+    23,
+    25,
+    28,
+    31,
+    35,
+    38,
+    42,
+    47,
+    52,
+    58,
+    64,
+    71,
+    79,
+    88,
+    97,
+    108,
+    119,
+    132,
+    147,
+    163,
+    180,
+    200,
+)
 
 SCORING_TOLERANCE: float = 0.02
 TASKS_PER_LEVEL: int = 10
@@ -25,15 +57,8 @@ MAX_ROUNDING_GAP_FRACTION = 0.25
 MAX_REFIT_CANDIDATES = 48
 
 TOOLS: list[str] = [
-    "calculate_series_resistance",
-    "calculate_parallel_resistance",
-    "delta_to_wye_transform",
-    "wye_to_delta_transform",
     "simulate_circuit_resistance",
     "validate_circuit_topology",
-    "validate_measurements",
-    "propose_simple_topology",
-    "estimate_resistor_values",
 ]
 
 SUBMISSION_FORMAT = (
@@ -531,12 +556,18 @@ def _parallel_values_are_unique(
     return True
 
 
-def measurement_budget(num_resistors: int) -> int:
-    """Static one-third redundancy, independent of model or agent performance."""
-    return num_resistors + (num_resistors + 2) // 3
+def measurement_budget(num_resistors: int, redundancy_divisor: int = 4) -> int:
+    """Observation budget; archived helpers retain one-quarter redundancy."""
+    return (
+        num_resistors + (num_resistors + redundancy_divisor - 1) // redundancy_divisor
+    )
 
 
-def rounding_stability(topology: dict, pairs: list[tuple[str, str]]) -> dict:
+def rounding_stability(
+    topology: dict,
+    pairs: list[tuple[str, str]],
+    value_pool: list[float] | None = RESISTOR_POOL,
+) -> dict:
     """Bound first-order log-value error from any three-decimal rounding errors."""
     jacobian = _measurement_jacobian(topology, pairs)
     rank = _jacobian_rank(jacobian)
@@ -545,13 +576,19 @@ def rounding_stability(topology: dict, pairs: list[tuple[str, str]]) -> dict:
     uncertainty = np.abs(np.linalg.pinv(jacobian)) @ np.full(
         len(pairs), MEASUREMENT_ROUNDING_ERROR
     )
+    if value_pool is None:
+        limit = math.log1p(SCORING_TOLERANCE) / 4
+        error = float(np.max(uncertainty))
+        return {
+            "stable": error <= limit,
+            "rank": rank,
+            "max_log_value_error": error,
+            "limit": limit,
+            "scope": "First-order local value identifiability on known wiring; not global topology uniqueness.",
+        }
     gaps = np.asarray(
         [
-            min(
-                abs(math.log(other / value))
-                for other in RESISTOR_POOL
-                if other != value
-            )
+            min(abs(math.log(other / value)) for other in value_pool if other != value)
             for value in topology["resistors"].values()
         ]
     )
@@ -723,14 +760,36 @@ class LevelConfig:
     """Structural families with overlapping sizes and a static measurement policy."""
 
     level: int
-    topology_family: Literal["separable_loops", "coupled_bridge"]
+    topology_family: Literal[
+        "separable_loops", "coupled_bridge", "modular_bridges", "coupled_core"
+    ]
     resistor_range: tuple[int, int]
     max_tail_edges: int = 2
+    measurement_redundancy_divisor: int = 4
+    module_node_fraction: float = 0.60
+    min_core_cycle_rank: int = 10
+    resistor_values: tuple[float, ...] | None = None
 
 
 LEVELS: dict[int, LevelConfig] = {
-    1: LevelConfig(1, "separable_loops", (8, 12)),
-    2: LevelConfig(2, "coupled_bridge", (10, 14), max_tail_edges=0),
+    1: LevelConfig(
+        1,
+        "modular_bridges",
+        (12, 16),
+        max_tail_edges=0,
+        measurement_redundancy_divisor=2,
+        module_node_fraction=0.75,
+        resistor_values=RESISTOR_POOL_30,
+    ),
+    2: LevelConfig(
+        2,
+        "coupled_core",
+        (18, 24),
+        max_tail_edges=0,
+        measurement_redundancy_divisor=2,
+        min_core_cycle_rank=7,
+        resistor_values=RESISTOR_POOL_30,
+    ),
 }
 
 
@@ -900,7 +959,12 @@ def _validate_sampled_topology(
             or not math.isfinite(resistors[rid])
         ):
             return False
-        if resistors[rid] <= 0 or resistors[rid] not in RESISTOR_POOL:
+        if resistors[rid] <= 0:
+            return False
+        if (
+            config.topology_family in {"separable_loops", "coupled_bridge"}
+            and resistors[rid] not in RESISTOR_POOL
+        ):
             return False
         referenced.add(rid)
         nodes.update((a, b))
@@ -930,6 +994,19 @@ def _validate_sampled_topology(
     quality = _sampled_topology_quality(topology)
     if quality.parallel_groups:
         return False
+    if config.topology_family == "modular_bridges":
+        return (
+            2 <= quality.coupled_core_count <= 3
+            and quality.tail_edges == 0
+            and all(rank >= 2 for rank in quality.component_cycle_ranks)
+        )
+    if config.topology_family == "coupled_core":
+        graph = nx.Graph([(a, b) for a, b, _ in connections])
+        return (
+            nx.is_biconnected(graph)
+            and min(dict(graph.degree()).values()) >= 3
+            and quality.cycle_rank >= config.min_core_cycle_rank
+        )
     if config.topology_family == "separable_loops":
         return (
             2 <= quality.cycle_rank <= 4
@@ -1227,6 +1304,10 @@ def _sample_circuit(
     rng: random.Random, config: LevelConfig, num_resistors: int, max_attempts: int = 200
 ) -> tuple[dict, list[dict], dict]:
     """Return the accepted circuit plus offline ambiguity-search coverage."""
+    if config.topology_family in {"modular_bridges", "coupled_core"}:
+        from resistor_network.sparse import sample_sparse_circuit
+
+        return sample_sparse_circuit(rng, config, num_resistors, max_attempts)
     if (
         isinstance(num_resistors, bool)
         or not isinstance(num_resistors, int)
@@ -1291,6 +1372,10 @@ def build_task(
     rng: random.Random, config: LevelConfig, index: int, num_resistors: int
 ) -> dict:
     """Build one task definition."""
+    if config.topology_family in {"modular_bridges", "coupled_core"}:
+        from resistor_network.sparse import build_sparse_task
+
+        return build_sparse_task(rng, config, index, num_resistors)
     topology, measurements, audit = _sample_circuit(rng, config, num_resistors)
 
     task_id = f"task_{index}"
@@ -1378,13 +1463,16 @@ def generate_level_tasks(level: int, count: int, seed: int) -> list[dict]:
                 continue
             graphs.append(graph)
             task["sampling_metadata"]["batch_seed"] = seed
-            task["sampling_metadata"]["measurement_policy"] = {
-                "budget": measurement_budget(size),
-                "formula": "m + ceil(m / 3)",
-                "min_measurements_per_node": 2,
-                "candidate_connections": "published measurement pairs only",
-                "selection": "probe star + physical edges + weakest-direction decoys",
-            }
+            task["sampling_metadata"].setdefault(
+                "measurement_policy",
+                {
+                    "budget": measurement_budget(size),
+                    "formula": "m + ceil(m / 3)",
+                    "min_measurements_per_node": 2,
+                    "candidate_connections": "published measurement pairs only",
+                    "selection": "probe star + physical edges + weakest-direction decoys",
+                },
+            )
             tasks.append(task)
             break
         else:

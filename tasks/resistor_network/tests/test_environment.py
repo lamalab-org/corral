@@ -22,7 +22,13 @@ def test_runtime_work_directory_creates_isolated_trial_workspaces(tmp_path, leve
         workspace = Path(environment.workspace_path)
         assert workspace.is_dir()
         assert workspace.parent == tmp_path
-        assert "calculate_series_resistance" in environment.tools
+        assert "simulate_circuit_resistance" in environment.tools
+        assert "validate_circuit_topology" in environment.tools
+        assert not {
+            "estimate_resistor_values",
+            "propose_simple_topology",
+            "validate_measurements",
+        } & set(environment.tools)
         assert "read_file" in environment.tools
         assert "write_file" in environment.tools
     Path(first.workspace_path, "trial.txt").write_text("first")

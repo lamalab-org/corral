@@ -20,13 +20,41 @@ from resistor_network.sampler import (
     leaf_resistor,
     measurement_budget,
     randomize_labels,
-    reconstruct_from_measurements,
     relabel_circuit,
     rounding_stability,
     sample_circuit,
     select_published_pairs,
 )
+from resistor_network.score import check_sparse_circuit_solution
+from resistor_network.sparse import fit_known_wiring
 from resistor_network.utils import get_resistance_between_nodes
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_saved_bank_known_wiring_fit_passes_every_simulated_reading(level):
+    bank = (
+        Path(__file__).resolve().parents[1]
+        / "environments"
+        / f"level_{level}"
+        / "tasks_json"
+    )
+    for path in sorted(bank.glob("*.json")):
+        task = json.loads(path.read_text())[0]
+        truth = task["scoring_params"]["expected_topology"]
+        readings = task["initial_input"]["measurements"]
+        fitted = fit_known_wiring(truth, readings, respect_rounding=True)
+        pool = task["scoring_params"].get("allowed_resistor_values")
+        if pool is not None:
+            fitted["topology"]["resistors"] = {
+                rid: min(pool, key=lambda value: abs(math.log(value / fitted_value)))
+                for rid, fitted_value in fitted["topology"]["resistors"].items()
+            }
+        assert (
+            check_sparse_circuit_solution(
+                truth, readings, allowed_resistor_values=pool
+            )(json.dumps(fitted["topology"]))
+            == 1
+        ), path.name
 
 
 @pytest.fixture(scope="module", params=[1, 2], ids=["level_1", "level_2"])
@@ -128,7 +156,7 @@ class TestGroundTruthSimulation:
 
 class TestMeasurementSelection:
     def test_fixed_budget_coverage_and_stability(self, benchmark_batch):
-        _level, tasks = benchmark_batch
+        level, tasks = benchmark_batch
         for task in tasks:
             topology = task["scoring_params"]["expected_topology"]
             pairs = [
@@ -138,13 +166,21 @@ class TestMeasurementSelection:
             nodes = {
                 n for connection in topology["connections"] for n in connection[:2]
             }
-            assert len(pairs) == measurement_budget(task["num_resistors"])
+            assert len(pairs) == measurement_budget(
+                task["num_resistors"], LEVELS[level].measurement_redundancy_divisor
+            )
             assert len(pairs) < math.comb(len(nodes), 2)
             assert ("A", "B") in pairs
             assert len(pairs) == len(set(pairs))
             assert all(sum(node in pair for pair in pairs) >= 2 for node in nodes)
-            assert {tuple(sorted(c[:2])) for c in topology["connections"]} <= set(pairs)
-            assert rounding_stability(topology, pairs)["stable"]
+            edges = {tuple(sorted(c[:2])) for c in topology["connections"]}
+            assert len(edges - set(pairs)) >= math.ceil(task["num_resistors"] / 3)
+            assert len(pairs) <= math.comb(len(nodes), 2) // 2
+            assert (
+                max(sum(node in pair for pair in pairs) for node in nodes)
+                < len(nodes) - 1
+            )
+            assert rounding_stability(topology, pairs, value_pool=None)["stable"]
 
     def test_rejects_topology_that_cannot_fit_the_fixed_budget(self):
         ids = _IdFactory()
@@ -178,7 +214,7 @@ class TestMeasurementSelection:
 
 class TestBenchmarkStructure:
     @pytest.mark.parametrize(
-        ("level", "num_resistors"), [(1, 8), (1, 12), (2, 10), (2, 14)]
+        ("level", "num_resistors"), [(1, 12), (1, 16), (2, 18), (2, 24)]
     )
     def test_sampled_circuits_have_requested_size(self, level, num_resistors):
         topology, _measurements = sample_circuit(
@@ -189,34 +225,33 @@ class TestBenchmarkStructure:
         )
 
     @pytest.mark.parametrize("level", [1, 2])
-    @pytest.mark.parametrize("num_resistors", [2, 5, 15, 18, True, 12.0])
+    @pytest.mark.parametrize("num_resistors", [0, 2, 5, 100, True, 12.0])
     def test_sample_circuit_rejects_unsupported_sizes(self, level, num_resistors):
         with pytest.raises(ValueError, match="circuits require"):
             sample_circuit(random.Random(0), LEVELS[level], num_resistors)
 
-    @pytest.mark.parametrize(("level", "num_resistors"), [(1, 14), (2, 8)])
+    @pytest.mark.parametrize(("level", "num_resistors"), [(1, 30), (2, 26)])
     def test_sample_circuit_rejects_other_levels_size(self, level, num_resistors):
         with pytest.raises(ValueError, match="circuits require"):
             sample_circuit(random.Random(0), LEVELS[level], num_resistors)
 
-    def test_reference_solver_recovers_from_public_input(self, benchmark_batch):
+    def test_known_wiring_values_are_observable_and_pool_is_published(
+        self, benchmark_batch
+    ):
         _level, tasks = benchmark_batch
-        from resistor_network.score import check_conductance_topology
-
         for task in tasks:
-            recovered = reconstruct_from_measurements(
-                task["initial_input"]["measurements"], task["num_resistors"]
+            truth = task["scoring_params"]["expected_topology"]
+            fitted = fit_known_wiring(truth, task["initial_input"]["measurements"])
+            assert fitted["success"]
+            assert all(
+                abs(fitted["topology"]["resistors"][rid] / value - 1)
+                < SCORING_TOLERANCE / 4
+                for rid, value in truth["resistors"].items()
             )
-            assert recovered["recovered"]
-            assert (
-                check_conductance_topology(**task["scoring_params"])(
-                    json.dumps(recovered["topology"])
-                )
-                == 1
-            )
-            assert "some measured pairs have no direct resistor" in " ".join(
-                task["initial_input"]["notes"]
-            )
+            pool = task["scoring_params"]["allowed_resistor_values"]
+            assert len(pool) == 30
+            assert set(truth["resistors"].values()) <= set(pool)
+            assert str(pool) in " ".join(task["initial_input"]["notes"])
 
     def test_relabeling_preserves_physics_and_hides_construction_order(self):
         import networkx as nx
@@ -268,8 +303,8 @@ class TestGenerateLevelTasks:
         _level, tasks = benchmark_batch
         for task in tasks:
             assert (
-                f"The circuit contains {task['num_resistors']} resistors."
-                in task["initial_input"]["notes"]
+                f"The circuit contains {task['num_resistors']} positive, finite, ideal resistors"
+                in " ".join(task["initial_input"]["notes"])
             )
 
     def test_deterministic_given_same_seed(self, benchmark_batch):
@@ -284,13 +319,19 @@ class TestGenerateLevelTasks:
         with pytest.raises(ValueError, match="Unknown level"):
             generate_level_tasks(level=99, count=10, seed=1)
 
-    def test_scoring_params_target_the_conductance_map(self, benchmark_batch):
+    def test_scoring_params_target_all_published_measurements(self, benchmark_batch):
         _level, tasks = benchmark_batch
         for t in tasks:
-            assert t["scoring_function"] == "resistor_conductance"
+            assert t["scoring_function"] == "sparse_circuit_solution"
             sp = t["scoring_params"]
-            assert set(sp) == {"expected_topology", "tolerance"}
-            assert sp["tolerance"] == SCORING_TOLERANCE
+            assert set(sp) == {
+                "expected_topology",
+                "expected_measurements",
+                "measurement_tolerance",
+                "allowed_resistor_values",
+            }
+            assert sp["expected_measurements"] == t["initial_input"]["measurements"]
+            assert sp["measurement_tolerance"] == pytest.approx(0.000500001)
             assert sp["expected_topology"]["connections"]
 
     def test_records_seed_and_bounded_ambiguity_audit(self, benchmark_batch):
@@ -300,13 +341,14 @@ class TestGenerateLevelTasks:
             assert metadata["batch_seed"] == 7
             assert metadata["topology_family"] == LEVELS[level].topology_family
             audit = metadata["ambiguity_audit"]
-            assert audit["neighborhood_complete"]
             assert not audit["exhaustive"]
             assert not audit["ambiguous"]
             assert audit["witness"] is None
-            assert audit["reference_recovery"]["recovered"]
+            assert 0 < audit["candidates_checked"] <= audit["limit"]
+            assert audit["known_wiring_fit"]["success"]
             assert audit["rounding_stability"]["stable"]
-            assert "joint_refit" in audit
+            assert "all visible pairs" in audit["scope"]
+            assert metadata["benchmark_version"] == 4
 
 
 class TestLoadBearingResistors:
@@ -341,7 +383,7 @@ class TestLoadBearingResistors:
 
         assert find_non_load_bearing_resistors(topology, measurements) == []
 
-    @pytest.mark.parametrize(("level", "num_resistors"), [(1, 12), (2, 14)])
+    @pytest.mark.parametrize(("level", "num_resistors"), [(1, 16), (2, 24)])
     def test_sample_circuit_never_returns_a_non_load_bearing_resistor(
         self, level, num_resistors
     ):

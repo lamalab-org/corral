@@ -10,6 +10,7 @@ from resistor_network.score import (
     check_resistance_measurements,
     check_resistor_topology,
     check_resistor_values_only,
+    check_sparse_circuit_solution,
     check_valid_circuit_json,
 )
 from resistor_network.tools import create_tools
@@ -28,6 +29,7 @@ SCORING_FUNCTIONS = {
     "complete_circuit_solution": check_complete_circuit_solution,
     "resistor_values_only": check_resistor_values_only,
     "valid_circuit_json": check_valid_circuit_json,
+    "sparse_circuit_solution": check_sparse_circuit_solution,
 }
 
 
