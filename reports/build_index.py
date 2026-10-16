@@ -26,13 +26,16 @@ import hashlib
 import json
 import lzma
 import os
+import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-LANGFUSE_HOST = os.environ.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com").rstrip("/")
+LANGFUSE_HOST = os.environ.get(
+    "LANGFUSE_BASE_URL", "https://cloud.langfuse.com"
+).rstrip("/")
 LANGFUSE_PROJECT_ID = os.environ.get("LANGFUSE_PROJECT_ID", "cmsio90yc092lad0ggc5lyo0x")
 
 AGENTS = {
@@ -53,16 +56,48 @@ MODELS = {
 }
 
 RUN_FIELDS = [
-    "environment", "level", "agent", "model", "model_id", "run_id",
-    "tasks", "trials_per_task", "trials", "passes", "error_trials", "average_score",
-    "pass_at_1", "pass_at_k", "pass_hat_k", "input_tokens", "output_tokens",
-    "generated_at", "report_file", "report_sha256", "langfuse_session_url",
+    "environment",
+    "level",
+    "agent",
+    "model",
+    "model_id",
+    "run_id",
+    "tasks",
+    "trials_per_task",
+    "trials",
+    "passes",
+    "error_trials",
+    "average_score",
+    "pass_at_1",
+    "pass_at_k",
+    "pass_hat_k",
+    "input_tokens",
+    "output_tokens",
+    "generated_at",
+    "report_file",
+    "report_sha256",
+    "langfuse_session_url",
 ]
 TRIAL_FIELDS = [
-    "environment", "level", "agent", "model", "run_id", "task_id", "trial",
-    "execution_id", "score", "success", "error", "duration_s",
-    "input_tokens", "output_tokens", "tool_calls",
-    "langfuse_session_id", "langfuse_trace_id", "langfuse_trace_url", "report_file",
+    "environment",
+    "level",
+    "agent",
+    "model",
+    "run_id",
+    "task_id",
+    "trial",
+    "execution_id",
+    "score",
+    "success",
+    "error",
+    "duration_s",
+    "input_tokens",
+    "output_tokens",
+    "tool_calls",
+    "langfuse_session_id",
+    "langfuse_trace_id",
+    "langfuse_trace_url",
+    "report_file",
 ]
 
 
@@ -109,26 +144,45 @@ def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
             tid = trace_id(t["trial_id"])
             # A substituted rerun trial keeps its own execution ID, and so its own session.
             session = t["trial_id"].rsplit(":", 2)[0]
-            trials.append({
-                "environment": env, "level": level, "agent": agent, "model": model,
-                "run_id": run_id, "task_id": task_id,
-                "trial": slot,
-                "execution_id": t["trial_id"], "score": t.get("score"),
-                "success": t.get("success"),
-                "error": (t.get("error_message") or t.get("evaluation_error") or "").strip(),
-                "duration_s": round(t["duration"], 3) if t.get("duration") is not None else "",
-                "input_tokens": usage.get("input_tokens", ""),
-                "output_tokens": usage.get("output_tokens", ""),
-                "tool_calls": usage.get("tool_calls", ""),
-                "langfuse_session_id": session, "langfuse_trace_id": tid,
-                "langfuse_trace_url": trace_url(tid), "report_file": rel,
-            })
+            trials.append(
+                {
+                    "environment": env,
+                    "level": level,
+                    "agent": agent,
+                    "model": model,
+                    "run_id": run_id,
+                    "task_id": task_id,
+                    "trial": slot,
+                    "execution_id": t["trial_id"],
+                    "score": t.get("score"),
+                    "success": t.get("success"),
+                    "error": (
+                        t.get("error_message") or t.get("evaluation_error") or ""
+                    ).strip(),
+                    "duration_s": round(t["duration"], 3)
+                    if t.get("duration") is not None
+                    else "",
+                    "input_tokens": usage.get("input_tokens", ""),
+                    "output_tokens": usage.get("output_tokens", ""),
+                    "tool_calls": usage.get("tool_calls", ""),
+                    "langfuse_session_id": session,
+                    "langfuse_trace_id": tid,
+                    "langfuse_trace_url": trace_url(tid),
+                    "report_file": rel,
+                }
+            )
 
     usage = metrics.get("Total Token Usage") or {}
     run = {
-        "environment": env, "level": level, "agent": agent, "model": model,
-        "model_id": model_id, "run_id": run_id, "tasks": len(data["task_results"]),
-        "trials_per_task": k, "trials": len(trials),
+        "environment": env,
+        "level": level,
+        "agent": agent,
+        "model": model,
+        "model_id": model_id,
+        "run_id": run_id,
+        "tasks": len(data["task_results"]),
+        "trials_per_task": k,
+        "trials": len(trials),
         "passes": sum(bool(t["success"]) for t in trials),
         "error_trials": sum(bool(t["error"]) for t in trials),
         "average_score": round(float(metrics["Average Score"]), 4),
@@ -137,7 +191,8 @@ def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
         "pass_hat_k": round(float(metrics.get(f"Pass^{k}", "nan")), 4),
         "input_tokens": usage.get("input_tokens", ""),
         "output_tokens": usage.get("output_tokens", ""),
-        "generated_at": data.get("generated_at", ""), "report_file": rel,
+        "generated_at": data.get("generated_at", ""),
+        "report_file": rel,
         "report_sha256": hashlib.sha256(raw).hexdigest(),
         "langfuse_session_url": session_url(run_id),
     }
@@ -158,7 +213,9 @@ def verify(trials: list[dict]) -> list[str]:
     ).decode()
 
     def get(url: str) -> dict:
-        request = urllib.request.Request(url, headers={"Authorization": f"Basic {auth}"})
+        request = urllib.request.Request(
+            url, headers={"Authorization": f"Basic {auth}"}
+        )
         for attempt in range(8):
             try:
                 with urllib.request.urlopen(request, timeout=120) as response:
@@ -166,9 +223,9 @@ def verify(trials: list[dict]) -> list[str]:
             except urllib.error.HTTPError as error:
                 if error.code != 429 and error.code < 500:
                     raise
-                delay = float(error.headers.get("Retry-After") or 2 ** attempt)
+                delay = float(error.headers.get("Retry-After") or 2**attempt)
             except urllib.error.URLError:
-                delay = 2 ** attempt
+                delay = 2**attempt
             time.sleep(min(delay, 60))
         raise RuntimeError(f"Langfuse request kept failing: {url}")
 
@@ -184,13 +241,19 @@ def verify(trials: list[dict]) -> list[str]:
             if page >= data["meta"]["totalPages"]:
                 break
             page += 1
-    return [t["langfuse_trace_id"] for t in trials if t["langfuse_trace_id"] not in found]
+    return [
+        t["langfuse_trace_id"] for t in trials if t["langfuse_trace_id"] not in found
+    ]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("env_dir", type=Path)
-    parser.add_argument("--verify", action="store_true", help="check every trace exists in its Langfuse session")
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="check every trace exists in its Langfuse session",
+    )
     args = parser.parse_args()
     env_dir = args.env_dir.resolve()
     env = env_dir.name
@@ -202,13 +265,15 @@ def main() -> None:
         trials.extend(run_trials)
     write_csv(env_dir / "runs.csv", RUN_FIELDS, runs)
     write_csv(env_dir / "trials.csv", TRIAL_FIELDS, trials)
-    print(f"{env}: {len(runs)} runs, {len(trials)} trials")
+    sys.stdout.write(f"{env}: {len(runs)} runs, {len(trials)} trials\n")
 
     if args.verify:
         missing = verify(trials)
-        print(f"Langfuse: {len(trials) - len(missing)}/{len(trials)} traces found")
+        sys.stdout.write(
+            f"Langfuse: {len(trials) - len(missing)}/{len(trials)} traces found\n"
+        )
         for tid in missing:
-            print("  missing", tid)
+            sys.stdout.write(f"  missing {tid}\n")
 
 
 if __name__ == "__main__":
