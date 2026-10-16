@@ -4,11 +4,13 @@ Run from the repository root:
     python reports/check_reports.py           # convention checks only
     python reports/check_reports.py --hf      # also check the Hugging Face datasets
 
-Convention checks (see reports/README.md) cover the folder layout, agent and
-model names, CSV columns, consistency between runs.csv, trials.csv and the run
-folders, Langfuse IDs and URLs, and that both CSVs match what build_index.py
-produces from the reports. Reports stored as Git LFS pointers cannot be read
-and are skipped by the rebuild check; --hf covers them through report_sha256.
+Convention checks (see reports/README.md) fail on what matters for the data:
+where reports live and how run folders are named, CSV columns, consistency
+between runs.csv, trials.csv and the run folders, Langfuse IDs and URLs, and
+that both CSVs match what build_index.py produces from the reports. Other files
+(READMEs, notes, figures) are only reported as warnings. Reports stored as Git
+LFS pointers cannot be read and are skipped by the rebuild check; --hf covers
+them through report_sha256.
 
 The --hf checks need huggingface_hub and pyarrow, and HF_TOKEN for the private
 datasets. They require a subset for every environment and level, row counts
@@ -36,8 +38,8 @@ SUMMARY_REPO = "jablonkagroup/corral-reports-october-runs-summary-v1"
 
 AGENTS = sorted(set(build_index.AGENTS.values()))
 MODELS = sorted(slug for slug, _ in build_index.MODELS.values())
-ENV_FILES = {"README.md", "runs.csv", "trials.csv"}
-RUN_FILES = {"report.json.gz", "report.json.xz", "run-metadata.json"}
+ENV_FILES = {"runs.csv", "trials.csv"}
+REPORT_FILES = {"report.json.gz", "report.json.xz"}
 LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
 
 
@@ -69,24 +71,31 @@ def as_csv(value: object) -> str:
     return "" if value is None else str(value)
 
 
-def check_layout(env_dir: Path, problems: Problems) -> list[Path]:
-    """Check folders and file names; return the report files found."""
+def check_layout(env_dir: Path, problems: Problems, warnings: Problems) -> list[Path]:
+    """Check where reports live and how run folders are named.
+
+    Only the reports and the two index files are required. Anything else, such
+    as a README, notes or figures, is reported as a warning, not an error.
+    """
     where = f"reports/{env_dir.name}"
     names = {p.name for p in env_dir.iterdir()}
     for missing in sorted(ENV_FILES - names):
         problems.add(where, f"missing {missing}")
-    for extra in sorted(names - ENV_FILES):
+    for extra in sorted(names - ENV_FILES - {"README.md"}):
         if not re.fullmatch(r"level_\d+", extra) or not (env_dir / extra).is_dir():
-            problems.add(
-                where, f"unexpected '{extra}' (only final reports belong here)"
-            )
+            warnings.add(where, f"'{extra}' is not part of the convention")
 
     reports = []
     for level_dir in sorted(env_dir.glob("level_*")):
+        if not level_dir.is_dir():
+            continue
         for run_dir in sorted(level_dir.iterdir()):
             run_where = f"{where}/{level_dir.name}/{run_dir.name}"
+            if not run_dir.is_dir():
+                warnings.add(run_where, "is not part of the convention")
+                continue
             agent, _, model = run_dir.name.partition("__")
-            if not run_dir.is_dir() or agent not in AGENTS or model not in MODELS:
+            if agent not in AGENTS or model not in MODELS:
                 problems.add(
                     run_where,
                     f"run folders must be <agent>__<model> with agent in {AGENTS} "
@@ -94,9 +103,9 @@ def check_layout(env_dir: Path, problems: Problems) -> list[Path]:
                 )
                 continue
             files = {p.name for p in run_dir.iterdir()}
-            for extra in sorted(files - RUN_FILES):
-                problems.add(run_where, f"unexpected file '{extra}'")
-            found = sorted(files & {"report.json.gz", "report.json.xz"})
+            for extra in sorted(files - REPORT_FILES - {"run-metadata.json"}):
+                warnings.add(f"{run_where}/{extra}", "is not part of the convention")
+            found = sorted(files & REPORT_FILES)
             if len(found) != 1:
                 problems.add(
                     run_where, "needs exactly one report.json.gz or report.json.xz"
@@ -295,11 +304,12 @@ def main() -> int:
     args = parser.parse_args()
 
     problems = Problems()
+    warnings = Problems()
     env_dirs = environments()
     if not env_dirs:
         problems.add("reports", "no environment folders found")
     for env_dir in env_dirs:
-        reports = check_layout(env_dir, problems)
+        reports = check_layout(env_dir, problems, warnings)
         if not (env_dir / "runs.csv").exists() or not (env_dir / "trials.csv").exists():
             continue
         check_indexes(env_dir, reports, problems)
@@ -314,6 +324,8 @@ def main() -> int:
         if not problems:
             sys.stdout.write("Hugging Face datasets match the reports\n")
 
+    for warning in warnings:
+        sys.stdout.write(f"WARNING {warning}\n")
     for problem in problems:
         sys.stdout.write(f"ERROR {problem}\n")
     if problems:

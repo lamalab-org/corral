@@ -92,7 +92,8 @@ its own trace.
    python reports/build_index.py reports/<environment> --verify  # needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
    ```
 
-3. Write or update `reports/<environment>/README.md` (results table and caveats).
+3. Optionally, write or update `reports/<environment>/README.md` with results
+   and caveats.
 4. Push to Hugging Face (needs `HF_TOKEN`):
 
    ```bash
@@ -108,7 +109,9 @@ its own trace.
    ```
 
 The `Reports` workflow (`.github/workflows/reports.yaml`) runs both checks on
-every push and pull request to `report_audit` that touches `reports/`. It
+every push and pull request to `report_audit` that touches `reports/`. It fails
+on the reports, the two CSVs, their Langfuse IDs, or a missing or outdated
+Hugging Face copy; other files only produce warnings. It
 checks out without Git LFS, so reports stored in LFS are verified through the
 Hugging Face summary's `report_sha256` rather than rebuilt.
 
