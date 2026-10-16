@@ -1,27 +1,21 @@
-# Inference optimization benchmark reports
+# Inference optimization reports
 
-Final benchmark: 14 runs × 50 trials = 700 trials.
+14 runs (7 agent/model pairs × 2 levels), 10 tasks × k = 5, 700 trials.
+Layout, names and index columns follow [`../README.md`](../README.md).
 
-- [summary.csv](summary.csv): run scores and report hashes.
-- [trial_scores_langfuse.csv](trial_scores_langfuse.csv): scores, errors, session IDs, and trace IDs for all 700 final trials.
+| Agent | Model | L1 passes | L1 errors | L2 passes | L2 errors |
+|---|---|---:|---:|---:|---:|
+| ai-scientist | claude-opus-5-5 | 35/50 | 0 | 34/50 | 0 |
+| claude-code | claude-opus-5-5 | 46/50 | 0 | 41/50 | 1 |
+| codex | gpt-5.6-sol | 27/50 | 0 | 26/50 | 0 |
+| openhands | kimi-k3 | 25/50 | 4 | 27/50 | 8 |
+| react | claude-opus-5-5 | 36/50 | 0 | 42/50 | 1 |
+| react | gpt-5.6-sol | 18/50 | 1 | 18/50 | 4 |
+| react | kimi-k3 | 12/50 | 25 | 19/50 | 22 |
 
-Trace IDs are derived from execution IDs and have not been verified against Langfuse.
+Errors are trials that ended with an agent or provider error; they count as
+failures. Most are exhausted interaction budgets (react Kimi K3: 47 of 47).
+react GPT-5.6 Sol has four prompts rejected by the provider's usage policy.
 
-Reports are complete JSON files compressed with gzip. Run `git lfs pull` to download large reports, then read reports with `gzip -dc <file>.report.json.gz`.
-
-| Run / Langfuse session ID | Average score | Report |
-| --- | ---: | --- |
-| `inference_opt_l1_react_claude55opus` | 72% | [JSON.gz](inference_opt_l1_react_claude55opus.report.json.gz) |
-| `inference_opt_l1_react_gpt56sol` | 36% | [JSON.gz](inference_opt_l1_react_gpt56sol.report.json.gz) |
-| `inference_opt_l2_react_claude55opus` | 84% | [JSON.gz](inference_opt_l2_react_claude55opus.report.json.gz) |
-| `inference_opt_l2_react_gpt56sol` | 36% | [JSON.gz](inference_opt_l2_react_gpt56sol.report.json.gz) |
-| `inference_opt_l1_codex_gpt56sol` | 54% | [JSON.gz](inference_opt_l1_codex_gpt56sol.report.json.gz) |
-| `inference_opt_l2_codex_gpt56sol` | 52% | [JSON.gz](inference_opt_l2_codex_gpt56sol.report.json.gz) |
-| `inference_opt_l1_claudecode_claude55opus` | 92% | [JSON.gz](inference_opt_l1_claudecode_claude55opus.report.json.gz) |
-| `inference_opt_l2_claudecode_claude55opus` | 82% | [JSON.gz](inference_opt_l2_claudecode_claude55opus.report.json.gz) |
-| `inference_opt_l1_openhands_kimik3` | 50% | [JSON.gz](inference_opt_l1_openhands_kimik3.report.json.gz) |
-| `inference_opt_l2_openhands_kimik3` | 54% | [JSON.gz](inference_opt_l2_openhands_kimik3.report.json.gz) |
-| `inference_opt_l1_aiscientist_claude55opus` | 70% | [JSON.gz](inference_opt_l1_aiscientist_claude55opus.report.json.gz) |
-| `inference_opt_l2_aiscientist_claude55opus` | 68% | [JSON.gz](inference_opt_l2_aiscientist_claude55opus.report.json.gz) |
-| `inference_opt_l1_react_kimik3` | 24% | [JSON.gz](inference_opt_l1_react_kimik3.report.json.gz) |
-| `inference_opt_l2_react_kimik3` | 38% | [JSON.gz](inference_opt_l2_react_kimik3.report.json.gz) |
+The AI Scientist reports (115 MB and 131 MB) are stored in Git LFS; run
+`git lfs pull` before reading them.
