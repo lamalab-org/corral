@@ -839,7 +839,8 @@ async def test_container_task_traces_through_the_environment_observer(
         raise RuntimeError("stop after the observer is created")
 
     monkeypatch.setattr(internal, "observer_from_env", Observer)
-    monkeypatch.setattr(internal.os, "chown", stop)
+    # Stop at startup regardless of whether the test runner is root.
+    monkeypatch.setattr(internal, "_reclaim_checkpoint", stop)
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
     request_path = checkpoint / "request.json"
