@@ -1,12 +1,14 @@
 # v4 terminal comparison reports
 
-12 reports, 600 trials. Kimi ReAct terminal runs are excluded because provider
-and credit failures remain unresolved. Shared OpenHands Kimi results are included.
+14 reports, 700 trials. All seven agent/model configurations have final reports.
+ReAct Kimi provider failures were recovered; the 30 remaining Kimi errors are
+interaction-budget failures. Shared OpenHands Kimi results are included.
 
 | Agent/model | Level 1 passes | Level 2 passes |
 |---|---:|---:|
 | ReAct GPT | 44/50 | 28/50 |
 | ReAct Opus | 38/50 | 26/50 |
+| ReAct Kimi | 10/50 | 1/50 |
 | AI Scientist Opus | 49/50 | 32/50 |
 | Codex GPT (shared) | 48/50 | 37/50 |
 | Claude Code Opus (shared) | 50/50 | 39/50 |
@@ -32,3 +34,7 @@ checkpoints or backups rather than separate model attempts. Langfuse traces
 with shared IDs may mix observations. The indexed local checkpoint and report
 are authoritative. Local delivery receipts are not a fresh remote availability
 check. Some infrastructure-error trials have only an unfinished ledger head.
+
+Kimi retained 23 earlier outcomes and replaced 77 provider-failed attempts using
+Fireworks with low reasoning. Two technical failures received one fresh attempt.
+The provider transition and retry outcomes are recorded in `provenance.json`.
