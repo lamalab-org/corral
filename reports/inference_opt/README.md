@@ -1,12 +1,14 @@
 # Inference optimization benchmark reports
 
-Final reports for the October 7–10, 2026 batches: 14 runs, 50 trials each, 700 trials total. Failed trials are included in the average scores. Superseded and smoke-test runs are excluded.
+Final reports for the October 7–10, 2026 batches: 14 runs, 50 trials each, 700 trials total. Failed trials are included in the average scores. Smoke tests and discarded attempts are preserved separately in [archive/](archive/README.md).
 
 The `.report.json.gz` files contain the complete original JSON reports, compressed with gzip. Read one with `gzip -dc <file>.report.json.gz` or Python `json.load(gzip.open(path, "rt"))`.
 
-The two AI Scientist reports use Git LFS because of their size. Run `git lfs pull` after cloning to download them.
+The two AI Scientist reports and the archive tarballs use Git LFS. Run `git lfs pull` after cloning to download them.
 
 [summary.csv](summary.csv) records scores, completion times, and SHA-256 hashes of the uncompressed reports. [trial_scores_langfuse.csv](trial_scores_langfuse.csv) contains all 700 trial scores, errors, execution IDs, and Langfuse trace IDs. Session IDs are the run IDs below; trace IDs use Corral’s deterministic mapping and have not been checked against the remote Langfuse service.
+
+[all_trial_scores_langfuse.csv](all_trial_scores_langfuse.csv) indexes every recorded attempt in `/data/alamparan/corral_ml_runs`: 700 final trials, 4 smoke-test trials, and 164 discarded attempts. It includes the category, original checkpoint path, containing archive, session ID, execution ID, trace ID, status, and available score/error. Discarded retries can reuse session and execution IDs; use `source_path` to distinguish physical attempts. Missing results and scores remain explicitly missing rather than being treated as zero.
 
 | Run / Langfuse session ID | Average score | Failed / total | Report |
 | --- | ---: | ---: | --- |
