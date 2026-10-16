@@ -20,3 +20,7 @@ terminal defaults and remaining model/iteration settings were retained.
 ReAct Kimi includes both original and updated settings, as recorded in
 `provenance.json`; this should be considered when comparing scores.
 Archived attempts are excluded from reports but remain in external storage.
+
+`final-trials.csv` maps all 700 reported trials to Langfuse IDs, local trace
+paths, report/evaluation hashes and archived-copy flags. The separate terminal
+comparison is in `../v4_terminal/`; shared native trials retain the same IDs.
