@@ -9,8 +9,8 @@ same layout, names and index files, so runs can be compared across them.
 | Psychometrics | [`psychometrics/`](psychometrics/) | `psychometric_hint_cleanup_clean` | 14 | 700 |
 | Resistor network (v4, terminal) | [`resistor_network/`](resistor_network/) | `resistor_level` | 14 | 700 |
 
-Each branch holds only its own environment's folder. This file and
-`build_index.py` are identical on every branch.
+The `report_audit` branch collects all environments. Add or update reports
+there, following [Adding or updating reports](#adding-or-updating-reports).
 
 ## Layout
 
@@ -80,13 +80,37 @@ new run IDs and are not affected. The report is authoritative for what the
 final attempt did. Future reruns should use a new run ID so each attempt gets
 its own trace.
 
-## Rebuilding the index
+## Adding or updating reports
 
-```bash
-python reports/build_index.py reports/<environment>
-# also check that every trace exists (needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY)
-python reports/build_index.py reports/<environment> --verify
-```
+1. Put each final report at `reports/<environment>/level_<L>/<agent>__<model>/report.json.gz`
+   (`report.json.xz` if gzip is much larger). Remove superseded reports; only
+   final ones belong here. Track reports over ~50 MB in Git LFS.
+2. Rebuild the index and check that every trace exists in Langfuse:
+
+   ```bash
+   python reports/build_index.py reports/<environment>
+   python reports/build_index.py reports/<environment> --verify  # needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+   ```
+
+3. Write or update `reports/<environment>/README.md` (results table and caveats).
+4. Push to Hugging Face (needs `HF_TOKEN`):
+
+   ```bash
+   python scripts/push_october_reports_to_hf.py   # jablonkagroup/corral-reports-october-runs-v1
+   python scripts/push_october_summary_to_hf.py   # jablonkagroup/corral-reports-october-runs-summary-v1
+   ```
+
+5. Check everything before pushing to git:
+
+   ```bash
+   python reports/check_reports.py        # convention
+   python reports/check_reports.py --hf   # Hugging Face datasets match (needs huggingface_hub, pyarrow)
+   ```
+
+The `Reports` workflow (`.github/workflows/reports.yaml`) runs both checks on
+every push and pull request to `report_audit` that touches `reports/`. It
+checks out without Git LFS, so reports stored in LFS are verified through the
+Hugging Face summary's `report_sha256` rather than rebuilt.
 
 Read a report with `gzip -dc report.json.gz` or `xz -dc report.json.xz`. The
 inference optimization AI Scientist reports are stored in Git LFS; run

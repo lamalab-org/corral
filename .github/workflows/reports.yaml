@@ -1,0 +1,64 @@
+name: Reports
+
+# Guards the report_audit branch: reports must follow the convention in
+# reports/README.md and be published to the Hugging Face datasets.
+on:
+  push:
+    branches: [report_audit]
+    paths:
+      - reports/**
+      - scripts/push_october_*.py
+      - .github/workflows/reports.yaml
+  pull_request:
+    branches: [report_audit]
+    paths:
+      - reports/**
+      - scripts/push_october_*.py
+      - .github/workflows/reports.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reports-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conventions:
+    runs-on: ubuntu-latest
+    steps:
+      # Without LFS: the large reports stay pointers, which saves LFS bandwidth.
+      # Their content is checked against Hugging Face by the next job.
+      - uses: actions/checkout@v7
+        with:
+          lfs: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Check report convention
+        run: python reports/check_reports.py
+
+  huggingface:
+    needs: conventions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install huggingface_hub pyarrow
+
+      - name: Check reports are on Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python reports/check_reports.py --hf
