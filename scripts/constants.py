@@ -8,6 +8,9 @@ individual scripts stay lean and the canonical values are defined in one place.
 # push_reports_to_hf
 HF_REPO_REPORTS = "jablonkagroup/corral_runs_reports"
 
+# push_october_reports_to_hf
+HF_REPO_OCTOBER_REPORTS = "jablonkagroup/corral-reports-october-runs-v1"
+
 # push_qa_to_hf
 HF_REPO_QA_REPORTS = "jablonkagroup/corral-QAs-reports"
 HF_REPO_QA_TOPIC = "jablonkagroup/corral-QAs-topic_reports"
