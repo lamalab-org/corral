@@ -8,6 +8,15 @@ same layout, names and index files, so runs can be compared across them.
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics | [`psychometrics/`](psychometrics/) | `psychometric_hint_cleanup_clean` | 14 | 700 |
 | Resistor network (v4, terminal) | [`resistor_network/`](resistor_network/) | `resistor_level` | 14 | 700 |
+| Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
+| Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
+| Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 12 | 1,200 |
+| Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
+| Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
+
+[`runs.csv`](runs.csv) and [`trials.csv`](trials.csv) combine all eight
+environments: **110 runs and 6,100 trials**. Each environment also has its own
+indexes. Report paths are relative to the directory containing the CSV.
 
 The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).
@@ -21,10 +30,14 @@ reports/<environment>/
   trials.csv                        one row per trial, with Langfuse links
   level_<L>/<agent>__<model>/
     report.json.gz                  final `corral bench` report (or report.json.xz)
-    run-metadata.json               launcher metadata, where it was recorded
+    run-metadata.json               run metadata, where available
+    langfuse-overrides.json          recorded exceptions to deterministic trace IDs, if any
+    langfuse.json                    verified session and trial IDs, where available
+    provenance.json                  source hashes and recovery details, where available
 ```
 
-Each report holds exactly the trials that count: 10 tasks × 5 trials. Where a
+Each report holds exactly the trials that count: 10 tasks × 5 trials, or
+20 tasks × 5 trials for spectra elucidation. Where a
 trial failed for an infrastructure reason and was rerun, the report holds the
 rerun in that trial's place, and the report's metrics are computed from the
 final trials. Superseded attempts are not kept here.
@@ -36,7 +49,7 @@ final trials. Superseded attempts are not kept here.
 | `agent` | `react`, `claude-code`, `codex`, `openhands`, `ai-scientist` |
 | `model` | `claude-opus-5-5`, `gpt-5.6-sol`, `kimi-k3` |
 | `model_id` | `anthropic/claude-opus-5-5`, `openai/gpt-5.6-sol`, `openrouter/moonshotai/kimi-k3` |
-| `level` | `1`, `2` |
+| `level` | `1`, `2`; retrosynthesis and wetlab use `2`, `3` |
 
 Run folders are `<agent>__<model>`, e.g. `level_2/react__gpt-5.6-sol/`.
 `run_id` is the report's `benchmark_run_id` and keeps the name the run was
@@ -54,8 +67,9 @@ uncompressed JSON.
 execution_id, score, success, error, duration_s, input_tokens, output_tokens,
 tool_calls, langfuse_session_id, langfuse_trace_id, langfuse_trace_url,
 report_file`. `trial` is the trial's position within its task (0–4). `error`
-is empty for clean trials; trials that still ended in an error count as
-failures.
+is empty when the saved terminal error fields are empty. These raw error
+counts can include iteration-limit or answer-format outcomes. The saved
+score and success flag determine the benchmark outcome.
 
 ## Langfuse
 
@@ -68,18 +82,12 @@ Each trial is one trace in project `cmsio90yc092lad0ggc5lyo0x` on
   This is the `run_id`, except for a rerun substituted into a report, which
   keeps the session it was run in.
 
-On 2026-10-16 every trace in the three `trials.csv` files (2,100 in total) was
-found in Langfuse (`build_index.py --verify`).
+Recorded trace IDs in `langfuse-overrides.json` take precedence over the
+deterministic formula. `build_index.py` reads these mappings before deriving
+other IDs. Keep these files when rebuilding or copying a run.
 
-**Known issue: some traces mix attempts.** Some trials were retried under the
-same execution ID, so the retry wrote into the same trace as the attempt it
-replaced. Such a trace can hold observations from both. This affects about 139
-inference optimization trials and up to 319 resistor trials (Codex, Claude
-Code, OpenHands, react Kimi K3 and react GPT L2 runs). The psychometrics reruns
-and the nine resistor technical reruns (`resistor_network/technical-reruns.csv`)
-used new run IDs and are not affected. The report is authoritative for what the
-final attempt did. Future reruns should use a new run ID so each attempt gets
-its own trace.
+On 2026-10-16 every trace in the original three environments' `trials.csv`
+files (2,100 in total) was found in Langfuse (`build_index.py --verify`).
 
 ## Adding or updating reports
 
@@ -90,6 +98,8 @@ its own trace.
 
    ```bash
    python reports/build_index.py reports/<environment>
+   # rebuild every environment and the combined root indexes
+   python reports/build_index.py reports
    python reports/build_index.py reports/<environment> --verify  # needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
    ```
 
