@@ -134,6 +134,11 @@ def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
 
     assert ownership_changes == [(result, 501, 20), (checkpoint, 501, 20)]
 
+    ownership_changes.clear()
+    internal._reclaim_checkpoint(checkpoint)
+
+    assert ownership_changes == [(result, 0, 0), (checkpoint, 0, 0)]
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("cached", [False, True])
@@ -175,6 +180,26 @@ async def test_preflight_builds_selected_task_and_extra_only_when_image_is_missi
             str(tmp_path),
         )
         assert commands[-1][1:3] == ("image", "inspect")
+
+
+@pytest.mark.anyio
+async def test_preflight_rebuilds_an_existing_image_when_asked(monkeypatch, tmp_path):
+    commands = []
+    digest = "sha256:" + "b" * 64
+
+    async def command(*arguments, **_kwargs):
+        commands.append(arguments)
+        return 0, digest
+
+    monkeypatch.setattr(launchers, "_command", command)
+    await launchers.DockerTaskLauncher.preflight(
+        DockerSandboxSpec(image="corral-wetlab:latest"),
+        build_context=tmp_path,
+        dockerfile=tmp_path / "wetlab.Dockerfile",
+        rebuild=True,
+    )
+
+    assert [arguments[1] for arguments in commands] == ["image", "build", "image"]
 
 
 @pytest.mark.anyio
@@ -814,7 +839,8 @@ async def test_container_task_traces_through_the_environment_observer(
         raise RuntimeError("stop after the observer is created")
 
     monkeypatch.setattr(internal, "observer_from_env", Observer)
-    monkeypatch.setattr(internal.os, "chown", stop)
+    # Stop at startup regardless of whether the test runner is root.
+    monkeypatch.setattr(internal, "_reclaim_checkpoint", stop)
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
     request_path = checkpoint / "request.json"

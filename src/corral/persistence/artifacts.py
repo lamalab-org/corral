@@ -253,3 +253,19 @@ class LocalArtifactStore:
 
     async def contains(self, blob_ref: str) -> bool:
         return await asyncio.to_thread(self._contains, blob_ref)
+
+
+@dataclass(frozen=True, slots=True)
+class PrivateArtifacts:
+    """Controller-only files a trusted tool keeps with the trial.
+
+    Files go to the execution's ArtifactStore, which travels with the
+    checkpoint but is never mounted into a worker. A saved file is referenced
+    only by the ``blob_ref`` the tool records in its own state.
+    """
+
+    store: ArtifactStore
+
+    def save(self, path: str | Path) -> str:
+        """Store one file and return its ``blob_ref``. Call from a worker thread."""
+        return asyncio.run(self.store.put_file(path)).blob_ref

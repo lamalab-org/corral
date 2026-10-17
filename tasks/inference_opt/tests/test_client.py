@@ -4,6 +4,8 @@ from inference_opt.client import StudentEndpoint
 
 
 class EmptyResponse:
+    status_code = 200
+
     def raise_for_status(self):
         pass
 
@@ -17,7 +19,7 @@ def test_api_key_is_allowed_for_local_http(monkeypatch):
     )
 
     endpoint = StudentEndpoint("http://127.0.0.1:8000", api_key="secret")
-    assert endpoint.generate("hello") == [""]
+    assert [c.text for c in endpoint.complete("hello")] == [""]
 
 
 def test_api_key_is_rejected_for_remote_http(monkeypatch):
@@ -27,7 +29,7 @@ def test_api_key_is_rejected_for_remote_http(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="non-local HTTP"):
-        StudentEndpoint("http://student.example", api_key="secret").generate("hello")
+        StudentEndpoint("http://student.example", api_key="secret").complete("hello")
 
 
 def test_remote_http_without_api_key_is_allowed(monkeypatch):
@@ -36,7 +38,7 @@ def test_remote_http_without_api_key_is_allowed(monkeypatch):
     )
 
     endpoint = StudentEndpoint("http://student.example")
-    assert endpoint.generate("hello") == [""]
+    assert [c.text for c in endpoint.complete("hello")] == [""]
 
 
 class JsonResponse:
@@ -72,7 +74,7 @@ def test_truncated_reasoning_is_empty_text_not_none(monkeypatch):
     assert completion.text == ""
     assert completion.finish_reason == "length"
     assert completion.reasoning == "Let me think..."
-    assert endpoint.generate("hi") == [""]
+    assert [c.text for c in endpoint.complete("hi")] == [""]
 
 
 def test_several_samples_are_separate_single_requests(monkeypatch):
@@ -118,3 +120,41 @@ def test_timeout_grows_with_max_tokens(monkeypatch):
     # Never longer than the per-question limit.
     endpoint.complete("hi", max_tokens=100_000)
     assert seen[2] == 1800
+
+
+def test_reasoning_off_is_sent_in_each_backends_own_form(monkeypatch):
+    from inference_opt.client import student_endpoint
+
+    bodies = []
+
+    def post(url, json, timeout, headers):
+        bodies.append(json)
+        return JsonResponse(
+            {"choices": [{"message": {"content": "4"}, "finish_reason": "stop"}]}
+        )
+
+    monkeypatch.setattr("inference_opt.client.requests.post", post)
+    off = {"reasoning": False}
+    student_endpoint("openrouter/qwen/qwen3.5-9b@together", options=off).chat([])
+    student_endpoint("vllm/Qwen/Qwen3.5-9B", "http://127.0.0.1:8000/v1", options=off).chat([])
+    student_endpoint("vllm/Qwen/Qwen3.5-9B", "http://127.0.0.1:8000/v1").chat([])
+    assert bodies[0]["reasoning"] == {"enabled": False}
+    assert bodies[0]["provider"] == {"order": ["together"], "allow_fallbacks": False}
+    assert bodies[1]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "reasoning" not in bodies[2]
+    assert "chat_template_kwargs" not in bodies[2]
+
+
+def test_a_reply_the_provider_broke_off_is_retried(monkeypatch):
+    replies = [
+        {"choices": [{"message": {"content": "partial"}, "finish_reason": "error"}]},
+        {"choices": [{"message": {"content": "ANSWER: 4"}, "finish_reason": "stop"}]},
+    ]
+    monkeypatch.setattr("inference_opt.client.time.sleep", lambda _: None)
+    monkeypatch.setattr(
+        "inference_opt.client.requests.post",
+        lambda *a, **k: JsonResponse(replies.pop(0)),
+    )
+    completion = StudentEndpoint("http://127.0.0.1:8000").chat([])
+    assert completion.text == "ANSWER: 4"
+    assert completion.finish_reason == "stop"

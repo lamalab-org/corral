@@ -379,7 +379,9 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
                 "CORRAL_EXTRAS": "claude",
                 "CORRAL_TASK": environment,
             }
+            assert kwargs["rebuild"] is True
         else:
+            assert kwargs["rebuild"] is False
             assert kwargs["build_context"] is None
             assert kwargs["dockerfile"] is None
             assert kwargs["build_args"] is None

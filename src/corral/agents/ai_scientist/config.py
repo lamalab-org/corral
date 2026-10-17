@@ -1,9 +1,18 @@
 """Configuration profiles for the AI Scientist scaffold."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class FinalAction(BaseModel):
+    """A task tool the agent runs on its main session before answering."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class AIScientistConfig(BaseModel):
@@ -42,6 +51,11 @@ class AIScientistConfig(BaseModel):
     max_search_nodes: int | None = Field(default=None, ge=1)
     max_validation_nodes: int | None = Field(default=None, ge=0)
     max_tool_calls: int = Field(default=32, ge=0)
+    # For tasks scored by what a submission tool records in the main session,
+    # not by the answer text. These run there, in order, after the best
+    # branch's files are promoted and before the final answer; the search
+    # never sees these tools, so branches cannot call them.
+    final_actions: tuple[FinalAction, ...] = ()
     max_llm_tokens: int | None = Field(default=None, ge=1)
     max_actions_per_node: int = Field(default=3, ge=1)
     max_debug_depth: int = Field(default=2, ge=0)

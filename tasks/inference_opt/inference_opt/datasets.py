@@ -9,10 +9,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from inference_opt.api import Question
-
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterable
 
 __all__ = [
     "BENCHMARKS",
@@ -21,41 +19,35 @@ __all__ = [
     "FrozenItem",
     "Split",
     "data_root",
-    "iter_questions",
+    "example_baselines_path",
+    "load_example_baselines",
     "load_items",
     "load_manifest",
     "load_targets",
     "public_record",
-    "to_question",
     "write_jsonl",
 ]
 
-DATASET_VERSION = "v1"
+DATASET_VERSION = "v2"
 
-#: The benchmarks included in the frozen set.
+#: One benchmark per MATH subject, Level 5 only (``scripts/select_math_levels.py``),
+#: and the three GSM-Symbolic variants (``scripts/select_gsm_symbolic.py``).
+#: ``data/frozen/v1`` is the earlier mixed set (MMLU-Pro, BBH, GPQA, MATH,
+#: ChemBench, ARC); it is kept on disk but not used.
 BENCHMARKS: tuple[str, ...] = (
-    "chembench",
-    "bbh",
-    "gpqa_diamond",
-    "gsm8k",
-    "mmlu_pro",
-    "arc_challenge",
+    "math_algebra",
+    "math_prealgebra",
+    "math_number_theory",
+    "math_counting_probability",
+    "math_geometry",
+    "gsm_symbolic",
+    "gsm_p1",
+    "gsm_p2",
 )
 
-Split = Literal["train", "test"]
-
-#: Fields exposed to policy execution. The target is not included.
-PUBLIC_FIELDS: tuple[str, ...] = (
-    "item_id",
-    "benchmark",
-    "sample_id",
-    "split",
-    "question",
-    "options",
-    "answer_format",
-    "category",
-    "subcategory",
-)
+#: ``train`` is scored by experiments, ``test`` by the submission, and ``examples``
+#: is what the agent reveals and policies get as ``ctx.examples``; it is never scored.
+Split = Literal["train", "test", "examples"]
 
 
 class DatasetError(RuntimeError):
@@ -96,19 +88,9 @@ class FrozenItem:
     options: tuple[str, ...] | None = None
     category: str | None = None
     subcategory: str | None = None
-    #: Accuracy of the reference model cohort on this item when the set was
-    #: assembled. Between 0.2 and 0.8 by construction; lower means harder.
+    #: Accuracy of a 7-8B reference model cohort on this item; lower means harder.
     reference_accuracy: float | None = None
     question_hash: str | None = None
-
-    @property
-    def answer_type(self) -> str:
-        """Map the storage-level format onto the policy-facing answer type."""
-        if self.answer_format in ("mcq_single", "mcq_multi"):
-            return "mcq"
-        if self.answer_format == "numeric":
-            return "numeric"
-        return "text"
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> FrozenItem:
@@ -131,8 +113,8 @@ class FrozenItem:
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         raise DatasetError(
-            f"frozen dataset file not found: {path}. Build it with "
-            "scripts/build_pool.py then scripts/freeze_dataset.py."
+            f"frozen dataset file not found: {path}; set CORRAL_INFERENCE_DATA_DIR "
+            "to a mounted dataset"
         )
     records: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as stream:
@@ -226,6 +208,30 @@ def load_manifest(version: str = DATASET_VERSION) -> dict[str, Any]:
         raise DatasetError(f"malformed manifest at {path}: {exc}") from exc
 
 
+def example_baselines_path(version: str = DATASET_VERSION) -> Path:
+    """Where ``measure_baselines.py --splits examples`` writes the students' answers."""
+    return Path(__file__).resolve().parent / "data" / "baselines" / f"examples_{version}.jsonl"
+
+
+def load_example_baselines(
+    models: Iterable[str], *, version: str = DATASET_VERSION
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Each student's zero-shot answer to each example, as ``{model: {item_id: row}}``.
+
+    A row holds ``correct``, ``completion`` and ``finish_reason``. A model that
+    was never measured maps to an empty dict.
+    """
+    wanted = set(models)
+    result: dict[str, dict[str, dict[str, Any]]] = {model: {} for model in wanted}
+    path = example_baselines_path(version)
+    if not path.is_file():
+        return result
+    for record in _read_jsonl(path):
+        if record["model"] in wanted:
+            result[record["model"]][str(record["item_id"])] = record
+    return result
+
+
 def public_record(item: FrozenItem) -> dict[str, Any]:
     """The subset of an item policy execution is allowed to receive."""
     record = {
@@ -241,30 +247,3 @@ def public_record(item: FrozenItem) -> dict[str, Any]:
     if item.options:
         record["options"] = list(item.options)
     return record
-
-
-def to_question(item: FrozenItem, index: int = 0, total: int = 1) -> Question:
-    """Convert a frozen item into the policy-facing :class:`~inference_opt.api.Question`."""
-    labels = (
-        tuple(chr(ord("A") + position) for position in range(len(item.options)))
-        if item.options
-        else None
-    )
-    return Question(
-        id=item.item_id,
-        text=item.question,
-        benchmark=item.benchmark,
-        answer_type=item.answer_type,  # type: ignore[arg-type]
-        choices=item.options,
-        choice_labels=labels,
-        topic=item.category,
-        index=index,
-        total=total,
-    )
-
-
-def iter_questions(items: Sequence[FrozenItem]) -> Iterator[Question]:
-    """Yield questions with ``index``/``total`` populated for pacing."""
-    total = len(items)
-    for index, item in enumerate(items):
-        yield to_question(item, index=index, total=total)

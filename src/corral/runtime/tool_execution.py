@@ -11,9 +11,11 @@ from typing import TYPE_CHECKING, Any, Literal
 from corral.core.resources import RESOURCE_STATE_NAMESPACE, MaterializedResourcePath
 from corral.core.transition import (
     CORRAL_ACTION_ID_ARGUMENT,
+    CORRAL_PRIVATE_ARTIFACTS_ARGUMENT,
     HIDDEN_ARGUMENTS_NAMESPACE,
     ToolExecutionResult,
 )
+from corral.persistence.artifacts import PrivateArtifacts
 from corral.runtime import permissions
 from corral.workspace import PUBLIC_WORKSPACE_ROOT, materialize_local_tool_arguments
 
@@ -223,6 +225,19 @@ class ToolExecutor:
             )
         return _json_copy(value)
 
+    def _private_artifacts(self, tool: Tool) -> PrivateArtifacts:
+        if not tool.trusted:
+            raise PermissionError(
+                f"Tool {tool.name!r} must be trusted to save private artifacts"
+            )
+        manager = self.environment.workspace_manager
+        if manager is None:
+            raise ToolArgumentError(
+                f"Tool {tool.name!r} needs private artifacts, but the "
+                "environment has no artifact store"
+            )
+        return PrivateArtifacts(manager.artifact_store)
+
     def _prepare_arguments(
         self,
         state: ExecutionState,
@@ -297,6 +312,8 @@ class ToolExecutor:
                 continue
             if name == CORRAL_ACTION_ID_ARGUMENT:
                 arguments[name] = action_id
+            elif name == CORRAL_PRIVATE_ARTIFACTS_ARGUMENT:
+                arguments[name] = self._private_artifacts(tool)
             elif name in tool.workspace_args:
                 arguments[name] = (
                     self.environment.workspace_path

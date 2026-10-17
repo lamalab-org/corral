@@ -6,10 +6,20 @@ import json
 from pathlib import Path
 
 import pytest
-from inference_opt.env import create_environments
-from inference_opt.score import resolve_submission
+from inference_opt import datasets
+from inference_opt.env import create_environments, load_tasks_from_json
+from inference_opt.score import template_of
 
-BENCHMARKS = {"gsm8k", "mmlu_pro", "gpqa_diamond", "bbh", "chembench", "arc_challenge"}
+TASK_BENCHMARKS = {
+    1: {
+        "math_algebra",
+        "math_prealgebra",
+        "math_number_theory",
+        "math_counting_probability",
+        "math_geometry",
+    },
+    2: {"gsm_symbolic", "gsm_p1", "gsm_p2"},
+}
 
 
 @pytest.fixture
@@ -18,22 +28,35 @@ def environments(tmp_path):
 
 
 class TestConstruction:
+    def test_unmeasured_example_baselines_stop_the_build(self, tmp_path, monkeypatch):
+        """Otherwise every revealed example would show no zero-shot reply."""
+        from inference_opt import datasets
+
+        monkeypatch.delenv("CORRAL_INFERENCE_ALLOW_UNMEASURED")
+        monkeypatch.setattr(
+            datasets, "example_baselines_path", lambda *_: tmp_path / "none"
+        )
+        with pytest.raises(RuntimeError, match="measure_baselines.py --splits examples"):
+            create_environments(level=1, work_dir=str(tmp_path / "w"))
+
     @pytest.mark.parametrize("level", [1, 2])
-    def test_twelve_tasks_per_level(self, tmp_path, level):
+    def test_ten_tasks_per_level(self, tmp_path, level):
         built = create_environments(level=level, work_dir=str(tmp_path / f"w{level}"))
-        assert len(built) == 12
+        assert len(built) == 10
         models = {
             len(environment.current_task.initial_input["models"])
             for environment in built.values()
         }
-        assert models == ({1} if level == 1 else {2})
+        assert models == {1}
 
-    def test_every_benchmark_is_covered(self, environments):
+    @pytest.mark.parametrize("level", [1, 2])
+    def test_every_benchmark_of_the_level_is_covered(self, tmp_path, level):
+        built = create_environments(level=level, work_dir=str(tmp_path / f"w{level}"))
         covered = {
             environment.current_task.initial_input["benchmark"]
-            for environment in environments.values()
+            for environment in built.values()
         }
-        assert covered == BENCHMARKS
+        assert covered == TASK_BENCHMARKS[level]
 
     def test_building_needs_no_server_or_dataset(self, tmp_path, monkeypatch):
         """Corral's contract suite builds every task with no GPU and no network."""
@@ -41,42 +64,44 @@ class TestConstruction:
         monkeypatch.delenv("CORRAL_VLLM_URL", raising=False)
         assert create_environments(level=1, work_dir=str(tmp_path / "w")) != {}
 
-    def test_level_two_tasks_are_joint(self, tmp_path):
-        built = create_environments(level=2, work_dir=str(tmp_path / "w2"))
-        assert all(
-            environment.current_task.initial_input["joint"]
-            for environment in built.values()
-        )
+    @pytest.mark.parametrize(("level", "metric"), [(1, "accuracy"), (2, "template_consistency")])
+    def test_each_level_matches_a_larger_model_on_its_own_metric(self, tmp_path, level, metric):
+        built = create_environments(level=level, work_dir=str(tmp_path / f"w{level}"))
+        for environment in built.values():
+            rule = environment.current_task.initial_input["pass_rule"]
+            assert rule["kind"] == "reference"
+            assert rule["metric"] == metric
+            assert bool(rule.get("no_regression")) == (level == 2)
 
 
 class TestToolSurface:
     def test_the_agent_can_write_its_policy(self, environments):
         """Without workspace tools the agent cannot produce a submission at all."""
-        tools = environments["gsm8k_a"].tools
+        tools = environments["math_algebra_b"].tools
         assert {"write_file", "read_file", "list_files"} <= set(tools)
 
     def test_all_nine_task_tools_are_present(self, environments):
-        tools = environments["gsm8k_a"].tools
+        tools = environments["math_algebra_b"].tools
         assert {
-            "get_baseline", "reveal_train_questions", "query_student",
+            "get_baseline", "reveal_examples", "query_student",
             "dry_run_policy", "evaluate_candidate", "inspect_failures",
             "compare_runs", "get_budget", "submit_policy",
         } <= set(tools)
 
     def test_inference_tools_are_trusted(self, environments):
         """The environment uses trusted tools and committed session state."""
-        tools = environments["gsm8k_a"].tools
+        tools = environments["math_algebra_b"].tools
         trusted = {name for name, tool in tools.items() if getattr(tool, "trusted", False)}
         assert trusted == {
-            "get_baseline", "reveal_train_questions", "query_student",
+            "get_baseline", "reveal_examples", "query_student",
             "dry_run_policy", "evaluate_candidate", "inspect_failures",
             "compare_runs", "get_budget", "submit_policy",
         }
 
     def test_tools_are_bound_to_their_own_task(self, environments):
         """One shared pool would bind every task to whichever was built last."""
-        first = environments["gsm8k_a"].tools["get_baseline"]
-        second = environments["chembench_a"].tools["get_baseline"]
+        first = environments["math_algebra_b"].tools["get_baseline"]
+        second = environments["math_prealgebra_d"].tools["get_baseline"]
         assert first is not second
 
 
@@ -84,55 +109,176 @@ class TestPrompt:
     def test_prompt_states_the_rule_and_how_to_finish(self, environments):
         from corral.core.state import ExecutionState
 
-        environment = environments["gsm8k_a"]
+        environment = environments["math_algebra_b"]
         prompt = environment.current_task.prompt_fn(environment, ExecutionState)
         assert "submit_answer" in prompt
         assert "modify model weights" in prompt
         assert "frozen student model" in prompt
-        assert "gsm8k" in prompt
+        assert "math_algebra" in prompt
+        assert "Llama 3.1 70B Instruct" in prompt
+        assert "76.7%" in prompt  # the larger model's train accuracy, the target
 
     def test_prompt_does_not_name_strategies(self, environments):
         """The prompt leaves strategy choice to the policy."""
         from corral.core.state import ExecutionState
 
-        environment = environments["gsm8k_a"]
+        environment = environments["math_algebra_b"]
         prompt = environment.current_task.prompt_fn(environment, ExecutionState).lower()
         for leak in ("self-consistency", "majority vote", "debate", "chain of thought"):
             assert leak not in prompt
 
 
-class TestSubmissionResolution:
-    def _policy(self, root):
-        policy = root / "policy"
-        policy.mkdir(parents=True, exist_ok=True)
-        (policy / "policy.py").write_text(
-            "class Policy:\n    def solve(self, q, ctx): return 'A'\n", encoding="utf-8"
+def _task_config(level, task_id):
+    root = Path(__file__).resolve().parents[1] / f"environments/level_{level}/tasks_json"
+    config = dict(load_tasks_from_json(root)[task_id].initial_input)
+    config["model_specs"] = dict.fromkeys(config["models"], "mockllm/model")
+    config["base_urls"] = {}
+    return config
+
+
+def _workspace_with_policy(tmp_path, source):
+    workspace = tmp_path / "workspace"
+    (workspace / "policy").mkdir(parents=True, exist_ok=True)
+    (workspace / "policy" / "policy.py").write_text(source, encoding="utf-8")
+    return workspace
+
+
+class TestSubmission:
+    POLICY = (
+        "class Policy:\n"
+        "    def run(self, questions, ctx):\n"
+        "        texts = ctx.student.generate([q.text for q in questions])\n"
+        "        ctx.answer({q.id: t for q, t in zip(questions, texts)})\n"
+    )
+
+    def _submit(self, tmp_path, ledger, source=POLICY):
+        from inference_opt.tools import create_tools
+
+        workspace = _workspace_with_policy(tmp_path, source)
+        submit = create_tools(_task_config(1, "math_algebra_b"), "")["submit_policy"]._func
+        return submit(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
+
+    def _state(self, ledger):
+        from corral.core.state import EnvironmentState, ExecutionState
+
+        return ExecutionState(
+            through_commit_hash="a" * 64,
+            execution_id="x",
+            branch_id="main",
+            environment=EnvironmentState(values={"resources": {"inference_state": ledger}}),
         )
-        return policy
 
-    def test_staged_submission_is_preferred(self, tmp_path):
-        self._policy(tmp_path)
-        (tmp_path / "submission.json").write_text(
-            json.dumps({"policy_dir": "policy"}), encoding="utf-8"
+    def test_the_test_run_is_recorded_but_not_shown(self, tmp_path):
+        ledger = {}
+        out = self._submit(tmp_path, ledger)
+        assert out.startswith("Submitted.")
+        final = ledger["final"]
+        assert final["submission"] == 1 and len(final["policy_hash"]) == 64
+        # The reply carries no test score, accuracy or per-model result.
+        for leak in ("accuracy", "headroom", "delta", "score "):
+            assert leak not in out
+        assert "per_model" in final["result"]["metadata"]
+        assert not (tmp_path / "workspace" / "runs").exists()
+
+    def test_the_host_scorer_only_reads_the_recorded_result(self, tmp_path):
+        from inference_opt.score import StateScorer
+
+        from corral.evaluation.scorer import SubmissionScore
+
+        ledger = {}
+        self._submit(tmp_path, ledger)
+        details = SubmissionScore.model_validate(
+            StateScorer().evaluate_state(self._state(ledger))
         )
-        resolved, _ = resolve_submission(str(tmp_path / "submission.json"), tmp_path)
-        assert resolved == (tmp_path / "policy").resolve()
+        metrics = details.metadata["metrics"]
+        assert {"student_b_accuracy", "student_b_delta", "raw_delta"} <= set(metrics)
+        assert details.metadata["outcome"] == "ok"
+        assert details.metadata["policy_hash"] == ledger["final"]["policy_hash"]
+        assert details.feedback.startswith("score ")
 
-    def test_a_bare_directory_still_resolves(self, tmp_path):
-        policy = self._policy(tmp_path)
-        resolved, notes = resolve_submission(str(policy), tmp_path)
-        assert resolved == policy.resolve()
-        assert notes
+    def test_no_submission_scores_zero_with_a_reason(self):
+        from inference_opt.score import StateScorer
 
-    def test_garbage_falls_back_to_the_workspace_policy(self, tmp_path):
-        self._policy(tmp_path)
-        resolved, _ = resolve_submission("not-a-real-path", tmp_path)
-        assert resolved == (tmp_path / "policy").resolve()
+        result = StateScorer().evaluate_state(self._state({}))
+        assert result["score"] == 0.0
+        assert result["metadata"]["outcome"] == "no_submission"
 
-    def test_nothing_to_score_is_reported_not_guessed(self, tmp_path):
-        resolved, notes = resolve_submission("nope", tmp_path)
-        assert resolved is None
-        assert any("no policy.py" in note for note in notes)
+    def test_the_score_carries_the_train_history(self):
+        from inference_opt.score import StateScorer
+
+        runs = [{"run_id": "exp-1", "kind": "experiment", "delta": 0.1}]
+        result = StateScorer().evaluate_state(self._state({"runs": runs}))
+        assert result["metadata"]["train_history"] == runs
+
+    def test_an_environment_fault_is_raised_not_scored(self):
+        from inference_opt.score import HarnessError, StateScorer
+
+        state = self._state({"final": {"harness_error": "student unreachable"}})
+        with pytest.raises(HarnessError, match="student unreachable"):
+            StateScorer().evaluate_state(state)
+
+    def test_a_policy_that_does_not_load_uses_no_submission(self, tmp_path):
+        ledger = {}
+        out = self._submit(tmp_path, ledger, "raise ImportError('nope')\n")
+        assert out.startswith("NOT submitted")
+        assert ledger.get("submissions", 0) == 0 and ledger.get("final") is None
+
+    def test_a_policy_can_be_submitted_only_once(self, tmp_path):
+        from inference_opt.tools import create_tools
+
+        workspace = _workspace_with_policy(tmp_path, self.POLICY)
+        submit = create_tools(_task_config(1, "math_algebra_b"), "")["submit_policy"]._func
+        ledger = {}
+        args = {"policy_path": "policy", "work_dir": str(workspace), "inference_state": ledger}
+        assert submit(**args).startswith("Submitted")
+        first = ledger["final"]
+        out = submit(**args)
+        assert out.startswith("NOT submitted: a policy was already submitted")
+        assert ledger["final"] == first and ledger["submissions"] == 1
+
+
+def test_a_refunded_run_keeps_its_folder_and_id(tmp_path):
+    from inference_opt.tools import create_tools
+
+    workspace = _workspace_with_policy(tmp_path, "raise ImportError('nope')\n")
+    dry_run = create_tools(_task_config(1, "math_algebra_b"), "")["dry_run_policy"]._func
+    ledger = {}
+    dry_run(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
+    (workspace / "policy" / "policy.py").write_text(TestSubmission.POLICY)
+
+    out = dry_run(policy_path="policy", work_dir=str(workspace), inference_state=ledger)
+
+    assert json.loads(out.split("\n")[1])["run_id"] == "dry-2"
+    assert sorted(path.name for path in (workspace / "runs").iterdir()) == [
+        "dry-1",
+        "dry-2",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "warning"),
+    [
+        (
+            "def run(questions, ctx):\n    ctx.answer({q.id: '' for q in questions})\n",
+            "made no student calls and gave no non-empty answer",
+        ),
+        (TestSubmission.POLICY, None),
+    ],
+)
+def test_a_dry_run_that_never_reaches_the_student_is_not_ok(tmp_path, source, warning):
+    from inference_opt.tools import create_tools
+
+    workspace = _workspace_with_policy(tmp_path, source)
+    dry_run = create_tools(_task_config(1, "math_algebra_b"), "")["dry_run_policy"]._func
+
+    headline = dry_run(
+        policy_path="policy", work_dir=str(workspace), inference_state={}
+    ).split("\n")[0]
+
+    if warning:
+        assert warning in headline and "OK" not in headline
+    else:
+        assert "Dry run OK" in headline
 
 
 class TestQueryStudent:
@@ -148,7 +294,7 @@ class TestQueryStudent:
                 StudentCompletion("30", "stop"),
             ],
         )
-        query = environments["gsm8k_a"].tools["query_student"]._func
+        query = environments["math_algebra_b"].tools["query_student"]._func
         out = query(prompt="3/5 of 50?", max_tokens=256, n=2, work_dir="", inference_state={})
         summary, payload = out.split("\n")[:2]
         data = json.loads(payload)
@@ -157,6 +303,21 @@ class TestQueryStudent:
         assert "None" not in data["completions"]
         assert "1 hit max_tokens=256" in summary
         assert data["reasoning_tail"] == ["...so 3/5 of 50 is", ""]
+
+    def test_max_tokens_is_capped_like_a_policy_call(self, environments, monkeypatch):
+        from inference_opt.client import StudentCompletion
+        from inference_opt.runner import MAX_TOKENS_CAP
+
+        requested = []
+
+        def probe(*_args, max_tokens, **_kwargs):
+            requested.append(max_tokens)
+            return [StudentCompletion("30", "stop")]
+
+        monkeypatch.setattr("inference_opt.tools.probe_student", probe)
+        query = environments["math_algebra_b"].tools["query_student"]._func
+        query(prompt="3/5 of 50?", max_tokens=10**6, work_dir="", inference_state={})
+        assert requested == [MAX_TOKENS_CAP]
 
 
 GROUPED_TRACEBACK = """  + Exception Group Traceback (most recent call last):
@@ -191,19 +352,23 @@ class TestToolErrors:
     def test_a_failed_dry_run_names_the_real_exception(
         self, environments, monkeypatch, tmp_path
     ):
-        from inference_opt.eval_runner.spec import RunSummary
+        from inference_opt.runner import ModelRun
 
         monkeypatch.setattr(
-            "inference_opt.tools.PolicyEvaluator.run",
-            lambda self, spec, targets=None: RunSummary(
-                run_id=spec.run_id, ok=False, error=GROUPED_TRACEBACK
-            ),
+            "inference_opt.tools.run_policy",
+            lambda **kwargs: {
+                model: ModelRun(
+                    model=model,
+                    split="train",
+                    question_ids=list(kwargs["item_ids"]),
+                    error=GROUPED_TRACEBACK,
+                )
+                for model in kwargs["models"]
+            },
         )
-        dry = environments["gsm8k_a"].tools["dry_run_policy"]._func
-        workspace = tmp_path / "workspace"
-        (workspace / "policy").mkdir(parents=True)
-        (workspace / "policy" / "policy.py").write_text(
-            "class Policy:\n    def solve(self, q, ctx): return 'A'\n"
+        dry = environments["math_algebra_b"].tools["dry_run_policy"]._func
+        workspace = _workspace_with_policy(
+            tmp_path, "def run(questions, ctx):\n    ctx.answer(questions[0].id, 'A')\n"
         )
         out = dry(policy_path="policy", work_dir=str(workspace), inference_state={})
         headline, payload = out.split("\n")[:2]
@@ -211,49 +376,7 @@ class TestToolErrors:
         assert "solver.py" in json.loads(payload)["error"]
 
 
-class TestScoringDiagnostics:
-    def test_tasks_sharing_a_work_dir_keep_their_own_diagnostics(self, tmp_path):
-        """Every task scores under the same work_dir; reports must not collide."""
-        from corral.evaluation.scorer import SubmissionScore
-        from inference_opt.env import load_tasks_from_json
-        from inference_opt.score import policy_score
-
-        root = Path(__file__).resolve().parents[1] / "environments/level_1/tasks_json"
-        tasks = load_tasks_from_json(root, str(tmp_path / "unused"))
-        shared = tmp_path / "workspaces"
-        for task_id in ("gsm8k_a", "arc_challenge_a"):
-            config = dict(tasks[task_id].initial_input)
-            config["model_specs"] = {"student_a": "mockllm/model"}
-            config["base_urls"] = {}
-            submission = tmp_path / task_id / "policy"
-            submission.mkdir(parents=True)
-            (submission / "policy.py").write_text(
-                "class Policy:\n"
-                "    def solve(self, q, ctx):\n"
-                "        return ctx.student.generate(q.text)\n"
-            )
-            scorer = policy_score(config, str(shared))
-            # Corral records the feedback and metadata next to the score.
-            details = SubmissionScore.model_validate(
-                scorer.evaluate_submission(str(submission))
-            )
-            metrics = details.metadata["metrics"]
-            assert {"student_a_accuracy", "student_a_delta", "raw_delta"} <= set(metrics)
-            assert details.metadata["outcome"] == "ok"
-            assert "student_a" in details.metadata["per_model"]
-            assert details.feedback.startswith("score ")
-
-        reports = sorted(shared.glob("state/*/scoring_diagnostics.json"))
-        assert [p.parent.name for p in reports] == [
-            "arc_challenge-student_a",
-            "gsm8k-student_a",
-        ]
-        for report in reports:
-            payload = json.loads(report.read_text())
-            assert "student_a" in payload["per_model"]
-
-
-class TestHeadroomPassRule:
+class TestPassRules:
     def test_headroom_closed_counts_questions(self):
         from inference_opt.score import headroom_closed
 
@@ -264,41 +387,115 @@ class TestHeadroomPassRule:
         assert headroom_closed(30, 1.0, 30) is None  # nothing left to improve
 
     @pytest.mark.parametrize(
-        ("level", "task_id", "correct", "expected"),
+        ("level", "task_id", "outcome", "expected"),
         [
-            (1, "gsm8k_a", {"student_a": 30}, 1.0),
-            (1, "gsm8k_a", {"student_a": 23}, 0.0),
-            # Level 2 needs every student to pass: one at 100% and one at 0% fails.
-            (2, "gsm8k_ab", {"student_a": 30, "student_b": 24}, 0.0),
-            (2, "gsm8k_ab", {"student_a": 30, "student_b": 30}, 1.0),
+            (1, "math_algebra_b", "all", 1.0),
+            (1, "math_algebra_b", "just_short", 0.0),
+            (2, "gsm_p1_d", "all", 1.0),
+            (2, "gsm_p1_d", "just_short", 0.0),
         ],
     )
-    def test_score_is_one_only_when_every_student_closes_half(
-        self, tmp_path, monkeypatch, level, task_id, correct, expected
+    def test_score_is_one_only_when_the_student_matches_the_larger_model(
+        self, level, task_id, outcome, expected
     ):
-        from inference_opt import score as score_module
-        from inference_opt.env import load_tasks_from_json
-        from inference_opt.outcomes import ItemOutcome, RunOutcome
+        """Level 1 compares accuracy, level 2 template consistency."""
+        from inference_opt.runner import ModelRun
+        from inference_opt.score import final_result
 
-        root = Path(__file__).resolve().parents[1] / f"environments/level_{level}/tasks_json"
-        config = dict(load_tasks_from_json(root, str(tmp_path / "u"))[task_id].initial_input)
-        config["model_specs"] = {m: "mockllm/model" for m in config["models"]}
-        config["base_urls"] = {}
-        models = iter(config["models"])
-
-        def fake_outcomes(log_dir, predictions):
-            n = correct[next(models)]
-            return RunOutcome(items=[ItemOutcome(f"q{i}", i < n) for i in range(30)])
-
-        monkeypatch.setattr(score_module, "read_outcomes", fake_outcomes)
-        submission = tmp_path / "policy"
-        submission.mkdir()
-        (submission / "policy.py").write_text(
-            "class Policy:\n    def solve(self, q, ctx): return ctx.student.generate(q.text)\n"
-        )
-        scorer = score_module.policy_score(config, str(tmp_path / "w"))
-        result = scorer.evaluate_submission(str(submission))
+        config = _task_config(level, task_id)
+        rule = config["pass_rule"]
+        ((model, reference),) = rule["references"].items()
+        question_ids = [
+            item.item_id for item in datasets.load_items(config["benchmark"], "test")
+        ]
+        n = len(question_ids)
+        if outcome == "all":
+            correct = dict.fromkeys(question_ids, True)
+        elif rule["metric"] == "accuracy":
+            # One question below the larger model.
+            below = round(reference["test"] * n) - 1
+            correct = {qid: i < below for i, qid in enumerate(question_ids)}
+        else:
+            # Every instance right but one per template, in one template fewer
+            # than the larger model's share: accuracy stays high, consistency falls short.
+            templates = sorted({template_of(qid) for qid in question_ids})
+            solved = set(templates[: round(reference["test"] * len(templates)) - 1])
+            seen: set[str] = set()
+            correct = {}
+            for qid in question_ids:
+                template = template_of(qid)
+                first = template not in seen
+                seen.add(template)
+                correct[qid] = template in solved or not first
+        runs = {
+            model: ModelRun(
+                model=model,
+                split="test",
+                question_ids=question_ids,
+                answers=dict.fromkeys(question_ids, "ANSWER: 1"),
+                correct=correct,
+                calls_used=n,
+            )
+        }
+        result = final_result(config, runs)
         assert result["score"] == expected
         assert result["metadata"]["metrics"]["passed"] == expected
-        for model in config["models"]:
-            assert f"{model}_headroom_closed" in result["metadata"]["metrics"]
+
+    def test_robustness_must_not_cost_accuracy(self):
+        """Matching the larger model's consistency is not enough if accuracy falls."""
+        from inference_opt.runner import ModelRun
+        from inference_opt.score import final_result
+
+        config = _task_config(2, "gsm_p1_d")
+        ((model, reference),) = config["pass_rule"]["references"].items()
+        question_ids = [item.item_id for item in datasets.load_items("gsm_p1", "test")]
+        templates = sorted({template_of(qid) for qid in question_ids})
+        # Exactly the larger model's share of templates solved, every other question wrong.
+        solved = set(templates[: round(reference["test"] * len(templates))])
+        correct = {qid: template_of(qid) in solved for qid in question_ids}
+        run = ModelRun(
+            model=model, split="test", question_ids=question_ids,
+            answers=dict.fromkeys(question_ids, "ANSWER: 1"), correct=correct,
+            calls_used=len(question_ids),
+        )
+        accuracy = sum(correct.values()) / len(correct)
+        result = final_result(config, {model: run})
+        assert result["metadata"]["per_model"][model]["template_consistency"] >= reference["test"]
+        assert result["score"] == (1.0 if accuracy >= config["baselines"][model] else 0.0)
+
+    @pytest.mark.parametrize("level", [1, 2])
+    def test_the_headroom_rule_still_scores(self, level):
+        from inference_opt.runner import ModelRun
+        from inference_opt.score import final_result
+
+        config = _task_config(level, "math_algebra_b" if level == 1 else "gsm_p1_d")
+        config["pass_rule"] = {"kind": "headroom", "min_closed": 0.5}
+        (model,) = config["models"]
+        question_ids = [f"q{i}" for i in range(30)]
+        run = ModelRun(
+            model=model, split="test", question_ids=question_ids,
+            answers=dict.fromkeys(question_ids, "ANSWER: 1"),
+            correct=dict.fromkeys(question_ids, True), calls_used=30,
+        )
+        assert final_result(config, {model: run})["score"] == 1.0
+
+
+def test_a_reference_task_passes_on_a_tie_with_the_larger_model():
+    from inference_opt.runner import ModelRun
+    from inference_opt.score import final_result
+
+    config = _task_config(1, "math_counting_probability_b")
+    bar = config["pass_rule"]["references"]["student_b"]["test"]
+    question_ids = [f"q{i}" for i in range(30)]
+    tie = round(bar * 30)
+    run = ModelRun(
+        model="student_b",
+        split="test",
+        question_ids=question_ids,
+        answers=dict.fromkeys(question_ids, "ANSWER: 1"),
+        correct={qid: index < tie for index, qid in enumerate(question_ids)},
+        calls_used=30,
+    )
+    result = final_result(config, {"student_b": run})
+    assert result["score"] == 1.0
+    assert "(Llama 3.1 70B Instruct 33%)" in result["feedback"]

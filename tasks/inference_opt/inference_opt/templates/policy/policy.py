@@ -1,30 +1,24 @@
-"""Starter policy: a single zero-shot call."""
+"""Starter policy: one zero-shot call per question, all questions at once."""
 
-MANIFEST = {
-    "name": "starter-zero-shot",
-    "max_calls_per_question": 1,
-}
+MANIFEST = {"name": "starter-zero-shot"}
+
+
+def _prompt(question):
+    return (
+        question.text
+        + "\n\nSolve the problem. Put your final answer on the last line, "
+        "in the form `ANSWER: <answer>`."
+    )
 
 
 class Policy:
-    """Answers each question with one direct call to the student."""
+    """Sends every question to the student in one batch."""
 
-    def solve(self, question, ctx):
-        # If anything below fails, this is what gets scored. Always set it: a
-        # cheap guess beats no answer when the budget runs out mid-run.
-        ctx.scratch["fallback"] = (question.choice_labels or ("A",))[0]
-
-        prompt = question.text
-        if question.choices:
-            prompt += "\n\n" + question.rendered_choices()
-            prompt += "\n\nAnswer with the letter of the correct option."
-        marker = (
-            "`[ANSWER]<answer>[/ANSWER]`"
-            if question.benchmark == "chembench"
-            else "`ANSWER: <answer>`"
+    def run(self, questions, ctx):
+        texts = ctx.student.generate(
+            [{"prompt": _prompt(q), "question_id": q.id} for q in questions]
         )
-        prompt += f"\n\nExplain briefly, then finish with {marker}."
-
-        answer = ctx.student.generate(prompt, temperature=0.0)
-        ctx.log(f"one call, {len(answer)} chars back")
-        return answer
+        for question, text in zip(questions, texts, strict=True):
+            if text:
+                ctx.answer(question.id, text)
+            ctx.log(f"one call, {len(text)} chars back", question_id=question.id)
