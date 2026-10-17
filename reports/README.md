@@ -5,6 +5,7 @@ same layout, names and index files, so runs can be compared across them.
 
 | Environment | Folder | Branch | Runs | Trials |
 |---|---|---|---:|---:|
+| AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics | [`psychometrics/`](psychometrics/) | `psychometric_hint_cleanup_clean` | 14 | 700 |
 | Resistor network (v4, terminal) | [`resistor_network/`](resistor_network/) | `resistor_level` | 14 | 700 |
