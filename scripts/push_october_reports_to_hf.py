@@ -21,7 +21,7 @@ python scripts/push_october_reports_to_hf.py --dry_run
 # Push everything (the dataset repo is created private if it does not exist)
 python scripts/push_october_reports_to_hf.py
 
-# Push only some configs
+# Push only some configs (plus `runs`, which is always pushed)
 python scripts/push_october_reports_to_hf.py --env=psychometrics --level=2
 python scripts/push_october_reports_to_hf.py --runs_only
 """
@@ -223,7 +223,8 @@ def main(
             repo_id=repo, repo_type="dataset", private=not public, exist_ok=True
         )
 
-    # (config name, environment, level); the `runs` config has neither.
+    # (config name, environment, level); the `runs` config has neither. It
+    # indexes every environment and is small, so it is always pushed.
     configs: list[tuple[str, str | None, int | None]] = []
     if not runs_only:
         configs = [
@@ -231,8 +232,7 @@ def main(
             for env_name in (ENVIRONMENTS if env is None else (env,))
             for level_number in ((1, 2) if level is None else (level,))
         ]
-    if env is None and level is None:
-        configs.append(("runs", None, None))
+    configs.append(("runs", None, None))
 
     # A fresh cache per run: datasets keys generator caches on code and
     # arguments, not on the report files, so a reused cache could be stale.

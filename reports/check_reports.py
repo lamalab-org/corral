@@ -199,11 +199,23 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
             )
 
 
+def token_from_dotenv() -> str | None:
+    """Read HF_TOKEN from the repository's .env, as the push scripts do."""
+    dotenv = Path(__file__).resolve().parent.parent / ".env"
+    if not dotenv.is_file():
+        return None
+    for line in dotenv.read_text().splitlines():
+        key, _, value = line.removeprefix("export ").partition("=")
+        if key.strip() == "HF_TOKEN":
+            return value.strip().strip("\"'") or None
+    return None
+
+
 def check_hf(env_dirs: list[Path], problems: Problems) -> None:
     import pyarrow.parquet as pq
     from huggingface_hub import DatasetCard, HfApi, hf_hub_download
 
-    token = os.environ.get("HF_TOKEN")
+    token = os.environ.get("HF_TOKEN") or token_from_dotenv()
     if not token:
         problems.add("huggingface", "HF_TOKEN is not set; the datasets are private")
         return
