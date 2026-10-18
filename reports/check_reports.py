@@ -141,14 +141,22 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
 
     trials_by_report: dict[str, list[dict[str, str]]] = {}
     seen: set[str] = set()
+    overrides = {}
+    for report in reports:
+        rel = report.relative_to(env_dir).as_posix()
+        ids = {r["execution_id"] for r in trials if r["report_file"] == rel}
+        overrides.update(build_index.trace_overrides(report, ids))
     for row in trials:
         execution_id = row["execution_id"]
         row_where = f"{where}/trials.csv {execution_id}"
         if execution_id in seen:
             problems.add(row_where, "duplicate execution_id")
         seen.add(execution_id)
-        session = execution_id.rsplit(":", 2)[0]
-        trace = hashlib.sha256(f"corral:{execution_id}".encode()).hexdigest()[:32]
+        session = build_index.session_id(execution_id, row["run_id"])
+        trace = overrides.get(
+            execution_id,
+            hashlib.sha256(f"corral:{execution_id}".encode()).hexdigest()[:32],
+        )
         if row["langfuse_session_id"] != session:
             problems.add(
                 row_where, "langfuse_session_id must be the run part of execution_id"
@@ -156,7 +164,7 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
         if row["langfuse_trace_id"] != trace:
             problems.add(
                 row_where,
-                'langfuse_trace_id must be sha256("corral:" + execution_id)[:32]',
+                "langfuse_trace_id must match its recorded override or deterministic ID",
             )
         if row["langfuse_trace_url"] != build_index.trace_url(trace):
             problems.add(row_where, "langfuse_trace_url does not match the trace ID")

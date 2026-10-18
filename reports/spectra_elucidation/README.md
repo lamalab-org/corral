@@ -25,4 +25,12 @@ subsequent rescoring and reruns. Final evaluations are retained in the run repor
 
 ## Caveats
 
-None after retries.
+The retained trials include IR tool failures from the underlying
+spectral-prediction API. Affected calls returned `IR prediction failed` instead
+of an IR spectrum; the same message can appear in the IR field of combined
+spectral predictions. These failures remain in the reported traces after retries
+and may have limited the spectral evidence available to the agent.
+
+The tool returns this diagnostic as text, so a call can be recorded as completed
+without producing a spectrum or setting a terminal trial error. Consequently,
+the table's Errors column does not capture all IR API failures.

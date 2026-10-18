@@ -9,8 +9,8 @@ subsequent rescoring and reruns. Final evaluations are retained in the run repor
 
 | Agent | Model | Level | Passes | Errors | Unscored | Report |
 |---|---|---:|---:|---:|---:|---|
-| ai-scientist | claude-opus-5-5 | 1 | 13/50 | 0 | 0 | [report](level_1/ai-scientist__claude-opus-5-5/report.json.xz) |
-| ai-scientist | claude-opus-5-5 | 2 | 0/50 | 0 | 0 | [report](level_2/ai-scientist__claude-opus-5-5/report.json.xz) |
+| ai-scientist | claude-opus-5-5 | 1 | 30/50 | 0 | 0 | [report](level_1/ai-scientist__claude-opus-5-5/report.json.gz) |
+| ai-scientist | claude-opus-5-5 | 2 | 0/50 | 0 | 0 | [report](level_2/ai-scientist__claude-opus-5-5/report.json.gz) |
 | claude-code | claude-opus-5-5 | 1 | 27/50 | 0 | 0 | [report](level_1/claude-code__claude-opus-5-5/report.json.gz) |
 | claude-code | claude-opus-5-5 | 2 | 0/50 | 0 | 0 | [report](level_2/claude-code__claude-opus-5-5/report.json.gz) |
 | codex | gpt-5.6-sol | 1 | 25/50 | 0 | 0 | [report](level_1/codex__gpt-5.6-sol/report.json.gz) |
@@ -29,5 +29,25 @@ iteration-limit or answer-format outcomes. CSV trial positions are zero-based.
 
 ## Caveats
 
-AI Scientist runs completed with OpenBLAS errors
-(`completed_with_errors`).
+The retained trials include 128 pre-execution guard rejections across 72 trials
+(36 per level). Stargazer's `PythonREPL` tool wrapper included a safeguard
+intended to catch accidental replacement of functions with data, such as passing
+a number or array to an optimizer that expects a callable. It checked names
+before executing a cell and returned a diagnostic when it detected a conflict.
+
+The check used previously stored global values without correctly accounting for
+local function parameters or new callable definitions in the submitted cell.
+For example:
+
+```python
+# Previous cell
+from scipy.optimize import minimize
+
+f = 7
+
+# Later cell: valid Python that replaces f with a callable
+f = lambda x: (x[0] - 1) ** 2
+minimize(f, [0.0])
+```
+
+Perhaps a warning would be more appropriate than an outright rejection, allowing the user to proceed with the cell execution while still being informed of potential conflicts.
