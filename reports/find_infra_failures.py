@@ -328,7 +328,7 @@ def finding_table(rows: list[dict]) -> list[str]:
 def markdown(results: list[tuple[str, int, list[dict], list[str]]]) -> str:
     """Render the findings as Markdown tables, e.g. for a PR comment."""
     lines = [
-        "| Environment | Trials | Rerun candidates | To review | Agent limits "
+        "| Environment | Trials | Might need rerun | To review | Iteration limit "
         "| Not scanned (LFS) |",
         "|---|---:|---:|---:|---:|---:|",
     ]
@@ -339,7 +339,7 @@ def markdown(results: list[tuple[str, int, list[dict], list[str]]]) -> str:
         limits = {
             r["execution_id"]
             for r in rows
-            if r["success"] != "True" and r["category"] in NOT_INFRA
+            if r["success"] != "True" and r["category"] == "agent_limit"
         }
         lines.append(
             f"| {env} | {trials} | {len({r['execution_id'] for r in rerun})} "
@@ -350,8 +350,18 @@ def markdown(results: list[tuple[str, int, list[dict], list[str]]]) -> str:
         reviews.extend(review)
         skipped_all.extend(f"{env}/{s}" for s in skipped)
 
-    lines += ["", "### Rerun candidates", ""]
-    lines += finding_table(reruns) if reruns else ["None."]
+    if reruns:
+        lines += [
+            "",
+            "<details><summary>Might need rerun: "
+            f"{len({r['execution_id'] for r in reruns})} trials</summary>",
+            "",
+            *finding_table(reruns),
+            "",
+            "</details>",
+        ]
+    else:
+        lines += ["", "Might need rerun: none."]
     if reviews:
         lines += [
             "",
@@ -370,10 +380,12 @@ def markdown(results: list[tuple[str, int, list[dict], list[str]]]) -> str:
         ]
     lines += [
         "",
-        "Rerun candidates are failed trials whose terminal error, evaluation "
-        "error or missing activity shows an infrastructure cause (credits, rate "
-        "limit, provider error, timeout, policy, environment crash). Agent limits "
-        "and context-window overflows count as failures, not reruns.",
+        "Might need rerun: failed trials whose terminal error, evaluation error "
+        "or missing activity shows an infrastructure cause (credits, rate limit, "
+        "provider error, timeout, policy, environment crash). Iteration limit: "
+        "failed trials that ran out of iterations, turns or budget, or never "
+        "submitted. These and context-window overflows count as failures, not "
+        "reruns.",
     ]
     return "\n".join(lines) + "\n"
 
