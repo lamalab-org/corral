@@ -45,6 +45,16 @@ from pathlib import Path
 
 REPORTS_DIR = Path(__file__).resolve().parent
 LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
+# The agent and model pairs every environment runs at each of its levels.
+EXPECTED_RUNS = (
+    ("ai-scientist", "claude-opus-5-5"),
+    ("claude-code", "claude-opus-5-5"),
+    ("codex", "gpt-5.6-sol"),
+    ("openhands", "kimi-k3"),
+    ("react", "claude-opus-5-5"),
+    ("react", "gpt-5.6-sol"),
+    ("react", "kimi-k3"),
+)
 # GitHub rejects comments over 65,536 characters.
 MARKDOWN_ROWS = 150
 
@@ -263,6 +273,19 @@ def scan(env_dir: Path) -> tuple[list[dict], list[str]]:
     return rows, skipped
 
 
+def missing_runs(env_dir: Path) -> list[str]:
+    """Expected agent, model and level combinations with no run in runs.csv."""
+    with (env_dir / "runs.csv").open(newline="", encoding="utf-8") as f:
+        runs = {(r["level"], r["agent"], r["model"]) for r in csv.DictReader(f)}
+    levels = sorted({level for level, _, _ in runs}, key=int)
+    return [
+        f"L{level} {agent} / {model}"
+        for level in levels
+        for agent, model in EXPECTED_RUNS
+        if (level, agent, model) not in runs
+    ]
+
+
 def is_rerun(row: dict) -> bool:
     return (
         row["success"] != "True"
@@ -325,15 +348,15 @@ def finding_table(rows: list[dict]) -> list[str]:
     return lines
 
 
-def markdown(results: list[tuple[str, int, list[dict], list[str]]]) -> str:
+def markdown(results: list[tuple[str, int, list[dict], list[str], list[str]]]) -> str:
     """Render the findings as Markdown tables, e.g. for a PR comment."""
     lines = [
         "| Environment | Trials | Might need rerun | To review | Iteration limit "
-        "| Not scanned (LFS) |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Missing runs | Not scanned (LFS) |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
-    reruns, reviews, skipped_all = [], [], []
-    for env, trials, rows, skipped in results:
+    reruns, reviews, skipped_all, missing_all = [], [], [], []
+    for env, trials, rows, skipped, missing in results:
         rerun = [r for r in rows if is_rerun(r)]
         review = [r for r in rows if is_review(r)]
         limits = {
@@ -344,8 +367,9 @@ def markdown(results: list[tuple[str, int, list[dict], list[str]]]) -> str:
         lines.append(
             f"| {env} | {trials} | {len({r['execution_id'] for r in rerun})} "
             f"| {len({r['execution_id'] for r in review})} | {len(limits)} "
-            f"| {len(skipped)} |"
+            f"| {len(missing)} | {len(skipped)} |"
         )
+        missing_all.extend(f"{env} {run}" for run in missing)
         reruns.extend(rerun)
         reviews.extend(review)
         skipped_all.extend(f"{env}/{s}" for s in skipped)
@@ -372,6 +396,15 @@ def markdown(results: list[tuple[str, int, list[dict], list[str]]]) -> str:
             "",
             "</details>",
         ]
+    if missing_all:
+        lines += [
+            "",
+            f"<details><summary>Missing runs: {len(missing_all)}</summary>",
+            "",
+            *(f"- {run}" for run in missing_all),
+            "",
+            "</details>",
+        ]
     if skipped_all:
         lines += [
             "",
@@ -385,7 +418,8 @@ def markdown(results: list[tuple[str, int, list[dict], list[str]]]) -> str:
         "provider error, timeout, policy, environment crash). Iteration limit: "
         "failed trials that ran out of iterations, turns or budget, or never "
         "submitted. These and context-window overflows count as failures, not "
-        "reruns.",
+        "reruns. Missing runs: agent, model and level combinations of the "
+        "standard seven agent and model pairs with no run in the environment.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -418,9 +452,12 @@ def main() -> int:
         rows, skipped = scan(env_dir)
         with (env_dir / "trials.csv").open(newline="", encoding="utf-8") as f:
             trials = sum(1 for _ in csv.DictReader(f))
+        missing = missing_runs(env_dir)
         summarize(env_dir.name, rows, trials, skipped)
+        for run in missing:
+            sys.stdout.write(f"  missing run: {run}\n")
         all_rows.extend(rows)
-        results.append((env_dir.name, trials, rows, skipped))
+        results.append((env_dir.name, trials, rows, skipped, missing))
 
     if args.markdown:
         args.markdown.write_text(markdown(results), encoding="utf-8")
