@@ -128,6 +128,14 @@ its own trace.
    python reports/check_reports.py --hf   # Hugging Face datasets match (needs huggingface_hub, pyarrow)
    ```
 
+To find trials that failed for infrastructure or environment reasons (exhausted
+credits, rate limits, provider errors, timeouts, environment crashes) and so
+are rerun candidates:
+
+```bash
+python reports/find_infra_failures.py [<environment> ...] [--csv findings.csv]
+```
+
 The `Reports` workflow (`.github/workflows/reports.yaml`) runs both checks on
 every push and pull request to `report_audit` that touches `reports/`. It fails
 on the reports, the two CSVs, their Langfuse IDs, or a missing or outdated
