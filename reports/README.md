@@ -136,6 +136,12 @@ are rerun candidates:
 python reports/find_infra_failures.py [<environment> ...] [--csv findings.csv]
 ```
 
+On a pull request, comment `/infra-failures [lfs] [<environment> ...]` or add
+the `infra-failures` label to have the `Infra failures` workflow
+(`.github/workflows/infra-failures.yaml`) post the result as a comment; `lfs`
+also scans the reports stored in Git LFS. It can also be run from the Actions
+tab. Comment and Actions-tab runs need the workflow on the default branch.
+
 The `Reports` workflow (`.github/workflows/reports.yaml`) runs both checks on
 every push and pull request to `report_audit` that touches `reports/`. It fails
 on the reports, the two CSVs, their Langfuse IDs, or a missing or outdated

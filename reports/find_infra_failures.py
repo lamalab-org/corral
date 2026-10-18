@@ -4,6 +4,7 @@ Run from the repository root:
     python reports/find_infra_failures.py                    # every environment
     python reports/find_infra_failures.py afm corral_md      # some environments
     python reports/find_infra_failures.py --csv failures.csv # also write findings
+    python reports/find_infra_failures.py --markdown out.md  # tables for a PR comment
 
 Each trial is checked for these signals:
 
@@ -25,6 +26,9 @@ credits. Other findings from tool results have confidence `review`: the event
 happened during the trial but may not have decided its outcome, so check the
 evidence. A failed trial with a `high` infrastructure
 finding is a rerun candidate.
+
+Reports stored as Git LFS pointers (checked out without `git lfs pull`) cannot
+be read; they are listed as not scanned.
 """
 
 from __future__ import annotations
@@ -40,6 +44,9 @@ import sys
 from pathlib import Path
 
 REPORTS_DIR = Path(__file__).resolve().parent
+LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
+# GitHub rejects comments over 65,536 characters.
+MARKDOWN_ROWS = 150
 
 INFRA = (
     "credits",
@@ -155,6 +162,11 @@ def environments() -> list[Path]:
     return sorted(p.parent for p in REPORTS_DIR.glob("*/trials.csv"))
 
 
+def is_lfs_pointer(path: Path) -> bool:
+    with path.open("rb") as f:
+        return f.read(len(LFS_POINTER)) == LFS_POINTER
+
+
 def load_report(path: Path) -> dict:
     opener = lzma.open if path.suffix == ".xz" else gzip.open
     with opener(path, "rt", encoding="utf-8") as f:
@@ -230,11 +242,15 @@ def trial_findings(trial: dict) -> list[dict]:
     return list(findings.values())
 
 
-def scan(env_dir: Path) -> list[dict]:
+def scan(env_dir: Path) -> tuple[list[dict], list[str]]:
+    """Return the findings and the reports that are Git LFS pointers."""
     with (env_dir / "trials.csv").open(newline="", encoding="utf-8") as f:
         index = {row["execution_id"]: row for row in csv.DictReader(f)}
-    rows = []
+    rows, skipped = [], []
     for report in sorted(env_dir.glob("level_*/*/report.json.[gx]z")):
+        if is_lfs_pointer(report):
+            skipped.append(report.relative_to(env_dir).as_posix())
+            continue
         data = load_report(report)
         for task in data["task_results"].values():
             for trial in task["trials"]:
@@ -244,20 +260,35 @@ def scan(env_dir: Path) -> list[dict]:
                     for finding in trial_findings(trial)
                 )
         del data
-    return rows
+    return rows, skipped
 
 
-def summarize(env: str, rows: list[dict], trials: int) -> None:
+def is_rerun(row: dict) -> bool:
+    return (
+        row["success"] != "True"
+        and row["infrastructure"]
+        and row["confidence"] == "high"
+    )
+
+
+def is_review(row: dict) -> bool:
+    """A failed trial with an uncertain infrastructure or unknown error finding."""
+    return (
+        row["success"] != "True"
+        and row["confidence"] == "review"
+        and (row["infrastructure"] or row["category"] == "unclassified_error")
+    )
+
+
+def summarize(env: str, rows: list[dict], trials: int, skipped: list[str]) -> None:
     failed = [r for r in rows if r["success"] != "True"]
-    rerun = {
-        r["execution_id"]
-        for r in failed
-        if r["infrastructure"] and r["confidence"] == "high"
-    }
+    rerun = {r["execution_id"] for r in rows if is_rerun(r)}
     sys.stdout.write(
         f"\n{env}: {trials} trials, {len(rerun)} failed with a high-confidence "
         "infrastructure cause (rerun candidates)\n"
     )
+    for report in skipped:
+        sys.stdout.write(f"  not scanned (Git LFS pointer): {report}\n")
     counts = collections.Counter(
         (r["category"], r["confidence"], f"L{r['level']} {r['agent']}/{r['model']}")
         for r in failed
@@ -269,12 +300,93 @@ def summarize(env: str, rows: list[dict], trials: int) -> None:
         sys.stdout.write(f"  {category:18} {confidence:6} {n:4}  {run}\n")
 
 
+def cell(text: object, limit: int = 0) -> str:
+    text = " ".join(str(text).split())
+    if limit and len(text) > limit:
+        text = text[: limit - 1] + "…"
+    return text.replace("|", "\\|")
+
+
+def finding_table(rows: list[dict]) -> list[str]:
+    lines = [
+        "| Environment | Level | Run | Task | Trial | Cause | Evidence | Trace |",
+        "|---|---:|---|---|---:|---|---|---|",
+    ]
+    lines.extend(
+        f"| {r['environment']} | {r['level']} | {r['agent']} / {r['model']} "
+        f"| {cell(r['task_id'])} | {r['trial']} | {r['category']} "
+        f"| {cell(r['evidence'], 140)} | [trace]({r['langfuse_trace_url']}) |"
+        for r in rows[:MARKDOWN_ROWS]
+    )
+    if len(rows) > MARKDOWN_ROWS:
+        lines.append(
+            f"\n{len(rows) - MARKDOWN_ROWS} more rows are in the CSV artifact."
+        )
+    return lines
+
+
+def markdown(results: list[tuple[str, int, list[dict], list[str]]]) -> str:
+    """Render the findings as Markdown tables, e.g. for a PR comment."""
+    lines = [
+        "| Environment | Trials | Rerun candidates | To review | Agent limits "
+        "| Not scanned (LFS) |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    reruns, reviews, skipped_all = [], [], []
+    for env, trials, rows, skipped in results:
+        rerun = [r for r in rows if is_rerun(r)]
+        review = [r for r in rows if is_review(r)]
+        limits = {
+            r["execution_id"]
+            for r in rows
+            if r["success"] != "True" and r["category"] in NOT_INFRA
+        }
+        lines.append(
+            f"| {env} | {trials} | {len({r['execution_id'] for r in rerun})} "
+            f"| {len({r['execution_id'] for r in review})} | {len(limits)} "
+            f"| {len(skipped)} |"
+        )
+        reruns.extend(rerun)
+        reviews.extend(review)
+        skipped_all.extend(f"{env}/{s}" for s in skipped)
+
+    lines += ["", "### Rerun candidates", ""]
+    lines += finding_table(reruns) if reruns else ["None."]
+    if reviews:
+        lines += [
+            "",
+            "<details><summary>To review: "
+            f"{len(reviews)} findings from tool results or unknown errors</summary>",
+            "",
+            *finding_table(reviews),
+            "",
+            "</details>",
+        ]
+    if skipped_all:
+        lines += [
+            "",
+            "Not scanned, stored in Git LFS: "
+            + ", ".join(f"`{s}`" for s in skipped_all),
+        ]
+    lines += [
+        "",
+        "Rerun candidates are failed trials whose terminal error, evaluation "
+        "error or missing activity shows an infrastructure cause (credits, rate "
+        "limit, provider error, timeout, policy, environment crash). Agent limits "
+        "and context-window overflows count as failures, not reruns.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "environments", nargs="*", help="environment folders (default: all)"
     )
     parser.add_argument("--csv", type=Path, help="write every finding to this CSV")
+    parser.add_argument(
+        "--markdown", type=Path, help="write summary tables to this Markdown file"
+    )
     args = parser.parse_args()
 
     env_dirs = environments()
@@ -289,13 +401,18 @@ def main() -> int:
     sys.stdout.write(
         "Failed trials by category; `review` findings come from tool results\n"
     )
-    all_rows = []
+    all_rows, results = [], []
     for env_dir in env_dirs:
-        rows = scan(env_dir)
+        rows, skipped = scan(env_dir)
         with (env_dir / "trials.csv").open(newline="", encoding="utf-8") as f:
             trials = sum(1 for _ in csv.DictReader(f))
-        summarize(env_dir.name, rows, trials)
+        summarize(env_dir.name, rows, trials, skipped)
         all_rows.extend(rows)
+        results.append((env_dir.name, trials, rows, skipped))
+
+    if args.markdown:
+        args.markdown.write_text(markdown(results), encoding="utf-8")
+        sys.stdout.write(f"\nMarkdown summary written to {args.markdown}\n")
 
     if args.csv:
         with args.csv.open("w", newline="", encoding="utf-8") as f:
