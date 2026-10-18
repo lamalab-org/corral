@@ -15,9 +15,9 @@ same layout, names and index files, so runs can be compared across them.
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
 
-[`runs.csv`](runs.csv) and [`trials.csv`](trials.csv) combine all eight
-environments: **110 runs and 6,100 trials**. Each environment also has its own
-indexes. Report paths are relative to the directory containing the CSV.
+All nine environments together have **116 runs and 6,500 trials**. Each
+environment has its own indexes, with report paths relative to its folder. The
+`runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
 The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).
@@ -32,9 +32,9 @@ reports/<environment>/
   level_<L>/<agent>__<model>/
     report.json.gz                  final `corral bench` report (or report.json.xz)
     run-metadata.json               run metadata, where available
-    langfuse-overrides.json          recorded exceptions to deterministic trace IDs, if any
-    langfuse.json                    verified session and trial IDs, where available
-    provenance.json                  source hashes and recovery details, where available
+    langfuse-overrides.json         recorded exceptions to deterministic trace IDs, if any
+    langfuse.json                   verified session and trial IDs, where available
+    provenance.json                 source hashes and recovery details, where available
 ```
 
 Each report holds exactly the trials that count: 10 tasks × 5 trials, or
@@ -90,6 +90,16 @@ other IDs. Keep these files when rebuilding or copying a run.
 On 2026-10-16 every trace in the original three environments' `trials.csv`
 files (2,100 in total) was found in Langfuse (`build_index.py --verify`).
 
+**Known issue: some traces mix attempts.** Some trials were retried under the
+same execution ID, so the retry wrote into the same trace as the attempt it
+replaced. Such a trace can hold observations from both. This affects about 139
+inference optimization trials and up to 319 resistor trials (Codex, Claude
+Code, OpenHands, react Kimi K3 and react GPT L2 runs). The psychometrics reruns
+and the nine resistor technical reruns (`resistor_network/technical-reruns.csv`)
+used new run IDs and are not affected. The report is authoritative for what the
+final attempt did. Future reruns should use a new run ID so each attempt gets
+its own trace.
+
 ## Adding or updating reports
 
 1. Put each final report at `reports/<environment>/level_<L>/<agent>__<model>/report.json.gz`
@@ -99,8 +109,6 @@ files (2,100 in total) was found in Langfuse (`build_index.py --verify`).
 
    ```bash
    python reports/build_index.py reports/<environment>
-   # rebuild every environment and the combined root indexes
-   python reports/build_index.py reports
    python reports/build_index.py reports/<environment> --verify  # needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
    ```
 

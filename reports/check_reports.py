@@ -40,6 +40,13 @@ AGENTS = sorted(set(build_index.AGENTS.values()))
 MODELS = sorted(slug for slug, _ in build_index.MODELS.values())
 ENV_FILES = {"runs.csv", "trials.csv"}
 REPORT_FILES = {"report.json.gz", "report.json.xz"}
+# Optional files next to a report, described in reports/README.md.
+RUN_FILES = {
+    "run-metadata.json",
+    "langfuse-overrides.json",
+    "langfuse.json",
+    "provenance.json",
+}
 LFS_POINTER = b"version https://git-lfs.github.com/spec/v1"
 
 
@@ -103,7 +110,7 @@ def check_layout(env_dir: Path, problems: Problems, warnings: Problems) -> list[
                 )
                 continue
             files = {p.name for p in run_dir.iterdir()}
-            for extra in sorted(files - REPORT_FILES - {"run-metadata.json"}):
+            for extra in sorted(files - REPORT_FILES - RUN_FILES):
                 warnings.add(f"{run_where}/{extra}", "is not part of the convention")
             found = sorted(files & REPORT_FILES)
             if len(found) != 1:

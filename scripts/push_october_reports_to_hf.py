@@ -45,7 +45,8 @@ from loguru import logger
 
 WORKSPACE = Path(__file__).resolve().parent.parent
 REPORTS_DIR = WORKSPACE / "reports"
-ENVIRONMENTS = ("inference_opt", "psychometrics", "resistor_network")
+# Every folder under reports/ with a runs.csv is an environment.
+ENVIRONMENTS = tuple(sorted(p.parent.name for p in REPORTS_DIR.glob("*/runs.csv")))
 
 load_dotenv(dotenv_path=WORKSPACE / ".env")
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -160,6 +161,11 @@ def _trial_rows(env: str, level: int) -> Iterator[dict[str, Any]]:
         )
 
 
+def _levels(env: str) -> list[int]:
+    """Levels with reports in *env*, e.g. [1, 2] or [2, 3]."""
+    return sorted({int(r["level"]) for r in _read_csv(REPORTS_DIR / env / "runs.csv")})
+
+
 def _trial_dataset(env: str, level: int, cache_dir: str) -> Dataset:
     return Dataset.from_generator(
         _trial_rows,
@@ -201,9 +207,8 @@ def main(
     """Push the October reports as one config per environment and level.
 
     Args:
-        env: Push only this environment (inference_opt, psychometrics,
-            resistor_network).
-        level: Push only this level (1 or 2).
+        env: Push only this environment (a folder under reports/).
+        level: Push only this level.
         runs_only: Push only the `runs` config.
         dry_run: Build the configs and log their sizes without pushing.
         public: Create the dataset repo public instead of private. Has no
@@ -214,8 +219,6 @@ def main(
         raise SystemExit(
             f"ERROR: Unknown environment '{env}', expected one of {ENVIRONMENTS}"
         )
-    if level is not None and level not in (1, 2):
-        raise SystemExit("ERROR: --level must be 1 or 2")
     if not dry_run:
         if not HF_TOKEN:
             raise SystemExit("ERROR: HF_TOKEN is not set (add it to .env)")
@@ -230,8 +233,11 @@ def main(
         configs = [
             (f"{env_name}-level_{level_number}", env_name, level_number)
             for env_name in (ENVIRONMENTS if env is None else (env,))
-            for level_number in ((1, 2) if level is None else (level,))
+            for level_number in _levels(env_name)
+            if level is None or level_number == level
         ]
+        if not configs:
+            raise SystemExit(f"ERROR: no reports at level {level}")
     configs.append(("runs", None, None))
 
     # A fresh cache per run: datasets keys generator caches on code and

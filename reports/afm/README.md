@@ -19,7 +19,7 @@ their causes have not been audited for infrastructure reruns.
 Langfuse tracing was not enabled for these runs and no traces were uploaded.
 The index script generates Langfuse links from execution IDs using the shared
 report convention, but these links do not correspond to uploaded traces.
-These reports have not been published to Hugging Face.
+These reports are published to Hugging Face with the other environments.
 
 To regenerate the indexes and check the local report layout:
 
