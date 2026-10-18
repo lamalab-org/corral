@@ -11,7 +11,7 @@ same layout, names and index files, so runs can be compared across them.
 | Resistor network (v4, terminal) | [`resistor_network/`](resistor_network/) | `resistor_level` | 14 | 700 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
-| Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 12 | 1,200 |
+| Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
 
