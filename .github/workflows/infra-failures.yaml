@@ -133,6 +133,8 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           {
+            # Marks this workflow's comment so it is updated, not duplicated.
+            echo "<!-- corral-infra-failures -->"
             echo "## Infrastructure failure analysis"
             echo
             echo "Commit \`$(git rev-parse --short HEAD)\` · environments: ${ENVS:-all}" \
@@ -157,7 +159,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NUMBER: ${{ steps.args.outputs.number }}
-        # Update the previous report instead of adding a new comment each time.
+          REPO: ${{ github.repository }}
+        # Update this workflow's previous comment instead of adding a new one.
         run: |
-          gh pr comment "$NUMBER" --repo "${{ github.repository }}" \
-            --body-file comment.md --edit-last --create-if-none
+          id=$(gh api "repos/$REPO/issues/$NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]"
+              and (.body | startswith("<!-- corral-infra-failures -->"))) | .id' | tail -n1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$id" -F body=@comment.md
+          else
+            gh api --method POST "repos/$REPO/issues/$NUMBER/comments" -F body=@comment.md
+          fi

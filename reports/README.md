@@ -142,6 +142,17 @@ the `infra-failures` label to have the `Infra failures` workflow
 also scans the reports stored in Git LFS. It can also be run from the Actions
 tab. Comment and Actions-tab runs need the workflow on the default branch.
 
+To tabulate pass@5 and pass^5 for every environment, agent, model and level
+from the `runs.csv` files:
+
+```bash
+python reports/scores.py [<environment> ...] [--markdown scores.md]
+```
+
+The `Scores` workflow (`.github/workflows/scores.yaml`) posts these tables on a
+pull request whenever a `runs.csv` changes, and on the `scores` label or a
+`/scores [<environment> ...]` comment. It updates its own comment in place.
+
 The `Reports` workflow (`.github/workflows/reports.yaml`) runs both checks on
 every push and pull request to `report_audit` that touches `reports/`. It fails
 on the reports, the two CSVs, their Langfuse IDs, or a missing or outdated
