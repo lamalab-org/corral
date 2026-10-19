@@ -111,15 +111,19 @@ class ToolCallingAgent(BaseAgent):
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Run the complete native tool-calling loop for one task."""
         messages = self._initial_messages(session)
-        tools = with_submit_answer_tool(session.tools)
+        prompt_message_count = len(messages) - len(session.messages)
+        tools = self._tools(session)
         usage = _UsageAccumulator(self._usage)
         iteration_limit = session.iteration_limit
 
         for _iteration in range(iteration_limit):
             try:
+                turn_messages = await self._before_turn(
+                    session, messages, messages[prompt_message_count:], usage
+                )
                 response = await call_model(
                     model=self.model,
-                    messages=messages,
+                    messages=turn_messages,
                     tools=tools,
                     temperature=self.temperature,
                     api_endpoint=self.api_endpoint,
@@ -142,6 +146,11 @@ class ToolCallingAgent(BaseAgent):
             turn_usage = getattr(response, "usage", None) or {}
             raw_calls = list(getattr(response, "tool_calls", None) or [])
             content = getattr(response, "content", None)
+            content_metadata = (
+                {"content_source": "reasoning_summary"}
+                if getattr(response, "content_source", "text") == "reasoning_summary"
+                else {}
+            )
 
             if not raw_calls:
                 assistant = dict(
@@ -153,17 +162,15 @@ class ToolCallingAgent(BaseAgent):
                 )
                 messages.append(assistant)
                 await session.record_message(
-                    assistant,
+                    {**assistant, "metadata": content_metadata}
+                    if content_metadata
+                    else assistant,
                     usage=turn_usage,
                 )
                 feedback = dict(
                     LiteLLMMessage(
                         role="user",
-                        content=(
-                            "A plain-text answer does not finish the task. Call "
-                            "submit_answer with the complete answer, or call an "
-                            "available environment tool."
-                        ),
+                        content=self._text_only_feedback(),
                     )
                 )
                 messages.append(feedback)
@@ -184,6 +191,7 @@ class ToolCallingAgent(BaseAgent):
                     action = Action.from_tool_call(
                         value,
                         content=content if index == 0 else None,
+                        metadata=content_metadata if index == 0 else None,
                     )
                 except Exception as exc:
                     protocol_error = f"invalid provider tool call: {exc}"
@@ -245,6 +253,28 @@ class ToolCallingAgent(BaseAgent):
             error=error,
             usage=usage.outcome(),
         )
+
+    def _tools(self, session: AgentSession) -> list[dict[str, Any]]:
+        """Prepare a provider catalog without modifying the session's tools."""
+        return with_submit_answer_tool(session.tools)
+
+    def _text_only_feedback(self) -> str:
+        """Remind the actor of the native submission protocol."""
+        return (
+            "A plain-text answer does not finish the task. Call "
+            "submit_answer with the complete answer, or call an "
+            "available environment tool."
+        )
+
+    async def _before_turn(
+        self,
+        _session: AgentSession,
+        messages: list[dict[str, Any]],
+        _trajectory: list[dict[str, Any]],
+        _usage: _UsageAccumulator,
+    ) -> list[dict[str, Any]]:
+        """Prepare model context without changing the tool/submission protocol."""
+        return messages
 
 
 __all__ = ["ToolCallingAgent"]

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import math
-import os
 
+from .annotators.jev import DEFAULT_ENDPOINT, MAX_WINDOW
+from .decisions import DEFAULT_DECISIONS_MODEL
 from .schema import AnnotationConfig
 
 
@@ -24,7 +25,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         choices=("path", "langfuse"),
         help="Validate every input against this source type.",
     )
-    parser.add_argument("--annotator", choices=("llm", "jev"), default="llm")
+    parser.add_argument(
+        "--annotator",
+        choices=("llm", "jev"),
+        default="llm",
+        help="Graph extraction: generative LLM or Jev's workflow via OpenAI Decisions.",
+    )
     parser.add_argument(
         "--model",
         help="Annotation model, separate from the agent model in trace metadata.",
@@ -69,32 +75,40 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         choices=("agent_model", "environment", "level", "task", "trial"),
     )
     parser.add_argument("--concurrency", type=int, default=8)
-    parser.add_argument("--window", type=int, default=2)
-    parser.add_argument("--overlap", type=int, default=1)
-    parser.add_argument("--max-nodes-per-window", type=int, default=100)
+    parser.add_argument("--window", type=int, default=AnnotationConfig.window)
+    parser.add_argument("--overlap", type=int, default=AnnotationConfig.overlap)
+    parser.add_argument(
+        "--max-nodes-per-window",
+        type=int,
+        default=AnnotationConfig.max_nodes_per_window,
+    )
     parser.add_argument(
         "--tool-output-max-chars",
         type=int,
-        default=4000,
+        default=AnnotationConfig.tool_output_max_chars,
         help="Retained original characters per tool result (0 disables; otherwise >=16).",
     )
     parser.add_argument(
-        "--tool-output-truncation", choices=("head-tail",), default="head-tail"
+        "--tool-output-truncation",
+        choices=("head-tail",),
+        default=AnnotationConfig.tool_output_truncation,
     )
     parser.add_argument(
         "--max-request-tokens",
         type=int,
-        default=0,
+        default=AnnotationConfig.max_request_tokens,
         help="Estimated complete input budget (0 disables preflight enforcement).",
     )
     parser.add_argument(
         "--llm-output-reserve-tokens",
         type=int,
-        default=4096,
+        default=AnnotationConfig.llm_output_reserve_tokens,
         help="Generation allowance reserved within LLM context when budgeting is enabled.",
     )
     parser.add_argument(
-        "--strict-support", action=argparse.BooleanOptionalAction, default=True
+        "--strict-support",
+        action=argparse.BooleanOptionalAction,
+        default=AnnotationConfig.strict_support,
     )
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--min-confidence", type=float, default=0.5)
@@ -103,7 +117,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--timeout", type=float, default=120)
     parser.add_argument("--max-retries", type=int, default=5)
     parser.add_argument(
-        "--jev-endpoint", default="https://api.typesafe.ai/v1/systemone"
+        "--decisions-endpoint",
+        "--jev-endpoint",
+        dest="jev_endpoint",
+        default=DEFAULT_ENDPOINT,
+        help="OpenAI Decisions endpoint for the Jev graph workflow.",
     )
     parser.add_argument(
         "--from-time",
@@ -126,15 +144,19 @@ def validate_options(args) -> AnnotationConfig:
         raise ValueError("temperature must be nonnegative and finite")
     if not math.isfinite(args.min_confidence) or not 0 <= args.min_confidence <= 1:
         raise ValueError("Confidence thresholds must lie between 0 and 1")
-    if args.annotator == "jev" and args.window > 252:
-        raise ValueError("Jev requires window <= 252")
+    if args.annotator == "jev" and args.window > MAX_WINDOW:
+        raise ValueError(f"Decisions graph annotation requires window <= {MAX_WINDOW}")
     if args.configuration and not args.skip_annotate:
         raise ValueError("--configuration requires --skip-annotate")
     if args.skip_annotate and args.force:
         raise ValueError("--force cannot be used with --skip-annotate")
     return AnnotationConfig(
         model=args.model
-        or ("jev-latest" if args.annotator == "jev" else "anthropic/claude-sonnet-4-6"),
+        or (
+            DEFAULT_DECISIONS_MODEL
+            if args.annotator == "jev"
+            else "anthropic/claude-sonnet-4-6"
+        ),
         window=args.window,
         overlap=args.overlap,
         max_nodes_per_window=args.max_nodes_per_window,
@@ -158,7 +180,6 @@ def create_backend(args):
     from .annotators.jev import JevAnnotator, JevClient
 
     client = JevClient(
-        os.getenv("TYPESAFE_API_KEY") or os.getenv("JEV_API_KEY") or "",
         endpoint=args.jev_endpoint,
         batch_size=args.batch_size,
         timeout_s=args.timeout,

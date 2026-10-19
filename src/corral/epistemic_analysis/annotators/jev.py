@@ -1,4 +1,4 @@
-"""Jev span classification and native TypeSafe transport."""
+"""Jev's span-classification workflow, backed by OpenAI's Decisions API."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 import math
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -47,7 +48,11 @@ from corral.epistemic_analysis.ontology import (
 
 from .base import record_model
 
-DEFAULT_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
+DEFAULT_ENDPOINT = "https://api.openai.com/v1/decisions"
+MAX_QUESTIONS = 200
+MAX_CHOICES = 255
+# Edge-support decisions offer each message plus a final "none" choice.
+MAX_WINDOW = MAX_CHOICES - 1
 # Use the current annotator's ontology, rather than the illustrative labels in
 # jev_as_annotator.md. These definitions are also included in every decision.
 
@@ -119,19 +124,86 @@ def validate_answers(
     return {key: answers[key] for key in questions}
 
 
+def _decisions_request(model, state, questions):
+    """Translate the wire format without changing any prompts or criteria."""
+    converted = []
+    for name, question in questions.items():
+        item = {
+            "name": name,
+            "instructions": question.get("instructions", ""),
+            "type": "predicate" if question["type"] == "noul" else question["type"],
+        }
+        if question["type"] == "choice":
+            item["choices"] = [
+                {"value": value, "description": description}
+                for value, description in question["criteria"].items()
+            ]
+            if not 2 <= len(item["choices"]) <= MAX_CHOICES:
+                raise JevError(f"Decisions requires 2-{MAX_CHOICES} choices: {name}")
+        converted.append(item)
+    return {
+        "model": model,
+        "input": json.dumps(state, ensure_ascii=False),
+        "questions": converted,
+    }
+
+
+def _decisions_answers(payload, questions):
+    """Validate Decisions responses, then restore the extraction loop's format."""
+    answers = payload.get("answers") if isinstance(payload, dict) else None
+    if not isinstance(answers, list) or len(answers) != len(questions):
+        raise JevError("Expected exactly one Decisions answer per question")
+    converted = {}
+    for (name, question), answer in zip(questions.items(), answers, strict=True):
+        expected_type = "predicate" if question["type"] == "noul" else question["type"]
+        if (
+            not isinstance(answer, dict)
+            or answer.get("name") != name
+            or answer.get("type") != expected_type
+        ):
+            raise JevError(f"Missing, refused, or mistyped Decisions answer: {name}")
+        if expected_type == "predicate":
+            converted[name] = {"type": "noul", "noul": answer.get("probability")}
+            continue
+        probabilities = answer.get("probabilities")
+        if not isinstance(probabilities, list):
+            raise JevError(f"Invalid Decisions probabilities: {name}")
+        distribution = {}
+        for entry in probabilities:
+            if (
+                not isinstance(entry, dict)
+                or not isinstance(entry.get("value"), str)
+                or entry["value"] not in question["criteria"]
+                or entry["value"] in distribution
+            ):
+                raise JevError(f"Invalid Decisions probabilities: {name}")
+            distribution[entry["value"]] = entry.get("probability")
+        converted[name] = {
+            "type": "choice",
+            "choice": answer.get("choice"),
+            "confidence": answer.get("confidence"),
+            "probabilities": distribution,
+        }
+    return validate_answers({"answers": converted}, questions)
+
+
 class JevClient:
-    """Small async adapter for TypeSafe's native structured-decision endpoint."""
+    """Decisions transport retaining Jev's batching, retries, and graph workflow."""
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None = None,
         endpoint: str = DEFAULT_ENDPOINT,
         batch_size: int = 32,
         timeout_s: float = 120,
         max_retries: int = 5,
         max_request_tokens: int = 0,
     ):
-        self.api_key = api_key
+        if batch_size < 1 or max_retries < 1:
+            raise ValueError("batch_size and max_retries must be positive")
+        self.api_key = (
+            api_key if api_key is not None else os.getenv("OPENAI_API_KEY", "")
+        )
         self.endpoint = endpoint
         self.batch_size = batch_size
         self.timeout_s = timeout_s
@@ -140,7 +212,7 @@ class JevClient:
 
     def _post(self, body: dict[str, Any]) -> Any:
         if not self.api_key:
-            raise JevError("Set TYPESAFE_API_KEY (or JEV_API_KEY) to annotate with Jev")
+            raise JevError("Set OPENAI_API_KEY to run the Jev workflow with Decisions")
         request = Request(
             self.endpoint,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -157,7 +229,7 @@ class JevClient:
         self, model: str, state: dict[str, Any], questions: dict[str, dict[str, Any]]
     ) -> dict[str, dict[str, Any]]:
         if questions and not self.api_key:
-            raise JevError("Set TYPESAFE_API_KEY (or JEV_API_KEY) to annotate with Jev")
+            raise JevError("Set OPENAI_API_KEY to run the Jev workflow with Decisions")
         answers: dict[str, dict[str, Any]] = {}
         items = list(questions.items())
         context = current_context()
@@ -166,7 +238,7 @@ class JevClient:
         )
 
         async def evaluate_batch(batch):
-            body = {"model": model, "state": state, "questions": batch}
+            body = _decisions_request(model, state, batch)
 
             def record_exchange(**result):
                 if context is not None:
@@ -181,11 +253,10 @@ class JevClient:
                     )
 
             estimated, estimator = estimate_request(body)
-            # A <=32k total budget satisfies both TypeSafe limits and remains
-            # conservative for OpenRouter's 32k context.
-            limit = min(budget, 32000) if budget else 0
+            limit = budget
             diagnostic = {
                 "backend": "jev",
+                "api": "openai-decisions",
                 "estimated_tokens": estimated,
                 "is_estimate": True,
                 "estimator": estimator,
@@ -217,8 +288,8 @@ class JevClient:
                 try:
                     payload = await asyncio.to_thread(self._post, body)
                     record_exchange(attempt=attempt + 1, response=payload)
+                    checked = _decisions_answers(payload, batch)
                     record_model(payload.get("model"))
-                    checked = validate_answers(payload, batch)
                     for answer in checked.values():
                         answer["model"] = payload.get("model", model)
                     answers.update(checked)
@@ -250,7 +321,9 @@ class JevClient:
                         }
                     )
                     if status != 429 and status < 500:
-                        raise JevError(f"Jev request failed (HTTP {status})") from exc
+                        raise JevError(
+                            f"Decisions request failed (HTTP {status})"
+                        ) from exc
                     error = f"HTTP {status}"
                 except (URLError, TimeoutError, OSError) as exc:
                     error = type(exc).__name__
@@ -259,13 +332,14 @@ class JevClient:
                     error = str(exc)
                 if attempt + 1 == self.max_retries:
                     raise JevError(
-                        f"Jev request failed after {self.max_retries} attempts: {error}"
+                        f"Decisions request failed after {self.max_retries} attempts: {error}"
                     )
-                logger.warning(f"Jev request retry {attempt + 1}: {error}")
+                logger.warning(f"Decisions request retry {attempt + 1}: {error}")
                 await asyncio.sleep(min(2 ** (attempt + 1), 30))
 
-        for offset in range(0, len(items), self.batch_size):
-            await evaluate_batch(dict(items[offset : offset + self.batch_size]))
+        batch_size = min(self.batch_size, MAX_QUESTIONS)
+        for offset in range(0, len(items), batch_size):
+            await evaluate_batch(dict(items[offset : offset + batch_size]))
         return answers
 
 
@@ -371,6 +445,7 @@ class JevAnnotator:
             extract_edges=self.extract_edges,
             provenance={
                 "annotator": "jev",
+                "api": "openai-decisions",
                 "candidate_extractor": "multilabel_spans_v4",
                 "node_postprocessing": "test_precedence_neutral_fallback_v1",
                 "node_decisions": "independent_choices_v1",

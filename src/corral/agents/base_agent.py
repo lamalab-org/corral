@@ -106,8 +106,8 @@ class _UsageAccumulator:
     reasoning_tokens: int = 0
     llm_calls: int = 0
 
-    def add(self, usage: Mapping[str, Any] | None) -> None:
-        normalized = self.convert(usage, llm_calls=1)
+    def add(self, usage: Mapping[str, Any] | None, *, llm_calls: int = 1) -> None:
+        normalized = self.convert(usage, llm_calls=llm_calls)
         self.input_tokens += normalized.input_tokens
         self.output_tokens += normalized.output_tokens
         self.reasoning_tokens += normalized.reasoning_tokens

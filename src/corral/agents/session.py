@@ -489,8 +489,9 @@ class AgentSession:
         raw_messages: Sequence[Mapping[str, Any]],
         *,
         usage: Mapping[str, Any] | None = None,
+        llm_calls: int = 1,
     ) -> None:
-        """Commit exactly the conversation messages added by one turn."""
+        """Commit a turn, including usage from an optional multi-call annotation."""
         messages: list[Mapping[str, JsonValue]] = []
         for raw in raw_messages:
             message = dict(raw)
@@ -506,7 +507,7 @@ class AgentSession:
             return
         normalized = usage_from_mapping(
             usage,
-            llm_calls=1 if usage is not None else 0,
+            llm_calls=llm_calls if usage is not None else 0,
         )
         await self._append_agent(
             AgentTurnRecorded(
@@ -526,8 +527,9 @@ class AgentSession:
         raw: Mapping[str, Any],
         *,
         usage: Mapping[str, Any] | None = None,
+        llm_calls: int = 1,
     ) -> None:
-        await self.record_messages((raw,), usage=usage)
+        await self.record_messages((raw,), usage=usage, llm_calls=llm_calls)
 
     async def run_hooks(
         self,

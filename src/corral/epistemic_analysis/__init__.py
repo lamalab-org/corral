@@ -3,6 +3,7 @@
 from .aggregation import aggregate
 from .analysis import analyze_graph
 from .annotators.base import AnnotationBackend
+from .decisions import DecisionsAnnotator, EpistemicReport, MotifAssessment
 from .pipeline import annotate_trace
 from .schema import (
     AggregateResult,
@@ -21,7 +22,10 @@ __all__ = [
     "AnnotatedGraph",
     "AnnotationBackend",
     "AnnotationConfig",
+    "DecisionsAnnotator",
+    "EpistemicReport",
     "GroupingMetadata",
+    "MotifAssessment",
     "NormalizedTrace",
     "SourceReference",
     "aggregate",

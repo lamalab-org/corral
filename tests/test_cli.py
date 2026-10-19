@@ -12,6 +12,7 @@ import pytest
 from corral import cli
 from corral.agents.ai_scientist import AIScientistConfig, SakanaAIScientistConfig
 from corral.agents.ai_scientist.agent import AIScientistAgent
+from corral.agents.epistemic import EpistemicAgent
 from corral.agents.llm_planner import LLMPlanner
 from corral.agents.react import ReActAgent
 from corral.agents.reflexion_agent import ReflexionAgent
@@ -50,6 +51,7 @@ EXPECTED_AGENTS = (
     "ai-scientist",
     "claude-code",
     "codex",
+    "epistemic",
     "llm-planner",
     "openhands",
     "react",
@@ -104,6 +106,7 @@ def test_every_public_concrete_agent_is_registered():
         "AIScientistAgent",
         "ClaudeCodeAgent",
         "CodexAgent",
+        "EpistemicAgent",
         "LLMPlanner",
         "OpenHandsAgent",
         "ReActAgent",
@@ -117,6 +120,7 @@ def test_every_public_concrete_agent_is_registered():
     ("name", "agent_class"),
     [
         ("ai-scientist", AIScientistAgent),
+        ("epistemic", EpistemicAgent),
         ("llm-planner", LLMPlanner),
         ("react", ReActAgent),
         ("terminus", TerminusAgent),

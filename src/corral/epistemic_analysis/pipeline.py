@@ -12,6 +12,7 @@ from typing import Any
 
 from . import ontology
 from .annotators.base import AnnotationBackend, reset_models
+from .annotators.jev import MAX_WINDOW
 from .budget import RequestBudgetExceeded, estimator_configuration
 from .context import (
     VIEW_INSTRUCTIONS,
@@ -213,8 +214,8 @@ async def _annotate_messages(
 async def annotate_trace(
     trace: NormalizedTrace, annotator: AnnotationBackend, config: AnnotationConfig
 ) -> AnnotatedGraph:
-    if annotator.provenance.get("annotator") == "jev" and config.window > 252:
-        raise ValueError("Jev requires window <= 252")
+    if annotator.provenance.get("annotator") == "jev" and config.window > MAX_WINDOW:
+        raise ValueError(f"Decisions graph annotation requires window <= {MAX_WINDOW}")
     if trace.reconstruction_status != "complete" or trace.completion_status in {
         "incomplete",
         "unsupported",

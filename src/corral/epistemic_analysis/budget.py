@@ -1,6 +1,6 @@
 """Backend request estimates and sanitized size diagnostics.
 
-Jev has no published tokenizer. Its estimate uses a general text BPE with 25%
+Structured Decisions requests use a general text BPE estimate with 25%
 headroom and 256 tokens for provider formatting. UTF-8 bytes are a conservative
 fallback when the encoding cannot be loaded; neither is a provider token count.
 """

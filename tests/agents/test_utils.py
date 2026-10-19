@@ -216,6 +216,27 @@ async def test_llm_call_basic(monkeypatch):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("content", [None, "", " \n", "Visible justification."])
+async def test_returned_reasoning_summary_is_preserved_with_provenance(
+    monkeypatch, content
+):
+    _, raw = setup_mock_litellm(monkeypatch)
+    message = raw.choices[0].message
+    message.content = content
+    message.reasoning_content = "Provider-returned reasoning summary."
+    message.tool_calls = [{"id": "finish", "function": {"name": "submit_answer"}}]
+    result = await llm_call(model="test-model", messages=[], temperature=None)
+    if content and content.strip():
+        assert result.content == content
+        assert result.content_source == "text"
+    else:
+        assert result.content == message.reasoning_content
+        assert result.content_source == "reasoning_summary"
+    assert result.tool_calls == message.tool_calls
+    assert result.message.reasoning_content == "Provider-returned reasoning summary."
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "tool_choice",
     [

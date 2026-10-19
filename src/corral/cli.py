@@ -56,6 +56,10 @@ AGENT_DEFINITIONS: Mapping[str, AgentDefinition] = MappingProxyType(
             "CodexAgent",
             extra="codex",
         ),
+        "epistemic": AgentDefinition(
+            "corral.agents.epistemic",
+            "EpistemicAgent",
+        ),
         "llm-planner": AgentDefinition(
             "corral.agents.llm_planner",
             "LLMPlanner",

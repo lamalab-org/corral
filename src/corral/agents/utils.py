@@ -2,7 +2,7 @@ import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 import litellm
 import openai
@@ -88,6 +88,7 @@ class LLMResponseMetadata(TypedDict, total=False):
     id: str | None
     logprobs: Any | None
     usage: dict[str, int] | None
+    content_source: Literal["text", "reasoning_summary"]
 
 
 class LLMResponse:
@@ -120,6 +121,11 @@ class LLMResponse:
     def content(self) -> str | None:
         """Get the message content"""
         return self.message.content
+
+    @property
+    def content_source(self) -> str:
+        """Distinguish visible assistant text from a returned reasoning summary."""
+        return self.metadata.get("content_source", "text")
 
     @property
     def role(self) -> str:
@@ -238,14 +244,18 @@ async def llm_call(
 
         message = response.choices[0].message
 
-        # If message content is None, try to get reasoning_content
-        if message.content is None:
-            reasoning_content = getattr(message, "reasoning_content", None)
-            if reasoning_content is not None:
-                # Ensure reasoning_content is a string
-                message.content = str(reasoning_content) if reasoning_content else None
-
         metadata = LLMResponseMetadata()
+        # Streaming tool-only replies can have an empty string rather than None.
+        # Preserve a provider-returned summary in either case, while recording
+        # its source so downstream reports do not count it as visible assistant text.
+        if message.content is None or (
+            isinstance(message.content, str) and not message.content.strip()
+        ):
+            reasoning_content = getattr(message, "reasoning_content", None)
+            if reasoning_content:
+                message.content = str(reasoning_content)
+                metadata["content_source"] = "reasoning_summary"
+
         metadata["id"] = response.id
 
         # Include logprobs if requested via kwargs

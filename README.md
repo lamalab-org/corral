@@ -220,7 +220,7 @@ If that environment is already activated, `uv run` is optional and the command
 is simply `corral bench ...`. The `--project` form is only needed when invoking
 `uv` from elsewhere in the monorepo.
 
-The available agent names are `ai-scientist`, `claude-code`, `codex`,
+The available agent names are `ai-scientist`, `claude-code`, `codex`, `epistemic`,
 `llm-planner`, `openhands`, `react`, `reflexion`, `terminus`, and
 `tool-calling`. Class names and underscore spellings such as `ReActAgent` and
 `tool_calling` are accepted as aliases. Claude Code, Codex, and OpenHands need
@@ -410,6 +410,127 @@ agent = ToolCallingAgent(
     temperature=0.0,
 )
 ```
+
+### EpistemicAgent
+
+Extends `ToolCallingAgent` with a Decisions assessment before each model turn
+after the first. The initial turn receives no epistemic report and makes no
+annotation API calls: the agent states initial hypotheses and justifies its first
+experiments without judging nonexistent prior experiments or reports.
+It classifies the seven productive motifs and eleven
+antipatterns from the final graph aggregation in `reasoning_reports/analyze.py`.
+The standalone registry reuses `corral.epistemic_analysis.patterns`; no graph
+extraction is required. Subsequent turns ask the agent to interpret previous experiments,
+check the assessment against the observations, and justify its next experiments.
+Before `submit_answer`, the prompt requires a visible submission justification
+connecting the answer to specific observations, considering relevant alternatives
+and remaining uncertainty, and explaining why the evidence suffices. This text
+accompanies the tool call; its `answer` argument keeps the task's required format.
+Completion still requires `submit_answer`.
+Its own `epistemic/user_prompt` replaces the base tool-calling prompt. It requests
+a visible reasoning summary before every tool call, including a separate
+justification for each call when using several tools in one response. It also
+permits turns containing only reasoning, which count toward the iteration limit.
+The system prompt, continuation reminder, and submission tool description are
+overridden for this agent; the base `ToolCallingAgent` keeps its original prompts
+and reminder. These are prompt instructions, not a runtime guarantee that the
+model will provide an explanation. Reasoning-only turns are assessed before the
+next actor turn; earlier epistemic reports remain excluded from the annotator.
+If a provider returns a separate reasoning summary with an empty text field,
+the tool-calling loop preserves it as message content and marks its provenance
+with `metadata.content_source = "reasoning_summary"`. This is distinguishable
+from an explicitly generated visible justification.
+
+```python
+from corral.agents import EpistemicAgent
+
+agent = EpistemicAgent(
+    model="openai/gpt-4o",  # Actor: any model supported by ToolCallingAgent.
+    epistemic_model="gpt-6-luna",  # Separate Decisions classifier.
+    epistemic_explanation_model="gpt-6-luna",  # Defaults to epistemic_model.
+    epistemic_timeout_s=120,
+    epistemic_max_retries=2,
+)
+```
+
+```bash
+uv run corral bench \
+  --agent epistemic --environment samplemath --task task1 \
+  --model openai/gpt-4o \
+  --agent-kwargs '{"epistemic_model":"gpt-6-luna"}'
+```
+
+Set `OPENAI_API_KEY` for the classifier. Its connection can be configured with
+`epistemic_api_key` and `epistemic_base_url`, independently of the actor's
+`api_endpoint`. The [Decisions API](https://developers.openai.com/api/reference/python/resources/decisions/methods/create)
+currently supports `gpt-6-luna`. The annotator uses the SDK's native Decisions
+helper when available, or its generic `POST /decisions` transport on older SDKs.
+
+Use the annotator independently with chronological message dictionaries:
+
+```python
+import asyncio
+import json
+from pathlib import Path
+from corral.epistemic_analysis import DecisionsAnnotator
+
+
+async def annotate_saved_conversation():
+    messages = json.loads(Path("messages.json").read_text())
+    report = await DecisionsAnnotator().annotate(messages, task="Describe the task")
+    Path("epistemic-report.json").write_text(json.dumps(report.to_dict(), indent=2))
+    print(report.format_for_agent())
+
+
+asyncio.run(annotate_saved_conversation())
+```
+
+`annotate` accepts a sequence of provider-style messages, including assistant
+`tool_calls` and tool outputs. Pass only the observed prefix for online use.
+An optional caller-owned `AsyncOpenAI` client can be passed as `client` to reuse
+connections. An agent accepts a configured annotator through `annotator`.
+
+All 18 motifs are classified in one request as `absent`, `emerging`, `active`,
+`resolved`, or `uncertain`, with probabilities. Each question includes a full
+graph description specifying the events, relationships, ordering, and missing
+links, along with the original notation and examples/counterexamples. Shared
+glossaries define the nodes and relationships. The classifier reassesses the
+trajectory independently without receiving previous reports. The agent's reports
+show only **active** patterns with a short, trajectory-specific explanation of why
+each is present. Absent, emerging, resolved, uncertain, and refused classifications,
+confidence scores, probability distributions, and generic graph definitions are
+not included in the agent-facing feedback.
+Refusals remain explicitly marked as uncertain in the saved assessment.
+These are temporal motif assessments, not deterministic graph counts
+or judgments of scientific correctness. Newly arrived results are not treated as
+ignored before the agent has an opportunity to respond.
+
+When Decisions detects active patterns, the annotator makes one additional
+Responses API call to explain them, using structured output and the same filtered
+trajectory. The explanation model receives the complete candidate graph definitions
+and must identify the actual observations and relationships supporting each
+pattern, with valid 1-based trajectory message references. It can reject unsupported
+detections; these remain in the saved assessment but are omitted from agent feedback.
+No explanation call is made when there are no active patterns. The explanation
+model defaults to the Decisions model and can be configured with
+`explanation_model` on the standalone annotator or `epistemic_explanation_model`
+on the agent. Both calls use the annotator's API connection settings.
+If nothing is supported, the feedback says "No present epistemic patterns detected."
+
+The actor retains all earlier reports in chronological order and receives a new
+report before each subsequent turn. A resumed session with prior agent activity
+receives feedback immediately; task-only context does not trigger a judgment.
+Reports are excluded from the annotator's input,
+including when resuming a session, from both classification and explanation calls.
+Complete reports, probabilities, explanations, evidence message references, raw responses, and
+usage remain in named `epistemic_report` session messages under
+`metadata.epistemic_report`. This metadata is never sent to the actor, including
+on resume; it sees only the formatted report text.
+The actor, classifier, and explanation calls contribute to token
+and model-call accounting; `max_iterations` still limits actor turns. Each request
+contains the full prefix without silent truncation, so classification cost grows
+with the conversation. After bounded SDK retries, API or malformed-response
+errors end the session with `agent_failure` rather than silently skipping feedback.
 
 ### LLMPlanner
 
