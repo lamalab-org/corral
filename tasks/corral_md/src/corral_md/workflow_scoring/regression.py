@@ -184,9 +184,18 @@ def scaler_matches(features, model: dict, *, rtol=1e-5, atol=1e-8) -> bool:
         raise EvidenceError("Standardization flags must be booleans")
     mean = finite_array(model.get("mean", np.zeros(d)), shape=(d,))
     scale = finite_array(model.get("scale", np.ones(d)), shape=(d,))
-    expected_mean = x.mean(axis=0) if model.get("with_mean", True) else np.zeros(d)
-    expected_scale = x.std(axis=0) if model.get("with_std", True) else np.ones(d)
-    expected_scale[expected_scale < np.finfo(float).eps] = 1
+    training_mean = x.mean(axis=0)
+    expected_mean = training_mean if model.get("with_mean", True) else np.zeros(d)
+    expected_scale = np.ones(d)
+    if model.get("with_std", True):
+        variance = x.var(axis=0)
+        expected_scale = np.sqrt(variance)
+        # StandardScaler detects constants from variance error bounds, not an
+        # absolute standard-deviation threshold. Small SOAP features can vary
+        # meaningfully even when their physical magnitude is below epsilon.
+        eps = np.finfo(np.float64).eps
+        upper_bound = len(x) * eps * variance + (len(x) * training_mean * eps) ** 2
+        expected_scale[variance <= upper_bound] = 1
     return bool(
         np.allclose(mean, expected_mean, rtol=rtol, atol=atol)
         and np.allclose(scale, expected_scale, rtol=rtol, atol=atol)

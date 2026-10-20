@@ -39,9 +39,15 @@ HESSIAN_OPERATIONS = {
         "none": ("none",),
         "average_transpose": (
             "average_transpose",
+            "average_with_transpose",
             "transpose_average",
             "Hessian transpose average",
             "H_sym = (H_raw + H_raw^T)/2",
+            "arithmetic Hessian symmetrization: (Phi + Phi^T)/2; no crystallographic symmetry reduction",
+            "index symmetrization Phi=(Phi+Phi^T)/2 (no space-group symmetrization)",
+        ),
+        "average_transpose_iterative_100": (
+            "Phi=(Phi+Phi^T)/2 alternated with ASR (100 iterations), final symmetrization",
         ),
     },
     "acoustic_sum_rule": {
@@ -50,6 +56,14 @@ HESSIAN_OPERATIONS = {
             "projection",
             "orthogonal translational projection",
             "Cartesian orthogonal projection H = P H_sym P, P removes the three uniform translations",
+            "double-sided orthogonal projection removing the three uniform Cartesian translations",
+        ),
+        "onsite_blocks_then_resymmetrize": (
+            "on-site blocks replaced by minus sum of off-site blocks, then re-symmetrized",
+            "self_term_correction",
+        ),
+        "onsite_blocks_iterative_100": (
+            "self-block correction Phi_ii=-sum_{j!=i} Phi_ij (3x3 blocks)",
         ),
     },
 }
@@ -66,7 +80,43 @@ def postprocess_settings(record):
                 break
         else:
             raise UnsupportedMethod(f"Unsupported {field}: {value!r}")
+    paired = {
+        "onsite_blocks_then_resymmetrize": "average_transpose",
+        "onsite_blocks_iterative_100": "average_transpose_iterative_100",
+    }
+    acoustic = normalized["acoustic_sum_rule"]
+    symmetry = normalized["symmetrization"]
+    if (acoustic in paired and symmetry != paired[acoustic]) or (
+        symmetry == "average_transpose_iterative_100"
+        and acoustic != "onsite_blocks_iterative_100"
+    ):
+        raise UnsupportedMethod("Unsupported symmetrization and acoustic-sum-rule sequence")
     return normalized
+
+
+def _onsite_block_correction(matrix):
+    corrected = matrix.copy()
+    for atom in range(2):
+        own = slice(3 * atom, 3 * atom + 3)
+        other = slice(3 * (1 - atom), 3 * (1 - atom) + 3)
+        corrected[own, own] = -matrix[own, other]
+    return corrected
+
+
+def _apply_onsite_asr(matrix, order, operations):
+    # Apply atom-block operations in standard atom/Cartesian order, then restore
+    # the submitted degree-of-freedom order.
+    standard = np.empty_like(matrix)
+    standard[np.ix_(order, order)] = matrix
+    if operations["acoustic_sum_rule"] == "onsite_blocks_then_resymmetrize":
+        standard = (standard + standard.T) / 2
+        standard = _onsite_block_correction(standard)
+    else:
+        for _ in range(100):
+            standard = (standard + standard.T) / 2
+            standard = _onsite_block_correction(standard)
+    standard = (standard + standard.T) / 2
+    return standard[np.ix_(order, order)]
 
 
 def close(actual, expected, rtol=1e-5, atol=1e-7):
@@ -148,9 +198,19 @@ def _reconstruct(e, record):
         "analytical_energy_hessian",
         "MACE analytical Cartesian energy Hessian (automatic differentiation)",
     )
-    if method == "central_difference":
+    if method in {
+        "central_difference",
+        "central_difference_periodic_gamma",
+        "central_difference_forces",
+        "central_difference_of_forces",
+        "central_difference_gamma_primitive_cell",
+        "central_difference_periodic_primitive_cell_Gamma",
+    }:
         plus = _array(e, record["plus_displacements_A"])
         minus = _array(e, record["minus_displacements_A"], plus.shape)
+        if plus.ndim == 2 and plus.shape[1] == 6:
+            plus = plus.reshape(-1, 2, 3)
+            minus = minus.reshape(-1, 2, 3)
         if plus.ndim != 3 or plus.shape[1:] != (2, 3) or len(plus) < 6:
             raise EvidenceError(
                 "Central differences need at least six [2,3] displacement pairs"
@@ -214,7 +274,9 @@ def _reconstruct(e, record):
             f"Cannot reconstruct the saved numerical method {method!r}"
         )
     transformations = postprocess_settings(record)
-    if transformations["symmetrization"] == "average_transpose":
+    if transformations["acoustic_sum_rule"].startswith("onsite_blocks_"):
+        matrix = _apply_onsite_asr(matrix, order, transformations)
+    elif transformations["symmetrization"] == "average_transpose":
         matrix = (matrix + matrix.T) / 2
     if transformations["acoustic_sum_rule"] == "projection":
         translations = np.tile(np.eye(3), (2, 1))[order]

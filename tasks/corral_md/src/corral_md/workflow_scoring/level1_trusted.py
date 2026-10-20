@@ -95,6 +95,7 @@ def replay_task8_default_rng(e) -> bool:
     if any(name not in pcg64_names and "default_rng" not in name for name in rng_names):
         raise UnsupportedEvidence("The recorded generator needs another replay adapter")
     explicit_pcg64 = any(name in pcg64_names for name in rng_names)
+    explicit_pcg64 = explicit_pcg64 or "pcg64" in method
     if "numpy" not in library or not (
         explicit_pcg64
         or any("default_rng" in value for value in (library, method, *rng_names))
@@ -240,7 +241,13 @@ def _task5_force_plan(p: Plan) -> None:
             hessian_frames.append(base)
             hessian_values.append({"hessian": standard.tolist()})
             continue
-        if method == "central_difference":
+        if method in {
+            "central_difference",
+            "central_difference_periodic_gamma",
+            "central_difference_forces",
+            "central_difference_of_forces",
+            "central_difference_gamma_primitive_cell",
+        }:
             displacements = np.concatenate(
                 [
                     _array(e, record["plus_displacements_A"]),
@@ -258,6 +265,10 @@ def _task5_force_plan(p: Plan) -> None:
             forces = _array(e, record["forces_eV_A"])
         else:
             raise UnsupportedEvidence(f"Unsupported Task 5 method: {method!r}")
+        if displacements.ndim == 2 and displacements.shape[1] == 6:
+            displacements = displacements.reshape(-1, 2, 3)
+        if forces.ndim == 2 and forces.shape[1] == 6:
+            forces = forces.reshape(-1, 2, 3)
         if displacements.shape != forces.shape or displacements.shape[1:] != (2, 3):
             raise EvidenceError("Task 5 displacement and force arrays must align")
         for delta, force in zip(displacements, forces, strict=True):

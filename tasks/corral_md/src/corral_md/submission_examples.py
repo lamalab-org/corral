@@ -62,6 +62,37 @@ def example_files(task_number: int, *, level: int = 2) -> dict[str, str]:
             "options must agree. Precision aliases are dtype, precision, and "
             "model_dtype.\n"
         )
+    if task_number == 2:
+        guide += (
+            "\nTask 2 uses protocol task2-4000K-v3: read liq4000.dat and cool "
+            "from 4000 to 300 K at 10 K/ps for 370 ps, then hold at 300 K for "
+            "100 ps. Level 1 requires both stages (470000 steps at 1 fs). "
+            "Level 2 additionally reheats to 4000 K at 10 K/ps for 370 ps "
+            "(840000 total steps). Preserve the supplied velocities and use "
+            "100 fs thermostat damping, with 10000/5000/10000 fs pressure "
+            "damping for cooling/hold/reheating. Record steps and time from "
+            "zero and keep all stage-boundary states. Transition fitting uses "
+            "only measured temperatures at or below 2600 K and unique trace "
+            "indices; repeated indices cannot add evidence.\n"
+        )
+        if level == 2:
+            guide += (
+                "\nAn unresolved transition may use unresolved.example.json: "
+                "retain the assessed indices, measured-temperature coordinate, "
+                "a reason, and diagnostics.single_line_sse (the unweighted "
+                "density residual sum of squares for an intercept-plus-temperature "
+                "linear least-squares fit to those rows). Set its result Tg and "
+                "delta_tg_K to null. This is a scientific-review case; null "
+                "alone is not sufficient evidence.\n"
+                "For the built-in two-regime estimators, automatic checks require "
+                "at least six distinct measured temperatures and screen support "
+                "against one straight line on the same selected rows and weights. "
+                "The BIC gain is n*log(SSE_single/SSE_segmented)-2*log(n), counting "
+                "four parameters for the segmented model versus two for a line. "
+                "Gain below 6 leaves the transition check pending for review. "
+                "This ambiguity screen does not establish statistical significance "
+                "for correlated MD samples or prove a physical glass transition.\n"
+            )
     if level == 2 and task_number == 3:
         guide += (
             "For the separate teacher, student, and MD calculators, use "

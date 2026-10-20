@@ -112,3 +112,70 @@ def test_unknown_calculator_options_still_require_independent_verification_suppo
         parse_calculator_settings(settings)
     with pytest.raises(UnsupportedEvidence):
         calculator_settings(SimpleNamespace(settings=settings))
+
+
+def test_recorded_default_d3_cutoffs_are_supported_without_changing_the_calculator():
+    settings = {
+        "dispersion": True,
+        "model_settings": {
+            "dispersion": True,
+            "dispersion_xc": "pbe",
+            "damping": "bj",
+            "dispersion_cutoff_angstrom": 21.167088422553647,
+            "dispersion_cutoff_bohr": 40.0,
+            "dispersion_cn_cutoff": "torch-dftd default",
+        },
+    }
+    assert parse_calculator_settings(settings) == {"dispersion": True}
+    assert calculator_settings(SimpleNamespace(settings=settings))["dispersion"] is True
+
+    settings["model_settings"]["dispersion_cutoff_bohr"] = 35.0
+    with pytest.raises(UnsupportedCalculatorSettings):
+        parse_calculator_settings(settings)
+
+
+@pytest.mark.parametrize("cutoff", [40.0 * 0.52917721, 40.0 * 0.52917726])
+def test_recorded_d3_damping_alias_and_bohr_conversion(cutoff):
+    settings = {"model_settings": {
+        "dispersion": True,
+        "dispersion_damping": "bj",
+        "dispersion_xc": "pbe",
+        "dispersion_cutoff_A": cutoff,
+    }}
+    assert _model_parameters(SimpleNamespace(settings=settings), 3) == {
+        "model": "teacher.model", "default_dtype": "float64", "dispersion": True,
+    }
+    for changes in (
+        {"damping": "zero"},
+        {"dispersion_damping": "zero"},
+        {"dispersion_cutoff_A": cutoff + 1e-5},
+        {"dispersion": False},
+    ):
+        altered = copy.deepcopy(settings)
+        altered["model_settings"].update(changes)
+        with pytest.raises(UnsupportedCalculatorSettings):
+            parse_calculator_settings(altered)
+
+
+def test_identity_calculator_options_are_accepted_but_nondefault_values_stay_pending():
+    options = {
+        "default_dtype": "float64",
+        "enable_cueq": False,
+        "energy_units_to_eV": 1.0,
+        "length_units_to_A": 1.0,
+        "model_type": "MACE",
+        "compile_mode": None,
+    }
+    settings = {"model_settings": options, "calculator_args": {"model_paths": "input/teacher.model"}}
+    assert parse_calculator_settings(settings) == {"default_dtype": "float64"}
+    for key, value in (
+        ("enable_cueq", True),
+        ("energy_units_to_eV", 2.0),
+        ("length_units_to_A", 2.0),
+        ("model_type", "Other"),
+        ("compile_mode", "max-autotune"),
+    ):
+        changed = copy.deepcopy(settings)
+        changed["model_settings"][key] = value
+        with pytest.raises(UnsupportedCalculatorSettings):
+            parse_calculator_settings(changed)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import os
 import signal
+import stat
 import sys
 from contextlib import suppress
 from pathlib import Path
@@ -162,6 +163,40 @@ def enter_workspace(
         else:
             bind(source, target, readonly=True)
 
+    # The NVIDIA container runtime injects the host driver as individual file
+    # mounts under /usr. A non-recursive /usr bind sees the image's small CUDA
+    # stubs instead, so bind those driver files explicitly over the stubs.
+    for entry in Path("/proc/self/mountinfo").read_text().splitlines():
+        mountpoint = Path(entry.split()[4])
+        if (
+            mountpoint.parent != Path("/usr/lib/x86_64-linux-gnu")
+            or not mountpoint.name.startswith(("libcuda.", "libnvidia-"))
+            or not mountpoint.is_file()
+        ):
+            continue
+        target = runtime / mountpoint.relative_to("/")
+        if not target.is_file() or target.is_symlink():
+            continue
+        mount(mountpoint, target, flags=_MS_BIND)
+        mount(
+            None,
+            target,
+            flags=_MS_BIND | _MS_REMOUNT | _MS_RDONLY | _MS_NOSUID | _MS_NODEV,
+        )
+    if Path("/dev/nvidiactl").exists():
+        # CUDA queries PCI topology during initialization. The worker needs a
+        # read-only sysfs view as well as the driver files and device nodes.
+        bind(Path("/sys"), runtime / "sys", readonly=True)
+        persistence = Path("/run/nvidia-persistenced")
+        if persistence.is_dir():
+            _directory(runtime / "run")
+            _directory(runtime / "run" / "nvidia-persistenced")
+            mount(
+                persistence,
+                runtime / "run" / "nvidia-persistenced",
+                flags=_MS_BIND | _MS_REC,
+            )
+
     etc = runtime / "etc"
     _directory(etc)
     for name in _PUBLIC_ETC:
@@ -200,7 +235,7 @@ def enter_workspace(
             target_workspace,
             "tmpfs",
             _MS_NOSUID | _MS_NODEV,
-            f"mode=0700,uid={uid},gid={gid},size=256m",
+            f"mode=0700,uid={uid},gid={gid},size=2g",
         )
 
     # Explicit immutable resources are nested read-only mounts. Their public
@@ -257,7 +292,7 @@ def enter_workspace(
         scratch_path,
         "tmpfs",
         _MS_NOSUID | _MS_NODEV,
-        f"mode=0700,uid={uid},gid={gid},size=64m",
+        f"mode=0700,uid={uid},gid={gid},size=2g",
     )
     scratch = str(SCRATCH_ROOT)
     shared_memory = scratch_path / "shm"
@@ -272,13 +307,27 @@ def enter_workspace(
         "proc",
         proc,
         "proc",
-        _MS_RDONLY | _MS_NOSUID | _MS_NODEV | _MS_NOEXEC,
+        (_MS_RDONLY if not Path("/dev/nvidiactl").exists() else 0)
+        | _MS_NOSUID
+        | _MS_NODEV
+        | _MS_NOEXEC,
         "hidepid=2",
     )
     dev = runtime / "dev"
     _directory(dev)
     for name in ("null", "zero", "random", "urandom", "tty"):
         bind(Path("/dev") / name, dev / name, readonly=False)
+    # Docker's NVIDIA device request publishes driver nodes in /dev. Make the
+    # same nodes available to restricted scientific tools after chroot.
+    for source in sorted(Path("/dev").glob("nvidia*")):
+        if source.is_symlink() or not stat.S_ISCHR(source.stat().st_mode):
+            continue
+        bind(source, dev / source.name, readonly=False)
+    caps = Path("/dev/nvidia-caps")
+    if caps.is_dir():
+        for source in sorted(caps.iterdir()):
+            if not source.is_symlink() and stat.S_ISCHR(source.stat().st_mode):
+                bind(source, dev / "nvidia-caps" / source.name, readonly=False)
     _directory(dev / "pts")
     mount(
         "devpts",
@@ -300,18 +349,16 @@ def enter_workspace(
         "root",
         "home",
         "corral-state",
-        "sys",
         "srv",
         "mnt",
         "media",
         "boot",
-        "run",
     ):
         _directory(jail / name, 0)
     for name in ("passwd", "shadow", "group", "gshadow"):
         (etc / name).touch(mode=0)
 
-    for name in ("usr", "bin", "sbin", "lib", "lib64", "opt", "etc", "proc", "dev"):
+    for name in ("usr", "bin", "sbin", "lib", "lib64", "opt", "etc", "proc", "dev", "sys", "run"):
         if (runtime / name).exists() or (runtime / name).is_symlink():
             (jail / name).symlink_to(RUNTIME_ROOT / name)
     (jail / "tmp").symlink_to(scratch)

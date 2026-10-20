@@ -615,13 +615,27 @@ def apply_template_forward(
     reactants: str
         The SMILES of the reactants, separated by dots if multiple.
     template_id: str
-        The identifier of the reaction template to use.
+        The numeric catalog identifier, or a retrosynthetic SMARTS template
+        in product>>precursors orientation.
 
     Returns:
         tuple[tuple[str, ...], ...]: A tuple of tuples, where each inner tuple contains SMILES strings
         representing one possible set of predicted products.
     """
+    if '>>' in template_id:
+        # verify_step has always documented a retrosynthetic SMARTS input.
+        # Reverse that template for the forward check instead of treating the
+        # SMARTS string as an integer database identifier.
+        from rxnutils.chem.template import ReactionTemplate
+
+        parts = template_id.split('>>')
+        if len(parts) != 2 or not all(parts):
+            raise ValueError('Expected a retrosynthetic SMARTS template: product>>precursors')
+        products, precursors = parts
+        return ReactionTemplate(f'{precursors}>>{products}').apply(reactants)
     reaction_data = search_by_template(template_id)
+    if reaction_data is None:
+        raise ValueError(f'Template ID {template_id} not found in database.')
     try:
         rxn = ChemicalReaction(reaction_data["mapped_rxn"])
         rxn.generate_reaction_template()

@@ -239,8 +239,9 @@ def _reconstruct_derivative(e, frames, data):
                 )
             forces.append(force[indices])
         phi = -np.einsum("aj,jrb->rba", w, np.asarray(forces))
-    elif method == "analytical":
-        if not str(derivative.get("description", "")).strip():
+    elif method in ("analytical", "analytical_hessian"):
+        description = derivative.get("description") or derivative.get("details") or ""
+        if not str(description).strip():
             raise ValueError("Analytical derivative description is required")
         hessian = finite_array(
             e.array(derivative.get("hessian_artifact", "raw_hessian")), shape=(375, 375)
@@ -290,7 +291,15 @@ def _apply_corrections(raw, data):
     phi = raw.copy()
     origin = np.where(np.all(cells == 0, axis=1))[0][0]
     for operation in data.get("corrections", []):
-        label = operation.lower() if isinstance(operation, str) else ""
+        if isinstance(operation, dict) and "name" in operation:
+            label = operation["name"]
+            if not isinstance(label, str):
+                raise UnsupportedMethod("Correction name must be a string")
+            label = label.lower()
+            if label == "cubic_symmetry" and operation.get("operations", 48) != 48:
+                raise UnsupportedMethod("Cubic correction must use all 48 operations")
+        else:
+            label = operation.lower() if isinstance(operation, str) else ""
         if label in ("cubic_symmetry", "48-operation cubic o_h group projection"):
             phi = _cubic_symmetry(phi, cell, cells, transform)
         elif label in (

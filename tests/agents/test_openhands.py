@@ -53,6 +53,20 @@ class Session:
         self.messages.append(message)
 
 
+def test_openhands_passes_retry_settings_without_changing_provider_or_reasoning():
+    provider = {"only": ["together"], "allow_fallbacks": False,
+                "zdr": True, "data_collection": "deny"}
+    agent = OpenHandsAgent(
+        model="openrouter/moonshotai/kimi-k3", api_key="test-key", system_prompt="system",
+        litellm_extra_body={"provider": provider}, num_retries=12,
+        retry_min_wait=15, retry_max_wait=300, retry_multiplier=15.0,
+    )
+    llm = agent._make_llm()
+    assert (llm.num_retries, llm.retry_min_wait, llm.retry_max_wait, llm.retry_multiplier) == (12, 15, 300, 15.0)
+    assert llm.litellm_extra_body == {"provider": provider}
+    assert llm.reasoning_effort == openhands_module.LLM.model_fields["reasoning_effort"].default
+
+
 @pytest.mark.anyio
 async def test_openhands_uses_only_the_iteration_run_limit(monkeypatch, tmp_path):
     captured = {"arun_calls": 0}

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from ase.calculators.singlepoint import SinglePointCalculator
 from corral_md.workflow_scoring.common import Evidence, Rubric
-from corral_md.workflow_scoring.task_5 import ENERGY_FACTOR, evaluate
+from corral_md.workflow_scoring.task_5 import ENERGY_FACTOR, _reconstruct, evaluate, postprocess_settings
 
 CELL = 5.43 / 2 * (np.ones((3, 3)) - np.eye(3))
 MASS = 28.0855
@@ -157,6 +157,81 @@ def test_named_dof_order_and_transpose_average_are_equivalent(submission):
         write(path, records)
 
     assert score(submission).score == pytest.approx(0.9)
+
+
+def test_average_with_transpose_alias_reconstructs_the_same_hessian(submission):
+    for name in ("calculations.json", "sensitivity.json"):
+        path = submission.parent / name
+        records = load(path)
+        for record in records:
+            record["symmetrization"] = "average_with_transpose"
+        write(path, records)
+
+    assert score(submission).score == pytest.approx(0.9)
+
+
+@pytest.mark.parametrize(
+    "symmetry, acoustic, canonical",
+    [
+        (
+            "index symmetrization Phi=(Phi+Phi^T)/2 (no space-group symmetrization)",
+            "on-site blocks replaced by minus sum of off-site blocks, then re-symmetrized",
+            "onsite_blocks_then_resymmetrize",
+        ),
+        (
+            "Phi=(Phi+Phi^T)/2 alternated with ASR (100 iterations), final symmetrization",
+            "self-block correction Phi_ii=-sum_{j!=i} Phi_ij (3x3 blocks)",
+            "onsite_blocks_iterative_100",
+        ),
+    ],
+)
+def test_documented_onsite_asr_reconstructs_from_raw_forces(symmetry, acoustic, canonical):
+    offsite = np.array([[2.0, 1.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]])
+    raw = np.zeros((6, 6))
+    raw[:3, 3:] = offsite
+    raw[3:, :3] = offsite.T
+    displacements = np.eye(6) * 0.01
+    forces = -displacements @ raw.T
+    record = {
+        "method": "central_difference",
+        "dof_order": [[atom, axis] for atom in range(2) for axis in "xyz"],
+        "symmetrization": symmetry,
+        "acoustic_sum_rule": acoustic,
+        "plus_displacements_A": displacements.reshape(6, 2, 3).tolist(),
+        "minus_displacements_A": (-displacements).reshape(6, 2, 3).tolist(),
+        "plus_forces_eV_A": forces.reshape(6, 2, 3).tolist(),
+        "minus_forces_eV_A": (-forces).reshape(6, 2, 3).tolist(),
+    }
+    assert postprocess_settings(record)["acoustic_sum_rule"] == canonical
+    reconstructed, _ = _reconstruct(None, record)
+    expected = raw.copy()
+    expected[:3, :3] = -(offsite + offsite.T) / 2
+    expected[3:, 3:] = expected[:3, :3]
+    assert reconstructed == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "method",
+    (
+        "central_difference_periodic_gamma",
+        "central_difference_forces",
+        "central_difference_of_forces",
+        "central_difference_gamma_primitive_cell",
+        "central_difference_periodic_primitive_cell_Gamma",
+    ),
+)
+def test_equivalent_central_force_records_reconstruct_from_flat_displacements(submission, method):
+    for name in ("calculations.json", "sensitivity.json"):
+        path = submission.parent / name
+        rows = load(path)
+        for row in rows:
+            row["method"] = method
+            row["plus_displacements_A"] = np.asarray(row["plus_displacements_A"]).reshape(6, 6).tolist()
+            row["minus_displacements_A"] = np.asarray(row["minus_displacements_A"]).reshape(6, 6).tolist()
+            row["symmetrization"] = "arithmetic Hessian symmetrization: (Phi + Phi^T)/2; no crystallographic symmetry reduction"
+            row["acoustic_sum_rule"] = "double-sided orthogonal projection removing the three uniform Cartesian translations"
+        write(path, rows)
+    assert check(score(submission), "force_constants_reconstructed_from_raw_evidence")["status"] == "passed"
 
 
 def score(path):

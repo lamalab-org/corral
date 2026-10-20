@@ -8,13 +8,13 @@ or withhold credit for the later production, fitting, or analysis stages.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import numpy as np
 from ase import units
 from ase.build import bulk
-from ase.data import atomic_masses, atomic_numbers
 from ase.io import read as read_atoms
 
 from . import (
@@ -159,47 +159,21 @@ def _task_1(e: Evidence, r: Rubric) -> None:
 
 
 def _task_2(e: Evidence, r: Rubric) -> None:
+    stages = {"cooling", "hold"}
+
     @lru_cache(None)
     def trace():
-        table = task_2._trace(e, {"cooling"})
-        if len(table) < 2 or np.any(np.diff(table.time_ps) <= 0):
-            raise EvidenceError("Cooling trace needs chronological endpoint samples")
-        elapsed = table.time_ps.to_numpy() - table.time_ps.iloc[0]
-        if not task_2._close(
-            elapsed[[0, -1]], [0, task_2._COOLING_DURATION_PS], atol=0.5, rtol=0.01
-        ):
-            raise EvidenceError("Cooling must run for 20 ps")
-        target = task_2._START_TEMPERATURE_K - task_2._RAMP_RATE_K_PS * elapsed
-        if not task_2._close(table.target_temperature_K, target, atol=5, rtol=0.01):
-            raise EvidenceError("Target temperatures do not reproduce 50 K/ps cooling")
-        return table
+        outcome = task_2._schedule(e, stages)
+        if outcome is not True:
+            raise EvidenceError(outcome[1])
+        return task_2._trace(e, stages)
 
     def boundary_states():
-        states = e.json("boundary_states", "stage_boundaries")
-        initial = task_2._state(states["initial"])
-        final = task_2._state(states["cooling_end"])
-        if not (
-            np.array_equal(initial["ids"], final["ids"])
-            and np.array_equal(initial["species"], final["species"])
-            and task_2._close(initial["charges"], final["charges"], atol=1e-7, rtol=0)
-            and task_2._close(
-                final["time_ps"] - initial["time_ps"],
-                task_2._COOLING_DURATION_PS,
-                atol=0.5,
-                rtol=0.01,
-            )
-        ):
-            return False
-        table = trace()
-        for state, row in ((initial, table.iloc[0]), (final, table.iloc[-1])):
-            mass = sum(
-                atomic_masses[atomic_numbers[str(symbol)]]
-                for symbol in state["species"]
-            )
-            density = mass * 1.66053906660 / np.linalg.det(state["cell"])
-            if not task_2._close(density, row.density_g_cm3, atol=1e-5):
-                return False
-        return True
+        trace()
+        outcome = task_2._boundaries(e, stages)
+        if outcome is not True:
+            return outcome
+        return task_2._boundary_density(e, stages)
 
     r.check("cooling_schedule_and_observables", 20, lambda: bool(len(trace())))
     r.check(
@@ -223,9 +197,9 @@ def _task_2(e: Evidence, r: Rubric) -> None:
         _supported(
             lambda: task_2._input_cycle(
                 e,
-                task_2._COOLING_DURATION_PS,
+                task_2._HOLD_END_PS,
                 required_timestep_fs=1.0,
-                required_steps=20_000,
+                required_steps=task_2._PREPARATION_STEPS,
             )
         ),
     )
@@ -238,7 +212,7 @@ def _task_2(e: Evidence, r: Rubric) -> None:
         _supported(
             lambda: task_2._logged_trace(
                 e,
-                {"cooling"},
+                stages,
                 required_timestep_fs=1.0,
             )
         ),
@@ -1222,11 +1196,29 @@ def _task_9(e: Evidence, r: Rubric) -> None:
             ]
         )
         normalization = str(doc["normalization"]).lower().replace(" ", "")
-        if normalization == "unbiased" or (
+        if normalization in {
+            "unbiased",
+            "biased-free(dividebyn-k),normalizedtorho(0)=1,meansubtracted",
+        } or (
             "c(k)/c(0)" in normalization and "/(n-k)" in normalization
+        ) or (
+            normalization == "c(lag)/c(0),productionmeanremoved"
+            and "unbiased" in estimator
+        ) or (
+            normalization == f"c(lag)/c(0),meanremovedoverall{len(energy)}samples"
+            and "per-lag overlap normalization" in estimator
+        ) or (
+            "variance" in normalization
+            and "c(0)=1" in normalization
+            and "mean-subtracted" in normalization
+            and "unbiased" in normalization
+            and "1/(n-k)" in normalization
         ):
             values *= len(energy) / (len(energy) - lags)
-        elif normalization != "biased":
+        elif normalization not in {
+            "biased",
+            "mean-subtractedbiasedestimatornormalizedtolag0=1",
+        }:
             raise UnsupportedEvidence("Unsupported autocorrelation normalization")
         factor = {"fs": 1, "ps": 1000}.get(doc["time_unit"])
         if factor is None:
@@ -1268,6 +1260,71 @@ def _task_9(e: Evidence, r: Rubric) -> None:
         else:
             value, bound = lags[-1] * delta[0], "lower"
         reported_bound = item["bound"]
+        bound_type = str(item.get("bound_type", "")).lower()
+        if isinstance(reported_bound, Mapping):
+            if set(reported_bound) == {"lower", "upper"}:
+                # This format records the two samples bracketing a linearly
+                # interpolated first crossing. Recompute the endpoints and
+                # estimate; merely falling inside the interval is insufficient.
+                if bound != "estimate" or crossing == 0:
+                    return False
+                expected_interval = (
+                    lags[[crossing - 1, crossing]] * delta[0] / item_factor
+                )
+                if not result_close(
+                    [reported_bound["lower"], reported_bound["upper"]],
+                    expected_interval,
+                    atol=1e-7,
+                ):
+                    return False
+                if "crossing_lag_index" in item and item["crossing_lag_index"] != lags[crossing]:
+                    return False
+                fraction = (threshold - values[crossing - 1]) / (
+                    values[crossing] - values[crossing - 1]
+                )
+                interpolated = (lags[crossing - 1] + fraction) * delta[0] / item_factor
+                return result_close(item["value"], interpolated, atol=1e-7)
+            if (
+                str(reported_bound.get("type", "")).lower() != "upper"
+                or type(reported_bound.get("value")) not in (int, float)
+            ):
+                return False
+            bound_type = "upper"
+            reported_bound = reported_bound["value"]
+        described_interval = (
+            re.fullmatch(r"resolved between (\S+) and (\S+) (fs|ps)", reported_bound)
+            if isinstance(reported_bound, str)
+            else None
+        )
+        if described_interval:
+            if bound != "estimate" or crossing == 0:
+                return False
+            interval_factor = {"fs": 1, "ps": 1000}[described_interval[3]]
+            interval = finite_array(
+                [described_interval[1], described_interval[2]], shape=(2,)
+            )
+            expected_interval = lags[[crossing - 1, crossing]] * delta[0] / interval_factor
+            if not result_close(interval, expected_interval, atol=1e-7):
+                return False
+            reported_bound = "estimate"
+        if type(reported_bound) in (int, float):
+            # A numeric upper bound may accompany a linearly interpolated
+            # first crossing. Validate both against the saved ACF samples.
+            if (
+                bound != "estimate"
+                or crossing == 0
+                or values[crossing] == values[crossing - 1]
+                or "upper" not in bound_type
+            ):
+                return False
+            upper = lags[crossing] * delta[0] / item_factor
+            fraction = (threshold - values[crossing - 1]) / (
+                values[crossing] - values[crossing - 1]
+            )
+            interpolated = (lags[crossing - 1] + fraction) * delta[0] / item_factor
+            return result_close(reported_bound, upper, atol=1e-7) and result_close(
+                item["value"], interpolated, atol=1e-7
+            )
         if reported_bound is None and bound == "estimate":
             reported_bound = "estimate"
         return reported_bound == bound and result_close(

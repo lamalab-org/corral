@@ -114,6 +114,12 @@ def test_legacy_runtime_cannot_disable_worker_permissions(version):
         DockerSandboxSpec(runtime_protocol_version=version)
 
 
+@pytest.mark.parametrize("gpus", ["device=", "device=2,2", "device=-1", "device=2, x"])
+def test_docker_gpu_device_selector_rejects_invalid_indices(gpus):
+    with pytest.raises(ValueError, match="Docker sandbox gpus"):
+        DockerSandboxSpec(gpus=gpus)
+
+
 def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
@@ -133,6 +139,32 @@ def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
     internal._restore_host_ownership(checkpoint)
 
     assert ownership_changes == [(result, 501, 20), (checkpoint, 501, 20)]
+
+
+def test_claim_checkpoint_ownership_covers_restored_artifact_directories(
+    monkeypatch, tmp_path
+):
+    checkpoint = tmp_path / "checkpoint"
+    artifact = checkpoint / "artifacts" / "01" / "blob"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"saved output")
+    ownership_changes = []
+
+    monkeypatch.setattr(internal.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        internal.os,
+        "chown",
+        lambda path, uid, gid: ownership_changes.append((path, uid, gid)),
+    )
+
+    internal._set_checkpoint_ownership(checkpoint, 0, 0)
+
+    assert {path for path, uid, gid in ownership_changes if (uid, gid) == (0, 0)} == {
+        checkpoint,
+        checkpoint / "artifacts",
+        artifact.parent,
+        artifact,
+    }
 
 
 @pytest.mark.anyio
@@ -183,8 +215,9 @@ async def test_preflight_builds_selected_task_and_extra_only_when_image_is_missi
     ("agent_name", "default_limit"), [("react", 50), ("ai_scientist", 100)]
 )
 @pytest.mark.parametrize("max_iterations", [None, 7])
+@pytest.mark.parametrize("gpus", [None, "4", "device=2,3"])
 async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
-    monkeypatch, tmp_path, private_data, agent_name, default_limit, max_iterations
+    monkeypatch, tmp_path, private_data, agent_name, default_limit, max_iterations, gpus
 ):
     store = ShardedCommitStore(tmp_path / ".corral")
     private_root = tmp_path / "private-bank"
@@ -258,6 +291,7 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
             docker=DockerSandboxSpec(
                 image="corral:test",
                 image_digest="sha256:" + "b" * 64,
+                gpus=gpus,
                 private_directories=(str(private_root),) if private_data else (),
             ),
         ),
@@ -307,6 +341,18 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
         not in (execution_dir / "request.json").read_text()
     )
     assert "--read-only" in create
+    if gpus is not None:
+        assert create[create.index("--gpus") + 1] == (
+            '"device=2,3"' if gpus == "device=2,3" else "4"
+        )
+        assert any(
+            entry.startswith("CUDA_VISIBLE_DEVICES=")
+            and entry[-1] in ("01" if gpus == "device=2,3" else "0123")
+            for entry in forwarded_env
+        )
+        assert durable_metadata["sandbox"]["gpus"] == gpus
+    else:
+        assert "--gpus" not in create
     assert "--init" in create
     assert create[create.index("--user") + 1] == "0:0"
     assert durable_metadata["sandbox"]["permissions_policy"] == "workspace-root-v1"

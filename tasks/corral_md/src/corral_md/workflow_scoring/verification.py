@@ -495,7 +495,13 @@ def build_plan(e, task_number, challenge):
                         targets=targets,
                     )
                     continue
-                if row["method"] == "central_difference":
+                if row["method"] in {
+                    "central_difference",
+                    "central_difference_periodic_gamma",
+                    "central_difference_forces",
+                    "central_difference_of_forces",
+                    "central_difference_gamma_primitive_cell",
+                }:
                     displacements = np.concatenate(
                         [
                             _array(e, row[k])
@@ -517,6 +523,12 @@ def build_plan(e, task_number, challenge):
                     raise UnsupportedEvidence(
                         "Derivative method needs a calculator adapter"
                     )
+                if displacements.ndim == 2 and displacements.shape[1] == 6:
+                    displacements = displacements.reshape(-1, 2, 3)
+                if forces.ndim == 2 and forces.shape[1] == 6:
+                    forces = forces.reshape(-1, 2, 3)
+                if displacements.shape != forces.shape or displacements.shape[1:] != (2, 3):
+                    raise EvidenceError("Task 5 displacement and force arrays must align")
                 displaced = []
                 for delta in displacements:
                     atoms = base.copy()
@@ -722,6 +734,8 @@ def _regression_plan(p):
     if checkpoint.suffix == ".json":
         # Portable JSON is already loaded and evaluated independently by the current scorer.
         saved = json.loads(checkpoint.read_text())
+        if isinstance(saved, dict) and "coef" not in saved and isinstance(saved.get("model"), dict):
+            saved = saved["model"]
         actual = predict(all_x, saved)
         if not np.allclose(actual, predict(all_x, portable), rtol=1e-4, atol=1e-6):
             p.notes.append(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
@@ -80,9 +81,35 @@ def _token_usage(state: ExecutionState | None) -> dict[str, int] | None:
         "output_tokens": usage.output_tokens,
         "reasoning_tokens": usage.reasoning_tokens,
         "llm_calls": usage.llm_calls,
-        "tool_calls": usage.tool_calls,
+        "tool_calls": usage.tool_calls + len(_branch_tool_calls(state)),
         "agent_steps": usage.agent_steps,
     }
+
+
+def _branch_tool_calls(state: ExecutionState) -> list[dict[str, Any]]:
+    """Include physical experiments retained in completed agent metadata.
+
+    AI Scientist executes experiments on isolated branches and records their
+    statistics on its parent agent run. The parent's action projection contains
+    only its own actions, including the final submission.
+    """
+    calls = []
+    for run in state.agent_runs.values():
+        statistics = run.metadata.get("tool_statistics")
+        if not isinstance(statistics, Mapping):
+            continue
+        for recorded in statistics.get("tool_calls", []):
+            call = dict(recorded)
+            failed = call.get("status") in {
+                "failed", "execution_error", "invalid_args", "invalid_tool"
+            } or bool(call.get("error"))
+            call.update(
+                status="failed" if failed else "completed",
+                error=failed,
+                actor_id=run.actor_id,
+            )
+            calls.append(call)
+    return calls
 
 
 def _tool_statistics(state: ExecutionState | None) -> dict[str, Any]:
@@ -124,7 +151,12 @@ def _tool_statistics(state: ExecutionState | None) -> dict[str, Any]:
                 "actor_id": action.actor_id,
             }
         )
-    return {"tool_calls": calls, "by_tool": state.tool_statistics}
+    by_tool = dict(state.tool_statistics)
+    for call in _branch_tool_calls(state):
+        calls.append(call)
+        name = call["tool_name"]
+        by_tool[name] = by_tool.get(name, 0) + 1
+    return {"tool_calls": calls, "by_tool": by_tool}
 
 
 def _runtime_error(

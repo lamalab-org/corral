@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import litellm
+import httpx
 import openai
 from litellm.exceptions import BudgetExceededError, RateLimitError
 from litellm.types.utils import Message
@@ -13,10 +14,12 @@ from tenacity import (
     retry_if_exception,
     stop_after_attempt,
     wait_chain,
+    wait_exponential,
     wait_fixed,
 )
 
 from corral.agents.schema import BudgetExhaustedError
+from corral.core.errors import concise_error_message
 from corral.report.logging import logger
 
 RETRY_EXCEPTIONS = (
@@ -37,6 +40,12 @@ RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
 
 def _should_retry(exc: BaseException) -> bool:
     """Retry transient failures only; fail fast on non-retryable 4xx errors."""
+    # Streaming transports can expose HTTPX errors before LiteLLM wraps them.
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status in RETRYABLE_STATUS_CODES or status >= 500
+    if isinstance(exc, httpx.TransportError):
+        return True
     if not isinstance(exc, RETRY_EXCEPTIONS):
         return False
     status = getattr(exc, "status_code", None)
@@ -61,6 +70,17 @@ QUOTA_EXHAUSTED_KEYWORDS = (
     "budget",
 )
 
+# Anthropic reports account spending caps as HTTP 400, rather than 429.
+# Keep these specific: an invalid thinking budget is a request error, not an
+# exhausted account quota.
+ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS = (
+    "reached your specified api usage limits",
+    "credit balance is too low",
+    "insufficient_quota",
+    "exceeded your current quota",
+    "insufficient credits",
+)
+
 
 def before_sleep_loguru(retry_state):
     # Surface *what* is being retried, not just the attempt count: without the
@@ -73,7 +93,8 @@ def before_sleep_loguru(retry_state):
     wait = f"{next_action.sleep:.0f}s" if next_action is not None else "unknown"
     retry_object = getattr(retry_state, "retry_object", None)
     stop = getattr(retry_object, "stop", None)
-    maximum_attempts = getattr(stop, "max_attempt_number", 3)
+    policy = getattr(retry_state, "kwargs", {}).get("llm_retry_policy") or {}
+    maximum_attempts = policy.get("max_attempts", getattr(stop, "max_attempt_number", 3))
     attempt_label = (
         f"{retry_state.attempt_number}/{maximum_attempts}"
         if maximum_attempts is not None
@@ -178,9 +199,25 @@ def _reasoning_tokens(usage: Any) -> int | None:
     return None
 
 
+def _llm_retry_stop(state):
+    policy = state.kwargs.get("llm_retry_policy") or {}
+    return stop_after_attempt(int(policy.get("max_attempts", 3)))(state)
+
+
+def _llm_retry_wait(state):
+    policy = state.kwargs.get("llm_retry_policy")
+    if not policy:
+        return wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90))(state)
+    return wait_exponential(
+        multiplier=policy.get("multiplier", 15),
+        min=policy.get("min_wait_s", 15),
+        max=policy.get("max_wait_s", 300),
+    )(state)
+
+
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90)),
+    stop=_llm_retry_stop,
+    wait=_llm_retry_wait,
     retry=retry_if_exception(_should_retry),
     before_sleep=before_sleep_loguru,
     reraise=True,
@@ -192,6 +229,7 @@ async def llm_call(
     tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
     return_usage: bool = True,
+    llm_retry_policy: dict[str, int | float] | None = None,
     **kwargs,
 ) -> LLMResponse:
     """
@@ -204,6 +242,8 @@ async def llm_call(
         tools (list[dict[str, Any]], optional): The tools to make available to the model.
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
         return_usage (bool, optional): If True, includes token usage in metadata. Defaults to True.
+        llm_retry_policy: Optional transport retry settings. These stay local
+            and are never sent to the model provider.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
             Configure provider requirements here (e.g. max_tokens, reasoning_effort,
             thinking, tool_choice, or additional_drop_params). Caller settings are
@@ -238,8 +278,9 @@ async def llm_call(
 
         message = response.choices[0].message
 
-        # If message content is None, try to get reasoning_content
-        if message.content is None:
+        # Providers may return either None or an empty string for content.
+        # Preserve usable reasoning in either case for text-based agents.
+        if not message.content:
             reasoning_content = getattr(message, "reasoning_content", None)
             if reasoning_content is not None:
                 # Ensure reasoning_content is a string
@@ -295,16 +336,28 @@ async def llm_call(
 
     except RateLimitError as e:
         # Check if this is a quota exhaustion (not a temporary rate limit)
-        error_str = str(e).lower()
-        if any(keyword in error_str for keyword in QUOTA_EXHAUSTED_KEYWORDS):
+        detail = concise_error_message(e)
+        error_str = f"{e} {detail}".lower()
+        if any(
+            keyword in error_str
+            for keyword in (*QUOTA_EXHAUSTED_KEYWORDS, *ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS)
+        ):
             raise BudgetExhaustedError(
-                f"Benchmark stopped - quota exhausted: {e}"
+                f"Benchmark stopped - quota exhausted: {detail}"
             ) from e
         # Otherwise, it's a temporary rate limit - re-raise to let retry handle it
         raise
 
     except Exception as e:
-        raise e
+        detail = concise_error_message(e)
+        if any(
+            keyword in detail.lower()
+            for keyword in ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS
+        ):
+            raise BudgetExhaustedError(
+                f"Benchmark stopped - quota exhausted: {detail}"
+            ) from e
+        raise
 
 
 def format_examples(examples: list[str] | None) -> str:

@@ -1,10 +1,52 @@
 """Resolve MD result files inside the workspace restored for evaluation."""
 
+import errno
 import json
 import posixpath
+import re
 from pathlib import Path
 
 from corral.workspace import confine_workspace_path, workspace_relative_path
+
+
+def _manifest_reference(value: str) -> str:
+    """Accept one explicit manifest path in an otherwise textual answer.
+
+    Accept inline code references or standalone/labeled path lines. Do not choose
+    among different manifests, infer a missing path, or use file existence to
+    disambiguate. Resolution and workspace confinement still apply to the path.
+    """
+    candidates = {
+        line.strip()
+        for line in value.splitlines()
+        if re.fullmatch(r"[^\s`\"'<>]*manifest\.json", line.strip())
+        and Path(line.strip()).name == "manifest.json"
+    }
+    for line in value.splitlines():
+        labeled = re.match(
+            r"(?:submission\s+)?manifest(?:\s+path)?\s*:\s*"
+            r"([^\s`\"'<>()\[\],;]*manifest\.json)(?=$|\s|[,;)]|\.(?:\s|$))",
+            line.strip(),
+            flags=re.IGNORECASE,
+        )
+        if labeled and Path(labeled[1]).name == "manifest.json":
+            candidates.add(labeled[1])
+    remaining = value
+    for match in re.finditer(r"(?<!`)`([^`\r\n]+)`(?!`)", value):
+        candidate = match.group(1).strip()
+        if Path(candidate).name == "manifest.json":
+            candidates.add(candidate)
+            remaining = remaining.replace(match.group(0), "")
+    if not candidates:
+        return value
+    references = set(re.findall(r"[^\s`\"'<>()\[\],;]*manifest\.json\b", remaining))
+    # A filename mentioned in a deliverables list is not a second explicit
+    # path. Standalone or code-formatted bare paths remain in candidates.
+    references.discard("manifest.json")
+    references.update(candidates)
+    if len(references) != 1:
+        raise ValueError("Submitted manifest path is ambiguous in the answer")
+    return references.pop()
 
 
 class _ResolvedManifest(str):
@@ -150,6 +192,7 @@ def resolve_submission(submission: str, workspace: str | Path) -> str:
             pass
         else:
             return submission
+        value = _manifest_reference(value)
         path = find_file(value, root)
         if path.suffix.lower() != ".json":
             return str(path)
@@ -164,3 +207,24 @@ def resolve_submission(submission: str, workspace: str | Path) -> str:
             json.loads(path.read_text()), path.parent, original_root
         )
     return resolve_manifest(value, root)
+
+
+def resolve_local_submission(submission: str, workspace: str | Path) -> str:
+    """Score an absent agent submission as zero in local benchmark reports."""
+    try:
+        return resolve_submission(submission, workspace)
+    except (ValueError, UnicodeError, OSError) as exc:
+        if (
+            isinstance(exc, OSError)
+            and not isinstance(exc, FileNotFoundError)
+            and exc.errno
+            not in {errno.ENOENT, errno.ENAMETOOLONG, errno.EACCES, errno.ELOOP}
+        ):
+            raise
+        return json.dumps(
+            {
+                "results": {},
+                "artifacts": {},
+                "invalid_submission": str(exc)[:500],
+            }
+        )

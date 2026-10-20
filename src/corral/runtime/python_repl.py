@@ -41,8 +41,23 @@ except ImportError:  # pragma: no cover - unavailable on Windows
 
 DEFAULT_MAX_OUTPUT_CHARS = 5_000 + len("...(output truncated)")
 DEFAULT_MAX_CODE_CHARS = 50_000
-DEFAULT_WORKER_ADDRESS_SPACE_BYTES = 2 * 1024**3
+DEFAULT_WORKER_ADDRESS_SPACE_BYTES = int(
+    os.environ.get("CORRAL_REPL_ADDRESS_SPACE_BYTES", 2 * 1024**3)
+)
+if DEFAULT_WORKER_ADDRESS_SPACE_BYTES <= 0:
+    raise ValueError("CORRAL_REPL_ADDRESS_SPACE_BYTES must be a positive byte count")
 _WORKER_ADDRESS_SPACE_HEADROOM_BYTES = 512 * 1024**2
+_NUMERICAL_THREAD_VARIABLES = (
+    "OPENBLAS_NUM_THREADS",
+    "OPENBLAS_DEFAULT_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "OMP_THREAD_LIMIT",
+    "MKL_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "NUMEXPR_MAX_THREADS",
+)
 _NO_OUTPUT = (
     "No output. You likely forgot to print the result. "
     "Please use `print(...)` to see any output."
@@ -51,6 +66,17 @@ _NO_OUTPUT = (
 Namespace = dict[str, Any]
 NamespaceFactory = Callable[[Mapping[str, Any]], Namespace]
 CodeExecutor = Callable[[str, Namespace], str]
+
+
+def _clear_worker_environment() -> None:
+    """Strip credentials while retaining controls for lazily loaded BLAS wheels."""
+    numerical_environment = {
+        name: os.environ[name]
+        for name in _NUMERICAL_THREAD_VARIABLES
+        if name in os.environ
+    }
+    os.environ.clear()
+    os.environ.update(numerical_environment)
 
 
 def _session_builtins() -> dict[str, Any]:
@@ -118,6 +144,38 @@ def _restore_function_state(function: types.FunctionType, state: tuple) -> None:
                 target.cell_contents = source.cell_contents
 
 
+def _restore_regex_match(pattern, string, pos, endpos, regs):
+    # Search from the original bounds, preserving Match.pos and lookbehinds.
+    for match in pattern.finditer(string, pos, endpos):
+        if match.regs == regs:
+            return match
+    raise ValueError("Cannot restore regular-expression match")
+
+
+def _restore_closed_file(text: bool, name: Any, mode: Any):
+    # Closed handles contain no readable data and must never reopen a path on
+    # recovery. Retain their closed behavior and diagnostic attributes.
+    handle = io.StringIO() if text else io.BytesIO()
+    handle.name = name
+    handle.mode = mode
+    handle.close()
+    return handle
+
+
+def _restore_pydantic_mock(error_message: str, code: str, kind: str):
+    # Incomplete dynamic models carry a deferred validator/serializer. Its
+    # __getattr__ recurses if pickle creates it without initializing its slots.
+    from pydantic._internal._mock_val_ser import MockValSer
+
+    return MockValSer(error_message, code=code, val_or_ser=kind)
+
+
+def _restore_pydantic_mock_state(mock: Any, attempt_rebuild: Any) -> None:
+    # Rebuild callbacks may refer back to the model containing this mock, so
+    # restore them after pickle has memoized the initialized object.
+    mock._attempt_rebuild = attempt_rebuild
+
+
 class _SessionPickler(cloudpickle.CloudPickler):
     """Keep functions attached to the restored REPL namespace."""
 
@@ -127,6 +185,32 @@ class _SessionPickler(cloudpickle.CloudPickler):
         self.closure_cells: dict[int, types.CellType] = {}
 
     def reducer_override(self, value: Any) -> Any:
+        from pydantic._internal._mock_val_ser import MockValSer
+        from pydantic_core import SchemaSerializer
+
+        if isinstance(value, MockValSer):
+            return (
+                _restore_pydantic_mock,
+                (
+                    value._error_message,
+                    value._code,
+                    "serializer" if value._val_or_ser is SchemaSerializer else "validator",
+                ),
+                value._attempt_rebuild,
+                None,
+                None,
+                _restore_pydantic_mock_state,
+            )
+        if isinstance(value, re.Match):
+            return _restore_regex_match, (
+                value.re, value.string, value.pos, value.endpos, value.regs
+            )
+        if isinstance(value, io.IOBase) and value.closed:
+            return _restore_closed_file, (
+                isinstance(value, io.TextIOBase),
+                getattr(value, "name", None),
+                getattr(value, "mode", None),
+            )
         if isinstance(value, types.FunctionType) and (
             value.__globals__ is self.namespace
             # Checkpoints created by the original Stargazer implementation
@@ -548,7 +632,7 @@ def _python_repl_worker(
 ) -> None:
     try:
         os.chdir(working_directory)
-        os.environ.clear()
+        _clear_worker_environment()
         namespace = _materialize_namespace(initial_data, namespace_factory)
         # NumPy loads the legacy RNG extension lazily. Map it before applying
         # RLIMIT_AS so snapshotting does not fail merely by importing it.
@@ -646,7 +730,7 @@ class _RestrictedPythonREPLTool(Tool):
     def execute(self, *, code: str, public_data: str, checkpoint: str | None) -> str:
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             raise RuntimeError("Docker Python REPL must run as an unprivileged worker")
-        os.environ.clear()
+        _clear_worker_environment()
         np.random.get_state()  # noqa: NPY002 - preload before RLIMIT_AS
         apply_worker_resource_limits(self.address_space_bytes)
         data = json.loads(public_data)

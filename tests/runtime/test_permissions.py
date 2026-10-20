@@ -1064,6 +1064,25 @@ def test_sdk_scratch_is_not_a_task_artifact(workspace, tmp_path):
     assert not (destination / scratch.name).exists()
 
 
+def test_snapshot_ignores_open_mpi_debugger_fifo_only(workspace, tmp_path):
+    from pathlib import Path
+
+    source = Path(workspace)
+    mpi_dir = source / "ompi.example" / "pid.123" / "0"
+    mpi_dir.mkdir(parents=True)
+    os.mkfifo(mpi_dir / "debugger_attach_fifo")
+    (source / "answer.txt").write_text("answer")
+    destination = tmp_path / "snapshot"
+    destination.mkdir()
+
+    assert "answer.txt" in permissions.copy_workspace(source, destination)
+    assert not (destination / "ompi.example/pid.123/0/debugger_attach_fifo").exists()
+
+    os.mkfifo(source / "other_fifo")
+    with pytest.raises(ValueError, match="workspace can contain regular files only: other_fifo"):
+        permissions.copy_workspace(source, destination)
+
+
 @tool(workspace_access="read")
 def sibling_probe(path: str) -> str:
     """Try to read another assigned workspace."""

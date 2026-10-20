@@ -10,6 +10,15 @@ def _provider_message(exc: BaseException) -> str | None:
     """Return a provider's structured error message when one is available."""
     body = getattr(exc, "body", None)
     if not isinstance(body, Mapping):
+        # Streaming/provider adapters can expose only the underlying HTTP
+        # response. Preserve its useful error instead of reducing it to HTTP 400.
+        response = getattr(exc, "response", None)
+        if response is not None:
+            try:
+                body = response.json()
+            except (AttributeError, ValueError, RuntimeError):
+                pass
+    if not isinstance(body, Mapping):
         return None
 
     error: Any = body.get("error", body)

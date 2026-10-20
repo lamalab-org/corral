@@ -6,7 +6,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from exceptiongroup import BaseExceptionGroup
+# Exception groups are built into every supported Python version (>=3.11).
 from mcp import ClientSession, types
 from mcp.client.streamable_http import streamablehttp_client
 

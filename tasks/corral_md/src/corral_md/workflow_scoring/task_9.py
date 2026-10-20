@@ -686,9 +686,18 @@ def evaluate(e, r):
             raise EvidenceError(
                 "Independent trajectories cannot select the final model"
             )
-        if source not in STRATEGIES and "selection_indices" not in item:
+        described_selection = (
+            source not in STRATEGIES
+            and "main trajectory" in source
+            and isinstance(item.get("tuning_summary"), list)
+            and bool(item["tuning_summary"])
+        )
+        missing_selection_fields = source not in STRATEGIES and (
+            "selection_indices" not in item or "selection_dataset" not in item
+        )
+        if source not in STRATEGIES and "selection_indices" not in item and not described_selection:
             raise EvidenceError("Record main-trajectory rows used for final selection")
-        if source not in STRATEGIES and "selection_dataset" not in item:
+        if source not in STRATEGIES and "selection_dataset" not in item and not described_selection:
             raise EvidenceError(
                 "Record the dataset namespace for final model selection"
             )
@@ -712,7 +721,13 @@ def evaluate(e, r):
             return False
         if len(train) < 200 and not item.get("training_selection"):
             raise EvidenceError("Record the final training-subset selection method")
-        return _model_ok(x[train], y[train], item["model"])
+        if not _model_ok(x[train], y[train], item["model"]):
+            return False
+        if missing_selection_fields:
+            raise Unsupported(
+                "The described main-trajectory selection procedure and saved tuning summary require independent verification of selection rows and dataset"
+            )
+        return True
 
     r.check("final_main_only_affine_pipeline", 8, _supported(final_fit))
     for name in RUNS[1:]:
