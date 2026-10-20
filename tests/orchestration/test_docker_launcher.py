@@ -120,16 +120,22 @@ def test_docker_gpu_device_selector_rejects_invalid_indices(gpus):
         DockerSandboxSpec(gpus=gpus)
 
 
-def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
+@pytest.mark.parametrize("already_owned", [False, True])
+def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path, already_owned):
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
     result = checkpoint / "result.json"
     result.write_text("{}")
     ownership_changes = []
+    owner = checkpoint.stat()
+    uid, gid = owner.st_uid, owner.st_gid
+    if not already_owned:
+        uid += 1
+        gid += 1
 
     monkeypatch.setattr(internal.os, "geteuid", lambda: 0)
-    monkeypatch.setenv("CORRAL_HOST_UID", "501")
-    monkeypatch.setenv("CORRAL_HOST_GID", "20")
+    monkeypatch.setenv("CORRAL_HOST_UID", str(uid))
+    monkeypatch.setenv("CORRAL_HOST_GID", str(gid))
     monkeypatch.setattr(
         internal.os,
         "chown",
@@ -138,7 +144,9 @@ def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
 
     internal._restore_host_ownership(checkpoint)
 
-    assert ownership_changes == [(result, 501, 20), (checkpoint, 501, 20)]
+    assert ownership_changes == (
+        [] if already_owned else [(result, uid, gid), (checkpoint, uid, gid)]
+    )
 
 
 def test_claim_checkpoint_ownership_covers_restored_artifact_directories(

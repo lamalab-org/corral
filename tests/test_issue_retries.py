@@ -11,6 +11,19 @@ from types import SimpleNamespace
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+# These campaign scripts are deployment-specific and are not shipped in the
+# repository. Keep their checks available where the scripts are installed,
+# without preventing collection of the main suite in a clean checkout.
+# A partial installation must still fail at import time.
+if not any(
+    (SCRIPTS / f"retry_issues_{name}.py").is_file()
+    for name in ("campaign", "health", "worker")
+):
+    pytest.skip(
+        "Retry campaign scripts are not installed in this checkout",
+        allow_module_level=True,
+    )
+
 sys.path.insert(0, str(SCRIPTS))
 import retry_issues_campaign as campaign
 import retry_issues_health as health

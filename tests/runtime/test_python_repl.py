@@ -129,13 +129,17 @@ counter = 41
 def test_repl_retains_blas_limits_without_exposing_credentials(monkeypatch):
     monkeypatch.setenv("OPENBLAS_NUM_THREADS", "1")
     monkeypatch.setenv("OMP_NUM_THREADS", "1")
+    monkeypatch.setenv("VECLIB_MAXIMUM_THREADS", "1")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "private-test-value")
     with PythonREPLSession({}, address_space_bytes=8 * 1024**3) as session:
         output = session.execute(
-            "import os\nfrom scipy import linalg\n"
+            "import os\nfrom scipy import linalg, show_config\n"
             "from threadpoolctl import threadpool_info\n"
             "print({'threads': os.environ.get('OPENBLAS_NUM_THREADS'), "
+            "'omp_threads': os.environ.get('OMP_NUM_THREADS'), "
+            "'veclib_threads': os.environ.get('VECLIB_MAXIMUM_THREADS'), "
             "'secret': 'ANTHROPIC_API_KEY' in os.environ, "
+            "'blas': show_config(mode='dicts')['Build Dependencies']['blas']['name'], "
             "'pools': [p['num_threads'] for p in threadpool_info() "
             "if p['internal_api'] == 'openblas']})"
         )
@@ -143,8 +147,12 @@ def test_repl_retains_blas_limits_without_exposing_credentials(monkeypatch):
 
     result = ast.literal_eval(output)
     assert result["threads"] == "1"
+    assert result["omp_threads"] == "1"
+    assert result["veclib_threads"] == "1"
     assert not result["secret"]
-    assert result["pools"]
+    # macOS wheels can use Accelerate, which threadpoolctl does not report.
+    if "openblas" in result["blas"].lower():
+        assert result["pools"]
     assert all(count == 1 for count in result["pools"])
 
 
