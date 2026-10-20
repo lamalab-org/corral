@@ -13,15 +13,26 @@ skipped when the SDK is not importable.
 """
 
 import asyncio
+from unittest.mock import AsyncMock, Mock
 
 import anyio
 import httpx
 import pytest
+from litellm import ModelResponse
+from litellm.exceptions import (
+    APIConnectionError,
+    APIError,
+    AuthenticationError,
+    RateLimitError,
+    Timeout,
+)
 from pydantic import ValidationError
 
 pytest.importorskip("openhands.sdk")
 
 from openhands.sdk import AgentContext, LocalConversation
+from openhands.sdk.llm import LLM, Message, TextContent
+from openhands.sdk.llm.exceptions import LLMNoResponseError
 from openhands.sdk.mcp.definition import (
     MCPToolAction,
     MCPToolObservation,
@@ -37,6 +48,84 @@ from corral.backend.mcp import open_mcp_host
 from corral.core.tool import ToolResponse
 from corral.core.tool_catalog import ToolCatalogSnapshot
 from corral.orchestration.parameters import model_parameter_metadata
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize("status", [408, 409, 429, 500, 502, 503])
+def test_generic_provider_error_retries_same_request(monkeypatch, asynchronous, status):
+    """A transient generic APIError recovers inside the existing conversation."""
+    error = APIError(status, "provider unavailable", "openai/gpt-4o", "openrouter")
+    response = ModelResponse(
+        choices=[{"message": {"role": "assistant", "content": "Recovered"}}]
+    )
+    transport = (AsyncMock if asynchronous else Mock)(side_effect=[error, response])
+    method = "_atransport_call" if asynchronous else "_transport_call"
+    monkeypatch.setattr(LLM, method, transport)
+    warnings = []
+    monkeypatch.setattr("corral.agents.utils.logger.warning", warnings.append)
+    llm = OpenHandsAgent(model="openai/gpt-4o", api_key="offline-test")._make_llm()
+    llm.num_retries = 2
+    llm.retry_min_wait = llm.retry_max_wait = 0
+    listener = Mock()
+    llm.retry_listener = listener
+    messages = [Message(role="user", content=[TextContent(text="Hello")])]
+    on_token = Mock()
+
+    result = (
+        asyncio.run(llm.acompletion(messages, on_token=on_token))
+        if asynchronous
+        else llm.completion(messages, on_token=on_token)
+    )
+
+    assert result.message.content[0].text == "Recovered"
+    assert transport.call_count == 2
+    assert transport.call_args_list[0] == transport.call_args_list[1]
+    assert transport.call_args.kwargs["enable_streaming"] is True
+    listener.assert_called_once_with(1, 2, error)
+    assert len(warnings) == 1
+    assert "1/2" in warnings[0]
+    assert "APIError" in warnings[0]
+    assert "provider unavailable" in warnings[0]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize(
+    ("error", "attempts"),
+    [
+        (APIError(400, "invalid request", "test", "openrouter"), 1),
+        (APIError(401, "invalid key", "test", "openrouter"), 1),
+        (APIError(402, "payment required", "test", "openrouter"), 1),
+        (APIError(403, "forbidden", "test", "openrouter"), 1),
+        (APIError(429, "insufficient_quota", "test", "openrouter"), 1),
+        (AuthenticationError("invalid key", "test", "openrouter"), 1),
+        (RateLimitError("insufficient_quota", "openrouter", "test"), 1),
+        (APIError(503, "provider unavailable", "test", "openrouter"), 2),
+        (RateLimitError("too many requests", "openrouter", "test"), 2),
+        (APIConnectionError("connection lost", "openrouter", "test"), 2),
+        (Timeout("request timed out", "test", "openrouter"), 2),
+        (LLMNoResponseError("empty response"), 2),
+    ],
+)
+def test_provider_retry_stops_and_preserves_error(
+    monkeypatch, asynchronous, error, attempts
+):
+    """Permanent errors fail once; transient errors stop at the SDK limit."""
+    transport = (AsyncMock if asynchronous else Mock)(side_effect=error)
+    method = "_atransport_call" if asynchronous else "_transport_call"
+    monkeypatch.setattr(LLM, method, transport)
+    llm = OpenHandsAgent(model="openai/gpt-4o", api_key="offline-test")._make_llm()
+    llm.num_retries = 2
+    llm.retry_min_wait = llm.retry_max_wait = 0
+    messages = [Message(role="user", content=[TextContent(text="Hello")])]
+
+    with pytest.raises(Exception) as raised:
+        if asynchronous:
+            asyncio.run(llm.acompletion(messages))
+        else:
+            llm.completion(messages)
+
+    assert transport.call_count == attempts
+    assert str(error) in str(raised.value)
 
 
 def test_action_arguments_reads_real_mcp_tool_action_data():
