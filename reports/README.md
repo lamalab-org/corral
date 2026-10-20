@@ -22,6 +22,36 @@ environment has its own indexes, with report paths relative to its folder. The
 The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).
 
+## Browse agent conversations
+
+Start the local trace browser from the repository root (Python 3.9 or newer;
+no extra dependencies):
+
+```bash
+python3 reports/serve_traces.py --open
+```
+
+Open **http://127.0.0.1:8765**. Filter and group trials by **agent, environment,
+and model**, with additional filters for level, outcome, and saved errors.
+Select a trial to read its messages in saved order, search the conversation,
+filter by role or agent session, jump between tool calls and results, and
+inspect the submitted output and evaluation. Download the saved trial as JSON
+or copy a link to a trace or individual message. Links work when opened against
+the same local report collection and server address.
+
+The browser reads `*/trials.csv` indexes at startup and decompresses only the
+selected trial's report on demand. Large reports can take a moment to scan;
+recently opened trials are cached in memory. Both `.json.gz` and `.json.xz`
+reports are supported. Git LFS pointers and missing reports appear in the list;
+download LFS reports with `git lfs pull` to inspect their messages. Restart the
+browser after rebuilding CSV indexes.
+
+Use `--port 9000` for a different port or `--reports /path/to/reports` for another
+collection with the same layout. The server binds to `127.0.0.1` and serves only
+the trace browser and indexed trial data. Conversations show exactly what was
+saved: missing prompts, empty thinking messages, and unrecorded SDK activity
+cannot be reconstructed.
+
 ## Layout
 
 ```
