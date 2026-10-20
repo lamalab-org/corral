@@ -793,7 +793,9 @@ def test_benchmark_runs_locally_and_writes_report(
     assert len(list(reports[0].parent.rglob("commits.sqlite3"))) == 2
 
 
-def test_benchmark_reports_evaluation_failure_as_incomplete(monkeypatch, tmp_path, capsys):
+def test_benchmark_reports_evaluation_failure_as_incomplete(
+    monkeypatch, tmp_path, capsys
+):
     import importlib
 
     run_module = importlib.import_module("corral.run")
@@ -830,7 +832,9 @@ def test_benchmark_reports_evaluation_failure_as_incomplete(monkeypatch, tmp_pat
         "evaluation error: Cannot grade a different execution protocol or task bank"
         in capsys.readouterr().out
     )
-    manifest = json.loads((tmp_path / "evaluation-failure/run-metadata.json").read_text())
+    manifest = json.loads(
+        (tmp_path / "evaluation-failure/run-metadata.json").read_text()
+    )
     assert manifest["status"] == "completed_with_errors"
     assert manifest["failed_trials"] == manifest["evaluation_failed_trials"] == 1
     report = json.loads((tmp_path / "evaluation-failure/report.json").read_text())

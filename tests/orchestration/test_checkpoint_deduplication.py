@@ -36,6 +36,7 @@ async def test_checkpoint_export_preserves_shared_artifacts(
 
     monkeypatch.setattr(launchers, "_command", fake_command)
     if interrupt_copy:
+
         def interrupted_copy(source, destination, **kwargs):
             Path(destination).write_bytes(b"partial")
             raise OSError("interrupted export")

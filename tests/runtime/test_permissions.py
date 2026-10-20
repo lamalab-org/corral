@@ -1079,7 +1079,9 @@ def test_snapshot_ignores_open_mpi_debugger_fifo_only(workspace, tmp_path):
     assert not (destination / "ompi.example/pid.123/0/debugger_attach_fifo").exists()
 
     os.mkfifo(source / "other_fifo")
-    with pytest.raises(ValueError, match="workspace can contain regular files only: other_fifo"):
+    with pytest.raises(
+        ValueError, match="workspace can contain regular files only: other_fifo"
+    ):
         permissions.copy_workspace(source, destination)
 
 

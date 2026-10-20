@@ -383,9 +383,7 @@ def create_environments(
     }
 
     try:
-        tasks = load_tasks_from_json(
-            json_path, local=local, assets_dir=local_assets
-        )
+        tasks = load_tasks_from_json(json_path, local=local, assets_dir=local_assets)
         environments = build_environments(
             tasks,
             base_work_dir=work_dir,

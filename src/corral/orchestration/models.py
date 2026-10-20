@@ -80,9 +80,13 @@ class DockerSandboxSpec:
                 if self.gpus.startswith("device=")
                 else []
             )
-            explicit_devices = bool(devices) and all(
-                re.fullmatch(r"(?:0|[1-9][0-9]*)", device) for device in devices
-            ) and len(devices) == len(set(devices))
+            explicit_devices = (
+                bool(devices)
+                and all(
+                    re.fullmatch(r"(?:0|[1-9][0-9]*)", device) for device in devices
+                )
+                and len(devices) == len(set(devices))
+            )
             if not (
                 self.gpus == "all"
                 or re.fullmatch(r"[1-9][0-9]*", self.gpus)

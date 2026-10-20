@@ -101,7 +101,10 @@ def _branch_tool_calls(state: ExecutionState) -> list[dict[str, Any]]:
         for recorded in statistics.get("tool_calls", []):
             call = dict(recorded)
             failed = call.get("status") in {
-                "failed", "execution_error", "invalid_args", "invalid_tool"
+                "failed",
+                "execution_error",
+                "invalid_args",
+                "invalid_tool",
             } or bool(call.get("error"))
             call.update(
                 status="failed" if failed else "completed",

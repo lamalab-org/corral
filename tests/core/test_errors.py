@@ -42,7 +42,9 @@ def test_concise_error_message_reads_http_provider_response():
         request=httpx.Request("POST", "https://provider.test/v1/messages"),
         json={"error": {"type": "invalid_request_error", "message": message}},
     )
-    error = httpx.HTTPStatusError("HTTP 400", request=response.request, response=response)
+    error = httpx.HTTPStatusError(
+        "HTTP 400", request=response.request, response=response
+    )
     assert concise_error_message(error) == message
 
 
@@ -54,5 +56,7 @@ def test_concise_error_message_keeps_non_json_http_error():
         request=httpx.Request("POST", "https://provider.test/v1/messages"),
         text="gateway failure",
     )
-    error = httpx.HTTPStatusError("HTTP 502", request=response.request, response=response)
+    error = httpx.HTTPStatusError(
+        "HTTP 502", request=response.request, response=response
+    )
     assert concise_error_message(error) == "HTTP 502"

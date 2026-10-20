@@ -83,8 +83,10 @@ def _trace(e, required_stages=None):
             raise ValueError("Trace must identify each thermal stage")
         table["stage"] = "cooling"
     else:
-        table["stage"] = table.stage.astype(str).str.lower().replace(
-            {"cool": "cooling", "reheat": "reheating"}
+        table["stage"] = (
+            table.stage.astype(str)
+            .str.lower()
+            .replace({"cool": "cooling", "reheat": "reheating"})
         )
     stages = set(table.stage)
     if stages == expected | {"initial"} and "cooling" in expected:
@@ -160,9 +162,9 @@ def _text(e, *aliases):
 def _commands(e):
     """Read simple saved commands, expanding linked includes without execution."""
     paths = e.artifacts("lammps_inputs", "lammps_input", "inputs")
-    linked = list(dict.fromkeys(
-        path for name in e._artifacts for path in e.artifacts(name)
-    ))
+    linked = list(
+        dict.fromkeys(path for name in e._artifacts for path in e.artifacts(name))
+    )
     variables, included = {}, set()
 
     def read(path, parents=()):
@@ -808,7 +810,9 @@ def _selected(t, stage, indices):
                 and np.isclose(t.time_ps, time_ps, atol=1e-9, rtol=0).sum() == 1
             )
         if not shared:
-            raise ValueError("Selection contains samples from a different thermal stage")
+            raise ValueError(
+                "Selection contains samples from a different thermal stage"
+            )
     return selected
 
 

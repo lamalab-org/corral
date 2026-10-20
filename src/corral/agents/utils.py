@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
 
-import litellm
 import httpx
+import litellm
 import openai
 from litellm.exceptions import BudgetExceededError, RateLimitError
 from litellm.types.utils import Message
@@ -94,7 +94,9 @@ def before_sleep_loguru(retry_state):
     retry_object = getattr(retry_state, "retry_object", None)
     stop = getattr(retry_object, "stop", None)
     policy = getattr(retry_state, "kwargs", {}).get("llm_retry_policy") or {}
-    maximum_attempts = policy.get("max_attempts", getattr(stop, "max_attempt_number", 3))
+    maximum_attempts = policy.get(
+        "max_attempts", getattr(stop, "max_attempt_number", 3)
+    )
     attempt_label = (
         f"{retry_state.attempt_number}/{maximum_attempts}"
         if maximum_attempts is not None
@@ -229,7 +231,8 @@ async def llm_call(
     tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
     return_usage: bool = True,
-    llm_retry_policy: dict[str, int | float] | None = None,
+    # Consumed by Tenacity callbacks through retry_state.kwargs.
+    llm_retry_policy: dict[str, int | float] | None = None,  # noqa: ARG001
     **kwargs,
 ) -> LLMResponse:
     """
@@ -340,7 +343,10 @@ async def llm_call(
         error_str = f"{e} {detail}".lower()
         if any(
             keyword in error_str
-            for keyword in (*QUOTA_EXHAUSTED_KEYWORDS, *ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS)
+            for keyword in (
+                *QUOTA_EXHAUSTED_KEYWORDS,
+                *ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS,
+            )
         ):
             raise BudgetExhaustedError(
                 f"Benchmark stopped - quota exhausted: {detail}"
@@ -351,8 +357,7 @@ async def llm_call(
     except Exception as e:
         detail = concise_error_message(e)
         if any(
-            keyword in detail.lower()
-            for keyword in ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS
+            keyword in detail.lower() for keyword in ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS
         ):
             raise BudgetExhaustedError(
                 f"Benchmark stopped - quota exhausted: {detail}"

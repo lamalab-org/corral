@@ -527,8 +527,13 @@ def build_plan(e, task_number, challenge):
                     displacements = displacements.reshape(-1, 2, 3)
                 if forces.ndim == 2 and forces.shape[1] == 6:
                     forces = forces.reshape(-1, 2, 3)
-                if displacements.shape != forces.shape or displacements.shape[1:] != (2, 3):
-                    raise EvidenceError("Task 5 displacement and force arrays must align")
+                if displacements.shape != forces.shape or displacements.shape[1:] != (
+                    2,
+                    3,
+                ):
+                    raise EvidenceError(
+                        "Task 5 displacement and force arrays must align"
+                    )
                 displaced = []
                 for delta in displacements:
                     atoms = base.copy()
@@ -734,7 +739,11 @@ def _regression_plan(p):
     if checkpoint.suffix == ".json":
         # Portable JSON is already loaded and evaluated independently by the current scorer.
         saved = json.loads(checkpoint.read_text())
-        if isinstance(saved, dict) and "coef" not in saved and isinstance(saved.get("model"), dict):
+        if (
+            isinstance(saved, dict)
+            and "coef" not in saved
+            and isinstance(saved.get("model"), dict)
+        ):
             saved = saved["model"]
         actual = predict(all_x, saved)
         if not np.allclose(actual, predict(all_x, portable), rtol=1e-4, atol=1e-6):

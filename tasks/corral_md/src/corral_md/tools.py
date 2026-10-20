@@ -159,7 +159,9 @@ def build_md_terminal_tool(workspace: str | Path, *, local: bool = False):
                 byte_count = output.tell()
                 output.seek(max(0, byte_count - max_output_chars * 4))
                 combined = output.read().decode("utf-8", errors="replace")
-            truncated = byte_count > max_output_chars or len(combined) > max_output_chars
+            truncated = (
+                byte_count > max_output_chars or len(combined) > max_output_chars
+            )
             return json.dumps(
                 {
                     "exit_code": process.returncode,
@@ -641,8 +643,13 @@ def build_execute_python_script_tool(
             )
         if local:
             return _run_python_in_local_worker(
-                workspace, script_path, args, timeout, directory,
-                gpu=True, assets_dir=assets_dir,
+                workspace,
+                script_path,
+                args,
+                timeout,
+                directory,
+                gpu=True,
+                assets_dir=assets_dir,
             )
         downloaded = run_python_gpu_in_modal(
             workspace,
@@ -1088,10 +1095,7 @@ def build_run_lammps_tool(
             log = run_lammps_locally(
                 workspace, input_file, assets_dir=assets_directory(assets_dir)
             )
-            return (
-                "Simulation completed locally; log: "
-                f"/workspace/output/{log.name}"
-            )
+            return f"Simulation completed locally; log: /workspace/output/{log.name}"
         return _run_lammps_for_workspace(
             workspace,
             str(local_path(workspace, input_file)),

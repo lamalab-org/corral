@@ -582,7 +582,8 @@ def evaluate(e: Evidence, r: Rubric):
                 output.append(float(np.mean(np.sum(distances < cutoff, axis=1))))
             elif method == "rms_displacement" or method in translated_rms_methods:
                 remove_translation = (
-                    True if method in translated_rms_methods
+                    True
+                    if method in translated_rms_methods
                     else config["remove_translation"]
                 )
                 if type(remove_translation) is not bool:

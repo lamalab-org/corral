@@ -1196,25 +1196,30 @@ def _task_9(e: Evidence, r: Rubric) -> None:
             ]
         )
         normalization = str(doc["normalization"]).lower().replace(" ", "")
-        if normalization in {
-            "unbiased",
-            "unbiased_by_overlap_then_divided_by_lag0",
-            "variance(lag-0=1),mean-subtracted,unbiased(1/(n-k))",
-            "biased-free(dividebyn-k),normalizedtorho(0)=1,meansubtracted",
-        } or (
-            "c(k)/c(0)" in normalization and "/(n-k)" in normalization
-        ) or (
-            normalization == "c(lag)/c(0),productionmeanremoved"
-            and "unbiased" in estimator
-        ) or (
-            normalization == f"c(lag)/c(0),meanremovedoverall{len(energy)}samples"
-            and "per-lag overlap normalization" in estimator
-        ) or (
-            "variance" in normalization
-            and "c(0)=1" in normalization
-            and "mean-subtracted" in normalization
-            and "unbiased" in normalization
-            and "1/(n-k)" in normalization
+        if (
+            normalization
+            in {
+                "unbiased",
+                "unbiased_by_overlap_then_divided_by_lag0",
+                "variance(lag-0=1),mean-subtracted,unbiased(1/(n-k))",
+                "biased-free(dividebyn-k),normalizedtorho(0)=1,meansubtracted",
+            }
+            or ("c(k)/c(0)" in normalization and "/(n-k)" in normalization)
+            or (
+                normalization == "c(lag)/c(0),productionmeanremoved"
+                and "unbiased" in estimator
+            )
+            or (
+                normalization == f"c(lag)/c(0),meanremovedoverall{len(energy)}samples"
+                and "per-lag overlap normalization" in estimator
+            )
+            or (
+                "variance" in normalization
+                and "c(0)=1" in normalization
+                and "mean-subtracted" in normalization
+                and "unbiased" in normalization
+                and "1/(n-k)" in normalization
+            )
         ):
             values *= len(energy) / (len(energy) - lags)
         elif normalization not in {
@@ -1281,7 +1286,10 @@ def _task_9(e: Evidence, r: Rubric) -> None:
                     atol=1e-7,
                 ):
                     return False
-                if "crossing_lag_index" in item and item["crossing_lag_index"] != lags[crossing]:
+                if (
+                    "crossing_lag_index" in item
+                    and item["crossing_lag_index"] != lags[crossing]
+                ):
                     return False
                 fraction = (threshold - values[crossing - 1]) / (
                     values[crossing] - values[crossing - 1]
@@ -1316,7 +1324,9 @@ def _task_9(e: Evidence, r: Rubric) -> None:
             interval = finite_array(
                 [described_interval[1], described_interval[2]], shape=(2,)
             )
-            expected_interval = lags[[crossing - 1, crossing]] * delta[0] / interval_factor
+            expected_interval = (
+                lags[[crossing - 1, crossing]] * delta[0] / interval_factor
+            )
             if not result_close(interval, expected_interval, atol=1e-7):
                 return False
             reported_bound = "estimate"

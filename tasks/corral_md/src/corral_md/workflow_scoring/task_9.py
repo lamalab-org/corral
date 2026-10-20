@@ -695,9 +695,17 @@ def evaluate(e, r):
         missing_selection_fields = source not in STRATEGIES and (
             "selection_indices" not in item or "selection_dataset" not in item
         )
-        if source not in STRATEGIES and "selection_indices" not in item and not described_selection:
+        if (
+            source not in STRATEGIES
+            and "selection_indices" not in item
+            and not described_selection
+        ):
             raise EvidenceError("Record main-trajectory rows used for final selection")
-        if source not in STRATEGIES and "selection_dataset" not in item and not described_selection:
+        if (
+            source not in STRATEGIES
+            and "selection_dataset" not in item
+            and not described_selection
+        ):
             raise EvidenceError(
                 "Record the dataset namespace for final model selection"
             )

@@ -30,10 +30,14 @@ class LocalCalculationTransport:
             self.gpus: tuple[str, ...] | None = None
         else:
             devices = configured_gpus.split(",")
-            if not devices or any(
-                re.fullmatch(r"(?:0|[1-9][0-9]*)", device) is None
-                for device in devices
-            ) or len(devices) != len(set(devices)):
+            if (
+                not devices
+                or any(
+                    re.fullmatch(r"(?:0|[1-9][0-9]*)", device) is None
+                    for device in devices
+                )
+                or len(devices) != len(set(devices))
+            ):
                 raise ValueError(
                     "CORRAL_MD_VERIFIER_GPUS must contain unique GPU indices"
                 )
@@ -80,18 +84,44 @@ class LocalCalculationTransport:
             ).strip()
             operations = {job["operation"] for job in jobs}
             command = [
-                "docker", "run", "--rm", "--read-only", "--user", "10001:10001",
-                "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
-                "--cpus", "8", "--memory", "16g", "--pids-limit", "512",
-                "--shm-size", "2g", "--tmpfs", "/tmp:rw,nosuid,nodev,size=4g",
-                "--workdir", "/output", "--env", "HOME=/tmp",
-                "--env", "XDG_CACHE_HOME=/tmp/.cache",
-                "--network", "bridge" if operations == {"sw"} else "none",
-                "--mount", f"type=bind,src={evidence},dst=/evidence,readonly",
-                "--mount", f"type=bind,src={output},dst=/output",
-                "--mount", f"type=bind,src={self.assets / 'models'},dst=/workspace/models,readonly",
-                "--mount", f"type=bind,src={self.assets / 'potentials'},dst=/workspace/potentials,readonly",
-                "--mount", (
+                "docker",
+                "run",
+                "--rm",
+                "--read-only",
+                "--user",
+                "10001:10001",
+                "--security-opt",
+                "no-new-privileges",
+                "--cap-drop",
+                "ALL",
+                "--cpus",
+                "8",
+                "--memory",
+                "16g",
+                "--pids-limit",
+                "512",
+                "--shm-size",
+                "2g",
+                "--tmpfs",
+                "/tmp:rw,nosuid,nodev,size=4g",
+                "--workdir",
+                "/output",
+                "--env",
+                "HOME=/tmp",
+                "--env",
+                "XDG_CACHE_HOME=/tmp/.cache",
+                "--network",
+                "bridge" if operations == {"sw"} else "none",
+                "--mount",
+                f"type=bind,src={evidence},dst=/evidence,readonly",
+                "--mount",
+                f"type=bind,src={output},dst=/output",
+                "--mount",
+                f"type=bind,src={self.assets / 'models'},dst=/workspace/models,readonly",
+                "--mount",
+                f"type=bind,src={self.assets / 'potentials'},dst=/workspace/potentials,readonly",
+                "--mount",
+                (
                     "type=bind,src="
                     + str(Path(__file__).resolve().parents[3] / "modal_app")
                     + ",dst=/opt/corral-md,readonly"
@@ -104,8 +134,15 @@ class LocalCalculationTransport:
                 runtime = Path(runtime_directory).expanduser().resolve(strict=True)
                 if not (runtime / "local/bin/python").exists():
                     raise ValueError("Verifier runtime must be a complete /usr tree")
-                command.extend(("--mount", f"type=bind,src={runtime},dst=/usr,readonly"))
-                command.extend(("--env", "LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/x86_64-linux-gnu"))
+                command.extend(
+                    ("--mount", f"type=bind,src={runtime},dst=/usr,readonly")
+                )
+                command.extend(
+                    (
+                        "--env",
+                        "LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/x86_64-linux-gnu",
+                    )
+                )
             if "mace" in operations:
                 gpu_request = "1"
                 if self.gpus is not None:
@@ -117,9 +154,11 @@ class LocalCalculationTransport:
             command.extend(
                 (
                     image_id,
-                    "python", "-I",
+                    "python",
+                    "-I",
                     "/opt/corral-md/verification_worker.py",
-                    "/evidence/request.json", "/output/result.json",
+                    "/evidence/request.json",
+                    "/output/result.json",
                 )
             )
             process = subprocess.run(
@@ -158,7 +197,7 @@ class LocalVerifier(ModalVerifier):
         result["mode"] = "local_docker"
         return result
 
-    def provenance(self, evidence):
+    def provenance(self, evidence):  # noqa: ARG002 - Preserve the verifier interface.
         # The Modal-only execution record is absent from the local backend.
         # Keep the check pending rather than awarding or denying provenance.
         return {

@@ -192,7 +192,9 @@ class WorkflowScorer:
                         ".local"
                         if verification is not None
                         and verification.get("mode") == "local_docker"
-                        else ".modal" if self.verifier is not None else ".offline"
+                        else ".modal"
+                        if self.verifier is not None
+                        else ".offline"
                     )
                     + "\0"
                     + evidence.fingerprint()
@@ -216,7 +218,8 @@ class WorkflowScorer:
 
 
 def check_level2_workflow(
-    task_number: int, verification_backend: str | None = None,
+    task_number: int,
+    verification_backend: str | None = None,
     assets_dir: str | None = None,
 ) -> WorkflowScorer:
     """Use trusted readers for silicon restarts and verification for silver."""
@@ -250,7 +253,8 @@ def check_level2_workflow(
 
 
 def check_level1_workflow(
-    task_number: int, verification_backend: str | None = None,
+    task_number: int,
+    verification_backend: str | None = None,
     assets_dir: str | None = None,
 ) -> WorkflowScorer:
     """Construct the Level 1 scorer with independent MACE checks by default."""
@@ -275,7 +279,8 @@ def check_level1_workflow(
                 restart_reader=ModalRestartReader(LocalVerifier(assets_dir)),
             )
         return WorkflowScorer(
-            task_number, level=1,
+            task_number,
+            level=1,
             verifier=Level1LocalVerifier(assets_dir) if task_number >= 3 else None,
         )
     if backend != "modal":

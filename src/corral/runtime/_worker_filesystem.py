@@ -358,7 +358,19 @@ def enter_workspace(
     for name in ("passwd", "shadow", "group", "gshadow"):
         (etc / name).touch(mode=0)
 
-    for name in ("usr", "bin", "sbin", "lib", "lib64", "opt", "etc", "proc", "dev", "sys", "run"):
+    for name in (
+        "usr",
+        "bin",
+        "sbin",
+        "lib",
+        "lib64",
+        "opt",
+        "etc",
+        "proc",
+        "dev",
+        "sys",
+        "run",
+    ):
         if (runtime / name).exists() or (runtime / name).is_symlink():
             (jail / name).symlink_to(RUNTIME_ROOT / name)
     (jail / "tmp").symlink_to(scratch)

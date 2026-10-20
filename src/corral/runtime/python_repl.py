@@ -42,7 +42,7 @@ except ImportError:  # pragma: no cover - unavailable on Windows
 DEFAULT_MAX_OUTPUT_CHARS = 5_000 + len("...(output truncated)")
 DEFAULT_MAX_CODE_CHARS = 50_000
 DEFAULT_WORKER_ADDRESS_SPACE_BYTES = int(
-    os.environ.get("CORRAL_REPL_ADDRESS_SPACE_BYTES", 2 * 1024**3)
+    os.environ.get("CORRAL_REPL_ADDRESS_SPACE_BYTES", str(2 * 1024**3))
 )
 if DEFAULT_WORKER_ADDRESS_SPACE_BYTES <= 0:
     raise ValueError("CORRAL_REPL_ADDRESS_SPACE_BYTES must be a positive byte count")
@@ -194,7 +194,9 @@ class _SessionPickler(cloudpickle.CloudPickler):
                 (
                     value._error_message,
                     value._code,
-                    "serializer" if value._val_or_ser is SchemaSerializer else "validator",
+                    "serializer"
+                    if value._val_or_ser is SchemaSerializer
+                    else "validator",
                 ),
                 value._attempt_rebuild,
                 None,
@@ -203,7 +205,11 @@ class _SessionPickler(cloudpickle.CloudPickler):
             )
         if isinstance(value, re.Match):
             return _restore_regex_match, (
-                value.re, value.string, value.pos, value.endpos, value.regs
+                value.re,
+                value.string,
+                value.pos,
+                value.endpos,
+                value.regs,
             )
         if isinstance(value, io.IOBase) and value.closed:
             return _restore_closed_file, (

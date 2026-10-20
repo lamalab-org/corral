@@ -602,7 +602,10 @@ async def run_benchmark(
     _print_results(run_id, result)
     sys.stdout.write(f"Outputs: {run_dir}\n")
     return int(
-        any(trial.error_message or trial.evaluation_error for trial in result.all_results)
+        any(
+            trial.error_message or trial.evaluation_error
+            for trial in result.all_results
+        )
     )
 
 

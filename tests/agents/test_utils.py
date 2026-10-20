@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, Mock
 
-import openai
 import httpx
+import openai
 import pytest
 
 from corral.agents.utils import (
@@ -148,38 +148,73 @@ def test_retry_exceptions_are_openai_exceptions():
     assert len(RETRY_EXCEPTIONS) > 0
 
 
-@pytest.mark.parametrize('status,retryable', [(400, False), (401, False), (403, False),
-                                            (408, True), (429, True), (500, True), (503, True)])
-def test_unwrapped_httpx_provider_errors_retry_only_transient_statuses(status, retryable):
+@pytest.mark.parametrize(
+    ("status", "retryable"),
+    [
+        (400, False),
+        (401, False),
+        (403, False),
+        (408, True),
+        (429, True),
+        (500, True),
+        (503, True),
+    ],
+)
+def test_unwrapped_httpx_provider_errors_retry_only_transient_statuses(
+    status, retryable
+):
     from corral.agents.utils import _should_retry
-    response = httpx.Response(status, request=httpx.Request('POST', 'https://example.org'))
-    error = httpx.HTTPStatusError('provider error', request=response.request, response=response)
+
+    response = httpx.Response(
+        status, request=httpx.Request("POST", "https://example.org")
+    )
+    error = httpx.HTTPStatusError(
+        "provider error", request=response.request, response=response
+    )
     assert _should_retry(error) is retryable
 
 
 @pytest.mark.anyio
-async def test_serialized_retry_policy_survives_worker_import_and_preserves_routing(monkeypatch):
+async def test_serialized_retry_policy_survives_worker_import_and_preserves_routing(
+    monkeypatch,
+):
     mock, response = setup_mock_litellm(monkeypatch)
-    request = httpx.Request('POST', 'https://example.org')
-    error = httpx.HTTPStatusError('rate limited', request=request,
-                                  response=httpx.Response(429, request=request))
-    mock.acompletion.side_effect = [error] * 4 + [MockAsyncStream(['chunk'])]
+    request = httpx.Request("POST", "https://example.org")
+    error = httpx.HTTPStatusError(
+        "rate limited", request=request, response=httpx.Response(429, request=request)
+    )
+    mock.acompletion.side_effect = [error] * 4 + [MockAsyncStream(["chunk"])]
     sleep = AsyncMock()
-    monkeypatch.setattr(llm_call.retry, 'sleep', sleep)
-    provider = {'only': ['together'], 'allow_fallbacks': False,
-                'zdr': True, 'data_collection': 'deny'}
-    options = json.loads(json.dumps({'extra_body': {'provider': provider},
-        'llm_retry_policy': {'max_attempts': 12, 'min_wait_s': 15,
-                             'max_wait_s': 300, 'multiplier': 15}}))
-    result = await llm_call(model='openrouter/moonshotai/kimi-k3', messages=[],
-                            temperature=1.0, **options)
+    monkeypatch.setattr(llm_call.retry, "sleep", sleep)
+    provider = {
+        "only": ["together"],
+        "allow_fallbacks": False,
+        "zdr": True,
+        "data_collection": "deny",
+    }
+    options = json.loads(
+        json.dumps(
+            {
+                "extra_body": {"provider": provider},
+                "llm_retry_policy": {
+                    "max_attempts": 12,
+                    "min_wait_s": 15,
+                    "max_wait_s": 300,
+                    "multiplier": 15,
+                },
+            }
+        )
+    )
+    result = await llm_call(
+        model="openrouter/moonshotai/kimi-k3", messages=[], temperature=1.0, **options
+    )
     assert result.content == response.choices[0].message.content
     assert mock.acompletion.await_count == 5
     assert [call.args[0] for call in sleep.await_args_list] == [15, 30, 60, 120]
     for call in mock.acompletion.await_args_list:
-        assert call.kwargs['extra_body'] == {'provider': provider}
-        assert 'llm_retry_policy' not in call.kwargs
-        assert 'reasoning_effort' not in call.kwargs
+        assert call.kwargs["extra_body"] == {"provider": provider}
+        assert "llm_retry_policy" not in call.kwargs
+        assert "reasoning_effort" not in call.kwargs
 
 
 def test_reasoning_tokens_support_responses_usage_shape():
@@ -787,12 +822,15 @@ def test_message_serialization_and_saving():
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    'message,quota_exhausted',
+    ("message", "quota_exhausted"),
     [
-        ('You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.', True),
-        ('Your credit balance is too low to access the Anthropic API.', True),
-        ('thinking.budget_tokens must be less than max_tokens', False),
-        ('Invalid tool arguments in the request', False),
+        (
+            "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.",
+            True,
+        ),
+        ("Your credit balance is too low to access the Anthropic API.", True),
+        ("thinking.budget_tokens must be less than max_tokens", False),
+        ("Invalid tool arguments in the request", False),
     ],
 )
 async def test_http_400_account_limit_stops_benchmark_without_retry(
@@ -804,15 +842,17 @@ async def test_http_400_account_limit_stops_benchmark_without_retry(
 
     response = httpx.Response(
         400,
-        request=httpx.Request('POST', 'https://provider.test/v1/messages'),
-        json={'error': {'type': 'invalid_request_error', 'message': message}},
+        request=httpx.Request("POST", "https://provider.test/v1/messages"),
+        json={"error": {"type": "invalid_request_error", "message": message}},
     )
-    error = httpx.HTTPStatusError('HTTP 400', request=response.request, response=response)
+    error = httpx.HTTPStatusError(
+        "HTTP 400", request=response.request, response=response
+    )
     completion = AsyncMock(side_effect=error)
-    monkeypatch.setattr('corral.agents.utils.litellm.acompletion', completion)
+    monkeypatch.setattr("corral.agents.utils.litellm.acompletion", completion)
     expected = BudgetExhaustedError if quota_exhausted else httpx.HTTPStatusError
     with pytest.raises(expected) as caught:
-        await llm_call(model='anthropic/claude-opus-5-5', messages=[], temperature=1.0)
+        await llm_call(model="anthropic/claude-opus-5-5", messages=[], temperature=1.0)
     if quota_exhausted:
         assert message in str(caught.value)
     else:

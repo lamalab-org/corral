@@ -91,7 +91,9 @@ def postprocess_settings(record):
         symmetry == "average_transpose_iterative_100"
         and acoustic != "onsite_blocks_iterative_100"
     ):
-        raise UnsupportedMethod("Unsupported symmetrization and acoustic-sum-rule sequence")
+        raise UnsupportedMethod(
+            "Unsupported symmetrization and acoustic-sum-rule sequence"
+        )
     return normalized
 
 

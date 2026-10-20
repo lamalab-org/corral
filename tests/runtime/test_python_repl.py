@@ -59,7 +59,9 @@ advance, read = counter()""",
     )
 
 
-def test_checkpoint_preserves_regex_matches_closed_handles_and_recursive_functions(tmp_path):
+def test_checkpoint_preserves_regex_matches_closed_handles_and_recursive_functions(
+    tmp_path,
+):
     namespace = create_python_namespace({"path": str(tmp_path / "sample.txt")})
     execute_in_namespace(
         """import re
@@ -73,9 +75,12 @@ def factorial(n):
     )
     for _ in range(3):
         namespace = restore_namespace(snapshot_namespace(namespace))
-        assert execute_in_namespace(
-            "print([(m.span(), m.groupdict(), m.pos) for m in matches])", namespace
-        ).strip() == "[((0, 1), {'letter': 'a'}, 0), ((1, 2), {'letter': 'b'}, 0), ((2, 3), {'letter': 'a'}, 0)]"
+        assert (
+            execute_in_namespace(
+                "print([(m.span(), m.groupdict(), m.pos) for m in matches])", namespace
+            ).strip()
+            == "[((0, 1), {'letter': 'a'}, 0), ((1, 2), {'letter': 'b'}, 0), ((2, 3), {'letter': 'a'}, 0)]"
+        )
         assert namespace["handle"].closed
         assert namespace["handle"].name == str(tmp_path / "sample.txt")
         assert execute_in_namespace("print(factorial(6))", namespace).strip() == "720"
@@ -137,9 +142,10 @@ def test_repl_retains_blas_limits_without_exposing_credentials(monkeypatch):
     import ast
 
     result = ast.literal_eval(output)
-    assert result['threads'] == '1'
-    assert not result['secret']
-    assert result['pools'] and all(count == 1 for count in result['pools'])
+    assert result["threads"] == "1"
+    assert not result["secret"]
+    assert result["pools"]
+    assert all(count == 1 for count in result["pools"])
 
 
 def test_repl_tool_factory_is_serial_and_controller_managed():

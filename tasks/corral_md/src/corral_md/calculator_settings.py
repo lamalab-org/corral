@@ -57,15 +57,17 @@ def _default_d3_options(config: Mapping) -> bool:
                 return False
 
     def cutoff_matches(value) -> bool:
-        return (
-            type(value) in (int, float)
-            and any(
-                isclose(value, cutoff, rel_tol=0, abs_tol=1e-6)
-                for cutoff in (_D3_CUTOFF_A, _D3_CUTOFF_A_ROUNDED_CONVERSION)
-            )
+        return type(value) in (int, float) and any(
+            isclose(value, cutoff, rel_tol=0, abs_tol=1e-6)
+            for cutoff in (_D3_CUTOFF_A, _D3_CUTOFF_A_ROUNDED_CONVERSION)
         )
 
-    for key in ("dispersion_cutoff_A", "dispersion_cutoff_Angstrom", "dispersion_cutoff_angstrom", "dispersion_cutoff"):
+    for key in (
+        "dispersion_cutoff_A",
+        "dispersion_cutoff_Angstrom",
+        "dispersion_cutoff_angstrom",
+        "dispersion_cutoff",
+    ):
         if key in config and not cutoff_matches(config[key]):
             return False
     if "dispersion_cutoff_bohr" in config and not (
@@ -172,7 +174,11 @@ def parse_calculator_settings(settings: Mapping, *, role: str | None = None) -> 
                 for key in config
                 if key not in allowed
                 and key not in recognized_d3
-                and not (key in identity_options and type(config[key]) is type(identity_options[key]) and config[key] == identity_options[key])
+                and not (
+                    key in identity_options
+                    and type(config[key]) is type(identity_options[key])
+                    and config[key] == identity_options[key]
+                )
             )
             for key in ("calculator", "note"):
                 if key in config and (

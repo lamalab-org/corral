@@ -20,7 +20,11 @@ def assets_directory(value: str | Path | None = None) -> Path:
     # The benchmark controller uses the host path. Docker trials use the same
     # immutable catalogs baked into the image under a worker-visible /usr tree.
     image_assets = Path("/usr/local/share/corral-md-assets")
-    if configured and not Path(configured).expanduser().exists() and image_assets.is_dir():
+    if (
+        configured
+        and not Path(configured).expanduser().exists()
+        and image_assets.is_dir()
+    ):
         configured = image_assets
     if not configured:
         raise ValueError(
@@ -61,8 +65,12 @@ def run_lammps_locally(
         text = text.replace(f"/workspace/{kind}/", f"{assets / kind}/")
     text = text.replace("/workspace/", f"{root}/")
     with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", suffix=".in", prefix=".corral-md-",
-        dir=root, delete=False,
+        mode="w",
+        encoding="utf-8",
+        suffix=".in",
+        prefix=".corral-md-",
+        dir=root,
+        delete=False,
     ) as stream:
         stream.write(text)
         temporary = Path(stream.name)

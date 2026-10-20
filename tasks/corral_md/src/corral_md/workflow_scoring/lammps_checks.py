@@ -458,7 +458,9 @@ def cooled_endpoint_temperature(e) -> bool:
     """Check the measured endpoint against saved velocities and 300 K target."""
     trace = e.table("thermal_trace", "thermal_traces", "trace")
     if "stage" in trace:
-        trace = trace.loc[trace["stage"].astype(str).str.lower().isin(["cooling", "cool"])]
+        trace = trace.loc[
+            trace["stage"].astype(str).str.lower().isin(["cooling", "cool"])
+        ]
     measured = (
         trace["measured_temperature_K"]
         if "measured_temperature_K" in trace
