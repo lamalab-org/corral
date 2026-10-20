@@ -339,6 +339,14 @@ class OpenHandsAgent(BaseAgent):
             llm_kwargs["base_url"] = self.api_endpoint
         if "litellm_extra_body" in self.kwargs:
             llm_kwargs["litellm_extra_body"] = self.kwargs["litellm_extra_body"]
+        for name in (
+            "num_retries",
+            "retry_min_wait",
+            "retry_max_wait",
+            "retry_multiplier",
+        ):
+            if name in self.kwargs:
+                llm_kwargs[name] = self.kwargs[name]
         return LLM(**llm_kwargs)
 
     def _build_agent(

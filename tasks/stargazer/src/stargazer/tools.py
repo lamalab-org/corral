@@ -125,9 +125,10 @@ def _execute_persistent(code: str, namespace: dict[str, Any]) -> str:
         return "No plotting is allowed. Code was not executed since it contained 'matplotlib'."
     namespace["__builtins__"].update(_session_builtins())
     cleaned = wrap_last_line_with_print(sanitize_input(code))
-    conflict = detect_shadowing_callable_conflict(cleaned, namespace)
-    if conflict:
-        return conflict
+    # Python resolves local bindings and redefinitions during execution. The
+    # old namespace-wide shadowing check rejected valid callbacks, parameters,
+    # and lambdas before the cell could run. Real call errors are reported by
+    # execute_in_namespace with the rest of the agent's Python exceptions.
     return execute_in_namespace(
         cleaned, namespace, preloaded_names=tuple(PRELOADED_VARS)
     )

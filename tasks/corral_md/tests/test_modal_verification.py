@@ -417,6 +417,39 @@ def test_task5_operation_aliases_reach_the_reference_verifier_in_canonical_form(
     assert evidence.fingerprint() == before
 
 
+@pytest.mark.parametrize(
+    "symmetry, acoustic, expected_acoustic",
+    [
+        (
+            "index symmetrization Phi=(Phi+Phi^T)/2 (no space-group symmetrization)",
+            "on-site blocks replaced by minus sum of off-site blocks, then re-symmetrized",
+            "onsite_blocks_then_resymmetrize",
+        ),
+        (
+            "Phi=(Phi+Phi^T)/2 alternated with ASR (100 iterations), final symmetrization",
+            "self-block correction Phi_ii=-sum_{j!=i} Phi_ij (3x3 blocks)",
+            "onsite_blocks_iterative_100",
+        ),
+    ],
+)
+def test_task5_onsite_asr_reaches_independent_reference(
+    tmp_path, symmetry, acoustic, expected_acoustic
+):
+    path = _submission(5, tmp_path)
+    manifest = json.loads(path.read_text())
+    records_path = Path(manifest["artifacts"]["strain_calculations"])
+    records = json.loads(records_path.read_text())
+    for record in records:
+        record.update(symmetrization=symmetry, acoustic_sum_rule=acoustic)
+    records_path.write_text(json.dumps(records))
+    plan = build_plan(Evidence(path), 5, "nonce")
+    assert not plan.notes
+    spec = plan.jobs[0]["postprocess"][0]
+    assert spec["acoustic_sum_rule"] == expected_acoustic
+    result = module("ground_truth").postprocess_hessian(np.eye(6), spec)
+    assert result.shape == (6, 6)
+
+
 def test_ground_truth_resolves_dimer_orientation_and_task5_atom_order():
     ground_truth = module("ground_truth")
     assets = json.loads(
@@ -613,7 +646,9 @@ def test_palladium_analytical_derivative_is_recalculated(tmp_path):
     path = _submission(4, tmp_path)
     fixture_module(
         "test_workflow_task_4"
-    ).test_task4_analytical_hessian_is_read_as_data(path)
+    ).test_task4_analytical_hessian_is_read_as_data(
+        path, method="analytical", description_key="description"
+    )
     plan = build_plan(Evidence(path), 4, "analytical")
     job = next(j for j in plan.jobs if j["id"] == "palladium_hessian")
     assert job["operation"] == "mace"
@@ -735,21 +770,23 @@ def test_worker_recalculates_instead_of_reading_stored_values(monkeypatch):
 
 
 @pytest.mark.parametrize("count", [1, 2])
-def test_soap_preserves_one_row_per_input_frame(monkeypatch, count):
+@pytest.mark.parametrize("descriptive_metadata", [False, True])
+def test_soap_preserves_one_row_per_input_frame(monkeypatch, count, descriptive_metadata):
     import sys
     from types import ModuleType
 
     descriptor = ModuleType("dscribe.descriptors")
     values = np.arange(count * 147, dtype=float).reshape(count, 147)
-    descriptor.SOAP = lambda **kwargs: SimpleNamespace(
-        create=lambda frames, n_jobs: values[0] if len(frames) == 1 else values
-    )
+    def soap(**kwargs):
+        assert "implementation" not in kwargs and "n_features" not in kwargs
+        return SimpleNamespace(create=lambda frames, n_jobs: values[0] if len(frames) == 1 else values)
+    descriptor.SOAP = soap
     monkeypatch.setitem(sys.modules, "dscribe", ModuleType("dscribe"))
     monkeypatch.setitem(sys.modules, "dscribe.descriptors", descriptor)
     result = module("verification_worker").calculate(
         {
             "operation": "soap",
-            "parameters": {"average": "inner"},
+            "parameters": {"average": "inner", **({"implementation": "dscribe 2.1.1 SOAP", "n_features": 147} if descriptive_metadata else {})},
             "frames": [geometry(bulk("Si", "diamond", a=5.43))] * count,
         },
         {},

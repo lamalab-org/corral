@@ -50,9 +50,16 @@ class Session:
         self.messages = []
         self.submission = submission
         self.submission_status = submission_status
+        self.submitted_actions = []
 
     async def record_message(self, message):
         self.messages.append(message)
+
+    async def execute(self, action):
+        self.submitted_actions.append(action)
+        self.submission = action.arguments["answer"]
+        self.submission_status = "submitted"
+        return SimpleNamespace(success=True, error=None)
 
 
 @pytest.mark.anyio
@@ -122,7 +129,7 @@ def test_codex_extracts_usage_from_nested_total():
 
 
 @pytest.mark.anyio
-async def test_codex_plain_text_answer_is_not_a_submission(monkeypatch):
+async def test_codex_final_answer_falls_back_to_submission_action(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     def fake_run(self, *, run, **_kwargs):
@@ -130,10 +137,32 @@ async def test_codex_plain_text_answer_is_not_a_submission(monkeypatch):
         return "42"
 
     monkeypatch.setattr(CodexAgent, "_execute_harness", fake_run)
-    outcome = await CodexAgent(system_prompt="system").run_session(Session())
+    session = Session()
+    outcome = await CodexAgent(system_prompt="system").run_session(session)
+
+    assert outcome.status == "completed"
+    assert outcome.answer == "42"
+    assert session.submission == "42"
+    assert len(session.submitted_actions) == 1
+    assert session.submitted_actions[0].name == "submit_answer"
+    assert session.submitted_actions[0].metadata["source"] == "codex_final_answer"
+    assert outcome.metadata["submission_source"] == "codex_final_answer"
+
+
+@pytest.mark.anyio
+async def test_codex_empty_final_answer_remains_protocol_failure(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_run(self, *, run, **_kwargs):
+        run.result = HarnessRunResult(status="success", answer="  ")
+        return ""
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", fake_run)
+    session = Session()
+    outcome = await CodexAgent(system_prompt="system").run_session(session)
 
     assert outcome.status == "protocol_failure"
-    assert "without calling submit_answer" in outcome.error
+    assert not session.submitted_actions
 
 
 @pytest.mark.anyio

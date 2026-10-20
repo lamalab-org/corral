@@ -569,6 +569,7 @@ class Solution(StockSolution):
         # trying to solve the equilibrium equations
         self._eq_iters = 0
         converged = False
+        initial_state = self.state.clone()
         for _ in range(retry):
             eq_result = self._engine.solver.solve(self.state)
             self._eq_iters += 1
@@ -578,10 +579,27 @@ class Solution(StockSolution):
                 converged = True
                 break
         if not converged:
+            # Repeating a capped solve from its failed iterate can stagnate.
+            # Restart from the original conserved composition with a larger
+            # optimization budget, preserving the chemistry and tolerances.
+            options = rk.EquilibriumOptions()
+            options.epsilon = self._engine.spec.solver_epsilon
+            options.use_ideal_activity_models = self._engine.spec.use_ideal_activity_models
+            options.optima.maxiters = 2000
+            fallback = rk.EquilibriumSolver(self._engine.system)
+            fallback.setOptions(options)
+            eq_result = fallback.solve(initial_state)
+            self._eq_iters += 1
+            error = eq_result.optima.error
+            if eq_result.succeeded() or error < error_threshold:
+                self.state.assign(initial_state)
+                self._eq_error = error
+                converged = True
+        if not converged:
             self._eq_error = error
             err_percent = 100 * (error - error_threshold) / error_threshold
             raise NotEquilibratedError(
-                f"Equilibrium calculations failed to converge after {retry} attempts! ({err_percent:.1f} %)"
+                f"Equilibrium calculations failed to converge after {self._eq_iters} attempts! ({err_percent:.1f} %)"
             )
 
         visible_solids = {}
