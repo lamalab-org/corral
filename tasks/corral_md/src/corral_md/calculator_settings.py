@@ -36,11 +36,9 @@ _D3_CUTOFF_A_ROUNDED_CONVERSION = 40.0 * 0.52917726
 _D3_CUTOFF_BOHR = 40.0
 
 
-def _default_d3_options(config: Mapping, settings: Mapping) -> bool:
+def _default_d3_options(config: Mapping) -> bool:
     """Recognize only the pinned mace_mp D3(BJ) defaults, not arbitrary D3 settings."""
     if not any(key in config for key in _D3_KEYS):
-        return False
-    if config.get("dispersion", settings.get("dispersion")) is not True:
         return False
     for key, expected in (
         ("dispersion_xc", "pbe"),
@@ -51,8 +49,12 @@ def _default_d3_options(config: Mapping, settings: Mapping) -> bool:
             "torch_dftd.torch_dftd3_calculator.TorchDFTD3Calculator",
         ),
     ):
-        if key in config and config[key] != expected:
-            return False
+        if key in config:
+            value = config[key]
+            if key != "d3_calculator" and isinstance(value, str):
+                value = value.lower()
+            if value != expected:
+                return False
 
     def cutoff_matches(value) -> bool:
         return (
@@ -144,11 +146,18 @@ def parse_calculator_settings(settings: Mapping, *, role: str | None = None) -> 
         "model_path",
         "checkpoint",
         "model_paths",
+        "calculator",
+        "note",
     }
     result, locations, unknown = {}, {}, []
     for location, config in sources:
         if location != "settings":
-            recognized_d3 = _D3_KEYS if _default_d3_options(config, settings) else set()
+            recognized_d3 = (
+                _D3_KEYS
+                if config.get("dispersion", settings.get("dispersion")) is True
+                and _default_d3_options(config)
+                else set()
+            )
             identity_options = {
                 "enable_cueq": False,
                 "energy_units_to_eV": 1.0,
@@ -164,6 +173,18 @@ def parse_calculator_settings(settings: Mapping, *, role: str | None = None) -> 
                 if key not in allowed
                 and key not in recognized_d3
                 and not (key in identity_options and type(config[key]) is type(identity_options[key]) and config[key] == identity_options[key])
+            )
+            for key in ("calculator", "note"):
+                if key in config and (
+                    not isinstance(config[key], str) or not config[key].strip()
+                ):
+                    raise CalculatorSettingsError(
+                        f"{location}.{key}", "Expected a nonempty metadata string"
+                    )
+        elif any(key in config for key in _D3_KEYS) and not _default_d3_options(config):
+            raise UnsupportedCalculatorSettings(
+                location,
+                "Nondefault dispersion parameters need a verification adapter",
             )
         for key in (*dtype_aliases, "device", "dispersion"):
             if key not in config:

@@ -22,6 +22,18 @@ def _manifest_reference(value: str) -> str:
         if re.fullmatch(r"[^\s`\"'<>]*manifest\.json", line.strip())
         and Path(line.strip()).name == "manifest.json"
     }
+    remaining = value
+    first_line, separator, trailing = value.partition("\n")
+    first_line = first_line.strip()
+    if (
+        separator
+        and first_line.startswith("/workspace/")
+        and first_line.endswith(".json")
+    ):
+        # Preserve an explicit first-line JSON path, including a custom manifest
+        # filename, while still checking the summary for conflicting manifests.
+        candidates.add(first_line)
+        remaining = trailing
     for line in value.splitlines():
         labeled = re.match(
             r"(?:submission\s+)?manifest(?:\s+path)?\s*:\s*"
@@ -31,7 +43,6 @@ def _manifest_reference(value: str) -> str:
         )
         if labeled and Path(labeled[1]).name == "manifest.json":
             candidates.add(labeled[1])
-    remaining = value
     for match in re.finditer(r"(?<!`)`([^`\r\n]+)`(?!`)", value):
         candidate = match.group(1).strip()
         if Path(candidate).name == "manifest.json":

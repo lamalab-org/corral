@@ -90,7 +90,7 @@ def test_level1_accepts_sparse_raw_log_with_matching_samples(submission):
     log_path = Path(artifacts["log"])
     log = read(log_path)
     production_log = log[4:]
-    write(log_path, production_log[::20] + [production_log[-1]])
+    write(log_path, [*production_log[::20], production_log[-1]])
 
     rubric = Rubric(9, fail_fast=False)
     evaluate_level1(Evidence(submission), rubric, 9)
@@ -126,7 +126,7 @@ def test_level1_accepts_ase_temperature_reporting_and_unit_labeled_frames(submis
     )
     log_path = Path(artifacts["log"])
     production_log = read(log_path)[4:]
-    sparse_log = production_log[::20] + [production_log[-1]]
+    sparse_log = [*production_log[::20], production_log[-1]]
     for row in sparse_log:
         row["temperature_K"] *= 93 / 96
     write(log_path, sparse_log)
@@ -150,7 +150,7 @@ def test_level1_accepts_ase_temperature_reporting_and_unit_labeled_frames(submis
 
 
 @pytest.mark.parametrize(
-    "estimator,normalization",
+    ("estimator", "normalization"),
     [
         (
             "mean-subtracted potential-energy autocorrelation, unbiased covariance at each lag",
@@ -299,6 +299,63 @@ def fit(x, y, alpha):
         "with_mean": True,
         "with_std": True,
     }
+
+
+@pytest.mark.parametrize(
+    "normalization",
+    [
+        "unbiased_by_overlap_then_divided_by_lag0",
+        "variance (lag-0 = 1), mean-subtracted, unbiased (1/(n-k))",
+    ],
+)
+@pytest.mark.parametrize("bound_type", ["upper", "bracket_from_sampling"])
+@pytest.mark.parametrize("time_unit", ["fs", "ps"])
+def test_level1_interpolated_crossing_with_sampling_bound(
+    submission, normalization, bound_type, time_unit
+):
+    manifest = read(submission)
+    path = Path(manifest["artifacts"]["correlation"])
+    doc = read(path)
+    lags = np.asarray(doc["lag_indices"])
+    values = np.asarray(doc["values"]) * 200 / (200 - lags)
+    doc["values"] = values.tolist()
+    doc["normalization"] = normalization
+    item = doc["characteristic"]
+    item["method"] = "first_crossing"
+    item["time_unit"] = time_unit
+    unit_factor = 1 if time_unit == "fs" else 1000
+    crossing = int(np.flatnonzero(values <= item["threshold"])[0])
+    fraction = (item["threshold"] - values[crossing - 1]) / (
+        values[crossing] - values[crossing - 1]
+    )
+    item["value"] = float((crossing - 1 + fraction) * 5 / unit_factor)
+    item["bound"] = (
+        {"type": "upper", "value_fs": float(crossing * 5)}
+        if bound_type == "upper"
+        else {
+            "type": bound_type,
+            "lower": float((crossing - 1) * 5 / unit_factor),
+            "upper": float(crossing * 5 / unit_factor),
+        }
+    )
+    write(path, doc)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert (
+        check(rubric, "temporal_correlation_and_characteristic_time")["status"]
+        == "passed"
+    )
+    if bound_type == "upper":
+        item["bound"]["value_fs"] += 5
+    else:
+        item["bound"]["upper"] += 5 / unit_factor
+    write(path, doc)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert (
+        check(rubric, "temporal_correlation_and_characteristic_time")["status"]
+        == "failed"
+    )
 
 
 def temp(frame):

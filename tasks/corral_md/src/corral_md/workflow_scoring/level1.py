@@ -1198,6 +1198,8 @@ def _task_9(e: Evidence, r: Rubric) -> None:
         normalization = str(doc["normalization"]).lower().replace(" ", "")
         if normalization in {
             "unbiased",
+            "unbiased_by_overlap_then_divided_by_lag0",
+            "variance(lag-0=1),mean-subtracted,unbiased(1/(n-k))",
             "biased-free(dividebyn-k),normalizedtorho(0)=1,meansubtracted",
         } or (
             "c(k)/c(0)" in normalization and "/(n-k)" in normalization
@@ -1262,7 +1264,9 @@ def _task_9(e: Evidence, r: Rubric) -> None:
         reported_bound = item["bound"]
         bound_type = str(item.get("bound_type", "")).lower()
         if isinstance(reported_bound, Mapping):
-            if set(reported_bound) == {"lower", "upper"}:
+            if set(reported_bound) == {"lower", "upper"} or (
+                reported_bound.get("type") == "bracket_from_sampling"
+            ):
                 # This format records the two samples bracketing a linearly
                 # interpolated first crossing. Recompute the endpoints and
                 # estimate; merely falling inside the interval is insufficient.
@@ -1284,13 +1288,22 @@ def _task_9(e: Evidence, r: Rubric) -> None:
                 )
                 interpolated = (lags[crossing - 1] + fraction) * delta[0] / item_factor
                 return result_close(item["value"], interpolated, atol=1e-7)
-            if (
-                str(reported_bound.get("type", "")).lower() != "upper"
-                or type(reported_bound.get("value")) not in (int, float)
-            ):
+            if str(reported_bound.get("type", "")).lower() != "upper":
                 return False
             bound_type = "upper"
-            reported_bound = reported_bound["value"]
+            if "value_fs" in reported_bound:
+                if type(reported_bound["value_fs"]) not in (int, float):
+                    return False
+                upper = reported_bound["value_fs"] / item_factor
+                if "value" in reported_bound and not result_close(
+                    reported_bound["value"], upper, atol=1e-7
+                ):
+                    return False
+                reported_bound = upper
+            else:
+                if type(reported_bound.get("value")) not in (int, float):
+                    return False
+                reported_bound = reported_bound["value"]
         described_interval = (
             re.fullmatch(r"resolved between (\S+) and (\S+) (fs|ps)", reported_bound)
             if isinstance(reported_bound, str)

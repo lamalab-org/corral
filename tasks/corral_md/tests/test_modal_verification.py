@@ -646,7 +646,9 @@ def test_palladium_analytical_derivative_is_recalculated(tmp_path):
     path = _submission(4, tmp_path)
     fixture_module(
         "test_workflow_task_4"
-    ).test_task4_analytical_hessian_is_read_as_data(path)
+    ).test_task4_analytical_hessian_is_read_as_data(
+        path, method="analytical", description_key="description"
+    )
     plan = build_plan(Evidence(path), 4, "analytical")
     job = next(j for j in plan.jobs if j["id"] == "palladium_hessian")
     assert job["operation"] == "mace"

@@ -43,6 +43,7 @@ HESSIAN_OPERATIONS = {
             "transpose_average",
             "Hessian transpose average",
             "H_sym = (H_raw + H_raw^T)/2",
+            "force-constant matrix symmetrized as (Phi+Phi^T)/2 before diagonalization; no space-group symmetry used (all 6 Cartesian DOFs displaced)",
             "arithmetic Hessian symmetrization: (Phi + Phi^T)/2; no crystallographic symmetry reduction",
             "index symmetrization Phi=(Phi+Phi^T)/2 (no space-group symmetrization)",
         ),

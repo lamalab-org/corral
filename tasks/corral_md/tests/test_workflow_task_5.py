@@ -9,7 +9,12 @@ import numpy as np
 import pytest
 from ase.calculators.singlepoint import SinglePointCalculator
 from corral_md.workflow_scoring.common import Evidence, Rubric
-from corral_md.workflow_scoring.task_5 import ENERGY_FACTOR, _reconstruct, evaluate, postprocess_settings
+from corral_md.workflow_scoring.task_5 import (
+    ENERGY_FACTOR,
+    _reconstruct,
+    evaluate,
+    postprocess_settings,
+)
 
 CELL = 5.43 / 2 * (np.ones((3, 3)) - np.eye(3))
 MASS = 28.0855
@@ -171,7 +176,7 @@ def test_average_with_transpose_alias_reconstructs_the_same_hessian(submission):
 
 
 @pytest.mark.parametrize(
-    "symmetry, acoustic, canonical",
+    ("symmetry", "acoustic", "canonical"),
     [
         (
             "index symmetrization Phi=(Phi+Phi^T)/2 (no space-group symmetrization)",
@@ -212,13 +217,13 @@ def test_documented_onsite_asr_reconstructs_from_raw_forces(symmetry, acoustic, 
 
 @pytest.mark.parametrize(
     "method",
-    (
+    [
         "central_difference_periodic_gamma",
         "central_difference_forces",
         "central_difference_of_forces",
         "central_difference_gamma_primitive_cell",
         "central_difference_periodic_primitive_cell_Gamma",
-    ),
+    ],
 )
 def test_equivalent_central_force_records_reconstruct_from_flat_displacements(submission, method):
     for name in ("calculations.json", "sensitivity.json"):
@@ -463,7 +468,8 @@ def test_described_energy_hessian_schema_is_reconstructed(submission, mutation):
         # These extra terms must be removed by the declared operations.
         raw = (
             np.asarray(record["force_constants_eV_A2"])
-            + asymmetric - asymmetric.T
+            + asymmetric
+            - asymmetric.T
             + 0.13 * translations @ translations.T
         )
         record["raw_analytical_hessian_eV_A2"] = raw.tolist()
@@ -590,3 +596,26 @@ def test_empty_submission_has_no_task_credit(tmp_path):
     result = score(path)
     assert result.score == 0
     assert sum(item["points"] for item in result.checks) == 90
+
+
+def test_described_transpose_average_still_checks_raw_forces(submission):
+    path = submission.parent / "calculations.json"
+    records = load(path)
+    for row in records:
+        row["symmetrization"] = (
+            "force-constant matrix symmetrized as (Phi+Phi^T)/2 before diagonalization; "
+            "no space-group symmetry used (all 6 Cartesian DOFs displaced)"
+        )
+    write(path, records)
+    result = score(submission)
+    assert (
+        check(result, "force_constants_reconstructed_from_raw_evidence")["status"]
+        == "passed"
+    )
+    records[0]["plus_forces_eV_A"][0][0][0] += 10
+    write(path, records)
+    result = score(submission)
+    assert (
+        check(result, "force_constants_reconstructed_from_raw_evidence")["status"]
+        == "failed"
+    )

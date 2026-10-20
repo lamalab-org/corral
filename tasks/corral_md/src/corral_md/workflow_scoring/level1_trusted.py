@@ -12,10 +12,11 @@ import secrets
 from collections.abc import Mapping
 
 import numpy as np
+from ase import units
 from ase.build import bulk
 
 from .common import EvidenceError, UnsupportedEvidence, finite_array
-from .verification import ModalVerifier, Plan, stored
+from .verification import ModalVerifier, Plan, geometry, stored
 
 # This is the immutable teacher asset in modal_app/assets.json. Keep the value
 # independent of submission metadata: a submitted digest is only a claim.
@@ -466,10 +467,61 @@ def build_level1_plan(e, task_number: int, challenge: str) -> Plan:
             if not isinstance(trajectories, Mapping) or not trajectories:
                 raise EvidenceError("Task 7 needs a production trajectory")
             for stage in trajectories:
+                frames = e.trajectory(f"trajectories.{stage}")
+                if not all(
+                    {"energy", "forces", "stress"} <= stored(frame).keys()
+                    for frame in frames
+                ):
+                    # A valid NPT trajectory may retain pressure and momenta
+                    # without serializing calculator results. Recalculate the
+                    # potential stress and add the saved kinetic contribution.
+                    from .level1 import _time_fs
+
+                    table = e.table("thermal_trace", "raw_trace")
+                    table = table.loc[table["stage"] == stage]
+                    times = finite_array(table["time_fs"], ndim=1)
+                    pressures = finite_array(table["pressure_GPa"], ndim=1)
+                    matched = []
+                    for index, frame in enumerate(frames):
+                        hits = np.flatnonzero(
+                            np.isclose(times, _time_fs(frame), rtol=0, atol=1e-6)
+                        )
+                        if len(hits) == 1:
+                            if "momenta" not in frame.arrays:
+                                raise EvidenceError(
+                                    "Pressure verification needs saved momenta"
+                                )
+                            matched.append((index, float(pressures[hits[0]])))
+                    if len(matched) < 5:
+                        raise UnsupportedEvidence(
+                            "Too few NPT frames align with saved pressures"
+                        )
+                    name = f"aluminum_npt_{stage}_pressure"
+                    samples = [matched[i] for i in p.sample(len(matched), 5, name)]
+                    p.add(
+                        name,
+                        "mace",
+                        {
+                            "frames": [geometry(frames[i]) for i, _ in samples],
+                            "properties": ["stress"],
+                            "sample_indices": [i for i, _ in samples],
+                        },
+                        {"frames": [{"pressure_GPa": value} for _, value in samples]},
+                        parameters=_model_parameters(e, 7),
+                        targets=[MODEL_TARGET, "independent_pressure_evidence"],
+                        tolerance={"pressure_GPa": [0.01, 0.001]},
+                    )
+                    p.expected[name]["pressure_kinetic_GPa"] = [
+                        2
+                        * frames[i].get_kinetic_energy()
+                        / (3 * frames[i].get_volume() * units.GPa)
+                        for i, _ in samples
+                    ]
+                    continue
                 _samples(
                     p,
                     f"aluminum_npt_{stage}",
-                    e.trajectory(f"trajectories.{stage}"),
+                    frames,
                     count=5,
                     properties=["energy", "forces", "stress"],
                 )

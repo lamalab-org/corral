@@ -918,9 +918,29 @@ class ModalVerifier:
                 )
             result = jobs[0]
             if result.get("status") == "complete":
+                actual = result.get("value")
+                if "pressure_kinetic_GPa" in spec:
+                    from ase import units
+
+                    actual = {
+                        "frames": [
+                            {
+                                "pressure_GPa": -float(
+                                    np.mean(finite_array(row["stress"], shape=(6,))[:3])
+                                )
+                                / units.GPa
+                                + kinetic
+                            }
+                            for row, kinetic in zip(
+                                actual["frames"],
+                                spec["pressure_kinetic_GPa"],
+                                strict=True,
+                            )
+                        ]
+                    }
                 check["status"] = (
                     "passed"
-                    if compare(spec["values"], result.get("value"), spec["tolerance"])
+                    if compare(spec["values"], actual, spec["tolerance"])
                     else "failed"
                 )
             check["detail"] = result.get(
@@ -1255,6 +1275,25 @@ def apply_verification(rubric, report, *, task_number=None):
                 detail="Required independent model calculation is unavailable or incomplete.",
             )
     for verification in report["checks"] if report is not None else ():
+        if (
+            verification["status"] == "passed"
+            and "independent_pressure_evidence" in verification.get("targets", [])
+            and "independent_pressure_evidence" in by_name
+        ):
+            pressure = by_name["independent_pressure_evidence"]
+            relevant = [
+                c
+                for c in report["checks"]
+                if "independent_pressure_evidence" in c.get("targets", [])
+            ]
+            if pressure["status"] == "unverified" and all(
+                c["status"] == "passed" for c in relevant
+            ):
+                pressure.update(
+                    status="passed",
+                    earned=pressure["points"],
+                    detail="Saved pressures match independently calculated model stress plus kinetic pressure.",
+                )
         if (
             verification["id"] == "trusted_md_execution"
             and verification["status"] == "passed"

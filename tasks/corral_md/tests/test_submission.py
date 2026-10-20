@@ -72,6 +72,8 @@ def test_formatted_manifest_resolves_to_identical_evidence(tmp_path, answer):
         "first/manifest.json or `second/manifest.json`",
         "first/manifest.json\nUse second/manifest.json instead.",
         "first/manifest.json\nUse `second/manifest.json` instead.",
+        "/workspace/first/manifest.json\nUse `/workspace/second/manifest.json` instead.",
+        "/workspace/first.json\nUse `/workspace/second/manifest.json` instead.",
         "Manifest path: first/manifest.json\nManifest path: second/manifest.json",
         "Manifest path: second/manifest.json\nAlternative: `manifest.json`",
         "Submission manifest: first/manifest.json (validated); alternative: second/manifest.json",
@@ -119,6 +121,23 @@ def test_manifest_prose_inside_inline_json_is_preserved(tmp_path):
     assert json.loads(resolve_submission(json.dumps(answer), tmp_path)) == answer
 
 
+@pytest.mark.parametrize("filename", ["manifest.json", "results.json", "my results.json"])
+def test_explicit_manifest_first_line_allows_trailing_summary(tmp_path, filename):
+    output = tmp_path / "output"
+    output.mkdir()
+    manifest = output / filename
+    manifest.write_text('{"artifacts": {}, "results": {"value": 1}}')
+    original = manifest.read_bytes()
+    resolved = resolve_submission(
+        f"/workspace/output/{filename}\n\nCalculation summary and caveats.", tmp_path
+    )
+    assert json.loads(resolved)["results"] == {"value": 1}
+    assert manifest.read_bytes() == original
+    manifest.unlink()
+    with pytest.raises(FileNotFoundError):
+        resolve_submission(f"/workspace/output/{filename}\n\nSummary.", tmp_path)
+
+
 def test_missing_file_does_not_read_from_cwd(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -152,7 +171,9 @@ def test_manifest_can_link_sibling_workspace_files(tmp_path):
         json.dumps({"scripts": {"run": "../scripts/run.py"}})
     )
 
-    resolved = json.loads(resolve_submission("/workspace/output/manifest.json", workspace))
+    resolved = json.loads(
+        resolve_submission("/workspace/output/manifest.json", workspace)
+    )
 
     assert resolved["scripts"]["run"] == str(script)
 
