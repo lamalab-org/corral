@@ -90,7 +90,7 @@ def test_level1_accepts_sparse_raw_log_with_matching_samples(submission):
     log_path = Path(artifacts["log"])
     log = read(log_path)
     production_log = log[4:]
-    write(log_path, production_log[::20] + [production_log[-1]])
+    write(log_path, [*production_log[::20], production_log[-1]])
 
     rubric = Rubric(9, fail_fast=False)
     evaluate_level1(Evidence(submission), rubric, 9)
@@ -126,7 +126,7 @@ def test_level1_accepts_ase_temperature_reporting_and_unit_labeled_frames(submis
     )
     log_path = Path(artifacts["log"])
     production_log = read(log_path)[4:]
-    sparse_log = production_log[::20] + [production_log[-1]]
+    sparse_log = [*production_log[::20], production_log[-1]]
     for row in sparse_log:
         row["temperature_K"] *= 93 / 96
     write(log_path, sparse_log)
@@ -149,18 +149,29 @@ def test_level1_accepts_ase_temperature_reporting_and_unit_labeled_frames(submis
     assert check(rubric, "fixed_cell_cu32_chronological_frames")["status"] == "failed"
 
 
-def test_level1_accepts_unbiased_interpolated_correlation(submission):
+@pytest.mark.parametrize(
+    ("estimator", "normalization"),
+    [
+        (
+            "mean-subtracted potential-energy autocorrelation, unbiased covariance at each lag",
+            "C(k)/C(0); C(k)=sum((E_i-mean(E))*(E_(i+k)-mean(E)))/(N-k)",
+        ),
+        (
+            "direct normalized autocorrelation with per-lag overlap normalization",
+            "C(lag)/C(0), mean removed over all 200 samples",
+        ),
+    ],
+)
+@pytest.mark.parametrize("describe_bound", [False, True])
+def test_level1_accepts_unbiased_interpolated_correlation(submission, estimator, normalization, describe_bound):
     manifest = read(submission)
     correlation_path = Path(manifest["artifacts"]["correlation"])
     doc = read(correlation_path)
     lags = np.asarray(doc["lag_indices"])
     values = np.asarray(doc["values"]) * 200 / (200 - lags)
     doc["values"] = values.tolist()
-    doc["estimator"] = (
-        "mean-subtracted potential-energy autocorrelation, "
-        "unbiased covariance at each lag"
-    )
-    doc["normalization"] = "C(k)/C(0); C(k)=sum((E_i-mean(E))*(E_(i+k)-mean(E)))/(N-k)"
+    doc["estimator"] = estimator
+    doc["normalization"] = normalization
     characteristic = doc["characteristic"]
     characteristic["method"] = "first 1/e crossing, linearly interpolated"
     crossing = int(np.flatnonzero(values <= characteristic["threshold"])[0])
@@ -169,6 +180,8 @@ def test_level1_accepts_unbiased_interpolated_correlation(submission):
     )
     characteristic["value"] = float((crossing - 1 + fraction) * 5)
     characteristic["bound"] = None
+    if describe_bound:
+        characteristic["bound"] = f"resolved between {(crossing - 1) * 5} and {crossing * 5} fs"
     write(correlation_path, doc)
 
     rubric = Rubric(9, fail_fast=False)
@@ -178,6 +191,15 @@ def test_level1_accepts_unbiased_interpolated_correlation(submission):
         == "passed"
     )
 
+    if describe_bound:
+        correct_bound = characteristic["bound"]
+        characteristic["bound"] = f"resolved between {(crossing - 1) * 5} and {crossing * 5 + 1} fs"
+        write(correlation_path, doc)
+        rubric = Rubric(9, fail_fast=False)
+        evaluate_level1(Evidence(submission), rubric, 9)
+        assert check(rubric, "temporal_correlation_and_characteristic_time")["status"] == "failed"
+        characteristic["bound"] = correct_bound
+
     doc["characteristic"]["value"] += 20
     write(correlation_path, doc)
     rubric = Rubric(9, fail_fast=False)
@@ -186,6 +208,80 @@ def test_level1_accepts_unbiased_interpolated_correlation(submission):
         check(rubric, "temporal_correlation_and_characteristic_time")["status"]
         == "failed"
     )
+
+
+def test_level1_checks_numeric_upper_bound_against_acf_samples(submission):
+    manifest = read(submission)
+    path = Path(manifest["artifacts"]["correlation"])
+    doc = read(path)
+    doc["normalization"] = "mean-subtracted biased estimator normalized to lag0 = 1"
+    values = np.asarray(doc["values"])
+    crossing = int(np.flatnonzero(values <= 1 / np.e)[0])
+    times = np.asarray(doc["lag_times"])
+    fraction = (1 / np.e - values[crossing - 1]) / (
+        values[crossing] - values[crossing - 1]
+    )
+    doc["characteristic"] = {
+        "method": "first_crossing",
+        "threshold": 1 / np.e,
+        "value": float(
+            times[crossing - 1] + fraction * (times[crossing] - times[crossing - 1])
+        ),
+        "time_unit": doc["time_unit"],
+        "bound": float(times[crossing]),
+        "bound_type": "upper",
+    }
+    write(path, doc)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert (
+        check(rubric, "temporal_correlation_and_characteristic_time")["status"]
+        == "passed"
+    )
+
+    doc["characteristic"]["bound"] += 1
+    write(path, doc)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert (
+        check(rubric, "temporal_correlation_and_characteristic_time")["status"]
+        == "failed"
+    )
+
+
+def test_level1_accepts_variance_normalized_unbiased_acf_with_structured_upper_bound(submission):
+    manifest = read(submission)
+    path = Path(manifest["artifacts"]["correlation"])
+    doc = read(path)
+    lags = np.asarray(doc["lag_indices"])
+    doc["values"] = (np.asarray(doc["values"]) * 200 / (200 - lags)).tolist()
+    doc["estimator"] = "acf"
+    doc["normalization"] = (
+        "variance (c(0)=1), mean-subtracted, unbiased (1/(N-k)) lag average"
+    )
+    values = np.asarray(doc["values"])
+    times = np.asarray(doc["lag_times"])
+    crossing = int(np.flatnonzero(values <= 1 / np.e)[0])
+    fraction = (1 / np.e - values[crossing - 1]) / (
+        values[crossing] - values[crossing - 1]
+    )
+    doc["characteristic"] = {
+        "method": "first_crossing",
+        "threshold": 1 / np.e,
+        "value": float(times[crossing - 1] + fraction * (times[crossing] - times[crossing - 1])),
+        "time_unit": doc["time_unit"],
+        "bound": {"type": "upper", "value": float(times[crossing])},
+    }
+    write(path, doc)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "temporal_correlation_and_characteristic_time")["status"] == "passed"
+
+    doc["characteristic"]["bound"]["value"] += 1
+    write(path, doc)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert check(rubric, "temporal_correlation_and_characteristic_time")["status"] == "failed"
 
 
 def fit(x, y, alpha):
@@ -203,6 +299,63 @@ def fit(x, y, alpha):
         "with_mean": True,
         "with_std": True,
     }
+
+
+@pytest.mark.parametrize(
+    "normalization",
+    [
+        "unbiased_by_overlap_then_divided_by_lag0",
+        "variance (lag-0 = 1), mean-subtracted, unbiased (1/(n-k))",
+    ],
+)
+@pytest.mark.parametrize("bound_type", ["upper", "bracket_from_sampling"])
+@pytest.mark.parametrize("time_unit", ["fs", "ps"])
+def test_level1_interpolated_crossing_with_sampling_bound(
+    submission, normalization, bound_type, time_unit
+):
+    manifest = read(submission)
+    path = Path(manifest["artifacts"]["correlation"])
+    doc = read(path)
+    lags = np.asarray(doc["lag_indices"])
+    values = np.asarray(doc["values"]) * 200 / (200 - lags)
+    doc["values"] = values.tolist()
+    doc["normalization"] = normalization
+    item = doc["characteristic"]
+    item["method"] = "first_crossing"
+    item["time_unit"] = time_unit
+    unit_factor = 1 if time_unit == "fs" else 1000
+    crossing = int(np.flatnonzero(values <= item["threshold"])[0])
+    fraction = (item["threshold"] - values[crossing - 1]) / (
+        values[crossing] - values[crossing - 1]
+    )
+    item["value"] = float((crossing - 1 + fraction) * 5 / unit_factor)
+    item["bound"] = (
+        {"type": "upper", "value_fs": float(crossing * 5)}
+        if bound_type == "upper"
+        else {
+            "type": bound_type,
+            "lower": float((crossing - 1) * 5 / unit_factor),
+            "upper": float(crossing * 5 / unit_factor),
+        }
+    )
+    write(path, doc)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert (
+        check(rubric, "temporal_correlation_and_characteristic_time")["status"]
+        == "passed"
+    )
+    if bound_type == "upper":
+        item["bound"]["value_fs"] += 5
+    else:
+        item["bound"]["upper"] += 5 / unit_factor
+    write(path, doc)
+    rubric = Rubric(9, fail_fast=False)
+    evaluate_level1(Evidence(submission), rubric, 9)
+    assert (
+        check(rubric, "temporal_correlation_and_characteristic_time")["status"]
+        == "failed"
+    )
 
 
 def temp(frame):
@@ -933,6 +1086,22 @@ def test_final_selection_cannot_use_independent_trajectory(submission):
         check(score(submission), "final_main_only_affine_pipeline")["status"]
         == "failed"
     )
+
+
+def test_described_final_selection_requires_review_and_preserves_numeric_checks(submission):
+    path = submission.parent / "models.json"
+    doc = read(path)
+    doc["final"].update(
+        selection_source="Forward CV on the full main trajectory; refit all main rows",
+        tuning_summary=[{"alpha": doc["final"]["model"]["alpha"], "mean_inner_rmse": 0.1}],
+    )
+    doc["final"].pop("selection_indices", None)
+    doc["final"].pop("selection_dataset", None)
+    write(path, doc)
+    assert check(score(submission), "final_main_only_affine_pipeline")["status"] == "unverified"
+    doc["final"]["model"]["coef"][0] += 100
+    write(path, doc)
+    assert check(score(submission), "final_main_only_affine_pipeline")["status"] == "failed"
 
 
 @pytest.mark.parametrize("dataset", ["independent_800", "validation_pool", ["main"]])

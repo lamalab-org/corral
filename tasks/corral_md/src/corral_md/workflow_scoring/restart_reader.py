@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 class ModalRestartReader:
     """Convert an opaque restart without executing submission code locally."""
 
+    def __init__(self, verifier=None):
+        self.verifier = verifier or ModalVerifier()
+
     def __call__(self, path: Path) -> Atoms:
         if path.stat().st_size > 64 * 1024 * 1024:
             raise EvidenceError("LAMMPS binary restart exceeds the 64 MiB limit")
@@ -32,7 +35,7 @@ class ModalRestartReader:
             parameters=checkpoint,
         )
         try:
-            response = ModalVerifier()._calculate(plan, digest)
+            response = self.verifier._calculate(plan, digest)
         except Exception as exc:
             raise UnsupportedEvidence(
                 "The trusted LAMMPS restart reader is unavailable"

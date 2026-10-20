@@ -188,7 +188,14 @@ class WorkflowScorer:
             evidence_sha256 = hashlib.sha256(
                 (
                     f"corral_md.workflow.level_{self.level}.task_{self.task_number}"
-                    + (".modal" if self.verifier is not None else ".offline")
+                    + (
+                        ".local"
+                        if verification is not None
+                        and verification.get("mode") == "local_docker"
+                        else ".modal"
+                        if self.verifier is not None
+                        else ".offline"
+                    )
                     + "\0"
                     + evidence.fingerprint()
                     + "\0"
@@ -201,13 +208,19 @@ class WorkflowScorer:
         report["level"] = self.level
         report["evidence_sha256"] = evidence_sha256
         if verification is not None:
-            report["mode"] = "artifact_and_modal"
+            report["mode"] = (
+                "artifact_and_local"
+                if verification.get("mode") == "local_docker"
+                else "artifact_and_modal"
+            )
             report["verification"] = verification
         return report
 
 
 def check_level2_workflow(
-    task_number: int, verification_backend: str | None = None
+    task_number: int,
+    verification_backend: str | None = None,
+    assets_dir: str | None = None,
 ) -> WorkflowScorer:
     """Use trusted readers for silicon restarts and verification for silver."""
     backend = verification_backend or os.getenv(
@@ -215,8 +228,18 @@ def check_level2_workflow(
     )
     if backend == "offline":
         return WorkflowScorer(task_number, level=2)
+    if backend == "local":
+        from corral_md.workflow_scoring.local_verifier import LocalVerifier
+        from corral_md.workflow_scoring.restart_reader import ModalRestartReader
+
+        verifier = LocalVerifier(assets_dir)
+        if task_number == 1:
+            return WorkflowScorer(
+                task_number, level=2, restart_reader=ModalRestartReader(verifier)
+            )
+        return WorkflowScorer(task_number, level=2, verifier=verifier)
     if backend != "modal":
-        raise ValueError("verification_backend must be 'offline' or 'modal'")
+        raise ValueError("verification_backend must be 'offline', 'local', or 'modal'")
     if task_number == 1:
         from corral_md.workflow_scoring.restart_reader import ModalRestartReader
 
@@ -230,7 +253,9 @@ def check_level2_workflow(
 
 
 def check_level1_workflow(
-    task_number: int, verification_backend: str | None = None
+    task_number: int,
+    verification_backend: str | None = None,
+    assets_dir: str | None = None,
 ) -> WorkflowScorer:
     """Construct the Level 1 scorer with independent MACE checks by default."""
     if type(task_number) is not int or task_number not in range(1, 11):
@@ -240,8 +265,26 @@ def check_level1_workflow(
     )
     if backend == "offline":
         return WorkflowScorer(task_number, level=1)
+    if backend == "local":
+        from corral_md.workflow_scoring.local_verifier import (
+            Level1LocalVerifier,
+            LocalVerifier,
+        )
+        from corral_md.workflow_scoring.restart_reader import ModalRestartReader
+
+        if task_number == 1:
+            return WorkflowScorer(
+                task_number,
+                level=1,
+                restart_reader=ModalRestartReader(LocalVerifier(assets_dir)),
+            )
+        return WorkflowScorer(
+            task_number,
+            level=1,
+            verifier=Level1LocalVerifier(assets_dir) if task_number >= 3 else None,
+        )
     if backend != "modal":
-        raise ValueError("verification_backend must be 'offline' or 'modal'")
+        raise ValueError("verification_backend must be 'offline', 'local', or 'modal'")
     if task_number == 1:
         from corral_md.workflow_scoring.restart_reader import ModalRestartReader
 
@@ -263,7 +306,7 @@ __all__ = [
 
 
 def main() -> int:
-    """Run the evaluator CLI, optionally with independent Modal verification."""
+    """Run the evaluator CLI with offline, local, or Modal verification."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("task_number", type=int, choices=range(1, 11))
     parser.add_argument("manifest", type=Path)
@@ -272,9 +315,10 @@ def main() -> int:
     parser.add_argument("--output", type=Path, help="Write the evaluation report here")
     parser.add_argument(
         "--verification",
-        choices=("offline", "modal"),
-        help="Independent Modal calculator and provenance checks",
+        choices=("offline", "local", "modal"),
+        help="Independent calculation backend",
     )
+    parser.add_argument("--assets-dir", help="Prepared catalogs for local verification")
     parser.add_argument("--run-id", help="Bind provenance to the evaluated execution")
     parser.add_argument(
         "--action-id", help="Bind provenance to its controlled MD action"
@@ -282,9 +326,13 @@ def main() -> int:
     args = parser.parse_args()
     review = json.loads(args.review.read_text()) if args.review else None
     factory = check_level1_workflow if args.level == 1 else check_level2_workflow
-    scorer = factory(args.task_number, verification_backend=args.verification)
+    scorer = factory(
+        args.task_number,
+        verification_backend=args.verification,
+        assets_dir=args.assets_dir,
+    )
     if args.run_id or args.action_id:
-        if scorer.verifier is None:
+        if args.verification != "modal" or scorer.verifier is None:
             parser.error("--run-id/--action-id require Modal verification")
         scorer.verifier.run_id = args.run_id
         scorer.verifier.action_id = args.action_id

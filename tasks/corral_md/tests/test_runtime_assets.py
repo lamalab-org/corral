@@ -46,7 +46,9 @@ def test_prepare_shipped_archives_and_cache_verified_models(
     assert (tmp_path / "potentials/SW/Si.sw").is_file()
     assert (tmp_path / "potentials/BKS/pot.mod").is_file()
     assert (tmp_path / "structures/melt/liq4000.dat").is_file()
-    assert (tmp_path / "structures/melt/liq1300.dat").is_file()
+    assert not (tmp_path / "structures/melt/liq2600.dat").exists()
+    assert not (tmp_path / "structures/melt/liq2600.restart").exists()
+    assert not (tmp_path / "structures/melt/liq2600.preparation.json").exists()
     assert (tmp_path / "structures/cu/cu32.extxyz").is_file()
     assert not (tmp_path / "structures/si/mp-149-conventional.extxyz").exists()
     assert (tmp_path / "models/test.model").read_bytes() == small_model
@@ -76,6 +78,21 @@ def test_archive_verification_rejects_changed_input(tmp_path, monkeypatch):
     monkeypatch.setattr(assets, "TASK_ROOT", tmp_path)
     with pytest.raises(ValueError, match="Checksum mismatch"):
         assets.prepare_assets(tmp_path / "output")
+
+
+def test_task2_original_melt_matches_the_scoring_reference():
+    from zipfile import ZipFile
+
+    from corral_md.workflow_scoring import lammps_checks, task_2
+
+    with ZipFile(APP_DIR.parent / "structures.zip") as archive:
+        data = archive.read("structures/melt/liq4000.dat")
+    assert hashlib.sha256(data).hexdigest() == lammps_checks._SILICATE_SOURCE_SHA256
+    assert task_2.PROTOCOL_VERSION == "task2-4000K-v3"
+    assert task_2._INITIAL_STEP == 0
+    assert task_2._COOLING_STEPS == 370000
+    assert task_2._PREPARATION_STEPS == 470000
+    assert task_2._CYCLE_STEPS == 840000
 
 
 @pytest.mark.parametrize(

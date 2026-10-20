@@ -4,7 +4,6 @@ from typing import Any
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDeprotect
-from rdkit.Chem.rdDeprotect import Deprotect
 from retrosynthesis.constants import FUNCTIONAL_GROUPS, PG
 from retrosynthesis.retrosynthesis_utils import (
     _is_buyable,
@@ -466,11 +465,8 @@ def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -
 
     [SYNTACTICAL] Usage examples:
     [
-        `verify_step("CCO", "template_123", ["CCBr", "CO"])`,
-        `verify_step("c1ccccc1O", "template_456", ["c1ccccc1Br", "CO"])`,
-        `verify_step("C1=CC=CC=C1", "template_789", ["C1=CC=CC=C1Br", "H2O"])`,
-        `verify_step("C1=CC=CC=C1", "template_zzz", ["C1=CC=CC=C1Br", "H2O"])`,
-        `verify_step("C1=CC=CC=C1C(=O)O", "template_131415", ["C1=CC=CC=C1C(=O)Cl", "H2O"])`,
+        `verify_step("CCO", "123", ["CCBr", "CO"])`,
+        `verify_step("CO", "[C:1][O:2]>>[C:1].[O:2]", ["C", "O"])`,
     ]
     [/SYNTACTICAL]
 
@@ -482,10 +478,10 @@ def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -
             [ARGS_EXAMPLES] "CCO", "c1ccccc1O", "C1=CC=CC=C1" [/ARGS_EXAMPLES]
 
         template_id (str):
-            [ARGS_BRIEF] Retrosynthetic template in SMARTS format. [/ARGS_BRIEF]
-            [ARGS_DETAILED] The retrosynthetic template is a SMARTS string that defines the transformation to be applied to the precursors. It should be one of the templates from the dataset. [/ARGS_DETAILED]
-            [ARGS_SYNTACTICAL] Valid SMARTS string [/ARGS_SYNTACTICAL]
-            [ARGS_EXAMPLES] "[C:1][O:2]>>[C:1][C:2]", "[C:1][C:2]>>[C:1][O:2]" [/ARGS_EXAMPLES]
+            [ARGS_BRIEF] Numeric catalog template ID or retrosynthetic SMARTS. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Pass the numeric ID returned by the template catalog, or the template's retrosynthetic SMARTS in product>>precursors orientation. A SMARTS template is reversed for this forward validation. Synthesis route submissions still require catalog template IDs. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] Numeric ID string or valid retrosynthetic SMARTS string [/ARGS_SYNTACTICAL]
+            [ARGS_EXAMPLES] "123", "[C:1][O:2]>>[C:1].[O:2]" [/ARGS_EXAMPLES]
 
         precursors (list[str]):
             [ARGS_BRIEF] List of SMILES strings representing the precursor molecules. [/ARGS_BRIEF]
@@ -816,7 +812,11 @@ def deprotect_molecule(molecule_smiles: str) -> str:
     mol = Chem.MolFromSmiles(molecule_smiles)
     if mol is None:
         raise ValueError("Invalid SMILES string provided.")
-    return Deprotect(mol)
+    # Import the extension through its module in the worker: a Boost.Python
+    # function captured in a decorated tool cannot cross the pickle boundary.
+    from rdkit.Chem import rdDeprotect
+
+    return Chem.MolToSmiles(rdDeprotect.Deprotect(mol))
 
 
 @tool

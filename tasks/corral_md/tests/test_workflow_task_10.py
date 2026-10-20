@@ -726,10 +726,17 @@ def test_geometry_allows_rigid_global_translation(submission):
     assert sum(item["earned"] for item in r.checks) == 90, r.checks
 
 
-def test_rms_structural_metric_is_reproduced(submission):
+@pytest.mark.parametrize("method", (
+    "rms_displacement",
+    "periodic site RMSD to initial ideal lattice after minimum-image wrapping and removal of mean translation",
+    "PBC minimum-image RMS displacement from ideal FCC sites after removing mean translation",
+))
+def test_rms_structural_metric_is_reproduced(submission, method):
     path = submission.parent / "settings.json"
     settings = _read(path)
-    settings["structure"] = {"method": "rms_displacement", "remove_translation": True}
+    settings["structure"] = {"method": method}
+    if method == "rms_displacement":
+        settings["structure"]["remove_translation"] = True
     _write(path, settings)
     manifest = _read(submission)
     initial = np.asarray(_read(submission.parent / "initial.json")[0]["positions"])
@@ -759,6 +766,18 @@ def test_rms_structural_metric_is_reproduced(submission):
         _check(_score(submission), "consistent_structural_return_comparison")["status"]
         == "passed"
     )
+
+
+@pytest.mark.parametrize("method", (
+    "ordinary least squares with intercept on five stage production means",
+    "unweighted ordinary least squares with intercept",
+))
+def test_explicit_ordinary_least_squares_names_preserve_measured_temperature_fit(submission, method):
+    path = submission.parent / "settings.json"
+    settings = _read(path)
+    settings["fit"]["method"] = method
+    _write(path, settings)
+    assert _check(_score(submission), "measured_temperature_heat_capacity_fit")["status"] == "passed"
 
 
 def test_directional_anisotropy_requires_physical_review(submission):
