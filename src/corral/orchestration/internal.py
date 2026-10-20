@@ -140,6 +140,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
 
     registry: RuntimeRegistry | None = None
     store: SQLiteCommitStore | None = None
+    # The task runs here, not in the host process, so tracing starts here too.
     observer = observer_from_env()
     try:
         # docker cp preserves host ownership in a reused state volume. The
@@ -211,6 +212,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         )
         _write_result(Path(result_file), asdict(result))
     finally:
+        # Send buffered traces before the container exits.
         await asyncio.to_thread(observer.flush)
         if registry is not None:
             registry.close()

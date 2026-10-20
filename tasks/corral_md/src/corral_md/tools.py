@@ -98,12 +98,29 @@ def build_md_terminal_tool(workspace: str | Path, *, local: bool = False):
         def terminal(
             command: str, timeout_seconds: int = 120, max_output_chars: int = 20_000
         ) -> str:
-            """Run a bounded foreground shell command in the local task workspace.
+            """[BRIEF] Run a bounded foreground shell command in the local task workspace. [/BRIEF]
+
+            [DETAILED] Execute a shell command with the task workspace as its current directory, capturing combined stdout and stderr. The timeout stops the command and its child processes. [/DETAILED]
+
+            [PROCEDURAL] Use this tool to inspect files, prepare inputs, and run local commands. Choose a timeout that fits the workload. [/PROCEDURAL]
+
+            [WORKFLOW_INTEGRATION] Save inputs, run the command, then inspect its exit code and output before using the resulting files. [/WORKFLOW_INTEGRATION]
+
+            [CONTEXTUAL] Commands run through /bin/sh with a limited environment. Use relative paths within the task workspace. [/CONTEXTUAL]
+
+            [SYNTACTICAL] Example: `terminal("ls -la output", timeout_seconds=30)`. [/SYNTACTICAL]
 
             Args:
-                command: Shell command, with the task workspace as its cwd.
-                timeout_seconds: Wall-clock limit from 1 to 3600 seconds.
-                max_output_chars: Maximum combined output from 1 to 100000 characters.
+                command: [ARGS_BRIEF] Nonempty shell command, with the task workspace as its cwd. [/ARGS_BRIEF]
+                timeout_seconds: [ARGS_BRIEF] Wall-clock limit from 1 to 3600 seconds. [/ARGS_BRIEF]
+                max_output_chars: [ARGS_BRIEF] Maximum combined output from 1 to 100000 characters. [/ARGS_BRIEF]
+
+            Returns:
+                str: [RETURNS_BRIEF] JSON containing exit_code, output, timed_out, and truncated. [/RETURNS_BRIEF]
+
+            [RAISES] ValueError for an empty command or invalid limits; OSError if the shell cannot start. [/RAISES]
+
+            [LIMITATIONS] Output is returned after the command exits. Background processes are stopped when the call finishes, and only the final max_output_chars characters are returned. [/LIMITATIONS]
             """
             if not command.strip():
                 raise ValueError("terminal command cannot be empty")
@@ -556,7 +573,7 @@ def build_execute_python_script_tool(
         use_gpu: bool = False,
         corral_action_id: str | None = None,
     ) -> str:
-        """[BRIEF] Run a saved Python script on CPU or a GPU. The default wall-clock budget is 900 seconds (15 minutes) per call, including Python startup and model loading. The process is stopped when its timeout expires. Choose a workload that fits; use shorter runs and inspect their timing before scaling up. Continue long simulations from saved restart states in separate calls, preserving positions and velocities. [/BRIEF]
+        """[BRIEF] Run a saved Python script on CPU or a GPU. The default wall-clock budget is 900 seconds (15 minutes) per call, including Python startup and model loading. The process is stopped when its timeout expires. Modal GPU workspace changes are synchronized only on success. Choose a workload that fits; use shorter runs and inspect their timing before scaling up. Continue long simulations from saved restart states in separate calls, preserving positions and velocities. [/BRIEF]
 
         [DETAILED] CPU scripts run in Corral's restricted local task workspace. When use_gpu is true, the configured GPU backend runs the script and saves its results. [/DETAILED]
 
