@@ -69,6 +69,11 @@ class Agent(Protocol):
 
 
 INSPECT_SUBAGENT_TOOL_NAME = "inspect_subagent"
+MEMORY_READ_TOOL_NAME = "memory_read"
+MEMORY_WRITE_TOOL_NAME = "memory_write"
+_MEMORY_STATE_NAMESPACE = "memory"
+_MAX_MEMORY_ENTRIES = 10
+_MAX_MEMORY_CHARS = 4000
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +155,50 @@ def inspect_subagent_tool() -> dict[str, Any]:
             },
         },
     }
+
+
+def memory_tools() -> list[dict[str, Any]]:
+    """Return the session-scoped tools for durable agent memory."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": MEMORY_READ_TOOL_NAME,
+                "description": (
+                    "Read the memories saved by this agent in earlier attempts. "
+                    "Use these only when they apply to the current task."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": MEMORY_WRITE_TOOL_NAME,
+                "description": (
+                    "Save a short lesson for this agent's future attempts. "
+                    "Save an actionable procedure, not the task answer."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "The lesson or procedure to remember.",
+                            "minLength": 1,
+                            "maxLength": _MAX_MEMORY_CHARS,
+                        }
+                    },
+                    "required": ["content"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,16 +412,111 @@ class AgentSession:
     @property
     def tool_catalog(self) -> ToolCatalogSnapshot:
         """The environment catalog plus this session's enabled actions."""
-        if not self.capabilities.inspect_subagents:
-            return self._tool_catalog
         tools = list(self._tool_catalog.detached_tools())
         names = {str(tool.get("function", {}).get("name", "")) for tool in tools}
-        if INSPECT_SUBAGENT_TOOL_NAME in names:
-            raise ValueError(
-                f"{INSPECT_SUBAGENT_TOOL_NAME!r} is reserved for AgentSession"
-            )
-        tools.append(inspect_subagent_tool())
+        reserved = {MEMORY_READ_TOOL_NAME, MEMORY_WRITE_TOOL_NAME}
+        collisions = sorted(reserved & names)
+        if collisions:
+            raise ValueError(f"reserved session tool(s) already exist: {collisions}")
+        tools.extend(memory_tools())
+        if self.capabilities.inspect_subagents:
+            if INSPECT_SUBAGENT_TOOL_NAME in names:
+                raise ValueError(
+                    f"{INSPECT_SUBAGENT_TOOL_NAME!r} is reserved for AgentSession"
+                )
+            tools.append(inspect_subagent_tool())
         return ToolCatalogSnapshot.capture(tools)
+
+    def _memory_entries(self) -> list[dict[str, str]]:
+        """Read current memory, falling back to the previous attempt."""
+        payload = self.get_agent_state(_MEMORY_STATE_NAMESPACE)
+        if payload is None:
+            payload = self.get_agent_state(_MEMORY_STATE_NAMESPACE, previous=True)
+        entries = payload.get("entries") if payload else None
+        if not isinstance(entries, list):
+            return []
+        return [
+            {"id": str(item["id"]), "content": str(item["content"])}
+            for item in entries
+            if isinstance(item, Mapping)
+            and isinstance(item.get("id"), str)
+            and isinstance(item.get("content"), str)
+        ]
+
+    def _memory_entry_for_invocation(self, invocation_id: str) -> dict[str, str] | None:
+        """Return the memory entry already written by a tool invocation."""
+        payload = self.get_agent_state(_MEMORY_STATE_NAMESPACE)
+        raw_entries = payload.get("entries") if payload else None
+        if not isinstance(raw_entries, list):
+            return None
+        for item in raw_entries:
+            if (
+                isinstance(item, Mapping)
+                and item.get("invocation_id") == invocation_id
+                and isinstance(item.get("id"), str)
+                and isinstance(item.get("content"), str)
+            ):
+                return {"id": item["id"], "content": item["content"]}
+        return None
+
+    async def _memory_effects(
+        self, action: Action, *, based_on_hash: str, invocation_id: str
+    ) -> ToolEffects:
+        """Execute a session memory operation as a durable agent-state update."""
+        arguments = dict(action.arguments)
+        if action.name == MEMORY_READ_TOOL_NAME:
+            if arguments:
+                return ToolEffects(
+                    observation="memory_read takes no arguments",
+                    status="invalid_args",
+                )
+            entries = self._memory_entries()
+            if self.get_agent_state(_MEMORY_STATE_NAMESPACE) is None and entries:
+                self._last_observed_hash = based_on_hash
+                await self.set_agent_state(
+                    _MEMORY_STATE_NAMESPACE,
+                    {"schema_version": 1, "entries": entries},
+                )
+            return ToolEffects(observation={"entries": entries}, status="success")
+
+        unknown = set(arguments) - {"content"}
+        content = arguments.get("content")
+        if unknown or not isinstance(content, str) or not content.strip():
+            return ToolEffects(
+                observation=(
+                    "memory_write requires one non-empty string argument: content"
+                ),
+                status="invalid_args",
+            )
+        if len(content) > _MAX_MEMORY_CHARS:
+            return ToolEffects(
+                observation=f"content exceeds {_MAX_MEMORY_CHARS} characters",
+                status="invalid_args",
+            )
+
+        existing = self._memory_entry_for_invocation(invocation_id)
+        if existing is not None:
+            return ToolEffects(observation=existing, status="success")
+
+        from uuid import uuid4
+
+        entries = self._memory_entries()
+        entry = {
+            "id": str(uuid4()),
+            "content": content.strip(),
+            "invocation_id": invocation_id,
+        }
+        entries.append(entry)
+        entries = entries[-_MAX_MEMORY_ENTRIES:]
+        self._last_observed_hash = based_on_hash
+        await self.set_agent_state(
+            _MEMORY_STATE_NAMESPACE,
+            {"schema_version": 1, "entries": entries},
+        )
+        return ToolEffects(
+            observation={"id": entry["id"], "content": entry["content"]},
+            status="success",
+        )
 
     @property
     def tools(self) -> tuple[dict[str, Any], ...]:
@@ -712,7 +856,17 @@ class AgentSession:
             await self._refresh(observed_hash=failed.hash)
             return ToolResponse(success=False, result=None, error=str(error))
 
-        if trusted.name == INSPECT_SUBAGENT_TOOL_NAME:
+        if trusted.name in {MEMORY_READ_TOOL_NAME, MEMORY_WRITE_TOOL_NAME}:
+            self._last_observed_hash = current.through_commit_hash
+            effects = await self._memory_effects(
+                trusted,
+                based_on_hash=based_on,
+                invocation_id=invocation_id,
+            )
+            # memory_write appends an AgentStateUpdated event, so the tool
+            # completion must follow that new ledger head.
+            based_on = self._last_observed_hash
+        elif trusted.name == INSPECT_SUBAGENT_TOOL_NAME:
             effects = await self._inspect_subagent_effects(trusted.arguments)
         elif trusted.is_submission and not self._require_submission:
             effects = ToolEffects(
@@ -1012,6 +1166,7 @@ class AgentSession:
             require_submission=False,
             capabilities=child_capabilities,
             mcp_host=self.mcp_host,
+            previous_state=self.previous_state,
         )
         child._last_observed_hash = started.hash
 
@@ -1523,6 +1678,8 @@ async def run_agent_session(
 
 __all__ = [
     "INSPECT_SUBAGENT_TOOL_NAME",
+    "MEMORY_READ_TOOL_NAME",
+    "MEMORY_WRITE_TOOL_NAME",
     "Agent",
     "AgentSession",
     "AgentSessionCapabilities",
@@ -1531,5 +1688,6 @@ __all__ = [
     "ToolResponse",
     "agent_session_capabilities",
     "inspect_subagent_tool",
+    "memory_tools",
     "run_agent_session",
 ]
