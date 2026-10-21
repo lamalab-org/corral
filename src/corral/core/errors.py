@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any
 
+import httpx
+
 
 def _provider_message(exc: BaseException) -> str | None:
     """Return a provider's structured error message when one is available."""
@@ -34,9 +36,10 @@ def concise_error_message(exc: BaseException) -> str:
     """Format the useful final exception without traceback or wrapper layers.
 
     Explicit causes (and unsuppressed implicit contexts) are followed to the
-    leaf exception. Provider exceptions are a special case: their structured
-    response body usually contains a clearer message than either the SDK
-    wrapper or its low-level HTTP cause.
+    leaf exception by default. When the leaf is an ``httpx.HTTPStatusError``
+    without structured provider details, the outer exception may contain the
+    useful provider message. Provider exceptions with structured response
+    bodies take precedence over both the SDK wrapper and low-level HTTP cause.
     """
     chain = [exc]
     seen = {id(exc)}
@@ -61,6 +64,8 @@ def concise_error_message(exc: BaseException) -> str:
             break
 
     if message is None:
+        if isinstance(selected, httpx.HTTPStatusError):
+            selected = chain[0]
         message = str(selected).strip()
     # Projection metadata is intended for reports and JSON, not traceback rendering.
     # Keep embedded multi-line SDK text readable as one exception-only message.
