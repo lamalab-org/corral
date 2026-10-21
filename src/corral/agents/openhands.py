@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import math
@@ -5,6 +6,7 @@ import os
 import platform
 import shutil
 import tempfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -72,6 +74,22 @@ _DEFAULT_TOOL_TIMEOUT_S = 1202.0
 _OPENHANDS_DEFAULT_EXECUTOR_TIMEOUT_S = float(MCP_TOOL_TIMEOUT_SECONDS)
 
 
+class _TranscriptMCPToolExecutor(MCPToolExecutor):
+    """Persist preceding SDK messages before the runtime records this call."""
+
+    def __init__(
+        self,
+        executor: MCPToolExecutor,
+        before_tool: Callable[[], Awaitable[None]],
+    ):
+        super().__init__(executor.tool_name, executor.client, executor.timeout)
+        self.before_tool = before_tool
+
+    async def call_tool(self, action: Any) -> Any:
+        await self.before_tool()
+        return await super().call_tool(action)
+
+
 class _TimeoutMCPToolProvider:
     """Apply the per-run deadline to Corral's MCP client and tool executors.
 
@@ -80,8 +98,13 @@ class _TimeoutMCPToolProvider:
     of changing SDK globals, so concurrent agents can have different limits.
     """
 
-    def __init__(self, tool_timeout_s: float):
+    def __init__(
+        self,
+        tool_timeout_s: float,
+        before_tool: Callable[[], Awaitable[None]] | None = None,
+    ):
         self.tool_timeout_s = tool_timeout_s
+        self.before_tool = before_tool
 
     def create_tools(
         self, mcp_config: dict[str, MCPServer], timeout: float = 30.0
@@ -98,10 +121,16 @@ class _TimeoutMCPToolProvider:
             client.call_async_from_sync(
                 _connect_and_list_tools, timeout=timeout, client=client
             )
-            for tool in client.tools:
+            for index, tool in enumerate(client.tools):
                 if not isinstance(tool.executor, MCPToolExecutor):
                     raise TypeError(f"Unexpected MCP executor for {tool.name}")
                 tool.executor.timeout = self.tool_timeout_s
+                if self.before_tool is not None:
+                    # SDK tool definitions are frozen and `tools` returns a
+                    # copy; replace the entry populated by the helper above.
+                    client._tools[index] = tool.set_executor(
+                        _TranscriptMCPToolExecutor(tool.executor, self.before_tool)
+                    )
         except BaseException:
             client.sync_close()
             raise
@@ -156,6 +185,7 @@ class _RunState:
     metadata: dict[str, Any] = field(default_factory=dict)
     available_tools: list[dict[str, Any]] = field(default_factory=list)
     result: HarnessRunResult | None = None
+    flush_messages: Callable[[], Awaitable[None]] | None = None
 
 
 class _OpenHandsError(RuntimeError):
@@ -507,6 +537,32 @@ class OpenHandsAgent(BaseAgent):
         # SDK metrics. The real OpenHands path replaces this with the count
         # of per-completion token-usage records in `_record_usage`.
         run.metadata["sdk_turns"] = 1
+        session_loop = asyncio.get_running_loop()
+        flush_lock = asyncio.Lock()
+        recorded_messages = 0
+
+        async def flush_messages() -> None:
+            nonlocal recorded_messages
+            async with flush_lock:
+                # Snapshot before awaiting: SDK callbacks may append while a
+                # commit is in flight. Those messages belong to the next flush.
+                pending = run.messages[recorded_messages:]
+                for message in pending:
+                    await session.record_message(message)
+                    recorded_messages += 1
+
+        async def flush_from_tool() -> None:
+            # SDK MCP executors run on their client's event loop, while the
+            # session (including remote worker sessions) belongs to this loop.
+            # Await its work without blocking either loop's thread.
+            if asyncio.get_running_loop() is session_loop:
+                await flush_messages()
+            else:
+                await asyncio.wrap_future(
+                    asyncio.run_coroutine_threadsafe(flush_messages(), session_loop)
+                )
+
+        run.flush_messages = flush_from_tool
         await self._execute_harness(
             task_id=task_id,
             prompt=prompt,
@@ -516,8 +572,7 @@ class OpenHandsAgent(BaseAgent):
             run=run,
         )
 
-        for message in run.messages:
-            await session.record_message(message)
+        await flush_messages()
         usage = self._usage(
             run.usage,
             llm_calls=int(run.metadata.get("sdk_turns", 0) or 0),
@@ -716,7 +771,9 @@ class OpenHandsAgent(BaseAgent):
         # provider hook. This adapter always uses a local workspace.
         conversation = LocalConversation(
             agent=agent,
-            mcp_tool_provider=_TimeoutMCPToolProvider(self.tool_timeout_s),
+            mcp_tool_provider=_TimeoutMCPToolProvider(
+                self.tool_timeout_s, before_tool=run.flush_messages
+            ),
             callbacks=[on_event],
             # OpenHands deliberately falls back to a blocking response when
             # streaming is enabled without a token callback. A no-op callback

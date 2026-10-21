@@ -69,13 +69,13 @@ def test_reads_only_requested_trial_and_preserves_saved_fields(
         browser.read_trial(path, "task", 8)
 
 
-def write_index(root, report_file="level_1/react__model/report.json.gz"):
+def write_index(root, report_file="level_1/react__model/report.json.gz", agent="react"):
     env = root / "environment"
     env.mkdir()
     row = {
         "environment": "environment",
         "level": "1",
-        "agent": "react",
+        "agent": agent,
         "model": "model",
         "run_id": "run",
         "task_id": "task",
@@ -159,3 +159,180 @@ def test_cache_invalidates_changed_reports_and_detects_stale_index(tmp_path):
 def test_stream_rejects_incomplete_json():
     with pytest.raises(ValueError, match="Incomplete"):
         browser.JSONStream(io.StringIO('{"value":"unfinished\\'), 3).value()
+
+
+def legacy_openhands_messages(terminal=(), session="first"):
+    """Runtime calls were saved before the adapter flushed its buffered prose."""
+    messages = []
+    for name in ("measure", "submit_answer"):
+        call_id = f"{session}-{name}"
+        messages.extend(
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "function": {"name": name, "arguments": '{"value":42}'},
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": name,
+                    "content": "42",
+                },
+            ]
+        )
+    messages.extend(
+        [
+            {"role": "system", "content": "You are OpenHands."},
+            {"role": "user", "content": "Solve the task."},
+            {"role": "assistant", "name": "thinking", "content": "Inspect inputs."},
+            {"role": "assistant", "content": "A buffered progress message."},
+            {"role": "assistant", "name": "thinking", "content": "Submit the answer."},
+        ]
+    )
+    return messages + list(terminal)
+
+
+@pytest.mark.parametrize(
+    "terminal",
+    [
+        [],
+        [{"role": "assistant", "content": "Done."}],
+        [{"role": "assistant", "name": "openhands-error", "content": "Failed."}],
+        [
+            {"role": "assistant", "content": "Done."},
+            {"role": "assistant", "name": "openhands-error", "content": "Failed."},
+        ],
+    ],
+)
+def test_legacy_openhands_presentation_preserves_calls_and_marks_untimed_prose(
+    terminal,
+):
+    messages = legacy_openhands_messages(terminal)
+    saved = json.loads(json.dumps(messages))
+
+    presentation = browser.message_presentation(messages, "openhands")
+
+    assert presentation == {
+        "order": [4, 5, 6, 7, 8, 0, 1, 2, 3, *range(9, len(messages))],
+        "untimed": [6, 7, 8],
+    }
+    assert sorted(presentation["order"]) == list(range(len(messages)))
+    assert messages == saved
+    displayed = [messages[index] for index in presentation["order"]]
+    assert [message["role"] for message in displayed[:2]] == ["system", "user"]
+    # Neither call IDs nor the order of the authoritative runtime stream changes.
+    assert displayed[5:9] == saved[:4]
+    for call, result in zip(displayed[5:9:2], displayed[6:9:2], strict=True):
+        assert call["tool_calls"][0]["id"] == result["tool_call_id"]
+    assert displayed[9:] == terminal
+
+
+@pytest.mark.parametrize("agent", ["react", "codex", "claude-code", "", None])
+def test_presentation_leaves_other_agents_unchanged(agent):
+    messages = legacy_openhands_messages()
+    assert browser.message_presentation(messages, agent) is None
+
+
+def test_presentation_leaves_chronological_openhands_unchanged():
+    legacy = legacy_openhands_messages([{"role": "assistant", "content": "Done."}])
+    messages = [legacy[index] for index in [4, 5, 6, 0, 1, 7, 8, 2, 3, 9]]
+    assert browser.message_presentation(messages, "openhands") is None
+
+
+@pytest.mark.parametrize(
+    "messages",
+    [
+        [],
+        [{"role": "assistant", "content": "An incomplete trace."}],
+        legacy_openhands_messages()[:4],
+        legacy_openhands_messages()[:5],
+    ],
+)
+def test_presentation_does_not_invent_missing_openhands_prologues(messages):
+    assert browser.message_presentation(messages, "openhands") is None
+
+
+@pytest.mark.parametrize("late_result", [False, True])
+@pytest.mark.parametrize("distinct_runs", [False, True])
+def test_legacy_openhands_presentation_keeps_repeated_sessions_separate(
+    late_result, distinct_runs
+):
+    first = legacy_openhands_messages([{"role": "assistant", "content": "Done."}])
+    second = legacy_openhands_messages(
+        [{"role": "assistant", "content": "Done again."}], session="second"
+    )
+    boundary = (
+        [{"role": "tool", "tool_call_id": "late", "content": "Delayed result."}]
+        if late_result
+        else []
+    )
+    if distinct_runs:
+        for message in first + boundary:
+            message["agent_run_id"] = "first"
+        for message in second:
+            message["agent_run_id"] = "second"
+    messages = first + boundary + second
+    start = len(first) + len(boundary)
+    local_order = [4, 5, 6, 7, 8, 0, 1, 2, 3, 9]
+
+    presentation = browser.message_presentation(messages, "openhands")
+
+    assert presentation == {
+        "order": local_order
+        + list(range(len(first), start))
+        + [start + index for index in local_order],
+        "untimed": [6, 7, 8, start + 6, start + 7, start + 8],
+    }
+    assert sorted(presentation["order"]) == list(range(len(messages)))
+
+
+def test_presentation_does_not_move_another_runs_prompt_ahead_of_runtime_calls():
+    messages = legacy_openhands_messages()
+    for index, message in enumerate(messages):
+        message["agent_run_id"] = "first" if index < 4 else "second"
+    assert browser.message_presentation(messages, "openhands") is None
+
+
+@pytest.mark.parametrize(
+    ("agent", "chronological", "normalized"),
+    [("openhands", False, True), ("openhands", True, False), ("react", False, False)],
+)
+def test_trace_response_adds_presentation_without_rewriting_saved_messages(
+    tmp_path, agent, chronological, normalized
+):
+    messages = legacy_openhands_messages([{"role": "assistant", "content": "Done."}])
+    if chronological:
+        messages = [messages[index] for index in [4, 5, 6, 0, 1, 7, 8, 2, 3, 9]]
+    trial = {
+        "trial_id": "run:task:0",
+        "messages": messages,
+        "custom": {"preserved": True},
+    }
+    path = write_index(tmp_path, agent=agent)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(
+        gzip.compress(
+            json.dumps({"task_results": {"task": {"trials": [trial]}}}).encode()
+        )
+    )
+    original_report = path.read_bytes()
+    store = browser.TraceStore(tmp_path)
+    trace_id = store.traces[0]["id"]
+
+    response = json.loads(gzip.decompress(store.trial(trace_id)))
+
+    if normalized:
+        assert response.pop("_trace_browser") == {
+            "order": [4, 5, 6, 7, 8, 0, 1, 2, 3, 9],
+            "untimed": [6, 7, 8],
+        }
+    else:
+        assert "_trace_browser" not in response
+    assert response == trial
+    assert path.read_bytes() == original_report

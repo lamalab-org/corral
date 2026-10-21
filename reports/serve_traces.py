@@ -240,9 +240,82 @@ def load_index(reports: Path):
     return traces, locations
 
 
+def message_presentation(messages, agent):
+    """Recover legacy OpenHands prompts without inventing tool/thought timing.
+
+    The adapter used to persist MCP calls live, then append its buffered SDK
+    transcript. The session discarded duplicate SDK tool messages, including
+    the only anchors for interleaving thoughts with calls. Keep the saved data
+    intact and return display indices; unanchored prose gets a separate group.
+    """
+    if agent != "openhands":
+        return None
+
+    def is_runtime(message):
+        return message.get("role") == "tool" or bool(message.get("tool_calls"))
+
+    order, untimed = [], []
+    start = 0
+    while start < len(messages):
+        end = start + 1
+        session = messages[start].get("agent_run_id")
+        while end < len(messages) and messages[end].get("agent_run_id") == session:
+            end += 1
+        cursor = start
+        while cursor < end:
+            # A session already beginning with prompts is not the legacy shape.
+            # Do not move a later, legitimate prompt ahead of its earlier turns.
+            if messages[cursor].get("role") in {"system", "user"}:
+                order.extend(range(cursor, end))
+                break
+            if not messages[cursor].get("tool_calls"):
+                # In particular, retain late results from the preceding run.
+                order.append(cursor)
+                cursor += 1
+                continue
+            prologue = cursor
+            while prologue < end and is_runtime(messages[prologue]):
+                prologue += 1
+            if (
+                prologue + 1 >= end
+                or messages[prologue].get("role") != "system"
+                or messages[prologue + 1].get("role") != "user"
+            ):
+                order.extend(range(cursor, prologue))
+                cursor = prologue
+                continue
+            tail = prologue + 2
+            while (
+                tail < end
+                and messages[tail].get("role") == "assistant"
+                and not is_runtime(messages[tail])
+            ):
+                tail += 1
+            # Leave the closing response and harness errors at the end, where
+            # they were saved. Earlier commentary has no recoverable timing.
+            closing = tail
+            while (
+                closing > prologue + 2
+                and messages[closing - 1].get("name") == "openhands-error"
+            ):
+                closing -= 1
+            if closing > prologue + 2 and not messages[closing - 1].get("name"):
+                closing -= 1
+            order.extend(range(prologue, closing))
+            untimed.extend(range(prologue + 2, closing))
+            order.extend(range(cursor, prologue))
+            order.extend(range(closing, tail))
+            cursor = tail
+        start = end
+    if order == list(range(len(messages))):
+        return None
+    return {"order": order, "untimed": untimed}
+
+
 class TraceStore:
     def __init__(self, reports):
         self.traces, self.locations = load_index(reports)
+        self.agents = {trace["id"]: trace["agent"] for trace in self.traces}
         self.index = json.dumps({"traces": self.traces}, ensure_ascii=False).encode()
         self.cache = OrderedDict()
         self.cache_bytes = 0
@@ -265,6 +338,11 @@ class TraceStore:
                     "The CSV index and report disagree about this trial. "
                     "Rebuild the index with reports/build_index.py and restart the browser."
                 )
+            presentation = message_presentation(
+                trial.get("messages") or [], self.agents[trace_id]
+            )
+            if presentation:
+                trial["_trace_browser"] = presentation
             payload = gzip.compress(
                 json.dumps(trial, ensure_ascii=False).encode(), compresslevel=1
             )

@@ -33,11 +33,15 @@ python3 reports/serve_traces.py --open
 
 Open **http://127.0.0.1:8765**. Filter and group trials by **agent, environment,
 and model**, with additional filters for level, outcome, and saved errors.
-Select a trial to read its messages in saved order, search the conversation,
+Select a trial to read its messages, search the conversation,
 filter by role or agent session, jump between tool calls and results, and
 inspect the submitted output and evaluation. Download the saved trial as JSON
 or copy a link to a trace or individual message. Links work when opened against
-the same local report collection and server address.
+the same local report collection and server address. For legacy OpenHands
+reports, the browser restores prompts ahead of tool calls and groups commentary
+whose timing was not recorded separately. Its exact interleaving with tool
+calls cannot be recovered. Message numbers follow the displayed order; JSON
+downloads retain the original saved data and order.
 
 The browser reads `*/trials.csv` indexes at startup and decompresses only the
 selected trial's report on demand. Large reports can take a moment to scan;
