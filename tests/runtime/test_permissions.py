@@ -115,6 +115,28 @@ def test_foreground_tool_and_descendants(workspace):
     assert_probe(permissions.execute_restricted_tool(permission_probe, {}, workspace))
 
 
+def test_workspace_tools_take_the_same_paths_with_and_without_the_worker(workspace):
+    from pathlib import Path
+
+    from corral.workspace import AbsoluteWorkspaceFilesystem, build_workspace_tools
+
+    Path(workspace, "data.csv").write_text("a,b\n")
+    read_file = build_workspace_tools(AbsoluteWorkspaceFilesystem(workspace))[
+        "read_file"
+    ]
+
+    def local(path):
+        return read_file.execute(path=path)
+
+    def restricted(path):
+        return permissions.execute_restricted_tool(read_file, {"path": path}, workspace)
+
+    for run in (local, restricted):
+        assert run("/workspace/data.csv") == "a,b\n"
+        with pytest.raises(Exception, match="absolute under /workspace"):
+            run("data.csv")
+
+
 @tool
 def no_workspace_probe() -> str:
     """Verify the default worker sees an empty, immutable /workspace."""

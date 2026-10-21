@@ -16,13 +16,17 @@ import numpy as np
 from corral.core.tool import Tool, tool
 from corral.runtime.python_repl import Namespace, create_python_namespace
 from corral.tools.python_repl import create_python_repl_tool
-from corral.workspace import WorkspaceFilesystem, build_workspace_tools
+from corral.workspace import AbsoluteWorkspaceFilesystem, build_workspace_tools
 
 MAX_CODE_CHARS = 50_000
 MAX_OUTPUT_CHARS = 10_000
 
 
-REPL_DESCRIPTION = "Execute Python code in the task's persistent public-data-only session."
+REPL_DESCRIPTION = (
+    "Execute Python code in the task's persistent public-data-only session. "
+    "The working directory is the task workspace (/workspace), so open files "
+    "by relative path, e.g. 'data.csv'."
+)
 
 
 def _namespace(initial_data: Mapping[str, Any]) -> Namespace:
@@ -99,7 +103,7 @@ def validate_model_syntax(syntax: str) -> dict[str, Any]:
 
 def workspace_tools(workspace: str) -> dict[str, Tool]:
     """Every tool a psychometrics task exposes, bound to one workspace."""
-    files = build_workspace_tools(WorkspaceFilesystem(workspace))
+    files = build_workspace_tools(AbsoluteWorkspaceFilesystem(workspace))
     repl = create_python_repl_tool(
         name="PythonREPL",
         description=REPL_DESCRIPTION,
