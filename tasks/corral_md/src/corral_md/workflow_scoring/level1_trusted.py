@@ -12,10 +12,11 @@ import secrets
 from collections.abc import Mapping
 
 import numpy as np
+from ase import units
 from ase.build import bulk
 
 from .common import EvidenceError, UnsupportedEvidence, finite_array
-from .verification import ModalVerifier, Plan, stored
+from .verification import ModalVerifier, Plan, geometry, stored
 
 # This is the immutable teacher asset in modal_app/assets.json. Keep the value
 # independent of submission metadata: a submitted digest is only a claim.
@@ -95,6 +96,7 @@ def replay_task8_default_rng(e) -> bool:
     if any(name not in pcg64_names and "default_rng" not in name for name in rng_names):
         raise UnsupportedEvidence("The recorded generator needs another replay adapter")
     explicit_pcg64 = any(name in pcg64_names for name in rng_names)
+    explicit_pcg64 = explicit_pcg64 or "pcg64" in method
     if "numpy" not in library or not (
         explicit_pcg64
         or any("default_rng" in value for value in (library, method, *rng_names))
@@ -240,7 +242,13 @@ def _task5_force_plan(p: Plan) -> None:
             hessian_frames.append(base)
             hessian_values.append({"hessian": standard.tolist()})
             continue
-        if method == "central_difference":
+        if method in {
+            "central_difference",
+            "central_difference_periodic_gamma",
+            "central_difference_forces",
+            "central_difference_of_forces",
+            "central_difference_gamma_primitive_cell",
+        }:
             displacements = np.concatenate(
                 [
                     _array(e, record["plus_displacements_A"]),
@@ -258,6 +266,10 @@ def _task5_force_plan(p: Plan) -> None:
             forces = _array(e, record["forces_eV_A"])
         else:
             raise UnsupportedEvidence(f"Unsupported Task 5 method: {method!r}")
+        if displacements.ndim == 2 and displacements.shape[1] == 6:
+            displacements = displacements.reshape(-1, 2, 3)
+        if forces.ndim == 2 and forces.shape[1] == 6:
+            forces = forces.reshape(-1, 2, 3)
         if displacements.shape != forces.shape or displacements.shape[1:] != (2, 3):
             raise EvidenceError("Task 5 displacement and force arrays must align")
         for delta, force in zip(displacements, forces, strict=True):
@@ -455,10 +467,61 @@ def build_level1_plan(e, task_number: int, challenge: str) -> Plan:
             if not isinstance(trajectories, Mapping) or not trajectories:
                 raise EvidenceError("Task 7 needs a production trajectory")
             for stage in trajectories:
+                frames = e.trajectory(f"trajectories.{stage}")
+                if not all(
+                    {"energy", "forces", "stress"} <= stored(frame).keys()
+                    for frame in frames
+                ):
+                    # A valid NPT trajectory may retain pressure and momenta
+                    # without serializing calculator results. Recalculate the
+                    # potential stress and add the saved kinetic contribution.
+                    from .level1 import _time_fs
+
+                    table = e.table("thermal_trace", "raw_trace")
+                    table = table.loc[table["stage"] == stage]
+                    times = finite_array(table["time_fs"], ndim=1)
+                    pressures = finite_array(table["pressure_GPa"], ndim=1)
+                    matched = []
+                    for index, frame in enumerate(frames):
+                        hits = np.flatnonzero(
+                            np.isclose(times, _time_fs(frame), rtol=0, atol=1e-6)
+                        )
+                        if len(hits) == 1:
+                            if "momenta" not in frame.arrays:
+                                raise EvidenceError(
+                                    "Pressure verification needs saved momenta"
+                                )
+                            matched.append((index, float(pressures[hits[0]])))
+                    if len(matched) < 5:
+                        raise UnsupportedEvidence(
+                            "Too few NPT frames align with saved pressures"
+                        )
+                    name = f"aluminum_npt_{stage}_pressure"
+                    samples = [matched[i] for i in p.sample(len(matched), 5, name)]
+                    p.add(
+                        name,
+                        "mace",
+                        {
+                            "frames": [geometry(frames[i]) for i, _ in samples],
+                            "properties": ["stress"],
+                            "sample_indices": [i for i, _ in samples],
+                        },
+                        {"frames": [{"pressure_GPa": value} for _, value in samples]},
+                        parameters=_model_parameters(e, 7),
+                        targets=[MODEL_TARGET, "independent_pressure_evidence"],
+                        tolerance={"pressure_GPa": [0.01, 0.001]},
+                    )
+                    p.expected[name]["pressure_kinetic_GPa"] = [
+                        2
+                        * frames[i].get_kinetic_energy()
+                        / (3 * frames[i].get_volume() * units.GPa)
+                        for i, _ in samples
+                    ]
+                    continue
                 _samples(
                     p,
                     f"aluminum_npt_{stage}",
-                    e.trajectory(f"trajectories.{stage}"),
+                    frames,
                     count=5,
                     properties=["energy", "forces", "stress"],
                 )

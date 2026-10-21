@@ -10,7 +10,6 @@ from ase import Atoms
 from ase.build import bulk
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.io import write
-
 from corral_md.workflow_scoring.common import Evidence, Rubric, UnsupportedEvidence
 from corral_md.workflow_scoring.level1_trusted import (
     MODEL_TARGET,
@@ -301,3 +300,66 @@ def test_required_independent_calculation_keeps_binary_score_pending_until_passe
             },
             "frozen-evidence",
         )
+
+
+@pytest.mark.parametrize("stress_error", [0.0, 0.1])
+def test_npt_pressure_without_serialized_calculator_results(tmp_path, stress_error):
+    from ase import units
+
+    frames, rows = [], []
+    for i in range(6):
+        frame = Atoms("Al", positions=[[0, 0, 0]], cell=[4, 4, 4], pbc=True)
+        frame.set_momenta([[0.1 * i, 0.2, 0.3]])
+        frame.info["time_fs"] = float(10 * i)
+        frames.append(frame)
+        kinetic = 2 * frame.get_kinetic_energy() / (3 * frame.get_volume() * units.GPa)
+        rows.append(
+            {
+                "stage": "T300",
+                "time_fs": float(10 * i),
+                "pressure_GPa": -0.01 / units.GPa + kinetic,
+            }
+        )
+    write(tmp_path / "npt.extxyz", frames)
+    (tmp_path / "trace.json").write_text(json.dumps(rows))
+    evidence = _document(
+        tmp_path,
+        {"dispersion": False},
+        {
+            "trajectories": {"T300": "npt.extxyz"},
+            "thermal_trace": "trace.json",
+        },
+    )
+
+    def transport(plan, fingerprint):
+        assert all(job["properties"] == ["stress"] for job in plan.jobs)
+        return {
+            "evidence_sha256": fingerprint,
+            "challenge": plan.challenge,
+            "jobs": [
+                {
+                    "id": job["id"],
+                    "status": "complete",
+                    "value": {
+                        "frames": [
+                            {"stress": [0.01 + stress_error] * 3 + [0, 0, 0]}
+                            for _ in job["frames"]
+                        ],
+                    },
+                }
+                for job in plan.jobs
+            ],
+        }
+
+    report = Level1ModalVerifier(transport=transport).evaluate(evidence, 7)
+    assert report["checks"][0]["status"] == (
+        "passed" if stress_error == 0 else "failed"
+    )
+    rubric = Rubric(7, binary=True)
+    rubric.unverified("independent_pressure_evidence", "No stored stress", points=5)
+    rubric.unverified(MODEL_TARGET, "No model check", points=1)
+    apply_verification(rubric, report)
+    assert all(
+        c["status"] == ("passed" if stress_error == 0 else "failed")
+        for c in rubric.checks
+    )

@@ -1,7 +1,7 @@
 """Focused checks for the prompt requirements added to level-1 LAMMPS scoring."""
 
-import json
 import hashlib
+import json
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -10,7 +10,11 @@ import pytest
 from ase import units
 from ase.build import bulk
 from ase.io import read, write
-from corral_md.workflow_scoring.common import Evidence, EvidenceError, UnsupportedEvidence
+from corral_md.workflow_scoring.common import (
+    Evidence,
+    EvidenceError,
+    UnsupportedEvidence,
+)
 from corral_md.workflow_scoring.lammps_checks import (
     cooled_endpoint_temperature,
     mp149_conventional_cell,
@@ -145,12 +149,14 @@ def test_absolute_input_path_must_resolve_exactly(tmp_path):
         silicon_input_matches_reference(evidence)
 
 
-def test_silicon_reference_matches_current_mp_cell_and_historical_variant(tmp_path, monkeypatch):
+def test_silicon_reference_matches_current_mp_cell_and_historical_variant(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         "corral_md.workflow_scoring.lammps_checks._mp149_live_reference",
         lambda: bulk("Si", "diamond", a=5.468728, cubic=True),
     )
-    _, evidence = _silicon_evidence(tmp_path)
+    _silicon_evidence(tmp_path)
     reference_path = tmp_path / "input" / "mp-149.cif"
     write(reference_path, bulk("Si", "diamond", a=5.468728, cubic=True))
     assert mp149_conventional_cell(Evidence(tmp_path / "manifest.json"))
@@ -180,11 +186,19 @@ def test_silicon_assessment_must_have_content(tmp_path):
 def _silicate_evidence(tmp_path):
     asset = Path(__file__).resolve().parents[1] / "structures.zip"
     with ZipFile(asset) as archive:
-        data = archive.read("structures/melt/liq1300.dat")
-    source = tmp_path / "input" / "liq1300.dat"
+        data = archive.read("structures/melt/liq4000.dat")
+    source = tmp_path / "input" / "liq4000.dat"
     source.parent.mkdir(parents=True)
     source.write_bytes(data)
-    atoms = read(source, format="lammps-data", atom_style="charge", units="real", sort_by_id=True)
+    data_path = source.with_suffix(".dat")
+    data_path.write_bytes(data)
+    atoms = read(
+        data_path,
+        format="lammps-data",
+        atom_style="charge",
+        units="real",
+        sort_by_id=True,
+    )
     state = {
         "time_ps": 0,
         "ids": atoms.arrays["id"].tolist(),
@@ -195,7 +209,7 @@ def _silicate_evidence(tmp_path):
         "species": atoms.get_chemical_symbols(),
     }
     final = json.loads(json.dumps(state))
-    final["time_ps"] = 20
+    final["time_ps"] = 370
     velocities = np.asarray(final["velocities"], dtype=float)
     masses = atoms.get_masses()
     kinetic_temperature = np.sum(masses[:, None] * (velocities / units.fs) ** 2) / (
@@ -206,15 +220,15 @@ def _silicate_evidence(tmp_path):
     _save(
         tmp_path / "trace.json",
         [
-            {"temperature_K": 1300.0},
+            {"temperature_K": 2600.0},
             {"temperature_K": 310.89},
         ],
     )
     input_path = tmp_path / "cool.in"
     input_path.write_text(
-        "read_data /workspace/input/liq1300.dat\n"
-        "fix cooling all npt temp 1300 300 100 iso 0 0 1000\n"
-        "run 20000\n"
+        "read_data /workspace/input/liq4000.dat\n"
+        "fix cooling all npt temp 4000 300 100 iso 0 0 10000\n"
+        "run 370000\n"
     )
     _save(
         tmp_path / "manifest.json",
@@ -240,33 +254,14 @@ def test_silicate_source_and_initial_boundary_are_bound_to_supplied_file(tmp_pat
     boundary["cooling_end"]["velocities"][0][0] += 1
     _save(tmp_path / "boundaries.json", boundary)
     assert not cooled_endpoint_temperature(Evidence(tmp_path / "manifest.json"))
+
     boundary = json.loads(json.dumps(original_boundary))
     boundary["initial"]["velocities"][0][0] += 0.1
     _save(tmp_path / "boundaries.json", boundary)
     assert not supplied_silicate_initial_state(Evidence(tmp_path / "manifest.json"))
     _save(tmp_path / "boundaries.json", original_boundary)
-    atoms = read(source, format="lammps-data", atom_style="charge", units="real")
-    write(
-        source,
-        atoms,
-        format="lammps-data",
-        atom_style="charge",
-        units="real",
-        masses=True,
-        velocities=True,
-    )
-    # Serialization changes are fine when the physical source state is unchanged.
-    assert supplied_silicate_initial_state(Evidence(tmp_path / "manifest.json"))
-    atoms.positions[0, 0] += 0.2
-    write(
-        source,
-        atoms,
-        format="lammps-data",
-        atom_style="charge",
-        units="real",
-        masses=True,
-        velocities=True,
-    )
+    # A modified source is rejected even when reported boundary atoms remain valid.
+    source.write_bytes(source.read_bytes() + b"modified")
     assert not supplied_silicate_initial_state(Evidence(tmp_path / "manifest.json"))
 
 
@@ -274,8 +269,8 @@ def test_silicate_can_read_the_mounted_asset_without_a_local_copy(tmp_path):
     input_path, source, evidence = _silicate_evidence(tmp_path)
     input_path.write_text(
         input_path.read_text().replace(
-            "/workspace/input/liq1300.dat",
-            "/workspace/structures/melt/liq1300.dat",
+            "/workspace/input/liq4000.dat",
+            "/workspace/structures/melt/liq4000.dat",
         )
     )
     source.unlink()
@@ -283,8 +278,8 @@ def test_silicate_can_read_the_mounted_asset_without_a_local_copy(tmp_path):
 
     input_path.write_text(
         input_path.read_text().replace(
-            "/workspace/structures/melt/liq1300.dat",
-            "/workspace/other/liq1300.dat",
+            "/workspace/structures/melt/liq4000.dat",
+            "/workspace/other/liq4000.dat",
         )
     )
     with pytest.raises(EvidenceError, match="Missing artifact"):
@@ -294,9 +289,9 @@ def test_silicate_can_read_the_mounted_asset_without_a_local_copy(tmp_path):
 def test_evaluator_uses_the_bundled_silicate_input():
     archive = Path(__file__).resolve().parents[1] / "structures.zip"
     with ZipFile(archive) as zipped:
-        original = zipped.read("structures/melt/liq1300.dat")
+        original = zipped.read("structures/melt/liq4000.dat")
     assert hashlib.sha256(original).hexdigest() == (
-        "6bd3b36b6d6b3e47c5c5a339460ad95ac88438e2ee6adafb91b96ace0ef9ecf3"
+        "1674c66496b0bab9eda0ce79b439ad90f9ce2097c5d5450a86965442f5cdfa63"
     )
 
 
@@ -304,12 +299,35 @@ def test_silicate_velocity_resets_and_hot_endpoint_are_rejected(tmp_path):
     input_path, _, evidence = _silicate_evidence(tmp_path)
     input_path.write_text(
         input_path.read_text().replace(
-            "fix cooling", "velocity all scale 1300\nfix cooling"
+            "fix cooling", "velocity all scale 2600\nfix cooling"
         )
     )
     assert not no_silicate_state_resets(evidence)
     _save(
         tmp_path / "trace.json",
-        [{"temperature_K": 1300}, {"temperature_K": 600}],
+        [{"temperature_K": 2600}, {"temperature_K": 600}],
     )
     assert not cooled_endpoint_temperature(Evidence(tmp_path / "manifest.json"))
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["reset_timestep 0", "minimize 1e-6 1e-8 100 1000", "change_box all x scale 1.1"],
+)
+def test_silicate_checkpoint_cannot_be_reset(tmp_path, command):
+    input_path, _, evidence = _silicate_evidence(tmp_path)
+    input_path.write_text(
+        input_path.read_text().replace("fix cooling", command + "\nfix cooling")
+    )
+    assert not no_silicate_state_resets(evidence)
+
+
+def test_silicate_rejects_the_superseded_checkpoint(tmp_path):
+    input_path, _, evidence = _silicate_evidence(tmp_path)
+    input_path.write_text(
+        input_path.read_text().replace(
+            "read_data /workspace/input/liq4000.dat",
+            "read_restart /workspace/structures/melt/liq2600.restart",
+        )
+    )
+    assert not supplied_silicate_initial_state(evidence)

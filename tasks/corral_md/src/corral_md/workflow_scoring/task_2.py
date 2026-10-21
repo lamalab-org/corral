@@ -13,14 +13,21 @@ from ase.io import read
 
 from .common import EvidenceError, UnsupportedEvidence, aliased_value, result_close
 
-# From potentials.zip/potentials/BKS/pot.mod and the supplied liq1300.dat.
+# From potentials.zip/potentials/BKS/pot.mod and the supplied 4000 K melt.
 _CHARGES = {"Na": 0.6, "Si": 2.4, "O": -1.2}
-_COOLING_DURATION_PS = 20
-_HOLD_DURATION_PS = 10
-_REHEATING_DURATION_PS = 20
-_START_TEMPERATURE_K = 1300
+PROTOCOL_VERSION = "task2-4000K-v3"
+_INITIAL_STEP = 0
+_COOLING_DURATION_PS = 370
+_HOLD_DURATION_PS = 100
+_REHEATING_DURATION_PS = 370
+_START_TEMPERATURE_K = 4000
+_MAX_FIT_TEMPERATURE_K = 2600
 _END_TEMPERATURE_K = 300
-_RAMP_RATE_K_PS = 50
+_RAMP_RATE_K_PS = 10
+_COOLING_STEPS = 370_000
+_PREPARATION_STEPS = 470_000
+_CYCLE_STEPS = 840_000
+_MIN_TRANSITION_BIC_GAIN = 6.0
 _HOLD_END_PS = _COOLING_DURATION_PS + _HOLD_DURATION_PS
 _CYCLE_END_PS = _HOLD_END_PS + _REHEATING_DURATION_PS
 _SUPPLIED_BKS_PATH = "/workspace/potentials/BKS/pot.mod"
@@ -76,15 +83,38 @@ def _trace(e, required_stages=None):
             raise ValueError("Trace must identify each thermal stage")
         table["stage"] = "cooling"
     else:
-        table["stage"] = table.stage.astype(str).str.lower()
-    if set(table.stage) != expected:
+        table["stage"] = (
+            table.stage.astype(str)
+            .str.lower()
+            .replace({"cool": "cooling", "reheat": "reheating"})
+        )
+    stages = set(table.stage)
+    if stages == expected | {"initial"} and "cooling" in expected:
+        initial = table[table.stage == "initial"]
+        cooling_start = table[table.stage == "cooling"].iloc[0]
+        if (
+            len(initial) != 1
+            or initial.index[0] != table.index[0]
+            or initial.iloc[0].time_ps != 0
+            or ("step" in table and initial.iloc[0].step != 0)
+            or not _close(
+                initial.iloc[0][columns].to_numpy(dtype=float),
+                cooling_start[columns].to_numpy(dtype=float),
+                atol=1e-8,
+                rtol=1e-7,
+            )
+        ):
+            raise ValueError("Initial trace sample must reproduce the cooling start")
+        # Keep the row so all submitted positional analysis indices stay valid.
+        stages.remove("initial")
+    if stages != expected:
         names = ", ".join(sorted(expected))
         raise ValueError(f"Trace must contain exactly these stages: {names}")
     return table
 
 
-def _schedule(e):
-    t = _trace(e)
+def _schedule(e, required_stages=None):
+    t = _trace(e, required_stages)
     expected = [
         ("cooling", 0, _COOLING_DURATION_PS, _START_TEMPERATURE_K, _END_TEMPERATURE_K),
         (
@@ -103,9 +133,13 @@ def _schedule(e):
         ),
     ]
     origin = float(t.time_ps.iloc[0])
+    if not _close(origin, 0, atol=1e-7, rtol=0):
+        return False, "The supplied melt starts at simulation time zero"
     if np.any(np.diff(t.time_ps) < 0):
         return False, "Trace elapsed times are not chronological"
     for stage, start, end, first, last in expected:
+        if required_stages is not None and stage not in required_stages:
+            continue
         part = t[t.stage == stage]
         if len(part) < 2 or np.any(np.diff(part.time_ps) <= 0):
             return False, f"{stage} needs chronological samples including endpoints"
@@ -128,7 +162,9 @@ def _text(e, *aliases):
 def _commands(e):
     """Read simple saved commands, expanding linked includes without execution."""
     paths = e.artifacts("lammps_inputs", "lammps_input", "inputs")
-    linked = paths + (e.artifacts("potential") if "potential" in e._artifacts else [])
+    linked = list(
+        dict.fromkeys(path for name in e._artifacts for path in e.artifacts(name))
+    )
     variables, included = {}, set()
 
     def read(path, parents=()):
@@ -137,6 +173,17 @@ def _commands(e):
         for raw in path.read_text().replace("&\n", " ").splitlines():
             line = raw.split("#", 1)[0]
             preview = shlex.split(line)
+            if preview[:1] == ["print"] and len(preview) == 2:
+                # A screen-only status message with literal step/time arithmetic
+                # cannot alter the integration protocol. Keep other expressions
+                # and print-to-file commands subject to the normal checks.
+                status = re.sub(
+                    r"\$\(((?:step|time|dt|[0-9.\s+*/%\-])+)\)",
+                    "",
+                    preview[1],
+                )
+                if "$" not in status:
+                    continue
             if len(preview) > 3 and preview[:1] == ["fix"] and preview[3] == "print":
                 # Output-only expressions may reference step, time, or thermo
                 # variables without changing the NPT protocol being checked.
@@ -225,12 +272,21 @@ def _input_cycle(
     advanced_steps = 0
     active = {}
     for c in _commands(e):
-        if c[0] == "timestep":
+        if c[0] == "read_restart":
+            return (
+                False,
+                "Start the full ramp with read_data from the supplied 4000 K melt",
+            )
+        elif c[0] == "read_data":
+            if advanced_steps:
+                return False, "Do not reload the system during the thermal cycle"
+            step = _INITIAL_STEP
+        elif c[0] == "timestep":
             timestep = float(c[1])
             if not np.isfinite(timestep) or timestep <= 0:
                 return False, "Integration timestep must be positive"
         elif c[0] == "reset_timestep":
-            step = int(c[1])
+            return False, "Preserve the simulation step count and elapsed time"
         elif c[0] == "fix":
             active[c[1]] = c
         elif c[0] == "unfix":
@@ -289,6 +345,14 @@ def _input_cycle(
                     + _RAMP_RATE_K_PS
                     * (np.array([elapsed, elapsed + duration]) - _HOLD_END_PS),
                 )
+            required_pdamp = (
+                5000 if _COOLING_DURATION_PS <= elapsed < _HOLD_END_PS else 10000
+            )
+            if damping != 100 or pressure[2] != required_pdamp:
+                return (
+                    False,
+                    "Use 100 fs thermostat damping and 10000/5000/10000 fs stage pressure damping",
+                )
             if elapsed + duration > end + 1e-7 or not _close(
                 actual, expected, atol=1e-5, rtol=0
             ):
@@ -297,7 +361,7 @@ def _input_cycle(
             step += count
             advanced_steps += count
     if required_steps is not None and advanced_steps != required_steps:
-        return False, f"Cooling requires exactly {required_steps:,} advancing steps"
+        return False, f"Protocol requires exactly {required_steps:,} advancing steps"
     return _close(
         elapsed, end_time_ps, atol=1e-7, rtol=0
     ), f"Run commands must cover the full {end_time_ps:g} ps requested cycle"
@@ -424,6 +488,8 @@ def _logged_trace(e, required_stages=None, *, required_timestep_fs=None):
                 "Include trace step values when changing the integration timestep"
             )
         steps = (t.time_ps.to_numpy() - t.time_ps.iloc[0]) * 1000 / dt[0] + min(rows)
+    if required_timestep_fs is not None and steps[0] != _INITIAL_STEP:
+        return False, "Thermo steps must start at step zero for the supplied melt"
     if required_timestep_fs is not None and not _close(
         steps - steps[0],
         (t.time_ps.to_numpy() - t.time_ps.iloc[0]) * 1000 / required_timestep_fs,
@@ -452,8 +518,8 @@ def _logged_trace(e, required_stages=None, *, required_timestep_fs=None):
     return True
 
 
-def _boundary_density(e):
-    t = _trace(e)
+def _boundary_density(e, required_stages=None):
+    t = _trace(e, required_stages)
     states = _boundary_states(e)
     for name, stage, location in [
         ("initial", "cooling", 0),
@@ -463,18 +529,24 @@ def _boundary_density(e):
         ("reheating_start", "reheating", 0),
         ("reheating_end", "reheating", -1),
     ]:
+        if required_stages is not None and stage not in required_stages:
+            continue
         state = states[name]
         mass = sum(
             atomic_masses[atomic_numbers[str(symbol)]] for symbol in state["species"]
         )
         density = mass * 1.66053906660 / np.linalg.det(state["cell"])
-        sample = t[t.stage == stage].iloc[location]
-        if not _close(state["time_ps"], sample.time_ps, atol=0.5, rtol=0.001):
-            return False, f"{name} timing contradicts the corresponding trace endpoint"
         # A shared handoff can be recorded only under the preceding stage.
         matching = t[np.isclose(t.time_ps, state["time_ps"], rtol=0, atol=1e-6)]
         if matching.empty:
             return False, f"{name} has no thermal sample at its boundary time"
+        previous_stage = {"hold_start": "cooling", "reheating_start": "hold"}.get(name)
+        if previous_stage and (matching.stage == previous_stage).any():
+            sample = t[t.stage == previous_stage].iloc[-1]
+        else:
+            sample = t[t.stage == stage].iloc[location]
+        if not _close(state["time_ps"], sample.time_ps, atol=0.5, rtol=0.001):
+            return False, f"{name} timing contradicts the corresponding trace endpoint"
         if not _close(density, matching.density_g_cm3, atol=1e-5):
             return (
                 False,
@@ -497,6 +569,42 @@ def _state(s):
             )
         },
     }
+    if "positions_lammps" in s:
+        # An explicit pair may describe zero-origin positions alongside the
+        # original LAMMPS coordinates. Verify the declared translation before
+        # using the original frame for source and handoff comparisons.
+        origin = np.asarray(s["cell_origin"], dtype=float)
+        absolute = np.asarray(s["positions_lammps"], dtype=float)
+        relative = np.asarray(s["positions"], dtype=float)
+        if (
+            origin.shape != (3,)
+            or absolute.shape != relative.shape
+            or not _close(absolute, relative + origin, atol=1e-7, rtol=1e-7)
+        ):
+            raise EvidenceError("Conflicting boundary coordinate origins")
+        s["positions"] = absolute
+    elif {"positions_wrapped", "images", "cell_origin"} <= s.keys():
+        origin = np.asarray(s["cell_origin"], dtype=float)
+        wrapped = np.asarray(s["positions_wrapped"], dtype=float)
+        positions = np.asarray(s["positions"], dtype=float)
+        images = np.asarray(s["images"], dtype=float)
+        cell = np.asarray(s["cell"], dtype=float)
+        if cell.shape == (3,):
+            cell = np.diag(cell)
+        if (
+            origin.shape != (3,)
+            or wrapped.shape != positions.shape
+            or images.shape != positions.shape
+            or not np.array_equal(images, np.rint(images))
+        ):
+            raise EvidenceError("Invalid wrapped boundary coordinate metadata")
+        absolute = wrapped + images @ cell
+        if not (
+            _close(positions, absolute, atol=1e-7, rtol=1e-7)
+            or _close(positions + origin, absolute, atol=1e-7, rtol=1e-7)
+        ):
+            raise EvidenceError("Conflicting wrapped boundary coordinate metadata")
+        s["positions"] = absolute
     ids = np.asarray(s["ids"])
     order = np.argsort(ids)
     if len(ids) < 3 or len(np.unique(ids)) != len(ids):
@@ -507,6 +615,9 @@ def _state(s):
     }
     state["ids"] = ids[order]
     state["cell"] = np.asarray(s["cell"], float)
+    if state["cell"].shape == (3,) and np.all(state["cell"] > 0):
+        # Three positive lengths explicitly describe an orthorhombic cell.
+        state["cell"] = np.diag(state["cell"])
     if (
         state["cell"].shape != (3, 3)
         or not np.isfinite(state["cell"]).all()
@@ -541,10 +652,13 @@ def _boundary_states(e):
     for name, record in data.items():
         if name in ("description", "atom_style", "atom_type_species"):
             continue
-        if "lammps_data" not in record:
+        linked = record.get("lammps_data")
+        if "data_path" in record and record.get("data_format") == "lammps-data":
+            linked = aliased_value(record, "lammps_data", "data_path")
+        if linked is None:
             result[name] = _state(record)
             continue
-        path = e.linked_path(record["lammps_data"], document)
+        path = e.linked_path(linked, document)
         species = record.get("atom_type_species", data.get("atom_type_species"))
         mapping = (
             {int(key): atomic_numbers[value] for key, value in species.items()}
@@ -580,6 +694,14 @@ def _boundary_states(e):
                     if key in ("ids", "species")
                     else _close(inline[key], state[key], atol=1e-7, rtol=1e-7)
                 )
+                if key == "positions" and not same:
+                    # LAMMPS image flags are unwrapped by ASE, whereas inline
+                    # snapshots may retain wrapped coordinates. Compare the
+                    # same periodic images with the existing numeric tolerance.
+                    displacement = inline[key].astype(float) - state[key]
+                    images = np.rint(displacement @ np.linalg.inv(state["cell"]))
+                    aligned = inline[key] - images @ state["cell"]
+                    same = _close(aligned, state[key], atol=1e-7, rtol=1e-7)
                 if not same:
                     raise EvidenceError(
                         f"Inline and LAMMPS boundary evidence disagree on {key}"
@@ -588,7 +710,7 @@ def _boundary_states(e):
     return result
 
 
-def _boundaries(e):
+def _boundaries(e, required_stages=None):
     states = _boundary_states(e)
     names = [
         "initial",
@@ -598,6 +720,16 @@ def _boundaries(e):
         "reheating_start",
         "reheating_end",
     ]
+    expected_times = [
+        0,
+        _COOLING_DURATION_PS,
+        _COOLING_DURATION_PS,
+        _HOLD_END_PS,
+        _HOLD_END_PS,
+        _CYCLE_END_PS,
+    ]
+    if required_stages == {"cooling", "hold"}:
+        names, expected_times = names[:4], expected_times[:4]
     data = {name: states[name] for name in names}
     initial = data["initial"]
     for s in data.values():
@@ -610,19 +742,14 @@ def _boundaries(e):
     times = np.asarray([data[name]["time_ps"] for name in names]) - initial["time_ps"]
     if not _close(
         times,
-        [
-            0,
-            _COOLING_DURATION_PS,
-            _COOLING_DURATION_PS,
-            _HOLD_END_PS,
-            _HOLD_END_PS,
-            _CYCLE_END_PS,
-        ],
+        expected_times,
         atol=0.5,
         rtol=0.01,
     ):
         return False, "Boundary times contradict the thermal cycle"
     for left, right in [("cooling_end", "hold_start"), ("hold_end", "reheating_start")]:
+        if right not in data:
+            continue
         a, b = data[left], data[right]
         if not _close(a["cell"], b["cell"], atol=1e-7, rtol=1e-6):
             return False, "Cell changed at a stage handoff"
@@ -651,13 +778,41 @@ def _selected(t, stage, indices):
         or index.dtype.kind not in "iu"
         or np.any(index < 0)
         or np.any(index >= len(t))
+        or len(np.unique(index)) != len(index)
     ):
         raise ValueError(
-            "Selection must contain valid zero-based integer trace indices"
+            "Selection must contain unique valid zero-based integer trace indices"
         )
     selected = t.iloc[index]
     if not (selected.stage == stage).all():
-        raise ValueError("Selection contains samples from a different thermal stage")
+        # Deduplicated traces may retain a handoff once, labeled with the stage
+        # that ended. Accept only that exact shared endpoint, without shifting
+        # indices or substituting any submitted samples.
+        handoff = {
+            "hold": ("cooling", _COOLING_DURATION_PS, _COOLING_STEPS),
+            "reheating": ("hold", _HOLD_END_PS, _PREPARATION_STEPS),
+        }.get(stage)
+        other = selected[selected.stage != stage]
+        shared = False
+        if handoff is not None and len(other) == 1:
+            previous, time_ps, step = handoff
+            row = other.iloc[0]
+            current = t[t.stage == stage]
+            preceding = t[t.stage == previous]
+            shared = (
+                row.stage == previous
+                and _close(row.time_ps, time_ps, atol=1e-9, rtol=0)
+                and ("step" not in t or _close(row.step, step, atol=1e-7, rtol=0))
+                and len(current) > 0
+                and (current.time_ps > time_ps).all()
+                and len(preceding) > 0
+                and preceding.index[-1] == other.index[0]
+                and np.isclose(t.time_ps, time_ps, atol=1e-9, rtol=0).sum() == 1
+            )
+        if not shared:
+            raise ValueError(
+                "Selection contains samples from a different thermal stage"
+            )
     return selected
 
 
@@ -665,6 +820,31 @@ def _estimate(t, stage, rec):
     if rec.get("temperature_coordinate") != "temperature_K":
         raise ValueError("Transition estimation must use measured temperature")
     selected = _selected(t, stage, _indices(rec))
+    if (selected.temperature_K > _MAX_FIT_TEMPERATURE_K).any():
+        raise ValueError(
+            "Exclude measured temperatures above 2600 K from transition fitting"
+        )
+    if rec["method"] == "unresolved":
+        if (
+            rec["estimate_K"] is not None
+            or not isinstance(rec.get("reason"), str)
+            or not rec["reason"].strip()
+        ):
+            raise ValueError(
+                "An unresolved transition needs a null estimate and an explanation"
+            )
+        x, y = selected.temperature_K.to_numpy(), selected.density_g_cm3.to_numpy()
+        if len(np.unique(x)) < 4:
+            raise ValueError(
+                "Retain the measured temperature range assessed for an unresolved transition"
+            )
+        coefficients = np.polyfit(x, y, 1)
+        sse = np.sum((y - np.polyval(coefficients, x)) ** 2)
+        if not result_close(rec["diagnostics"]["single_line_sse"], sse, atol=1e-10):
+            raise ValueError(
+                "Unresolved-transition diagnostic does not reproduce the selected data"
+            )
+        return None
     if "temperature_values_K" in rec and not _close(
         rec["temperature_values_K"], selected.temperature_K, atol=1e-5, rtol=1e-7
     ):
@@ -674,6 +854,7 @@ def _estimate(t, stage, rec):
     if rec["method"] == "line_intersection":
         fits = []
         parts = []
+        fit_weights = []
         for key in ["low", "high"]:
             part = _selected(t, stage, rec[f"{key}_indices"])
             x, y = part.temperature_K.to_numpy(), part.density_g_cm3.to_numpy()
@@ -694,6 +875,7 @@ def _estimate(t, stage, rec):
                 )
             fits.append(np.polyfit(x, y, 1, w=np.sqrt(weights)))
             parts.append(x)
+            fit_weights.append(weights)
             supplied = rec.get("fit_coefficients", {}).get(key)
             if supplied is not None and not result_close(supplied, fits[-1], atol=1e-8):
                 raise ValueError("Reported line coefficients do not reproduce the data")
@@ -704,6 +886,10 @@ def _estimate(t, stage, rec):
         if abs(fits[0][0] - fits[1][0]) < 1e-12:
             raise ValueError("Parallel density lines do not identify a transition")
         value = (fits[1][1] - fits[0][1]) / (fits[0][0] - fits[1][0])
+        predictions = np.concatenate(
+            [np.polyval(fit, x) for fit, x in zip(fits, parts, strict=True)]
+        )
+        weights = np.concatenate(fit_weights)
     elif rec["method"] == "change_point":
         x, y = selected.temperature_K.to_numpy(), selected.density_g_cm3.to_numpy()
         candidates = np.asarray(rec["candidates_K"], float)
@@ -727,6 +913,12 @@ def _estimate(t, stage, rec):
         if not np.isfinite(losses).any():
             raise ValueError("No change point has sufficient samples on both sides")
         value = candidates[np.argmin(losses)]
+        design = np.column_stack([np.ones(len(x)), x, np.maximum(x - value, 0)])
+        coefficients = np.linalg.lstsq(design, y, rcond=None)[0]
+        if abs(coefficients[2]) < 1e-12:
+            raise ValueError("A straight density line does not identify a transition")
+        predictions = design @ coefficients
+        weights = np.ones(len(x))
     else:
         if not isinstance(rec.get("calculations"), dict) or not rec["calculations"]:
             raise ValueError("Retain calculations for the chosen transition estimator")
@@ -742,6 +934,29 @@ def _estimate(t, stage, rec):
         raise ValueError("Transition is not supported on both sides by measured data")
     if not result_close(rec["estimate_K"], value, atol=0.5):
         raise ValueError("Reported estimate does not reproduce the declared estimator")
+    # A reproducible optimum also exists in noisy, nearly linear data. This is
+    # an empirical ambiguity screen, not a significance test for correlated MD
+    # samples. Four fitted parameters account for either two independent lines
+    # or three hinge coefficients plus the selected breakpoint. Weak evidence
+    # goes to review, rather than becoming an incorrect Tg or a scientific fail.
+    y = selected.density_g_cm3.to_numpy()
+    if len(np.unique(x)) < 6:
+        raise UnsupportedEvidence(
+            "Too few distinct temperatures to assess two density regimes"
+        )
+    single = np.polyfit(x, y, 1, w=np.sqrt(weights))
+    single_sse = float(np.sum(weights * (y - np.polyval(single, x)) ** 2))
+    segmented_sse = float(np.sum(weights * (y - predictions) ** 2))
+    tiny = np.finfo(float).tiny
+    bic_gain = len(x) * np.log(
+        max(single_sse, tiny) / max(segmented_sse, tiny)
+    ) - 2 * np.log(len(x))
+    if bic_gain < _MIN_TRANSITION_BIC_GAIN:
+        raise UnsupportedEvidence(
+            f"The two-regime fit has weak support over one line (BIC gain {bic_gain:.3g} < {_MIN_TRANSITION_BIC_GAIN:g}). "
+            "Retain diagnostics and fitting-window sensitivity for scientific review, "
+            "or report an unresolved transition."
+        )
     return float(value)
 
 
@@ -780,6 +995,37 @@ def _coordinate(e):
     return True
 
 
+def _transition_result_matches(e, stage):
+    value = _estimate(_trace(e), stage, _transitions(e)[stage])
+    reported = e.results[f"{stage}_tg_K"]
+    if value is None:
+        if reported is not None:
+            return False
+        raise UnsupportedEvidence(
+            "The unresolved-transition diagnostics reproduce the selected data. "
+            "Independent scientific review must assess the explanation and data coverage; "
+            "a numerical Tg is not mandatory."
+        )
+    return result_close(reported, value, atol=0.5)
+
+
+def _difference_matches(e):
+    values = [e.results[f"{stage}_tg_K"] for stage in ("cooling", "reheating")]
+    if any(value is None for value in values):
+        return e.results["delta_tg_K"] is None
+    return result_close(
+        e.results["delta_tg_K"], float(values[1]) - float(values[0]), atol=0.5
+    )
+
+
+def _reported_estimate_matches(e, stage):
+    rec = _transitions(e)[stage]
+    value = e.results[f"{stage}_tg_K"]
+    if rec.get("method") == "unresolved":
+        return value is None and rec.get("estimate_K") is None
+    return result_close(value, rec["estimate_K"], atol=0.5)
+
+
 def _hold(e, drift=False):
     t = _trace(e)
     rec = _analysis(e)["hold"]
@@ -804,7 +1050,7 @@ def evaluate(e, r):
         if isinstance(trace, tuple) and not trace[0]:
             return trace
         trace_ok = bool(trace)
-        return _input_cycle(e)
+        return _input_cycle(e, required_timestep_fs=1.0, required_steps=_CYCLE_STEPS)
 
     r.check("thermal_cycle", 12, lambda: _verified(thermal_cycle))
     r.check("saved_physics_and_logs", 8, lambda: _verified(lambda: _physics(e)))
@@ -820,7 +1066,11 @@ def evaluate(e, r):
         )
 
     r.check("boundary_state_continuity", 10, boundary_check)
-    r.check("thermal_observables", 4, lambda: _verified(lambda: _logged_trace(e)))
+    r.check(
+        "thermal_observables",
+        4,
+        lambda: _verified(lambda: _logged_trace(e, required_timestep_fs=1.0)),
+    )
     r.check("boundary_density_consistency", 3, lambda: _boundary_density(e))
     selections = r.check("transition_selections", 8, lambda: _selection(e))
     coordinate = r.check(
@@ -831,20 +1081,17 @@ def evaluate(e, r):
             f"{stage}_transition_reproduction",
             6,
             lambda stage=stage: _verified(
-                lambda: (
-                    coordinate
-                    and trace_ok
-                    and result_close(
-                        e.results[f"{stage}_tg_K"],
-                        _estimate(_trace(e), stage, _transitions(e)[stage]),
-                        atol=0.5,
-                    )
-                )
+                lambda: coordinate and trace_ok and _transition_result_matches(e, stage)
             ),
         )
         try:
             rec = _transitions(e)[stage]
-            if rec.get("method") not in {"line_intersection", "change_point"}:
+            if rec.get("method") == "unresolved":
+                r.unverified(
+                    f"{stage}_transition_interpretation",
+                    "No resolved Tg is claimed. The saved diagnostics and explanation require independent scientific review; a numerical Tg is not mandatory.",
+                )
+            elif rec.get("method") not in {"line_intersection", "change_point"}:
                 r.unverified(
                     f"{stage}_custom_estimator",
                     "Saved custom estimator calculations require independent review before a final score is available.",
@@ -854,14 +1101,7 @@ def evaluate(e, r):
     r.check(
         "signed_transition_difference",
         4,
-        lambda: (
-            coordinate
-            and result_close(
-                e.results["delta_tg_K"],
-                float(e.results["reheating_tg_K"]) - float(e.results["cooling_tg_K"]),
-                atol=0.5,
-            )
-        ),
+        lambda: coordinate and _difference_matches(e),
     )
     r.check(
         "reported_estimates_and_units",
@@ -876,11 +1116,7 @@ def evaluate(e, r):
                 ]
             )
             and all(
-                result_close(
-                    e.results[f"{stage}_tg_K"],
-                    _transitions(e)[stage]["estimate_K"],
-                    atol=0.5,
-                )
+                _reported_estimate_matches(e, stage)
                 for stage in ["cooling", "reheating"]
             )
         ),
@@ -912,8 +1148,21 @@ def evaluate(e, r):
         part = _hold(e, True)
         record = _analysis(e)["hold"]
         method = record.get("drift_method", "linear_slope")
+        if isinstance(method, str):
+            method = re.sub(r"\s+", "_", method.strip().lower())
         x, y = part.time_ps.to_numpy(), part.density_g_cm3.to_numpy()
-        if method == "linear_slope":
+        if method in {
+            "linear_slope",
+            "ordinary_least_squares_linear_slope",
+            "ordinary_least_squares_density_vs_time",
+            "unweighted_linear_slope",
+            "unweighted_linear_slope_of_density_versus_elapsed_time",
+            "unweighted_linear_slope_vs_time",
+            "unweighted_linear_slope_density_vs_time",
+            "unweighted_ols_density_versus_elapsed_time",
+            "unweighted_linear_slope_of_density_versus_elapsed_time_over_the_final_80_ps,"
+            "_excluding_the_first_20_ps_as_initial_hold_relaxation",
+        }:
             slope = np.polyfit(x, y, 1)[0]
         elif method == "endpoint_slope":
             first, last = np.argmin(x), np.argmax(x)
