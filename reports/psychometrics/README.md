@@ -10,7 +10,7 @@ Layout, names and index columns follow [`../README.md`](../README.md).
 | codex | gpt-5.6-sol | 24/50 | 0 | 29/50 | 0 | earlier |
 | openhands | kimi-k3 | 8/50 | 0 | 10/50 | 1 | current |
 | react | claude-opus-5-5 | 22/50 | 0 | 27/50 | 0 | current |
-| react | gpt-5.6-sol | 19/50 | 2 | 33/50 | 0 | earlier |
+| react | gpt-5.6-sol | 21/50 | 0 | 33/50 | 0 | earlier |
 | react | kimi-k3 | 10/50 | 10 | 8/50 | 8 | current |
 
 **Runs used two task versions.** Two commits changed the tasks while the runs
@@ -29,9 +29,15 @@ both. This is inferred from run times, since reports do not record the task
 commit. On L1 the two groups differ only by the semopy note. On L2, compare
 them only on t02 and t06–t08, the tasks neither commit touched.
 
-react GPT-5.6 Sol includes reruns of four trials that failed for infrastructure
-reasons (three provider usage-policy rejections on L1, one agent bug on L2).
-Its two remaining L1 errors are socket timeouts. react Kimi K3 errors are
-mostly exhausted interaction budgets.
+react GPT-5.6 Sol includes reruns of six trials that failed for infrastructure
+reasons: three provider usage-policy rejections and two socket timeouts on L1
+(t01 trials 1 and 2), and one agent bug on L2. The socket-timeout reruns ran
+on 2026-10-21 against the earlier task version (`493ecdda4`), so they saw the
+same prompt as the rest of the run.
+
+react Kimi K3 errors are model failures, not infrastructure ones, and are kept:
+exhausted interaction budgets, plus one L1 trial (t06 trial 2) that read the
+whole 3.5 MB data file with `read_file` and overflowed the model's context,
+which OpenRouter rejected as HTTP 400.
 
 The runs were launched with [`../run_psychometrics.sh`](../run_psychometrics.sh).
