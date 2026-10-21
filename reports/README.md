@@ -129,7 +129,7 @@ same execution ID, so the retry wrote into the same trace as the attempt it
 replaced. Such a trace can hold observations from both. This affects about 139
 inference optimization trials and up to 319 resistor trials (Codex, Claude
 Code, OpenHands, react Kimi K3 and react GPT L2 runs). The psychometrics reruns
-and the nine resistor technical reruns (`resistor_network/technical-reruns.csv`)
+and the ten resistor technical reruns (`resistor_network/technical-reruns.csv`)
 used new run IDs and are not affected. The report is authoritative for what the
 final attempt did. Future reruns should use a new run ID so each attempt gets
 its own trace.

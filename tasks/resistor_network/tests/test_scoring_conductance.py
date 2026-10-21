@@ -153,12 +153,13 @@ def test_malformed_submissions_score_zero(bad):
 def test_every_shipped_task_accepts_its_own_ground_truth():
     from pathlib import Path
 
+    from resistor_network.env import get_scoring_function
+
     root = Path(__file__).resolve().parents[1]
     paths = sorted(root.glob("environments/level_*/tasks_json/task_*.json"))
     assert paths, "no task files found"
     for path in paths:
         for task in json.loads(path.read_text()):
-            assert task["scoring_function"] == "resistor_conductance"
             params = task["scoring_params"]
-            scorer = check_conductance_topology(**params)
+            scorer = get_scoring_function(task["scoring_function"], params)
             assert scorer(json.dumps(params["expected_topology"])) == 1.0
