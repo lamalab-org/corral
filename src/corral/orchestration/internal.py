@@ -100,16 +100,23 @@ def _write_result(path: Path, value: dict[str, Any]) -> None:
         raise
 
 
-def _restore_host_ownership(root: Path) -> None:
-    """Return bind-mounted checkpoint files to the invoking host user."""
+def _set_checkpoint_ownership(root: Path, uid: int, gid: int) -> None:
+    """Change trusted checkpoint ownership without following symlinks."""
     if os.geteuid() != 0:
         return
-    uid = int(os.environ.get("CORRAL_HOST_UID", "0"))
-    gid = int(os.environ.get("CORRAL_HOST_GID", "0"))
     for entry in (*root.rglob("*"), root):
         if entry.is_symlink():
             raise ValueError("checkpoint directories cannot contain symbolic links")
-        os.chown(entry, uid, gid)
+        status = entry.stat()
+        if (status.st_uid, status.st_gid) != (uid, gid):
+            os.chown(entry, uid, gid)
+
+
+def _restore_host_ownership(root: Path) -> None:
+    """Return bind-mounted checkpoint files to the invoking host user."""
+    uid = int(os.environ.get("CORRAL_HOST_UID", "0"))
+    gid = int(os.environ.get("CORRAL_HOST_GID", "0"))
+    _set_checkpoint_ownership(root, uid, gid)
 
 
 async def run_task_from_files(request_file: str | Path, result_file: str | Path) -> int:
@@ -133,9 +140,13 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
 
     registry: RuntimeRegistry | None = None
     store: SQLiteCommitStore | None = None
+    # The task runs here, not in the host process, so tracing starts here too.
     observer = observer_from_env()
     try:
-        os.chown(checkpoint_root, 0, 0)
+        # docker cp preserves host ownership in a reused state volume. The
+        # restricted controller has CHOWN but not FOWNER, so an existing
+        # host-owned artifact directory cannot be chmodded during resume.
+        _set_checkpoint_ownership(checkpoint_root, 0, 0)
         checkpoint_root.chmod(0o700)
         permissions.configure(checkpoint_root)
         workspace_snapshots = checkpoint_root / "workspace-snapshots"
@@ -201,6 +212,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         )
         _write_result(Path(result_file), asdict(result))
     finally:
+        # Send buffered traces before the container exits.
         await asyncio.to_thread(observer.flush)
         if registry is not None:
             registry.close()

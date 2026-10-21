@@ -154,13 +154,15 @@ def test_level2_rejects_recorded_md_contradictions(tmp_path, change, check_name)
     )
 
 
-def test_level2_rejects_silicate_velocity_reinitialization(tmp_path):
+@pytest.mark.parametrize("stage", ["cooling", "hold"])
+def test_level2_rejects_silicate_velocity_reinitialization(tmp_path, stage):
     path = _submission(2, tmp_path)
     script = tmp_path / "in.lammps"
+    original = script.read_text()
+    boundary = f"unfix {stage}"
+    assert original.count(boundary) == 1
     script.write_text(
-        script.read_text().replace(
-            "unfix ramp", "unfix ramp\nvelocity all create 300 42"
-        )
+        original.replace(boundary, f"{boundary}\nvelocity all create 300 42", 1)
     )
     report = WorkflowScorer(2, level=2).evaluate(path)
     assert report["score"] == 0

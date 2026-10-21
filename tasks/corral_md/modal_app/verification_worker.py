@@ -315,19 +315,32 @@ def calculate(job, assets, evidence_root, cache=None):
             "dtype",
             "sparse",
         }
-        if set(parameters) - allowed:
+        descriptive = {"implementation", "n_features"}
+        if set(parameters) - allowed - descriptive:
             raise NotImplementedError("Unsupported SOAP settings")
+        implementation = parameters.get("implementation")
+        if implementation is not None and (
+            not isinstance(implementation, str)
+            or "dscribe" not in implementation.lower()
+            or "soap" not in implementation.lower()
+        ):
+            raise NotImplementedError("Unsupported declared SOAP implementation")
         if parameters.get("sparse", False) or parameters.get("average") not in {
             "inner",
             "outer",
         }:
             raise NotImplementedError("Verifier expects dense global SOAP descriptors")
-        descriptor = SOAP(**parameters)
+        descriptor = SOAP(**{k: v for k, v in parameters.items() if k in allowed})
         features = array(descriptor.create(frames, n_jobs=1))
         if len(frames) == 1 and features.ndim == 1:
             features = features[None, :]
         if features.ndim != 2 or features.shape[0] != len(frames):
             raise ValueError("SOAP output does not contain one row per frame")
+        if "n_features" in parameters and (
+            type(parameters["n_features"]) is not int
+            or parameters["n_features"] != features.shape[1]
+        ):
+            raise ValueError("Declared SOAP feature count differs from calculated features")
         return {"features": features.tolist()}
 
     properties = job.get("properties", ["energy", "forces"])

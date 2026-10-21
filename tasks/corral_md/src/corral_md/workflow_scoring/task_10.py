@@ -454,7 +454,11 @@ def evaluate(e: Evidence, r: Rubric):
 
     def weights():
         config = e.settings["fit"]
-        if config["method"] == "ols":
+        if config["method"] in {
+            "ols",
+            "ordinary least squares with intercept on five stage production means",
+            "unweighted ordinary least squares with intercept",
+        }:
             return np.ones(5)
         if config["method"] == "wls":
             values = finite_array(config["weights"], shape=(5,))
@@ -553,6 +557,10 @@ def evaluate(e: Evidence, r: Rubric):
     def structural_values(index):
         config = e.settings["structure"]
         method, output = config["method"], []
+        translated_rms_methods = {
+            "periodic site RMSD to initial ideal lattice after minimum-image wrapping and removal of mean translation",
+            "PBC minimum-image RMS displacement from ideal FCC sites after removing mean translation",
+        }
         for frame in selected(index):
             if method == "coordination":
                 cutoff = _number(config["cutoff_A"])
@@ -572,13 +580,18 @@ def evaluate(e: Evidence, r: Rubric):
                 distances = frame.get_all_distances(mic=True)
                 np.fill_diagonal(distances, np.inf)
                 output.append(float(np.mean(np.sum(distances < cutoff, axis=1))))
-            elif method == "rms_displacement":
-                if type(config["remove_translation"]) is not bool:
+            elif method == "rms_displacement" or method in translated_rms_methods:
+                remove_translation = (
+                    True
+                    if method in translated_rms_methods
+                    else config["remove_translation"]
+                )
+                if type(remove_translation) is not bool:
                     raise EvidenceError("remove_translation must be boolean")
                 displacement, _ = find_mic(
                     frame.positions - initial().positions, frame.cell, pbc=True
                 )
-                if config["remove_translation"]:
+                if remove_translation:
                     displacement -= displacement.mean(axis=0)
                 output.append(float(np.sqrt(np.mean(np.sum(displacement**2, axis=1)))))
             elif method == "nearest_neighbor_distance":

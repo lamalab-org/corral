@@ -228,11 +228,28 @@ def postprocess_hessian(hessian, specification):
     """Apply the Task 5 transformations in standard atom/Cartesian order."""
     result = _finite(hessian, (6, 6)).copy()
     symmetry = specification.get("symmetrization", "none")
+    acoustic = specification.get("acoustic_sum_rule", "none")
+    onsite_modes = {
+        "onsite_blocks_then_resymmetrize": "average_transpose",
+        "onsite_blocks_iterative_100": "average_transpose_iterative_100",
+    }
+    if acoustic in onsite_modes:
+        if symmetry != onsite_modes[acoustic]:
+            raise ValueError("Unsupported Hessian symmetry and acoustic sequence")
+        iterations = 100 if acoustic == "onsite_blocks_iterative_100" else 1
+        for _ in range(iterations):
+            result = (result + result.T) / 2
+            updated = result.copy()
+            for atom in range(2):
+                own = slice(3 * atom, 3 * atom + 3)
+                other = slice(3 * (1 - atom), 3 * (1 - atom) + 3)
+                updated[own, own] = -result[own, other]
+            result = updated
+        return (result + result.T) / 2
     if symmetry == "average_transpose":
         result = (result + result.T) / 2
     elif symmetry != "none":
         raise ValueError(f"Unsupported reference symmetrization: {symmetry!r}")
-    acoustic = specification.get("acoustic_sum_rule", "none")
     if acoustic == "projection":
         translations = np.tile(np.eye(3), (2, 1))
         projection = np.eye(6) - translations @ translations.T / 2

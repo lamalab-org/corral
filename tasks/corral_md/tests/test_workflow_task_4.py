@@ -597,7 +597,13 @@ def test_task4_missing_and_malformed_evidence_do_not_crash():
         assert sum(check["points"] for check in result.checks) == 90
 
 
-def test_task4_analytical_hessian_is_read_as_data(submission):
+@pytest.mark.parametrize(
+    ("method", "description_key"),
+    [("analytical", "description"), ("analytical_hessian", "details")],
+)
+def test_task4_analytical_hessian_is_read_as_data(
+    submission, method, description_key
+):
     directory = submission.parent
     fc = json.loads((directory / "force_constants.json").read_text())
     phi = np.array(fc["values_eV_A2"])
@@ -608,8 +614,8 @@ def test_task4_analytical_hessian_is_read_as_data(submission):
     hessian[source, :, indices, :] = phi.swapaxes(1, 2)
     np.save(directory / "hessian.npy", hessian.reshape(375, 375))
     fc["derivative"] = {
-        "method": "analytical",
-        "description": "Saved Cartesian energy Hessian",
+        "method": method,
+        description_key: "Saved Cartesian energy Hessian",
     }
     _write(directory / "force_constants.json", fc)
     _edit(
@@ -620,6 +626,20 @@ def test_task4_analytical_hessian_is_read_as_data(submission):
     )
     result = _score(submission)
     assert result.score == pytest.approx(0.9), result.checks
+
+
+def test_task4_analytical_hessian_alias_still_requires_raw_hessian(submission):
+    directory = submission.parent
+    fc = json.loads((directory / "force_constants.json").read_text())
+    fc["derivative"] = {
+        "method": "analytical_hessian",
+        "details": "Cartesian Hessian from automatic differentiation",
+    }
+    _write(directory / "force_constants.json", fc)
+    result = _score(submission)
+    check = next(c for c in result.checks if c["name"] == "derivative_reconstruction")
+    assert check["status"] == "failed"
+    assert "raw_hessian" in check["detail"]
 
 
 def test_task4_accepts_equivalent_primitive_basis(submission):

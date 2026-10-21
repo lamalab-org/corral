@@ -62,6 +62,35 @@ def example_files(task_number: int, *, level: int = 2) -> dict[str, str]:
             "options must agree. Precision aliases are dtype, precision, and "
             "model_dtype.\n"
         )
+    if task_number == 2:
+        guide += (
+            "\nTask 2 uses protocol task2-4000K-v3: read liq4000.dat and cool "
+            "from 4000 to 300 K at 10 K/ps for 370 ps, then hold at 300 K for "
+            "100 ps. These stages require 470000 steps at 1 fs. Preserve the "
+            "supplied velocities and use 100 fs thermostat damping, with "
+            "10000 fs pressure damping during cooling and 5000 fs during the "
+            "hold. Record steps and time from zero and keep all stage-boundary "
+            "states.\n"
+        )
+        if level == 2:
+            guide += (
+                "\nContinue by reheating to 4000 K at 10 K/ps for 370 ps, with "
+                "10000 fs pressure damping (840000 total steps). Transition "
+                "fitting uses only measured temperatures at or below 2600 K "
+                "and unique trace indices; repeated indices cannot add evidence.\n"
+                "\nAn unresolved transition may use unresolved.example.json: "
+                "retain the assessed indices, measured-temperature coordinate, "
+                "a reason, and diagnostics.single_line_sse (the unweighted "
+                "density residual sum of squares for an intercept-plus-temperature "
+                "linear least-squares fit to those rows). Set its result Tg and "
+                "delta_tg_K to null. This is a scientific-review case; null "
+                "alone is not sufficient evidence.\n"
+                "Use distinct measured temperatures spanning each fitted regime "
+                "and compare the fit with one straight line on the same selected "
+                "rows and weights. An ambiguous fit requires scientific review. "
+                "A reproducible fit does not establish statistical significance "
+                "for correlated MD samples or prove a physical glass transition.\n"
+            )
     if level == 2 and task_number == 3:
         guide += (
             "For the separate teacher, student, and MD calculators, use "
