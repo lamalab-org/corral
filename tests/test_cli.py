@@ -791,3 +791,54 @@ def test_benchmark_runs_locally_and_writes_report(
     manifest = json.loads((reports[0].parent / "run-metadata.json").read_text())
     assert manifest["status"] == ("completed_with_errors" if failed else "completed")
     assert len(list(reports[0].parent.rglob("commits.sqlite3"))) == 2
+
+
+def test_benchmark_reports_evaluation_failure_as_incomplete(
+    monkeypatch, tmp_path, capsys
+):
+    import importlib
+
+    run_module = importlib.import_module("corral.run")
+
+    async def unavailable_evaluator(*args, **kwargs):
+        raise ValueError("Cannot grade a different execution protocol or task bank")
+
+    monkeypatch.setattr(run_module, "evaluate_task", unavailable_evaluator)
+    monkeypatch.setattr(
+        cli,
+        "load_environment_group",
+        lambda *args, **kwargs: {"task1": _environment("task1")},
+    )
+    monkeypatch.setattr(cli, "create_agent", lambda *args, **kwargs: SubmitAgent())
+    args = cli.build_parser().parse_args(
+        [
+            "bench",
+            "--agent",
+            "react",
+            "--environment",
+            "samplemath",
+            "--sandbox",
+            "local",
+            "--max-attempts",
+            "1",
+            "--run-id",
+            "evaluation-failure",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert asyncio.run(cli.run_benchmark(args)) == 1
+    assert (
+        "evaluation error: Cannot grade a different execution protocol or task bank"
+        in capsys.readouterr().out
+    )
+    manifest = json.loads(
+        (tmp_path / "evaluation-failure/run-metadata.json").read_text()
+    )
+    assert manifest["status"] == "completed_with_errors"
+    assert manifest["failed_trials"] == manifest["evaluation_failed_trials"] == 1
+    report = json.loads((tmp_path / "evaluation-failure/report.json").read_text())
+    trial = report["task_results"]["task1"]["trials"][0]
+    assert trial["score"] is None
+    assert trial["error_message"] is None
+    assert trial["evaluation_error"]

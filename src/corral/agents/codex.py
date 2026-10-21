@@ -35,6 +35,7 @@ from corral.agents.schema import (
 from corral.agents.session import AgentSession
 from corral.agents.usage import usage_field
 from corral.agents.utils import LiteLLMMessage
+from corral.core.action import submit_answer_action
 
 # Name under which the corral MCP server is registered with the Codex harness
 # (the `[mcp_servers.<name>]` config table key).
@@ -200,8 +201,8 @@ class CodexAgent(BaseAgent):
         """Compose the developer instructions handed to the Codex thread."""
         final_answer_directive = (
             "When you have solved the task, call the `submit_answer` MCP tool "
-            "with the complete answer. A plain-text final response does not "
-            "complete the task."
+            "with the complete answer. A plain-text final response is only a "
+            "fallback if you do not call the tool."
         )
         instructions = (
             self.system_prompt
@@ -692,9 +693,39 @@ class CodexAgent(BaseAgent):
                 metadata=metadata,
             )
         if result.status in {"success", "surrender"}:
+            # Codex can finish a turn with a final answer instead of an MCP
+            # submit_answer call. Submit that exact terminal answer through the
+            # normal session action so the durable state and scorer see the
+            # same value; never convert timeouts or SDK failures into answers.
+            final_answer = result.answer
+            if isinstance(final_answer, str) and final_answer.strip():
+                response = await session.execute(
+                    submit_answer_action(
+                        final_answer.strip(),
+                        metadata={"source": "codex_final_answer"},
+                    )
+                )
+                if response.success and session.submission is not None:
+                    metadata["submission_source"] = "codex_final_answer"
+                    if session.submission_status == "surrendered":
+                        return AgentOutcome(
+                            status="surrendered", usage=usage, metadata=metadata
+                        )
+                    return AgentOutcome(
+                        status="completed",
+                        answer=session.submission,
+                        usage=usage,
+                        metadata=metadata,
+                    )
+                return AgentOutcome(
+                    status="tool_failure",
+                    error=response.error or "Codex final answer submission failed",
+                    usage=usage,
+                    metadata=metadata,
+                )
             return AgentOutcome(
                 status="protocol_failure",
-                error="Codex finished without calling submit_answer",
+                error="Codex finished without calling submit_answer or returning a final answer",
                 usage=usage,
                 metadata=metadata,
             )
@@ -719,9 +750,8 @@ class CodexAgent(BaseAgent):
     ) -> str:
         """Drive the harness and retain its terminal text for diagnostics.
 
-        Completion still requires the harness to call the session's
-        `submit_answer` MCP tool; this returned text is never submitted by the
-        adapter.
+        A final text answer is retained as a fallback when the harness does not
+        call the session's `submit_answer` MCP tool.
         """
         # CODEX_HOME is always a throwaway temp dir this agent owns and deletes,
         # so the run never inherits the developer's global Codex config.

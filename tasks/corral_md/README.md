@@ -86,11 +86,45 @@ Remote dispatch retains the execution's pinned Modal build, storage volume,
 workspace snapshot, and action ID. Interrupted remote calls remain resumable
 under that same action ID instead of being recorded as completed failures.
 
+## Run simulations on this machine
+
+Prepare the verified asset catalogs once, then select the local backend in the
+environment arguments:
+
+```bash
+cd tasks/corral_md
+uv run python modal_app/setup_assets.py --output-dir "$HOME/corral-md-assets"
+uv run corral bench \
+  --sandbox local \
+  --agent tool-calling \
+  --environment corral_md \
+  --task level_1_task_1 \
+  --env-kwargs "{\"local\": true, \"assets_dir\": \"$HOME/corral-md-assets\"}" \
+  --model openai/gpt-5.6
+```
+
+Local mode uses the host `lmp` executable for `run_lammps` and the current
+Python environment plus its CUDA GPU for `execute_python_script(use_gpu=True)`.
+Install LAMMPS with the packages needed by your tasks, CUDA-enabled PyTorch,
+MACE, ASE, and the other scientific dependencies on this machine. Set
+`CORRAL_MD_LAMMPS_BIN` if `lmp` is not on `PATH`. The terminal and CPU Python
+tools also run locally with `--sandbox local`. The asset catalogs stay outside
+the writable task workspace; file tools expose them read-only. Local scripts
+should use workspace-relative paths and copy needed assets into
+`/workspace/input` with `copy_file` first. The LAMMPS tool maps absolute
+`/workspace/...` paths in its input file to host paths before execution.
+
+Local mode runs independent calculation checks in a separate Docker container
+with the pinned models and potentials. Missing or invalid agent submissions
+receive zero. The specialized `run_verified_md` tool and its execution
+provenance receipt remain available only with Modal. Local scoring does not
+send calculations to Modal.
+
 ## Bundled inputs
 
 `structures.zip` contains the shared structure inputs, with its SHA-256 recorded
-in `modal_app/assets.json`. Tasks 2 use the molten sodium-silicate state at
-`/workspace/structures/melt/liq1300.dat`. Tasks 9 use the periodic 32-atom FCC
+in `modal_app/assets.json`. Tasks 2 use the original sodium-silicate melt at
+`/workspace/structures/melt/liq4000.dat`. Tasks 9 use the periodic 32-atom FCC
 copper cell at `/workspace/structures/cu/cu32.extxyz`, with lattice parameter
 3.615 Å. Tasks 1 retrieve mp-149 through Materials Project using `MP_API_KEY`;
 that structure is not bundled.
@@ -98,6 +132,71 @@ that structure is not bundled.
 Task definitions under `environments/` are included in the Python wheel along
 with the submission templates and scoring structure archive. Deploying the
 Modal app uses the repository's `modal_app/` scripts and both ZIP archives.
+
+Task 2 protocol `task2-4000K-v3` starts from the supplied `liq4000.dat` and
+restores the historical 4000→300 K cooling range, 10 K/ps rate, 10,000 fs
+cooling pressure damping, and 100 ps hold at 300 K with 5000 fs pressure damping.
+The integration timestep is 1 fs and thermostat damping is 100 fs, retained
+from the audited implementation; the historical task prompt did not specify
+those two parameters. Preserve the supplied velocities and start at step zero.
+
+```lammps
+units real
+atom_style charge
+boundary p p p
+read_data /workspace/structures/melt/liq4000.dat
+include /workspace/potentials/BKS/pot.mod
+timestep 1.0
+fix cooling all npt temp 4000 300 100 iso 0 0 10000
+run 370000
+unfix cooling
+fix hold all npt temp 300 300 100 iso 0 0 5000
+run 100000
+```
+
+Level 1 includes cooling and the hold: 470 ps and 470,000 steps. Level 2
+adds reheating from 300 to 4000 K at 10 K/ps with 10,000 fs pressure damping,
+for a complete 840 ps / 840,000-step cycle. The reheating stage retains the
+Level 2 thermal-history extension; the historical task defined cooling and
+the hold only. Save the initial state and both sides of every stage handoff.
+
+Both scorers verify the pinned 4000 K source, temperature schedule, exact
+step counts, damping, raw thermo samples, and state continuity. Level 1
+requires the hold as well as cooling. Level 2 verifies the reported analysis.
+The fit cutoff remains measured T ≤ 2600 K; it is not a simulation endpoint.
+The scorer does not compare Tg with a fixed reference value. A straight
+density line cannot establish a change point. Repeated analysis indices are
+rejected, including overlaps between the two fitting regions.
+
+Nearly linear noisy data are screened against a single-line fit: fewer than
+six distinct measured temperatures or a BIC gain below 6 routes the transition
+check to review. The gain is `n*log(SSE_single/SSE_segmented)-2*log(n)`, using
+the same rows and weights and two versus four model parameters. This is an
+ambiguity screen; time-correlated MD samples limit its statistical interpretation.
+Level 2 also supports `method: "unresolved"`: retain the assessed indices,
+reason, and reproducible single-line SSE; report null Tg and null difference.
+That transition check remains pending for independent scientific review.
+Reproducing a fitted breakpoint does not by itself validate a glass transition.
+
+A full cooling/hold validation run did not establish a robust density-based
+Tg. Its standalone audit artifacts were removed during report cleanup; final
+benchmark results remain in the [run reports](../../reports/corral_md/README.md).
+The author's input script and reference trajectory are unavailable, so
+restoring the documented protocol does not establish exact reproduction of
+the author's experiment or validate the historical numerical target.
+
+Maintainers can generate full validation evidence with
+`scripts/prepare_task2_original.py --lammps /path/to/pinned/lmp --output /tmp/task2`.
+Use `--level 1` for cooling/hold only. With `corral_md` installed, verify it using
+`scripts/score_task2_validation.py --run-dir /tmp/task2 --output /tmp/task2-score`
+(and `--level 1` for a Level 1 run). These are maintainer checks, not benchmark
+agent trials. The old checkpoint preparation/comparison scripts remain
+historical audit tools for superseded protocol `task2-2600K-v2`; their generated
+validation reports are no longer retained in `reports/corral_md/`.
+
+Rebuild local assets or upload the new versioned structures volume and redeploy
+the Modal runtime before launching trials against this protocol. Earlier
+checkpoint trajectories cannot satisfy the restored full-range task by rescoring.
 
 ## What the tasks cover
 
@@ -130,6 +229,10 @@ Start from the submission templates for
 Fill them with measured results and link the retained artifacts, settings,
 scripts, and report. Blank examples are seeded into each task workspace.
 
+Submit the completed manifest path. A single unambiguous path in inline
+backticks is also accepted, including when surrounded by explanatory text.
+Answers naming different manifests remain ambiguous and are rejected.
+
 To score a saved manifest and write a detailed check report:
 
 ```bash
@@ -149,3 +252,6 @@ independent evidence can remain pending; the CLI exits with code 2 for a
 `pending_review` report. A trusted evaluator can supply `--review review.json`;
 agent-submitted review files are not discovered automatically. For controlled MD
 provenance, `--run-id` and `--action-id` bind verification to the recorded run.
+
+Use `--verification local --assets-dir /path/to/corral-md-assets` to score a
+saved manifest with independent calculations in the local Docker image.

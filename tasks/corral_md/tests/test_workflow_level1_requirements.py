@@ -30,13 +30,15 @@ def check(report, name):
 @pytest.fixture
 def cooling(tmp_path):
     inputs = tmp_path / "cool.in"
-    inputs.write_text("fix ramp all npt temp 1300 300 100 iso 0 0 1000\nrun 20000\n")
+    inputs.write_text(
+        "read_data /workspace/structures/melt/liq4000.dat\nfix cooling all npt temp 4000 300 100 iso 0 0 10000\nrun 370000\n"
+    )
     table = pd.DataFrame(
         {
-            "time_ps": [0.0, 10.0, 20.0],
-            "step": [0, 10000, 20000],
-            "target_temperature_K": [1300, 800, 300],
-            "temperature_K": [1305, 793, 298],
+            "time_ps": [0.0, 185.0, 370.0],
+            "step": [0, 185000, 370000],
+            "target_temperature_K": [4000, 2150, 300],
+            "temperature_K": [4005, 2143, 298],
             "pressure_atm": [10, -3, 5],
             "density_g_cm3": [2.6, 2.7, 2.8],
         }
@@ -61,21 +63,22 @@ def cooling(tmp_path):
 
 
 def strict_cycle(e):
-    return _input_cycle(e, 20, required_timestep_fs=1.0, required_steps=20_000)
+    return _input_cycle(e, 370, required_timestep_fs=1.0, required_steps=370_000)
 
 
 @pytest.mark.parametrize(
     "commands",
     [
-        "run 20000\n",  # LAMMPS real-unit default: 1 fs.
-        "timestep 1.0\nrun 20000\n",
-        "run 0\nrun 10000 start 0 stop 20000\nrun 20000 upto start 0 stop 20000\n",
-        "timestep 2\nrun 0\ntimestep 1\nrun 20000\n",  # Only advancing steps matter.
+        "run 370000\n",  # LAMMPS real-unit default: 1 fs.
+        "timestep 1.0\nrun 370000\n",
+        "run 0\nrun 185000 start 0 stop 370000\nrun 370000 upto start 0 stop 370000\n",
+        "timestep 2\nrun 0\ntimestep 1\nrun 370000\n",  # Only advancing steps matter.
     ],
 )
 def test_task2_accepts_exact_schedule_with_equivalent_run_commands(cooling, commands):
     cooling.artifact("lammps_inputs").write_text(
-        "fix ramp all npt temp 1300 300 100 iso 0 0 1000\n" + commands
+        "read_data /workspace/structures/melt/liq4000.dat\nfix cooling all npt temp 4000 300 100 iso 0 0 10000\n"
+        + commands
     )
     assert strict_cycle(cooling)[0]
     assert _logged_trace(cooling, {"cooling"}, required_timestep_fs=1.0) is True
@@ -84,16 +87,17 @@ def test_task2_accepts_exact_schedule_with_equivalent_run_commands(cooling, comm
 @pytest.mark.parametrize(
     "commands",
     [
-        "timestep 2\nrun 10000\n",
-        "timestep 0.5\nrun 40000\n",
-        "timestep 1\nrun 19999\n",
-        "timestep 1\nrun 20001\n",
-        "fix adaptive all dt/reset 1 0.5 2.0 0.1\nrun 20000\n",
+        "timestep 2\nrun 185000 start 0 stop 370000\n",
+        "timestep 0.5\nrun 740000\n",
+        "timestep 1\nrun 369999 start 0 stop 370000\n",
+        "timestep 1\nrun 370001 start 0 stop 370001\n",
+        "fix adaptive all dt/reset 1 0.5 2.0 0.1\nrun 370000\n",
     ],
 )
 def test_task2_rejects_wrong_step_schedule(cooling, commands):
     cooling.artifact("lammps_inputs").write_text(
-        "fix ramp all npt temp 1300 300 100 iso 0 0 1000\n" + commands
+        "read_data /workspace/structures/melt/liq4000.dat\nfix cooling all npt temp 4000 300 100 iso 0 0 10000\n"
+        + commands
     )
     assert not strict_cycle(cooling)[0]
     rubric = Rubric(2)
@@ -125,6 +129,22 @@ def test_task2_trace_can_derive_steps_from_raw_log(cooling):
     table = cooling.table("thermal_trace").drop(columns="step")
     table.to_csv(cooling.artifact("thermal_trace"), index=False)
     assert _logged_trace(cooling, {"cooling"}, required_timestep_fs=1.0) is True
+
+
+def test_task2_cannot_hide_a_reset_with_consistent_relative_steps(cooling):
+    table = cooling.table("thermal_trace")
+    table["step"] += 140000
+    table.to_csv(cooling.artifact("thermal_trace"), index=False)
+    cooling.artifact("raw_logs").write_text(
+        "Step Temp Press Density\n"
+        + "\n".join(
+            f"{r.step} {r.temperature_K} {r.pressure_atm} {r.density_g_cm3}"
+            for r in table.itertuples()
+        )
+    )
+    outcome = _logged_trace(cooling, {"cooling"}, required_timestep_fs=1.0)
+    assert not outcome[0]
+    assert "step zero" in outcome[1]
 
 
 @pytest.fixture

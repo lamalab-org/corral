@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import suppress
 from typing import Any
 
 
 def _provider_message(exc: BaseException) -> str | None:
     """Return a provider's structured error message when one is available."""
     body = getattr(exc, "body", None)
+    if not isinstance(body, Mapping):
+        # Streaming/provider adapters can expose only the underlying HTTP
+        # response. Preserve its useful error instead of reducing it to HTTP 400.
+        response = getattr(exc, "response", None)
+        if response is not None:
+            with suppress(AttributeError, ValueError, RuntimeError):
+                body = response.json()
     if not isinstance(body, Mapping):
         return None
 

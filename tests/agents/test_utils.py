@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import openai
 import pytest
 
@@ -145,6 +146,75 @@ def test_retry_exceptions_are_openai_exceptions():
 
     # Test that the tuple is not empty
     assert len(RETRY_EXCEPTIONS) > 0
+
+
+@pytest.mark.parametrize(
+    ("status", "retryable"),
+    [
+        (400, False),
+        (401, False),
+        (403, False),
+        (408, True),
+        (429, True),
+        (500, True),
+        (503, True),
+    ],
+)
+def test_unwrapped_httpx_provider_errors_retry_only_transient_statuses(
+    status, retryable
+):
+    from corral.agents.utils import _should_retry
+
+    response = httpx.Response(
+        status, request=httpx.Request("POST", "https://example.org")
+    )
+    error = httpx.HTTPStatusError(
+        "provider error", request=response.request, response=response
+    )
+    assert _should_retry(error) is retryable
+
+
+@pytest.mark.anyio
+async def test_serialized_retry_policy_survives_worker_import_and_preserves_routing(
+    monkeypatch,
+):
+    mock, response = setup_mock_litellm(monkeypatch)
+    request = httpx.Request("POST", "https://example.org")
+    error = httpx.HTTPStatusError(
+        "rate limited", request=request, response=httpx.Response(429, request=request)
+    )
+    mock.acompletion.side_effect = [error] * 4 + [MockAsyncStream(["chunk"])]
+    sleep = AsyncMock()
+    monkeypatch.setattr(llm_call.retry, "sleep", sleep)
+    provider = {
+        "only": ["together"],
+        "allow_fallbacks": False,
+        "zdr": True,
+        "data_collection": "deny",
+    }
+    options = json.loads(
+        json.dumps(
+            {
+                "extra_body": {"provider": provider},
+                "llm_retry_policy": {
+                    "max_attempts": 12,
+                    "min_wait_s": 15,
+                    "max_wait_s": 300,
+                    "multiplier": 15,
+                },
+            }
+        )
+    )
+    result = await llm_call(
+        model="openrouter/moonshotai/kimi-k3", messages=[], temperature=1.0, **options
+    )
+    assert result.content == response.choices[0].message.content
+    assert mock.acompletion.await_count == 5
+    assert [call.args[0] for call in sleep.await_args_list] == [15, 30, 60, 120]
+    for call in mock.acompletion.await_args_list:
+        assert call.kwargs["extra_body"] == {"provider": provider}
+        assert "llm_retry_policy" not in call.kwargs
+        assert "reasoning_effort" not in call.kwargs
 
 
 def test_reasoning_tokens_support_responses_usage_shape():
@@ -452,6 +522,49 @@ async def test_llm_call_rejects_an_empty_stream(monkeypatch):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("content", [None, ""])
+async def test_llm_call_uses_reasoning_when_content_is_empty(monkeypatch, content):
+    _, response = setup_mock_litellm(monkeypatch, return_usage=True)
+    response.choices[0].message.content = content
+    response.choices[0].message.reasoning_content = "<action>submit_answer</action>"
+
+    result = await llm_call(model="model", messages=[], temperature=1.0)
+
+    assert result.content == "<action>submit_answer</action>"
+    assert result.usage["completion_tokens"] == 20
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("content", [None, ""])
+@pytest.mark.parametrize("reasoning", [None, ""])
+async def test_llm_call_keeps_usage_when_both_fields_are_empty(
+    monkeypatch, content, reasoning
+):
+    _, response = setup_mock_litellm(monkeypatch, return_usage=True)
+    response.choices[0].message.content = content
+    response.choices[0].message.reasoning_content = reasoning
+
+    result = await llm_call(model="model", messages=[], temperature=1.0)
+
+    assert not result.content
+    assert result.usage == {
+        "prompt_tokens": 10,
+        "completion_tokens": 20,
+        "total_tokens": 30,
+    }
+
+
+@pytest.mark.anyio
+async def test_llm_call_preserves_content_when_reasoning_is_present(monkeypatch):
+    _, response = setup_mock_litellm(monkeypatch)
+    response.choices[0].message.reasoning_content = "reasoning"
+
+    result = await llm_call(model="model", messages=[], temperature=1.0)
+
+    assert result.content == "This is a response"
+
+
+@pytest.mark.anyio
 async def test_llm_call_cannot_be_downgraded_to_non_streaming(monkeypatch):
     """The shared helper keeps streaming enabled for every caller."""
     mock_litellm, _ = setup_mock_litellm(monkeypatch)
@@ -705,3 +818,43 @@ def test_message_serialization_and_saving():
         assert data["messages"][0]["role"] == "user"
         assert data["messages"][0]["content"] == "Hello"
         assert data["messages"][1] == mock_message2
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("message", "quota_exhausted"),
+    [
+        (
+            "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.",
+            True,
+        ),
+        ("Your credit balance is too low to access the Anthropic API.", True),
+        ("thinking.budget_tokens must be less than max_tokens", False),
+        ("Invalid tool arguments in the request", False),
+    ],
+)
+async def test_http_400_account_limit_stops_benchmark_without_retry(
+    monkeypatch, message, quota_exhausted
+):
+    import httpx
+
+    from corral.agents.schema import BudgetExhaustedError
+
+    response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "https://provider.test/v1/messages"),
+        json={"error": {"type": "invalid_request_error", "message": message}},
+    )
+    error = httpx.HTTPStatusError(
+        "HTTP 400", request=response.request, response=response
+    )
+    completion = AsyncMock(side_effect=error)
+    monkeypatch.setattr("corral.agents.utils.litellm.acompletion", completion)
+    expected = BudgetExhaustedError if quota_exhausted else httpx.HTTPStatusError
+    with pytest.raises(expected) as caught:
+        await llm_call(model="anthropic/claude-opus-5-5", messages=[], temperature=1.0)
+    if quota_exhausted:
+        assert message in str(caught.value)
+    else:
+        assert caught.value is error
+    completion.assert_awaited_once()
