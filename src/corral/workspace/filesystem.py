@@ -407,17 +407,22 @@ class AbsoluteWorkspaceFilesystem(WorkspaceFilesystem):
         return info
 
 
-def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
-    """Build local file tools for one materialized v2 workspace."""
+def build_workspace_tools(filesystem: AbsoluteWorkspaceFilesystem) -> dict[str, Tool]:
+    """Build agent file tools for one materialized v2 workspace.
 
-    default_path = (
-        PUBLIC_WORKSPACE_ROOT
-        if isinstance(filesystem, AbsoluteWorkspaceFilesystem)
-        else "."
-    )
+    The tools take canonical `/workspace` paths in every execution mode. A
+    restricted worker rebuilds them by name against its own `/workspace` mount,
+    so tools bound to a relative filesystem would accept one path form locally
+    and the other under a sandbox.
+    """
+    if not isinstance(filesystem, AbsoluteWorkspaceFilesystem):
+        raise TypeError(
+            "workspace tools need an AbsoluteWorkspaceFilesystem; restricted "
+            "workers always serve them with canonical /workspace paths"
+        )
 
     @tool(workspace_access="read")
-    def list_files(path: str = default_path, recursive: bool = False) -> str:
+    def list_files(path: str = PUBLIC_WORKSPACE_ROOT, recursive: bool = False) -> str:
         """List regular files in the workspace.
 
         Args:
@@ -553,26 +558,13 @@ def build_workspace_tools(filesystem: WorkspaceFilesystem) -> dict[str, Tool]:
         # Restricted workers rebuild these closures against their canonical
         # mount instead of serializing a controller-side physical root.
         item.worker_operation = f"workspace:{name}"
-        # The docstrings describe the canonical /workspace form; a relative
-        # workspace rejects exactly those paths, so say what it does accept.
-        if filesystem.path_root == PUBLIC_WORKSPACE_ROOT:
-            item.description += " All paths must be absolute /workspace paths; relative paths are forbidden."
-            parameter_text = (
-                "Absolute POSIX path(s) under /workspace. Relative paths, "
-                "parent traversal and symbolic links are forbidden."
-            )
-        else:
-            item.description += (
-                " Paths are relative to the workspace root, e.g. 'data.csv'; "
-                "absolute paths are rejected."
-            )
-            parameter_text = (
-                "POSIX path(s) relative to the workspace root, e.g. 'data.csv'. "
-                "Absolute paths, parent traversal and symbolic links are forbidden."
-            )
+        item.description += " All paths must be absolute /workspace paths; relative paths are forbidden."
         for parameter_name, parameter in item.params_json_schema["properties"].items():
             if parameter_name in {"path", "paths", "source", "destination"}:
-                parameter["description"] = parameter_text
+                parameter["description"] = (
+                    "Absolute POSIX path(s) under /workspace. Relative paths, "
+                    "parent traversal and symbolic links are forbidden."
+                )
     return tools
 
 
