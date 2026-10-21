@@ -17,7 +17,7 @@
     if (typeof value !== "string") return pretty(value);
     try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
   };
-  const state = {traces: [], filtered: [], selected: null, data: null, group: "agent", view: "messages", role: "", session: "", query: "", listLimit: 60, page: 0, target: null, controller: null};
+  const state = {traces: [], filtered: [], selected: null, data: null, messages: [], savedIndices: [], untimed: new Set(), reordered: false, group: "agent", view: "messages", role: "", session: "", query: "", listLimit: 60, page: 0, target: null, controller: null};
   const PAGE_SIZE = 40;
   let traceSearchTimer, messageSearchTimer, toastTimer;
 
@@ -200,6 +200,10 @@
     const controller = state.controller;
     state.selected = trace;
     state.data = null;
+    state.messages = [];
+    state.savedIndices = [];
+    state.untimed = new Set();
+    state.reordered = false;
     state.role = "";
     state.session = "";
     state.query = "";
@@ -221,7 +225,14 @@
     try {
       const data = await request(`/api/traces/${encodeURIComponent(trace.id)}`, controller.signal);
       if (controller !== state.controller) return;
-      state.data = data;
+      const {_trace_browser: presentation, ...trial} = data;
+      state.data = trial;
+      const saved = trial.messages || [];
+      state.savedIndices = presentation?.order || saved.map((_, index) => index);
+      state.messages = state.savedIndices.map(index => saved[index]);
+      const untimed = new Set(presentation?.untimed || []);
+      state.untimed = new Set(state.savedIndices.flatMap((savedIndex, index) => untimed.has(savedIndex) ? [index] : []));
+      state.reordered = Boolean(presentation);
       setStatus("");
       renderHeading();
       populateSessions();
@@ -237,7 +248,7 @@
 
   function populateSessions() {
     const sessions = new Map();
-    for (const message of state.data.messages || []) {
+    for (const message of state.messages) {
       const key = sessionKey(message);
       if (!sessions.has(key)) sessions.set(key, new Set());
       if (message.name && message.role !== "tool") sessions.get(key).add(message.name);
@@ -265,7 +276,7 @@
   }
 
   function filteredMessages() {
-    return (state.data?.messages || []).map((message, index) => ({message, index})).filter(({message}) => {
+    return state.messages.map((message, index) => ({message, index})).filter(({message}) => {
       if (state.role && message.role !== state.role) return false;
       if (state.session && sessionKey(message) !== state.session) return false;
       if (!state.query) return true;
@@ -318,7 +329,7 @@
     const header = el("div", "message-card-header");
     const permalink = el("a", "message-number", `#${String(index + 1).padStart(3, "0")}`);
     permalink.href = `#message-${index + 1}`;
-    permalink.title = "Link to this message";
+    permalink.title = state.reordered ? `Link to this message · saved position #${state.savedIndices[index] + 1}` : "Link to this message";
     permalink.addEventListener("click", event => { event.preventDefault(); state.target = index; writeURL(); renderContent(); });
     header.append(permalink, el("span", `role-badge ${message.role || ""}`, capitalize(message.role)));
     if (message.name) header.append(el("span", "message-name", message.name));
@@ -356,7 +367,7 @@
     const matched = filteredMessages();
     const total = state.data.messages?.length || 0;
     const calls = new Map(), results = new Map();
-    for (const [index, message] of (state.data.messages || []).entries()) {
+    for (const [index, message] of state.messages.entries()) {
       for (const call of message.tool_calls || []) if (call.id) calls.set(call.id, index);
       if (message.tool_call_id) results.set(message.tool_call_id, index);
     }
@@ -366,7 +377,22 @@
     $("prev-page").disabled = state.page === 0;
     $("next-page").disabled = state.page >= pages - 1;
     const fragment = document.createDocumentFragment();
-    for (const {message, index} of matched.slice(start, start + PAGE_SIZE)) fragment.append(renderMessage(message, index, calls, results));
+    if (state.reordered) fragment.append(el("p", "info-note", "OpenHands saved its prompts and commentary after the tool log. Prompts are shown first; tool calls keep their saved order. Commentary without timing is grouped separately because its exact position among the calls was not recorded. The JSON download keeps the original saved order."));
+    let untimedGroup = null;
+    for (const {message, index} of matched.slice(start, start + PAGE_SIZE)) {
+      if (state.untimed.has(index)) {
+        if (!untimedGroup) {
+          untimedGroup = el("details", "untimed-messages");
+          untimedGroup.open = true;
+          untimedGroup.append(el("summary", "", "OpenHands commentary · timing unavailable"));
+          fragment.append(untimedGroup);
+        }
+        untimedGroup.append(renderMessage(message, index, calls, results));
+      } else {
+        untimedGroup = null;
+        fragment.append(renderMessage(message, index, calls, results));
+      }
+    }
     if (!matched.length) fragment.append(el("p", "info-note", total ? "No messages match this search, role, and session. Clear a filter to see more." : "No conversation messages were saved in this report. The tool log and result may contain additional saved details."));
     if (pages > 1) {
       const pagination = el("nav", "pagination");
@@ -387,7 +413,7 @@
   function scrollToContent() { $("conversation-panel").scrollIntoView({block: "start"}); }
 
   function jumpTo(index, updateURL = true) {
-    const messages = state.data?.messages || [];
+    const messages = state.messages;
     if (!Number.isInteger(index) || index < 0 || index >= messages.length) {
       state.target = null;
       renderContent();
@@ -463,7 +489,7 @@
     if (data.token_usage) fragment.append(resultSection("Token usage", data.token_usage));
     const additional = Object.fromEntries(Object.entries(data).filter(([key]) => !["messages", "tool_calls", "output", "evaluation", "token_usage"].includes(key)));
     fragment.append(resultSection("Additional saved trial fields", additional));
-    fragment.append(el("p", "info-note", "This browser displays the final report. It cannot recover reasoning, prompts, or SDK activity that an agent did not save. Message numbers refer to the original saved sequence; session IDs identify the agent runs recorded in that sequence."));
+    fragment.append(el("p", "info-note", "This browser displays the final report. It cannot recover reasoning, prompts, or SDK activity that an agent did not save. Message numbers refer to the displayed sequence; session IDs identify the saved agent runs. Legacy OpenHands prompts are moved ahead of tool calls, and commentary with unknown timing is labeled. JSON downloads preserve the original saved sequence."));
     $("conversation-panel").replaceChildren(fragment);
   }
 
