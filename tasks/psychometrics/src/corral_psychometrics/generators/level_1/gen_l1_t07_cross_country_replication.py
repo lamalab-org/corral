@@ -139,8 +139,6 @@ exactly one of:
   substantive_only  that structure does not hold, but the instrument still measures
                     the same broad construct or constructs
   none              neither
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\
@@ -148,7 +146,7 @@ A single JSON object:
 
 {
   "model_syntax": "<the model you calibrated on the United States, covering both
-                    instruments, in lavaan notation>",
+                    instruments, in semopy syntax>",
   "replication": {
     "hsns": {"<country>": "<class>", ...},
     "dirty_dozen": {"<country>": "<class>", ...}

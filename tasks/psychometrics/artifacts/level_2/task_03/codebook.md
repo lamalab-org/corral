@@ -2,7 +2,7 @@
 
 Every file is tab-separated. Responses run from 1 (Disagree) to 5 (Agree); all responses are complete.
 
-The reference files hold large samples from six populations, named only by identifier. How they differ is not supplied. `cases.csv` holds five case samples of 200 respondents each, identified by `case_id`; each case comes from one of the six populations.
+The reference files hold large samples from four populations, named only by identifier. How they differ is not supplied. `cases.csv` holds three case samples of 200 respondents each, identified by `case_id`; each case comes from one of the four populations.
 
 | item | text |
 |---|---|

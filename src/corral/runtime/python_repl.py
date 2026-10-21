@@ -17,6 +17,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 import traceback
 import types
 from collections.abc import Callable, Mapping, Sequence
@@ -58,6 +59,13 @@ _NUMERICAL_THREAD_VARIABLES = (
     "NUMEXPR_NUM_THREADS",
     "NUMEXPR_MAX_THREADS",
 )
+_DEFAULT_ONE_THREAD_VARIABLES = (
+    "OPENBLAS_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
 _NO_OUTPUT = (
     "No output. You likely forgot to print the result. "
     "Please use `print(...)` to see any output."
@@ -75,6 +83,14 @@ def _clear_worker_environment() -> None:
         for name in _NUMERICAL_THREAD_VARIABLES
         if name in os.environ
     }
+    # Native maths libraries loaded inside a worker (SciPy's own OpenBLAS, for
+    # one) start a thread per core. Every thread's stack and buffers count
+    # against the worker's address-space limit, so on a many-core Linux host
+    # thread creation fails partway and the import or fit breaks. Parallel
+    # trials gain nothing from those threads either, so a worker gets one
+    # unless the host asks for more.
+    for name in _DEFAULT_ONE_THREAD_VARIABLES:
+        numerical_environment.setdefault(name, "1")
     os.environ.clear()
     os.environ.update(numerical_environment)
 
@@ -442,6 +458,20 @@ def _export_namespace(namespace: Namespace, names: Sequence[str]) -> dict[str, A
     return _json_copy(exports, label="exports")
 
 
+class PythonREPLTimeoutError(RuntimeError):
+    """A REPL call ran past its time limit and its worker was stopped.
+
+    Whatever the call did is lost; the caller still holds the checkpoint from
+    before it, so restoring that leaves the session as it was.
+    """
+
+    def __init__(self, timeout_seconds: float):
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"Python REPL call exceeded its {timeout_seconds:g}s time limit"
+        )
+
+
 class PythonREPLSession:
     """Local handle for an isolated, checkpointable Python worker process.
 
@@ -460,7 +490,11 @@ class PythonREPLSession:
         max_code_chars: int = DEFAULT_MAX_CODE_CHARS,
         max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
         address_space_bytes: int = DEFAULT_WORKER_ADDRESS_SPACE_BYTES,
+        timeout_seconds: float | None = None,
     ):
+        if timeout_seconds is not None and timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive, or None for no limit")
+        self._timeout_seconds = timeout_seconds
         self._initial_data = _json_copy(initial_data or {}, label="initial data")
         self._namespace_factory = namespace_factory
         self._code_executor = code_executor or execute_in_namespace
@@ -547,7 +581,10 @@ class PythonREPLSession:
             )
         updates = _json_copy(namespace_updates or {}, label="namespace updates")
         return str(
-            self._request({"command": "execute", "code": code, "updates": updates})
+            self._request(
+                {"command": "execute", "code": code, "updates": updates},
+                timeout=self._timeout_seconds,
+            )
         )
 
     def exports(self) -> dict[str, Any]:
@@ -572,7 +609,7 @@ class PythonREPLSession:
             if checkpoint is not None:
                 self._request({"command": "restore", "checkpoint": checkpoint})
 
-    def _request(self, request: dict[str, Any]) -> Any:
+    def _request(self, request: dict[str, Any], timeout: float | None = None) -> Any:
         with self._lock:
             process = self._process
             if process is None or not process.is_alive():
@@ -581,6 +618,11 @@ class PythonREPLSession:
             assert connection is not None
             try:
                 connection.send(request)
+                # Compiled code does not yield to signals, so the limit is
+                # enforced from here: past it, the worker is killed outright.
+                if timeout is not None and not connection.poll(timeout):
+                    self._stop_worker()
+                    raise PythonREPLTimeoutError(timeout)
                 response = connection.recv()
             except (BrokenPipeError, EOFError, OSError) as exc:
                 self._stop_worker()
@@ -588,6 +630,8 @@ class PythonREPLSession:
                     "The Python REPL worker stopped unexpectedly; "
                     "the persistent session was reset"
                 ) from exc
+            except PythonREPLTimeoutError:
+                raise
             except BaseException:
                 self._stop_worker()
                 raise
@@ -791,6 +835,7 @@ def execute_python_repl(
     max_response_bytes: int | None = None,
     workspace_access: WorkspaceAccess | str = WorkspaceAccess.NONE,
     network_access: str = "allowed",
+    timeout_seconds: float | None = None,
 ) -> PythonREPLResult:
     """Execute and checkpoint Python in Corral's restricted worker.
 
@@ -800,6 +845,8 @@ def execute_python_repl(
     """
     if network_access not in {"allowed", "none"}:
         raise ValueError("network_access must be allowed or none")
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be positive, or None for no limit")
     if len(code) > max_code_chars:
         raise ValueError(
             f"Python REPL code is limited to {max_code_chars:,} characters"
@@ -838,21 +885,46 @@ def execute_python_repl(
         address_space_bytes=address_space_bytes,
         network_access=network_access,
     )
-    reply, bulk = permissions.run_worker_with_bulk(
-        "tool",
-        (
-            worker_tool,
-            {
-                "code": code,
-                "public_data": json.dumps(public_data),
-                "checkpoint": checkpoint,
-            },
-        ),
-        workspace,
-        cancel=cancel,
-        max_response_bytes=max_response_bytes,
-        workspace_access=WorkspaceAccess(workspace_access).value,
-    )
+    # The worker already dies on `cancel`; a time limit is one more reason to
+    # set it, so it gets its own event that also follows the caller's.
+    stop, timed_out, done = cancel, threading.Event(), threading.Event()
+    if timeout_seconds is not None:
+        stop = threading.Event()
+        deadline = time.monotonic() + timeout_seconds
+
+        def watch() -> None:
+            while not done.wait(0.1):
+                if cancel is not None and cancel.is_set():
+                    stop.set()
+                    return
+                if time.monotonic() >= deadline:
+                    timed_out.set()
+                    stop.set()
+                    return
+
+        threading.Thread(target=watch, daemon=True, name="corral-repl-timeout").start()
+    try:
+        reply, bulk = permissions.run_worker_with_bulk(
+            "tool",
+            (
+                worker_tool,
+                {
+                    "code": code,
+                    "public_data": json.dumps(public_data),
+                    "checkpoint": checkpoint,
+                },
+            ),
+            workspace,
+            cancel=stop,
+            max_response_bytes=max_response_bytes,
+            workspace_access=WorkspaceAccess(workspace_access).value,
+        )
+    except RuntimeError:
+        if timed_out.is_set():
+            raise PythonREPLTimeoutError(timeout_seconds) from None
+        raise
+    finally:
+        done.set()
     result = json.loads(reply["content"])
     expected = (
         {"output", *result_names.values()} if result_names else {"output", "exports"}
@@ -891,6 +963,7 @@ __all__ = [
     "NamespaceFactory",
     "PythonREPLResult",
     "PythonREPLSession",
+    "PythonREPLTimeoutError",
     "apply_worker_resource_limits",
     "create_python_namespace",
     "execute_in_namespace",

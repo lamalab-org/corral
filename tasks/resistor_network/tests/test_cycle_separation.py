@@ -175,6 +175,21 @@ def test_saved_tasks_reject_collapse_and_have_distinct_graphs(level):
         graphs.append(network)
 
 
+def _reproducible(task):
+    """A task without the fields that legitimately differ between machines.
+
+    The audit's solver diagnostics (iteration counts, residuals, gap fractions)
+    follow the BLAS build and CPU, so a seed reproduces them only approximately.
+    """
+    task = json.loads(json.dumps(task))
+    del task["uuid"]
+    audit = task["sampling_metadata"]["ambiguity_audit"]
+    audit.get("known_wiring_fit", {}).pop("evaluations", None)
+    audit.get("known_wiring_fit", {}).pop("max_absolute_error", None)
+    audit.get("rounding_stability", {}).pop("max_gap_fraction", None)
+    return task
+
+
 @pytest.mark.parametrize("level", [1, 2])
 def test_saved_bank_is_reproduced_by_recorded_seed(level):
     directory = (
@@ -188,6 +203,6 @@ def test_saved_bank_is_reproduced_by_recorded_seed(level):
     ]
     seed = saved[0]["sampling_metadata"]["batch_seed"]
     regenerated = generate_level_tasks(level, 10, seed)
-    assert [{k: v for k, v in task.items() if k != "uuid"} for task in saved] == [
-        {k: v for k, v in task.items() if k != "uuid"} for task in regenerated
+    assert [_reproducible(task) for task in saved] == [
+        _reproducible(task) for task in regenerated
     ]
