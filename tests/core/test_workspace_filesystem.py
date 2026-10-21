@@ -7,6 +7,7 @@ from corral.core.environment import Environment, Toolset, default_file_tools
 from corral.core.task import TaskDefinition
 from corral.orchestration.registry import RuntimeRegistry
 from corral.workspace import (
+    AbsoluteWorkspaceFilesystem,
     WorkspaceFilesystem,
     build_terminal_tool,
     build_workspace_tools,
@@ -38,7 +39,7 @@ def test_workspace_filesystem_uses_logical_paths_and_stays_confined(tmp_path):
 def test_workspace_file_tools_bind_only_to_a_materialization(tmp_path):
     root = tmp_path / "workspace"
     root.mkdir()
-    tools = build_workspace_tools(WorkspaceFilesystem(root))
+    tools = build_workspace_tools(AbsoluteWorkspaceFilesystem(root))
 
     assert set(tools) == {
         "cat_files",
@@ -52,6 +53,36 @@ def test_workspace_file_tools_bind_only_to_a_materialization(tmp_path):
         "write_file",
     }
     assert all("FSManager" not in repr(item) for item in tools.values())
+
+
+def test_workspace_file_tools_require_canonical_paths(tmp_path):
+    # A restricted worker rebuilds these tools against /workspace, so a relative
+    # binding would accept different paths with and without a sandbox.
+    with pytest.raises(TypeError, match="AbsoluteWorkspaceFilesystem"):
+        build_workspace_tools(WorkspaceFilesystem(tmp_path))
+
+
+def test_workspace_file_tools_match_the_restricted_worker_rebuild(tmp_path):
+    host_root = tmp_path / "host"
+    worker_root = tmp_path / "worker"
+    host_root.mkdir()
+    worker_root.mkdir()
+    host = build_workspace_tools(AbsoluteWorkspaceFilesystem(host_root))
+    worker = build_workspace_tools(AbsoluteWorkspaceFilesystem(worker_root))
+
+    # What the agent is shown cannot depend on where the workspace lives.
+    for name, item in host.items():
+        assert item.description == worker[name].description
+        assert item.params_json_schema == worker[name].params_json_schema
+        assert item.worker_operation == f"workspace:{name}"
+
+    host["write_file"].execute(path="/workspace/data.csv", content="a,b\n")
+    assert host["read_file"].execute(path="/workspace/data.csv") == "a,b\n"
+    assert json.loads(host["list_files"].execute()) == {
+        "files": ["/workspace/data.csv"]
+    }
+    with pytest.raises(ValueError, match="absolute under /workspace"):
+        host["read_file"].execute(path="data.csv")
 
 
 def test_default_file_tools_use_the_integrated_workspace(tmp_path):
