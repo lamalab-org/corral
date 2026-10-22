@@ -59,6 +59,14 @@ REQUEST_TIMEOUT="${REQUEST_TIMEOUT-180}"
 # LiteLLM also reads REQUEST_TIMEOUT from the environment as its global
 # default, and fails on an empty value; keep ours out of child processes.
 export -n REQUEST_TIMEOUT
+# One native thread per REPL worker. The worker resets these itself, but only
+# after numpy is imported, so OpenBLAS has already started a thread per core;
+# those threads' stacks exhaust the worker's 2 GiB address-space limit and later
+# imports fail ("libgomp ... failed to map segment"). Workers inherit these and
+# the reset keeps host values.
+for name in OPENBLAS_NUM_THREADS OMP_NUM_THREADS MKL_NUM_THREADS VECLIB_MAXIMUM_THREADS NUMEXPR_NUM_THREADS; do
+  export "$name=${!name:-1}"
+done
 # Space-separated task ids to run instead of every task, e.g.
 #   TASKS="psy_l1_t09_careless_responding psy_l2_t02_out_of_sample_generalization"
 # Each id goes to its own level; a level with none of them is skipped.
@@ -166,8 +174,10 @@ run_level() {
   # semopy and factor-analyzer, which only that venv has. Running from the root
   # venv still loads the task package, so every model-fitting scorer silently
   # returns 0 instead of failing. langfuse is a corral extra rather than a task
-  # dependency, so it comes in with --with.
-  uv run --project tasks/psychometrics "${WITH_FLAGS[@]}" corral bench \
+  # dependency, so it comes in with --with. `python -m` rather than the `corral`
+  # console script: that script's shebang is the project venv's own python, which
+  # never sees the --with overlay, so langfuse would fail to import.
+  uv run --project tasks/psychometrics "${WITH_FLAGS[@]}" python -m corral.cli bench \
     --environment psychometrics \
     --env-kwargs "{\"level\": $level, \"repl_timeout_minutes\": $REPL_TIMEOUT_MINUTES}" \
     --agent "$AGENT" \

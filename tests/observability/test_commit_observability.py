@@ -383,10 +383,14 @@ def test_resume_recovers_unexported_generation_without_replaying_history(observe
 
 
 @pytest.mark.parametrize("cut", range(1, 12))
-def test_crash_resume_exports_each_generation_and_usage_once(observer, cut):
+@pytest.mark.parametrize("benchmark_run_id", ["benchmark", None])
+def test_crash_resume_exports_each_generation_and_usage_once(
+    observer, cut, benchmark_run_id
+):
+    """Keep session identity and generation usage across observer restarts."""
     before, exporter, _ = observer
     context = ObservationContext(
-        "execution", benchmark_run_id="benchmark", task_id="task"
+        "execution", benchmark_run_id=benchmark_run_id, task_id="task"
     )
     commits = [_commit(event, index) for index, event in enumerate(_events())]
     for commit in commits[:cut]:
@@ -404,6 +408,15 @@ def test_crash_resume_exports_each_generation_and_usage_once(observer, cut):
     for commit in commits[cut:]:
         resumed.record_commit(commit, context=context)
     resumed.flush()
+
+    spans = exporter.get_finished_spans()
+    assert spans
+    assert {span.attributes["session.id"] for span in spans} == {
+        benchmark_run_id or "execution"
+    }
+    assert {f"{span.context.trace_id:032x}" for span in spans} == {
+        deterministic_trace_id("execution")
+    }
 
     models = sorted(
         (

@@ -6,7 +6,7 @@ You are given responses from an online personality survey collected in several c
 
 - `sound`: the item and its recorded data are usable;
 - `mis_keyed`: the response scale was stored in reverse;
-- `missing_as_neutral`: non-responses were recorded as the midpoint;
+- `inserted_neutral`: recorded answers were overwritten with the midpoint;
 - `truncated_scale`: the upper part of the response scale was not recorded;
 - `weak_item`: the data are intact but the item measures the trait poorly.
 
@@ -16,7 +16,7 @@ The Dirty Dozen items are present but are not part of this task. Responses are f
 
 ## What to report
 
-Submit a complete lavaan/semopy model for the HSNS and a classification for every HSNS item.
+Submit a complete semopy model for the HSNS and a classification for every HSNS item.
 
 ## Why this is non-trivial
 

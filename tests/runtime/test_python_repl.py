@@ -99,6 +99,19 @@ def test_local_session_supports_initial_state_updates_and_exports():
         assert session.execute("print((total, status))") == "(6, 'updated')\n"
 
 
+def test_local_worker_bounds_native_thread_pools(monkeypatch):
+    monkeypatch.delenv("OPENBLAS_NUM_THREADS", raising=False)
+    monkeypatch.setenv("OMP_NUM_THREADS", "4")
+    monkeypatch.setenv("CORRAL_TEST_SECRET", "hidden")
+    with PythonREPLSession({}) as session:
+        output = session.execute(
+            "import os\n"
+            "print(os.environ.get('OPENBLAS_NUM_THREADS'), os.environ.get('OMP_NUM_THREADS'),"
+            " os.environ.get('CORRAL_TEST_SECRET'))"
+        )
+    assert output == "1 4 None\n"
+
+
 def test_checkpoint_preserves_incomplete_dynamic_pydantic_models():
     namespace = create_python_namespace({})
     execute_in_namespace(

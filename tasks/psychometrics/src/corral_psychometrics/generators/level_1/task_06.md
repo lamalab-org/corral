@@ -10,7 +10,7 @@ Estimate the correlation between every cross-instrument dimension pair while acc
 
 ## What to report
 
-Submit one complete lavaan/semopy model covering both instruments, one latent correlation for every cross-instrument pair, and the pair or pairs that meet the indistinguishability threshold.
+Submit one complete semopy model covering both instruments, one latent correlation for every cross-instrument pair, and the pair or pairs that meet the indistinguishability threshold.
 
 Name factors as you wish; dimensions are matched by the items they cover.
 
