@@ -59,6 +59,14 @@ class Session:
         self.messages.append(message)
 
 
+def test_openhands_distinguishes_shell_isolation_from_real_task_tools():
+    agent = OpenHandsAgent(api_key="test-key", system_prompt="system")
+    instructions = agent._system_message_suffix(False)
+    assert "does not imply those actions are simulated" in instructions
+    assert "Follow the task-specific operating instructions" in instructions
+    assert "sandboxed evaluation environment" not in instructions
+
+
 def test_openhands_passes_retry_settings_without_changing_provider_or_reasoning():
     provider = {
         "only": ["together"],

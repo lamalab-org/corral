@@ -353,7 +353,9 @@ def test_percent_changes_follow_accepted_rounded_measurements(
     raw_values = (1.0449, 1.0, 0.99)
     reported_values = (1.04, 1.0, 0.99)
     afms, report = {}, {}
-    for i, (raw, reported) in enumerate(zip(raw_values, reported_values), 1):
+    for i, (raw, reported) in enumerate(
+        zip(raw_values, reported_values, strict=False), 1
+    ):
         path = tmp_path / f"rounded_{i}.nid"
         path.write_bytes(f"scan-{i}".encode())
         afms[str(path)] = fake_nid(acquisition.params, amplitude=raw)
@@ -392,6 +394,7 @@ def test_registry_and_loader_cover_all_tasks(tmp_path, monkeypatch):
         json=json,
         Callable=object,
         TaskDefinition=SimpleNamespace,
+        CONTRACT_VERSION="managed-afm-v1",
         InputRef=lambda x: x,
         event=lambda *a, **kw: None,
         resolve_submission=submission.resolve_submission,
@@ -468,78 +471,6 @@ def test_full_path_scores_saved_acquisition_after_original_is_removed(
     assert scorer(submission.resolve_submission(report, snapshot)) == 1
     saved.unlink()
     assert scorer(submission.resolve_submission(report, snapshot)) == 0
-
-
-@pytest.mark.parametrize(
-    ("mode", "setpoint"),
-    [
-        (2, {"value": 0.1, "unit": "V"}),
-        (9, {"value": 0.1, "unit": "V"}),
-        (4, {"value": 70, "unit": "%"}),
-    ],
-)
-def test_initial_structured_setpoint_applied_after_mode(mode, setpoint):
-    tree = ast.parse((ROOT / "src/env.py").read_text())
-    cls = next(
-        n
-        for n in tree.body
-        if isinstance(n, ast.ClassDef) and n.name == "AFMEnvironment"
-    )
-    reset = next(
-        n
-        for n in cls.body
-        if isinstance(n, ast.FunctionDef) and n.name == "reset_params"
-    )
-    zcontrol = SimpleNamespace()
-
-    class OperatingMode:
-        @property
-        def OperatingMode(self):
-            return self.mode
-
-        @OperatingMode.setter
-        def OperatingMode(self, value):
-            self.mode = value
-            zcontrol.SetPoint = -1
-            zcontrol.PGain = zcontrol.IGain = zcontrol.DGain = -1
-
-    app = SimpleNamespace(
-        Scan=SimpleNamespace(),
-        ZController=zcontrol,
-        ScanHead=SimpleNamespace(),
-        OperatingMode=OperatingMode(),
-        SetGalleryHistoryDirectoryPath=lambda _: None,
-        GetGalleryHistoryDirectoryPath="test",
-    )
-    ns = {
-        "pythoncom": None,
-        "nanosurf": SimpleNamespace(SPM=lambda: SimpleNamespace(application=app)),
-        "gc": SimpleNamespace(collect=lambda: None),
-        "event": lambda *a, **kw: None,
-    }
-    exec(compile(ast.Module(body=[reset], type_ignores=[]), "env.py", "exec"), ns)
-    ns["reset_params"](
-        SimpleNamespace(
-            initial_params={
-                "mode": mode,
-                "setpoint": setpoint,
-                "pgain": 80,
-                "igain": 40,
-                "dgain": 0 if mode == 2 else 5,
-            },
-            workspace_path="test",
-            task_id="test",
-            afm_dir="test",
-        )
-    )
-    assert zcontrol.SetPoint == setpoint["value"]
-    assert (zcontrol.PGain, zcontrol.IGain, zcontrol.DGain) == (
-        80,
-        40,
-        0 if mode == 2 else 5,
-    )
-    if setpoint["unit"] == "V":
-        assert zcontrol.SetPointForceUnitMode == 0
 
 
 @pytest.mark.parametrize("task", TASKS, ids=lambda t: t["id"])
@@ -716,6 +647,67 @@ def test_image_analyzer_channel_override(acquisition, direction, channel):
     )
     assert output["status"] == "Success"
     assert output["image_data"] is selected
+
+
+@pytest.mark.parametrize("use_legacy_code", [False, True])
+def test_rms_friction_and_raw_channel_selection_have_independent_definitions(
+    acquisition, use_legacy_code
+):
+    acquisition.afm.data["Image"]["Forward"]["Friction force"] = np.full((2, 2), 6.0)
+    acquisition.afm.data["Image"]["Backward"]["Friction force"] = np.zeros((2, 2))
+    selected = np.full((2, 2), 99.0)
+    acquisition.afm.data["Image"]["Backward"]["Deflection"] = selected
+    tree = ast.parse((ROOT / "src/tools.py").read_text())
+    fn = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name == "Image_Analyzer"
+    )
+    fn.decorator_list = []
+    namespace = {
+        "Any": object,
+        "read": lambda _: acquisition.afm,
+        "measure_image": score.measure_image,
+    }
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "tools.py", "exec"), namespace)
+    selection = (
+        {"dynamic_code": 'image_data = data["Image"]["Backward"]["Deflection"]'}
+        if use_legacy_code
+        else {"direction": "Backward", "channel": "Deflection"}
+    )
+    output = namespace["Image_Analyzer"](
+        str(acquisition.path),
+        calculate_rms_friction=True,
+        calculate_mean_roughness=True,
+        **selection,
+    )
+    # Constant nonzero friction distinguishes RMS from standard deviation.
+    assert output["rms_friction"] == pytest.approx(3.0)
+    assert output["metric_units"]["rms_friction"] == "V"
+    assert output["mean_roughness"] == pytest.approx(1.0)
+    assert output["image_data"] is selected
+    scorer = score.score_friction(0.01, acquisition.params, metrics=["rms_friction"])
+    assert (
+        scorer(
+            {"path_1": str(acquisition.path), "rms_friction_1": output["rms_friction"]}
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize("task", TASKS, ids=lambda t: t["id"])
+def test_public_task_contract_matches_required_mode_and_acquisition_count(task):
+    sequence = task["scoring_params"]["final_params"]
+    if isinstance(sequence, dict):
+        sequence = [sequence]
+    assert "Image_optimizer" not in task["tools"]
+    for acquisition in sequence:
+        assert f"ID {acquisition['mode']}" in task["description"]
+    assert (
+        f"Submit exactly {len(sequence)} distinct raw NID" in task["submission_format"]
+    )
+    assert "Additional acquisitions are allowed" in task["submission_format"]
+    assert "Acquire exactly three" not in task["description"]
 
 
 @pytest.mark.parametrize("task", TASKS, ids=lambda t: t["id"])

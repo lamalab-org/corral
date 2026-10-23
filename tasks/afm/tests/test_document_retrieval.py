@@ -1,35 +1,34 @@
-"""The bundled retrieval index must not depend on the launch directory."""
+"""The AFM reference is local and independent of launch directory or credentials."""
 
-import ast
+import importlib.util
 from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]
-SOURCE = ROOT / "tasks/afm/src/tool_utils.py"
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "afm_contract", ROOT / "src/afm_contract.py"
+)
+contract = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(contract)
 
 
-@pytest.mark.parametrize("launch_dir", [ROOT, SOURCE.parent])
-def test_retriever_opens_bundled_database(launch_dir, monkeypatch):
+@pytest.mark.parametrize("launch_dir", [ROOT, ROOT / "src"])
+def test_reference_is_complete_without_provider_credentials(launch_dir, monkeypatch):
     monkeypatch.chdir(launch_dir)
-    tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
-    initializer = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id == "db_new" for t in node.targets)
-    )
-    calls = []
-    namespace = {
-        "__file__": str(SOURCE),
-        "Path": Path,
-        "embeddings": object(),
-        "Chroma": lambda **kwargs: calls.append(kwargs),
-    }
-    exec(
-        compile(ast.Module(body=[initializer], type_ignores=[]), str(SOURCE), "exec"),
-        namespace,
-    )
-    directory = Path(calls[0]["persist_directory"])
-    assert directory == SOURCE.parent / "aila_db"
-    assert (directory / "chroma.sqlite3").is_file()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    content = contract.reference("RMS friction")
+    assert content == contract.reference("connect and acquire")
+    assert contract.CONTRACT_VERSION in content
+    assert "calculate_rms_friction=True" in content
+    assert "PhaseContrast" in content
+    assert "LateralForce" in content
+    assert "nanosurf.SPM()" in content
+    assert "C3000()" not in content
+    assert "CoreAFM()" not in content
+
+
+@pytest.mark.parametrize("query", ["", "  ", None, 12])
+def test_empty_or_invalid_query_is_rejected(query):
+    with pytest.raises(ValueError, match="nonempty"):
+        contract.reference(query)
