@@ -87,6 +87,35 @@ def afm_instrument(monkeypatch):
     ):
         setattr(tools, name, Tool(name=name, description="Instrument test double."))
     monkeypatch.setitem(sys.modules, "nanosurf", SimpleNamespace(SPM=spm))
+    # Keep the real environment/runtime guard while replacing the hardware owner.
+    # Thread ownership, health, acquisition and quarantine are covered separately
+    # in tasks/afm/tests/test_afm_runtime.py without platform dependencies.
+    controller = ModuleType("afm_runtime")
+    controller.InstrumentUnavailable = type(
+        "InstrumentUnavailable", (RuntimeError,), {}
+    )
+
+    def call(method, params=None, workspace=None, trial_id=None):
+        if method == "finish":
+            return None
+        assert method == "begin"
+        application = sys.modules["nanosurf"].SPM().application
+        application.OperatingMode.OperatingMode = params["mode"]
+        application.ZController.PGain = params["pgain"]
+        if "image_width" in params:
+            application.Scan.ImageWidth = params["image_width"] * 1e-9
+        application.SetGalleryHistoryDirectoryPath(workspace)
+        return {
+            **params,
+            "Current Working directory": workspace,
+            "machine_id": "afm-contract-test",
+            "hostname": "test-host",
+        }
+
+    controller.runtime = lambda: SimpleNamespace(
+        call=call, config=SimpleNamespace(machine_id="afm-contract-test")
+    )
+    monkeypatch.setitem(sys.modules, "afm_runtime", controller)
     monkeypatch.setitem(sys.modules, "score", score)
     monkeypatch.setitem(sys.modules, "tools", tools)
     monkeypatch.setitem(
@@ -156,7 +185,21 @@ def test_task_definitions_run_and_restore(
                     assert state.runtime.status == "submitted", task_id
                     assert state.runtime.metadata["execution_completed"] is True
                     assert state.submission == "api-contract-answer"
-                    assert state.task.metadata["prompt"]
+                    prompt = state.task.metadata.get(
+                        "prompt"
+                    ) or environment.get_task_prompt(state)
+                    assert prompt
+                    if benchmark == "afm":
+                        assert "afm-contract-test" in prompt
+                        assert (
+                            state.environment.values["afm_initial_snapshot"][
+                                "machine_id"
+                            ]
+                            == "afm-contract-test"
+                        )
+                        assert (
+                            state.task.metadata["execution_version"] == "managed-afm-v2"
+                        )
                     if benchmark == "spectra_elucidation":
                         hidden = state.environment.values.get("hidden_arguments", {})
                         assert hidden["h_smiles"] == tasks[task_id].scoring_inputs
@@ -263,6 +306,58 @@ def test_afm_serializes_different_tasks_and_trials(
     asyncio.run(run())
     assert peak == 1
     assert observations == [(True, True)] * 4
+
+
+@pytest.mark.parametrize("failure_phase", ["begin", "finish"])
+def test_afm_infrastructure_failure_survives_trial_projection(
+    tmp_path, monkeypatch, afm_instrument, failure_phase
+):
+    controller = sys.modules["afm_runtime"]
+    original = controller.runtime()
+
+    def call(method, *args):
+        if method == failure_phase:
+            raise controller.InstrumentUnavailable(
+                "AFM_INFRASTRUCTURE_FAILURE: simulated missing head"
+            )
+        return original.call(method, *args)
+
+    monkeypatch.setattr(
+        controller,
+        "runtime",
+        lambda: SimpleNamespace(call=call, config=original.config),
+    )
+    environments = load_environment_group(
+        "afm", env_kwargs={"work_dir": str(tmp_path / "work")}
+    )
+    environments = dict(list(environments.items())[:1])
+
+    async def run():
+        async with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
+            registry = RuntimeRegistry(
+                agents={"agent": SubmitAgent()}, environments=environments
+            )
+            try:
+                runner = CorralRunner(
+                    registry,
+                    environments=environments,
+                    state_store=store,
+                    observer=NoOpObserver(),
+                )
+                result = await runner._execute_benchmark(
+                    runner.build_input(
+                        "afm-infrastructure",
+                        trials_per_task=1,
+                        max_parallel=1,
+                        evaluate=False,
+                    )
+                )
+                assert len(result.trials) == 1
+                assert "AFM_INFRASTRUCTURE_FAILURE:" in result.trials[0].error
+            finally:
+                registry.close()
+
+    asyncio.run(run())
 
 
 def test_afm_guard_releases_after_error_and_cancelled_waiter(tmp_path, afm_instrument):
