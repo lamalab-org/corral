@@ -590,6 +590,8 @@ def _species_match_single(ground_truth: list[str], predicted: list[str]) -> bool
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return False
+        for atom in mol.GetAtoms():
+            atom.SetAtomMapNum(0)
         # Remove stereochemistry for comparison
         Chem.RemoveStereochemistry(mol)
         actual_canonical.append(Chem.MolToSmiles(mol))
@@ -598,6 +600,8 @@ def _species_match_single(ground_truth: list[str], predicted: list[str]) -> bool
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return False
+        for atom in mol.GetAtoms():
+            atom.SetAtomMapNum(0)
         # Remove stereochemistry for comparison
         Chem.RemoveStereochemistry(mol)
         predicted_canonical.append(Chem.MolToSmiles(mol))
@@ -804,11 +808,15 @@ def validate_molecule(mol: dict[str, Any], path: str = "root") -> tuple[bool, st
     # SMILES should not be empty
     if not mol["smiles"].strip():
         return False, f"Molecule at {path} has empty SMILES string"
+    if not valid_smiles(mol["smiles"]):
+        return False, f"Molecule at {path} has invalid SMILES"
 
     # Check optional children
     if "children" in mol:
         if not isinstance(mol["children"], list):
             return False, f"Molecule at {path} has non-list 'children' field"
+        if not mol["children"]:
+            return True, ""
         # Children should contain exactly one reaction for synthesis routes
         if len(mol["children"]) != 1:
             return (
@@ -839,14 +847,18 @@ def validate_reaction(
     if "template_id" not in reaction:
         return False, f"Reaction at {path} is missing required 'template_id' field"
 
-    if not isinstance(reaction["template_id"], int):
+    if type(reaction["template_id"]) is not int:
         return False, f"Reaction at {path} has non-integer 'template_id' field"
+    if reaction["template_id"] <= 0:
+        return False, f"Reaction at {path} must have a positive catalog 'template_id'"
 
     if "children" not in reaction:
         return False, f"Reaction at {path} is missing required 'children' field"
 
     if not isinstance(reaction["children"], list):
         return False, f"Reaction at {path} has non-list 'children' field"
+    if not reaction["children"]:
+        return False, f"Reaction at {path} has no reactants"
 
     # All children must be valid molecules
     for i, child in enumerate(reaction["children"]):
@@ -855,6 +867,58 @@ def validate_reaction(
             return False, error
 
     return True, ""
+
+
+def validate_route_reactions(route: dict[str, Any]) -> tuple[bool, str]:
+    """Check the schema and every catalog reaction, including intermediate steps.
+
+    Each submitted reactant multiset must match one complete outcome of applying
+    its catalog template to the parent product. Atom maps and stereochemistry
+    are ignored, as in the existing species comparison. This does not establish
+    experimental feasibility or check task-specific prices and step limits.
+    Database failures propagate so callers can distinguish unavailable evidence
+    from an invalid reaction.
+    """
+    valid, error = validate_molecule(route)
+    if not valid:
+        return False, error
+
+    def visit(molecule: dict[str, Any], path: str) -> tuple[bool, str]:
+        if not molecule.get("children"):
+            return True, ""
+        reaction = molecule["children"][0]
+        reaction_path = f"{path}.children[0]"
+        template_id = reaction["template_id"]
+        reactants = [child["smiles"] for child in reaction["children"]]
+        try:
+            outcomes = apply_template_retro(molecule["smiles"], str(template_id))
+        except psycopg2.Error:
+            raise
+        except Exception as exc:
+            return False, f"Reaction at {reaction_path}, template {template_id}: {exc}"
+        if not outcomes:
+            return False, (
+                f"Reaction at {reaction_path}: template {template_id} does not apply "
+                "to the parent molecule"
+            )
+        if not species_match(reactants, outcomes):
+            return False, (
+                f"Reaction at {reaction_path}: reactants do not match any complete "
+                f"outcome of template {template_id}"
+            )
+        for index, child in enumerate(reaction["children"]):
+            valid, error = visit(child, f"{reaction_path}.children[{index}]")
+            if not valid:
+                return False, error
+        return True, ""
+
+    valid, error = visit(route, "root")
+    if not valid:
+        return False, error
+    return True, (
+        "Route structure and catalog reaction steps are valid; "
+        "prices and task-specific constraints have not been checked"
+    )
 
 
 def check_templates_equal(pred_rxn: str, ground_rxn_mapped: str) -> float:
