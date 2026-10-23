@@ -22,7 +22,11 @@ def is_runtime_notice(content: str) -> bool:
     """Recognize the runner's budget notice without matching ordinary reasoning."""
     return bool(
         re.fullmatch(
-            r"agent exhausted its \d+ interaction budget\.?", content.strip(), re.I
+            r"agent exhausted its \d+ interaction budget\.?"
+            r"|Claude Code harness failed: Claude Agent SDK run did not succeed:.*"
+            r"|Error running OpenHands harness: Agent reached maximum iterations limit \(\d+\)\.",
+            content.strip(),
+            re.I | re.S,
         )
     )
 

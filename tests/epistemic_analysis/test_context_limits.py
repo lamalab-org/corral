@@ -267,6 +267,9 @@ def test_both_backends_stop_at_submission(monkeypatch, kind, strict_support):
         if kind == "llm"
         else jev.JevAnnotator(client).backend()
     )
+    backend = replace(
+        backend, extract_trace_checks=None
+    )  # This test covers graph context only.
     settings = replace(config(), window=20, overlap=1, strict_support=strict_support)
     graph = asyncio.run(annotate_trace(trace, backend, settings))
     assert "POST_SUBMISSION" not in json.dumps(requests + client.requests)
@@ -278,7 +281,7 @@ def test_both_backends_stop_at_submission(monkeypatch, kind, strict_support):
         s["msg_idx"] <= 4 for item in graph.nodes + graph.edges for s in item["support"]
     )
     assert graph.annotation_status == "complete"
-    assert graph.qc["uncovered_messages"] == []
+    assert graph.qc["uncovered_messages"] == ([2] if kind == "llm" else [])
     assert can_reuse(graph, trace, backend, settings)
     old = copy.deepcopy(graph)
     old.annotation_view["policy_version"] = "head-tail-v1"
@@ -287,7 +290,7 @@ def test_both_backends_stop_at_submission(monkeypatch, kind, strict_support):
 
 def test_jev_uses_same_view_everywhere_including_edge_support():
     trace, client = source(), Decisions()
-    backend = jev.JevAnnotator(client).backend()
+    backend = replace(jev.JevAnnotator(client).backend(), extract_trace_checks=None)
     graph = asyncio.run(annotate_trace(trace, backend, config()))
     assert graph.messages == trace.messages
     assert graph.edges
@@ -399,7 +402,11 @@ def test_llm_both_passes_and_automatic_observation_support(monkeypatch):
 
     monkeypatch.setattr(llm, "llm_json_call_async", respond)
     graph = asyncio.run(
-        annotate_trace(source(), llm.LLMAnnotator().backend(), config())
+        annotate_trace(
+            source(),
+            replace(llm.LLMAnnotator().backend(), extract_trace_checks=None),
+            config(),
+        )
     )
     assert any("Nodes:\n" in request for request in seen)
     observations = [n for n in graph.nodes if n["time"] == 3]

@@ -125,6 +125,7 @@ def test_edges_receive_one_test_per_action_and_old_cache_is_invalid(monkeypatch)
         messages, SourceReference("fixture", "fixture.json", "hash")
     )
     backend, config = llm.LLMAnnotator().backend(), AnnotationConfig("fixture")
+    backend = replace(backend, extract_trace_checks=None)
     graph = asyncio.run(annotate_trace(source, backend, config))
     assert [(n["type"], n["time"]) for n in graph.nodes] == [("T", 1), ("E", 2)]
     assert edge_inputs
@@ -162,3 +163,50 @@ def test_support_outside_request_and_future_messages_are_rejected():
         llm._extract_nodes(messages, "fixture", 2, 1, 100, call=respond)
     )
     assert [n["time"] for n in nodes] == [2, 3]
+
+
+@pytest.mark.parametrize(
+    "payload", [{}, {"nodes": None}, {"nodes": {}}, {"nodes": [None]}]
+)
+def test_malformed_node_response_is_not_an_abstention(payload):
+    async def respond(**kwargs):
+        return payload
+
+    with pytest.raises(llm.LLMError):
+        asyncio.run(
+            llm._extract_nodes(
+                [{"role": "assistant", "content": "A claim."}],
+                "fixture",
+                16,
+                4,
+                100,
+                call=respond,
+            )
+        )
+
+
+def test_empty_nodes_are_allowed_and_revised_prompt_is_fingerprinted():
+    calls = []
+
+    async def respond(**kwargs):
+        calls.append(kwargs)
+        return {"nodes": []}
+
+    nodes, warnings = asyncio.run(
+        llm._extract_nodes(
+            [{"role": "assistant", "content": "A fragment"}],
+            "fixture",
+            16,
+            4,
+            100,
+            call=respond,
+        )
+    )
+    assert nodes == []
+    assert warnings == []
+    assert "An empty or unlabelled message is allowed" in calls[0]["system"]
+    assert "do not reconstruct" in calls[0]["system"].lower()
+    assert "in [0, 1)" in calls[0]["user"]
+    provenance = llm.LLMAnnotator().backend().provenance
+    assert provenance["prompt_version"] == "transcript-labels-v2"
+    assert len(provenance["prompt_hash"]) == 64

@@ -12,11 +12,12 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class AnnotationBackend:
-    """Node and edge extraction passes with reproducibility metadata."""
+    """Node, edge, and optional whole-trace passes with reproducibility metadata."""
 
     extract_nodes: Callable[..., Awaitable[tuple[list[dict[str, Any]], list[str]]]]
     extract_edges: Callable[..., Awaitable[tuple[list[dict[str, Any]], list[str]]]]
     provenance: dict[str, Any]
+    extract_trace_checks: Callable[..., Awaitable[list[dict[str, Any]]]] | None = None
 
     def resolved_models(self) -> set[str]:
         return _resolved_models.get() or set()

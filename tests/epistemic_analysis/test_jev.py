@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+from dataclasses import replace
 from urllib.error import HTTPError
 
 import pytest
@@ -111,7 +112,10 @@ def run_annotation(client=None, **kwargs):
     return asyncio.run(
         annotate_trace(
             trace,
-            jev.JevAnnotator(client or FakeJev(), **kwargs).backend(),
+            replace(
+                jev.JevAnnotator(client or FakeJev(), **kwargs).backend(),
+                extract_trace_checks=None,
+            ),
             AnnotationConfig(DEFAULT_DECISIONS_MODEL, window=4, overlap=2),
         )
     ).to_dict()

@@ -129,7 +129,11 @@ def cap_sequence(requested: int) -> list[int]:
 
 
 def build_annotation_view(
-    trace: NormalizedTrace, config: AnnotationConfig, effective_cap: int | None = None
+    trace: NormalizedTrace,
+    config: AnnotationConfig,
+    effective_cap: int | None = None,
+    *,
+    stop_at_submission: bool = True,
 ) -> AnnotationView:
     cap = config.tool_output_max_chars if effective_cap is None else effective_cap
     if cap not in cap_sequence(config.tool_output_max_chars):
@@ -174,8 +178,10 @@ def build_annotation_view(
                 "omitted_chars": omitted,
             }
         )
-        if message["role"].lower() == "assistant" and SUBMIT_ANSWER_ACTION.search(
-            original
+        if (
+            stop_at_submission
+            and message["role"].lower() == "assistant"
+            and SUBMIT_ANSWER_ACTION.search(original)
         ):
             break
     return AnnotationView(

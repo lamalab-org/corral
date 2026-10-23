@@ -494,6 +494,23 @@ def build_report_markdown(summary: AggregateResult) -> str:
                 )
         lines += [
             "",
+            "### Whole-trace behavioral checks",
+            "",
+            "Each check uses one request per full trace after node and edge labelling, including completed annotations with empty graphs. Uncertain, not-applicable, and unassessed results are excluded from each check's fraction.",
+            "",
+            "| Check | Present | Assessed | Fraction | Uncertain | Not applicable | Unassessed |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+        for name, check in stats.get("trace_checks", {}).items():
+            fraction = (
+                f"{check['fraction']:.3f}" if check["fraction"] is not None else "—"
+            )
+            counts = check["status_counts"]
+            lines.append(
+                f"| {name} | {check['count']} | {check['n_assessed']} | {fraction} | {counts['uncertain']} | {counts['not_applicable']} | {counts['unassessed']} |"
+            )
+        lines += [
+            "",
             "### Groups",
             "",
             "| Metadata | Eligible | Excluded |",

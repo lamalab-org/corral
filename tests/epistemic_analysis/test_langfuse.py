@@ -92,6 +92,17 @@ def test_reconstructs_history_once_and_keeps_source_mapping(rows):
     assert document["source"]["message_sources"][-1]["field"] == "output.answer"
 
 
+def test_recovers_missing_result_only_at_unique_matching_action(rows):
+    inputs = json.loads(rows[-1]["input"])
+    inputs.pop()  # The terminal result is still recorded in its TOOL observation.
+    rows[-1]["input"] = json.dumps(inputs)
+    # The previous model generation has no tool output, so history coverage is
+    # intact; the separate observation supplies the missing evidence.
+    document = source.reconstruct_trace(rows, "session")
+    assert document["messages"][3]["content"].startswith("Observation: X measured")
+    assert document["source"]["message_sources"][3]["recovered_tool_result"]
+
+
 def test_continuation_calls_can_be_grouped_in_export_but_split_in_history(rows):
     first = json.loads(rows[1]["output"])
     first["tool_calls"].append(action("two", "inspect"))

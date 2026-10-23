@@ -6,7 +6,7 @@ corrected observation nodes before extracting any edges.
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -35,6 +35,37 @@ from .schema import (
     NormalizedTrace,
     content_hash,
 )
+from .trace_checks import (
+    TRACE_CHECK_DEFINITIONS,
+    TRACE_CHECK_NAMES,
+    TRACE_CHECK_VERSION,
+    trace_check_prompt,
+    validate_trace_checks,
+)
+
+COVERAGE_POLICY = "unlabelled-messages-allowed-v2"
+
+
+def message_coverage(messages, nodes):
+    """Report retained labels on the actual annotation view, without inventing nodes.
+
+    A valid classification may abstain or find no applicable category. Missing
+    labels are diagnostic; failed requests, invalid results and node-cap losses
+    are handled separately. Use this same rule for all annotation backends.
+    """
+    eligible = {
+        i
+        for i, message in enumerate(messages)
+        if message.get("role", "").lower() == "assistant"
+        and message.get("content", "").strip()
+    }
+    covered = {n["time"] for n in nodes}
+    return {
+        "policy": COVERAGE_POLICY,
+        "assistant_messages": len(eligible),
+        "labelled_assistant_messages": len(eligible & covered),
+        "unlabelled_messages": sorted(eligible - covered),
+    }
 
 
 def annotation_configuration(
@@ -55,6 +86,15 @@ def annotation_configuration(
             ]
         ),
         "implementation_version": ANNOTATION_VERSION,
+        "trace_checks": {
+            "enabled": annotator.extract_trace_checks is not None,
+            "policy": TRACE_CHECK_VERSION,
+            "definitions_hash": content_hash(TRACE_CHECK_DEFINITIONS),
+            "rules_hash": content_hash(
+                [trace_check_prompt(name) for name in TRACE_CHECK_NAMES]
+            ),
+        },
+        "coverage_policy": COVERAGE_POLICY,
         "graph_schema_version": GRAPH_SCHEMA_VERSION,
         "annotation_view_policy_version": VIEW_VERSION,
         "annotation_view_instructions_hash": content_hash(VIEW_INSTRUCTIONS),
@@ -91,6 +131,13 @@ def can_reuse(
         )
     except (KeyError, TypeError, ValueError):
         return False
+    if annotator.extract_trace_checks is not None:
+        if graph.trace_checks_status != "complete":
+            return False
+        try:
+            validate_trace_checks(graph.trace_checks, trace.messages)
+        except (TypeError, ValueError):
+            return False
     return (
         graph.schema_version == GRAPH_SCHEMA_VERSION
         and graph.annotation_status == "complete"
@@ -260,31 +307,57 @@ async def annotate_trace(
         else:
             attempts.append({"effective_cap": cap, "status": "complete"})
             break
-    uncovered = []
-    if annotator.provenance.get("annotator") == "jev":
-        covered = {n["time"] for n in nodes}
-        uncovered = [
-            i
-            for i, m in enumerate(view.messages)
-            if m.get("role", "").lower() == "assistant"
-            and m.get("content", "").strip()
-            and i not in covered
-        ]
-        if uncovered:
-            warnings.append(
-                f"Assistant messages without nodes require review: {uncovered}."
-            )
+    # Pass C is deliberately outside the graph's cap-reduction loop. Each check
+    # gets its own request with the complete trace, including messages after submit_answer. A failed
+    # pass must never be retried with windows or a smaller annotation view.
+    trace_checks, trace_checks_status, trace_checks_error = [], "unspecified", None
+    if annotator.extract_trace_checks is not None:
+        full_config = replace(config, tool_output_max_chars=0)
+        full_view = build_annotation_view(trace, full_config, stop_at_submission=False)
+        request_start, diagnostic_start = len(requests), len(diagnostics)
+        try:
+            with annotation_context(
+                full_view, full_config, diagnostics, requests, review_issues
+            ):
+                trace_checks = validate_trace_checks(
+                    await annotator.extract_trace_checks(
+                        trace=trace, nodes=nodes, edges=edges, model=config.model
+                    ),
+                    messages,
+                )
+            trace_checks_status = "complete"
+        except Exception as exc:
+            trace_checks_status = "failed"
+            trace_checks_error = {"type": type(exc).__name__, "message": str(exc)}
+            if isinstance(exc, RequestBudgetExceeded):
+                trace_checks_error["diagnostic"] = exc.diagnostic
+            issue = f"Whole-trace behavioral checks failed: {type(exc).__name__}: {exc}"
+            warnings.append(issue)
+            review_issues.append(issue)
+        finally:
+            for entry in requests[request_start:] + diagnostics[diagnostic_start:]:
+                entry["stage"] = "trace_checks"
+    coverage = message_coverage(view.messages, nodes)
+    uncovered = coverage["unlabelled_messages"]
+    if uncovered:
+        warnings.append(
+            f"Assistant messages without retained labels: {uncovered}. "
+            "Unlabelled messages are allowed; coverage alone does not imply a processing failure."
+        )
     if view.coverage["reduced_context"]:
         warnings.append(
             "Annotation used reduced tool context. Omitted middle text is unknown; absence-based measurements may change."
         )
     fingerprint = annotation_fingerprint(trace, annotator, config)
     resolved = sorted(
-        _resolved_models(nodes + edges) | set(annotator.resolved_models())
+        _resolved_models(nodes + edges + trace_checks)
+        | set(annotator.resolved_models())
     )
     return AnnotatedGraph(
         nodes=nodes,
         edges=edges,
+        trace_checks=trace_checks,
+        trace_checks_status=trace_checks_status,
         input_file=trace.source.locator,
         source=trace.source,
         messages=messages,
@@ -294,7 +367,7 @@ async def annotate_trace(
         reconstruction_status=trace.reconstruction_status,
         annotation_view=view.to_dict(),
         annotation_requests=requests,
-        annotation_status="incomplete" if uncovered or review_issues else "complete",
+        annotation_status="incomplete" if review_issues else "complete",
         provenance={
             **asdict(config),
             **annotator.provenance,
@@ -321,6 +394,8 @@ async def annotate_trace(
             "annotation_attempts": attempts,
             "request_diagnostics": diagnostics,
             "uncovered_messages": uncovered,
+            "message_coverage": coverage,
             "review_issues": review_issues,
+            "trace_checks_error": trace_checks_error,
         },
     )

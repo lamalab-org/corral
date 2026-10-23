@@ -15,6 +15,8 @@ from corral.epistemic_analysis.decisions import (
     REPORT_MESSAGE_NAME,
     DecisionsAnnotationError,
     DecisionsAnnotator,
+    EpistemicReport,
+    MotifAssessment,
 )
 from corral.epistemic_analysis.motifs import (
     MOTIFS,
@@ -84,7 +86,7 @@ def explanation_payload(explanations, *, status="completed"):
     }
 
 
-def test_motif_registry_matches_original_final_graph_aggregation():
+def test_motif_registry_preserves_original_pattern_names_and_kinds():
     # Read literals without importing the old analysis script or loading .env.
     source = Path(__file__).parents[2] / "reasoning_reports" / "analyze.py"
     definitions = {
@@ -94,11 +96,83 @@ def test_motif_registry_matches_original_final_graph_aggregation():
         and isinstance(node.target, ast.Name)
         and node.target.id in {"SUBGRAPH_DESCRIPTIONS", "ANTIPATTERN_DESCRIPTIONS"}
     }
-    assert {motif.name: motif.description for motif in MOTIFS} == {
-        **definitions["SUBGRAPH_DESCRIPTIONS"],
-        **definitions["ANTIPATTERN_DESCRIPTIONS"],
+    # Definitions may become sharper without breaking stored pattern identities.
+    assert {motif.name: motif.kind for motif in MOTIFS} == {
+        **dict.fromkeys(definitions["SUBGRAPH_DESCRIPTIONS"], "productive"),
+        **dict.fromkeys(definitions["ANTIPATTERN_DESCRIPTIONS"], "antipattern"),
     }
     assert len(MOTIFS) == 18
+
+
+@pytest.mark.parametrize("status", STATUS_DESCRIPTIONS)
+@pytest.mark.parametrize("selected", [False, True])
+@pytest.mark.parametrize("evidence_ids", [(), (1, 2)])
+def test_historical_selection_does_not_override_current_status(
+    status, selected, evidence_ids
+):
+    assessment = MotifAssessment(
+        name="unsupported_judgment",
+        kind="antipattern",
+        family="evidence_handling",
+        status=status,
+        confidence=0.8,
+        probabilities={status: 1.0},
+        selected=selected,
+        explanation_supported=True,
+        explanation=(
+            "The current proposal still claims five DBE against the formula."
+            if status == "active"
+            else "The earlier proposal claimed five DBE; it was corrected to four."
+        ),
+        evidence_message_ids=evidence_ids,
+    )
+    report = EpistemicReport(
+        model="mock",
+        assessed_at="",
+        message_count=2,
+        trajectory_sha256="",
+        assessments=(assessment,),
+        usage={},
+        raw_response={},
+    )
+    # Even a supported explanation of an earlier error cannot make a nonactive
+    # assessment an outstanding problem. Active findings still reach the actor.
+    actionable = status == "active" and selected
+    assert report.present_antipatterns == ((assessment,) if actionable else ())
+    assert ("unsupported_judgment" in report.format_for_agent()) == actionable
+    assert report.to_dict()["assessments"][0]["explanation_supported"] is True
+
+
+def test_descriptive_fixed_belief_does_not_hide_a_real_active_problem():
+    def assessment(name):
+        return MotifAssessment(
+            name=name,
+            kind="antipattern",
+            family="experimental_strategy",
+            status="active",
+            confidence=0.9,
+            probabilities={"active": 1.0},
+            selected=True,
+            explanation_supported=True,
+            explanation="The observations support this classification.",
+            evidence_message_ids=(1,),
+        )
+
+    fixed = assessment("fixed_belief_trace")
+    contradiction = assessment("contradiction_without_repair")
+    report = EpistemicReport(
+        model="mock",
+        assessed_at="",
+        message_count=1,
+        trajectory_sha256="",
+        assessments=(fixed, contradiction),
+        usage={},
+        raw_response={},
+    )
+    assert report.present_antipatterns == (contradiction,)
+    assert "fixed_belief_trace" not in report.format_for_agent()
+    assert "contradiction_without_repair" in report.format_for_agent()
+    assert report.to_dict()["assessments"][0]["name"] == "fixed_belief_trace"
 
 
 @pytest.mark.anyio
@@ -167,7 +241,7 @@ async def test_real_sdk_transport_batches_motifs_and_preserves_observations():
     assert report.message_count == 2
     assert report.usage["reasoning_tokens"] == 1
     assert all(a.status == "emerging" for a in report.assessments)
-    assert rendered_report == "No present epistemic patterns detected."
+    assert rendered_report == "No present unconstructive epistemic patterns detected."
     assert report.usage["llm_calls"] == 1
     assert report.raw_explanation_response is None
     assert json.loads(json.dumps(report.to_dict()))["raw_response"] == decision_payload(
@@ -188,7 +262,10 @@ async def test_native_sdk_helper_and_refusal_are_supported():
     assert report.assessments[0].status == "uncertain"
     assert report.assessments[0].refused is True
     assert report.assessments[0].confidence is None
-    assert report.format_for_agent() == "No present epistemic patterns detected."
+    assert (
+        report.format_for_agent()
+        == "No present unconstructive epistemic patterns detected."
+    )
     assert report.assessments[1].status == "absent"
 
 
@@ -237,6 +314,8 @@ async def test_only_active_evidenced_patterns_reach_agent_with_reasons():
         ["active", "emerging", "resolved", "uncertain", "active"]
     ):
         payload["answers"][i] = decision_payload(status)["answers"][i]
+    for i in (7, 8):
+        payload["answers"][i] = decision_payload("active")["answers"][i]
     reason = (
         "The solubility test returned an insoluble sample, contradicting H1; "
         "the agent acknowledged that result and revised H1 to H2."
@@ -245,12 +324,18 @@ async def test_only_active_evidenced_patterns_reach_agent_with_reasons():
         MOTIFS[0].name: {
             "supported": True,
             "explanation": reason,
-            "evidence_message_ids": [1, 2, 3],
         },
         MOTIFS[4].name: {
             "supported": False,
             "explanation": "No subsequent test of H2 occurred.",
-            "evidence_message_ids": [3],
+        },
+        MOTIFS[7].name: {
+            "supported": True,
+            "explanation": "The revised H2 is being treated as settled without a test.",
+        },
+        MOTIFS[8].name: {
+            "supported": False,
+            "explanation": "The agent interpreted the insoluble result.",
         },
     }
 
@@ -260,7 +345,10 @@ async def test_only_active_evidenced_patterns_reach_agent_with_reasons():
         if request.url.path == "/v1/decisions":
             return httpx.Response(200, json=payload)
         assert request.url.path == "/v1/responses"
-        return httpx.Response(200, json=explanation_payload(explanations))
+        names = body["text"]["format"]["schema"]["required"]
+        return httpx.Response(
+            200, json=explanation_payload({name: explanations[name] for name in names})
+        )
 
     messages = [
         {"role": "assistant", "content": "H1 predicts a soluble sample; test it."},
@@ -275,34 +363,47 @@ async def test_only_active_evidenced_patterns_reach_agent_with_reasons():
         report = await DecisionsAnnotator(
             client=client, explanation_model="explanation-model"
         ).annotate(messages, task="Test solubility")
-    assert len(requests) == 2
-    body = requests[1][1]
-    assert body["model"] == "explanation-model"
-    assert body["store"] is False
-    assert body["text"]["format"]["strict"] is True
-    data = json.loads(body["input"])
-    assert [m["message_id"] for m in data["messages"]] == [1, 2, 3]
-    assert {m["name"] for m in data["candidate_patterns"]} == set(explanations)
-    assert all("graph_description" in m for m in data["candidate_patterns"])
+    assert len(requests) == 1 + len(explanations)
+    requested_names = []
+    for _, body in requests[1:]:
+        assert body["model"] == "explanation-model"
+        assert body["store"] is False
+        assert body["text"]["format"]["strict"] is True
+        data = json.loads(body["input"])
+        assert data["messages"] == [messages[0], messages[1], messages[3]]
+        schema = body["text"]["format"]["schema"]["properties"]
+        for item in schema.values():
+            assert set(item["properties"]) == {"supported", "explanation"}
+            assert set(item["required"]) == {"supported", "explanation"}
+        assert len(data["candidate_patterns"]) == 1
+        assert "graph_description" in data["candidate_patterns"][0]
+        requested_names.append(data["candidate_patterns"][0]["name"])
+    assert set(requested_names) == set(explanations)
     assert all("STALE_REPORT" not in json.dumps(body) for _, body in requests)
     rendered = report.format_for_agent()
-    assert MOTIFS[0].name in rendered
-    assert reason in rendered
-    assert all(m.name not in rendered for m in MOTIFS[1:])
+    assert MOTIFS[7].name in rendered
+    assert explanations[MOTIFS[7].name]["explanation"] in rendered
+    assert all(m.name not in rendered for m in MOTIFS if m != MOTIFS[7])
+    assert reason not in rendered
+    assert report.assessments[0].explanation == reason  # Productive record retained.
     assert "confidence" not in rendered
     assert "probabilit" not in rendered
     assert all(m.graph_description not in rendered for m in MOTIFS)
-    assert report.assessments[0].evidence_message_ids == (1, 2, 3)
+    assert report.assessments[0].evidence_message_ids == ()
     assert report.assessments[4].status == "active"
     assert report.assessments[4].explanation_supported is False
     assert len(report.to_dict()["assessments"]) == 18
     assert report.raw_response == payload
-    assert report.raw_explanation_response["usage"]["input_tokens"] == 19
+    assert report.raw_explanation_response is None
+    assert len(report.raw_explanation_responses) == 4
+    assert all(
+        r["usage"]["input_tokens"] == 19 for r in report.raw_explanation_responses
+    )
     assert report.usage == {
-        "input_tokens": 50,
-        "output_tokens": 13,
-        "reasoning_tokens": 4,
-        "llm_calls": 2,
+        "input_tokens": 107,
+        "output_tokens": 46,
+        "reasoning_tokens": 13,
+        "llm_calls": 5,
     }
 
 
@@ -313,10 +414,9 @@ async def test_only_active_evidenced_patterns_reach_agent_with_reasons():
         "missing",
         "extra",
         "blank",
-        "no_evidence",
-        "bad_id",
-        "bool_id",
-        "duplicate_id",
+        "bad_supported",
+        "bad_explanation",
+        "missing_supported",
         "refusal",
         "incomplete",
     ],
@@ -328,7 +428,6 @@ async def test_invalid_explanations_are_not_shown_as_evidence(invalid):
         MOTIFS[0].name: {
             "supported": True,
             "explanation": "Observation supports the revision.",
-            "evidence_message_ids": [1],
         }
     }
     item = explanations[MOTIFS[0].name]
@@ -338,13 +437,12 @@ async def test_invalid_explanations_are_not_shown_as_evidence(invalid):
         explanations["invented_pattern"] = dict(item)
     elif invalid == "blank":
         item["explanation"] = " "
-    elif invalid in {"no_evidence", "bad_id", "bool_id", "duplicate_id"}:
-        item["evidence_message_ids"] = {
-            "no_evidence": [],
-            "bad_id": [2],
-            "bool_id": [True],
-            "duplicate_id": [1, 1],
-        }[invalid]
+    elif invalid == "bad_supported":
+        item["supported"] = "true"
+    elif invalid == "bad_explanation":
+        item["explanation"] = 123
+    elif invalid == "missing_supported":
+        item.pop("supported")
     output = json.dumps(explanations) if invalid != "refusal" else ""
     create = AsyncMock(
         return_value=SimpleNamespace(

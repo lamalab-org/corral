@@ -20,6 +20,10 @@ from corral.agents.schema import (
 from corral.agents.utils import LiteLLMMessage
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action, with_submit_answer_tool
 from corral.core.errors import concise_error_message
+from corral.core.messages import EMPTY_RESPONSE_REMINDER, public_message
+from corral.report.logging import logger
+
+MAX_CONSECUTIVE_EMPTY_RESPONSES = 3
 
 if TYPE_CHECKING:
     from corral.agents.session import AgentSession
@@ -111,15 +115,22 @@ class ToolCallingAgent(BaseAgent):
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Run the complete native tool-calling loop for one task."""
         messages = self._initial_messages(session)
-        prompt_message_count = len(messages) - len(session.messages)
+        prompt_message_count = len(messages) - len(provider_messages(session.messages))
         tools = self._tools(session)
         usage = _UsageAccumulator(self._usage)
         iteration_limit = session.iteration_limit
+        consecutive_empty = 0
+        consecutive_refusals = 0
+        refresh_feedback = True
 
         for _iteration in range(iteration_limit):
             try:
-                turn_messages = await self._before_turn(
-                    session, messages, messages[prompt_message_count:], usage
+                turn_messages = (
+                    await self._before_turn(
+                        session, messages, messages[prompt_message_count:], usage
+                    )
+                    if refresh_feedback
+                    else messages
                 )
                 response = await call_model(
                     model=self.model,
@@ -145,12 +156,80 @@ class ToolCallingAgent(BaseAgent):
             usage.add(getattr(response, "usage", None))
             turn_usage = getattr(response, "usage", None) or {}
             raw_calls = list(getattr(response, "tool_calls", None) or [])
-            content = getattr(response, "content", None)
-            content_metadata = (
-                {"content_source": "reasoning_summary"}
-                if getattr(response, "content_source", "text") == "reasoning_summary"
-                else {}
+            public = public_message(
+                {
+                    "role": "assistant",
+                    "content": getattr(response, "content", None),
+                    "content_source": getattr(response, "content_source", "text"),
+                    "tool_calls": [self._tool_call_value(call) for call in raw_calls],
+                }
             )
+            finish_reason = getattr(response, "finish_reason", None)
+            if finish_reason in {"content_filter", "refusal"}:
+                consecutive_refusals += 1
+                if _iteration + 1 < iteration_limit and self._should_retry_refusal(
+                    consecutive_refusals
+                ):
+                    # Retain usage without feeding a refused/partial response
+                    # back to the actor or executing any of its tool calls.
+                    await session.record_messages((), usage=turn_usage)
+                    refresh_feedback = False
+                    logger.warning(
+                        f"Actor provider stopped the response "
+                        f"(finish_reason={finish_reason!r}); retrying the unchanged "
+                        f"request (refusal retry {consecutive_refusals})"
+                    )
+                    continue
+                if public is not None and public.get("content"):
+                    await session.record_message(
+                        {"role": "assistant", "content": public["content"]},
+                        usage=turn_usage,
+                    )
+                else:
+                    await session.record_messages((), usage=turn_usage)
+                return AgentOutcome(
+                    status="agent_failure",
+                    error=f"actor provider stopped the response (finish_reason={finish_reason!r})",
+                    usage=usage.outcome(),
+                )
+            consecutive_refusals = 0
+            if public is None:
+                # Account for the request without inventing an assistant message.
+                # No new public evidence means no new epistemic assessment.
+                await session.record_messages((), usage=turn_usage)
+                consecutive_empty += 1
+                refresh_feedback = False
+                logger.warning(
+                    f"Actor returned no public text or tool calls "
+                    f"({consecutive_empty}/{MAX_CONSECUTIVE_EMPTY_RESPONSES}, "
+                    f"finish_reason={finish_reason!r})"
+                )
+                if consecutive_empty >= MAX_CONSECUTIVE_EMPTY_RESPONSES:
+                    return AgentOutcome(
+                        status="protocol_failure",
+                        error=(
+                            f"actor returned {consecutive_empty} consecutive responses "
+                            "without public text or tool calls "
+                            f"(finish_reason={finish_reason!r})"
+                        ),
+                        usage=usage.outcome(),
+                    )
+                if consecutive_empty == 1:
+                    feedback = {
+                        "role": "user",
+                        "name": EMPTY_RESPONSE_REMINDER,
+                        "content": (
+                            "Your last response contained no public text or tool call. "
+                            "Please continue with visible assistant text or an "
+                            "available tool call. Use submit_answer when finished."
+                        ),
+                    }
+                    messages.append(feedback)
+                    await session.record_message(feedback)
+                continue
+            consecutive_empty = 0
+            refresh_feedback = True
+            content = public.get("content")
 
             if not raw_calls:
                 assistant = dict(
@@ -161,12 +240,7 @@ class ToolCallingAgent(BaseAgent):
                     )
                 )
                 messages.append(assistant)
-                await session.record_message(
-                    {**assistant, "metadata": content_metadata}
-                    if content_metadata
-                    else assistant,
-                    usage=turn_usage,
-                )
+                await session.record_message(assistant, usage=turn_usage)
                 feedback = dict(
                     LiteLLMMessage(
                         role="user",
@@ -177,12 +251,7 @@ class ToolCallingAgent(BaseAgent):
                 await session.record_message(feedback)
                 continue
 
-            provider_message = {
-                "role": "assistant",
-                "content": content,
-                "tool_calls": [self._tool_call_value(call) for call in raw_calls],
-            }
-            messages.append(provider_message)
+            messages.append(public)
 
             protocol_error: str | None = None
             for index, raw_call in enumerate(raw_calls):
@@ -191,7 +260,6 @@ class ToolCallingAgent(BaseAgent):
                     action = Action.from_tool_call(
                         value,
                         content=content if index == 0 else None,
-                        metadata=content_metadata if index == 0 else None,
                     )
                 except Exception as exc:
                     protocol_error = f"invalid provider tool call: {exc}"
@@ -204,13 +272,22 @@ class ToolCallingAgent(BaseAgent):
                             "submit_answer requires a string argument named answer"
                         )
                         break
-                    return await self._submit_outcome(
-                        answer,
+                    outcome = await self._handle_submission(
                         action,
-                        session,
-                        usage,
-                        turn_usage,
+                        session=session,
+                        messages=messages,
+                        trajectory=messages[prompt_message_count:],
+                        response_message=public,
+                        tool_call_index=index,
+                        usage=usage,
+                        turn_usage=turn_usage if index == 0 else None,
                     )
+                    if outcome is not None:
+                        return outcome
+                    # A submission review already supplied feedback. Let the
+                    # actor address it before assessing that same prefix again.
+                    refresh_feedback = False
+                    break
 
                 observation = await session.execute(
                     action,
@@ -257,6 +334,27 @@ class ToolCallingAgent(BaseAgent):
     def _tools(self, session: AgentSession) -> list[dict[str, Any]]:
         """Prepare a provider catalog without modifying the session's tools."""
         return with_submit_answer_tool(session.tools)
+
+    async def _handle_submission(
+        self,
+        action: Action,
+        *,
+        session: AgentSession,
+        messages: list[dict[str, Any]],  # noqa: ARG002 - Used by submission-review overrides.
+        trajectory: list[dict[str, Any]],  # noqa: ARG002 - Used by submission-review overrides.
+        response_message: dict[str, Any],  # noqa: ARG002 - Used by submission-review overrides.
+        tool_call_index: int,  # noqa: ARG002 - Used by submission-review overrides.
+        usage: _UsageAccumulator,
+        turn_usage: Mapping[str, Any] | None,
+    ) -> AgentOutcome | None:
+        """Submit normally; an agent may defer and supply the next-turn context."""
+        return await self._submit_outcome(
+            action.arguments["answer"], action, session, usage, turn_usage
+        )
+
+    def _should_retry_refusal(self, _consecutive_refusals: int) -> bool:
+        """Provider refusals are terminal unless an agent explicitly opts in."""
+        return False
 
     def _text_only_feedback(self) -> str:
         """Remind the actor of the native submission protocol."""

@@ -45,6 +45,11 @@ from corral.epistemic_analysis.ontology import (
     PASS_A_SYSTEM,
     PASS_B_INSTRUCTIONS,
 )
+from corral.epistemic_analysis.trace_checks import (
+    TRACE_CHECK_DEFINITIONS,
+    trace_check_prompt,
+    trace_check_state,
+)
 
 from .base import record_model
 
@@ -226,12 +231,19 @@ class JevClient:
             return json.load(response)
 
     async def evaluate(
-        self, model: str, state: dict[str, Any], questions: dict[str, dict[str, Any]]
+        self,
+        model: str,
+        state: dict[str, Any],
+        questions: dict[str, dict[str, Any]],
+        *,
+        single_shot: bool = False,
     ) -> dict[str, dict[str, Any]]:
         if questions and not self.api_key:
             raise JevError("Set OPENAI_API_KEY to run the Jev workflow with Decisions")
         answers: dict[str, dict[str, Any]] = {}
         items = list(questions.items())
+        if single_shot and len(items) > MAX_QUESTIONS:
+            raise JevError("Too many questions for a single-shot Decisions request")
         context = current_context()
         budget = (
             context.config.max_request_tokens if context else self.max_request_tokens
@@ -270,11 +282,13 @@ class JevClient:
                 record_request(
                     {
                         **diagnostic,
-                        "outcome": "split" if len(batch) > 1 else "oversized",
+                        "outcome": "split"
+                        if len(batch) > 1 and not single_shot
+                        else "oversized",
                         "reason": reason,
                     }
                 )
-                if len(batch) == 1:
+                if len(batch) == 1 or single_shot:
                     raise RequestBudgetExceeded({**diagnostic, "reason": reason})
                 entries = list(batch.items())
                 middle = len(entries) // 2
@@ -337,7 +351,9 @@ class JevClient:
                 logger.warning(f"Decisions request retry {attempt + 1}: {error}")
                 await asyncio.sleep(min(2 ** (attempt + 1), 30))
 
-        batch_size = min(self.batch_size, MAX_QUESTIONS)
+        batch_size = (
+            max(1, len(items)) if single_shot else min(self.batch_size, MAX_QUESTIONS)
+        )
         for offset in range(0, len(items), batch_size):
             await evaluate_batch(dict(items[offset : offset + batch_size]))
         return answers
@@ -443,6 +459,7 @@ class JevAnnotator:
         return AnnotationBackend(
             extract_nodes=self.extract_nodes,
             extract_edges=self.extract_edges,
+            extract_trace_checks=self.extract_trace_checks,
             provenance={
                 "annotator": "jev",
                 "api": "openai-decisions",
@@ -456,11 +473,53 @@ class JevAnnotator:
                 "timeout_s": getattr(self.client, "timeout_s", 120),
                 "max_retries": getattr(self.client, "max_retries", 5),
                 "decision_prompt_sha1": sha1_hex(
-                    PASS_A_SYSTEM + NODE_ONTOLOGY + NODE_RULES + EDGE_ONTOLOGY
+                    PASS_A_SYSTEM
+                    + NODE_ONTOLOGY
+                    + NODE_RULES
+                    + EDGE_ONTOLOGY
+                    + "".join(
+                        trace_check_prompt(name) for name in TRACE_CHECK_DEFINITIONS
+                    )
                 ),
                 "ontology_sha1": sha1_hex(PASS_A_INSTRUCTIONS + PASS_B_INSTRUCTIONS),
             },
         )
+
+    async def extract_trace_checks(self, trace, nodes, edges, model):
+        if self.client is None:
+            raise JevError("Jev client is required for annotation")
+        checks = []
+        for name, definition in TRACE_CHECK_DEFINITIONS.items():
+            criteria = {
+                "present": definition,
+                "absent": "The supplied evidence supports that this behavior did not occur.",
+                "uncertain": "A fact or evidence required by the definition cannot be established from the supplied capture.",
+            }
+            if name == "insufficient_validation":
+                criteria["not_applicable"] = (
+                    "No validation tools were available for this task."
+                )
+            question = {
+                "type": "choice",
+                "instructions": trace_check_prompt(name),
+                "criteria": criteria,
+            }
+            answers = await self.client.evaluate(
+                model,
+                trace_check_state(trace, nodes, edges, name),
+                {name: question},
+                single_shot=True,
+            )
+            answer = answers[name]
+            status = (
+                answer["choice"]
+                if answer["confidence"] >= self.min_confidence
+                else "uncertain"
+            )
+            checks.append(
+                {"name": name, "status": status, "support": [], "jev": answer}
+            )
+        return checks
 
     async def extract_nodes(
         self,

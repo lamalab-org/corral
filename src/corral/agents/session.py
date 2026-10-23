@@ -491,7 +491,7 @@ class AgentSession:
         usage: Mapping[str, Any] | None = None,
         llm_calls: int = 1,
     ) -> None:
-        """Commit a turn, including usage from an optional multi-call annotation."""
+        """Commit messages or usage alone when no public output was returned."""
         messages: list[Mapping[str, JsonValue]] = []
         for raw in raw_messages:
             message = dict(raw)
@@ -503,7 +503,7 @@ class AgentSession:
             if not isinstance(detached, Mapping):
                 raise TypeError("a provider transcript message must be a JSON object")
             messages.append(detached)
-        if not messages:
+        if not messages and usage is None:
             return
         normalized = usage_from_mapping(
             usage,

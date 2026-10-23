@@ -9,8 +9,8 @@ from typing import Any, Literal, TypedDict
 
 GRAPH_SCHEMA_VERSION = 1
 NORMALIZATION_VERSION = "corral-messages-v1"
-ANNOTATION_VERSION = "4"
-ANALYSIS_VERSION = "2"
+ANNOTATION_VERSION = "7"
+ANALYSIS_VERSION = "3"
 PATTERN_VERSION = "1"
 
 
@@ -175,8 +175,10 @@ class AnnotatedGraph:
     schema_version: int = GRAPH_SCHEMA_VERSION
     # Optional in v1 graphs; embedded for portable, provider-free reanalysis.
     annotation_view: dict[str, Any] | None = None
-    # Exact Jev requests and responses, including absent decisions; no auth headers.
+    # Exact annotation exchanges, including absent decisions; no auth headers.
     annotation_requests: list[dict[str, Any]] = field(default_factory=list)
+    trace_checks: list[dict[str, Any]] = field(default_factory=list)
+    trace_checks_status: Status = "unspecified"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -216,7 +218,12 @@ def read_graph(document: dict[str, Any]) -> AnnotatedGraph:
     for key in ("provenance", "qc", "grouping"):
         if key in document and not isinstance(document[key], dict):
             raise ValueError(f"Annotation {key} must be an object")
-    for key in ("completion_status", "reconstruction_status", "annotation_status"):
+    for key in (
+        "completion_status",
+        "reconstruction_status",
+        "annotation_status",
+        "trace_checks_status",
+    ):
         if key in document and document[key] not in {
             "complete",
             "unspecified",
@@ -253,6 +260,16 @@ def read_graph(document: dict[str, Any]) -> AnnotatedGraph:
         k: v for k, v in document.items() if k in AnnotatedGraph.__dataclass_fields__
     }
     values["schema_version"] = version
+    if "trace_checks" in document or document.get("trace_checks_status") == "complete":
+        from .trace_checks import validate_trace_checks
+
+        checks = document.get("trace_checks", [])
+        if checks or document.get("trace_checks_status") == "complete":
+            values["trace_checks"] = validate_trace_checks(
+                checks, document.get("messages", [])
+            )
+        elif checks != []:
+            raise ValueError("Annotation trace_checks must be a list")
     values["grouping"] = GroupingMetadata(**document.get("grouping", {}))
     raw_source = document.get("source")
     values["source"] = None

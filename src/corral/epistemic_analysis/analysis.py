@@ -15,6 +15,7 @@ from corral.epistemic_analysis.patterns import (
     detect_subgraphs_global,
     detect_subgraphs_local,
 )
+from corral.epistemic_analysis.trace_checks import TRACE_CHECK_NAMES
 
 if TYPE_CHECKING:
     from .schema import AnalysisResult, AnnotatedGraph
@@ -76,6 +77,13 @@ def summarize_trace(doc: dict[str, Any], file_path: Path) -> dict[str, Any]:
             sg_global.get(m, 0) for m in members
         )
 
+    checks = {check["name"]: check for check in doc.get("trace_checks", [])}
+    for name in TRACE_CHECK_NAMES:
+        status = checks.get(name, {}).get("status", "unassessed")
+        row[f"trace_check_status_{name}"] = status
+        row[f"trace_check_{name}"] = (
+            status == "present" if status in {"present", "absent"} else None
+        )
     return row
 
 

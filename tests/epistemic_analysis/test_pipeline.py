@@ -55,7 +55,7 @@ def test_corrected_and_added_observation_nodes_reach_both_backends(monkeypatch, 
     if kind == "llm":
 
         async def respond(model, system, user, **kwargs):
-            if system == ontology.PASS_A_SYSTEM:
+            if system == llm.PASS_A_SYSTEM:
                 return {
                     "nodes": [
                         node("ignored", "N", 0, source.messages),
@@ -93,6 +93,9 @@ def test_corrected_and_added_observation_nodes_reach_both_backends(monkeypatch, 
                 return answers
 
         backend = JevAnnotator(Decisions()).backend()
+    backend = replace(
+        backend, extract_trace_checks=None
+    )  # Graph postprocessing fixture.
     graph = asyncio.run(
         annotate_trace(
             source, backend, AnnotationConfig("annotator-model", window=20, overlap=5)
@@ -210,3 +213,35 @@ def test_status_denominators_configuration_partitioning_and_snapshot_selection()
 def test_invalid_saved_graphs_are_rejected(document):
     with pytest.raises(ValueError):
         read_graph(document)
+
+
+@pytest.mark.parametrize("kind", ["jev", "llm"])
+def test_coverage_allows_abstention_and_uses_only_the_annotation_view(kind):
+    messages = [
+        {"role": "user", "content": "Measure the sample."},
+        {"role": "assistant", "content": "Let me think about the next step."},
+        {"role": "assistant", "content": "   "},
+        {
+            "role": "assistant",
+            "content": "<action>submit_answer</action><action_input>X</action_input>",
+        },
+        {"role": "assistant", "content": "Post-submission duplicate summary."},
+    ]
+
+    async def nodes(messages, **kwargs):
+        assert len(messages) == 4
+        return [node("N1", "F", 3, messages)], []
+
+    async def edges(**kwargs):
+        return [], []
+
+    backend = AnnotationBackend(nodes, edges, {"annotator": kind})
+    source = NormalizedTrace(
+        messages, SourceReference("coverage", "coverage.json", "hash")
+    )
+    graph = asyncio.run(annotate_trace(source, backend, AnnotationConfig("fixture")))
+    assert graph.annotation_status == "complete"
+    assert graph.qc["uncovered_messages"] == [1]
+    assert graph.qc["message_coverage"]["assistant_messages"] == 2
+    assert graph.qc["message_coverage"]["labelled_assistant_messages"] == 1
+    assert len(graph.messages) == 5  # Source evidence is retained in full.

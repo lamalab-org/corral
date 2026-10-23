@@ -121,7 +121,33 @@ def _render(message: dict[str, Any]) -> dict[str, str]:
         if calls and [name.strip() for name in tagged] != [
             call["function"]["name"] for call in calls
         ]:
-            raise ValueError("ReAct tags and structured tool calls disagree")
+            # The ReAct runtime may execute only the first proposed action, or
+            # split a multi-action response over continuation messages. Keep
+            # the remaining proposal text, but do not render it as execution.
+            names = [call["function"]["name"] for call in calls]
+            if [name.strip() for name in tagged[: len(names)]] != names:
+                raise ValueError("ReAct tags and structured tool calls disagree")
+            index = 0
+
+            def mark_proposal(match):
+                nonlocal index
+                index += 1
+                if index <= len(names):
+                    return match.group(0)
+                return (
+                    match.group(0)
+                    .replace("<action>", "<proposed_action>")
+                    .replace("</action>", "</proposed_action>")
+                    .replace("<action_input>", "<proposed_action_input>")
+                    .replace("</action_input>", "</proposed_action_input>")
+                )
+
+            content = re.sub(
+                r"<action>.*?</action>(?:\s*<action_input>.*?</action_input>)?",
+                mark_proposal,
+                content,
+                flags=re.DOTALL,
+            )
     else:
         for call in calls:
             function = call["function"]
@@ -132,6 +158,26 @@ def _render(message: dict[str, Any]) -> dict[str, str]:
                 f"<action_input>{arguments}</action_input>"
             )
     return {"role": role, "content": content.lstrip("\n")}
+
+
+def _task_root(observations):
+    roots = [row for row in observations if not row.get("parentObservationId")]
+    # Some exports contain a synthetic trace-level SPAN alongside the task
+    # AGENT, and resumed executions can have an earlier failed task root.
+    tasks = [row for row in roots if row["type"].upper() == "AGENT"] or roots
+    if len(tasks) > 1:
+        identities = {
+            (_parse(row.get("metadata")) or {}).get("execution_id") for row in tasks
+        }
+        if len(identities) != 1 or None in identities:
+            raise ValueError("Multiple task roots have ambiguous execution identities")
+        if len({_hash(_parse(row.get("input"))) for row in tasks}) != 1:
+            raise ValueError("Multiple task roots have different task inputs")
+    if not tasks or any(not row.get("endTime") for row in tasks):
+        raise ValueError(
+            "Expected a completed task root; retry after ingestion finishes"
+        )
+    return max(tasks, key=lambda row: (row["endTime"], row["startTime"], row["id"]))
 
 
 def reconstruct_trace(
@@ -156,11 +202,7 @@ def reconstruct_trace(
             row["id"],
         ),
     )
-    roots = [row for row in ordered if not row.get("parentObservationId")]
-    if len(roots) != 1 or not roots[0].get("endTime"):
-        raise ValueError(
-            f"Trace {trace_id}: expected one completed task root; retry after ingestion finishes"
-        )
+    root = _task_root(ordered)
     generations = [row for row in ordered if row["type"].upper() == "GENERATION"]
     if not generations:
         raise ValueError(f"Trace {trace_id}: no recorded model generations")
@@ -195,9 +237,35 @@ def reconstruct_trace(
             if message["tool_call_id"] in tool_ids:
                 continue
             if row["startTime"] < latest["startTime"]:
-                raise ValueError(
-                    f"Trace {trace_id}: an earlier tool result is missing from model history"
+                positions = [
+                    i
+                    for i, item in enumerate(messages)
+                    if any(
+                        call.get("id") == message["tool_call_id"]
+                        for call in item.get("tool_calls") or []
+                    )
+                ]
+                if len(positions) != 1:
+                    raise ValueError(
+                        f"Trace {trace_id}: an earlier tool result is missing from model history"
+                    )
+                # Recover a recorded result at its uniquely identified action,
+                # before a subsequent harness restart/system preamble.
+                position = positions[0] + 1
+                while position < len(messages) and messages[position]["role"] == "tool":
+                    position += 1
+                messages.insert(position, message)
+                sources.insert(
+                    position,
+                    {
+                        "observation_id": row["id"],
+                        "field": "output",
+                        "index": index,
+                        "recovered_tool_result": True,
+                    },
                 )
+                tool_ids.add(message["tool_call_id"])
+                continue
             tool_ids.add(message["tool_call_id"])
             messages.append(message)
             sources.append(
@@ -212,7 +280,6 @@ def reconstruct_trace(
                 }
             )
     rendered = [_render(message) for message in messages]
-    root = roots[0]
     outcome = _parse(root.get("output"))
     if isinstance(outcome, dict) and outcome.get("status") == "submitted":
         answer = _text(outcome.get("answer"))
@@ -330,6 +397,63 @@ def parse_langfuse_url(value: str) -> LangfuseLocator:
     )
 
 
+_MEDIA_REFERENCE = re.compile(
+    r"@@@langfuseMedia:type=([^|]+)\|id=([^|]+)\|source=([^@]+)@@@"
+)
+
+
+def resolve_observation_media(rows, api, http):
+    """Restore oversized text fields offloaded by Langfuse, without losing evidence.
+
+    The media download uses a signed URL and must not receive project credentials.
+    Keep original references on the snapshot for auditing. Repeated references
+    are downloaded once. Non-text attachments remain explicitly unsupported.
+    """
+    cache = {}
+
+    def restore(value):
+        if isinstance(value, list):
+            return [restore(item) for item in value]
+        if isinstance(value, dict):
+            return {key: restore(item) for key, item in value.items()}
+        if not isinstance(value, str):
+            return value
+        # Observation v2 fields can be JSON-encoded strings.
+        parsed = _parse(value)
+        if not isinstance(parsed, str):
+            return restore(parsed)
+        match = _MEDIA_REFERENCE.fullmatch(parsed)
+        if match is None:
+            if "@@@langfuseMedia:" in parsed:
+                raise ValueError(
+                    "Embedded Langfuse media reference cannot be reconstructed"
+                )
+            return parsed
+        mime, identity, _ = match.groups()
+        if mime not in {"text/plain", "application/json"}:
+            raise ValueError(f"Unsupported Langfuse media type: {mime}")
+        if identity not in cache:
+            record = api.media.get(identity)
+            response = http.get(record.url)
+            response.raise_for_status()
+            cache[identity] = _parse(response.text)
+        return cache[identity]
+
+    result = []
+    for row in rows:
+        restored = dict(row)
+        references = {}
+        for field in ("input", "output"):
+            value = row.get(field)
+            if "@@@langfuseMedia:" in _json(value):
+                references[field] = value
+                restored[field] = restore(value)
+        if references:
+            restored["_media_references"] = references
+        result.append(restored)
+    return result
+
+
 def download_locator(locator: LangfuseLocator, from_time=None, to_time=None):
     """Validate deployment and credential project before fetching observations.
 
@@ -371,7 +495,7 @@ def download_locator(locator: LangfuseLocator, from_time=None, to_time=None):
         )
         if any(row.get("projectId") != locator.project_id for row in rows):
             raise ValueError("Langfuse returned records from another project")
-        return rows
+        return resolve_observation_media(rows, api, http)
 
 
 def traces_from_observations(entry, observations):
@@ -426,11 +550,13 @@ def traces_from_observations(entry, observations):
                 raise ValueError(
                     f"Trace {trace_id}: multiple {key} values require separate conversation reconstruction"
                 )
-        sessions = {row.get("sessionId") for row in rows}
-        if len(sessions) != 1:
+        # A child observation can omit the optional session field; traceId is
+        # still checked above. Distinct non-empty session IDs remain an error.
+        sessions = {row.get("sessionId") for row in rows if row.get("sessionId")}
+        if len(sessions) > 1:
             raise ValueError(f"Trace {trace_id}: inconsistent session identities")
-        document = reconstruct_trace(ordered_rows, next(iter(sessions)) or "")
-        root = next(row for row in rows if not row.get("parentObservationId"))
+        document = reconstruct_trace(ordered_rows, next(iter(sessions), ""))
+        root = _task_root(rows)
         metadata = _parse(root.get("metadata")) or {}
         if not isinstance(metadata, dict):
             metadata = {}

@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from corral.cli import build_parser
 from corral.epistemic_analysis import (
     AnnotationConfig,
     NormalizedTrace,
@@ -77,7 +76,7 @@ def annotate(messages, decisions, **options):
     trace = NormalizedTrace(messages, SourceReference("test", "test.json", "hash"))
     client = JevClient("not-saved", batch_size=8)
     client._post = decisions.post
-    backend = JevAnnotator(client).backend()
+    backend = replace(JevAnnotator(client).backend(), extract_trace_checks=None)
     config = AnnotationConfig("jev", **options)
     return asyncio.run(annotate_trace(trace, backend, config)), trace, backend, config
 
@@ -92,11 +91,12 @@ def test_current_definitions_are_sent_for_every_node_decision():
         if isinstance(target, ast.Name)
         and target.id in {"PASS_A_SYSTEM", "PASS_A_INSTRUCTIONS"}
     }
-    # Preserve the legacy definitions except for the requested F and T/N rules.
+    # Preserve the legacy structure while sharing current action and commitment
+    # definitions across LLM and Jev annotation.
     assignments["PASS_A_INSTRUCTIONS"] = assignments["PASS_A_INSTRUCTIONS"].replace(
         "tag <final_answer>", "action `submit_answer`"
     )
-    for kind in ("T", "N"):
+    for kind in ("T", "N", "C"):
         assignments["PASS_A_INSTRUCTIONS"] = re.sub(
             rf"^{kind} = .+$",
             f"{kind} = {ontology.NODE_CRITERIA[kind]}",
@@ -237,6 +237,8 @@ def test_test_plan_and_action_count_once_and_neutral_result_stays_evidence():
 
 
 def test_defaults_bounded_windows_clipping_and_full_decision_artifacts(tmp_path):
+    from corral.cli import build_parser
+
     args = build_parser().parse_args(
         ["analyze", "--input", "trace.json", "--annotator", "jev"]
     )
@@ -297,12 +299,11 @@ def test_defaults_bounded_windows_clipping_and_full_decision_artifacts(tmp_path)
 @pytest.mark.parametrize(
     ("text", "types"),
     [
-        ("No supported reasoning.", set()),
         ("<final_answer>X</final_answer>", {"H"}),
         ("Ordinary prose.", {"N"}),
     ],
 )
-def test_uncovered_or_invalid_annotations_require_review(text, types):
+def test_invalid_annotations_require_review(text, types):
     graph, trace, backend, config = annotate(
         [{"role": "assistant", "content": text}], Decisions(lambda c: types)
     )
@@ -310,6 +311,21 @@ def test_uncovered_or_invalid_annotations_require_review(text, types):
     assert graph.qc["review_issues"] or graph.qc["uncovered_messages"]
     assert not can_reuse(graph, trace, backend, config)
     assert not any(n["type"] == "N" for n in graph.nodes)
+
+
+@pytest.mark.parametrize("confidence", [0.04, 0.9])
+def test_unlabelled_prose_is_a_valid_abstention(confidence):
+    # Low-confidence "present" and confident "absent" both leave no node.
+    types = {"T"} if confidence < 0.5 else set()
+    graph, trace, backend, config = annotate(
+        [{"role": "assistant", "content": "Let me start with mass spec and 1H NMR."}],
+        Decisions(lambda c: types, confidence=confidence),
+    )
+    assert graph.nodes == []
+    assert graph.annotation_status == "complete"
+    assert graph.qc["uncovered_messages"] == [0]
+    assert graph.qc["message_coverage"]["unlabelled_messages"] == [0]
+    assert can_reuse(graph, trace, backend, config)
 
 
 def test_task_description_evidence_exception_is_preserved():

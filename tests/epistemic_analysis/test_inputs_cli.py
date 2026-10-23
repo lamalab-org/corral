@@ -27,6 +27,7 @@ from corral.epistemic_analysis.sources.langfuse import (
     download_locator,
     parse_langfuse_url,
 )
+from corral.epistemic_analysis.trace_checks import TRACE_CHECK_NAMES
 
 URL = "https://cloud.langfuse.com/project/project/sessions/session#observation=one"
 MESSAGES = [
@@ -266,6 +267,16 @@ def test_all_four_source_backend_combinations(
 
     async def llm_call(model, system, user, **kwargs):
         requests.append(system)
+        if system not in {llm.PASS_A_SYSTEM, llm.PASS_B_SYSTEM}:
+            assert system == llm.trace_check_system(json.loads(user)["check"]["name"])
+            return {
+                "trace_check": {
+                    "name": json.loads(user)["check"]["name"],
+                    "status": "absent",
+                    "explanation": "No supported incident.",
+                    "support": [],
+                }
+            }
         return (
             {
                 "nodes": [
@@ -281,8 +292,13 @@ def test_all_four_source_backend_combinations(
             else {"edges": []}
         )
 
-    async def decisions(self, model, state, questions):
+    async def decisions(self, model, state, questions, *, single_shot=False):
         requests.append(state)
+        if single_shot:
+            assert state["scope"] == "full_trace"
+            assert list(questions) == [state["check"]["name"]]
+            assert state["check"]["name"] in TRACE_CHECK_NAMES
+            return {name: {"choice": "absent", "confidence": 1.0} for name in questions}
         answers = {}
         for key in questions:
             if key.startswith("edge_"):
@@ -310,6 +326,8 @@ def test_all_four_source_backend_combinations(
     assert requests
     graph = json.loads(next((output / "annotations").glob("*.json")).read_text())
     assert graph["nodes"]
+    assert graph["trace_checks_status"] == "complete"
+    assert len(graph["trace_checks"]) == 11
     assert graph["source"]["locator"] == origin
     assert len(graph["message_sources"]) == len(graph["messages"])
     summary = json.loads((output / "analysis" / "annotation_summary.json").read_text())

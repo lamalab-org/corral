@@ -27,20 +27,45 @@ from corral.epistemic_analysis.graph import (
     coerce_edge,
     coerce_node,
 )
-from corral.epistemic_analysis.ontology import (
+from corral.epistemic_analysis.schema import content_hash
+from corral.epistemic_analysis.trace_checks import (
+    TRACE_CHECK_NAMES,
+    trace_check_prompt,
+    trace_check_state,
+    validate_trace_checks,
+)
+
+from .base import AnnotationBackend, record_model
+from .prompts import (
     PASS_A_INSTRUCTIONS,
     PASS_A_SYSTEM,
     PASS_B_INSTRUCTIONS,
     PASS_B_SYSTEM,
+    PROMPT_VERSION,
 )
-
-from .base import AnnotationBackend, record_model
 
 NODE_WINDOW_POLICY = "first-window-per-message-v1"
 
 
+def trace_check_system(name: str) -> str:
+    return f"""{trace_check_prompt(name)}
+Return JSON only: {{"trace_check": {{"name": "{name}", "status": "present",
+"explanation": "Brief evidence-based assessment", "support": [
+{{"msg_idx": 0, "quote": "Exact source substring"}}]}}}}.
+Return exactly one object with name "{name}" and an allowed status.
+Include a short explanation. A present assessment needs exact source
+quotes identifying the incident and the evidence required by its definition,
+including relevant task boundaries, contradicting results, and later actions.
+Do not use invented quotes or cite a derived node as source evidence.
+"""
+
+
 class LLMError(RuntimeError):
     pass
+
+
+class LLMRefusalError(LLMError):
+    """An explicit provider refusal; retrying the same request is inappropriate."""
 
 
 def _load_litellm():
@@ -52,7 +77,9 @@ def _load_litellm():
 def _extract_json_text(raw: str) -> str:
     """Strip markdown fences and find the outermost JSON object in *raw*."""
     raw = raw.strip()
-    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", raw, re.DOTALL)
+    # A quote inside valid JSON can itself contain a Markdown code fence.
+    # Only remove a fence wrapping the entire response.
+    m = re.fullmatch(r"```(?:json)?\s*\n?(.*?)\n?\s*```", raw, re.DOTALL)
     if m:
         raw = m.group(1).strip()
     start = raw.find("{")
@@ -66,9 +93,11 @@ async def llm_json_call_async(
     model: str,
     system: str,
     user: str,
-    temperature: float = 0.7,
+    temperature: float | None = 0.7,
     max_retries: int = 5,
     timeout_s: int = 120,
+    reasoning_effort: str | None = None,
+    max_output_tokens: int | None = None,
 ) -> dict[str, Any]:
     litellm = _load_litellm()
     last_err: Exception | None = None
@@ -79,11 +108,17 @@ async def llm_json_call_async(
     context = current_context()
     budget = context.config.max_request_tokens if context else 0
     options = {}
+    if reasoning_effort is not None:
+        options["reasoning_effort"] = reasoning_effort
+    if max_output_tokens is not None:
+        options["max_tokens"] = max_output_tokens
+    if temperature is not None:
+        options["temperature"] = temperature
     body = {
         "model": model,
         "messages": messages,
-        "temperature": temperature,
         "stream": True,
+        **options,
     }
     estimated, estimator = estimate_request(body)
     try:
@@ -119,7 +154,6 @@ async def llm_json_call_async(
         response_stream = await litellm.acompletion(
             model=model,
             messages=messages,
-            temperature=temperature,
             timeout=timeout_s,
             stream=True,
             **options,
@@ -134,6 +168,8 @@ async def llm_json_call_async(
             resp = await asyncio.wait_for(read_response(), timeout=timeout_s)
             if resp is None:
                 raise ValueError("LLM stream returned no response chunks")
+            if resp["choices"][0].get("finish_reason") == "length":
+                raise ValueError("LLM output was truncated at the output token limit")
             record_model(resp.get("model"))
             usage = resp.get("usage")
             if hasattr(usage, "model_dump"):
@@ -147,12 +183,26 @@ async def llm_json_call_async(
                 }
             )
             content = resp["choices"][0]["message"]["content"] or ""
+            if context is not None:
+                context.requests.append(
+                    {
+                        "request": {**body, **options},
+                        "response_text": content,
+                        "finish_reason": resp["choices"][0].get("finish_reason"),
+                        "resolved_model": resp.get("model"),
+                        "usage": numeric_usage(usage),
+                    }
+                )
+            if resp["choices"][0].get("finish_reason") in {"content_filter", "refusal"}:
+                raise LLMRefusalError(
+                    "The annotation provider explicitly refused this request"
+                )
             content = _extract_json_text(content)
             if not content:
                 raise ValueError("LLM returned empty content")
             return json.loads(content)
         except Exception as e:
-            if isinstance(e, RequestBudgetExceeded):
+            if isinstance(e, RequestBudgetExceeded | LLMRefusalError):
                 raise
             if (
                 is_context_error(str(e))
@@ -204,16 +254,26 @@ async def _extract_nodes(
         user = (
             f"{PASS_A_INSTRUCTIONS}\n\n"
             f"Message window:\n{window_text}\n\n"
+            f"Only return new nodes whose earliest supporting message index is "
+            f"in [{first_new}, {end}). Earlier messages are context only.\n"
             f"Return at most {max_nodes_per_window} nodes."
         )
         if view_instructions():
             user += "\n\n" + view_instructions()
 
         out = await call(model=model, system=PASS_A_SYSTEM, user=user)
-        nodes = out.get("nodes", [])
-        if not isinstance(nodes, list):
-            warnings.append(f"Pass A returned non-list nodes for window {start}-{end}.")
-            continue
+        if not isinstance(out, dict) or not isinstance(out.get("nodes"), list):
+            raise LLMError(f"Pass A requires a nodes array for window {start}-{end}")
+        nodes = out["nodes"]
+        if any(not isinstance(n, dict) for n in nodes):
+            raise LLMError(
+                f"Pass A returned a non-object node for window {start}-{end}"
+            )
+        if len(nodes) > max_nodes_per_window:
+            issue = f"PassA[{start}-{end}] Node cap reached; omitted {len(nodes) - max_nodes_per_window} nodes."
+            warnings.append(issue)
+            if current_context() is not None:
+                current_context().review_issues.append(issue)
 
         for n in nodes[:max_nodes_per_window]:
             if not isinstance(n, dict):
@@ -296,10 +356,13 @@ async def _extract_edges(
             user += "\n\n" + view_instructions()
 
         out = await call(model=model, system=PASS_B_SYSTEM, user=user)
-        edges = out.get("edges", [])
-        if not isinstance(edges, list):
-            warnings.append(f"Pass B returned non-list edges for window {start}-{end}.")
-            continue
+        if not isinstance(out, dict) or not isinstance(out.get("edges"), list):
+            raise LLMError(f"Pass B requires an edges array for window {start}-{end}")
+        edges = out["edges"]
+        if any(not isinstance(e, dict) for e in edges):
+            raise LLMError(
+                f"Pass B returned a non-object edge for window {start}-{end}"
+            )
 
         for e in edges:
             if not isinstance(e, dict):
@@ -321,19 +384,57 @@ async def _extract_edges(
     return deduped, warnings
 
 
+async def _extract_trace_checks(trace, nodes, edges, model, *, call):
+    checks = []
+    for name in TRACE_CHECK_NAMES:
+        out = await call(
+            model=model,
+            system=trace_check_system(name),
+            user=json.dumps(
+                trace_check_state(trace, nodes, edges, name), ensure_ascii=False
+            ),
+        )
+        if not isinstance(out, dict) or "trace_check" not in out:
+            raise LLMError(f"Pass C requires one trace_check object for {name}")
+        check = validate_trace_checks(
+            [out["trace_check"]], trace.messages, expected_names=(name,)
+        )[0]
+        if (
+            not isinstance(check.get("explanation"), str)
+            or not check["explanation"].strip()
+        ):
+            raise LLMError(f"Pass C requires an explanation for {check['name']}")
+        if check["status"] == "present" and not check["support"]:
+            raise LLMError(f"Pass C requires source evidence for {check['name']}")
+        checks.append(check)
+    return checks
+
+
 class LLMAnnotator:
-    """Generative node and edge extraction."""
+    """Generative node, edge and whole-trace behavioral annotation."""
 
     def __init__(
-        self, *, temperature: float = 0.7, timeout_s: float = 120, max_retries: int = 5
+        self,
+        *,
+        temperature: float | None = 0.7,
+        timeout_s: float = 120,
+        max_retries: int = 5,
+        reasoning_effort: str | None = None,
+        max_output_tokens: int | None = None,
     ):
         self.temperature = temperature
         self.timeout_s = timeout_s
         self.max_retries = max_retries
+        self.reasoning_effort = reasoning_effort
+        self.max_output_tokens = max_output_tokens
 
     def backend(self) -> AnnotationBackend:
         async def call(**kwargs):
             kwargs["temperature"] = self.temperature
+            if self.reasoning_effort is not None:
+                kwargs["reasoning_effort"] = self.reasoning_effort
+            if self.max_output_tokens is not None:
+                kwargs["max_output_tokens"] = self.max_output_tokens
             return await llm_json_call_async(
                 **kwargs, timeout_s=self.timeout_s, max_retries=self.max_retries
             )
@@ -341,11 +442,24 @@ class LLMAnnotator:
         return AnnotationBackend(
             extract_nodes=partial(_extract_nodes, call=call),
             extract_edges=partial(_extract_edges, call=call),
+            extract_trace_checks=partial(_extract_trace_checks, call=call),
             provenance={
                 "annotator": "llm",
                 "temperature": self.temperature,
                 "timeout_s": self.timeout_s,
                 "max_retries": self.max_retries,
                 "node_window_policy": NODE_WINDOW_POLICY,
+                "prompt_version": PROMPT_VERSION,
+                "prompt_hash": content_hash(
+                    [
+                        PASS_A_SYSTEM,
+                        PASS_A_INSTRUCTIONS,
+                        PASS_B_SYSTEM,
+                        PASS_B_INSTRUCTIONS,
+                        *[trace_check_system(name) for name in TRACE_CHECK_NAMES],
+                    ]
+                ),
+                "reasoning_effort": self.reasoning_effort,
+                "max_output_tokens": self.max_output_tokens,
             },
         )

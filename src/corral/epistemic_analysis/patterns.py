@@ -57,37 +57,71 @@ SUBGRAPH_NAMES = list(SUBGRAPH_DESCRIPTIONS.keys())
 
 
 ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
-    "untested_claim": ("Hypothesis never linked to a test [H with no tests]."),
+    "untested_claim": (
+        "Hypothesis never linked to a test [H with no tests]. "
+        "For current activity the claim must remain in use after an opportunity "
+        "to evaluate it; earlier relevant tests count and withdrawal is repair."
+    ),
     "evidence_non_uptake": (
-        "Evidence collected but never used [E with no informs to J or H]."
+        "Evidence collected but never used [E with no informs to J or H]. "
+        "Current activity requires an unaddressed relevant observation; "
+        "interpreting why a result is excluded counts as uptake."
     ),
     "unsupported_judgment": (
-        "Judgment made without supporting evidence [J with no E via informs]."
+        "Judgment made without supporting evidence [J with no E via informs]. "
+        "Support must address the particular inference or asserted attribute; "
+        "a plausible overall answer does not support every detail. "
+        "A corrected or retracted judgment is not still active unless retained "
+        "in the current reasoning."
     ),
     "stalled_revision": (
         "Revised hypothesis never tested "
-        "[H target of updates_to with no outgoing tests]."
+        "[H target of updates_to with no outgoing tests]. "
+        "Current activity requires an adopted revision still awaiting "
+        "evaluation, not a withdrawal or an already evaluated correction."
     ),
     "contradiction_without_repair": (
         "Contradiction unresolved by any update or alternative "
-        "[E -contradicts-> H, no updates_to/competes_with]."
+        "[E -contradicts-> H, no updates_to/competes_with]. "
+        "Evidence-based withdrawal or narrowing can also repair the conflict."
     ),
     "premature_commitment": (
         "Commitment (explicit or inferred) to a hypothesis without testing it first "
-        "[J -informs-> C, J -informs-> H, H with no tests]."
+        "[J -informs-> C, J -informs-> H, H with no tests]. "
+        "Identify the specific untested claim treated as settled. First-time "
+        "unsupported closure suffices; prior resistance to revision is not "
+        "required, and submission alone does not establish commitment."
     ),
-    "uninformative_test": ("Test produces no observed evidence [T with no E]."),
+    "uninformative_test": (
+        "Test produces no observed evidence [T with no E]. "
+        "A failed test with an observed result or reported error does not count. "
+        "Pending, superseded, or abandoned unused results are not active "
+        "omissions in current reasoning."
+    ),
     "fixed_belief_trace": (
-        "No hypothesis revision in the entire trace [No updates_to edges in trace]."
+        "No hypothesis revision in the entire trace [No updates_to edges in trace]. "
+        "This descriptive measurement is not a defect and never blocks submission."
     ),
-    "disconnected_evidence": ("Evidence node with no edges [Isolated E]."),
+    "disconnected_evidence": (
+        "Evidence node with no edges [Isolated E]. "
+        "Later attribution or interpretation resolves the disconnection."
+    ),
     "one_sided_confirmation": (
-        "Commitment (explicit or inferred) without contradicting evidence "
-        "[J -informs-> C, J -informs-> H, H has support but no contradicts]."
+        "Selective commitment to a supported hypothesis while neglecting a "
+        "specific live rival or an available useful discriminating check. "
+        "Treating favorable support as excluding that rival can establish "
+        "selectivity on the first occurrence, without a separate refusal. "
+        "Legacy graph candidate: [J -informs-> C, J -informs-> H, H has support "
+        "but no contradicts]. Absence of contradiction alone is insufficient "
+        "for the current behavioral motif."
     ),
     "precommitted_test_plan": (
         "Commitment (explicit or inferred) before evidence collection "
-        "[C before E; then H -tests-> T]."
+        "[C before E; then H -tests-> T]. "
+        "Unsupported closure before testing can establish commitment without "
+        "a prior challenge or refusal; a provisional plan cannot. "
+        "Current activity requires continuing unsupported closure; later "
+        "evidence-responsive evaluation can resolve the historical instance."
     ),
 }
 

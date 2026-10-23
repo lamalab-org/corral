@@ -11,6 +11,7 @@ from corral.epistemic_analysis.patterns import (
     SUBGRAPH_FAMILY_NAMES,
     SUBGRAPH_NAMES,
 )
+from corral.epistemic_analysis.trace_checks import TRACE_CHECK_NAMES
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -25,6 +26,32 @@ def _mean(values: list[float | None]) -> float | None:
         if v is not None and not (isinstance(v, float) and math.isnan(v))
     ]
     return sum(clean) / len(clean) if clean else None
+
+
+def compute_trace_check_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    result = {}
+    for name in TRACE_CHECK_NAMES:
+        values = [row.get(f"trace_check_{name}") for row in rows]
+        assessed = [value for value in values if value is not None]
+        result[name] = {
+            "count": sum(assessed),
+            "n_assessed": len(assessed),
+            "fraction": sum(assessed) / len(assessed) if assessed else None,
+            "status_counts": {
+                status: sum(
+                    row.get(f"trace_check_status_{name}", "unassessed") == status
+                    for row in rows
+                )
+                for status in (
+                    "present",
+                    "absent",
+                    "uncertain",
+                    "not_applicable",
+                    "unassessed",
+                )
+            },
+        }
+    return result
 
 
 def compute_aggregate_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -112,6 +139,7 @@ def compute_aggregate_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "n_traces": n,
+        "trace_checks": compute_trace_check_stats(rows),
         "subgraph_presence_local": subgraph_local,
         "subgraph_presence_global": subgraph_global,
         "antipattern_presence_local": antipattern_local,
@@ -167,6 +195,10 @@ def aggregate(
     def statistics(items):
         return {
             **compute_aggregate_stats([r.row for r in items if r.eligible]),
+            # Whole-trace checks do not require a nonempty epistemic graph.
+            "trace_checks": compute_trace_check_stats(
+                [r.row for r in items if r.status in {"complete", "uninformative"}]
+            ),
             "n_selected": len(items),
             "n_excluded": sum(not r.eligible for r in items),
             "status_counts": dict(Counter(r.status for r in items)),

@@ -89,6 +89,7 @@ class LLMResponseMetadata(TypedDict, total=False):
     logprobs: Any | None
     usage: dict[str, int] | None
     content_source: Literal["text", "reasoning_summary"]
+    finish_reason: str | None
 
 
 class LLMResponse:
@@ -126,6 +127,11 @@ class LLMResponse:
     def content_source(self) -> str:
         """Distinguish visible assistant text from a returned reasoning summary."""
         return self.metadata.get("content_source", "text")
+
+    @property
+    def finish_reason(self) -> str | None:
+        """Provider stop reason, retained for empty/truncated response diagnostics."""
+        return self.metadata.get("finish_reason")
 
     @property
     def role(self) -> str:
@@ -245,18 +251,10 @@ async def llm_call(
         message = response.choices[0].message
 
         metadata = LLMResponseMetadata()
-        # Streaming tool-only replies can have an empty string rather than None.
-        # Preserve a provider-returned summary in either case, while recording
-        # its source so downstream reports do not count it as visible assistant text.
-        if message.content is None or (
-            isinstance(message.content, str) and not message.content.strip()
-        ):
-            reasoning_content = getattr(message, "reasoning_content", None)
-            if reasoning_content:
-                message.content = str(reasoning_content)
-                metadata["content_source"] = "reasoning_summary"
-
+        # Provider reasoning is separate from public assistant text. In particular,
+        # masked thinking is not an empty public turn or a substitute explanation.
         metadata["id"] = response.id
+        metadata["finish_reason"] = getattr(response.choices[0], "finish_reason", None)
 
         # Include logprobs if requested via kwargs
         if kwargs.get("logprobs"):

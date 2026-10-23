@@ -15,6 +15,7 @@ from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.usage import usage_from_mapping
 from corral.agents.utils import llm_call as _default_llm_call
+from corral.core.messages import public_message
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -148,18 +149,11 @@ async def call_model(
 def provider_messages(
     messages: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Return provider-safe copies of canonical session messages."""
-    provider_fields = {
-        "role",
-        "content",
-        "name",
-        "tool_call_id",
-        "tool_calls",
-        "function_call",
-    }
+    """Return public history without empty assistant turns or private reasoning."""
     return [
-        {key: value for key, value in message.items() if key in provider_fields}
+        public
         for message in messages
+        if (public := public_message(message)) is not None
     ]
 
 

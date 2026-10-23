@@ -64,7 +64,23 @@ NODE_CRITERIA = {
     "T": "Test: any information-seeking action, including experiments, evaluations, or lookups. Both the intention and the concrete tool call qualify as one test (T) - each tool call is one test; what matters is that the system is seeking new scientific information to evaluate a hypothesis (H) or a judgment (J). If both the intention/plan to run a test and the actual tool call are present within the same message, count only the tool call as the test (T) node. If both T and N are selected for a tool call (with the tag <action>), keep T. If no node type is assigned to a tool call, use N.",
     "J": "Judgment: an interpretation of test results (Observation) that goes beyond the literal repetition of the raw output. If the agent restates an observation while adding any evaluative, comparative, or inferential content, even brief it is a judgment (J).",
     "F": "Final Answer: Only the message that contains a final submisssion (with action `submit_answer`), must be a assigned with a Final Answer (F) node.",
-    "C": "Commitment: if from the actions of the agents or system it can be inferred that they have reached an implicit commitment to an answer that is not yet fully supported by evidence, and that they are **refusing to revise it**, then create a pseudo-node labeled C. This is a special pseudo-node that captures the commitment even if it is not explicitly stated. It is possible that the Final Answer (F) node is also a Commitment (C) if the Final Answer (F) is not fully supported by evidence.",
+    "C": (
+        "Commitment: observable unsupported closure on an answer, or observable "
+        "resistance to relevant revision or validation. Unsupported closure "
+        "means treating a specific unevaluated claim as settled, or excluding "
+        "a specific live alternative without a discriminating basis. It can "
+        "occur on the first assertion; no prior challenge or refusal is required. "
+        "Resistance means dismissing relevant evidence, a live alternative, or "
+        "an available useful check without an evidence-based reason. Identify "
+        "the concrete support gap or dismissal in recorded statements or "
+        "actions; do not infer private intent. C may be a pseudo-node when "
+        "behavior demonstrates closure or resistance without an explicit "
+        "declaration. A provisional hypothesis, ordinary test plan, confident "
+        "wording, or final submission alone is insufficient. A supported "
+        "submission with acknowledged uncertainty is not C. A Final Answer "
+        "(F) can also be C only when unsupported closure or resistance is "
+        "independently established, not merely because it is final."
+    ),
 }
 
 PASS_A_INSTRUCTIONS = f"""Extract 0..k nodes from the provided message window.

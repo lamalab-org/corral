@@ -413,8 +413,8 @@ agent = ToolCallingAgent(
 
 ### EpistemicAgent
 
-Extends `ToolCallingAgent` with a Decisions assessment before each model turn
-after the first. The initial turn receives no epistemic report and makes no
+Extends `ToolCallingAgent` with a Decisions assessment after each public actor
+turn. The initial turn receives no epistemic report and makes no
 annotation API calls: the agent states initial hypotheses and justifies its first
 experiments without judging nonexistent prior experiments or reports.
 It classifies the seven productive motifs and eleven
@@ -426,30 +426,57 @@ Before `submit_answer`, the prompt requires a visible submission justification
 connecting the answer to specific observations, considering relevant alternatives
 and remaining uncertainty, and explaining why the evidence suffices. This text
 accompanies the tool call; its `answer` argument keeps the task's required format.
-Completion still requires `submit_answer`.
+Completion still requires `submit_answer`. Each attempted answer receives a fresh
+assessment that includes its proposed answer and justification, even on the first
+turn. The attempt is saved as a `submission_proposal` before the assessment. If
+any selected unconstructive pattern is supported by the explanation check,
+submission is held and the actor receives feedback to validate, revise, or
+challenge the assessment using concrete evidence. It must call `submit_answer`
+again; each attempt is reassessed. A clear assessment permits native submission.
+The existing actor iteration limit bounds this loop; exhaustion does not
+silently accept a held answer. An allowed surrender bypasses answer review.
 Its own `epistemic/user_prompt` replaces the base tool-calling prompt. It requests
-a visible reasoning summary before every tool call, including a separate
-justification for each call when using several tools in one response. It also
-permits turns containing only reasoning, which count toward the iteration limit.
+a brief scientific explanation of observations, evidence, and the purpose of
+each tool call, including when using several tools in one response. It also
+permits text-only explanations, which count toward the iteration limit.
 The system prompt, continuation reminder, and submission tool description are
 overridden for this agent; the base `ToolCallingAgent` keeps its original prompts
 and reminder. These are prompt instructions, not a runtime guarantee that the
-model will provide an explanation. Reasoning-only turns are assessed before the
+model will provide an explanation. Text-only turns are assessed before the
 next actor turn; earlier epistemic reports remain excluded from the annotator.
-If a provider returns a separate reasoning summary with an empty text field,
-the tool-calling loop preserves it as message content and marks its provenance
-with `metadata.content_source = "reasoning_summary"`. This is distinguishable
-from an explicitly generated visible justification.
+Only public assistant text, tool calls, and observations enter the conversation
+and epistemic trajectory. Provider thinking and reasoning summaries are never
+promoted to visible text. Empty assistant turns (including legacy saved turns)
+are omitted from model and annotator input; tool-only replies remain valid.
+An empty response is accounted for without adding an assistant message. The
+loop adds one continuation reminder and retries without reassessing unchanged
+evidence, stopping with `protocol_failure` after three consecutive empty
+responses. These requests still count toward the iteration limit and usage.
+For actor `content_filter` or `refusal` stop reasons, `EpistemicAgent` retries
+the unchanged request once by default, if the iteration budget allows it.
+It keeps the same messages, tools, model settings, and epistemic report.
+The refused attempt contributes usage but no transcript message or tool
+execution; the retry does not trigger another assessment. Every attempt counts
+toward the iteration limit. The retry allowance resets after a non-refused
+response. If refusals persist, the trial ends with `agent_failure`, retaining
+the final public refusal text and usage from all attempts.
+Set `actor_refusal_max_retries=0` to disable this behavior or choose another
+non-negative retry limit. This setting belongs only to `EpistemicAgent`;
+the base `ToolCallingAgent` still stops immediately on a refusal.
+Classifier retries remain controlled separately by `epistemic_max_retries`.
 
 ```python
 from corral.agents import EpistemicAgent
 
 agent = EpistemicAgent(
     model="openai/gpt-4o",  # Actor: any model supported by ToolCallingAgent.
+    actor_refusal_max_retries=1,  # Retries after the initial refused actor call.
     epistemic_model="gpt-6-luna",  # Separate Decisions classifier.
     epistemic_explanation_model="gpt-6-luna",  # Defaults to epistemic_model.
+    epistemic_explanation_concurrency=8,  # Per assessment, one request per candidate.
     epistemic_timeout_s=120,
     epistemic_max_retries=2,
+    epistemic_pattern_thresholds="positive-mass-20261020-v1",  # Default policy.
 )
 ```
 
@@ -466,7 +493,27 @@ Set `OPENAI_API_KEY` for the classifier. Its connection can be configured with
 currently supports `gpt-6-luna`. The annotator uses the SDK's native Decisions
 helper when available, or its generic `POST /decisions` transport on older SDKs.
 
-Use the annotator independently with chronological message dictionaries:
+Offline graph annotation (`corral analyze`, with either `--annotator llm` or
+`--annotator jev`) also labels the 11 behavioral checks defined in
+[`additional_checks.md`](additional_checks.md). A third pass runs after node and
+edge extraction and makes one request per check per trace (11 requests per trace).
+Each request contains only that check's definition and the entire normalized
+trace, including full tool outputs and messages after submission; `--window`,
+`--overlap`, and `--tool-output-max-chars` only control the graph passes.
+The package includes a copy of the definitions for installed runs; update both
+copies together (a regression test checks that they match).
+
+Saved graphs contain `trace_checks` and `trace_checks_status` alongside `nodes`
+and `edges`. Each check is `present`, `absent`, or `uncertain`;
+`insufficient_validation` can also be `not_applicable` when no validation tools
+were available. LLM results include explanations and exact source quotes;
+Decisions results retain the choice, confidence, and status probabilities.
+Results appear in the comparison viewer and analysis reports. Older saved graphs
+remain readable, with these checks unassessed. A context overflow or invalid
+response leaves the graph incomplete and preserves its nodes and edges, with
+the failure recorded in quality notes. This pass never splits or clips the trace.
+
+Use the standalone epistemic annotator independently with chronological message dictionaries:
 
 ```python
 import asyncio
@@ -489,48 +536,126 @@ asyncio.run(annotate_saved_conversation())
 `tool_calls` and tool outputs. Pass only the observed prefix for online use.
 An optional caller-owned `AsyncOpenAI` client can be passed as `client` to reuse
 connections. An agent accepts a configured annotator through `annotator`.
+An explicitly supplied annotator owns its configuration; the agent does not
+replace its threshold policy.
+
+By default, `EpistemicAgent` selects candidate patterns when
+`P(active) + P(resolved) >= threshold`, using the fixed per-pattern values in
+[`decision_thresholds.py`](src/corral/epistemic_analysis/decision_thresholds.py).
+The `positive-mass-20261020-v1` policy contains the offline thresholds fitted on
+328 completed trials pooled across agents, maximizing mean macro F1 against
+the Decisions and Claude graph annotations. Those fits used 16-message windows
+with 4-message overlap; online application assesses each full observed prefix.
+There is no online refitting or carry-over of earlier positive decisions.
+These are exploratory agreement settings, not calibrated correctness probabilities.
+Four fitted thresholds are zero, so those patterns always become candidates
+unless the classifier refuses; the evidence check below still applies.
+This probability rule selects historical occurrence candidates for inspection;
+it does not determine whether a finding can block submission.
+
+Set `epistemic_pattern_thresholds=None` (JSON `null` in `--agent-kwargs`) to use
+the original `active`-choice selection, or pass a mapping of all 18 motif names
+to finite thresholds in `[0, 1]`. The standalone `DecisionsAnnotator` retains
+the original selection by default; opt in with
+`DecisionsAnnotator(pattern_thresholds="positive-mass-20261020-v1")`.
 
 All 18 motifs are classified in one request as `absent`, `emerging`, `active`,
 `resolved`, or `uncertain`, with probabilities. Each question includes a full
 graph description specifying the events, relationships, ordering, and missing
 links, along with the original notation and examples/counterexamples. Shared
 glossaries define the nodes and relationships. The classifier reassesses the
-trajectory independently without receiving previous reports. The agent's reports
-show only **active** patterns with a short, trajectory-specific explanation of why
-each is present. Absent, emerging, resolved, uncertain, and refused classifications,
-confidence scores, probability distributions, and generic graph definitions are
-not included in the agent-facing feedback.
+trajectory independently without receiving previous reports. The original
+classifier status and probabilities are preserved, even when the probability
+threshold selects a pattern whose chosen status was `absent` or `emerging`.
+The agent's reports show only selected **unconstructive patterns** (`antipattern`)
+whose classifier status is **active** and whose separate explanation identifies
+a current, unresolved scientific defect with message evidence. An explanation
+cannot reactivate a finding classified as absent, emerging, resolved, or uncertain.
+The saved policy identifies this feedback gate as `current-unresolved-v2`,
+separately from the unchanged historical probability thresholds.
+`fixed_belief_trace` retains its original meaning (no hypothesis revision in the
+observed prefix), but is descriptive: it remains in the saved assessment and
+never holds submission. Productive patterns are likewise omitted from actor
+feedback and never hold a submission. The explanation check supports a complete
+productive sequence even when its classifier status is `resolved`; successful
+completion does not erase that occurrence.
+
+The definitions distinguish an unresolved defect from a historical occurrence.
+Support is assessed for the particular claim: evidence for an overall answer
+does not automatically support an asserted intensity, exact match, or exclusion
+of a named rival. Valid calculations, evidence-based interpretations, and
+correctly qualified approximate comparisons still count as support.
+`premature_commitment` can occur when an untested claim is first treated as
+settled; an earlier challenge or refusal to revise is not required.
+`one_sided_confirmation` requires selective commitment that neglects a specific
+relevant alternative or discriminating check. Claiming that a preferred answer's
+matching result excludes a named rival can establish selectivity without a
+separate refusal; an existing discriminating observation can justify the
+exclusion. A hypothesis surviving a test does not need a contradictory result.
+`uninformative_test` requires a missing outcome
+still relevant to the inference; reported execution failures are observed
+outcomes, and superseded or abandoned tests do not create permanent obligations.
+Corrected, retracted, or adequately qualified claims cease to be active when the
+later reasoning actually removes the defect. A disclaimer alone does not repair
+a conclusion that still relies on the unsupported claim, and correcting one
+claim does not repair a different remaining defect. The complete criteria
+and positive/negative examples are in
+[`motifs.py`](src/corral/epistemic_analysis/motifs.py).
+Confidence scores, probability distributions, thresholds, and
+generic graph definitions are not included in the agent-facing feedback.
 Refusals remain explicitly marked as uncertain in the saved assessment.
 These are temporal motif assessments, not deterministic graph counts
 or judgments of scientific correctness. Newly arrived results are not treated as
-ignored before the agent has an opportunity to respond.
+ignored before the agent has an opportunity to respond. This waiting rule
+applies to omitted responses, not to an unsupported assertion or closure that
+is already explicit in the latest message.
 
-When Decisions detects active patterns, the annotator makes one additional
-Responses API call to explain them, using structured output and the same filtered
-trajectory. The explanation model receives the complete candidate graph definitions
+As soon as the Decisions response arrives and passes validation, the annotator
+verifies selected candidates in parallel, with one Responses API request per
+pattern and up to eight requests in flight per assessment. Set
+`explanation_concurrency` on the standalone annotator or
+`epistemic_explanation_concurrency` on the agent to a positive integer to change
+the limit. Concurrent trials each have their own limit. All explanations must
+finish and pass validation before the actor continues; a failed request cancels
+the remaining explanations. Requests use structured output and the same filtered
+trajectory. The explanation model receives the complete candidate graph definition
 and must identify the actual observations and relationships supporting each
-pattern, with valid 1-based trajectory message references. It can reject unsupported
+pattern in prose, together with a boolean support judgment. Message IDs and numbered
+citations are not requested or required for feedback or submission review. It can reject unsupported
 detections; these remain in the saved assessment but are omitted from agent feedback.
-No explanation call is made when there are no active patterns. The explanation
+No explanation call is made when there are no selected candidates. The explanation
 model defaults to the Decisions model and can be configured with
 `explanation_model` on the standalone annotator or `epistemic_explanation_model`
-on the agent. Both calls use the annotator's API connection settings.
-If nothing is supported, the feedback says "No present epistemic patterns detected."
+on the agent. All calls use the annotator's API connection settings. Parallel
+requests each include the full trajectory, increasing request volume and repeated
+input tokens compared with a single combined explanation request.
+If no finding passes the current-defect gate, the feedback says
+"No present unconstructive epistemic patterns detected."
 
 The actor retains all earlier reports in chronological order and receives a new
-report before each subsequent turn. A resumed session with prior agent activity
+report after new public activity. A resumed session with prior agent activity
 receives feedback immediately; task-only context does not trigger a judgment.
-Reports are excluded from the annotator's input,
+Reports and `epistemic_submission_review` continuation notices are excluded from the annotator's input,
 including when resuming a session, from both classification and explanation calls.
-Complete reports, probabilities, explanations, evidence message references, raw responses, and
+Complete reports, probabilities, explanations, support judgments, raw responses, and
 usage remain in named `epistemic_report` session messages under
-`metadata.epistemic_report`. This metadata is never sent to the actor, including
+`metadata.epistemic_report`. Each assessment also records `selection_probability`,
+`selection_threshold`, and `selected`; the report's `selection_policy` records
+the rule, all thresholds, and calibration provenance. This metadata is never sent to the actor, including
 on resume; it sees only the formatted report text.
+The legacy `evidence_message_ids` field remains readable in historical reports
+and is empty in new assessments.
+New reports store every explanation response in `raw_explanation_responses`,
+ordered by motif rather than completion time. The legacy singular
+`raw_explanation_response` is also populated when there is exactly one explanation
+request; it is `None` for multiple requests. Token and call totals include every
+explanation response exactly once.
 The actor, classifier, and explanation calls contribute to token
 and model-call accounting; `max_iterations` still limits actor turns. Each request
 contains the full prefix without silent truncation, so classification cost grows
 with the conversation. After bounded SDK retries, API or malformed-response
 errors end the session with `agent_failure` rather than silently skipping feedback.
+A failed submission assessment preserves the proposed answer without accepting it.
 
 ### LLMPlanner
 
