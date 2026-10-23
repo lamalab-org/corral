@@ -24,7 +24,13 @@ from corral.runtime import permissions
 from corral.runtime.tool_execution import ToolArgumentError, ToolExecutor
 
 
-def _execution(root):
+def _execution(root, *, file_resources=None, file_resource_sources=None):
+    def file_tools(workspace):
+        bound = _md_file_tools(workspace)
+        for item in bound.values():
+            item.resources = tuple(file_resources or {})
+        return bound
+
     environment = MolecularDynamicsEnvironment(
         "md",
         TaskDefinition(
@@ -37,6 +43,8 @@ def _execution(root):
         ),
         base_work_dir=str(root.parent),
         workspace_path=str(root),
+        file_resources=file_resources,
+        file_resource_sources=file_resource_sources,
         toolset=Toolset(
             pool={
                 item.name: item
@@ -45,7 +53,7 @@ def _execution(root):
                     tools.get_structure_from_mp_text,
                 )
             },
-            workspace_factory=_md_file_tools,
+            workspace_factory=file_tools,
         ),
     )
     started = environment.initial_event(execution_id="md-routing")
@@ -84,22 +92,26 @@ def test_python_timeout_budget_is_visible_to_the_agent(tmp_path):
     assert "synchronized only on success" in description
     assert "900" in timeout["description"]
     assert "7200" in timeout["description"]
+    assert "working_dir" not in definition["parameters"]["properties"]
 
 
 @pytest.mark.parametrize("restricted", [False, True])
-@pytest.mark.parametrize("kind", ["models", "structures", "potentials", "resources"])
+@pytest.mark.parametrize("kind", ["resources", "resources/fixture"])
 def test_write_cannot_bypass_reserved_namespaces(
     tmp_path, monkeypatch, restricted, kind
 ):
     environment, state = _execution(tmp_path / "task")
     monkeypatch.setattr(permissions, "enabled", lambda: restricted)
-    monkeypatch.setattr(
-        permissions,
-        "run_worker",
-        lambda *_a, **_k: pytest.fail(
-            "MD file operations must retain their asset checks"
-        ),
-    )
+    def worker(kind, payload, workspace, **_policy):
+        from corral.workspace import AbsoluteWorkspaceFilesystem, build_workspace_tools
+
+        assert kind == "workspace_tool"
+        name, arguments = payload
+        return {"content": build_workspace_tools(
+            AbsoluteWorkspaceFilesystem(workspace)
+        )[name].execute(**arguments)}
+
+    monkeypatch.setattr(permissions, "run_worker", worker)
     with pytest.raises((PermissionError, ValueError)):
         _call(
             environment,
@@ -156,7 +168,9 @@ def test_cpu_worker_receives_only_public_paths_and_declared_access(
         assert not selected.trusted
         assert arguments["workspace"] == "/workspace"
         assert arguments["script_relative"] == "scripts/analyze.py"
-        assert arguments["directory_relative"] == "."
+        assert "directory_relative" not in arguments
+        assert "assets_dir" not in arguments
+        assert "assets_dir" not in selected.params_json_schema["properties"]
         assert arguments["args"] == ["/workspace/output/result.txt"]
         assert arguments["timeout"] == 900
         assert "corral_action_id" not in arguments
@@ -330,3 +344,118 @@ def test_cpu_script_and_terminal_are_confined_by_linux(tmp_path, monkeypatch):
         keyword="fix",
     )
     assert secret.read_text() == "private"
+
+
+def test_cpu_dispatch_preserves_authorized_resource_mounts(tmp_path, monkeypatch):
+    from corral.core.resources import declare_file_resource
+
+    source = tmp_path / "fixture.dat"
+    source.write_text("pinned asset")
+    descriptor = declare_file_resource("fixture", source, runtime_version="test")
+    environment, state = _execution(
+        tmp_path / "task", file_resources={"fixture": descriptor},
+        file_resource_sources={"fixture": source},
+    )
+    Path(environment.workspace_path, "scripts/probe.py").write_text("print(42)")
+    monkeypatch.setattr(permissions, "enabled", lambda: True)
+
+    def run_worker(kind, payload, workspace, **policy):
+        assert kind == "tool"
+        assert payload[0].resources == ("fixture",)
+        assert set(policy["resource_mounts"]) == {"fixture"}
+        physical, public = policy["resource_mounts"]["fixture"]
+        assert public == descriptor.public_path
+        assert Path(physical).read_text() == "pinned asset"
+        return {"content": "authorized asset"}
+
+    monkeypatch.setattr(permissions, "run_worker", run_worker)
+    assert _call(environment, state, "execute_python_script",
+                 script_path="/workspace/scripts/probe.py") == "authorized asset"
+    assert tools._PYTHON_CALL.get() is None
+
+
+def test_python_each_invocation_starts_in_workspace_without_environment_variable(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "output").mkdir()
+    (tmp_path / "scripts/probe.py").write_text(
+        "import os\nfrom pathlib import Path\n"
+        "assert 'CORRAL_WORKSPACE' not in os.environ\n"
+        "assert Path('scripts/probe.py').is_file()\n"
+        "Path('output/result.txt').write_text('ok')\n"
+        "os.chdir('scripts')\n"
+    )
+    for _ in range(2):
+        receipt = json.loads(tools._run_python_locally(
+            tmp_path, "/workspace/scripts/probe.py", [], 30,
+        ))
+        for key in ("stdout", "stderr"):
+            assert (tmp_path / receipt[key].removeprefix("/workspace/")).is_file()
+    assert (tmp_path / "output/result.txt").read_text() == "ok"
+
+
+def test_local_lammps_passes_restricted_hidden_argument_validation(tmp_path, monkeypatch):
+    from corral.runtime.tool_execution import PreparedToolCall, execute_prepared_call
+
+    selected = tools.build_run_lammps_tool(tmp_path, local=True)
+    assert set(selected.hidden_args) == {"corral_workspace"}
+    assert "corral_action_id" not in selected.params_json_schema["properties"]
+    monkeypatch.setattr(permissions, "enabled", lambda: True)
+
+    def run_worker(kind, payload, workspace, **policy):
+        assert kind == "tool"
+        assert workspace == str(tmp_path)
+        assert payload[1] == {
+            "input_file": "/workspace/input/run.in",
+            "corral_workspace": "/workspace",
+        }
+        assert policy["workspace_access"] == "read_write"
+        return {"content": "local LAMMPS"}
+
+    monkeypatch.setattr(permissions, "run_worker", run_worker)
+    prepared = PreparedToolCall.capture(
+        selected,
+        {"input_file": "/workspace/input/run.in", "corral_workspace": str(tmp_path)},
+        workspace=str(tmp_path),
+    )
+    assert execute_prepared_call(prepared) == "local LAMMPS"
+
+
+@pytest.mark.parametrize("with_mount", [False, True])
+def test_modal_dispatch_uses_frozen_authorization_after_catalog_mutation(
+    tmp_path, monkeypatch, with_mount,
+):
+    from dataclasses import replace
+
+    from corral.core.resources import declare_file_resource
+
+    source = tmp_path / "fixture.dat"
+    source.write_text("original pinned asset")
+    original = declare_file_resource("fixture", source, runtime_version="test")
+    environment, state = _execution(
+        tmp_path / "task", file_resources={"fixture": original},
+        file_resource_sources={"fixture": source},
+    )
+    Path(environment.workspace_path, "scripts/probe.py").write_text("print(42)")
+    executor = ToolExecutor(environment)
+    prepared = executor.prepare(
+        state, environment.tools["execute_python_script"],
+        {"script_path": "/workspace/scripts/probe.py", "use_gpu": True},
+        action_id="frozen-resources",
+    )
+    if not with_mount:
+        prepared = replace(prepared, _resource_mount_items=())
+    changed = tmp_path / "replacement.dat"
+    changed.write_text("different asset")
+    environment.file_resources["fixture"] = declare_file_resource(
+        "fixture", changed, runtime_version="changed",
+    )
+
+    def remote(*_args, **_kwargs):
+        assert modal_workspace._AUTHORIZED_RESOURCES.get() == (
+            {"fixture": original.model_dump(mode="json")} if with_mount else {}
+        )
+        return 0
+
+    monkeypatch.setattr(tools, "run_python_gpu_in_modal", remote)
+    assert json.loads(executor.execute_prepared(state, prepared))["success"]
+    assert modal_workspace._AUTHORIZED_RESOURCES.get() is None

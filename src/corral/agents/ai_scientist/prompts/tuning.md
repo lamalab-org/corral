@@ -19,7 +19,7 @@ Existing child experiments from this checkpoint:
 Proposal slots in this expansion:
 {{proposal_slots}}
 
-Execution-relative workspaces, one per proposal in proposal order:
+Public workspaces, one per isolated proposal in proposal order:
 {{branch_workspaces}}
 
 All reliable evidence:
@@ -37,5 +37,4 @@ state what comparison the change enables. Do not repeat an existing child, and
 make requested slots materially different parameter comparisons. Do not
 precompute tool actions. A
 bounded worker will choose up to {{max_actions}} listed-tool actions one at a
-time from actual observations. Keep output paths relative to the assigned trial
-workspace. Return exactly {{count}} proposal(s) when possible.
+time from actual observations. Return exactly {{count}} proposal(s) when possible.

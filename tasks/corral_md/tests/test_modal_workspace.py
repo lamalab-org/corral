@@ -24,8 +24,8 @@ from corral.observability import NoOpObserver
 from corral.persistence import SQLiteCommitStore
 from corral.persistence.workspace import WorkspaceManager
 from corral.runtime import TaskRuntime
-from corral.runtime.tool_execution import ToolExecutor
 from corral.runtime.permissions import NODE_WORKSPACE_DIR, SCRATCH_PREFIX
+from corral.runtime.tool_execution import ToolExecutor
 
 
 def _ref(data: bytes) -> dict[str, str | int]:
@@ -128,11 +128,17 @@ class _Call:
             })
             volume.files[f"{attempt}/diagnostic.log"] = b"failed\n"
             raise RuntimeError("simulation failed")
+        logs = {}
+        for stream in ("stdout", "stderr"):
+            name = f"output/{Path(input_file).stem}.{stream}.txt"
+            volume.files[f"{attempt}/{name}"] = stream.encode()
+            logs[stream] = "/workspace/" + name
         if self.function.kind == "python":
             volume.files[f"{attempt}/gpu.out"] = b"GPU output\n"
         else:
             volume.files[f"{attempt}/output/{Path(input_file).with_suffix('.log').name}"] = b"LAMMPS log\n"
             volume.files[f"{attempt}/trajectory.dump"] = b"atoms\n"
+            logs["log"] = f"/workspace/output/{Path(input_file).stem}.log"
         files = {
             key.removeprefix(attempt + "/"): _ref(value)
             for key, value in volume.files.items() if key.startswith(attempt + "/")
@@ -140,7 +146,7 @@ class _Call:
         result = {
             "action_id": action, "kind": self.function.kind,
             "release_id": release, "workspace": "/results" + attempt,
-            "files": files, "revision": 1,
+            "files": files, "revision": 1, "logs": logs,
         }
         volume.write_json(f"{prefix}/actions/{action}.json", result)
         state = volume.json(f"{prefix}/run.json")
@@ -194,7 +200,7 @@ def test_persistent_modal_workspace_and_delta_sync(tmp_path: Path) -> None:
         volume=volume, remote_function=function, initializer=initializer,
     )
     assert log == workspace / "output/run.log"
-    assert downloaded == 2
+    assert downloaded == 4
     assert log.read_bytes() == b"LAMMPS log\n"
     assert len(function.calls) == 1
     assert "/corral/runs/workspace/actions/action-1.json" in volume.files
@@ -315,11 +321,15 @@ def test_gpu_python_uses_same_persistent_protocol(tmp_path: Path) -> None:
     (workspace / "old.dat").write_text("delete me")
     volume = _Volume()
     function = _Function(volume, kind="python", delete_file="old.dat")
+    logs = {}
     downloaded = bridge.run_python_gpu_in_modal(
-        workspace, "script.py", action_id="python-1", release_id="release-1",
+        workspace, "script.py", action_id="python-1", release_id="release-1", logs=logs,
         volume=volume, remote_function=function, initializer=_Initializer(volume),
     )
-    assert downloaded == 1
+    assert downloaded == 3
+    assert logs == {"stdout": "/workspace/output/script.stdout.txt",
+                    "stderr": "/workspace/output/script.stderr.txt"}
+    assert all((workspace / value.removeprefix("/workspace/")).is_file() for value in logs.values())
     assert (workspace / "gpu.out").read_bytes() == b"GPU output\n"
     assert not (workspace / "old.dat").exists()
     assert volume.json("/corral/runs/workspace/actions/python-1.json")["kind"] == "python"
@@ -343,7 +353,7 @@ def test_recover_remote_completion_without_reexecuting(tmp_path: Path, monkeypat
         workspace, "run.in", action_id="action-1", release_id="release-1",
         volume=volume, remote_function=function, initializer=initializer,
     )
-    assert downloaded == 2
+    assert downloaded == 4
     assert len(function.calls) == 1
     assert initializer.calls == 1
     assert (workspace / "output/run.log").is_file()
@@ -365,7 +375,7 @@ def test_restart_reattaches_to_saved_modal_call(tmp_path: Path) -> None:
         volume=volume, remote_function=function, initializer=initializer,
         call_factory=lambda _call_id: function.calls[0],
     )
-    assert downloaded == 2
+    assert downloaded == 4
     assert len(function.calls) == 1
 
 
@@ -396,7 +406,7 @@ def test_lost_remote_run_restarts_pending_action_from_local_snapshot(
             workspace, "run.in", action_id="action-1", release_id="release-1",
             volume=volume, remote_function=function, initializer=initializer,
         )
-    assert downloaded == 2
+    assert downloaded == 4
     assert len(function.calls) == 2
     assert (workspace / "output/run.log").is_file()
     assert not (workspace / "uncommitted.out").exists()
@@ -457,9 +467,9 @@ def test_md_io_tools_are_bound_to_local_workspace(tmp_path: Path) -> None:
     assert "corral_action_id" in tools["execute_python_script"].hidden_args
     assert tools["run_lammps"].trusted
     assert tools["run_verified_md"].trusted
-    assert tools["list_files"].trusted
-    assert tools["copy_file"].trusted
-    assert tools["write_file"].trusted
+    assert not tools["list_files"].trusted
+    assert not tools["copy_file"].trusted
+    assert not tools["write_file"].trusted
 
 
 def test_md_lammps_tool_receives_private_action_id(tmp_path: Path, monkeypatch) -> None:
@@ -476,6 +486,7 @@ def test_md_lammps_tool_receives_private_action_id(tmp_path: Path, monkeypatch) 
 
     monkeypatch.setattr(md_tools, "_run_lammps_for_workspace", run)
     tool = _md_file_tools(str(workspace))["run_lammps"]
+    tool.resources = ()
     environment = MolecularDynamicsEnvironment(
         "md",
         TaskDefinition(
@@ -519,7 +530,7 @@ def test_md_prompt_requires_absolute_workspace_paths(tmp_path: Path) -> None:
     assert prompt.count("canonical absolute paths under `/workspace`") == 1
     assert prompt.count("Available input data:") == 1
     assert "- temperature: 300" in prompt
-    assert "read-only catalogs" in prompt
+    assert "/workspace/resources" in prompt
     assert "execute_python_script(use_gpu=True)" in prompt
     assert "Step, Temperature, Pressure, and Density" in prompt
     assert str(environment.workspace_path) not in prompt
@@ -725,6 +736,7 @@ def test_input_sync_handles_file_directory_replacements(tmp_path, old_kind):
 @pytest.mark.parametrize("kind", ["lammps", "python"])
 @pytest.mark.parametrize("interruption", ["download", "snapshot"])
 def test_runtime_recovers_same_action_after_remote_success(tmp_path, monkeypatch, kind, interruption):
+    monkeypatch.setattr("corral_md.env.asset_descriptors", lambda: {})
     monkeypatch.delenv("CORRAL_MD_RELEASE_ID", raising=False)
     def deployed_function(app_name, function_name):
         assert (app_name, function_name) == ("simagent", "runtime_info")
@@ -745,6 +757,8 @@ def test_runtime_recovers_same_action_after_remote_success(tmp_path, monkeypatch
         "md", task, base_work_dir=str(tmp_path), task_execution_id="execution",
         toolset=Toolset(workspace_factory=_md_file_tools),
     )
+    for item in environment.tools.values():
+        item.resources = ()
     workspace = Path(environment.workspace_path)
     (workspace / "run.in").write_text("run 0\n")
     (workspace / "script.py").write_text("print('hello')\n")

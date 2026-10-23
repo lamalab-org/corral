@@ -13,9 +13,9 @@ import pytest
 from ase.build import bulk
 from ase.calculators.emt import EMT
 from ase.io import read
-from corral_md.score import WorkflowScorer, check_level2_workflow
-from corral_md.workflow_scoring.common import Evidence, Rubric
-from corral_md.workflow_scoring.verification import (
+from corral_md.scoring import WorkflowScorer, check_level2_workflow
+from corral_md.scoring.common import Evidence, Rubric
+from corral_md.scoring.verification import (
     ModalVerifier,
     Plan,
     apply_verification,
@@ -32,6 +32,36 @@ def module(name):
     loaded = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(loaded)
     return loaded
+
+
+@pytest.mark.parametrize("model", ["teacher.model", "student.model"])
+def test_verifier_uses_the_declared_model_path(monkeypatch, model):
+    import sys
+
+    from corral_md.resources import asset_public_path
+
+    verifier = module("verification_worker")
+    assets = json.loads(
+        (Path(__file__).resolve().parents[1] / "modal_app/assets.json").read_text()
+    )
+    calls = []
+    calculator = object()
+    monkeypatch.setitem(
+        sys.modules,
+        "mace.calculators",
+        SimpleNamespace(
+            MACECalculator=lambda **kwargs: calculator,
+            mace_mp=lambda **kwargs: calls.append(kwargs) or calculator,
+        ),
+    )
+
+    def digest(path):
+        assert str(path) == asset_public_path(f"models/{model}")
+        return assets["models"][model]["sha256"]
+
+    monkeypatch.setattr(verifier, "file_hash", digest)
+    assert verifier.mace_calculator({"model": model}, assets, "/evidence") is calculator
+    assert calls[0]["model"] == asset_public_path(f"models/{model}")
 
 
 def fixture_module(name):
@@ -65,18 +95,19 @@ def test_verifier_upload_makes_private_checkpoint_readable_without_changing_sour
     tmp_path, monkeypatch
 ):
     import hashlib
+
     import modal
 
-    checkpoint = tmp_path / "state.restart"
-    checkpoint.write_bytes(b"saved restart")
+    checkpoint = tmp_path / "student.model"
+    checkpoint.write_bytes(b"saved model checkpoint")
     checkpoint.chmod(0o600)
-    plan = Plan(None, 1, "nonce")
+    plan = Plan(None, 3, "nonce")
     plan.add(
-        "restart_state",
-        "lammps_restart",
+        "student_energy",
+        "mace",
+        {"frames": [], "properties": ["energy"]},
         {},
-        {},
-        parameters=plan.checkpoint(checkpoint),
+        parameters={"model": "submitted", **plan.checkpoint(checkpoint)},
     )
     uploaded = {}
 
@@ -127,14 +158,13 @@ def test_verifier_upload_makes_private_checkpoint_readable_without_changing_sour
     result = verifier._calculate(plan, "fingerprint")
     assert result["jobs"][0]["status"] == "complete"
     assert checkpoint.stat().st_mode & 0o777 == 0o600
-    assert checkpoint.read_bytes() == b"saved restart"
+    assert checkpoint.read_bytes() == b"saved model checkpoint"
 
 
-@pytest.mark.parametrize("number", range(3, 11))
 def test_current_evidence_builds_checks_without_scripts_or_expected_answers(
-    tmp_path, number
+    tmp_path,
 ):
-    plan = build_plan(Evidence(_submission(number, tmp_path)), number, "nonce")
+    plan = build_plan(Evidence(_submission(4, tmp_path)), 4, "nonce")
     assert plan.jobs
     assert not [n for n in plan.notes if n["status"] == "unverified"], plan.notes
     assert all("expected" not in job and "value" not in job for job in plan.jobs)
@@ -146,12 +176,14 @@ def test_current_evidence_builds_checks_without_scripts_or_expected_answers(
     assert all(path.suffix != ".py" for path in plan.files.values())
 
 
-def test_sampling_is_evaluator_controlled(tmp_path):
-    evidence = Evidence(_submission(10, tmp_path))
-    first = build_plan(evidence, 10, "first")
-    assert first.jobs == build_plan(evidence, 10, "first").jobs
-    assert first.jobs != build_plan(evidence, 10, "second").jobs
-    assert all(len(job["sample_indices"]) == 3 for job in first.jobs)
+def test_sampling_is_evaluator_controlled():
+    first = Plan(Evidence({}), 10, "first")
+    assert first.sample(100, 3, "energy") == Plan(Evidence({}), 10, "first").sample(
+        100, 3, "energy"
+    )
+    assert first.sample(100, 3, "energy") != Plan(Evidence({}), 10, "second").sample(
+        100, 3, "energy"
+    )
 
 
 def test_palladium_recalculation_is_split_into_bounded_jobs():
@@ -308,148 +340,6 @@ def test_verifier_waits_for_declared_dependencies():
     assert all(check["status"] == "passed" for check in checks)
 
 
-def test_fixed_task3_and_task5_inputs_use_release_ground_truth(tmp_path):
-    task3_root = tmp_path / "task3"
-    task5_root = tmp_path / "task5"
-    task3_root.mkdir()
-    task5_root.mkdir()
-    task3 = build_plan(Evidence(_submission(3, task3_root)), 3, "nonce")
-    operations = {job["id"]: job["operation"] for job in task3.jobs}
-    assert operations["teacher_dimer_labels"] == "reference"
-    assert operations["student_before"] == "reference"
-    assert operations["student_after"] == "mace"
-    assert operations["trained_bulk_model"] == "mace"
-
-    task5 = build_plan(Evidence(_submission(5, task5_root)), 5, "nonce")
-    assert [job["id"] for job in task5.jobs] == ["silicon_reference_hessians"]
-    assert task5.jobs[0]["operation"] == "reference"
-    assert len(task5.jobs[0]["frames"]) == 25
-
-
-def test_nonreference_calculator_settings_keep_live_verification(tmp_path):
-    for number, setting_name in ((3, "teacher_model_settings"), (5, "model_settings")):
-        root = tmp_path / f"task{number}"
-        root.mkdir()
-        path = _submission(number, root)
-        manifest = json.loads(path.read_text())
-        settings_path = Path(manifest["settings"])
-        settings = json.loads(settings_path.read_text())
-        settings[setting_name] = {"default_dtype": "float32"}
-        settings_path.write_text(json.dumps(settings))
-        plan = build_plan(Evidence(path), number, "nonce")
-        if number == 3:
-            teacher = next(j for j in plan.jobs if j["id"] == "teacher_dimer_labels")
-            assert teacher["operation"] == "mace"
-        else:
-            assert plan.jobs
-            assert all(job["operation"] == "mace" for job in plan.jobs)
-
-
-@pytest.mark.parametrize(
-    ("dtype", "operation"), [("float64", "reference"), ("float32", "mace")]
-)
-def test_task5_class_metadata_and_top_level_precision_build_real_checks(
-    tmp_path, dtype, operation
-):
-    path = _submission(5, tmp_path)
-    settings_path = Path(json.loads(path.read_text())["settings"])
-    settings = json.loads(settings_path.read_text())
-    settings.pop("model_settings", None)
-    settings.update(
-        calculator="mace.calculators.MACECalculator", default_dtype=dtype, device="cuda"
-    )
-    settings_path.write_text(json.dumps(settings))
-    evidence = Evidence(path)
-    fingerprint = evidence.fingerprint()
-    plan = build_plan(evidence, 5, "nonce")
-    assert not plan.notes
-    assert plan.jobs
-    # Float64 uses 25 cached Hessians. Float32 recomputes both displacement
-    # signs for all six degrees of freedom at each strain.
-    assert sum(len(job["frames"]) for job in plan.jobs) == (
-        25 if dtype == "float64" else 300
-    )
-    assert all(job["operation"] == operation for job in plan.jobs)
-    assert evidence.fingerprint() == fingerprint
-
-
-@pytest.mark.parametrize(
-    ("symmetry", "acoustic"),
-    [
-        ("transpose_average", "projection"),
-        ("Hessian transpose average", "orthogonal translational projection"),
-        (
-            "H_sym = (H_raw + H_raw^T)/2",
-            "Cartesian orthogonal projection H = P H_sym P, P removes the three uniform translations",
-        ),
-        ("none", "none"),
-    ],
-)
-def test_task5_operation_aliases_reach_the_reference_verifier_in_canonical_form(
-    tmp_path, symmetry, acoustic
-):
-    path = _submission(5, tmp_path)
-    manifest = json.loads(path.read_text())
-    records_path = Path(manifest["artifacts"]["strain_calculations"])
-    records = json.loads(records_path.read_text())
-    for record in records:
-        record.update(symmetrization=symmetry, acoustic_sum_rule=acoustic)
-    records_path.write_text(json.dumps(records))
-    evidence = Evidence(path)
-    before = evidence.fingerprint()
-    plan = build_plan(evidence, 5, "nonce")
-    assert not plan.notes
-    job = plan.jobs[0]
-    assert (
-        job["postprocess"]
-        == [
-            {
-                "symmetrization": "none" if symmetry == "none" else "average_transpose",
-                "acoustic_sum_rule": "none" if acoustic == "none" else "projection",
-            }
-        ]
-        * 25
-    )
-    ground_truth = module("ground_truth")
-    # The actual remote transformation reader must accept every serialized spec.
-    for spec in job["postprocess"]:
-        assert ground_truth.postprocess_hessian(np.eye(6), spec).shape == (6, 6)
-    assert evidence.fingerprint() == before
-
-
-@pytest.mark.parametrize(
-    "symmetry, acoustic, expected_acoustic",
-    [
-        (
-            "index symmetrization Phi=(Phi+Phi^T)/2 (no space-group symmetrization)",
-            "on-site blocks replaced by minus sum of off-site blocks, then re-symmetrized",
-            "onsite_blocks_then_resymmetrize",
-        ),
-        (
-            "Phi=(Phi+Phi^T)/2 alternated with ASR (100 iterations), final symmetrization",
-            "self-block correction Phi_ii=-sum_{j!=i} Phi_ij (3x3 blocks)",
-            "onsite_blocks_iterative_100",
-        ),
-    ],
-)
-def test_task5_onsite_asr_reaches_independent_reference(
-    tmp_path, symmetry, acoustic, expected_acoustic
-):
-    path = _submission(5, tmp_path)
-    manifest = json.loads(path.read_text())
-    records_path = Path(manifest["artifacts"]["strain_calculations"])
-    records = json.loads(records_path.read_text())
-    for record in records:
-        record.update(symmetrization=symmetry, acoustic_sum_rule=acoustic)
-    records_path.write_text(json.dumps(records))
-    plan = build_plan(Evidence(path), 5, "nonce")
-    assert not plan.notes
-    spec = plan.jobs[0]["postprocess"][0]
-    assert spec["acoustic_sum_rule"] == expected_acoustic
-    result = module("ground_truth").postprocess_hessian(np.eye(6), spec)
-    assert result.shape == (6, 6)
-
-
 def test_ground_truth_resolves_dimer_orientation_and_task5_atom_order():
     ground_truth = module("ground_truth")
     assets = json.loads(
@@ -507,15 +397,22 @@ def test_ground_truth_resolves_dimer_orientation_and_task5_atom_order():
             "name": "task5_strained_hessians",
             "strain_pairs": ground_truth.TASK5_STRAINS.tolist(),
         },
-        postprocess=[
-            {"symmetrization": "none", "acoustic_sum_rule": "none"} for _ in range(25)
-        ],
     )
     strained["frames"][0]["positions"].reverse()
     result = ground_truth.resolve_reference(strained, document, "release-1", assets)
     permutation = np.asarray([3, 4, 5, 0, 1, 2])
     expected = np.asarray(hessians[0])[np.ix_(permutation, permutation)]
     assert np.asarray(result["frames"][0]["hessian"]) == pytest.approx(expected)
+
+    isotropic = np.flatnonzero(ground_truth.TASK5_STRAINS[:, 1] == 0)
+    strained["frames"] = [strained["frames"][i] for i in isotropic]
+    strained["reference"]["strain_pairs"] = ground_truth.TASK5_STRAINS[
+        isotropic
+    ].tolist()
+    result = ground_truth.resolve_reference(strained, document, "release-1", assets)
+    assert len(result["frames"]) == 5
+    for row, index in zip(result["frames"], isotropic, strict=True):
+        assert np.asarray(row["hessian"]) == pytest.approx(np.asarray(hessians[index]))
 
 
 def test_runtime_uses_ground_truth_without_starting_a_sandbox(worker, monkeypatch):
@@ -621,7 +518,7 @@ def test_runtime_falls_back_to_live_calculation_without_ground_truth(
     assert result["cache"] == {"hits": 0, "misses": 1, "ground_truth": []}
 
 
-def test_public_asset_links_are_not_exported_from_sandbox(worker, tmp_path):
+def test_public_resources_are_not_exported_from_sandbox(worker, tmp_path):
     w, _ = worker
     root = tmp_path / "collected"
     root.mkdir()
@@ -629,7 +526,11 @@ def test_public_asset_links_are_not_exported_from_sandbox(worker, tmp_path):
     class Volume:
         def iterdir(self, *_args, **_kwargs):
             return [
-                SimpleNamespace(path="models", type=w.FileEntryType.SYMLINK),
+                SimpleNamespace(path="resources", type=w.FileEntryType.DIRECTORY),
+                SimpleNamespace(
+                    path="resources/md-models-teacher/teacher.model",
+                    type=w.FileEntryType.FILE,
+                ),
                 SimpleNamespace(path="result.json", type=w.FileEntryType.FILE),
             ]
 
@@ -643,12 +544,7 @@ def test_public_asset_links_are_not_exported_from_sandbox(worker, tmp_path):
 
 
 def test_palladium_analytical_derivative_is_recalculated(tmp_path):
-    path = _submission(4, tmp_path)
-    fixture_module(
-        "test_workflow_task_4"
-    ).test_task4_analytical_hessian_is_read_as_data(
-        path, method="analytical", description_key="description"
-    )
+    path = fixture_module("test_workflow_task_4")._submission(tmp_path, analytical=True)
     plan = build_plan(Evidence(path), 4, "analytical")
     job = next(j for j in plan.jobs if j["id"] == "palladium_hessian")
     assert job["operation"] == "mace"
@@ -662,21 +558,22 @@ def test_palladium_analytical_derivative_is_recalculated(tmp_path):
 def test_mutation_during_artifact_grading_is_rejected(tmp_path, monkeypatch):
     path = _submission(4, tmp_path)
     grader = WorkflowScorer(4, verifier=ModalVerifier(transport=response))
-    original = grader.module.evaluate
+    original = grader.module.prepare
 
-    def changed(evidence, rubric):
-        original(evidence, rubric)
-        artifact = evidence.artifact("structures")
-        artifact.write_text(artifact.read_text() + " ")
+    def changed(record):
+        result = original(record)
+        artifact = tmp_path / "phonons.npz"
+        artifact.write_bytes(artifact.read_bytes() + b" ")
+        return result
 
-    monkeypatch.setattr(grader.module, "evaluate", changed)
+    monkeypatch.setattr(grader.module, "prepare", changed)
     with pytest.raises(RuntimeError, match="changed during grading"):
         grader.evaluate(path)
 
 
 def test_disagreement_reduces_only_affected_existing_points(tmp_path):
     path = _submission(4, tmp_path)
-    original = check_level2_workflow(4)(path)
+    original = WorkflowScorer(4, verifier=ModalVerifier(transport=response))(path)
 
     def wrong(plan, fingerprint):
         value = response(plan, fingerprint)
@@ -684,11 +581,11 @@ def test_disagreement_reduces_only_affected_existing_points(tmp_path):
         return value
 
     report = WorkflowScorer(4, verifier=ModalVerifier(transport=wrong)).evaluate(path)
-    assert report["mode"] == "artifact_and_modal"
+    assert report["verification"]["mode"] == "modal"
     assert report["score"] < original
     assert sum(c["points"] for c in report["checks"]) == 100
     assert (
-        next(c for c in report["checks"] if c["name"] == "fcc_supercell_and_mapping")[
+        next(c for c in report["checks"] if c["name"] == "usable_force_constants")[
             "status"
         ]
         == "passed"
@@ -726,8 +623,8 @@ def test_mutation_during_verification_is_rejected(tmp_path):
     path = _submission(4, tmp_path)
 
     def mutate(plan, fingerprint):
-        artifact = plan.evidence.artifact("structures")
-        artifact.write_text(artifact.read_text() + " ")
+        artifact = plan.evidence.artifact("force_log")
+        artifact.write_bytes(artifact.read_bytes() + b" ")
         return response(plan, fingerprint)
 
     with pytest.raises(RuntimeError, match="changed during"):
@@ -771,22 +668,35 @@ def test_worker_recalculates_instead_of_reading_stored_values(monkeypatch):
 
 @pytest.mark.parametrize("count", [1, 2])
 @pytest.mark.parametrize("descriptive_metadata", [False, True])
-def test_soap_preserves_one_row_per_input_frame(monkeypatch, count, descriptive_metadata):
+def test_soap_preserves_one_row_per_input_frame(
+    monkeypatch, count, descriptive_metadata
+):
     import sys
     from types import ModuleType
 
     descriptor = ModuleType("dscribe.descriptors")
     values = np.arange(count * 147, dtype=float).reshape(count, 147)
+
     def soap(**kwargs):
         assert "implementation" not in kwargs and "n_features" not in kwargs
-        return SimpleNamespace(create=lambda frames, n_jobs: values[0] if len(frames) == 1 else values)
+        return SimpleNamespace(
+            create=lambda frames, n_jobs: values[0] if len(frames) == 1 else values
+        )
+
     descriptor.SOAP = soap
     monkeypatch.setitem(sys.modules, "dscribe", ModuleType("dscribe"))
     monkeypatch.setitem(sys.modules, "dscribe.descriptors", descriptor)
     result = module("verification_worker").calculate(
         {
             "operation": "soap",
-            "parameters": {"average": "inner", **({"implementation": "dscribe 2.1.1 SOAP", "n_features": 147} if descriptive_metadata else {})},
+            "parameters": {
+                "average": "inner",
+                **(
+                    {"implementation": "dscribe 2.1.1 SOAP", "n_features": 147}
+                    if descriptive_metadata
+                    else {}
+                ),
+            },
             "frames": [geometry(bulk("Si", "diamond", a=5.43))] * count,
         },
         {},
@@ -1001,7 +911,7 @@ def test_backend_rejects_agent_attestations_and_altered_hashes(
 
 def test_modal_factory_is_lazy_and_offline_is_explicit(monkeypatch):
     monkeypatch.setenv("CORRAL_MD_VERIFICATION", "modal")
-    assert check_level2_workflow(10).verifier.require_provenance
+    assert isinstance(check_level2_workflow(10).verifier, ModalVerifier)
     assert check_level2_workflow(10, verification_backend="offline").verifier is None
 
 
@@ -1028,31 +938,6 @@ def test_verification_cannot_upgrade_failed_artifacts():
     [
         ([{"operation": "mace"}], False),
         ([{"operation": "sw"}], True),
-        (
-            [
-                {
-                    "operation": "lammps_restart",
-                    "parameters": {
-                        "checkpoint": "state.restart",
-                        "checkpoint_sha256": "0" * 64,
-                    },
-                }
-            ],
-            True,
-        ),
-        (
-            [
-                {
-                    "operation": "lammps_restart",
-                    "parameters": {
-                        "checkpoint": "state.restart",
-                        "checkpoint_sha256": "0" * 64,
-                    },
-                },
-                {"operation": "mace"},
-            ],
-            False,
-        ),
         ([{"operation": "pipeline"}], False),
         ([{"operation": "sw", "parameters": {"checkpoint": "untrusted.pkl"}}], False),
         ([{"operation": "sw"}, {"operation": "mace"}], False),
@@ -1133,82 +1018,15 @@ def test_verification_sandbox_has_no_agent_workspace_or_controller_mounts(
     assert set(options["volumes"]) == {
         "/evidence",
         "/output",
-        "/workspace/models",
-        "/workspace/potentials",
+        "/assets/models",
+        "/assets/potentials",
     }
     assert options["volumes"]["/evidence"] == ("readonly", volumes[0])
+    resources = json.loads(command[4])
+    assert {item["name"] for item in resources} == {
+        item["name"]
+        for item in w._authorized_asset_files(None)
+        if Path(item["relative"]).parts[0] in {"models", "potentials"}
+    }
+    assert command[5] == "/opt/corral-md/verification_worker.py"
     assert list(volumes[0].files) == ["/request.json"]
-
-
-@pytest.mark.parametrize("layout", ["top_level", "nested", "mixed", "duplicated"])
-def test_provenance_evaluator_uses_controller_record_not_submitted_copy(
-    worker, monkeypatch, short_config, layout
-):
-    import modal
-    from corral_md.workflow_scoring.verification import _check_provenance
-
-    w, _ = worker
-    output = w.RUNS.parent / "local-output"
-    observed = module("trusted_md").run(short_config, output, calculator=EMT())
-    record = {
-        **observed,
-        "run_id": "run-1",
-        "action_id": "action-1",
-        "release_id": "release-1",
-        "model_sha256": "a" * 64,
-    }
-    manifest = {
-        "run_id": "run-1",
-        "action_id": "action-1",
-        "settings": str(output / "settings.json"),
-        "artifacts": {
-            key: str(output / filename)
-            for key, filename in {
-                "initial_state": "initial.traj",
-                "boundary_states": "boundaries.traj",
-                "production_trajectory": "production.traj",
-                "thermal_trace": "thermal_trace.csv",
-            }.items()
-        },
-    }
-    if layout in ("nested", "duplicated"):
-        manifest["provenance"] = {key: manifest[key] for key in ("run_id", "action_id")}
-        manifest["provenance"]["release_id"] = "release-1"
-        if layout == "nested":
-            del manifest["run_id"], manifest["action_id"]
-    elif layout == "mixed":
-        manifest["provenance"] = {"action_id": manifest.pop("action_id")}
-    path = output / "manifest.json"
-    path.write_text(json.dumps(manifest))
-    calls = []
-
-    def remote(*args):
-        calls.append(args)
-        return {"status": "passed", "record": record}
-
-    monkeypatch.setattr(
-        modal.Function,
-        "from_name",
-        lambda app, function: SimpleNamespace(remote=remote),
-    )
-    verifier = ModalVerifier(
-        release_id="release-1",
-        volume_name="simulations",
-    )
-    evidence = Evidence(path)
-    fingerprint = evidence.fingerprint()
-    assert _check_provenance(verifier, evidence)["status"] == "passed"
-    assert evidence.fingerprint() == fingerprint
-    assert json.loads(path.read_text()) == manifest
-    assert calls[0][:3] == ("run-1", "action-1", "release-1")
-    assert len(calls[0][3]) == 4
-    verifier.run_id = "run-1"
-    manifest["run_id"] = "other-run"
-    path.write_text(json.dumps(manifest))
-    assert _check_provenance(verifier, Evidence(path))["status"] == "failed"
-    manifest["run_id"] = "run-1"
-    path.write_text(json.dumps(manifest))
-    settings = json.loads((output / "settings.json").read_text())
-    settings["stages"][0]["end_time_fs"] += 1
-    (output / "settings.json").write_text(json.dumps(settings))
-    assert _check_provenance(verifier, Evidence(path))["status"] == "failed"

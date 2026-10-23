@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from corral_md.score import (
+from corral_md.scoring.evaluator import (
     PendingReviewError,
     WorkflowScorer,
     check_level1_workflow,
@@ -14,42 +14,12 @@ from corral_md.score import (
     main,
 )
 from corral_md.submission import resolve_submission
-from corral_md.workflow_scoring.common import (
+from corral_md.scoring.common import (
     Evidence,
     EvidenceError,
     Rubric,
     UnsupportedEvidence,
-    is_teacher_model,
-    level1_reproducibility,
-    reproducibility,
 )
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        "MACE-MP-0",
-        "/workspace/models/teacher.model",
-        "teacher.model",
-        {"identity": "MACE-MP-0", "path": "/workspace/models/teacher.model"},
-    ],
-)
-def test_teacher_declaration_accepts_pinned_filename(value):
-    assert is_teacher_model(value)
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        "MACE-MP-0b",
-        "student.model",
-        "not-mace-mp-01",
-        {},
-        {"identity": "MACE-MP-0", "path": "student.model"},
-    ],
-)
-def test_teacher_declaration_rejects_other_or_conflicting_models(value):
-    assert not is_teacher_model(value)
 
 
 def test_columnar_json_frames_keep_labels_geometry_and_time_aligned(tmp_path):
@@ -101,7 +71,7 @@ def test_conflicting_frame_time_aliases_are_not_silently_selected(tmp_path):
 
 def test_document_sidecars_must_be_confined_and_manifest_linked(manifest, tmp_path):
     root, path, _ = manifest
-    e = Evidence(resolve_submission(str(path), root))
+    e = Evidence(resolve_submission(path.read_text(), root))
     assert e.linked_path("data.json", path) == path.parent / "data.json"
     (path.parent / "unlisted.npz").write_bytes(b"not evidence")
     with pytest.raises(EvidenceError, match="listed in manifest.artifacts"):
@@ -129,10 +99,10 @@ def manifest(tmp_path):
     (output / "data.json").write_text(json.dumps([1, 2, 3]))
     data = {
         "results": {"value": 3.0, "unit": "eV", "status": "measured"},
-        "settings": "settings.json",
-        "report": "analysis.json",
-        "scripts": ["run.py"],
-        "artifacts": {"data": "data.json"},
+        "settings": str(output / "settings.json"),
+        "report": str(output / "analysis.json"),
+        "scripts": [str(output / "run.py")],
+        "artifacts": {"data": str(output / "data.json")},
     }
     path = output / "manifest.json"
     path.write_text(json.dumps(data))
@@ -142,7 +112,7 @@ def manifest(tmp_path):
 def test_shared_manifest_preserves_metadata_and_resolves_only_paths(manifest):
     root, path, data = manifest
     original = path.read_bytes()
-    resolved = resolve_submission(str(path), root)
+    resolved = resolve_submission(path.read_text(), root)
     assert json.loads(resolved)["results"] == data["results"]
     evidence = Evidence(resolved)
     assert evidence.root == root
@@ -152,43 +122,11 @@ def test_shared_manifest_preserves_metadata_and_resolves_only_paths(manifest):
     assert path.read_bytes() == original
 
 
-@pytest.mark.parametrize("report", [None, "missing.md", "analysis.json"])
-def test_shared_credit_does_not_require_a_narrative_report(manifest, report):
-    root, path, data = manifest
-    if report is None:
-        data.pop("report")
-    else:
-        data["report"] = report
-    path.write_text(json.dumps(data))
-    rubric = Rubric()
-    reproducibility(Evidence(resolve_submission(str(path), root)), rubric)
-    assert sum(check["points"] for check in rubric.checks) == 10
-    assert sum(check["earned"] for check in rubric.checks) == 10
-    assert all(check["name"] != "analysis_report" for check in rubric.checks)
-
-
-def test_level1_reproducibility_ignores_unused_level2_slots(manifest):
-    root, path, data = manifest
-    data["results"] = {}
-    data["artifacts"].update(
-        {
-            "later_scalar": "",
-            "later_list": [],
-            "later_nested": {"level2_only": ""},
-        }
-    )
-    path.write_text(json.dumps(data))
-    rubric = Rubric()
-    level1_reproducibility(Evidence(resolve_submission(str(path), root)), rubric)
-    assert sum(check["points"] for check in rubric.checks) == 10
-    assert sum(check["earned"] for check in rubric.checks) == 10
-
-
 def test_missing_link_preserves_independent_evidence(manifest):
     root, path, data = manifest
     data["artifacts"]["missing"] = "missing.csv"
     path.write_text(json.dumps(data))
-    evidence = Evidence(resolve_submission(str(path), root))
+    evidence = Evidence(resolve_submission(path.read_text(), root))
     assert evidence.json("data") == [1, 2, 3]
     with pytest.raises(EvidenceError, match="Missing artifact"):
         evidence.table("missing")
@@ -208,10 +146,10 @@ def test_missing_run_artifact_cannot_bind_to_another_run(
         "/old/workspace/runA/trajectory.json" if relocated else "runA/trajectory.json"
     )
     path.write_text(json.dumps(data))
-    answer = "/old/workspace/outputs/manifest.json" if relocated else str(path)
+    answer = path.read_text()
     evidence = Evidence(resolve_submission(answer, root))
     assert evidence.json("data") == [1, 2, 3]
-    with pytest.raises(EvidenceError, match="Missing artifact"):
+    with pytest.raises(EvidenceError, match="Missing artifact|escapes"):
         evidence.json("missing")
 
 
@@ -219,9 +157,9 @@ def test_missing_absolute_artifact_does_not_bind_to_same_basename(manifest):
     root, path, data = manifest
     data["artifacts"]["missing"] = str(root / "other/data.json")
     path.write_text(json.dumps(data))
-    evidence = Evidence(resolve_submission(str(path), root))
+    evidence = Evidence(resolve_submission(path.read_text(), root))
     assert evidence.json("data") == [1, 2, 3]
-    with pytest.raises(EvidenceError, match="Missing artifact"):
+    with pytest.raises(EvidenceError, match="Missing artifact|escapes"):
         evidence.json("missing")
 
 
@@ -232,7 +170,7 @@ def test_missing_manifest_does_not_bind_to_another_run(tmp_path, answer):
     other = tmp_path / "runB"
     other.mkdir()
     (other / "manifest.json").write_text('{"results": {"value": 99}}')
-    with pytest.raises(FileNotFoundError, match="missing"):
+    with pytest.raises(ValueError, match="JSON object directly"):
         resolve_submission(answer, tmp_path)
 
 
@@ -241,7 +179,7 @@ def test_result_strings_are_not_paths_even_when_they_look_like_paths(manifest):
     data["results"]["unit"] = "m2/s"
     data["results"]["explanation"] = "../this is prose"
     path.write_text(json.dumps(data))
-    assert Evidence(resolve_submission(str(path), root)).result("unit") == "m2/s"
+    assert Evidence(resolve_submission(path.read_text(), root)).result("unit") == "m2/s"
 
 
 @pytest.mark.parametrize("link", ["../../outside.json", "/external/missing.json"])
@@ -251,9 +189,9 @@ def test_workspace_confinement(manifest, link):
     path.write_text(json.dumps(data))
     if ".." in link:
         with pytest.raises(ValueError):
-            resolve_submission(str(path), root)
+            resolve_submission(path.read_text(), root)
     else:
-        evidence = Evidence(resolve_submission(str(path), root))
+        evidence = Evidence(resolve_submission(path.read_text(), root))
         with pytest.raises(EvidenceError):
             evidence.json("data")
 
@@ -261,9 +199,9 @@ def test_workspace_confinement(manifest, link):
 def test_object_arrays_cannot_be_deserialized(manifest):
     root, path, data = manifest
     np.save(path.parent / "objects.npy", np.array([{"not": "numeric"}], dtype=object))
-    data["artifacts"]["objects"] = "objects.npy"
+    data["artifacts"]["objects"] = str(path.parent / "objects.npy")
     path.write_text(json.dumps(data))
-    evidence = Evidence(resolve_submission(str(path), root))
+    evidence = Evidence(resolve_submission(path.read_text(), root))
     with pytest.raises(ValueError):
         evidence.array("objects")
 
@@ -275,7 +213,7 @@ def test_json_frames_require_boundary_condition_evidence(manifest, pbc):
     if pbc is not None:
         frame["pbc"] = pbc
     (path.parent / "data.json").write_text(json.dumps([frame]))
-    evidence = Evidence(resolve_submission(str(path), root))
+    evidence = Evidence(resolve_submission(path.read_text(), root))
     with pytest.raises(EvidenceError, match="explicit boolean pbc"):
         evidence.trajectory("data")
 
@@ -314,90 +252,56 @@ def test_binary_rubric_is_terminal_on_failure_and_keeps_pending_distinct():
     assert pending.as_dict()["score_bounds"] == [0, 1]
 
 
-def test_workflow_failure_skips_later_checks_and_modal_verification(
-    manifest, monkeypatch
-):
+def test_workflow_failure_skips_later_checks_and_modal_verification(manifest):
     _, path, _ = manifest
-    evaluated = []
-
-    def evaluate(_evidence, rubric):
-        rubric.check("reported_diffusion", 45, False, "first failure")
-        rubric.check(
-            "diffusion_estimator_and_units",
-            45,
-            lambda: evaluated.append("expensive") or True,
-        )
 
     class Verifier:
-        def evaluate(self, *_args):
-            raise AssertionError("Modal verification must not run after a failure")
+        def _evaluate_plan(self, *_args):
+            raise AssertionError("Model verification must not run after a log failure")
 
-    monkeypatch.setattr(
-        WorkflowScorer,
-        "module",
-        property(lambda _self: SimpleNamespace(evaluate=evaluate)),
-    )
-    report = WorkflowScorer(1, verifier=Verifier()).evaluate(path)
+    report = WorkflowScorer(10, verifier=Verifier()).evaluate(path)
     assert report["score"] == 0
-    assert evaluated == []
-    assert report["checks"][-2]["status"] == "skipped"
+    assert report["checks"][0]["name"] == "recorded_temperature_cycle"
+    assert report["checks"][1]["status"] == "skipped"
+    assert report["checks"][2]["status"] == "skipped"
 
 
-def test_failed_reproducibility_check_skips_task_evaluation(manifest, monkeypatch):
+def test_missing_log_fails_before_task_evaluation(manifest):
     _, path, data = manifest
-    data["artifacts"]["missing"] = "missing.json"
+    data["artifacts"] = {"run_log": "missing.json"}
     path.write_text(json.dumps(data))
-
-    def evaluate(*_args):
-        raise AssertionError("Task checks must not run after reproducibility fails")
-
-    monkeypatch.setattr(
-        WorkflowScorer,
-        "module",
-        property(lambda _self: SimpleNamespace(evaluate=evaluate)),
-    )
-    report = WorkflowScorer(1).evaluate(path)
+    report = WorkflowScorer(10).evaluate(path)
     assert report["score"] == 0
-    assert report["checks"][-2]["name"] == "remaining_evidence"
-
-
-@pytest.mark.parametrize(
-    ("results", "expected"),
-    [
-        ({"status": "finished", "units": "eV"}, 0),
-        ({"completed": True}, 0),
-        ({"energy": {"mean": -3.5, "units": "eV"}}, 1),
-        ({"energy": float("nan")}, 0),
-    ],
-)
-def test_result_credit_requires_finite_numerical_results(results, expected):
-    rubric = Rubric()
-    reproducibility(Evidence({"results": results}), rubric)
-    check = next(c for c in rubric.checks if c["name"] == "reported_results")
-    assert check["earned"] == expected
+    assert report["checks"][0]["status"] == "failed"
 
 
 def test_factory_returns_scalar_and_keeps_json_checks_task_local(manifest, monkeypatch):
     root, path, _ = manifest
 
-    def evaluate(e, r):
-        r.check("reported_diffusion", 90, lambda: e.json("data") == [1, 2, 3])
+    def evaluate_submission(value, **_kwargs):
+        rubric = Rubric(10, binary=True)
+        rubric.check(
+            "saved_value", 100, lambda: Evidence(value).json("data") == [1, 2, 3]
+        )
+        return {**rubric.as_dict(), "mode": "saved_logs"}
 
     monkeypatch.setattr(
         WorkflowScorer,
         "module",
-        property(lambda _self: SimpleNamespace(evaluate=evaluate)),
+        property(
+            lambda _self: SimpleNamespace(evaluate_submission=evaluate_submission)
+        ),
     )
     before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
-    scorer = check_level2_workflow(1)
-    submission = resolve_submission(str(path), root)
+    scorer = check_level2_workflow(10)
+    submission = resolve_submission(path.read_text(), root)
     good = scorer(submission)
     assert type(good) is float
     assert good == 1.0
     report = scorer.evaluate(submission)
     assert json.loads(json.dumps(report, allow_nan=False)) == report
-    assert report["mode"] == "artifact_only"
-    assert report["checks"][-1]["status"] == "unverified"
+    assert report["mode"] == "saved_logs"
+    assert report["checks"][-1]["status"] == "passed"
     bad = scorer(3.5)
     assert bad == 0
     assert good == 1
@@ -424,19 +328,31 @@ def test_level1_factory_uses_independent_model_verification():
 
 
 def _pending_scorer(monkeypatch):
-    def evaluate(e, r):
+    def evaluate_submission(submission, *, review=None, **_kwargs):
+        r = Rubric(10, binary=True, fail_fast=True)
+        try:
+            e = Evidence(submission)
+        except Exception as exc:
+            r.check("readable_manifest", 100, False, str(exc))
+            return r.as_dict()
+        r.check("reported_results", 10, lambda: bool(np.isfinite(e.results["value"])))
+
         def alternative():
             assert e.json("data") == [1, 2, 3]
             raise UnsupportedEvidence("Retained alternate calculation needs review")
 
         r.check("reported_diffusion", 90, alternative)
+        fingerprint = e.fingerprint() if not r.failed else None
+        if review is not None:
+            r.apply_review(review, fingerprint)
+        return {**r.as_dict(), "evidence_sha256": fingerprint}
 
     monkeypatch.setattr(
         WorkflowScorer,
         "module",
-        property(lambda _: SimpleNamespace(evaluate=evaluate)),
+        property(lambda _: SimpleNamespace(evaluate_submission=evaluate_submission)),
     )
-    return check_level2_workflow(1)
+    return check_level2_workflow(10)
 
 
 def _review(report, *, passed=True):
@@ -536,7 +452,15 @@ def test_cli_writes_pending_report_then_resolves_trusted_review(
     _, path, _ = manifest
     _pending_scorer(monkeypatch)
     output, review_path = tmp_path / "evaluation.json", tmp_path / "review.json"
-    argv = ["workflow_scoring", "1", str(path), "--output", str(output)]
+    argv = [
+        "corral_md.scoring",
+        "10",
+        str(path),
+        "--output",
+        str(output),
+        "--verification",
+        "offline",
+    ]
     monkeypatch.setattr(sys, "argv", argv)
     assert main() == 2
     pending = json.loads(output.read_text())
@@ -552,7 +476,7 @@ def test_malformed_direct_manifest_and_nonfinite_pending_result_do_not_crash(
     root, path, _ = manifest
     scorer = _pending_scorer(monkeypatch)
     assert scorer.evaluate({"results": {"value": object()}})["score"] == 0
-    data = json.loads(resolve_submission(str(path), root))
+    data = json.loads(resolve_submission(path.read_text(), root))
     data["results"]["value"] = float("nan")
     report = scorer.evaluate(data)
     assert report["score"] == 0

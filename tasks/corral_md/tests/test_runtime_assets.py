@@ -9,8 +9,14 @@ from types import SimpleNamespace
 
 import modal
 import pytest
+from corral_md import env as md_environment
 from corral_md import modal_workspace as bridge
 from corral_md.env import create_environments
+
+from corral.core.environment import Toolset
+from corral.core.resources import ResourceCatalogMismatchError, declare_file_resource
+from corral.core.task import TaskDefinition
+from corral.core.workspace import WorkspaceState
 
 APP_DIR = Path(__file__).resolve().parents[1] / "modal_app"
 spec = importlib.util.spec_from_file_location(
@@ -18,6 +24,33 @@ spec = importlib.util.spec_from_file_location(
 )
 assets = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(assets)
+
+
+def test_resource_catalog_preserves_every_pinned_asset():
+    from zipfile import ZipFile
+
+    from corral_md.resources import asset_descriptors, asset_relative_paths
+
+    descriptors = asset_descriptors()
+    paths = asset_relative_paths()
+    assert len(paths) == len(set(paths.values())) == len(descriptors)
+    pinned = {}
+    for archive in assets.MANIFEST["archives"].values():
+        with ZipFile(APP_DIR.parent / archive["file"]) as bundle:
+            for entry in bundle.infolist():
+                if entry.is_dir() or entry.filename.startswith("__MACOSX/"):
+                    continue
+                data = bundle.read(entry)
+                pinned[entry.filename] = (hashlib.sha256(data).hexdigest(), len(data))
+    for name, metadata in assets.MANIFEST["models"].items():
+        pinned["models/" + name] = (metadata["sha256"], None)
+    assert set(paths.values()) == set(pinned)
+    for name, relative in paths.items():
+        descriptor = descriptors[name]
+        digest, size = pinned[relative]
+        assert descriptor.sha256 == digest
+        assert size is None or descriptor.size == size
+        assert descriptor.public_path == f"/workspace/resources/{name}/{Path(relative).name}"
 
 
 @pytest.fixture
@@ -83,16 +116,73 @@ def test_archive_verification_rejects_changed_input(tmp_path, monkeypatch):
 def test_task2_original_melt_matches_the_scoring_reference():
     from zipfile import ZipFile
 
-    from corral_md.workflow_scoring import lammps_checks, task_2
+    from corral_md.scoring import task_2 as score_task_2
 
     with ZipFile(APP_DIR.parent / "structures.zip") as archive:
         data = archive.read("structures/melt/liq4000.dat")
-    assert hashlib.sha256(data).hexdigest() == lammps_checks._SILICATE_SOURCE_SHA256
-    assert task_2.PROTOCOL_VERSION == "task2-4000K-v3"
-    assert task_2._INITIAL_STEP == 0
-    assert task_2._COOLING_STEPS == 370000
-    assert task_2._PREPARATION_STEPS == 470000
-    assert task_2._CYCLE_STEPS == 840000
+    assert hashlib.sha256(data).hexdigest() == score_task_2.SOURCE_SHA256
+    assert score_task_2.COOLING_STEPS == 370000
+    assert score_task_2.TOTAL_STEPS == 470000
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("local", [True, False])
+def test_task2_agent_can_read_the_bundled_melt_before_simulation(
+    tmp_path, md_assets, monkeypatch, level, local
+):
+    from zipfile import ZipFile
+
+    from corral_md.resources import asset_descriptors, asset_resource_name
+
+    from corral.core.state import EnvironmentState, ExecutionState, TaskState
+    from corral.runtime.tool_execution import ToolExecutor
+
+    relative = "structures/melt/liq4000.dat"
+    name = asset_resource_name(relative)
+    descriptor = asset_descriptors()[name]
+    with ZipFile(APP_DIR.parent / "structures.zip") as archive:
+        original = archive.read(relative)
+    # Keep unrelated assets small, but exercise the real melt and pinned catalog.
+    (md_assets / relative).write_bytes(original)
+    descriptors = {**md_environment.asset_descriptors(), name: descriptor}
+    monkeypatch.setattr(md_environment, "asset_descriptors", lambda: descriptors)
+
+    environment = create_environments(
+        work_dir=str(tmp_path / "work"), level=level, local=local,
+        assets_dir=str(md_assets),
+    )[f"level_{level}_task_2"].for_task("melt-availability")
+    started = environment.initial_event(execution_id="melt-availability")
+    state = ExecutionState(
+        through_commit_hash="0" * 64,
+        execution_id="melt-availability",
+        branch_id="main",
+        task=TaskState(environment=started.environment_metadata),
+        environment=EnvironmentState(values=started.environment),
+        workspace=started.workspace,
+    )
+    public = environment.current_task.initial_input["path to molten state"]
+    assert public == descriptor.public_path
+    assert public in started.task["prompt"]
+    executor = ToolExecutor(environment)
+    content = executor.execute(
+        state, environment.tools["read_file"], {"path": public},
+        action_id="read-melt",
+    )
+    assert content.encode("utf-8") == original
+    info = json.loads(executor.execute(
+        state, environment.tools["file_info"], {"path": public},
+        action_id="inspect-melt",
+    ))
+    assert info["size"] == len(original)
+    assert info["read_only"] is True
+
+    prepared = executor.prepare(
+        state, environment.tools["run_lammps"],
+        {"input_file": "/workspace/input/quench.in"}, action_id="quench",
+    )
+    source, mounted_path = prepared.resource_mounts[name]
+    assert mounted_path == public
+    assert Path(source).read_bytes() == original
 
 
 @pytest.mark.parametrize(
@@ -162,18 +252,31 @@ def test_upload_is_repeatable_and_preserves_conflicting_assets(
     assert all(files[key] == value for key, value in old_files.items())
 
 
+@pytest.mark.usefixtures("md_assets")
 def test_prompts_use_provisioned_checkpoint_names(tmp_path):
     environments = create_environments(work_dir=str(tmp_path), level=2)
     manifest = json.loads((APP_DIR / "assets.json").read_text())
-    model_inputs = {"teacher_model": "teacher.model", "student_model": "student.model"}
-    assert set(manifest["models"]) == set(model_inputs.values())
+    from corral_md.resources import asset_public_path
+
+    model_inputs = {
+        key: asset_public_path("models/" + filename)
+        for key, filename in {
+            "teacher_model": "teacher.model",
+            "student_model": "student.model",
+        }.items()
+    }
+    assert set(manifest["models"]) == {
+        Path(path).name for path in model_inputs.values()
+    }
     for task_id in ("level_2_task_3", "level_2_task_8"):
         bound = environments[task_id].for_task(task_execution_id="asset-check")
         prompt = bound.initial_event(execution_id="asset-check").task["prompt"]
-        assert bound.current_task.initial_input.items() >= model_inputs.items()
-        for key, name in model_inputs.items():
+        expected = model_inputs if task_id.endswith("_3") else {"teacher_model": model_inputs["teacher_model"]}
+        assert bound.current_task.initial_input.items() >= expected.items()
+        for key, name in expected.items():
             assert f"- {key}: {name}" in prompt
-        assert "/workspace/models" in prompt
+        assert "/workspace/resources" in prompt
+        assert "/workspace/models" not in prompt
 
 
 def test_catalog_uses_deployed_asset_volumes(monkeypatch):
@@ -246,3 +349,98 @@ def test_asset_catalog_follows_execution_pin_after_a_new_release(monkeypatch):
         with pytest.raises(RuntimeError, match="different SimAgent build"):
             bridge.configured_asset_volume_name("models")
     assert bridge.configured_asset_volume_name("models") == "models-current"
+
+
+@pytest.fixture
+def remote_resource_environment(tmp_path, monkeypatch):
+    payload = b"pinned potential bytes"
+    source = tmp_path / "Si.sw"
+    source.write_bytes(payload)
+    descriptor = declare_file_resource(
+        "md-potentials-SW-Si", source, runtime_version="test-v1"
+    )
+    monkeypatch.setattr(
+        md_environment,
+        "asset_relative_paths",
+        lambda: {descriptor.name: "potentials/SW/Si.sw"},
+    )
+    monkeypatch.setattr(
+        md_environment, "configured_asset_volume_name", lambda _kind: "potentials-v1"
+    )
+    downloads = []
+    remote_bytes = [payload]
+
+    class Volume:
+        def read_file(self, path):
+            downloads.append(path)
+            yield remote_bytes[0]
+
+    monkeypatch.setattr(modal.Volume, "from_name", lambda _name: Volume())
+
+    def create():
+        return md_environment.MolecularDynamicsEnvironment(
+            "remote-resources",
+            TaskDefinition(
+                name="remote-resources",
+                description="Read a pinned potential.",
+                tools=[],
+                scoring_fn=lambda _answer: 1.0,
+                submission_format={},
+                resolve_answer=False,
+            ),
+            base_work_dir=str(tmp_path),
+            workspace_path=str(tmp_path / "workspace"),
+            toolset=Toolset(workspace_factory=None),
+            file_resources={descriptor.name: descriptor},
+        )
+
+    (tmp_path / "workspace").mkdir()
+    return create, descriptor, payload, downloads, remote_bytes
+
+
+def test_remote_resources_download_once_and_stay_outside_snapshots(
+    remote_resource_environment,
+):
+    create, descriptor, payload, downloads, _ = remote_resource_environment
+    environment = create()
+    assert downloads == []
+
+    handles = environment.materialize_file_resources((descriptor.name,))
+    assert downloads == ["/SW/Si.sw"]
+    assert Path(handles[descriptor.name].controller_path).read_bytes() == payload
+    assert handles[descriptor.name].public_path == descriptor.public_path
+    environment.ensure_file_resources_durable()
+    # Another runtime with no source bindings reuses the durable blob cache.
+    restored = create()
+    assert restored.file_resource_sources == {}
+    restored_handles = restored.materialize_file_resources((descriptor.name,))
+    assert (
+        Path(restored_handles[descriptor.name].controller_path).read_bytes() == payload
+    )
+    assert downloads == ["/SW/Si.sw"]
+
+    workspace = Path(environment.workspace_path)
+    (workspace / "result.txt").write_text("mutable output")
+    snapshot = environment.capture_workspace(WorkspaceState(id="resource-snapshot"))
+    assert set(snapshot.files) == {"result.txt"}
+    assert not (workspace / "resources").exists()
+
+
+def test_remote_resource_hash_mismatch_is_not_cached(remote_resource_environment):
+    create, descriptor, payload, downloads, remote_bytes = remote_resource_environment
+    remote_bytes[0] = b"x" + payload[1:]
+    environment = create()
+
+    with pytest.raises(ResourceCatalogMismatchError, match="pinned descriptor"):
+        environment.materialize_file_resources((descriptor.name,))
+    assert environment.file_resource_sources == {}
+    assert not list(
+        (Path(environment.base_work_dir) / ".corral" / "md-assets").rglob(
+            descriptor.filename
+        )
+    )
+
+    remote_bytes[0] = payload
+    handles = environment.materialize_file_resources((descriptor.name,))
+    assert Path(handles[descriptor.name].controller_path).read_bytes() == payload
+    assert downloads == ["/SW/Si.sw", "/SW/Si.sw"]

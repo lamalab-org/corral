@@ -18,7 +18,7 @@ Existing child experiments from this checkpoint:
 Proposal slot in this expansion:
 {{proposal_slots}}
 
-Execution-relative workspace:
+Public workspace for this isolated proposal:
 {{branch_workspaces}}
 
 Global research journal:
@@ -35,5 +35,4 @@ already in the journal and requires no environment action. For every other
 type, define one experiment goal and observable success criteria. Do not repeat
 an existing child experiment from this checkpoint. Do not
 precompute tool actions. A bounded worker will choose up to {{max_actions}}
-listed-tool actions adaptively. Keep output paths relative to the assigned trial
-workspace.
+listed-tool actions adaptively.

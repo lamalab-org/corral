@@ -15,7 +15,12 @@ from corral.core.transition import (
     ToolExecutionResult,
 )
 from corral.runtime import permissions
-from corral.workspace import PUBLIC_WORKSPACE_ROOT, materialize_local_tool_arguments
+from corral.workspace import (
+    PUBLIC_WORKSPACE_ROOT,
+    AbsoluteWorkspaceFilesystem,
+    build_workspace_tools,
+    materialize_local_tool_arguments,
+)
 
 if TYPE_CHECKING:
     import threading
@@ -185,6 +190,22 @@ def execute_prepared_call(
             cancel=cancel,
             prepared=prepared,
         )
+    if prepared.resource_mounts and (prepared.worker_operation or "").startswith(
+        "workspace:"
+    ):
+        if not prepared.workspace:
+            raise ValueError("resource file tools require an assigned workspace")
+        # Rebuild from this invocation's authorized bindings, as the restricted
+        # worker does. Never retain capabilities on a shared filesystem closure.
+        filesystem = AbsoluteWorkspaceFilesystem(
+            prepared.workspace,
+            resource_paths={
+                public: physical
+                for physical, public in prepared.resource_mounts.values()
+            },
+        )
+        operation = prepared.worker_operation.removeprefix("workspace:")
+        return build_workspace_tools(filesystem)[operation].execute(**arguments)
     local_arguments = materialize_local_tool_arguments(
         prepared.tool,
         arguments,
