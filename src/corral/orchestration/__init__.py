@@ -6,6 +6,7 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
+    "ContinuationSource": ("corral.orchestration.models", "ContinuationSource"),
     "RetryPolicy": ("corral.orchestration.models", "RetryPolicy"),
     "AgentRuntimeDefinition": (
         "corral.orchestration.models",
@@ -47,6 +48,7 @@ __all__ = [
     "AgentRuntimeDefinition",
     "BenchmarkExecutionResult",
     "BenchmarkInput",
+    "ContinuationSource",
     "DockerInfrastructureError",
     "DockerSandboxSpec",
     "DockerTaskLauncher",
