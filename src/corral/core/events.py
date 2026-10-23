@@ -10,6 +10,7 @@ from pydantic import Field, JsonValue, model_validator
 
 from corral.core._immutable import FrozenModel
 from corral.core.action import Action
+from corral.core.state import ExecutionState
 from corral.core.workspace import Artifact, FileRef, WorkspaceState
 
 SPAWN_SUBAGENT_TOOL_NAME = "spawn_subagent"
@@ -90,6 +91,19 @@ class ExecutionStarted(FrozenModel):
     model: Mapping[str, JsonValue] = Field(default_factory=dict)
     dependency_outputs: Mapping[str, JsonValue] = Field(default_factory=dict)
     runtime: RuntimeUpdate = Field(default_factory=RuntimeUpdate)
+
+
+class ExecutionForked(FrozenModel):
+    """A self-contained historical checkpoint starting an independent ledger."""
+
+    type: Literal["execution.forked"] = "execution.forked"
+    source: ExecutionState
+    source_run_id: str | None = None
+    source_trial: str
+    configured: bool
+    message: str | None = None
+    model: Mapping[str, JsonValue] = Field(default_factory=dict)
+    scaffold: Mapping[str, JsonValue] = Field(default_factory=dict)
 
 
 class TaskConfigured(FrozenModel):
@@ -253,6 +267,7 @@ class ExecutionCompleted(FrozenModel):
 
 StateEvent: TypeAlias = Annotated[
     ExecutionStarted
+    | ExecutionForked
     | TaskConfigured
     | AgentStarted
     | AgentSpawned
@@ -282,6 +297,7 @@ __all__ = [
     "EnvironmentOperation",
     "ExecutionCompleted",
     "ExecutionFailed",
+    "ExecutionForked",
     "ExecutionStarted",
     "ParallelGroupCompleted",
     "RuntimeUpdate",

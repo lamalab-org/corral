@@ -110,6 +110,115 @@ commit hash. Load the full projection with
 Agents and environments are registered with `RuntimeRegistry`. Benchmarks use
 the same function for every trial, then evaluate the persisted result.
 
+## Continue a finished trial
+
+`corral continue` imports an exact historical commit into a new, independent
+trial. Pass the source trial directory (for example `task-<id>/k-1`), not its
+live workspace or the benchmark's top-level output directory:
+
+```bash
+corral continue \
+  --source-trial .corral/runs/source-run/task-example/k-1 \
+  --commit FULL_SHA256_COMMIT_HASH \
+  --message "Your previous answer was wrong." \
+  --trials 4 \
+  --sandbox docker \
+  --output-dir .corral/continuations
+```
+
+Use `--sandbox local` for local execution. Docker images must use runtime
+protocol 5; rebuild older images. The command inherits saved agent and
+environment runtime definitions when available. Older trials without these
+definitions need explicit `--agent`, `--environment`, and any required
+`--agent-kwargs` / `--env-kwargs`. Use `--source-branch` for a non-main branch,
+`--source-execution` if the directory has no execution metadata, and
+`--source-agent-run` to select an agent when the checkpoint is ambiguous.
+
+The Python API uses the same import and execution path:
+
+```python
+from corral.orchestration import ContinuationSource, RunTaskInput, execute_task
+
+source = ContinuationSource(
+    trial="/path/to/source/trial",
+    commit_hash="<full SHA-256 hash>",
+    message="Recheck your last conclusion.",  # optional
+)
+result = await execute_task(
+    task=RunTaskInput(
+        execution_id="independent-child",
+        task_id=task_id,
+        environment_id=task_id,
+        agent_id=agent_id,
+        continuation=source,
+        max_iterations=20,
+    ),
+    registry=registry,
+    state_store=store,
+)
+```
+
+For several continuations, pass
+`continuation_by_task={task_id: source}` and `trials_per_task=4` to
+`CorralRunner.run(...)`. Dependency outputs are inherited from the checkpoint;
+upstream tasks are not rerun for the continued task. Each child has its own
+execution ID, commit database, artifact store, and workspace. It does not depend
+on the parent's files after import, and previous sibling evaluations are not
+injected into its context.
+
+The new `execution.forked` initialization event contains the historical state
+and source identity. The importer verifies and copies referenced artifact blobs
+before publishing that event. It reads a private copy of the source database
+and WAL rather than opening the original database for writing. Existing commit
+hashes and in-trial `create_branch()` behavior are unchanged. Lineage is
+available in `state.runtime.metadata["lineage"]` and `StateRef.metadata`, and
+therefore in the benchmark report. `launch-request.json` records the original
+host-side runtime definitions, including paths before Docker mount translation.
+
+Environment values, consumed resource budgets, workspace files, canonical
+conversation messages, and stored agent algorithm state are inherited. The
+agent implementation and task/tool definitions must remain compatible. The
+optional message is recorded once, after any pending tool results and before
+the next agent turn. Native tool-calling/ReAct agents reconstruct their prompts
+and canonical history; external SDK adapters use their existing canonical
+history import, not a saved opaque provider session.
+
+A pending or running tool action resumes from its committed environment and
+workspace in the child; completed tools are not replayed. If a successful
+`submit_answer` is awaiting its acceptance event, acceptance is recovered
+without another tool call. A checkpoint already submitted or terminated instead
+starts a fresh agent lifecycle with the historical messages retained. Setup is
+run only if the selected checkpoint precedes task configuration.
+
+`--max-iterations` is the child's new run budget. New usage is counted separately
+from cumulative `inherited_usage`; environment resource budgets are not reset.
+Psychometrics restores its serialized REPL namespace and NumPy RNG state through
+the existing worker, without replaying previous cells.
+
+Live subagents and active background jobs are rejected explicitly: this API
+copies durable state, not running processes or external services. Tools with
+external side effects need an environment-specific recovery contract before
+in-flight replay is safe. Workspace paths should use the portable `/workspace`
+namespace or relative paths. Arbitrary host absolute paths, open OS resources,
+and external SDK process memory cannot be made portable by copying a checkpoint.
+Local mode retains its existing unrestricted execution semantics.
+
+A reproducible integration check needs no model credentials:
+
+```bash
+PYTHONPATH=src:tasks/psychometrics/src python -m scripts.check_trial_continuation \
+  --output /tmp/continuation-local
+
+PYTHONPATH=src:tasks/psychometrics/src python -m scripts.check_trial_continuation \
+  --sandbox docker --image corral-psychometrics:latest \
+  --output /tmp/continuation-docker
+```
+
+Use a fresh output directory and an image built from this checkout. Both checks
+run one psychometrics task and four continuations, verifying earlier file and
+REPL state, the intervention message, independent children, and unchanged
+source files. They retain all ledgers and snapshots plus `summary.json`.
+
 ## Restricted worker limits
 
 Under Docker, agent and tool code runs in a restricted worker, and a worker

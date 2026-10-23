@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, MutableMapping
 from typing import TYPE_CHECKING, Any
+from uuid import NAMESPACE_URL, uuid5
 
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.events import (
@@ -18,6 +19,7 @@ from corral.core.events import (
     EnvironmentOperation,
     ExecutionCompleted,
     ExecutionFailed,
+    ExecutionForked,
     ExecutionStarted,
     ParallelGroupCompleted,
     RuntimeUpdate,
@@ -56,7 +58,7 @@ class SharedStateConflictError(ReducerError):
     """A shared environment/workspace precondition is stale."""
 
 
-def _replace(model: Any, **changes: Any) -> Any:
+def _replace(model: Any, /, **changes: Any) -> Any:
     values = model.model_dump(mode="python")
     values.update(changes)
     return type(model).model_validate(values)
@@ -168,12 +170,124 @@ def _descends_from(
     return False
 
 
+def _fork_state(event: ExecutionForked, commit: Commit) -> ExecutionState:
+    """Rebase checkpoint identity without altering historical message contents."""
+    if commit.parent_hash is not None:
+        raise ReducerError("a fork initialization cannot have a parent")
+    source = event.source
+    if source.execution_id == commit.execution_id:
+        raise ReducerError("a continuation must have a new execution identity")
+    selected = event.source_run_id
+    if selected is not None and selected not in source.agent_runs:
+        raise ReducerError("source agent run does not exist at the checkpoint")
+    target = str(uuid5(NAMESPACE_URL, f"corral:agent:{commit.execution_id}:main"))
+
+    def owner(run_id: str | None) -> str | None:
+        return target if run_id == selected and selected is not None else run_id
+
+    runs = {}
+    for run_id, run in source.agent_runs.items():
+        updates = {"parent_run_id": owner(run.parent_run_id)}
+        if run_id == selected:
+            updates.update(
+                run_id=target,
+                parent_run_id=None,
+                status="running",
+                result_summary=None,
+                trace_head=commit.hash,
+                context_cutoff_hash=None,
+            )
+        runs[owner(run_id)] = _replace(run, **updates)
+    actions = {
+        key: _replace(
+            action,
+            requested_by_run_id=owner(action.requested_by_run_id),
+            # A running call has no committed effects yet. It starts anew in
+            # the isolated child, never against the parent's live workspace.
+            status="pending" if action.status == "running" else action.status,
+            invocation_ids=() if action.status == "running" else action.invocation_ids,
+        )
+        for key, action in source.actions.items()
+    }
+    invocations = {
+        key: _replace(
+            invocation, requested_by_run_id=owner(invocation.requested_by_run_id)
+        )
+        for key, invocation in source.tool_invocations.items()
+        if invocation.status != "running"
+    }
+    lineage = {
+        "source_trial": event.source_trial,
+        "execution_id": source.execution_id,
+        "branch_id": source.branch_id,
+        "commit_hash": source.through_commit_hash,
+        "agent_run_id": selected,
+    }
+    # Environment resource budgets are inherited verbatim; usage here counts
+    # only the new trial. Preserve parent usage separately for analysis.
+    runtime_metadata = {
+        "lineage": lineage,
+        "inherited_usage": {
+            key: value + source.runtime.metadata.get("inherited_usage", {}).get(key, 0)
+            for key, value in source.usage.model_dump(mode="json").items()
+        },
+        "checkpoint_configured": event.configured,
+        "continuation_message": event.message,
+        "surrender_sentinel": source.runtime.metadata.get(
+            "surrender_sentinel", "SURRENDER"
+        ),
+    }
+    if not source.is_terminal:
+        for action in source.actions.values():
+            if (
+                action.requested_by_run_id == selected
+                and action.action.is_submission
+                and action.status == "completed"
+                and any(
+                    message.get("role") == "tool"
+                    and message.get("tool_call_id") == action.action.id
+                    and message.get("metadata", {}).get("success") is True
+                    for message in source.conversations.get(selected, ())
+                )
+            ):
+                runtime_metadata["pending_submission"] = {
+                    "action_id": action.action.id,
+                    "answer": action.action.arguments["answer"],
+                }
+    return ExecutionState(
+        through_commit_hash=commit.hash,
+        execution_id=commit.execution_id,
+        branch_id=commit.branch_id,
+        task=_replace(
+            source.task,
+            model={**source.task.model, **event.model},
+            scaffold={**source.task.scaffold, **event.scaffold},
+        ),
+        environment=source.environment,
+        workspace=_replace(
+            source.workspace,
+            id=str(uuid5(NAMESPACE_URL, f"corral:workspace:{commit.execution_id}")),
+        ),
+        agent_runs=runs,
+        conversations={
+            owner(key): value for key, value in source.conversations.items()
+        },
+        actions=actions,
+        tool_invocations=invocations,
+        runtime=RuntimeState(
+            status="running", started_at=commit.occurred_at, metadata=runtime_metadata
+        ),
+    )
+
+
 class EventReducer:
     """Pure reducer for typed commit events."""
 
     def apply(self, state: ExecutionState | None, commit: Commit) -> ExecutionState:
         event = commit.event
         if state is None:
+            if isinstance(event, ExecutionForked):
+                return _fork_state(event, commit)
             if not isinstance(event, ExecutionStarted):
                 raise ReducerError("the first commit must be execution.started")
             if commit.parent_hash is not None:
@@ -251,7 +365,7 @@ class EventReducer:
         environment = state.environment
         workspace = state.workspace
 
-        if isinstance(event, ExecutionStarted):
+        if isinstance(event, ExecutionStarted | ExecutionForked):
             raise ReducerError("execution.started can only be the first event")
         if isinstance(event, TaskConfigured):
             environment = _environment_after(
