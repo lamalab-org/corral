@@ -394,7 +394,7 @@ def test_registry_and_loader_cover_all_tasks(tmp_path, monkeypatch):
         json=json,
         Callable=object,
         TaskDefinition=SimpleNamespace,
-        CONTRACT_VERSION="managed-afm-v1",
+        CONTRACT_VERSION="managed-afm-v2",
         InputRef=lambda x: x,
         event=lambda *a, **kw: None,
         resolve_submission=submission.resolve_submission,
@@ -696,18 +696,28 @@ def test_rms_friction_and_raw_channel_selection_have_independent_definitions(
 
 
 @pytest.mark.parametrize("task", TASKS, ids=lambda t: t["id"])
-def test_public_task_contract_matches_required_mode_and_acquisition_count(task):
+def test_task_contract_states_requirements_without_api_recipe(task):
     sequence = task["scoring_params"]["final_params"]
     if isinstance(sequence, dict):
         sequence = [sequence]
     assert "Image_optimizer" not in task["tools"]
     for acquisition in sequence:
-        assert f"ID {acquisition['mode']}" in task["description"]
-    assert (
-        f"Submit exactly {len(sequence)} distinct raw NID" in task["submission_format"]
-    )
-    assert "Additional acquisitions are allowed" in task["submission_format"]
+        requirement = "phase-contrast" if acquisition["mode"] == 4 else "lateral-force"
+        assert requirement in task["description"]
+    if len(sequence) == 3:
+        assert "three distinct submitted raw NID files" in task["submission_format"]
+        assert "Preserve the initial scan center and rotation" in task["description"]
     assert "Acquire exactly three" not in task["description"]
+    public_text = task["description"] + task["submission_format"]
+    for hint in (
+        "ID 4",
+        "ID 9",
+        "PhaseContrast",
+        "LateralForce",
+        "StartFrameUp",
+        "Additional acquisitions are allowed",
+    ):
+        assert hint not in public_text
 
 
 @pytest.mark.parametrize("task", TASKS, ids=lambda t: t["id"])

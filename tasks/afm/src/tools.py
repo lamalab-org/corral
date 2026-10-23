@@ -228,17 +228,16 @@ def scan_grain_area(grain_id: int, image_path: str) -> None:
 
 @tool
 def Document_Retrieval(query: str) -> str:
-    """Return the complete local managed-afm-v1 API reference.
+    """Look up factual API documentation for the managed AFM adapter.
 
-    Use for connection, settings, single-frame acquisition, metrics and submission
-    conventions. The same small versioned reference is returned for every question;
-    this is not a search of the vendor manual. No network or API key is needed.
+    Returns up to two relevant sections from a local reference. No network or API
+    key is needed. This is not a search of the complete vendor manual.
 
     Args:
         query: A nonempty AFM API question.
 
     Returns:
-        The bundled reference for this managed instrument adapter.
+        Relevant API sections, or a list of topics if no section matches.
     """
     return reference(query)
 
@@ -328,11 +327,10 @@ def Code_Executor(code: str) -> dict:
     ScriptError means cleanup/health succeeded and the code may be corrected.
 
     Args:
-        code: Python source applying the task's settings or acquiring a frame.
+        code: Python source to execute.
 
     Returns:
         stdout, stderr, and observed parameters (geometry in nm, time in seconds).
-        Preserve absolute image paths printed by your script for submission.
     """
     return runtime().call("execute", code)
 
@@ -349,13 +347,11 @@ def Image_Analyzer(
     direction: str = "Forward",
     channel: str = "Z-Axis",
 ) -> dict[str, Any]:
-    """Read a Nanosurf NID and calculate the benchmark's raw-image metrics.
+    """Read a Nanosurf NID and calculate raw-image metrics.
 
-    Roughness uses unlevelled Forward/Z-Axis height in nm: Ra=mean(abs(h-mean(h))),
-    Rq=sqrt(mean((h-mean(h))**2)). Friction uses f=(Forward-Backward)/2 in V from
-    Friction force channels, without flipping the stored arrays. Average friction
-    is mean(f), or mean(abs(f)) with friction_absolute. RMS friction is
-    sqrt(mean(f**2)), without subtracting its mean.
+    Ra and Rq use unlevelled Forward/Z-Axis height in nm. Friction is half the
+    forward-minus-backward Friction force signal in V, in stored array orientation.
+    Its mean is signed unless friction_absolute is set; its RMS is uncentered.
 
     Args:
         path: Absolute raw NID path returned by the acquisition tool.

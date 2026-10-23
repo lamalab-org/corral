@@ -198,7 +198,7 @@ def test_task_definitions_run_and_restore(
                             == "afm-contract-test"
                         )
                         assert (
-                            state.task.metadata["execution_version"] == "managed-afm-v1"
+                            state.task.metadata["execution_version"] == "managed-afm-v2"
                         )
                     if benchmark == "spectra_elucidation":
                         hidden = state.environment.values.get("hidden_arguments", {})

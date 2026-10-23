@@ -1,4 +1,4 @@
-"""The AFM reference is local and independent of launch directory or credentials."""
+"""The query-scoped AFM reference needs neither credentials nor a specific cwd."""
 
 import importlib.util
 from pathlib import Path
@@ -14,18 +14,52 @@ SPEC.loader.exec_module(contract)
 
 
 @pytest.mark.parametrize("launch_dir", [ROOT, ROOT / "src"])
-def test_reference_is_complete_without_provider_credentials(launch_dir, monkeypatch):
+def test_reference_returns_requested_topic_without_provider_credentials(
+    launch_dir, monkeypatch
+):
     monkeypatch.chdir(launch_dir)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     content = contract.reference("RMS friction")
-    assert content == contract.reference("connect and acquire")
     assert contract.CONTRACT_VERSION in content
-    assert "calculate_rms_friction=True" in content
-    assert "PhaseContrast" in content
-    assert "LateralForce" in content
+    assert "calculate_rms_friction" in content
+    assert "nanosurf.SPM()" not in content
+    assert "StartFrameUp" not in content
+    assert "PhaseContrast" not in content
+
+
+def test_connection_reference_does_not_suggest_application_probing_or_workflow():
+    content = contract.reference("How do I connect?")
     assert "nanosurf.SPM()" in content
-    assert "C3000()" not in content
-    assert "CoreAFM()" not in content
+    for hint in (
+        "C3000()",
+        "CoreAFM()",
+        "StartFrameUp",
+        "calculate_rms_friction",
+        "SetPoint =",
+    ):
+        assert hint not in content
+
+
+def test_multi_topic_query_returns_relevant_sections_only():
+    content = contract.reference("connection and acquisition")
+    assert "nanosurf.SPM()" in content
+    assert "StartFrameUp" in content
+    assert "ImageWidth" not in content
+    assert "calculate_rms_friction" not in content
+
+
+def test_property_lookup_finds_units():
+    content = contract.reference("ImageWidth units")
+    assert "Scan geometry" in content
+    assert "metres" in content
+    assert "nanosurf.SPM()" not in content
+
+
+def test_unknown_question_lists_topics_without_dumping_manual():
+    content = contract.reference("unrelated zebras")
+    assert "No matching API section" in content
+    assert "Frame acquisition" in content
+    assert "StartFrameUp" not in content
 
 
 @pytest.mark.parametrize("query", ["", "  ", None, 12])

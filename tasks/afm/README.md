@@ -201,23 +201,32 @@ The AFM reference itself needs no API key. If `corral` is unavailable on PATH, u
 
 ## Agent and scoring contract
 
-All agents receive `managed-afm-v1`, the task requirements, and the verified initial
-snapshot including machine ID and hostname. The initial settings are not target
-answers. Native harness shells have their own workspaces; AFM tools control a real
-instrument and return absolute scan paths. Preserve those paths in submissions.
+All agents receive the task requirements, machine ID and hostname, and a brief
+notice that the tools control real hardware. The full initial-state snapshot is
+retained in execution records for auditing; it is not injected into the prompt.
+The common prompt contains no API recipe, enum values, analysis formulas, grading
+tolerances, or recovery procedure. The model still chooses and executes its solution.
+Native harness shells have their own workspaces, so their generic path guidance
+must respect each task's absolute AFM-path requirement.
 
 The task tool set is `Document_Retrieval`, `Code_Executor`, and `Image_Analyzer`.
 The optimizer is excluded because these tasks prescribe exact gains. The local
-[API reference](src/afm_api_reference.md) replaces the four historical retrieval
+[API reference](src/afm_api_reference.md) provides at most two relevant sections
+per query, without network credentials. It replaces the four historical retrieval
 snippets, including their misleading suggestion to try several application types.
-Legacy optimization/grain helpers remain available to separately defined tasks.
+It documents adapter semantics and tool capabilities, without choosing task settings
+or providing a worked workflow. Legacy optimization/grain helpers remain available
+to separately defined tasks.
 
-Task text specifies PhaseContrast (4) for tapping and LateralForce (9) for contact.
-The common instructions disclose units, unlevelled roughness and lateral-channel
-formulas, 1% relative tolerance, exact zero/mode/count requirements, and the null
-rule for percentage changes with a zero reference. `Image_Analyzer` now exposes
-RMS friction directly. Its `direction`/`channel` arguments select only the returned
-raw array; neither they nor legacy `dynamic_code` change metric definitions.
+Task text identifies the required scientific acquisition mode (phase-contrast or
+lateral-force) because the existing scorer requires that specific mode. It does not
+supply SDK enum identifiers or setter code. Level 2 also discloses the existing
+center/rotation requirement and clarifies that acquisition counts concern submitted
+files. Numerical targets, scoring tolerances, and grading logic are unchanged.
+`Image_Analyzer` exposes RMS friction alongside the existing metrics. Its
+`direction`/`channel` arguments select only the returned raw array; neither they nor
+legacy `dynamic_code` change metric definitions. These definitions are documented
+as tool behavior, not added as a solution to every task prompt.
 
 Level 1 scores one submitted acquisition; level 2 scores three distinct submitted
 acquisitions in the requested parameter order. Additional acquisitions are allowed
@@ -225,7 +234,7 @@ while healthy, but do not retry after an infrastructure failure. The scorer does
 not claim to count all scans or verify chronology from submitted file contents.
 The controller's operations journal records actual scan starts and completions.
 
-Tasks carry execution_version=managed-afm-v1 so Corral rejects evaluation of
+Tasks carry execution_version=managed-afm-v2 so Corral rejects evaluation of
 projections from a different execution contract. These execution and prompt changes
 define a new benchmark condition. Do not mix
 new runs with historical results. Report the contract version, machine identity,

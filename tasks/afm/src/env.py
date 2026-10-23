@@ -148,7 +148,7 @@ class AFMEnvironment(Environment):
 
     def initial_event(self, **kwargs) -> ExecutionStarted:
         # Setup happens after execution.started. Defer the prompt until the
-        # configuration event contains the observed initial hardware snapshot.
+        # configuration event contains the verified machine identity.
         started = super().initial_event(**kwargs)
         metadata = dict(started.task)
         metadata.pop("prompt", None)
@@ -239,8 +239,10 @@ class AFMEnvironment(Environment):
         prompt += "\n" + INSTRUCTIONS
         snapshot = state.environment.values.get("afm_initial_snapshot")
         if snapshot is not None:
-            prompt += "\nVerified initial instrument snapshot:\n"
-            prompt += json.dumps(dict(snapshot), indent=2, default=str)
+            prompt += (
+                f"\nInstrument: {snapshot['machine_id']} "
+                f"(host: {snapshot['hostname']}).\n"
+            )
         else:
             prompt += "\nInstrument setup has not completed; no verified state is available.\n"
         prompt += "\nAvailable input data:\n"

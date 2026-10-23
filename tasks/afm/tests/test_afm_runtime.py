@@ -520,7 +520,7 @@ def test_trial_configuration_checks_local_reference_before_hardware():
     assert calls == ["preflight"]
 
 
-def test_prompt_exposes_observed_machine_and_common_contract():
+def test_prompt_identifies_machine_without_providing_solution_guidance():
     snapshot = {"machine_id": "afm-test-01", "hostname": "test-pc", "pgain": 300}
     environment = SimpleNamespace(
         current_task=SimpleNamespace(
@@ -543,10 +543,22 @@ def test_prompt_exposes_observed_machine_and_common_contract():
     prompt = render(environment, state)
     assert "afm-test-01" in prompt
     assert "test-pc" in prompt
-    assert '"pgain": 300' in prompt
+    assert '"pgain": 300' not in prompt
     assert "999" not in prompt
     assert "Set P gain to 150" in prompt
     assert INSTRUCTIONS in prompt
+    for hint in (
+        "PhaseContrast",
+        "LateralForce",
+        "SetPointForceUnitMode",
+        "StartFrameUp",
+        "acquire_frame",
+        "sqrt",
+        "1%",
+        "relative tolerance",
+        "Verified initial",
+    ):
+        assert hint not in prompt
     # The same renderer is also used while constructing execution.started.
     provisional = render(
         environment, SimpleNamespace(environment=SimpleNamespace(values={}))

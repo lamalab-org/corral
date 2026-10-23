@@ -1,80 +1,55 @@
-# Managed AFM API — managed-afm-v1
+# Managed AFM API — managed-afm-v2
 
-This is the complete bundled reference, returned for every nonempty query. It is
-not a search of the vendor manual. It applies to Corral's managed Code_Executor;
-raw Nanosurf scan methods outside this adapter can have different blocking behavior.
+Factual documentation for Corral's instrument adapter. Document_Retrieval returns
+only sections matching the question. This is a small local reference, not the
+complete vendor manual. It contains no task-specific parameter choices or workflow.
 
 ## Connection and state
 
-```python
-import nanosurf
-spm = nanosurf.SPM()
-application = spm.application
-scan = application.Scan
-opmode = application.OperatingMode
-zcontrol = application.ZController
-print(application.Version)
-print(scan.IsScanning, scan.IsPaused, scan.IsCapturing)
-```
+`nanosurf.SPM()` returns the operator-configured connection. Its `application`
+exposes `Scan`, `OperatingMode`, `ZController`, and `Version`. Alternate application
+constructors and raw COM access are unavailable in this adapter.
+`Scan.IsScanning`, `Scan.IsPaused`, and `Scan.IsCapturing` report activity.
+Each Code_Executor call has a fresh Python namespace and returns stdout, stderr,
+and an observed parameter snapshot. The snapshot uses nm for geometry.
 
-SPM selects the one operator-configured machine. Do not select other application
-types, instantiate COM, change the scan head/cantilever, or reconnect after an
-infrastructure error. Each Code_Executor call has a fresh Python namespace. Define
-your variables again in subsequent calls. Printed output and a parameter snapshot
-are returned. Snapshot geometry is in nm; API geometry is in metres.
+## Scan geometry and resolution settings
 
-## Configure and acquire
+`application.Scan` exposes `ImageWidth`, `ImageHeight`, `CenterPosX`, and
+`CenterPosY` in metres; `Rotation` in degrees; `Points` and `Lines` as counts;
+and `Scantime` in seconds per line. Properties are readable and writable while idle.
 
-Set only the values requested by the task, while idle. These names are available:
+## Feedback gain and setpoint settings
 
-| Component | Properties and units |
-| --- | --- |
-| `scan` | `ImageWidth`, `ImageHeight`, `CenterPosX`, `CenterPosY` in metres; `Rotation` in degrees; `Points`, `Lines` as counts; `Scantime` in seconds per line |
-| `zcontrol` | `PGain`, `IGain`, `DGain`; `SetPoint`; `SetPointForceUnitMode` |
-| `opmode` | `OperatingMode` |
+`application.ZController` exposes `PGain`, `IGain`, `DGain`, `SetPoint`, and
+`SetPointForceUnitMode`. The setpoint unit depends on the operating mode. Amplitude
+setpoints are percentages; for voltage setpoints, `SetPointForceUnitMode` is 0.
 
-For tapping tasks, set `opmode.OperatingMode = spm.OperatingMode.PhaseContrast`
-(4) and the percent amplitude setpoint directly, e.g. `zcontrol.SetPoint = 70`.
-For contact tasks, use `spm.OperatingMode.LateralForce` (9), set
-`zcontrol.SetPointForceUnitMode = 0`, then set the requested voltage.
-Preserve the initial center and rotation unless the task specifies otherwise.
+## Operating modes
 
-```python
-# After applying ALL settings requested by the current task:
-saved_path = scan.StartFrameUp()  # or StartFrameDown()
-print(saved_path)
-```
+`application.OperatingMode.OperatingMode` is a readable/writable mode selector.
+The connection's `OperatingMode` enumeration includes `StaticAFM`, `DynamicAFM`,
+`PhaseContrast`, and `LateralForce`. This reference does not select a mode for a task.
 
-Alternatively, call `acquire_frame()` or `acquire_frame("down")` in Code_Executor.
-Each blocks until a fresh NID is stable, parseable and the scanner is idle. Repeated
-calls are serialized, including across concurrent tool requests. A successful return
-includes the absolute path; preserve it when analyzing/submitting the image.
-Do not use Start, Pause, continuous scans, manual capture, approach/retract or
-external control programs. Corral manages manual-scan handover and trial cleanup.
-`scan.Stop()` is available to stop activity, not to signal normal frame completion.
-The output directory is fixed for the trial. An optional filename prefix can be set
-with `application.SetGalleryHistoryFilenameMask("scan-")`; do not supply a path.
+## Frame acquisition and completion
 
-## Analyze and submit
+`application.Scan.StartFrameUp()` and `StartFrameDown()` each acquire one frame.
+The adapter waits for a fresh, stable, parseable NID and an idle scanner, then
+returns the absolute file path. `acquire_frame(direction="up")` is an equivalent
+adapter entry point accepting `"up"` or `"down"`. Instrument calls are serialized.
+`Scan.Stop()` stops activity. Continuous scanning, Pause, manual capture, and
+changing the output directory are unavailable through this adapter.
+`application.SetGalleryHistoryFilenameMask(prefix)` accepts a filename prefix,
+not a directory. InstrumentUnavailable denotes failed infrastructure; ScriptError
+reports a code error after successful cleanup and a health check.
 
-Call Image_Analyzer as a separate tool (not from inside Code_Executor), using the
-returned absolute NID path. Enable the requested flags:
+## Image analysis and metrics
 
-| Flag | Metric |
-| --- | --- |
-| `calculate_mean_roughness=True` | Ra in nm, mean absolute height deviation from mean |
-| `calculate_rms_roughness=True` | Rq in nm, RMS height deviation from mean |
-| `calculate_friction=True` | Signed average of f in V |
-| `calculate_friction=True, friction_absolute=True` | Mean magnitude of f in V |
-| `calculate_rms_friction=True` | RMS of f in V, without mean subtraction |
-
-Height is raw Forward/Z-Axis, without leveling. Friction is
-`f = (Forward/Friction force - Backward/Friction force) / 2` after conversion to V;
-use the stored NSFopen array orientation, without flipping. Raw `image_data` retains
-its file unit. `direction` and `channel` select that returned array only. Legacy
-`dynamic_code` also affects only that array; it cannot change metric definitions.
-
-Submit the task's exact fields and units, with absolute paths to distinct raw NIDs.
-Additional acquisitions are allowed on a healthy instrument; only the submitted
-acquisitions are scored. Do not retry or restart after InstrumentUnavailable.
-For an ordinary script error with successful cleanup, correct the code and continue.
+Image_Analyzer accepts an absolute NID `path`. Its `calculate_mean_roughness` and
+`calculate_rms_roughness` flags return Ra and Rq in nm from unlevelled Forward/Z-Axis
+height. `calculate_friction` returns the signed mean of half the forward-minus-
+backward lateral signal in V; `friction_absolute` selects mean magnitude instead.
+`calculate_rms_friction` returns the uncentered RMS of that signal. Lateral arrays
+use their stored NSFopen orientation. `direction` and `channel` select only the
+returned raw `image_data`; legacy `dynamic_code` also changes only this array,
+not the metric definitions. Raw data retains its file unit.

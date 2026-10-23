@@ -55,7 +55,7 @@ def summarize(report: dict) -> dict:
                 }
             )
     return {
-        "classification": "Explicit managed-afm-v1 controller errors only; other infrastructure incidents require review.",
+        "classification": "Explicit managed-afm-v2 controller errors only; other infrastructure incidents require review.",
         "attempted_trials": len(rows),
         "instrument_failures": sum(
             row["category"] == "instrument_failure" for row in rows
