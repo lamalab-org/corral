@@ -15,7 +15,7 @@ from retrosynthesis.retrosynthesis_utils import (
     search_by_template,
     search_reactions_by_criteria,
     species_match,
-    validate_molecule,
+    validate_route_reactions,
 )
 from rxnmapper import RXNMapper
 
@@ -518,84 +518,42 @@ def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -
 @tool
 def verify_route(route: str) -> tuple[bool, str]:
     """
-    [BRIEF] Verifies if a synthesis route follows the expected schema. [/BRIEF]
+    [BRIEF] Checks route structure and every reaction against the template catalog. [/BRIEF]
 
-    [DETAILED] This function checks whether a given synthesis route, represented as a JSON string, adheres to a predefined hierarchical schema.
-    The schema defines the structure and required fields for molecules and reactions in the route. [/DETAILED]
+    [DETAILED] Parses a JSON route, checks its molecules and reaction nodes, then
+    applies each catalog template to its parent product. The submitted reactants
+    must match one complete returned precursor set, including multiplicity.
+    Intermediate reactions are checked recursively. Placeholder IDs, custom
+    SMARTS in template_id, unavailable templates, and mismatched reactants fail.
+    Atom maps and stereochemistry are ignored when comparing precursor sets.
+    A successful result does not establish experimental feasibility or check
+    starting-material prices, availability, the required target, or step limits.
+    [/DETAILED]
 
-    [PROCEDURAL] When to use this tool:
-    - When you have a synthesis route and want to ensure it is correctly formatted before further processing.
-    - When you need to validate a route before submitting it to a retrosynthesis planning system. [/PROCEDURAL]
-
-    [WORKFLOW_INTEGRATION] Typical workflow integration:
-    1. [PREREQUISITE] Construct or obtain a synthesis route in JSON format. [/PREREQUISITE]
-    2. [CURRENT] Use `verify_route` to validate the route structure. [/CURRENT]
-    3. [FOLLOW_UP] If the route is valid, proceed with retrosynthesis planning, analysis or submit if the route is correct. You can check if the reactants are valid by checking if they are buyable using the tool `is_buyable`. If invalid, correct the structure based on the error message provided. [/FOLLOW_UP]
-    [/WORKFLOW_INTEGRATION]
-
-    [CONTEXTUAL] How this tool works:
-    - The function takes a JSON string representing a synthesis route as input.
-    - It parses the JSON and checks that it conforms to a hierarchical schema where:
-      - The root is a molecule with required fields "type" and "smiles".
-      - Molecules can have children that are either reactions or other molecules.
-      - Reactions must have required fields "type", "template_id", and "children".
-      - Each reaction must have at least two children (reactants).
-    - The function recursively validates each node in the hierarchy to ensure all required fields are present and correctly typed.
-    - If the route adheres to the schema, it returns (True, "The route is valid"). If not, it returns (False, error_message) with a description of the first encountered error. [/CONTEXTUAL]
-
-    [SYNTACTICAL] Usage examples:
-    [
-        `verify_route('{"type": "mol", "smiles": "CCO", "children": [{"type": ...}]}')`,
-        `verify_route('{"type": "mol", "smiles": "c1ccccc1O", "children": [{"type": ...}]}')`,
-        `verify_route('{"type": "mol", "smiles": "C1=CC=CC=C1", "children": [{"type": ...}]}')`,
-        `verify_route('{"type": "mol", "smiles": "C1=CC=CC=C1", "children": [{"type": ...}]}')`,
-        `verify_route('{"type": "mol", "smiles": "C1=CC=CC=C1C(=O)O", "children": [{"type": ...}]}')`,
-    ]
-    [/SYNTACTICAL]
+    [PROCEDURAL] Use before submitting a complete route. Correct the first
+    invalid step identified by its node path and template ID. [/PROCEDURAL]
 
     Args:
         route (str):
-            [ARGS_BRIEF] JSON string representing the synthesis route. [/ARGS_BRIEF]
-            [ARGS_DETAILED] A JSON-formatted string that encodes the hierarchical structure of a synthesis route, including molecules and reactions with their respective fields. [/ARGS_DETAILED]
-            [ARGS_SYNTACTICAL] Valid JSON string [/ARGS_SYNTACTICAL]
-            [ARGS_EXAMPLES] '{"type": "mol", "smiles": "CCO", "children": [{"type": ...}]}', '{"type": "mol", "smiles": "c1ccccc1O", "children": [{"type": ...}]}' [/ARGS_EXAMPLES]
+            [ARGS_BRIEF] JSON synthesis tree rooted at a molecule. [/ARGS_BRIEF]
+            [ARGS_DETAILED] Molecules have type "mol", a valid smiles string, and
+            optionally one reaction child. Leaves may omit children or use [].
+            Reactions have type "reaction", a positive integer catalog
+            template_id, and one or more molecule children. [/ARGS_DETAILED]
+            [ARGS_SYNTACTICAL] JSON string [/ARGS_SYNTACTICAL]
 
     Returns:
         tuple[bool, str]:
-            [RETURNS_BRIEF] (is_valid, error_message) where is_valid is True if the route is valid, False otherwise. [/RETURNS_BRIEF]
-            [RETURNS_DETAILED] A tuple where the first element is a boolean indicating whether the route is valid, and the second element is a string containing an error message if the route is invalid, or a success message if it is valid. [/RETURNS_DETAILED]
-            [RETURNS_SYNTACTICAL] (Boolean, String) [/RETURNS_SYNTACTICAL]
-            [RETURNS_EXAMPLES] (True, "The route is valid"), (False, "Invalid JSON format: ...") [/RETURNS_EXAMPLES]
-
-    [RAISES] Exceptions:
-        ValueError:
-            [ERROR_WHEN] Raised when the input JSON is invalid or cannot be parsed. [/ERROR_WHEN]
-            [ERROR_DETAILS] This occurs if the provided string is not valid JSON format. [/ERROR_DETAILS]
-            [ERROR_RECOVERY] Ensure the input string is correctly formatted JSON. [/ERROR_RECOVERY]
-    [/RAISES]
-
-    [LIMITATIONS] Known limitations:
-    - The function assumes that the input JSON string is well-formed and does not handle deeply nested structures beyond typical synthesis routes.
-    - The validation focuses on structural correctness and does not verify the chemical validity of the molecules or reactions.
-    - The function may not catch all possible schema violations, especially in complex or unconventional route representations.
-    - Error messages may not always pinpoint the exact location of the error in deeply nested structures.
-    [/LIMITATIONS]
+            [RETURNS_BRIEF] Whether the route passes, and validation details. [/RETURNS_BRIEF]
+            [RETURNS_DETAILED] False includes the first invalid node or step.
+            True confirms structure and catalog reaction consistency only.
+            [/RETURNS_DETAILED]
     """
     try:
-        # Parse JSON string
         data = json.loads(route)
-
-        # Root must be a molecule
-        is_valid, error = validate_molecule(data, "root")
-        if not is_valid:
-            return False, error
-
-        return True, "The route is valid"
-
-    except json.JSONDecodeError as e:
-        return False, f"Invalid JSON format: {e!s}"
-    except Exception as e:
-        return False, f"Unexpected error: {e!s}"
+    except (json.JSONDecodeError, TypeError) as exc:
+        return False, f"Invalid JSON format: {exc}"
+    return validate_route_reactions(data)
 
 
 @tool(

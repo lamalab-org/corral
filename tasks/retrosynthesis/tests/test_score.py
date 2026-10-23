@@ -440,9 +440,7 @@ class TestScoreFinalWithoutPrice:
         """Test scoring without price with invalid JSON."""
         prediction = "not valid json"
         target = []
-        # Invalid JSON raises JSONDecodeError since json.loads() is outside try-except
-        with pytest.raises(json.JSONDecodeError):
-            score_final_without_price(prediction, target)
+        assert score_final_without_price(prediction, target) == 0.0
 
     def test_score_without_price_with_markers(self):
         """Test that JSON markers are properly stripped."""
