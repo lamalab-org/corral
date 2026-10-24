@@ -441,19 +441,19 @@ class TestScoreNumCarbonSymmetryClasses:
 
     def test_ethane(self):
         """Test with ethane (stereo-aware carbon environments)."""
-        prediction = 2  # stereo-aware enumeration gives 2 environments
+        prediction = 1  # the two methyl carbons are equivalent
         ground_truth = "CC"
         assert score_num_carbon_symmetry_classes(prediction, ground_truth) == 1.0
 
     def test_propane(self):
         """Test with propane (stereo-aware carbon environments)."""
-        prediction = 3  # stereo-aware enumeration gives 3 environments
+        prediction = 2  # terminal methyls are equivalent; the middle carbon differs
         ground_truth = "CCC"
         assert score_num_carbon_symmetry_classes(prediction, ground_truth) == 1.0
 
     def test_phenol(self):
         """Test with phenol (stereo-aware carbon environments)."""
-        prediction = 6  # 6 carbon environments in phenol
+        prediction = 4  # equivalent ortho and meta pairs, plus ipso and para
         ground_truth = "c1ccc(O)cc1"
         assert score_num_carbon_symmetry_classes(prediction, ground_truth) == 1.0
 
@@ -468,6 +468,13 @@ class TestScoreNumCarbonSymmetryClasses:
         prediction = "1"
         ground_truth = "C"
         assert score_num_carbon_symmetry_classes(prediction, ground_truth) == 1.0
+
+    @pytest.mark.parametrize("smiles", ["c1ccccc1", "[CH3:7][CH3:42]", "C1CCCCC1"])
+    def test_atom_labels_do_not_break_carbon_symmetry(self, smiles):
+        assert score_num_carbon_symmetry_classes(1, smiles) == 1.0
+
+    def test_isotopes_still_distinguish_carbon_environments(self):
+        assert score_num_carbon_symmetry_classes(2, "[13CH3]C") == 1.0
 
 
 class TestScoreNumAromaticCarbons:

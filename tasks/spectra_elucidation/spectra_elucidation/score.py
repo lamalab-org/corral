@@ -547,6 +547,8 @@ def carbon_envs_stereo(smiles: str, max_isomers: int = 512):
                 breakTies=False,
                 includeChirality=True,
                 includeIsotopes=True,
+                # Map numbers track identity across isomers, not chemistry.
+                includeAtomMaps=False,
             )
         )
         # mapNum -> rank
@@ -581,7 +583,7 @@ def carbon_envs_stereo(smiles: str, max_isomers: int = 512):
 def score_num_carbon_symmetry_classes(
     prediction: int | str, ground_truth: str
 ) -> float:
-    """Count unique carbon environments using canonical ranking. Stereochemistry is ignored.
+    """Count unique carbon environments using stereo-aware canonical ranking.
     Then compare to predicted number and score consequently.
 
     Args:
