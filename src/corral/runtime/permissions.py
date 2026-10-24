@@ -235,6 +235,15 @@ def _entries(directory: int, prefix: str = ""):
         try:
             status = os.fstat(descriptor)
             relative = prefix + name
+            # Open MPI leaves a debugger FIFO in its temporary workspace tree.
+            # A FIFO has no bytes to checkpoint and may outlive the process that
+            # created it, so omit this one transient entry from snapshots.
+            if (
+                name == "debugger_attach_fifo"
+                and stat.S_ISFIFO(status.st_mode)
+                and prefix.split("/", 1)[0].startswith("ompi.")
+            ):
+                continue
             if not (stat.S_ISREG(status.st_mode) or stat.S_ISDIR(status.st_mode)):
                 raise ValueError(
                     f"workspace can contain regular files only: {relative}"
@@ -529,6 +538,18 @@ def drop_privileges(
                 "LANG",
                 "LC_ALL",
                 "LD_LIBRARY_PATH",
+                # Numeric libraries may be imported only after this boundary.
+                # Keep resource controls while stripping provider credentials.
+                "OPENBLAS_NUM_THREADS",
+                "OPENBLAS_DEFAULT_NUM_THREADS",
+                "OMP_NUM_THREADS",
+                "OMP_THREAD_LIMIT",
+                "MKL_NUM_THREADS",
+                "BLIS_NUM_THREADS",
+                "VECLIB_MAXIMUM_THREADS",
+                "NUMEXPR_NUM_THREADS",
+                "NUMEXPR_MAX_THREADS",
+                "CORRAL_REPL_ADDRESS_SPACE_BYTES",
                 "PATH",
                 "PYTHONPATH",
                 "REQUESTS_CA_BUNDLE",

@@ -75,6 +75,14 @@ def _python_literals_to_json(text: str) -> str:
     return "".join(out)
 
 
+# OpenAI accepts a message name of at most 64 letters, digits, "_" or "-".
+_MESSAGE_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+# OpenAI accepts a message name of at most 64 letters, digits, "_" or "-".
+_MESSAGE_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
 class ReActAgent(EpistemicSupport):
     """Run a text-based thought/action/observation loop inside an AgentSession."""
 
@@ -85,7 +93,7 @@ class ReActAgent(EpistemicSupport):
         system_prompt: str | None = None,
         user_prompt: str | None = None,
         surrender_prompt: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 1.0,
         *,
         epistemic: bool = False,
         **kwargs: Any,
@@ -430,15 +438,13 @@ class ReActAgent(EpistemicSupport):
                         if observation.success
                         else f"Error: {observation.error}"
                     )
-                    messages.append(
-                        dict(
-                            LiteLLMMessage(
-                                role="user",
-                                content=rendered,
-                                name=action.name,
-                            )
-                        )
-                    )
+                    observation_message = LiteLLMMessage(role="user", content=rendered)
+                    # The action name is model text, and providers reject a
+                    # message name that is not a short identifier, which would
+                    # end the trial on what is only a malformed action.
+                    if _MESSAGE_NAME.fullmatch(action.name):
+                        observation_message["name"] = action.name
+                    messages.append(dict(observation_message))
                 continue
 
             await session.record_message(

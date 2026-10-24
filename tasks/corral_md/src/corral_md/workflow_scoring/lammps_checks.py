@@ -26,11 +26,11 @@ from .task_2 import _boundary_states, _commands
 # SHA-256 of the individual files in the benchmark's versioned asset archives.
 _SILICON_SW_SHA256 = "c6d3a7d26db28ee8e3feaf2f8059607de9a4accb45d9719fcabe59488ecf1cad"
 _SILICATE_SOURCE_SHA256 = (
-    "6bd3b36b6d6b3e47c5c5a339460ad95ac88438e2ee6adafb91b96ace0ef9ecf3"
+    "1674c66496b0bab9eda0ce79b439ad90f9ce2097c5d5450a86965442f5cdfa63"
 )
 _CU32_SOURCE_SHA256 = "8e33dafe346e7292fe72bbe2626317d616dc8a8034db4a4bd05dc8dbcd697d89"
 _SILICON_SW_PATH = "/workspace/potentials/SW/Si.sw"
-_SILICATE_SOURCE_PATH = "/workspace/structures/melt/liq1300.dat"
+_SILICATE_SOURCE_PATH = "/workspace/structures/melt/liq4000.dat"
 CU32_SOURCE_PATH = "/workspace/structures/cu/cu32.extxyz"
 
 
@@ -349,75 +349,34 @@ def mp149_conventional_cell(e) -> bool:
 
 
 def supplied_silicate_initial_state(e) -> bool:
-    """Require the canonical liq1300.dat as input and match its initial atoms."""
+    """Bind the initial atoms, cell, charges and velocities to the supplied melt."""
     commands = list(_commands(e))
     first_run = next(
         (i for i, command in enumerate(commands) if _positive_run(command)), None
     )
     if first_run is None:
         return False
-    loads = [command for command in commands[:first_run] if command[0] == "read_data"]
-    if len(loads) != 1 or len(loads[0]) < 2:
+    loads = [c for c in commands[:first_run] if c[0] in {"read_data", "read_restart"}]
+    if len(loads) != 1 or loads[0][0] != "read_data" or len(loads[0]) != 2:
         return False
     original_bytes = _bundled_structure_bytes(
-        "structures/melt/liq1300.dat", _SILICATE_SOURCE_SHA256
+        "structures/melt/liq4000.dat", _SILICATE_SOURCE_SHA256
     )
-    if loads[0][1] == _SILICATE_SOURCE_PATH:
-        # Shared mounted assets are deliberately absent from run snapshots.
-        source_bytes = original_bytes
-        source_hash = _SILICATE_SOURCE_SHA256
-    else:
-        source = _file_in_input(
-            e, loads[0][1], "lammps_inputs", "lammps_input", "initial_state"
-        )
-        source_bytes = source.read_bytes()
-        source_hash = hashlib.sha256(source_bytes).hexdigest()
+    if loads[0][1] != _SILICATE_SOURCE_PATH:
+        # The role label is free-form: any explicitly linked, fingerprinted
+        # artifact may name the source, but basename resolution must be unique
+        # and its bytes must still match the immutable supplied checkpoint.
+        source = _file_in_input(e, loads[0][1], *e._artifacts)
+        if source.read_bytes() != original_bytes:
+            return False
+    # Compare against the immutable source, not a submitted replacement state.
     atoms = read(
-        StringIO(source_bytes.decode()),
+        StringIO(original_bytes.decode()),
         format="lammps-data",
         atom_style="charge",
         units="real",
         sort_by_id=True,
     )
-    if source_hash != _SILICATE_SOURCE_SHA256:
-        # A physical copy may have different comments, whitespace or numeric
-        # precision. Compare the actual source state with the bundled original.
-        original = read(
-            StringIO(original_bytes.decode()),
-            format="lammps-data",
-            atom_style="charge",
-            units="real",
-            sort_by_id=True,
-        )
-        if len(atoms) != len(original):
-            return False
-        if not np.array_equal(atoms.arrays["id"], original.arrays["id"]):
-            return False
-        if not np.array_equal(
-            atoms.get_chemical_symbols(), original.get_chemical_symbols()
-        ):
-            return False
-        if not np.allclose(atoms.cell.array, original.cell.array, atol=2e-5, rtol=1e-6):
-            return False
-        if not np.allclose(
-            atoms.get_initial_charges(),
-            original.get_initial_charges(),
-            atol=1e-7,
-            rtol=0,
-        ):
-            return False
-        if atoms.get_velocities() is None or original.get_velocities() is None:
-            return False
-        if not np.allclose(
-            atoms.get_velocities(), original.get_velocities(), atol=1e-6, rtol=1e-5
-        ):
-            return False
-        difference = (atoms.positions - original.positions) @ np.linalg.inv(
-            original.cell.array
-        )
-        difference -= np.rint(difference)
-        if np.max(np.abs(difference @ original.cell.array)) >= 2e-4:
-            return False
     initial = _boundary_states(e)["initial"]
     if len(atoms) != len(initial["ids"]):
         return False
@@ -463,7 +422,7 @@ def no_silicate_state_resets(e) -> bool:
     active = {}
     for command in commands[: saved + 1]:
         name = command[0]
-        if name == "read_data" and not loaded:
+        if name in {"read_data", "read_restart"} and not loaded:
             loaded = True
             continue
         if not loaded:
@@ -475,6 +434,10 @@ def no_silicate_state_resets(e) -> bool:
             "create_atoms",
             "delete_atoms",
             "replicate",
+            "reset_timestep",
+            "minimize",
+            "change_box",
+            "displace_atoms",
         }:
             return False
         if name == "set" and any(token in {"vx", "vy", "vz"} for token in command[1:]):
@@ -495,7 +458,9 @@ def cooled_endpoint_temperature(e) -> bool:
     """Check the measured endpoint against saved velocities and 300 K target."""
     trace = e.table("thermal_trace", "thermal_traces", "trace")
     if "stage" in trace:
-        trace = trace.loc[trace["stage"] == "cooling"]
+        trace = trace.loc[
+            trace["stage"].astype(str).str.lower().isin(["cooling", "cool"])
+        ]
     measured = (
         trace["measured_temperature_K"]
         if "measured_temperature_K" in trace

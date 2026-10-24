@@ -36,6 +36,7 @@ class DockerSandboxSpec:
     cpus: float = 2.0
     memory: str = "4g"
     pids_limit: int = 256
+    gpus: str | None = None
     network: str = "bridge"
     environment_allowlist: tuple[str, ...] = (
         "ANTHROPIC_API_KEY",
@@ -73,6 +74,28 @@ class DockerSandboxSpec:
             raise ValueError("Docker sandbox memory must look like '4096m' or '4g'")
         if self.pids_limit < 1:
             raise ValueError("Docker sandbox pids_limit must be at least one")
+        if self.gpus is not None:
+            devices = (
+                self.gpus.removeprefix("device=").split(",")
+                if self.gpus.startswith("device=")
+                else []
+            )
+            explicit_devices = (
+                bool(devices)
+                and all(
+                    re.fullmatch(r"(?:0|[1-9][0-9]*)", device) for device in devices
+                )
+                and len(devices) == len(set(devices))
+            )
+            if not (
+                self.gpus == "all"
+                or re.fullmatch(r"[1-9][0-9]*", self.gpus)
+                or explicit_devices
+            ):
+                raise ValueError(
+                    "Docker sandbox gpus must be 'all', a positive count, "
+                    "or 'device=' followed by unique GPU indices"
+                )
         if not self.network.strip():
             raise ValueError("Docker sandbox network cannot be empty")
         if not self.runtime_protocol_version.strip():
@@ -205,7 +228,7 @@ class RunTaskInput:
     started_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    max_iterations: int = 10
+    max_iterations: int | None = None
     model: str | None = None
     dependency_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     enable_surrender: bool = False
@@ -220,7 +243,7 @@ class RunTaskInput:
             raise ValueError("execution_id cannot be empty")
         if self.trial_index < 0:
             raise ValueError("trial_index cannot be negative")
-        if self.max_iterations < 1:
+        if self.max_iterations is not None and self.max_iterations < 1:
             raise ValueError("max_iterations must be at least 1")
         if self.model == "":
             raise ValueError("model cannot be empty")

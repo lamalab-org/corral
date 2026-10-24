@@ -79,6 +79,7 @@ UNSTABLE_HOLDOUT_DISCRIMINATION = 0.30
 # discrimination does not hold up.
 SCREENED_OUT = [FLAGGED_PAIR[1], MISSED_PAIR[1], UNSTABLE_ITEM]
 VENDOR_FLAGS = sorted([*FLAGGED_PAIR, FALSE_FLAG])
+VENDOR_VERDICTS = {item: "disagree" if item == FALSE_FLAG else "agree" for item in VENDOR_FLAGS}
 
 NODES = np.linspace(-4.0, 4.0, 31)
 PRIOR = norm.pdf(NODES) / norm.pdf(NODES).sum()
@@ -87,24 +88,21 @@ PROMPT = """You are choosing an item bank for a short computerized adaptive test
 
 You have calibration responses, an independent holdout sample, and the vendor's item review. The vendor recommends its full bank because it carries the most item information, and its review flags some items.
 
-Choose a bank, and report which item pairs are locally dependent, which vendor flags the responses do not support, and which items behave differently in the holdout sample.
+Decide whether the responses support the vendor's recommendation: which items, if any, should leave the bank, and whether the bank you end up with is ready for adaptive testing.
 """
 
 SUBMISSION_FORMAT = """A single JSON object:
 
 {
-  "bank_choice": "vendor_bank|screened_bank",
-  "dependent_pairs": [["CATxx", "CATyy"]],
-  "unsupported_vendor_flags": ["CATxx"],
-  "unstable_items": ["CATxx"],
-  "recommendation": "use_for_adaptive_testing|do_not_use_without_recalibration"
+  "removed_items": ["CATxx", ...],
+  "vendor_flags": {"<flagged item>": "agree|disagree", ...},
+  "ready_for_adaptive_testing": true|false
 }
 
-`screened_bank` means the vendor bank with the redundant half of each dependent
-pair and every unstable item removed. `dependent_pairs` lists every locally
-dependent pair the responses show, whether or not the vendor flagged it.
-`unsupported_vendor_flags` lists items the vendor flagged that the responses do
-not justify. No model syntax or working is required."""
+`removed_items` lists the items you take out of the vendor's bank; leave it empty
+to keep the full bank. `vendor_flags` gives your verdict on every item the vendor
+flagged. `ready_for_adaptive_testing` says whether the bank you end up with can
+be used as it is. No model syntax or working is required."""
 
 
 def _probability(discrimination, difficulty, theta):
@@ -297,9 +295,7 @@ def write_memo(path):
         "The vendor recommends its full twenty-item bank. Its case is that the bank "
         "carries more item information than any reduced version, and that the items it "
         "marked for attention in the latest review are the ones to watch.\n\n"
-        "The recommendation rests on information computed from the calibration fit. No "
-        "one has checked the vendor's flags against the responses, looked for items that "
-        "behave differently in the holdout sample, or simulated the adaptive test itself.\n"
+        "The recommendation rests on information computed from the calibration fit.\n"
     )
 
 
@@ -348,11 +344,13 @@ def truth(data_sha, rows, vendor, screened):
     return {
         "task_id": TASK_ID,
         "scored": {
-            "bank_choice": "screened_bank",
-            "dependent_pairs": sorted([list(FLAGGED_PAIR), list(MISSED_PAIR)]),
-            "unsupported_vendor_flags": [FALSE_FLAG],
-            "unstable_items": [UNSTABLE_ITEM],
-            "recommendation": "use_for_adaptive_testing",
+            # Either half of a redundant pair may go, but only one of them.
+            "removed_items": {
+                "always": [UNSTABLE_ITEM],
+                "one_of_each": sorted([list(FLAGGED_PAIR), list(MISSED_PAIR)]),
+            },
+            "vendor_flags": VENDOR_VERDICTS,
+            "ready_for_adaptive_testing": True,
         },
         "measured": {"vendor_bank": vendor, "screened_bank": screened},
         "generative_parameters": {
@@ -373,23 +371,34 @@ def truth(data_sha, rows, vendor, screened):
 
 def candidate_submissions():
     correct = {
-        "bank_choice": "screened_bank",
-        "dependent_pairs": sorted([list(FLAGGED_PAIR), list(MISSED_PAIR)]),
-        "unsupported_vendor_flags": [FALSE_FLAG],
-        "unstable_items": [UNSTABLE_ITEM],
-        "recommendation": "use_for_adaptive_testing",
+        "removed_items": SCREENED_OUT,
+        "vendor_flags": VENDOR_VERDICTS,
+        "ready_for_adaptive_testing": True,
     }
     return {
         "correct": correct,
         "follows the vendor review": {
-            **correct,
-            "bank_choice": "vendor_bank",
-            "dependent_pairs": [list(FLAGGED_PAIR)],
-            "unsupported_vendor_flags": [],
+            "removed_items": VENDOR_FLAGS,
+            "vendor_flags": {item: "agree" for item in VENDOR_FLAGS},
+            "ready_for_adaptive_testing": True,
         },
-        "chooses on nominal information": {**correct, "bank_choice": "vendor_bank"},
-        "misses the unflagged pair": {**correct, "dependent_pairs": [list(FLAGGED_PAIR)]},
-        "keeps the item that does not transport": {**correct, "unstable_items": []},
+        "chooses on nominal information": {**correct, "removed_items": []},
+        "misses the unflagged pair": {
+            **correct,
+            "removed_items": [FLAGGED_PAIR[1], UNSTABLE_ITEM],
+        },
+        "keeps the item that does not transport": {
+            **correct,
+            "removed_items": [FLAGGED_PAIR[1], MISSED_PAIR[1]],
+        },
+        "drops both items of a redundant pair": {
+            **correct,
+            "removed_items": [*FLAGGED_PAIR, MISSED_PAIR[1], UNSTABLE_ITEM],
+        },
+        "drops the false flag too": {
+            **correct,
+            "removed_items": [*SCREENED_OUT, FALSE_FLAG],
+        },
     }
 
 

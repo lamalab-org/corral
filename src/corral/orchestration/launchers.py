@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import asdict, replace
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import TypeAdapter
 
 from corral.core.state import ExecutionState, TaskOutput
+from corral.orchestration.defaults import resolve_max_iterations
 from corral.orchestration.models import (
     DockerSandboxSpec,
     RunTaskInput,
@@ -49,6 +51,22 @@ class TaskLauncher(Protocol):
 
 class DockerInfrastructureError(RuntimeError):
     """A container could not be created, supervised, or decoded safely."""
+
+
+def _copy_checkpoint_file(source: str, destination: str) -> str:
+    """Replace exported files atomically, preserving other hard-linked shards."""
+    target = Path(destination)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.checkpoint-", dir=target.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        shutil.copy2(source, temporary)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
 
 
 # Runs before the image's CLI, so retained containers also work with images
@@ -173,7 +191,7 @@ class LocalTaskLauncher:
             environment,
             execution_id=request.execution_id,
             started_at=datetime.fromisoformat(request.started_at),
-            max_iterations=request.max_iterations,
+            max_iterations=resolve_max_iterations(request.max_iterations, agent),
             dependency_outputs=dependencies,
             model_metadata={
                 **({"name": configured_model} if configured_model is not None else {}),
@@ -489,7 +507,12 @@ class DockerTaskLauncher:
                     str(staged),
                     output_limit=32_000,
                 )
-                shutil.copytree(staged, shard, dirs_exist_ok=True)
+                shutil.copytree(
+                    staged,
+                    shard,
+                    dirs_exist_ok=True,
+                    copy_function=_copy_checkpoint_file,
+                )
                 # A clean close can remove these in the container. Do not replay
                 # stale host WAL contents over the newly exported database.
                 for suffix in ("-wal", "-shm"):
@@ -511,6 +534,11 @@ class DockerTaskLauncher:
         observation_context: ObservationContext | None = None,
     ) -> StateRef:
         del observation_context
+        if request.max_iterations is None and request.agent_runtime is not None:
+            request = replace(
+                request,
+                max_iterations=resolve_max_iterations(None, request.agent_runtime.name),
+            )
         docker = request.sandbox.docker
         if docker is None:
             raise ValueError("DockerTaskLauncher received a local sandbox request")
@@ -618,6 +646,28 @@ class DockerTaskLauncher:
             "--env",
             f"CORRAL_HOST_GID={os.getgid()}",
         ]
+        if docker.gpus is not None:
+            selected_devices = (
+                docker.gpus.removeprefix("device=").split(",")
+                if docker.gpus.startswith("device=")
+                else None
+            )
+            # Docker's --gpus parser needs literal quotes around a comma-separated
+            # device selector even when no shell is involved.
+            gpu_argument = f'"{docker.gpus}"' if selected_devices else docker.gpus
+            create_arguments.extend(("--gpus", gpu_argument))
+            if docker.gpus != "all":
+                task_number = re.search(r"(?:^|_)task_(\d+)$", request.task_id)
+                offset = (
+                    int(task_number.group(1)) - 1
+                    if task_number is not None
+                    else int(hashlib.sha256(request.task_id.encode()).hexdigest(), 16)
+                )
+                visible_count = (
+                    len(selected_devices) if selected_devices else int(docker.gpus)
+                )
+                device = (offset + request.trial_index) % visible_count
+                create_arguments.extend(("--env", f"CUDA_VISIBLE_DEVICES={device}"))
         for key, value in labels.items():
             create_arguments.extend(("--label", f"{key}={value}"))
         create_arguments.extend(private_mounts)
@@ -712,6 +762,7 @@ class DockerTaskLauncher:
                 "container_name": container_name,
                 "permissions_policy": "workspace-root-v1",
                 "cpus": docker.cpus,
+                "gpus": docker.gpus,
                 "execution_id": request.execution_id,
                 "image": docker.image,
                 "image_digest": docker.image_digest,

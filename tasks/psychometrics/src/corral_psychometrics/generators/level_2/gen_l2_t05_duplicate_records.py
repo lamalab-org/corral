@@ -69,7 +69,7 @@ SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<complete lavaan/semopy model>",
+  "model_syntax": "<complete semopy model>",
   "diagnosis": "repeated_delivery_only|chance_collisions_only|both_mechanisms",
   "duplicate_key": ["<column>", "..."]
 }
@@ -94,7 +94,7 @@ def respondents(rng, n):
         index = 0 if item in F1_ITEMS else 1
         y = loading * eta[:, index] + rng.normal(0, np.sqrt(1 - loading**2), n)
         out[item] = C.categorize(y, C.THRESHOLDS[item])
-    frame = pd.DataFrame(out)
+    frame = pd.DataFrame(out)[ITEMS]
     frame["age"] = np.clip(rng.normal(35, 11, n).round(), 18, 78).astype(int)
     frame["gender"] = rng.choice([1, 2], size=n, p=[0.61, 0.39])
     frame["accuracy"] = np.clip(rng.beta(8, 1.5, n) * 100, 1, 100).round().astype(int)
@@ -129,11 +129,17 @@ def deliver(rng, people):
         {
             "session_id": delivered["session_id"],
             "device_family": [device_codes[int(i)] for i in source],
+            # Redelivered sessions lean fast and high, but no band value is
+            # reserved for them.
             "completion_band": np.where(
-                redelivered, "repeatable", rng.choice(["ordinary", "repeatable"], n, p=[0.84, 0.16])
+                redelivered,
+                rng.choice(["typical", "fast"], n, p=[0.45, 0.55]),
+                rng.choice(["typical", "fast"], n, p=[0.84, 0.16]),
             ),
             "response_quality_band": np.where(
-                redelivered, "high", rng.choice(["low", "typical", "high"], n, p=[0.08, 0.74, 0.18])
+                redelivered,
+                rng.choice(["low", "typical", "high"], n, p=[0.05, 0.45, 0.50]),
+                rng.choice(["low", "typical", "high"], n, p=[0.08, 0.74, 0.18]),
             ),
         }
     )
@@ -155,8 +161,8 @@ def write_evidence(out_dir, audit):
     (out_dir / "preliminary_analysis.md").write_text(
         "# Preliminary analysis\n\n"
         "A two-factor HSNS model was fitted to the delivered response file. The estimated factor correlation is noticeably larger than the panel analyst expected from prior work. The analyst also noticed many exact response-pattern matches, but did not determine whether these are repeated deliveries or different people who happened to use the same five-point answers.\n\n"
-        "The delivery system can issue a fresh participant identifier and session identifier when a record is transmitted again. The separate audit contains delivery characteristics that may help distinguish repeated transmissions from chance response-pattern matches, but none of its fields is a respondent identifier.\n\n"
-        "Treat this as a preliminary interpretation, not as the answer. Establish which explanation the combined evidence supports and check whether the reported factor relationship survives the data-quality decision.\n"
+        "The separate audit contains delivery characteristics; none of its fields is a respondent identifier.\n\n"
+        "Treat this as a preliminary interpretation, not as the answer.\n"
     )
 
 

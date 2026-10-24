@@ -4,10 +4,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from corral.agents.ai_scientist import AIScientistAgent
+from corral.agents.tool_calling import ToolCallingAgent
 from corral.core import submit_answer_action
 from corral.core.environment import Environment, Toolset
 from corral.core.state import (
     ActionState,
+    AgentRunState,
     ExecutionState,
     RuntimeState,
     ToolInvocationState,
@@ -20,6 +23,7 @@ from corral.orchestration import (
     BenchmarkInput,
     EnvironmentRuntimeDefinition,
     EvaluationRef,
+    RuntimeRegistry,
     StateRef,
     TaskExecutionResult,
 )
@@ -63,6 +67,82 @@ class MemoryCommitStore:
         assert branch_id == self.state.branch_id
         assert commit_hash == self.state.through_commit_hash
         return self.state
+
+
+@pytest.mark.anyio
+async def test_report_includes_isolated_experiments_and_preserves_score():
+    from corral.report.projection import project_benchmark_result
+
+    state = _submitted_state()
+    branch_calls = [
+        {
+            "tool_name": "PythonREPL",
+            "arguments": {"code": "print(42)"},
+            "result": "42",
+            "status": "success",
+            "duration": 2.0,
+        },
+        {
+            "tool_name": "PythonREPL",
+            "arguments": {"code": "print(1)"},
+            "result": "checkpoint failure",
+            "status": "execution_error",
+            "error_message": "checkpoint failure",
+            "duration": 3.0,
+        },
+    ]
+    state = ExecutionState.model_validate(
+        {
+            **state.model_dump(),
+            "agent_runs": {
+                "scientist": AgentRunState(
+                    run_id="scientist",
+                    actor_id="ai-scientist",
+                    status="completed",
+                    metadata={"tool_statistics": {"tool_calls": branch_calls}},
+                )
+            },
+        }
+    )
+    reference = StateRef(
+        commit_hash=state.through_commit_hash,
+        execution_id=state.execution_id,
+        branch_id="main",
+        sequence=10,
+        status="submitted",
+        agent_steps=1,
+        submission="42",
+        output={"answer": "42"},
+    )
+    evaluation = EvaluationRef(
+        commit_hash=state.through_commit_hash,
+        score=1.0,
+        metrics={},
+        scorer_version="test",
+    )
+    report = await project_benchmark_result(
+        BenchmarkExecutionResult(
+            "benchmark-1",
+            ("upstream",),
+            1,
+            (
+                TaskExecutionResult(
+                    "upstream", 0, state.execution_id, reference, evaluation=evaluation
+                ),
+            ),
+        ),
+        state_store=MemoryCommitStore(state),
+        verbose=True,
+    )
+    trial = report.task_results["upstream"].trials[0]
+    assert trial.score == 1.0
+    assert trial.output == {"answer": "42"}
+    assert trial.tool_statistics["by_tool"] == {"submit_answer": 1, "PythonREPL": 2}
+    assert len(trial.tool_statistics["tool_calls"]) == 3
+    assert sum(c["error"] for c in trial.tool_statistics["tool_calls"]) == 1
+    assert trial.tool_execution_duration == pytest.approx(5.005)
+    assert trial.token_usage["tool_calls"] == state.usage.tool_calls + 2
+    assert branch_calls[0]["status"] == "success"
 
 
 def _submitted_state() -> ExecutionState:
@@ -190,6 +270,45 @@ def test_runner_infers_metadata_from_environments_by_default():
             max_iterations=12,
         ),
     }
+
+
+@pytest.mark.parametrize(
+    ("agent_class", "default_limit"), [(AIScientistAgent, 100), (ToolCallingAgent, 50)]
+)
+@pytest.mark.parametrize("max_iterations", [None, 7])
+@pytest.mark.parametrize("explicit_metadata", [False, True])
+def test_runner_resolves_iteration_budget_for_arbitrary_agent_id(
+    agent_class, default_limit, max_iterations, explicit_metadata
+):
+    environment = _environment("task")
+    registry = RuntimeRegistry(
+        agents={"experimenter": agent_class()}, environments={"task": environment}
+    )
+    options = (
+        {
+            "tasks": {
+                "task": BenchmarkTaskMetadata(
+                    agent_id="experimenter",
+                    environment_id="task",
+                    max_iterations=max_iterations,
+                )
+            }
+        }
+        if explicit_metadata
+        else {
+            "environments": {"task": environment},
+            "agent_id": "experimenter",
+            "max_iterations": max_iterations,
+        }
+    )
+    try:
+        runner = CorralRunner(registry, state_store=None, **options)
+        request = runner.build_input("defaults")
+        assert request.max_iterations_by_task == {
+            "task": default_limit if max_iterations is None else max_iterations
+        }
+    finally:
+        registry.close()
 
 
 def test_runner_requires_one_metadata_source():

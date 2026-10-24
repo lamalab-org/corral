@@ -13,7 +13,7 @@ from corral.orchestration.parameters import model_parameter_metadata
 
 @pytest.mark.parametrize(
     ("name", "temperature"),
-    [("tool-calling", 0.7), ("ai-scientist", 0.2), ("reflexion", 0.0)],
+    [("tool-calling", 1.0), ("ai-scientist", 1.0), ("reflexion", 1.0)],
 )
 def test_constructor_temperature_and_catalog_effort_are_recorded(
     monkeypatch, name, temperature

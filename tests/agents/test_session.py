@@ -11,9 +11,11 @@ from corral.agents.ai_scientist.agent import _BranchSessionRegistry
 from corral.agents.schema import AgentOutcome
 from corral.agents.session import AgentSession, run_agent_session
 from corral.core import Action, ActorRef, AgentStarted, CommitRequest
-from corral.core.environment import Environment
+from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
+from corral.core.tool_catalog import state_tool_catalog
 from corral.persistence import SQLiteCommitStore
+from corral.workspace import AbsoluteWorkspaceFilesystem, build_terminal_tool
 
 
 @pytest.fixture
@@ -114,6 +116,73 @@ async def test_fork_branch_restores_nonempty_workspace(workspace_session):
         Path(fork.workspace, "notes.txt").read_text(encoding="utf-8")
         == "restored contents"
     )
+
+
+@pytest.mark.anyio
+async def test_fork_branch_preserves_custom_terminal_catalog(tmp_path):
+    def workspace_tools(workspace):
+        terminal = build_terminal_tool(AbsoluteWorkspaceFilesystem(workspace))
+        terminal.description += " Use the task's relative output paths."
+        return {"terminal": terminal}
+
+    environment = Environment(
+        "custom-terminal",
+        TaskDefinition(
+            name="custom-terminal",
+            description="Exercise a task-specific terminal description.",
+            tools=[],
+            scoring_fn=lambda _answer: 1.0,
+            submission_format={"answer": "string"},
+            resolve_answer=False,
+        ),
+        base_work_dir=str(tmp_path / "workspaces"),
+        task_execution_id="custom-terminal-execution",
+        toolset=Toolset(workspace_factory=workspace_tools),
+    )
+    runtime_actor = ActorRef(kind="runtime", actor_id="corral", run_id="runtime")
+    actor = ActorRef(kind="agent", actor_id="test-agent", run_id="agent")
+    async with SQLiteCommitStore(
+        tmp_path / "commits.sqlite3", "custom-terminal-execution"
+    ) as store:
+        event = await anyio.to_thread.run_sync(
+            lambda: environment.initial_event(
+                execution_id="custom-terminal-execution", actor_id=actor.actor_id
+            )
+        )
+        root = await store.append(
+            CommitRequest(
+                request_id="execution:started",
+                branch_id="main",
+                based_on_hash=None,
+                author=runtime_actor,
+                event=event,
+            )
+        )
+        await store.append(
+            CommitRequest(
+                request_id="agent:started",
+                branch_id="main",
+                based_on_hash=root.hash,
+                author=runtime_actor,
+                event=AgentStarted(agent_run_id=actor.run_id, agent_id=actor.actor_id),
+            )
+        )
+        state = await store.materialize("main")
+        session = AgentSession(
+            environment,
+            state,
+            actor=actor,
+            runtime_actor=runtime_actor,
+            state_store=store,
+            max_iterations=10,
+        )
+        fork = await session.fork_branch(branch_id="experiment")
+
+        assert (
+            fork.environment.tool_catalog_snapshot().fingerprint
+            == state_tool_catalog(state).fingerprint
+        )
+        fork.environment.validate_state_tool_catalog(fork.state)
 
 
 @pytest.mark.anyio

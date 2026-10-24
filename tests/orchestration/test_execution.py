@@ -10,6 +10,7 @@ import pytest
 from pydantic import TypeAdapter
 
 from corral import run
+from corral.agents.ai_scientist import AIScientistAgent
 from corral.agents.schema import AgentOutcome
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.environment import Environment, Toolset
@@ -234,6 +235,52 @@ async def test_sampling_defaults_survive_persistence_and_resume(monkeypatch, tmp
         )
         assert resumed.commit_hash == result.commit_hash
         assert resumed.metadata["model_parameters"] == expected
+    finally:
+        registry.close()
+        await store.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("scientist", [False, True])
+@pytest.mark.parametrize("max_iterations", [None, 7])
+async def test_direct_execution_resolves_and_records_iteration_default(
+    tmp_path, scientist, max_iterations
+):
+    expected = (
+        max_iterations if max_iterations is not None else (100 if scientist else 50)
+    )
+
+    class RecordingScientist(AIScientistAgent):
+        async def run_session(self, session):
+            assert session.iteration_limit == expected
+            return await SubmitAgent().run_session(session)
+
+    class RecordingAgent(SubmitAgent):
+        async def run_session(self, session):
+            assert session.iteration_limit == expected
+            return await super().run_session(session)
+
+    agent = RecordingScientist() if scientist else RecordingAgent()
+    store = SQLiteCommitStore(tmp_path / "iteration-default.sqlite3")
+    registry = RuntimeRegistry(
+        agents={"custom-id": agent}, environments={"task": _environment("task")}
+    )
+    request = RunTaskInput(
+        execution_id="iteration-default",
+        task_id="task",
+        environment_id="task",
+        agent_id="custom-id",
+        max_iterations=max_iterations,
+    )
+    try:
+        result = await execute_task(
+            task=request, state_store=store, registry=registry, observer=NoOpObserver()
+        )
+        assert result.status == "submitted"
+        state = await store.for_execution(request.execution_id).materialize(
+            "main", result.commit_hash
+        )
+        assert state.task.scaffold["max_iterations"] == expected
     finally:
         registry.close()
         await store.aclose()

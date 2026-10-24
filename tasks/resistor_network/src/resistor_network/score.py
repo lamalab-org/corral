@@ -598,3 +598,103 @@ def check_conductance_topology(
             return 0.0
 
     return score_fn
+
+
+def check_sparse_circuit_solution(
+    expected_topology: dict[str, Any],
+    expected_measurements: list[dict[str, Any]],
+    measurement_tolerance: float = 0.000500001,
+    allowed_resistor_values: list[float] | None = None,
+) -> Callable[[str], float]:
+    """Simulate every public reading without demanding the hidden wiring.
+
+    The hidden answer supplies only the public node set and component count.
+    Absolute tolerance represents three-decimal rounding, not a loose relative
+    fit or a sum-of-errors threshold. All physical and simulation checks apply
+    equally to the original circuit and alternative indistinguishable circuits.
+    An optional published value pool constrains every submitted resistor;
+    values may repeat and no private inventory or per-value counts are used.
+    """
+    if not expected_measurements:
+        raise ValueError("Sparse scoring requires published measurements")
+    if not math.isfinite(measurement_tolerance) or measurement_tolerance <= 0:
+        raise ValueError("Measurement tolerance must be positive and finite")
+    allowed = None
+    if allowed_resistor_values is not None:
+        if not allowed_resistor_values or any(
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(value)
+            or value <= 0
+            for value in allowed_resistor_values
+        ):
+            raise ValueError("Allowed resistor values must be positive and finite")
+        allowed = frozenset(allowed_resistor_values)
+        if any(
+            value not in allowed for value in expected_topology["resistors"].values()
+        ):
+            raise ValueError(
+                "Expected resistor values must belong to the published pool"
+            )
+    expected_nodes = {node for c in expected_topology["connections"] for node in c[:2]}
+    expected_count = len(expected_topology["resistors"])
+    if {
+        node for m in expected_measurements for node in (m["node_a"], m["node_b"])
+    } != expected_nodes:
+        raise ValueError("Every expected node must appear in the public measurements")
+
+    def unique_keys(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError(f"Duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def score_fn(topology_input: str) -> float:
+        try:
+            # Reject duplicate object keys rather than silently keeping the
+            # last resistor value, then reuse common structural parsing.
+            json.loads(topology_input, object_pairs_hook=unique_keys)
+            proposed = _parse_topology(topology_input)
+            if proposed is None or len(proposed["resistors"]) != expected_count:
+                return 0.0
+            if allowed is not None and any(
+                value not in allowed for value in proposed["resistors"].values()
+            ):
+                return 0.0
+            adjacency: dict[str, set[str]] = {}
+            pairs = set()
+            for a, b, _rid in proposed["connections"]:
+                pair = tuple(sorted((a, b)))
+                if pair in pairs:
+                    return 0.0
+                pairs.add(pair)
+                adjacency.setdefault(a, set()).add(b)
+                adjacency.setdefault(b, set()).add(a)
+            if set(adjacency) != expected_nodes:
+                return 0.0
+            reachable, frontier = {next(iter(adjacency))}, [next(iter(adjacency))]
+            while frontier:
+                unseen = adjacency[frontier.pop()] - reachable
+                reachable.update(unseen)
+                frontier.extend(unseen)
+            if reachable != expected_nodes:
+                return 0.0
+            # Independent nodal solves, not the generator's optimizer or its
+            # acceptance flags. Every individual observation must pass.
+            for measurement in expected_measurements:
+                predicted = get_resistance_between_nodes(
+                    topology_input, [measurement["node_a"], measurement["node_b"]]
+                )
+                if (
+                    not math.isfinite(predicted)
+                    or abs(predicted - measurement["resistance"])
+                    > measurement_tolerance
+                ):
+                    return 0.0
+            return 1.0
+        except (ValueError, TypeError, KeyError, OverflowError):
+            return 0.0
+
+    return score_fn

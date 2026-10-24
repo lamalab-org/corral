@@ -109,6 +109,33 @@ def test_analysis_checkpoint_preserves_random_state(analysis_session):
     assert analysis_session.execute(code) == expected
 
 
+def test_repl_resolves_callbacks_in_their_python_scope(analysis_session):
+    analysis_session.execute("f = 7\nBIC = lambda x: x")
+    analysis_session.restore(analysis_session.snapshot())
+    result = analysis_session.execute("""from scipy.optimize import minimize
+def optimize(f):
+    return minimize(f, [0.0]).x[0]
+opt = lambda f: minimize(f, [0.0]).x[0]
+BIC = lambda x: x + 1
+callbacks = [lambda x: x + 1]
+print(round(optimize(lambda x: (x[0] - 2)**2)))
+print(round(opt(lambda x: (x[0] - 3)**2)))
+print(BIC(41))
+print([f(4) for f in callbacks])""")
+    assert result == "2\n3\n42\n[5]\n"
+    analysis_session.restore(analysis_session.snapshot())
+    assert analysis_session.execute("print(BIC(9))") == "10\n"
+
+
+def test_repl_preserves_python_error_for_noncallable_callback(analysis_session):
+    result = analysis_session.execute("""from scipy.optimize import minimize
+f = 7
+minimize(f, [0.0])""")
+    assert result.startswith("Error Traceback:")
+    assert "TypeError: 'int' object is not callable" in result
+    assert analysis_session.execute("print(f)") == "7\n"
+
+
 def test_analysis_checkpoint_preserves_shared_recursive_closures(analysis_session):
     analysis_session.execute("""def counter():
     count = 0

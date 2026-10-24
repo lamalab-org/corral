@@ -11,7 +11,22 @@ from corral_md.workflow_scoring.regression import (
 )
 from sklearn.decomposition import PCA
 from sklearn.linear_model import Ridge
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+
+
+def test_standard_scaler_distinguishes_tiny_variation_from_constant_features():
+    rng = np.random.default_rng(26)
+    x = np.column_stack((rng.normal(size=140) * 1e-30,
+                         np.ones(140) * 3e-30,
+                         1e10 + rng.normal(size=140) * 1e-5,
+                         rng.normal(size=140)))
+    fitted = StandardScaler().fit(x)
+    model = {'mean': fitted.mean_, 'scale': fitted.scale_}
+    assert fitted.scale_[0] < np.finfo(float).eps
+    assert fitted.scale_[1] == fitted.scale_[2] == 1
+    assert scaler_matches(x, model)
+    assert not scaler_matches(x, {**model, 'mean': fitted.mean_ + 1})
+    assert not scaler_matches(x, {**model, 'scale': np.ones(4)})
 
 
 def test_metrics_are_recomputed_and_constant_targets_supported():

@@ -394,7 +394,10 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
         asyncio.run(cli.run_benchmark(args))
 
 
-@pytest.mark.parametrize("agent", ["claude-code", "codex", "openhands", "reflexion"])
+@pytest.mark.parametrize(
+    "agent", ["ai-scientist", "claude-code", "codex", "openhands", "reflexion"]
+)
+@pytest.mark.parametrize("max_iterations", [None, 7])
 @pytest.mark.parametrize(
     ("model_args", "expected_model", "expected_effort"),
     [
@@ -417,7 +420,13 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
     ],
 )
 def test_docker_benchmark_does_not_import_agent_on_host(
-    monkeypatch, tmp_path, agent, model_args, expected_model, expected_effort
+    monkeypatch,
+    tmp_path,
+    agent,
+    max_iterations,
+    model_args,
+    expected_model,
+    expected_effort,
 ):
     environments = {"task1": _environment("task1")}
     monkeypatch.setattr(cli, "load_environment_group", lambda *a, **kw: environments)
@@ -465,6 +474,11 @@ def test_docker_benchmark_does_not_import_agent_on_host(
             "--output-dir",
             str(tmp_path),
             *model_args,
+            *(
+                []
+                if max_iterations is None
+                else ["--max-iterations", str(max_iterations)]
+            ),
         ]
     )
     options = {"actor": "ClaudeCodeAgent"} if agent == "reflexion" else {}
@@ -475,6 +489,11 @@ def test_docker_benchmark_does_not_import_agent_on_host(
     assert request.sandbox.mode == "docker"
     assert request.model == expected_model
     assert request.agent_runtime.name == agent
+    assert request.max_iterations == (
+        max_iterations
+        if max_iterations is not None
+        else (100 if agent == "ai-scientist" else 50)
+    )
     assert request.agent_runtime.model == expected_model
     assert request.agent_runtime.reasoning_effort == expected_effort
     assert request.agent_runtime.options == {**args.agent_kwargs, **options}
@@ -561,9 +580,27 @@ def test_run_rejects_task_dependencies(monkeypatch):
 
 
 @pytest.mark.parametrize("agent_class", [SubmitAgent, FailingAgent])
+@pytest.mark.parametrize(
+    ("agent_name", "default_limit"), [("ai_scientist", 100), ("react", 50)]
+)
+@pytest.mark.parametrize("max_iterations", [None, 7])
 def test_run_executes_one_task_without_a_benchmark(
-    monkeypatch, tmp_path, capsys, agent_class
+    monkeypatch,
+    tmp_path,
+    capsys,
+    agent_class,
+    agent_name,
+    default_limit,
+    max_iterations,
 ):
+    iteration_limits = []
+    original_execute = cli.execute_task
+
+    async def record_execute(**kwargs):
+        iteration_limits.append(kwargs["task"].max_iterations)
+        return await original_execute(**kwargs)
+
+    monkeypatch.setattr(cli, "execute_task", record_execute)
     monkeypatch.setattr(
         cli,
         "load_environment_group",
@@ -574,7 +611,7 @@ def test_run_executes_one_task_without_a_benchmark(
         [
             "run",
             "--agent",
-            "react",
+            agent_name,
             "--environment",
             "samplemath",
             "--task",
@@ -583,11 +620,19 @@ def test_run_executes_one_task_without_a_benchmark(
             "cli-direct-task",
             "--commit-file",
             str(tmp_path / "run-commits.sqlite3"),
+            *(
+                []
+                if max_iterations is None
+                else ["--max-iterations", str(max_iterations)]
+            ),
         ]
     )
 
     result = asyncio.run(cli.run_task(args))
 
+    assert iteration_limits == [
+        default_limit if max_iterations is None else max_iterations
+    ]
     failed = agent_class is FailingAgent
     assert result == int(failed)
     output = capsys.readouterr().out
@@ -645,7 +690,7 @@ def test_legacy_script_defaults():
 
     assert args.model == "openai/gpt-5.6-terra"
     assert args.temperature == 1.0
-    assert args.max_iterations == 20
+    assert args.max_iterations == 50
     assert args.sandbox is None
     assert args.keep_sandboxes == "on-failure"
     assert args.agent_kwargs == {}
@@ -750,3 +795,54 @@ def test_benchmark_runs_locally_and_writes_report(
     manifest = json.loads((reports[0].parent / "run-metadata.json").read_text())
     assert manifest["status"] == ("completed_with_errors" if failed else "completed")
     assert len(list(reports[0].parent.rglob("commits.sqlite3"))) == 2
+
+
+def test_benchmark_reports_evaluation_failure_as_incomplete(
+    monkeypatch, tmp_path, capsys
+):
+    import importlib
+
+    run_module = importlib.import_module("corral.run")
+
+    async def unavailable_evaluator(*args, **kwargs):
+        raise ValueError("Cannot grade a different execution protocol or task bank")
+
+    monkeypatch.setattr(run_module, "evaluate_task", unavailable_evaluator)
+    monkeypatch.setattr(
+        cli,
+        "load_environment_group",
+        lambda *args, **kwargs: {"task1": _environment("task1")},
+    )
+    monkeypatch.setattr(cli, "create_agent", lambda *args, **kwargs: SubmitAgent())
+    args = cli.build_parser().parse_args(
+        [
+            "bench",
+            "--agent",
+            "react",
+            "--environment",
+            "samplemath",
+            "--sandbox",
+            "local",
+            "--max-attempts",
+            "1",
+            "--run-id",
+            "evaluation-failure",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert asyncio.run(cli.run_benchmark(args)) == 1
+    assert (
+        "evaluation error: Cannot grade a different execution protocol or task bank"
+        in capsys.readouterr().out
+    )
+    manifest = json.loads(
+        (tmp_path / "evaluation-failure/run-metadata.json").read_text()
+    )
+    assert manifest["status"] == "completed_with_errors"
+    assert manifest["failed_trials"] == manifest["evaluation_failed_trials"] == 1
+    report = json.loads((tmp_path / "evaluation-failure/report.json").read_text())
+    trial = report["task_results"]["task1"]["trials"][0]
+    assert trial["score"] is None
+    assert trial["error_message"] is None
+    assert trial["evaluation_error"]

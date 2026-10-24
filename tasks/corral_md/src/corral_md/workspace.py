@@ -1,5 +1,6 @@
 """Agent paths and read-only asset catalogs for the MD workspace."""
 
+import shutil
 from pathlib import Path
 
 import modal
@@ -25,6 +26,12 @@ def local_path(root: str | Path, path: str, *, allow_root: bool = False) -> Path
 class MDWorkspaceFilesystem(AbsoluteWorkspaceFilesystem):
     """Present remote assets alongside local files without snapshotting assets."""
 
+    def __init__(self, root: str | Path, *, assets_dir: str | Path | None = None):
+        super().__init__(root)
+        self.assets_dir = (
+            Path(assets_dir).expanduser().resolve() if assets_dir else None
+        )
+
     def _asset(self, path: str):
         from corral_md.modal_workspace import (  # — avoid a client/catalog import cycle
             configured_asset_volume_name,
@@ -34,6 +41,14 @@ class MDWorkspaceFilesystem(AbsoluteWorkspaceFilesystem):
         kind, _, tail = relative.partition("/")
         if kind not in ASSET_DIRECTORIES:
             return None
+        if self.assets_dir is not None:
+            catalog = self.assets_dir / kind
+            if not catalog.is_dir():
+                raise FileNotFoundError(f"Local MD asset catalog not found: {catalog}")
+            target = (catalog / tail).resolve()
+            if not target.is_relative_to(catalog):
+                raise ValueError(f"Asset path escapes its catalog: {path}")
+            return kind, target, None
         volume = modal.Volume.from_name(configured_asset_volume_name(kind))
         return kind, volume, "/" + tail
 
@@ -44,6 +59,8 @@ class MDWorkspaceFilesystem(AbsoluteWorkspaceFilesystem):
         asset = self._asset(path)
         if asset:
             _, volume, remote = asset
+            if remote is None:
+                return volume.read_text(encoding=encoding)
             return b"".join(volume.read_file(remote)).decode(encoding)
         return super().read_file(path, encoding=encoding)
 
@@ -53,6 +70,16 @@ class MDWorkspaceFilesystem(AbsoluteWorkspaceFilesystem):
         asset = self._asset(path)
         if asset:
             kind, volume, remote = asset
+            if remote is None:
+                if not volume.is_dir():
+                    raise NotADirectoryError(path)
+                entries = volume.rglob("*") if recursive else volume.iterdir()
+                catalog = self.assets_dir / kind
+                return sorted(
+                    f"/workspace/{kind}/{entry.relative_to(catalog).as_posix()}"
+                    for entry in entries
+                    if entry.is_file() and entry.resolve().is_relative_to(catalog)
+                )
             return sorted(
                 f"/workspace/{kind}/{entry.path.lstrip('/')}"
                 for entry in volume.listdir(remote, recursive=recursive)
@@ -68,6 +95,17 @@ class MDWorkspaceFilesystem(AbsoluteWorkspaceFilesystem):
         asset = self._asset(path)
         if asset:
             _, volume, remote = asset
+            if remote is None:
+                if volume.is_file():
+                    return {
+                        "path": path,
+                        "type": "file",
+                        "size": volume.stat().st_size,
+                        "read_only": True,
+                    }
+                if volume.is_dir():
+                    return {"path": path, "type": "directory", "read_only": True}
+                raise FileNotFoundError(f"Asset not found: {path}")
             if remote == "/":
                 return {"path": path, "type": "directory", "read_only": True}
             entries = volume.listdir(remote)
@@ -93,8 +131,17 @@ class MDWorkspaceFilesystem(AbsoluteWorkspaceFilesystem):
         if asset:
             _, volume, remote = asset
             target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("wb") as stream:
-                for chunk in volume.read_file(remote):
-                    stream.write(chunk)
+            if remote is None:
+                if not volume.is_file():
+                    raise FileNotFoundError(f"Asset not found: {source}")
+                with (
+                    volume.open("rb") as source_stream,
+                    target.open("wb") as target_stream,
+                ):
+                    shutil.copyfileobj(source_stream, target_stream)
+            else:
+                with target.open("wb") as stream:
+                    for chunk in volume.read_file(remote):
+                        stream.write(chunk)
             return
         super().copy_file(source, destination)

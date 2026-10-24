@@ -1207,9 +1207,12 @@ class AgentSession:
                 build_terminal_tool,
             )
 
-            environment.tools["terminal"] = build_terminal_tool(
+            rebound_terminal = build_terminal_tool(
                 AbsoluteWorkspaceFilesystem(environment.workspace_path)
             )
+            if original_terminal := environment.tools.get("terminal"):
+                rebound_terminal.description = original_terminal.description
+            environment.tools["terminal"] = rebound_terminal
         branch_state = await self.state_store.materialize(selected)
         if node_workspace is None:
             await anyio.to_thread.run_sync(

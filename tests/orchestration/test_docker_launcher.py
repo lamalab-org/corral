@@ -114,16 +114,28 @@ def test_legacy_runtime_cannot_disable_worker_permissions(version):
         DockerSandboxSpec(runtime_protocol_version=version)
 
 
-def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
+@pytest.mark.parametrize("gpus", ["device=", "device=2,2", "device=-1", "device=2, x"])
+def test_docker_gpu_device_selector_rejects_invalid_indices(gpus):
+    with pytest.raises(ValueError, match="Docker sandbox gpus"):
+        DockerSandboxSpec(gpus=gpus)
+
+
+@pytest.mark.parametrize("already_owned", [False, True])
+def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path, already_owned):
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
     result = checkpoint / "result.json"
     result.write_text("{}")
     ownership_changes = []
+    owner = checkpoint.stat()
+    uid, gid = owner.st_uid, owner.st_gid
+    if not already_owned:
+        uid += 1
+        gid += 1
 
     monkeypatch.setattr(internal.os, "geteuid", lambda: 0)
-    monkeypatch.setenv("CORRAL_HOST_UID", "501")
-    monkeypatch.setenv("CORRAL_HOST_GID", "20")
+    monkeypatch.setenv("CORRAL_HOST_UID", str(uid))
+    monkeypatch.setenv("CORRAL_HOST_GID", str(gid))
     monkeypatch.setattr(
         internal.os,
         "chown",
@@ -132,7 +144,35 @@ def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
 
     internal._restore_host_ownership(checkpoint)
 
-    assert ownership_changes == [(result, 501, 20), (checkpoint, 501, 20)]
+    assert ownership_changes == (
+        [] if already_owned else [(result, uid, gid), (checkpoint, uid, gid)]
+    )
+
+
+def test_claim_checkpoint_ownership_covers_restored_artifact_directories(
+    monkeypatch, tmp_path
+):
+    checkpoint = tmp_path / "checkpoint"
+    artifact = checkpoint / "artifacts" / "01" / "blob"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"saved output")
+    ownership_changes = []
+
+    monkeypatch.setattr(internal.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        internal.os,
+        "chown",
+        lambda path, uid, gid: ownership_changes.append((path, uid, gid)),
+    )
+
+    internal._set_checkpoint_ownership(checkpoint, 0, 0)
+
+    assert {path for path, uid, gid in ownership_changes if (uid, gid) == (0, 0)} == {
+        checkpoint,
+        checkpoint / "artifacts",
+        artifact.parent,
+        artifact,
+    }
 
 
 @pytest.mark.anyio
@@ -179,8 +219,13 @@ async def test_preflight_builds_selected_task_and_extra_only_when_image_is_missi
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("private_data", [False, True])
+@pytest.mark.parametrize(
+    ("agent_name", "default_limit"), [("react", 50), ("ai_scientist", 100)]
+)
+@pytest.mark.parametrize("max_iterations", [None, 7])
+@pytest.mark.parametrize("gpus", [None, "4", "device=2,3"])
 async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
-    monkeypatch, tmp_path, private_data
+    monkeypatch, tmp_path, private_data, agent_name, default_limit, max_iterations, gpus
 ):
     store = ShardedCommitStore(tmp_path / ".corral")
     private_root = tmp_path / "private-bank"
@@ -245,6 +290,7 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
         task_id="task-a",
         environment_id="task-a",
         agent_id="agent",
+        max_iterations=max_iterations,
         started_at="2026-01-01T00:00:00+00:00",
         benchmark_run_id="benchmark",
         trial_index=2,
@@ -253,11 +299,15 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
             docker=DockerSandboxSpec(
                 image="corral:test",
                 image_digest="sha256:" + "b" * 64,
+                gpus=gpus,
                 private_directories=(str(private_root),) if private_data else (),
             ),
         ),
         agent_runtime=AgentRuntimeDefinition(
-            name="react", model="test-model", temperature=0.2, reasoning_effort="high"
+            name=agent_name,
+            model="test-model",
+            temperature=0.2,
+            reasoning_effort="high",
         ),
         environment_runtime=EnvironmentRuntimeDefinition(
             name="samplemath",
@@ -272,6 +322,9 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
     assert result.metadata["recovered"] is False
     saved_request = json.loads((execution_dir / "request.json").read_text())
     assert saved_request["execution_id"] == execution_id
+    assert saved_request["max_iterations"] == (
+        default_limit if max_iterations is None else max_iterations
+    )
     assert saved_request["agent_runtime"]["temperature"] == 0.2
     assert saved_request["agent_runtime"]["reasoning_effort"] == "high"
     durable_metadata = json.loads((execution_dir / "metadata.json").read_text())
@@ -296,6 +349,18 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
         not in (execution_dir / "request.json").read_text()
     )
     assert "--read-only" in create
+    if gpus is not None:
+        assert create[create.index("--gpus") + 1] == (
+            '"device=2,3"' if gpus == "device=2,3" else "4"
+        )
+        assert any(
+            entry.startswith("CUDA_VISIBLE_DEVICES=")
+            and entry[-1] in ("01" if gpus == "device=2,3" else "0123")
+            for entry in forwarded_env
+        )
+        assert durable_metadata["sandbox"]["gpus"] == gpus
+    else:
+        assert "--gpus" not in create
     assert "--init" in create
     assert create[create.index("--user") + 1] == "0:0"
     assert durable_metadata["sandbox"]["permissions_policy"] == "workspace-root-v1"
@@ -740,3 +805,78 @@ async def test_container_uses_configured_observer_and_flushes_on_exit(
         )
     observer.flush.assert_called_once_with()
     registry.close.assert_called_once_with()
+
+
+def _docker_request(execution_id: str) -> RunTaskInput:
+    return RunTaskInput(
+        execution_id=execution_id,
+        task_id="task-a",
+        environment_id="task-a",
+        agent_id="agent",
+        started_at="2026-01-01T00:00:00+00:00",
+        benchmark_run_id="benchmark",
+        trial_index=1,
+        sandbox=SandboxProfile(
+            mode=SandboxMode.DOCKER,
+            docker=DockerSandboxSpec(
+                image="corral:test",
+                image_digest="sha256:" + "b" * 64,
+            ),
+        ),
+        agent_runtime=AgentRuntimeDefinition(name="react", model="test-model"),
+        environment_runtime=EnvironmentRuntimeDefinition(name="samplemath"),
+    )
+
+
+@pytest.mark.anyio
+async def test_docker_launcher_forwards_langfuse_keys_by_default(
+    monkeypatch, tmp_path, docker_lifecycle
+):
+    store = ShardedCommitStore(tmp_path / ".corral")
+    execution_id = "benchmark:task-a:1"
+    docker_lifecycle.outcome = "submitted"
+    commands = docker_lifecycle.commands
+
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://langfuse.example")
+
+    await launchers.DockerTaskLauncher(store).run(_docker_request(execution_id))
+
+    create = next(command for command in commands if command[1] == "create")
+    forwarded = {
+        create[index + 1] for index, value in enumerate(create) if value == "--env"
+    }
+    # Names only: Docker reads the values from the launcher's environment.
+    assert {"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} <= (
+        forwarded
+    )
+    await store.aclose()
+
+
+@pytest.mark.anyio
+async def test_container_task_traces_through_the_environment_observer(
+    monkeypatch, tmp_path
+):
+    flushed = []
+
+    class Observer:
+        def flush(self):
+            flushed.append(True)
+
+    def stop(*_args):
+        raise RuntimeError("stop after the observer is created")
+
+    monkeypatch.setattr(internal, "observer_from_env", Observer)
+    # Stop at the same startup boundary regardless of the runner's ownership.
+    monkeypatch.setattr(internal, "_set_checkpoint_ownership", lambda *_: None)
+    monkeypatch.setattr(internal.permissions, "configure", stop)
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    request_path = checkpoint / "request.json"
+    request_path.write_text(json.dumps(asdict(_docker_request("benchmark:task-a:1"))))
+
+    with pytest.raises(RuntimeError, match="stop after"):
+        await internal.run_task_from_files(request_path, checkpoint / "result.json")
+
+    assert flushed == [True]

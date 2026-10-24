@@ -7,6 +7,7 @@ import anyio
 import pytest
 from anyio.from_thread import BlockingPortal
 from tests.agents.commit_session import start_session
+from tests.agents.conftest import MockLLMResponse
 
 from corral.agents import INSPECT_SUBAGENT_TOOL_NAME, Agent, AIScientistAgent
 from corral.agents.ai_scientist import agent as agent_module
@@ -15,7 +16,9 @@ from corral.agents.ai_scientist.agent import (
     _call_llm_from_harness,
 )
 from corral.agents.ai_scientist.manager import ExperimentManager
-from corral.agents.schema import AgentUsage
+from corral.agents.ai_scientist.workers.base import LiteLLMStructuredModel
+from corral.agents.ai_scientist.workers.synthesizer import FinalAnswer
+from corral.agents.schema import AgentUsage, BudgetExhaustedError
 from corral.agents.session import AgentSession
 from corral.core.action import Action
 from corral.core.environment import Environment, Toolset
@@ -241,3 +244,101 @@ async def test_ai_scientist_instance_is_reentrant_across_sessions(monkeypatch):
     assert second.state.submission == second_id
     assert first.get_agent_state("ai_scientist")["status"] == "completed"
     assert second.get_agent_state("ai_scientist")["status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_correction_transcripts_keep_each_model_turn_and_its_usage(monkeypatch):
+    agent = AIScientistAgent(model="test-model")
+    session = await make_session([])
+    record_messages = AsyncMock(wraps=session.record_messages)
+    monkeypatch.setattr(session, "record_messages", record_messages)
+    replies = iter(
+        [
+            MockLLMResponse(content="invalid", usage={"total_tokens": 2}),
+            MockLLMResponse(content='{"final_answer":"42"}', usage={"total_tokens": 3}),
+            MockLLMResponse(content='{"final_answer":"42"}', usage={"total_tokens": 4}),
+        ]
+    )
+
+    def execute(_session, owner, _portal):
+        model = LiteLLMStructuredModel(
+            owner=owner,
+            default_model="test-model",
+            evaluator_model="test-model",
+            system_prompt="system",
+            temperature=1,
+            api_endpoint=None,
+            max_calls=3,
+            use_structured_output=True,
+            completion_runner=lambda **_kwargs: next(replies),
+        )
+        model.generate("First worker", FinalAnswer, purpose="first_worker")
+        answer = model.generate("Second worker", FinalAnswer, purpose="second_worker")
+        assert owner.cumulative_token_usage == {"total_tokens": 9}
+        return answer.final_answer, AgentUsage(llm_calls=model.call_count), {}
+
+    monkeypatch.setattr(agent, "_execute_session", execute)
+
+    outcome = await agent.run_session(session)
+
+    assert outcome.status == "completed"
+    assert session.state.submission == "42"
+    recorded = record_messages.call_args_list
+    assert [len(call.args[0]) for call in recorded] == [3, 5, 3]
+    assert [call.kwargs["usage"] for call in recorded] == [
+        {"total_tokens": 2},
+        {"total_tokens": 3},
+        {"total_tokens": 4},
+    ]
+    assert recorded[0].args[0][-1]["content"] == "invalid"
+    assert recorded[1].args[0][-2]["role"] == "user"
+    assert "Validation error" in recorded[1].args[0][-2]["content"]
+    assert [message["name"] for message in recorded[2].args[0]] == ["second_worker"] * 3
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [
+        (None, "iteration_limit"),
+        (TimeoutError("provider timed out"), "agent_failure"),
+        (BudgetExhaustedError("provider quota exhausted"), "budget_exhausted"),
+    ],
+)
+async def test_failed_corrections_preserve_transcripts_and_usage(
+    monkeypatch, failure, status
+):
+    agent = AIScientistAgent(model="test-model")
+    session = await make_session([], max_iterations=2 if failure is None else 3)
+    usages = [
+        {"prompt_tokens": 2, "completion_tokens": 1, "reasoning_tokens": 1},
+        {"prompt_tokens": 3, "completion_tokens": 2, "reasoning_tokens": 1},
+    ]
+    replies = [MockLLMResponse(content="invalid", usage=usage) for usage in usages]
+    if failure is not None:
+        replies.append(failure)
+    llm_call = AsyncMock(side_effect=replies)
+    monkeypatch.setattr(agent_module, "llm_call", llm_call)
+    record_messages = AsyncMock(wraps=session.record_messages)
+    monkeypatch.setattr(session, "record_messages", record_messages)
+
+    outcome = await agent.run_session(session)
+
+    assert outcome.usage == AgentUsage(
+        input_tokens=5, output_tokens=3, reasoning_tokens=2, llm_calls=2
+    )
+    assert outcome.status == status
+    assert session.get_agent_state("ai_scientist")["status"] == (
+        "failed" if status == "agent_failure" else status
+    )
+    assert llm_call.await_count == (2 if failure is None else 3)
+    recorded = record_messages.call_args_list
+    assert [len(call.args[0]) for call in recorded] == [3, 5]
+    assert [call.kwargs["usage"] for call in recorded] == usages
+    assert all(call.args[0][-1]["content"] == "invalid" for call in recorded)
+    assert "Validation error" in recorded[1].args[0][-2]["content"]
+    assert session.state.usage.input_tokens == 5
+    assert session.state.usage.output_tokens == 3
+    assert session.state.usage.reasoning_tokens == 2
+    assert session.state.usage.llm_calls == 2
+    assert session.state.submission is None

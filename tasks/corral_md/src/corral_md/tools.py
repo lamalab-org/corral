@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from corral_md.local_runtime import assets_directory, run_lammps_locally
 from corral_md.modal_workspace import (
     run_lammps_in_modal,
     run_python_gpu_in_modal,
@@ -89,8 +90,105 @@ def build_run_verified_md_tool(workspace: str | Path):
     return run_verified_md
 
 
-def build_md_terminal_tool(workspace: str | Path):
+def build_md_terminal_tool(workspace: str | Path, *, local: bool = False):
     """Run shell commands in Corral's local restricted workspace worker."""
+    if local:
+
+        @tool(workspace_access="read_write")
+        def terminal(
+            command: str, timeout_seconds: int = 120, max_output_chars: int = 20_000
+        ) -> str:
+            """[BRIEF] Run a bounded foreground shell command in the local task workspace. [/BRIEF]
+
+            [DETAILED] Execute a shell command with the task workspace as its current directory, capturing combined stdout and stderr. The timeout stops the command and its child processes. [/DETAILED]
+
+            [PROCEDURAL] Use this tool to inspect files, prepare inputs, and run local commands. Choose a timeout that fits the workload. [/PROCEDURAL]
+
+            [WORKFLOW_INTEGRATION] Save inputs, run the command, then inspect its exit code and output before using the resulting files. [/WORKFLOW_INTEGRATION]
+
+            [CONTEXTUAL] Commands run through /bin/sh with a limited environment. Use relative paths within the task workspace. [/CONTEXTUAL]
+
+            [SYNTACTICAL] Example: `terminal("ls -la output", timeout_seconds=30)`. [/SYNTACTICAL]
+
+            Args:
+                command: [ARGS_BRIEF] Nonempty shell command, with the task workspace as its cwd. [/ARGS_BRIEF]
+                timeout_seconds: [ARGS_BRIEF] Wall-clock limit from 1 to 3600 seconds. [/ARGS_BRIEF]
+                max_output_chars: [ARGS_BRIEF] Maximum combined output from 1 to 100000 characters. [/ARGS_BRIEF]
+
+            Returns:
+                str: [RETURNS_BRIEF] JSON containing exit_code, output, timed_out, and truncated. [/RETURNS_BRIEF]
+
+            [RAISES] ValueError for an empty command or invalid limits; OSError if the shell cannot start. [/RAISES]
+
+            [LIMITATIONS] Output is returned after the command exits. Background processes are stopped when the call finishes, and only the final max_output_chars characters are returned. [/LIMITATIONS]
+            """
+            if not command.strip():
+                raise ValueError("terminal command cannot be empty")
+            if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 3600:
+                raise ValueError("timeout_seconds must be between 1 and 3600")
+            if (
+                type(max_output_chars) is not int
+                or not 1 <= max_output_chars <= 100_000
+            ):
+                raise ValueError("max_output_chars must be between 1 and 100000")
+            # Restricted workers see the assigned task directory at the
+            # canonical path, not at the controller's physical host path.
+            root = (
+                Path("/workspace")
+                if Path("/workspace").is_dir()
+                else Path(workspace).resolve()
+            )
+            environment = {
+                "HOME": str(root),
+                "TMPDIR": str(root),
+                "LANG": "C.UTF-8",
+                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            }
+            for key in (
+                "CUDA_VISIBLE_DEVICES",
+                "CUDA_HOME",
+                "CUDA_PATH",
+                "LD_LIBRARY_PATH",
+                "NVIDIA_VISIBLE_DEVICES",
+            ):
+                if key in os.environ:
+                    environment[key] = os.environ[key]
+            with tempfile.TemporaryFile() as output:
+                process = subprocess.Popen(
+                    ["/bin/sh", "-c", command],
+                    cwd=root,
+                    env=environment,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                timed_out = False
+                try:
+                    process.wait(timeout=timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                finally:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                byte_count = output.tell()
+                output.seek(max(0, byte_count - max_output_chars * 4))
+                combined = output.read().decode("utf-8", errors="replace")
+            truncated = (
+                byte_count > max_output_chars or len(combined) > max_output_chars
+            )
+            return json.dumps(
+                {
+                    "exit_code": process.returncode,
+                    "output": combined[-max_output_chars:],
+                    "timed_out": timed_out,
+                    "truncated": truncated,
+                }
+            )
+
+        return terminal
     terminal = build_terminal_tool(AbsoluteWorkspaceFilesystem(workspace))
     terminal.description += (
         " Commands execute locally with the task workspace as the current "
@@ -263,6 +361,9 @@ def _run_python_locally(
     args: list[str] | None,
     timeout: int,
     working_dir: str | None,
+    *,
+    gpu: bool = False,
+    assets_dir: str | None = None,
 ) -> str:
     """Execute CPU Python after Corral has entered the restricted tool worker."""
     root = Path(workspace).resolve()
@@ -294,6 +395,27 @@ def _run_python_locally(
         "TMPDIR": str(scratch),
         "XDG_CACHE_HOME": str(scratch / "cache"),
     }
+    if gpu:
+        try:
+            import torch
+        except ImportError as exc:
+            raise RuntimeError(
+                "Local GPU Python requires a CUDA-enabled PyTorch installation"
+            ) from exc
+        if not torch.cuda.is_available():
+            raise RuntimeError("Local GPU Python requires an available CUDA GPU")
+        # The local worker may use a different interpreter from the controller.
+        # Preserve the host CUDA runtime variables when dispatching it.
+        for key in (
+            "CUDA_VISIBLE_DEVICES",
+            "CUDA_HOME",
+            "CUDA_PATH",
+            "LD_LIBRARY_PATH",
+            "NVIDIA_VISIBLE_DEVICES",
+        ):
+            if key in os.environ:
+                environment[key] = os.environ[key]
+        environment["CORRAL_MD_ASSETS_DIR"] = str(assets_directory(assets_dir))
     timed_out = False
     with (
         tempfile.TemporaryFile() as stdout_stream,
@@ -337,7 +459,7 @@ def _run_python_locally(
     return json.dumps(
         {
             "success": True,
-            "backend": "local_cpu",
+            "backend": "local_gpu" if gpu else "local_cpu",
             "return_code": process.returncode,
             "stdout": f"/workspace/output/{script.stem}.stdout.txt",
             "stderr": f"/workspace/output/{script.stem}.stderr.txt",
@@ -367,12 +489,16 @@ class _LocalPythonScriptTool(Tool):
                     },
                     "timeout": {"type": "integer"},
                     "directory_relative": {"type": "string"},
+                    "gpu": {"type": "boolean"},
+                    "assets_dir": {"anyOf": [{"type": "string"}, {"type": "null"}]},
                 },
                 "required": [
                     "script_relative",
                     "args",
                     "timeout",
                     "directory_relative",
+                    "gpu",
+                    "assets_dir",
                 ],
             },
         )
@@ -385,6 +511,8 @@ class _LocalPythonScriptTool(Tool):
         args: list[str] | None,
         timeout: int,
         directory_relative: str,
+        gpu: bool = False,
+        assets_dir: str | None = None,
     ) -> str:
         return _run_python_locally(
             workspace,
@@ -394,6 +522,8 @@ class _LocalPythonScriptTool(Tool):
             "/workspace"
             if directory_relative == "."
             else f"/workspace/{directory_relative}",
+            gpu=gpu,
+            assets_dir=assets_dir,
         )
 
 
@@ -403,15 +533,20 @@ def _run_python_in_local_worker(
     args: list[str] | None,
     timeout: int,
     working_dir: str | None,
+    *,
+    gpu: bool = False,
+    assets_dir: str | None = None,
 ) -> str:
     arguments = {
-        "workspace": str(Path(workspace).resolve()),
+        "workspace": "/workspace",
         "script_relative": workspace_relative_path(script_path),
         "args": args,
         "timeout": timeout,
         "directory_relative": workspace_relative_path(
             working_dir if working_dir is not None else "/workspace", allow_root=True
         ),
+        "gpu": gpu,
+        "assets_dir": assets_dir,
     }
     worker_tool = _LocalPythonScriptTool()
     prepared = PreparedToolCall.capture(
@@ -420,8 +555,10 @@ def _run_python_in_local_worker(
     return execute_prepared_call(prepared)
 
 
-def build_execute_python_script_tool(workspace: str | Path):
-    """Build one Python interface with local CPU and Modal GPU routing."""
+def build_execute_python_script_tool(
+    workspace: str | Path, *, local: bool = False, assets_dir: str | None = None
+):
+    """Build one Python interface with local CPU and selectable GPU routing."""
 
     @tool(
         hidden_args=["corral_action_id"],
@@ -436,9 +573,9 @@ def build_execute_python_script_tool(workspace: str | Path):
         use_gpu: bool = False,
         corral_action_id: str | None = None,
     ) -> str:
-        """[BRIEF] Run a saved Python script on CPU or an A100 GPU. The default wall-clock budget is 900 seconds (15 minutes) per call, including Python startup and model loading. The process is stopped when its timeout expires. Choose a workload that fits; use shorter runs and inspect their timing before scaling up. GPU outputs are synchronized only on success, so continue long simulations from previously synchronized restart states in separate calls, preserving positions and velocities. [/BRIEF]
+        """[BRIEF] Run a saved Python script on CPU or a GPU. The default wall-clock budget is 900 seconds (15 minutes) per call, including Python startup and model loading. The process is stopped when its timeout expires. Modal GPU workspace changes are synchronized only on success. Choose a workload that fits; use shorter runs and inspect their timing before scaling up. Continue long simulations from saved restart states in separate calls, preserving positions and velocities. [/BRIEF]
 
-        [DETAILED] CPU scripts run in Corral's restricted local task workspace. When use_gpu is true, the same interface synchronizes the script and task files to an env with an A100 GPU. [/DETAILED]
+        [DETAILED] CPU scripts run in Corral's restricted local task workspace. When use_gpu is true, the configured GPU backend runs the script and saves its results. [/DETAILED]
 
         [PROCEDURAL] When to use this tool:
         - Leave use_gpu false for lightweight analysis, plotting, and conversion.
@@ -453,7 +590,7 @@ def build_execute_python_script_tool(workspace: str | Path):
 
         [CONTEXTUAL] How this tool works:
         - Validates the script and working-directory paths.
-        - Runs CPU work locally and GPU work on an A100 in Modal.
+        - Runs CPU work locally and GPU work on the configured backend.
         - Saves or synchronizes captured logs under /workspace/output.
         [/CONTEXTUAL]
 
@@ -480,7 +617,7 @@ def build_execute_python_script_tool(workspace: str | Path):
                 [ARGS_SYNTACTICAL] Absolute /workspace directory path or null. [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] "/workspace", "/workspace/output" [/ARGS_EXAMPLES]
             use_gpu: [ARGS_BRIEF] Whether the script requires a GPU. Defaults to false. [/ARGS_BRIEF]
-                [ARGS_DETAILED] False runs locally on CPU; true runs on an A100 in Modal. [/ARGS_DETAILED]
+                [ARGS_DETAILED] False runs locally on CPU; true selects the configured GPU backend. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Boolean. [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] false, true [/ARGS_EXAMPLES]
 
@@ -520,6 +657,16 @@ def build_execute_python_script_tool(workspace: str | Path):
         if not use_gpu:
             return _run_python_in_local_worker(
                 workspace, script_path, args, timeout, directory
+            )
+        if local:
+            return _run_python_in_local_worker(
+                workspace,
+                script_path,
+                args,
+                timeout,
+                directory,
+                gpu=True,
+                assets_dir=assets_dir,
             )
         downloaded = run_python_gpu_in_modal(
             workspace,
@@ -901,14 +1048,16 @@ def _run_lammps_for_workspace(
         ) from None
 
 
-def build_run_lammps_tool(workspace: str | Path):
+def build_run_lammps_tool(
+    workspace: str | Path, *, local: bool = False, assets_dir: str | None = None
+):
     """Build the LAMMPS tool bound to one local Corral workspace."""
 
     @tool(hidden_args=["corral_action_id"], trusted=True, workspace_access="read_write")
     def run_lammps(input_file: str, corral_action_id: str | None = None) -> str:
-        """[BRIEF] Run a LAMMPS input file in the isolated MD sandbox. [/BRIEF]
+        """[BRIEF] Run a LAMMPS input file on the configured MD backend. [/BRIEF]
 
-        [DETAILED] The tool runs LAMMPS with the task workspace and read-only shared assets, then synchronizes changed task files. [/DETAILED]
+        [DETAILED] The tool runs LAMMPS with the task workspace and read-only shared assets. Results are available in the task workspace. [/DETAILED]
 
         [PROCEDURAL] When to use this tool:
         - Use it after preparing a complete LAMMPS input file.
@@ -918,13 +1067,13 @@ def build_run_lammps_tool(workspace: str | Path):
         [WORKFLOW_INTEGRATION] Typical workflow integration:
         1. [PREREQUISITE] Save the LAMMPS input and any included task files under /workspace. [/PREREQUISITE]
         2. [CURRENT] Run this tool with the input-file path. [/CURRENT]
-        3. [FOLLOW_UP] Check the synchronized log and simulation outputs. [/FOLLOW_UP]
+        3. [FOLLOW_UP] Check the log and simulation outputs. [/FOLLOW_UP]
         [/WORKFLOW_INTEGRATION]
 
         [CONTEXTUAL] How this tool works:
         - Validates the input path inside the task workspace.
-        - Runs LAMMPS in an isolated sandbox.
-        - Synchronizes changed task files after a successful run.
+        - Runs LAMMPS on the configured backend.
+        - Makes changed task files available after a successful run.
         [/CONTEXTUAL]
 
         [SYNTACTICAL] Usage example:
@@ -939,7 +1088,7 @@ def build_run_lammps_tool(workspace: str | Path):
 
         Returns:
             str: [RETURNS_BRIEF] Message confirming completion and giving the log path. [/RETURNS_BRIEF]
-                [RETURNS_DETAILED] The message also reports how many workspace files were synchronized. [/RETURNS_DETAILED]
+                [RETURNS_DETAILED] Remote runs also report how many workspace files were synchronized. [/RETURNS_DETAILED]
                 [RETURNS_EXAMPLES] "Simulation completed. Synchronized 4 workspace file(s); log: /workspace/output/simulation.log" [/RETURNS_EXAMPLES]
 
         [RAISES] Exceptions:
@@ -959,6 +1108,11 @@ def build_run_lammps_tool(workspace: str | Path):
         [/LIMITATIONS]
         """
 
+        if local:
+            log = run_lammps_locally(
+                workspace, input_file, assets_dir=assets_directory(assets_dir)
+            )
+            return f"Simulation completed locally; log: /workspace/output/{log.name}"
         return _run_lammps_for_workspace(
             workspace,
             str(local_path(workspace, input_file)),
