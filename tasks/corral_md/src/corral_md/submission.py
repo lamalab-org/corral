@@ -10,15 +10,19 @@ from corral.workspace import confine_workspace_path, workspace_relative_path
 
 
 def parse_submission(submission: str) -> dict:
-    """Read plain or fenced JSON, rejecting file paths and invalid objects."""
+    """Read one leading JSON object, optionally fenced, ignoring trailing prose."""
 
+    trailing = ""
+    fenced = None
     if isinstance(submission, str):
-        fenced = re.fullmatch(
-            r"```[ \t]*(?:json)?[ \t]*\r?\n(.*?)\r?\n[ \t]*```",
-            submission.strip(),
+        submission = submission.strip()
+        fenced = re.match(
+            r"```[ \t]*(?:json)?[ \t]*\r?\n(.*?)\r?\n[ \t]*```(?=\s|$)",
+            submission,
             flags=re.IGNORECASE | re.DOTALL,
         )
         if fenced is not None:
+            trailing = submission[fenced.end() :].strip()
             submission = fenced.group(1)
 
     def invalid(value):
@@ -32,8 +36,14 @@ def parse_submission(submission: str) -> dict:
             result[key] = value
         return result
 
+    decoder = json.JSONDecoder(parse_constant=invalid, object_pairs_hook=unique)
     try:
-        value = json.loads(submission, parse_constant=invalid, object_pairs_hook=unique)
+        if fenced is not None:
+            # Everything inside the submission fence must still be valid JSON.
+            value = decoder.decode(submission)
+        else:
+            value, end = decoder.raw_decode(submission)
+            trailing = submission[end:].strip()
     except (TypeError, json.JSONDecodeError) as exc:
         raise ValueError(
             "Return the submission JSON object directly, not a file path"
@@ -42,6 +52,15 @@ def parse_submission(submission: str) -> dict:
         raise ValueError("Return the submission JSON object directly, not a file path")
     # Also reject overflow such as 1e999, which parse_constant does not see.
     json.dumps(value, allow_nan=False)
+    if trailing.startswith(("{", "}", "[", "]", ",", "```")):
+        raise ValueError("Return one submission JSON object followed only by prose")
+    # Do not silently choose between competing objects in the explanation.
+    for match in re.finditer(r"\{", trailing):
+        try:
+            decoder.raw_decode(trailing, match.start())
+        except json.JSONDecodeError:
+            continue
+        raise ValueError("Return only one submission JSON object")
     return value
 
 

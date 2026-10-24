@@ -455,7 +455,7 @@ def build_plan(e, challenge):
     return plan
 
 
-def evaluate_submission(submission, *, level=2, verifier=None, review=None):
+def evaluate_submission(submission, *, level=2, verifier=None):
     if type(level) is not int or level not in (1, 2):
         raise ValueError("level must be 1 or 2")
     r = Rubric(4, binary=True, fail_fast=True)
@@ -603,8 +603,6 @@ def evaluate_submission(submission, *, level=2, verifier=None, review=None):
         raise RuntimeError(
             "Submission changed during grading; retry with frozen evidence"
         )
-    if review is not None:
-        r.apply_review(review, fingerprint)
     return {
         **r.as_dict(),
         "level": level,

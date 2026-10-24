@@ -13,7 +13,7 @@ from corral_md.scoring.common import (
     UnsupportedEvidence,
 )
 from corral_md.scoring.evaluator import (
-    PendingReviewError,
+    EvaluationError,
     WorkflowScorer,
     check_level1_workflow,
     check_level2_workflow,
@@ -224,9 +224,11 @@ def test_rubric_distinguishes_failure_and_unverified():
     rubric.check("invalid", 25, lambda: (False, "wrong value"))
     rubric.check("unsupported", 25, None)
     rubric.error("missing", 25, EvidenceError("Missing required scientific quantity"))
-    assert rubric.score is None
-    assert rubric.as_dict()["score_bounds"] == [0.25, 0.5]
-    assert rubric.as_dict()["pending_points"] == 25
+    for finalize in (lambda: rubric.score, rubric.as_dict):
+        with pytest.raises(EvaluationError, match="unsupported") as caught:
+            finalize()
+        assert "score" not in caught.value.report
+        assert caught.value.report["unsupported_checks"] == ["unsupported"]
     assert [c["status"] for c in rubric.checks] == [
         "passed",
         "failed",
@@ -236,7 +238,7 @@ def test_rubric_distinguishes_failure_and_unverified():
     assert "EvidenceError" in rubric.checks[-1]["detail"]
 
 
-def test_binary_rubric_is_terminal_on_failure_and_keeps_pending_distinct():
+def test_binary_rubric_is_terminal_on_failure_and_keeps_errors_distinct():
     failed = Rubric(1, binary=True)
     failed.check("valid", 25, True)
     failed.check("invalid", 25, False)
@@ -248,18 +250,18 @@ def test_binary_rubric_is_terminal_on_failure_and_keeps_pending_distinct():
     pending = Rubric(1, binary=True)
     pending.check("valid", 50, True)
     pending.check("unsupported", 50, None)
-    assert pending.score is None
-    assert pending.as_dict()["score_bounds"] == [0, 1]
+    with pytest.raises(EvaluationError, match="unsupported"):
+        _ = pending.score
 
 
 def test_workflow_failure_skips_later_checks_and_modal_verification(manifest):
     _, path, _ = manifest
 
     class Verifier:
-        def _evaluate_plan(self, *_args):
+        def _calculate(self, *_args):
             raise AssertionError("Model verification must not run after a log failure")
 
-    report = WorkflowScorer(10, verifier=Verifier()).evaluate(path)
+    report = WorkflowScorer(5, verifier=Verifier()).evaluate(path)
     assert report["score"] == 0
     assert report["checks"][0]["name"] == "calculation_log"
     assert report["checks"][0]["status"] == "failed"
@@ -270,7 +272,7 @@ def test_missing_log_fails_before_task_evaluation(manifest):
     _, path, data = manifest
     data["artifacts"] = {"run_log": "missing.json"}
     path.write_text(json.dumps(data))
-    report = WorkflowScorer(10).evaluate(path)
+    report = WorkflowScorer(5).evaluate(path)
     assert report["score"] == 0
     assert report["checks"][0]["status"] == "failed"
 
@@ -279,7 +281,7 @@ def test_factory_returns_scalar_and_keeps_json_checks_task_local(manifest, monke
     root, path, _ = manifest
 
     def evaluate_submission(value, **_kwargs):
-        rubric = Rubric(10, binary=True)
+        rubric = Rubric(5, binary=True)
         rubric.check(
             "saved_value", 100, lambda: Evidence(value).json("data") == [1, 2, 3]
         )
@@ -293,7 +295,7 @@ def test_factory_returns_scalar_and_keeps_json_checks_task_local(manifest, monke
         ),
     )
     before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
-    scorer = check_level2_workflow(10)
+    scorer = WorkflowScorer(5)
     submission = resolve_submission(path.read_text(), root)
     good = scorer(submission)
     assert type(good) is float
@@ -327,9 +329,9 @@ def test_level1_factory_uses_independent_model_verification():
     assert check_level1_workflow(2).verifier is None
 
 
-def _pending_scorer(monkeypatch):
-    def evaluate_submission(submission, *, review=None, **_kwargs):
-        r = Rubric(10, binary=True, fail_fast=True)
+def _unsupported_scorer(monkeypatch):
+    def evaluate_submission(submission, **_kwargs):
+        r = Rubric(5, binary=True, fail_fast=True)
         try:
             e = Evidence(submission)
         except Exception as exc:
@@ -339,12 +341,10 @@ def _pending_scorer(monkeypatch):
 
         def alternative():
             assert e.json("data") == [1, 2, 3]
-            raise UnsupportedEvidence("Retained alternate calculation needs review")
+            raise UnsupportedEvidence("Retained alternate calculation is unsupported")
 
         r.check("reported_diffusion", 90, alternative)
         fingerprint = e.fingerprint() if not r.failed else None
-        if review is not None:
-            r.apply_review(review, fingerprint)
         return {**r.as_dict(), "evidence_sha256": fingerprint}
 
     monkeypatch.setattr(
@@ -352,90 +352,45 @@ def _pending_scorer(monkeypatch):
         "module",
         property(lambda _: SimpleNamespace(evaluate_submission=evaluate_submission)),
     )
-    return check_level2_workflow(10)
-
-
-def _review(report, *, passed=True):
-    return {
-        "evidence_sha256": report["evidence_sha256"],
-        "decisions": {
-            "reported_diffusion": {
-                "passed": passed,
-                "reviewer": "independent evaluator",
-                "reason": "Checked retained data and calculation against the diffusion requirement",
-            }
-        },
-    }
-
-
-def test_pending_score_is_not_zero_and_trusted_review_completes_it(
-    manifest, monkeypatch
-):
-    _, path, _ = manifest
-    scorer = _pending_scorer(monkeypatch)
-    pending = scorer.evaluate(path)
-    assert pending["score"] is None
-    assert pending["status"] == "pending_review"
-    assert pending["score_bounds"] == [0.0, 1.0]
-    assert pending["possible_points"] == 100
-    assert len(pending["evidence_sha256"]) == 64
-    json.dumps(pending, allow_nan=False)
-    with pytest.raises(PendingReviewError) as error:
-        scorer(path)
-    assert error.value.report["pending_checks"] == ["reported_diffusion"]
-    reviewed = scorer.evaluate(path, review=_review(pending))
-    assert reviewed["score"] == 1
-    assert reviewed["status"] == "complete"
-    assert reviewed["pending_checks"] == []
-    assert scorer.score_submission(path, review=_review(pending, passed=False)) == 0
+    return WorkflowScorer(5)
 
 
 @pytest.mark.parametrize(
-    "changed",
-    ["manifest.json", "data.json", "settings.json", "run.py", "analysis.json"],
+    "entry", ["evaluate", "evaluate_submission", "score_submission", "__call__"]
 )
-def test_review_is_bound_to_all_evidence_bytes(manifest, monkeypatch, changed):
+def test_unsupported_calculation_is_an_explicit_error(manifest, monkeypatch, entry):
     _, path, _ = manifest
-    scorer = _pending_scorer(monkeypatch)
-    review = _review(scorer.evaluate(path))
-    artifact = path.parent / changed
-    artifact.write_text(artifact.read_text() + "\n")
-    # JSON whitespace in the manifest leaves its semantic identity unchanged;
-    # change an actual result as well for this case.
-    if changed == "manifest.json":
-        data = json.loads(path.read_text())
-        data["results"]["value"] = 4
-        path.write_text(json.dumps(data))
-    with pytest.raises(ValueError, match="evidence_sha256"):
-        scorer.evaluate(path, review=review)
+    scorer = _unsupported_scorer(monkeypatch)
+    with pytest.raises(
+        EvaluationError, match="Retained alternate calculation"
+    ) as caught:
+        getattr(scorer, entry)(path)
+    report = caught.value.report
+    assert report["status"] == "evaluation_error"
+    assert report["unsupported_checks"] == ["reported_diffusion"]
+    assert "score" not in report
+    assert "pending_checks" not in report
+    json.dumps(report, allow_nan=False)
 
 
-def test_submission_authored_review_is_ignored(manifest, monkeypatch):
+def test_submission_authored_review_cannot_create_a_score(manifest, monkeypatch):
     _, path, data = manifest
-    scorer = _pending_scorer(monkeypatch)
-    data["review"] = _review(scorer.evaluate(path))
+    scorer = _unsupported_scorer(monkeypatch)
+    data["review"] = {"decisions": {"reported_diffusion": {"passed": True}}}
     path.write_text(json.dumps(data))
-    assert scorer.evaluate(path)["status"] == "pending_review"
+    with pytest.raises(EvaluationError, match="reported_diffusion"):
+        scorer.evaluate(path)
 
 
-def test_review_cannot_override_failed_checks_or_partially_apply_invalid_bundle():
-    rubric = Rubric(1)
-    rubric.check("pending", 40, None)
-    rubric.check("failed", 60, False)
-    decision = {"passed": True, "reviewer": "reviewer", "reason": "reason"}
-    with pytest.raises(ValueError, match="only pending"):
-        rubric.apply_review(
-            {
-                "evidence_sha256": "digest",
-                "decisions": {
-                    "pending": decision,
-                    "failed": decision,
-                },
-            },
-            "digest",
-        )
-    assert rubric.checks[0]["status"] == "unverified"
-    assert rubric.checks[1]["status"] == "failed"
+@pytest.mark.parametrize(
+    "entry", ["evaluate", "evaluate_submission", "score_submission"]
+)
+def test_review_argument_is_removed(manifest, monkeypatch, entry):
+    _, path, _ = manifest
+    scorer = _unsupported_scorer(monkeypatch)
+    with pytest.raises(TypeError, match="review"):
+        getattr(scorer, entry)(path, review={"decisions": {}})
+    assert not hasattr(Rubric(), "apply_review")
 
 
 def test_zero_point_provenance_does_not_block_completed_score():
@@ -446,12 +401,13 @@ def test_zero_point_provenance_does_not_block_completed_score():
     assert rubric.as_dict()["status"] == "complete"
 
 
-def test_cli_writes_pending_report_then_resolves_trusted_review(
-    manifest, monkeypatch, tmp_path
-):
+def test_cli_writes_terminal_error_and_rejects_review(manifest, monkeypatch, tmp_path):
     _, path, _ = manifest
-    _pending_scorer(monkeypatch)
-    output, review_path = tmp_path / "evaluation.json", tmp_path / "review.json"
+    scorer = _unsupported_scorer(monkeypatch)
+    monkeypatch.setattr(
+        "corral_md.scoring.evaluator.check_level2_workflow", lambda *_a, **_kw: scorer
+    )
+    output = tmp_path / "evaluation.json"
     argv = [
         "corral_md.scoring",
         "10",
@@ -463,18 +419,22 @@ def test_cli_writes_pending_report_then_resolves_trusted_review(
     ]
     monkeypatch.setattr(sys, "argv", argv)
     assert main() == 2
-    pending = json.loads(output.read_text())
-    review_path.write_text(json.dumps(_review(pending)))
-    monkeypatch.setattr(sys, "argv", [*argv, "--review", str(review_path)])
-    assert main() == 0
-    assert json.loads(output.read_text())["score"] == 1
+    report = json.loads(output.read_text())
+    assert report["status"] == "evaluation_error"
+    assert report["level"] == 2
+    assert report["unsupported_checks"] == ["reported_diffusion"]
+    assert "score" not in report
+    monkeypatch.setattr(sys, "argv", [*argv, "--review", "unused.json"])
+    with pytest.raises(SystemExit) as caught:
+        main()
+    assert caught.value.code == 2
 
 
 def test_malformed_direct_manifest_and_nonfinite_pending_result_do_not_crash(
     manifest, monkeypatch
 ):
     root, path, _ = manifest
-    scorer = _pending_scorer(monkeypatch)
+    scorer = _unsupported_scorer(monkeypatch)
     assert scorer.evaluate({"results": {"value": object()}})["score"] == 0
     data = json.loads(resolve_submission(path.read_text(), root))
     data["results"]["value"] = float("nan")
@@ -486,3 +446,21 @@ def test_malformed_direct_manifest_and_nonfinite_pending_result_do_not_crash(
         == "failed"
     )
     json.dumps(report, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("task", "level"),
+    [(task, level) for task in (2, 6, 7, 9, 10) for level in (1, 2)] + [(3, 2), (5, 1)],
+)
+def test_workflow_constructor_cannot_select_a_retired_policy(task, level):
+    with pytest.raises(ValueError, match=f"check_level{level}_workflow"):
+        WorkflowScorer(task, level=level)
+
+
+@pytest.mark.parametrize(("task", "level"), [(3, 2), (5, 1)])
+def test_task_module_cannot_select_a_retired_policy(task, level):
+    from importlib import import_module
+
+    module = import_module(f"corral_md.scoring.task_{task}")
+    with pytest.raises(ValueError, match="uses"):
+        module.evaluate_submission({}, level=level)

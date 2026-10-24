@@ -2,14 +2,26 @@ import json
 from pathlib import Path
 
 import pytest
-from corral_md.submission import resolve_local_submission, resolve_submission
 from corral_md.scoring.common import Evidence
+from corral_md.submission import resolve_local_submission, resolve_submission
 
 
 @pytest.mark.parametrize("resolver", [resolve_submission, resolve_local_submission])
 @pytest.mark.parametrize(
     "wrapper",
-    ["{}", "```json\n{}\n```", "```\n{}\n```", " \n``` JSON \r\n{}\r\n  ```\t\n"],
+    [
+        "{}",
+        "```json\n{}\n```",
+        "```\n{}\n```",
+        " \n``` JSON \r\n{}\r\n  ```\t\n",
+        (
+            "{}\n\nI made the labelled dataset of 45 isolated Ag₂ dimers.\n"
+            "**Files:**\n- `dataset.extxyz` stores energies and forces."
+        ),
+        " \n{}\nFinished.",
+        "```json\n{}\n```\n\nFinished.",
+        "```\n{}\n```\nFinished.",
+    ],
 )
 def test_json_resolves_artifacts_from_workspace(tmp_path, resolver, wrapper):
     output = tmp_path / "output"
@@ -59,10 +71,18 @@ def test_json_resolves_artifacts_from_workspace(tmp_path, resolver, wrapper):
         '```json\n{"artifacts": {}}',
         '{"artifacts": {}}\n```',
         '```python\n{"artifacts": {}}\n```',
-        '```json\n{}\n```\n```json\n{}\n```',
-        'Answer:\n```json\n{}\n```',
-        '```json\n{}\n```\nFinished.',
-        '{"results": {}}\nFinished.',
+        "```json\n{}\n```\n```json\n{}\n```",
+        "Answer:\n```json\n{}\n```",
+        '{"results": {}}\n{"results": {"value": 2}}',
+        '{"results": {}}\nCorrection:\n{"results": {"value": 2}}',
+        '{"results": {}}\nCorrection:\n```json\n{"results": {}}\n```',
+        '{"results": {}}\n{"results":',
+        '{"results": {}}}',
+        '{"results": {}}\n[]',
+        "```json\n{}\nFinished.\n```",
+        '{"artifacts":{},"artifacts":{}}\nFinished.',
+        '{"results":{"value":NaN}}\nFinished.',
+        '{"results":{"value":1e999}}\nFinished.',
         '{"artifacts":{},"artifacts":{}}',
         '{"results":{"value":NaN}}',
         '{"results":{"value":1e999}}',

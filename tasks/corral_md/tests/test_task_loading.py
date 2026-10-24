@@ -206,7 +206,12 @@ def test_all_tasks_require_direct_json_answers(tmp_path, level, local):
         assert "JSON object directly as your final answer" in task.submission_format
         assert "relative to /workspace/" in task.submission_format
         instructions, example_block = task.submission_format.split("\n\n```json\n")
-        assert "Save artifact files under /workspace/" in instructions
+        save_instruction = (
+            "Save the trajectory under /workspace/"
+            if (level, task.scoring_fn.task_number) == (2, 3)
+            else "Save artifact files under /workspace/"
+        )
+        assert save_instruction in instructions
         assert example_block.endswith("\n```")
         answer = example_block.removesuffix("\n```")
         assert isinstance(json.loads(answer)["artifacts"], dict)

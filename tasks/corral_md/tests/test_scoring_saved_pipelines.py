@@ -178,7 +178,7 @@ def test_saved_model_metrics_are_reconstructed(tmp_path, saved_runtime):
     assert len(result["strain_groups"]) == 5
     assert [r["size"] for r in result["learning_curve"]] == [30, 100]
     assert result["id_test"]["rmse"] >= 0
-    assert not report["pending_checks"]
+    assert "pending_checks" not in report
 
 
 @pytest.mark.parametrize("artifact", ["run.jsonl", "final.pkl"])
@@ -197,9 +197,11 @@ def test_saved_pipeline_scoring_rejects_evidence_changed_during_verification(
         scorer(backend=mutate).evaluate(path)
 
 
-def test_saved_pipeline_scoring_validates_review_identity(tmp_path, saved_runtime):
+def test_saved_pipeline_scoring_rejects_removed_review_argument(
+    tmp_path, saved_runtime
+):
     path = stage_submission(tmp_path, saved_runtime)
-    with pytest.raises(ValueError, match="current evidence_sha256"):
+    with pytest.raises(TypeError, match="review"):
         scorer().evaluate(path, review={"evidence_sha256": "wrong", "decisions": {}})
 
 

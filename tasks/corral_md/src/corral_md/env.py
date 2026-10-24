@@ -17,9 +17,7 @@ from corral_md.modal_workspace import (
     recovery_snapshot,
 )
 from corral_md.resources import asset_descriptors, asset_relative_paths
-from corral_md.scoring import (
-    Task6Scorer,
-    Task7Scorer,
+from corral_md.scoring.evaluator import (
     WorkflowScorer,
     check_level1_workflow,
     check_level2_workflow,
@@ -367,9 +365,7 @@ def _md_task_prompt(env: Environment, state: ExecutionState) -> str:
             "use run_lammps for SW, Tersoff, EAM, and BKS potentials. "
             "Leave use_gpu=False for CPU analysis, plotting, and conversion.\n\n"
         )
-        if not isinstance(scorer, Task6Scorer | Task7Scorer) and not (
-            isinstance(scorer, WorkflowScorer) and scorer.task_number == 9
-        ):
+        if getattr(scorer, "task_number", None) not in (6, 7, 9):
             prompt += (
                 "Record Step, Temperature, Pressure, and Density for each simulation "
                 "where applicable, at a sampling interval suitable for the task "

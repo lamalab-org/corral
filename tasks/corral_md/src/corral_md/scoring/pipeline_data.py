@@ -71,7 +71,49 @@ def numeric_scalar(dtype, data):
     return np.frombuffer(data, dtype=dtype)[0]
 
 
-class NumericalUnpickler(pickle.Unpickler):
+class SavedJoblibArray(SavedState):
+    """Inert metadata for joblib's uncompressed, inline numerical arrays."""
+
+
+class NumericalUnpickler(pickle._Unpickler):
+    dispatch = pickle._Unpickler.dispatch.copy()
+
+    def __init__(self, stream):
+        super().__init__(stream)
+        self.stream = stream
+
+    def load_build(self):
+        super().load_build()
+        wrapper = self.stack[-1]
+        if not isinstance(wrapper, SavedJoblibArray):
+            return
+        dtype = numeric_dtype(wrapper.dtype)
+        shape = wrapper.shape
+        if (
+            wrapper.subclass is not SavedArray
+            or not isinstance(shape, tuple)
+            or len(shape) > 3
+            or any(type(n) is not int or n < 0 for n in shape)
+            or math.prod(shape) * dtype.itemsize > 16 * 1024 * 1024
+            or wrapper.order not in {"C", "F"}
+        ):
+            raise EvidenceError("Invalid saved joblib numerical array")
+        alignment = getattr(wrapper, "numpy_array_alignment_bytes", None)
+        if alignment is not None:
+            if type(alignment) is not int or not 1 <= alignment <= 64:
+                raise EvidenceError("Invalid saved joblib alignment")
+            padding = self.stream.read(1)
+            if len(padding) != 1 or padding[0] > alignment:
+                raise EvidenceError("Invalid saved joblib padding")
+            if len(self.stream.read(padding[0])) != padding[0]:
+                raise EvidenceError("Truncated saved joblib padding")
+        value = SavedArray()
+        data = self.stream.read(math.prod(shape) * dtype.itemsize)
+        value.__setstate__((1, shape, dtype, wrapper.order == "F", data))
+        self.stack[-1] = value
+
+    dispatch[pickle.BUILD[0]] = load_build
+
     def find_class(self, module, name):
         numerical = {
             ("numpy", "ndarray"): SavedArray,
@@ -85,10 +127,17 @@ class NumericalUnpickler(pickle.Unpickler):
         }
         if (module, name) in numerical:
             return numerical[module, name]
+        if (module, name) == ("joblib.numpy_pickle", "NumpyArrayWrapper"):
+            return SavedJoblibArray
         if (
             module.startswith("sklearn.")
             and name in {"Ridge", "Pipeline", "StandardScaler"}
-        ) or name.lower() in {"soapridge", "soapregressor", "soapridgepipeline"}:
+        ) or name.lower() in {
+            "soapridge",
+            "soapregressor",
+            "soapridgepipeline",
+            "soapridgemodel",
+        }:
             return SavedState
         raise EvidenceError(
             f"Non-numerical pickle global is not permitted: {module}.{name}"
@@ -110,10 +159,11 @@ def read_pipeline(path):
         raise EvidenceError(f"Unreadable numerical Ridge state: {exc}") from exc
     if not isinstance(state, SavedState):
         raise EvidenceError("Expected a fitted Ridge pipeline")
-    ridge = getattr(state, "ridge_", state)
-    scaler = getattr(state, "scaler_", None)
-    if hasattr(state, "steps"):
-        steps = dict(state.steps)
+    pipeline = getattr(state, "sk_pipeline", state)
+    ridge = getattr(pipeline, "ridge_", pipeline)
+    scaler = getattr(pipeline, "scaler_", None)
+    if hasattr(pipeline, "steps"):
+        steps = dict(pipeline.steps)
         ridge = next((v for v in steps.values() if hasattr(v, "coef_")), None)
         scaler = next((v for v in steps.values() if hasattr(v, "scale_")), None)
     if ridge is None or not hasattr(ridge, "coef_"):

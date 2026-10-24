@@ -1,6 +1,5 @@
-"""Log-only heat-capacity scoring, independent checks, and state continuity."""
+"""Existing temperature-cycle logs remain readable by the quantity scorers."""
 
-import copy
 import json
 
 import numpy as np
@@ -8,36 +7,13 @@ import pytest
 from ase import units
 from ase.build import bulk
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution, Stationary
-from corral_md.scoring import (
-    WorkflowScorer,
-)
+from corral_md.scoring import check_level1_workflow, check_level2_workflow
 from corral_md.scoring.level1_trusted import PINNED_TEACHER_SHA256
-from corral_md.scoring.task_10 import TARGETS
-from corral_md.scoring.verification import ModalVerifier
 from scipy.spatial import cKDTree
 
 
 def write_log(path, rows):
     path.write_text("".join(json.dumps(row) + "\n" for row in rows))
-
-
-def verified(plan, fingerprint):
-    return {
-        "evidence_sha256": fingerprint,
-        "challenge": plan.challenge,
-        "jobs": [
-            {
-                "id": job["id"],
-                "status": "complete",
-                "value": plan.expected[job["id"]]["values"],
-            }
-            for job in plan.jobs
-        ],
-    }
-
-
-def scorer(level=2, transport=verified):
-    return WorkflowScorer(10, level=level, verifier=ModalVerifier(transport=transport))
 
 
 @pytest.fixture
@@ -68,7 +44,7 @@ def submission(tmp_path):
     answers, structural = [], []
     slope, intercept = 3 * units.kB, -3.4
     previous = None
-    for index, target in enumerate(TARGETS):
+    for index, target in enumerate((300, 400, 500, 600, 700, 800, 900, 300)):
         rows.append(
             {
                 "event": "stage",
@@ -166,202 +142,10 @@ def submission(tmp_path):
     return path, manifest, rows
 
 
-def test_complete_cycle_recomputes_measured_fit_and_nonzero_return(submission):
-    path, _, _ = submission
-    report = scorer().evaluate(path)
-    assert report["score"] == 1, report
-    values = report["computed"]
-    assert values["heat_capacity"]["kB_per_atom"] == pytest.approx(3)
-    assert values["stages"][0]["temperature_K"] == pytest.approx(306)
-    assert values["high_temperature_residuals_eV_per_atom"] == pytest.approx(
-        [0.01, -0.005]
-    )
-    assert values["return_state"]["energy_difference_eV_per_atom"] == pytest.approx(
-        0.02
-    )
-    assert values["return_state"]["nearest_neighbor_difference_A"] < 0
-
-
-def test_compact_cycle_answer_keeps_stage_and_structure_diagnostics(submission):
-    path, manifest, rows = submission
-    results = manifest["results"]
-    manifest["results"] = {
-        "heat_capacity": {"eV_per_atom_K": results["heat_capacity"]["eV_per_atom_K"]}
-    }
-    path.write_text(json.dumps(manifest))
-    report = scorer().evaluate(path)
-    assert report["score"] == 1, report
-    assert len(report["computed"]["stages"]) == 8
-    assert "intercept_eV_per_atom" in report["computed"]["heat_capacity"]
-    assert len(report["computed"]["return_state"]) == 4
-    assert "kB_per_atom" in report["computed"]["heat_capacity"]
-    write_log(path.parent / "cycle.jsonl", rows[:-1])
-    assert scorer().evaluate(path)["score"] == 0
-
-
-def test_level1_needs_only_initial_stage_and_restartable_log(submission):
-    path, manifest, rows = submission
-    end = next(i for i, row in enumerate(rows) if row["event"] == "end")
-    write_log(path.parent / "cycle.jsonl", rows[: end + 1])
-    manifest.pop("results")
-    path.write_text(json.dumps(manifest))
-    assert scorer(1).evaluate(path)["score"] == 1
-    assert scorer().evaluate(path)["score"] == 0
-
-
-@pytest.mark.parametrize("level", [1, 2])
-@pytest.mark.parametrize("timestep_fs", [0.5, 2.0])
-def test_other_timesteps_fail_with_valid_durations_and_sampling(
-    submission, level, timestep_fs
-):
-    path, manifest, rows = submission
-    if level == 1:
-        end = next(i for i, row in enumerate(rows) if row["event"] == "end")
-        rows = rows[: end + 1]
-        manifest.pop("results")
-        path.write_text(json.dumps(manifest))
-    # Preserve physical durations, sampling intervals, and cumulative timestamps.
-    for row in rows:
-        if row["event"] == "stage":
-            row["timestep_fs"] = timestep_fs
-            for key in ("equilibration_steps", "production_steps", "interval"):
-                row[key] = int(row[key] / timestep_fs)
-        elif row["event"] in {"sample", "end"}:
-            row["step"] = int(row["step"] / timestep_fs)
-    write_log(path.parent / "cycle.jsonl", rows)
-    report = scorer(level).evaluate(path)
-    assert report["score"] == 0, report
-    assert any(
-        "integration timestep of 1 fs" in check.get("detail", "")
-        for check in report["checks"]
-    )
-
-
-def test_level2_still_requires_heat_capacity(submission):
-    path, manifest, _ = submission
-    manifest.pop("results")
-    path.write_text(json.dumps(manifest))
-    assert scorer().evaluate(path)["score"] == 0
-
-
-@pytest.mark.parametrize("method", ["ols", "wls", "theil_sen"])
-def test_fit_strategies(submission, method):
-    path, manifest, _ = submission
-    manifest["results"]["fit"] = {"method": method, "weights": [1, 2, 3, 4, 5]}
-    path.write_text(json.dumps(manifest))
-    assert scorer().evaluate(path)["score"] == 1
-    if method == "wls":
-        manifest["results"]["fit"]["weights"] = [v * 1e307 for v in range(1, 6)]
-        path.write_text(json.dumps(manifest))
-        assert scorer().evaluate(path)["score"] == 1
-        manifest["results"]["fit"]["weights"][0] = 0
-        path.write_text(json.dumps(manifest))
-        assert scorer().evaluate(path)["score"] == 0
-
-
-@pytest.mark.parametrize(
-    "change",
-    [
-        "truncated",
-        "missing_sample",
-        "order",
-        "cell",
-        "reset",
-        "time",
-        "units",
-        "model",
-        "seed",
-        "mass",
-        "anisotropy",
-        "energy_drift",
-        "too_short",
-        "static",
-    ],
-)
-def test_bad_records_fail(submission, change):
-    path, _, rows = submission
-    stages = [i for i, r in enumerate(rows) if r["event"] == "stage"]
-    sample = rows[stages[1] + 1]
-    if change == "truncated":
-        rows.pop()
-    elif change == "missing_sample":
-        rows.pop(20)
-    elif change == "order":
-        rows[stages[2]]["target_temperature_K"] = 600
-    elif change == "cell":
-        sample["cell_A"] = (np.array(sample["cell_A"]) * 1.001).tolist()
-    elif change == "reset":
-        sample["momenta"] = (-np.array(sample["momenta"])).tolist()
-    elif change == "time":
-        sample["time_fs"] = 0
-    elif change == "units":
-        rows[0]["units"]["energy"] = "J"
-    elif change == "model":
-        rows[0]["model_sha256"] = "0" * 64
-    elif change == "seed":
-        rows[0]["random_seed"] += 1
-    elif change == "mass":
-        rows[0]["masses_amu"][0] *= 2
-    elif change == "too_short":
-        rows[stages[0]]["production_steps"] = 100
-    else:
-        for row in rows[stages[0] + 1 : stages[1] - 2]:
-            if row["step"] <= 2000:
-                continue
-            if change == "anisotropy":
-                row["momenta"] = (
-                    np.array(row["momenta"]) * [np.sqrt(2), np.sqrt(0.5), np.sqrt(0.5)]
-                ).tolist()
-            elif change == "energy_drift":
-                row["potential_energy_eV"] += row["step"] / 20
-            elif change == "static":
-                row["positions_A"] = rows[2]["positions_A"]
-    write_log(path.parent / "cycle.jsonl", rows)
-    assert scorer().evaluate(path)["score"] == 0
-
-
-@pytest.mark.parametrize(
-    "keys",
-    [
-        ("stages", 0, "temperature_K"),
-        ("stages", 3, "directional_temperature_K", 0),
-        ("stages", 4, "energy_eV_per_atom"),
-        ("heat_capacity", "eV_per_atom_K"),
-        ("heat_capacity", "kB_per_atom"),
-        ("heat_capacity", "intercept_eV_per_atom"),
-        ("high_temperature_residuals_eV_per_atom", 0),
-        ("return_state", "energy_difference_eV_per_atom"),
-        ("return_state", "nearest_neighbor_difference_A"),
-    ],
-)
-def test_altered_answers_fail(submission, keys):
-    path, manifest, _ = submission
-    target = manifest["results"]
-    for key in keys[:-1]:
-        target = target[key]
-    target[keys[-1]] *= 1.1
-    path.write_text(json.dumps(manifest))
-    assert scorer().evaluate(path)["score"] == 0
-
-
-def test_offline_and_disagreeing_model_cannot_pass(submission):
-    path, _, _ = submission
-    offline = WorkflowScorer(10).evaluate(path)
-    assert offline["status"] == "pending_review"
-    assert offline["computed"]["heat_capacity"]["kB_per_atom"] == pytest.approx(3)
-
-    def wrong(plan, fingerprint):
-        response = copy.deepcopy(verified(plan, fingerprint))
-        response["jobs"][0]["value"]["frames"][0]["energy"] += 1
-        return response
-
-    assert scorer(transport=wrong).evaluate(path)["score"] == 0
-
-
 def test_missing_log_fails(tmp_path):
     path = tmp_path / "answer.json"
     path.write_text('{"artifacts": {}, "results": {}}')
-    assert scorer().evaluate(path)["score"] == 0
+    assert check_level2_workflow(10).evaluate(path)["score"] == 0
 
 
 @pytest.mark.parametrize("level", [1, 2])
@@ -376,5 +160,16 @@ def test_scientific_score_is_independent_of_md_log_layout(
         answer.pop("results", None)
         path.write_text(json.dumps(answer))
     rewrite_md_recording(log, representation, first_stage=level == 1)
-    report = scorer(level=level).evaluate(path)
+    factory = check_level1_workflow if level == 1 else check_level2_workflow
+    report = factory(10).evaluate(path)
     assert report["score"] == 1, report
+
+
+def test_default_level2_final_quantity_policy_accepts_numerical_legacy_log(submission):
+    from corral_md.scoring import check_level2_workflow
+
+    report = check_level2_workflow(10, verification_backend="offline").evaluate(
+        submission[0]
+    )
+    assert report["score"] == 1, report
+    assert report["scoring_policy"] == "level2-final-quantities-v1"

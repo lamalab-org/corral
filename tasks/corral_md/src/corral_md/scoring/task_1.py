@@ -1,8 +1,9 @@
-"""Task 1: reconstruct preparation and diffusion from a LAMMPS log and dump.
+"""Task 1: assess preparation at Level 1 and numerical diffusion at Level 2.
 
 No submitted analysis or executable code is used. Diffusion is reconstructed
-from the prescribed 500 ps interval at 2500 K and compared with the answer.
-Both coefficients must also agree with the fixed benchmark reference.
+from recorded times and unwrapped positions over the prescribed 500 ps interval.
+Level 2 does not require echoed setup commands or grade the preparation protocol.
+Both diffusion coefficients must agree with the fixed benchmark reference.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ DUMP_COLUMNS = ("id", "type", "xu", "yu", "zu", "vx", "vy", "vz")
 # widen this range; the trajectory comparison below has its own tolerance.
 REFERENCE_DIFFUSION_M2_S = 1.74e-8
 REFERENCE_DIFFUSION_RTOL = 0.1
+DIFFUSION_POLICY = "level2-diffusion-quantities-v1"
 
 
 def _require(condition, message):
@@ -71,24 +73,52 @@ class Trajectory:
     positions: np.ndarray
     velocities: np.ndarray | None
     wrapped: bool = False
+    times_ps: tuple[float | None, ...] = ()
+    unit_style: str | None = None
 
 
-def read_trajectory(path) -> Trajectory:
+def read_trajectory(path, *, expected_atoms=216, include_velocities=True) -> Trajectory:
     """Read orthogonal native dumps, preserving images and sorting persistent IDs."""
     steps, cells, positions, velocities = [], [], [], []
+    times_ps = []
     identities = None
     wrapped = None
+    unit_style = None
     with path.open() as stream:
         while line := stream.readline():
             if not line.strip():
                 continue
+            if line.strip() == "ITEM: UNITS":
+                recorded_units = stream.readline().strip()
+                _require(
+                    recorded_units == "metal" and unit_style in (None, recorded_units),
+                    "Task 1 trajectory units must be metal (Angstrom and ps)",
+                )
+                unit_style = recorded_units
+                continue
+            time_ps = None
+            if line.strip() == "ITEM: TIME":
+                try:
+                    time_ps = float(stream.readline())
+                except ValueError as exc:
+                    raise EvidenceError("Invalid trajectory TIME value") from exc
+                _require(
+                    np.isfinite(time_ps) and time_ps >= 0,
+                    "Invalid trajectory TIME value",
+                )
+                line = stream.readline()
             _require(line.strip() == "ITEM: TIMESTEP", "Expected a LAMMPS dump frame")
             step = int(stream.readline())
             _require(
                 stream.readline().strip() == "ITEM: NUMBER OF ATOMS",
                 "Missing atom count",
             )
-            _require(int(stream.readline()) == 216, "Task 1 requires 216 atoms")
+            count = int(stream.readline())
+            _require(count > 0, "Trajectory atom count must be positive")
+            if expected_atoms is not None:
+                _require(
+                    count == expected_atoms, f"Task 1 requires {expected_atoms} atoms"
+                )
             box = stream.readline().split()
             triclinic = box == [
                 "ITEM:",
@@ -121,7 +151,7 @@ def read_trajectory(path) -> Trajectory:
             _require(
                 {"id", "type"} <= set(columns), "Retain persistent atom identities"
             )
-            has_velocities = {"vx", "vy", "vz"} <= set(columns)
+            has_velocities = include_velocities and {"vx", "vy", "vz"} <= set(columns)
             unwrapped = {"xu", "yu", "zu"} <= set(columns)
             scaled = {"xs", "ys", "zs"} <= set(columns)
             imaged = {"ix", "iy", "iz"} <= set(columns)
@@ -135,17 +165,30 @@ def read_trajectory(path) -> Trajectory:
                 "Coordinate convention changed between frames",
             )
             wrapped = is_wrapped
-            rows = np.array([stream.readline().split() for _ in range(216)], float)
+            rows = np.array([stream.readline().split() for _ in range(count)], float)
+            _require(rows.shape == (count, len(columns)), "Truncated trajectory frame")
+            required = {"id", "type"}
+            required.update(
+                ("xu", "yu", "zu")
+                if unwrapped
+                else ("xs", "ys", "zs")
+                if scaled
+                else ("x", "y", "z")
+            )
+            if imaged and not unwrapped:
+                required.update(("ix", "iy", "iz"))
+            if has_velocities:
+                required.update(("vx", "vy", "vz"))
             _require(
-                rows.shape == (216, len(columns)) and np.isfinite(rows).all(),
-                "Truncated or nonfinite trajectory frame",
+                np.isfinite(rows[:, [columns.index(c) for c in required]]).all(),
+                "Nonfinite trajectory coordinates or identities",
             )
             rows = rows[np.argsort(rows[:, columns.index("id")])]
             ids = rows[:, [columns.index("id"), columns.index("type")]]
             _require(
                 (ids == ids.astype(int)).all()
                 and (ids > 0).all()
-                and len(np.unique(ids[:, 0])) == 216
+                and len(np.unique(ids[:, 0])) == count
                 and len(np.unique(ids[:, 1])) == 1,
                 "Invalid atom identities",
             )
@@ -185,12 +228,21 @@ def read_trajectory(path) -> Trajectory:
                     ),
                     "Discontinuous repeated trajectory boundary",
                 )
+                _require(
+                    time_ps is None
+                    or times_ps[-1] is None
+                    or _close(time_ps, times_ps[-1]),
+                    "Conflicting TIME headers at repeated trajectory boundary",
+                )
+                if time_ps is not None:
+                    times_ps[-1] = time_ps
                 continue
             _require(not steps or step > steps[-1], "Trajectory steps must increase")
             steps.append(step)
             cells.append(cell)
             positions.append(pos)
             velocities.append(vel)
+            times_ps.append(time_ps)
     _require(len(steps) >= 2, "Retain a nonempty trajectory including endpoints")
     return Trajectory(
         np.array(steps),
@@ -198,10 +250,12 @@ def read_trajectory(path) -> Trajectory:
         np.array(positions),
         np.array(velocities) if all(v is not None for v in velocities) else None,
         bool(wrapped),
+        tuple(times_ps) if any(t is not None for t in times_ps) else (),
+        unit_style,
     )
 
 
-def read_log(path):
+def read_log(path, *, columns=THERMO_COLUMNS, allow_missing=False):
     """Extract echoed commands and native thermo rows, without executing input."""
     commands, samples, header = [], [], None
     keywords = {
@@ -233,16 +287,19 @@ def read_log(path):
         if not fields:
             continue
         if fields[0] == "Step":
+            if allow_missing and not set(columns) <= set(fields):
+                header = None
+                continue
             _require(
-                set(THERMO_COLUMNS) <= set(fields),
-                "Log must contain Step Time Temp Press Density",
+                set(columns) <= set(fields),
+                "Log must contain " + " ".join(columns),
             )
             header = fields
         elif fields[0] in keywords and "$" not in line:
             commands.append(shlex.split(line, comments=True))
         elif header and len(fields) == len(header):
             try:
-                row = np.array([float(fields[header.index(c)]) for c in THERMO_COLUMNS])
+                row = np.array([float(fields[header.index(c)]) for c in columns])
             except ValueError:
                 continue
             _require(np.isfinite(row).all(), "Nonfinite thermal log")
@@ -250,8 +307,8 @@ def read_log(path):
                 _require(_close(row, samples[-1]), "Discontinuous thermal boundary")
             else:
                 samples.append(row)
-    _require(len(samples) >= 2, "No usable thermal records")
-    return commands, np.array(samples)
+    _require(allow_missing or len(samples) >= 2, "No usable thermal records")
+    return commands, np.array(samples).reshape(-1, len(columns))
 
 
 def _protocol(commands, thermal, end):
@@ -333,7 +390,7 @@ def _protocol(commands, thermal, end):
                     or f[1] in {"ave/time", "ave/correlate", "print", "vector"}
                     for f in active.values()
                 ),
-                "Additional dynamics fixes require independent review",
+                "Additional dynamics fixes are unsupported by the numerical evaluator",
             )
             fix = integrators[0]
             ti, pi = fix.index("temp"), fix.index("iso")
@@ -396,8 +453,122 @@ def _times(steps, segments):
     return times
 
 
+def _diffusion_states(data, commands, clock):
+    """Read the calculation's clock directly, without reconstructing its setup.
+
+    The task specifies metal units, so absent setup is not an absent unit
+    convention. Explicit incompatible units must not silently change the result.
+    """
+    _require(
+        all(
+            command == ["units", "metal"]
+            for command in commands
+            if command[0] == "units"
+        ),
+        "Diffusion records must use metal units (Angstrom and ps)",
+    )
+    times = np.full(len(data.steps), np.nan)
+    if len(clock):
+        steps, elapsed = clock.T
+        _require(
+            np.all(steps == np.rint(steps))
+            and np.all(steps >= 0)
+            and np.all(elapsed >= 0)
+            and np.all(np.diff(steps) > 0)
+            and np.all(np.diff(elapsed) > 0),
+            "Step/Time records must be chronological with increasing integer steps",
+        )
+        # Interpolation is justified only when the log establishes a constant
+        # step/time scale. Otherwise use explicit matching rows or dump times.
+        dt = np.diff(elapsed) / np.diff(steps)
+        if len(dt) and np.allclose(dt, dt[0], rtol=1e-5, atol=1e-10):
+            times = np.interp(data.steps, steps, elapsed, left=np.nan, right=np.nan)
+        else:
+            lookup = dict(zip(steps, elapsed, strict=True))
+            times = np.array([lookup.get(step, np.nan) for step in data.steps])
+    if data.times_ps:
+        saved = np.array([np.nan if t is None else t for t in data.times_ps])
+        both = np.isfinite(saved) & np.isfinite(times)
+        _require(
+            _close(saved[both], times[both]),
+            "Trajectory TIME headers contradict recorded run times",
+        )
+        times = np.where(np.isfinite(saved), saved, times)
+    known = np.isfinite(times)
+    _require(
+        np.count_nonzero(known) >= 2,
+        "Diffusion needs physical times from log Step/Time columns or dump TIME headers",
+    )
+    _require(np.all(np.diff(times[known]) > 0), "Trajectory times must increase")
+    # Also accept a production-only clock beginning at zero. A truncated full
+    # cycle must not be mistaken for a complete 500 ps production calculation.
+    production_clock = (
+        _close(times[known][0], 0)
+        and _close(times[known][-1], 500)
+        and (not len(clock) or _close(clock[-1, 1], 500))
+    )
+    start, end = (0, 500) if production_clock else (1000, 1500)
+    selected = known & (times >= start - 1e-6) & (times <= end + 1e-6)
+    indices = np.flatnonzero(selected)
+    _require(
+        len(indices) >= 2
+        and _close(times[indices[0]], start)
+        and _close(times[indices[-1]], end),
+        "Retain times and unwrapped positions for the complete 500 ps diffusion interval",
+    )
+    _require(
+        np.all(known[indices[0] : indices[-1] + 1]),
+        "Missing physical time for a diffusion trajectory frame",
+    )
+    production = Trajectory(
+        data.steps[selected],
+        data.cells[selected],
+        data.positions[selected],
+        None,
+        data.wrapped,
+    )
+    motion = _displacements(production)
+    increments = np.mean(np.sum(motion**2, axis=-1), axis=1)
+    _require(
+        increments.max() <= 10 * max(float(np.median(increments)), 1e-6),
+        "Trajectory contains a discontinuous jump or an unwrapping error",
+    )
+    positions = np.concatenate(
+        [np.zeros_like(production.positions[:1]), np.cumsum(motion, axis=0)]
+    )
+    # Existing MSD windows are expressed relative to the original 1000 ps end
+    # of heating. Translating the clock leaves all time differences unchanged.
+    return times[selected] + (1000 - start), positions, [start, end]
+
+
+def _displacements(data, *, allow_wrapped=False):
+    """Remove homogeneous cell motion and collective translation."""
+    fractional = np.einsum("faj,fjk->fak", data.positions, np.linalg.inv(data.cells))
+    increments = np.diff(fractional, axis=0)
+    if data.wrapped:
+        _require(
+            allow_wrapped, "Diffusion requires unwrapped positions or image counters"
+        )
+        increments -= np.rint(increments)
+    motion = np.einsum(
+        "faj,fjk->fak",
+        increments,
+        (data.cells[1:] + data.cells[:-1]) / 2,
+    )
+    return motion - motion.mean(axis=1, keepdims=True)
+
+
 def _states(data, thermal, segments, end):
     times = _times(data.steps, segments)
+    if data.times_ps:
+        _require(
+            len(data.times_ps) == len(times)
+            and all(
+                recorded is None or _close(recorded, expected)
+                for recorded, expected in zip(data.times_ps, times, strict=True)
+            ),
+            "Trajectory TIME headers contradict recorded run times",
+        )
     valid_start = _close(times[0], 0) if end == 1000 else times[0] <= 1000
     _require(
         _close(times[-1], end) and valid_start and np.any(np.isclose(times, 1000)),
@@ -453,22 +624,8 @@ def _states(data, thermal, segments, end):
         abs(temperature[-1] - 2500) < 500,
         "Final state is not near the requested 2500 K",
     )
-    # Fractional increments remove homogeneous barostat motion, then COM drift.
-    fractional = np.einsum("faj,fjk->fak", data.positions, np.linalg.inv(data.cells))
-    increments_fractional = np.diff(fractional, axis=0)
-    if data.wrapped:
-        _require(
-            end == 1000, "Diffusion requires unwrapped positions or image counters"
-        )
-        # Minimum-image motion is sufficient to establish mobility, not to
-        # estimate diffusion. Level 1 asks only for the heated state.
-        increments_fractional -= np.rint(increments_fractional)
-    motion = np.einsum(
-        "faj,fjk->fak",
-        increments_fractional,
-        (data.cells[1:] + data.cells[:-1]) / 2,
-    )
-    motion -= motion.mean(axis=1, keepdims=True)
+    # Minimum-image motion establishes Level 1 mobility, not diffusion.
+    motion = _displacements(data, allow_wrapped=end == 1000)
     high_temperature = times[1:] >= (1000 if end > 1000 else times[-2])
     increments = np.mean(np.sum(motion[high_temperature] ** 2, axis=-1), axis=1)
     _require(
@@ -506,26 +663,6 @@ def _phase(data, times, positions, level):
             3 < np.mean(coordination) < 12 and survival < 0.5 and displacement > 9
         ),
     }
-
-
-def _production(thermal):
-    selected = thermal[thermal[:, 1] >= 1100]
-    _require(len(selected) >= 100, "Insufficient production thermal samples")
-    temp, density = selected[:, 2], selected[:, 4]
-    blocks = np.array_split(selected, 4)
-    _require(
-        abs(temp.mean() - 2500) < 125
-        and temp.std() < 250
-        and (np.abs(temp - 2500) < 750).all(),
-        "Production temperature is not stable near 2500 K",
-    )
-    _require(
-        np.ptp([b[:, 2].mean() for b in blocks]) < 125
-        and np.ptp([b[:, 4].mean() for b in blocks]) / density.mean() < 0.03
-        and density.std() / density.mean() < 0.03,
-        "Production temperature or density is still drifting",
-    )
-    return {"temperature_K": float(temp.mean()), "density_g_cm3": float(density.mean())}
 
 
 def _msd_fit(times, positions, low=0.1, high=0.3):
@@ -614,7 +751,6 @@ def diffusion(times, positions):
 def evaluate(e, r, *, level=2):
     """Populate a binary rubric and return independently calculated diagnostics."""
     diagnostics = {}
-    end = 1000 if level == 1 else 1500
     if not r.check(
         "recorded_log_and_trajectory",
         10,
@@ -624,25 +760,31 @@ def evaluate(e, r, *, level=2):
     ):
         r.check("remaining_evidence", 90, False)
         return diagnostics
-    commands, thermal = read_log(e.artifact("lammps_log"))
-    data = read_trajectory(e.artifact("trajectory"))
-    segments = _protocol(commands, thermal, end)
-    r.check("heating_and_production_protocol", 25, True)
-    times, positions = _states(data, thermal, segments, end)
-    phase = _phase(data, times, positions, level)
-    r.check("state_and_thermal_continuity", 65 if level == 1 else 25, True)
-    diagnostics["phase" if level == 1 else "liquid"] = phase
     if level == 1:
+        commands, thermal = read_log(e.artifact("lammps_log"))
+        data = read_trajectory(e.artifact("trajectory"))
+        segments = _protocol(commands, thermal, 1000)
+        r.check("heating_and_production_protocol", 25, True)
+        times, positions = _states(data, thermal, segments, 1000)
+        diagnostics["phase"] = _phase(data, times, positions, level)
+        r.check("state_and_thermal_continuity", 65, True)
         return diagnostics
-    _require(
-        phase["liquid_criteria_met"],
-        "Structure and neighbor exchange do not support a mobile liquid",
+    commands, clock = read_log(
+        e.artifact("lammps_log"),
+        columns=("Step", "Time"),
+        allow_missing=True,
     )
-    r.check("liquid_state", 10, True)
-    diagnostics["production"] = _production(thermal)
-    r.check("stable_production", 5, True)
+    data = read_trajectory(
+        e.artifact("trajectory"),
+        expected_atoms=None,
+        include_velocities=False,
+    )
+    times, positions, interval = _diffusion_states(data, commands, clock)
+    r.check("diffusion_times_and_positions", 60, True)
     diagnostics.update(diffusion(times, positions))
-    r.check("resolved_stable_diffusion", 10, True)
+    diagnostics["analysis_interval_ps"] = interval
+    diagnostics["reference_basis"] = "logged_times_and_unwrapped_trajectory"
+    r.check("resolved_stable_diffusion", 15, True)
     value = diagnostics["diffusion_m2_s"]
     reported = e.results.get("diffusion_m2_s")
     valid_reported = (

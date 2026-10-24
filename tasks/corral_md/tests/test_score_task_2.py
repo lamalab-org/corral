@@ -47,7 +47,7 @@ def calculation(
     split=False,
     drift=1e-5,
     temperature_offset=0,
-    tg_K=1400,
+    tg_K=1576.88,
 ):
     rng = np.random.default_rng(74)
     rows = {}
@@ -121,7 +121,7 @@ def change_pressure(log, function):
 @pytest.mark.parametrize("change", ["wrong_target", "drift", "noise"])
 def test_measured_hold_pressure_must_settle_near_zero(tmp_path, level, change):
     path, answer, log = calculation(tmp_path)
-    answer["results"] = {} if level == 1 else {"cooling_tg_K": 1400}
+    answer["results"] = {} if level == 1 else {"cooling_tg_K": 1576.88}
     path.write_text(json.dumps(answer))
 
     def pressure(step):
@@ -180,7 +180,7 @@ def test_complete_log_passes_without_other_documents(tmp_path, split, level):
 
 @pytest.mark.parametrize(
     ("transition", "tg"),
-    [("unresolved", None), ("resolved", 1400), ("unresolved", 1400)],
+    [("unresolved", None), ("resolved", 1576.88), ("unresolved", 1576.88)],
 )
 @pytest.mark.parametrize("noise", [0, 0.0005, 0.3])
 def test_unresolved_data_fail_even_with_a_reported_tg(tmp_path, transition, tg, noise):
@@ -199,7 +199,7 @@ def test_unresolved_data_fail_even_with_a_reported_tg(tmp_path, transition, tg, 
         assert "requires a resolved Tg" in result.feedback
         assert report["computed"]["transition"] == "unresolved"
         assert report["computed"]["cooling_tg_K"] is None
-    assert report["pending_checks"] == []
+    assert "pending_checks" not in report
 
 
 def test_level1_preparation_does_not_require_a_resolved_tg(tmp_path):
@@ -248,29 +248,82 @@ def test_measured_temperature_and_cutoff_determine_fit(tmp_path):
     log.write_text("\n".join(lines))
     report = score(path)
     assert report["score"] == 1, report
-    assert report["computed"]["cooling_tg_K"] == pytest.approx(1400, abs=50)
+    assert report["computed"]["cooling_tg_K"] == pytest.approx(1576.88, abs=50)
 
 
-@pytest.mark.parametrize("tg_K", [450, 2450])
-def test_resolved_transition_outside_old_fitting_windows_passes(tmp_path, tg_K):
+@pytest.mark.parametrize("tg_K", [450, 1300, 1400, 1460, 1690, 2365, 2450, 2550])
+def test_self_consistent_tg_outside_historical_reference_fails(tmp_path, tg_K):
     path, _, _ = calculation(tmp_path, tg_K=tg_K)
     report = score(path)
-    assert report["score"] == 1, report
+    assert report["score"] == 0, report
+    assert "reference" in report["checks"][0]["detail"]
+    # Keep the data-derived estimate; never clip or pull it toward the target.
+    assert report["computed"]["transition"] == "resolved"
     assert report["computed"]["cooling_tg_K"] == pytest.approx(tg_K, abs=1e-6)
+    assert score(path, level=1)["score"] == 1
+
+
+def test_2600_k_answer_cannot_pass_by_matching_a_fit_near_the_cutoff(tmp_path):
+    path, answer, _ = calculation(tmp_path, tg_K=2550)
+    answer["results"]["cooling_tg_K"] = 2600
+    path.write_text(json.dumps(answer))
+    result = Task2Scorer().evaluate_submission(path)
+    assert result.score == 0
+    assert "reference" in result.feedback
+    assert "2550" in result.feedback
+    assert "2600" in result.feedback
+
+
+@pytest.mark.parametrize(
+    ("fitted_tg", "reported_tg"),
+    [(1460, 1500), (1690, 1650), (1500, 1460), (1650, 1690)],
+)
+def test_reference_applies_to_both_fitted_and_reported_tg(
+    tmp_path, fitted_tg, reported_tg
+):
+    # Each pair agrees within 100 K, with only one member outside the reference.
+    path, answer, _ = calculation(tmp_path, tg_K=fitted_tg)
+    answer["results"]["cooling_tg_K"] = reported_tg
+    path.write_text(json.dumps(answer))
+    result = Task2Scorer().evaluate_submission(path)
+    assert result.score == 0
+    assert "reference" in result.feedback
+
+
+@pytest.mark.parametrize(
+    ("tg_K", "expected"),
+    [
+        (1476.88 - 0.001, 0),
+        (1476.88, 1),
+        (1576.88, 1),
+        (1676.88, 1),
+        (1676.88 + 0.001, 0),
+    ],
+)
+def test_historical_reference_uses_100_kelvin_inclusive_tolerance(
+    tmp_path, tg_K, expected
+):
+    path, _, _ = calculation(tmp_path, tg_K=tg_K)
+    report = score(path)
+    assert report["score"] == expected, report
+    reference = report["computed"]["reference_tg"]
+    assert reference["cooling_tg_K"] == 1576.88
+    assert reference["absolute_tolerance_K"] == 100
+    assert reference["accepted_range_K"] == pytest.approx([1476.88, 1676.88])
 
 
 def test_tg_is_the_line_intersection_between_sampled_temperatures(tmp_path):
-    path, _, _ = calculation(tmp_path, tg_K=1437)
+    path, _, _ = calculation(tmp_path, tg_K=1576.88)
     report = score(path)
     assert report["score"] == 1, report
-    assert report["computed"]["cooling_tg_K"] == pytest.approx(1437, abs=1e-6)
+    assert report["computed"]["cooling_tg_K"] == pytest.approx(1576.88, abs=1e-6)
 
 
 def test_resolved_noisy_transition_does_not_require_old_window_checks(tmp_path):
     path, _, _ = calculation(tmp_path, noise=0.02)
     report = score(path)
     assert report["score"] == 1, report
-    assert report["computed"]["cooling_tg_K"] == pytest.approx(1400, abs=100)
+    assert report["computed"]["cooling_tg_K"] == pytest.approx(1576.88, abs=100)
 
 
 @pytest.mark.parametrize(
@@ -279,7 +332,9 @@ def test_resolved_noisy_transition_does_not_require_old_window_checks(tmp_path):
 def test_reported_tg_must_agree_with_independent_intersection(
     tmp_path, offset, expected
 ):
-    path, answer, _ = calculation(tmp_path, tg_K=1437)
+    # Keep both values within the reference range to isolate fit agreement.
+    fitted_tg = 1526.88 if offset > 0 else 1626.88
+    path, answer, _ = calculation(tmp_path, tg_K=fitted_tg)
     answer["results"]["cooling_tg_K"] += offset
     path.write_text(json.dumps(answer))
     report = score(path)

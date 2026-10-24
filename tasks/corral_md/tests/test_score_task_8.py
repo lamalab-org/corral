@@ -14,7 +14,7 @@ from ase.build import bulk
 from ase.calculators.calculator import Calculator, all_changes
 from corral_md.scoring import task_8 as score_task_8
 from corral_md.scoring.evaluator import (
-    PendingReviewError,
+    EvaluationError,
     WorkflowScorer,
     check_level1_workflow,
     check_level2_workflow,
@@ -357,7 +357,7 @@ def test_minimal_contract_and_independent_plan(tmp_path, runtime, level):
     report = scorer(level, independent).evaluate(path)
     assert report["score"] == 1, report
     assert report["possible_points"] == 100
-    assert report["pending_checks"] == []
+    assert "pending_checks" not in report
     assert sum(
         len(job["frames"]) for job in seen[0].jobs if job["operation"] == "mace"
     ) == (100 if level == 1 else 300)
@@ -541,8 +541,9 @@ def test_self_consistent_fabrications_fail_independent_recalculation(
 def test_independent_check_is_required_and_bound_to_evidence(tmp_path, runtime):
     path, _ = make_submission(tmp_path, runtime, level=1)
     offline = WorkflowScorer(8, level=1)
-    assert offline.evaluate(path)["score"] is None
-    with pytest.raises(PendingReviewError):
+    with pytest.raises(EvaluationError):
+        offline.evaluate(path)
+    with pytest.raises(EvaluationError):
         offline(path)
 
     def mismatched(plan, fingerprint):

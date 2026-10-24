@@ -3,7 +3,8 @@
 Both levels submit only results and artifacts.raw_logs. Logs retain echoed
 commands and thermo output; no submitted analysis code is executed. Continuity
 is checked within the recorded execution, not attested against log fabrication.
-Numerical screens below are evaluator policy, not a calibrated reference Tg.
+Level 2 requires both a resolved log-derived Tg and agreement with the historical
+benchmark reference. The reference is an acceptance check, never a fit constraint.
 """
 
 from __future__ import annotations
@@ -23,6 +24,11 @@ SOURCE_PATH = "/workspace/resources/md-structures-melt-liq4000/liq4000.dat"
 SOURCE_SHA256 = "1674c66496b0bab9eda0ce79b439ad90f9ce2097c5d5450a86965442f5cdfa63"
 COOLING_STEPS = 370_000
 TOTAL_STEPS = 470_000
+# Historical Level 2 Task 2 target, from environments/level_2/
+# tasks_json/task_2.json at commit 632800bf64a3f85ddcb003181f69ce12196a6244.
+# The 2600 K cutoff is only a data-selection limit, not an acceptable target Tg.
+REFERENCE_TG_K = 1576.88
+REFERENCE_TG_ATOL_K = 100.0
 _COEFFICIENTS = {
     (1, 1): (0, 1, 0),
     (1, 2): (0, 1, 0),
@@ -535,6 +541,13 @@ class Task2Scorer:
                 )
             if self.level == 2:
                 computed.update(cooling_transition(trace))
+                tolerance = REFERENCE_TG_ATOL_K
+                lower, upper = REFERENCE_TG_K - tolerance, REFERENCE_TG_K + tolerance
+                computed["reference_tg"] = {
+                    "cooling_tg_K": REFERENCE_TG_K,
+                    "absolute_tolerance_K": REFERENCE_TG_ATOL_K,
+                    "accepted_range_K": [lower, upper],
+                }
                 _require(
                     computed["transition"] == "resolved",
                     "Level 2 requires a resolved Tg; the cooling transition is "
@@ -553,6 +566,26 @@ class Task2Scorer:
                     abs(actual - computed["cooling_tg_K"]) <= 100,
                     "Cooling Tg differs from the independently fitted "
                     f"{computed['cooling_tg_K']:g} K",
+                )
+                _require(
+                    # Include the tolerance boundaries despite line-fit roundoff.
+                    # Check both values so the 100 K agreement allowance cannot
+                    # extend the reference range for either estimate.
+                    all(
+                        np.isclose(
+                            value,
+                            REFERENCE_TG_K,
+                            rtol=0,
+                            atol=REFERENCE_TG_ATOL_K + 1e-6,
+                        )
+                        for value in (actual, computed["cooling_tg_K"])
+                    ),
+                    f"Cooling Tg must match the historical reference {REFERENCE_TG_K:g} K "
+                    f"within {REFERENCE_TG_ATOL_K:g} K "
+                    f"([{lower:.2f}, {upper:.2f}] K); "
+                    f"reported: {actual:g} K; "
+                    f"independently fitted: {computed['cooling_tg_K']:g} K. "
+                    "Both values must lie within the reference range.",
                 )
             return True
 

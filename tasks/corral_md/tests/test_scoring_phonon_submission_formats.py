@@ -4,7 +4,7 @@ import json
 
 import numpy as np
 import pytest
-from corral_md.scoring.common import EvidenceError
+from corral_md.scoring.common import EvidenceError, UnsupportedEvidence
 from corral_md.scoring.formats import normalize_force_record, phonon_log
 from corral_md.scoring.task_4 import prepare
 from corral_md.scoring.task_5 import mode_energies
@@ -52,13 +52,14 @@ def test_saved_mode_layouts_score_and_still_reject_inaccurate_modes(tmp_path, le
     report = scorer(level).evaluate(path)
     assert report["score"] == 1, report
     key = "gamma_frequencies_eV" if level == 1 else "frequencies_eV"
-    # Change a nonmaximum optical mode, leaving the answer/fit unchanged: the
-    # independent full-spectrum check must still reject the calculation.
-    rows[0][key][3] *= 1.5
+    # Level 1 checks the maximum only; Level 2 checks the complete spectrum.
+    rows[0][key][-1 if level == 1 else 3] *= 1.5
     write(tmp_path / "calculations.json", log)
     report = scorer(level).evaluate(path)
     assert report["score"] == 0
-    assert report["checks"][-1]["name"] == "independent_hessian_accuracy"
+    assert report["checks"][-1]["name"] == (
+        "final_quantities" if level == 1 else "independent_hessian_accuracy"
+    )
 
 
 @pytest.mark.parametrize("level", [1, 2])
@@ -159,3 +160,120 @@ def test_compact_force_data_still_rejects_inconsistent_evidence(defect):
         record["numbers"] = np.full(125, 47)
     with pytest.raises(EvidenceError):
         normalize_force_record(record)
+
+
+def indexed_forces(layout):
+    """Use the two saved-run encodings with an independently known harmonic model."""
+    original, record = compact_forces()
+    vectors = original["displacements_A"]
+    atoms = np.zeros(len(vectors))
+    if layout == "atom_xyz":
+        record["displacements"] = np.column_stack((atoms, vectors))
+    else:
+        record["displacements"] = np.column_stack(
+            (atoms, np.argmax(abs(vectors), axis=1), vectors.sum(axis=1))
+        )
+    record.pop("supercell_numbers")
+    record.pop("supercell_masses")
+    record["symbols"] = np.full(125, "Pd")
+    record["mass_amu"] = 106.42
+    return original, record
+
+
+@pytest.mark.parametrize("layout", ["atom_xyz", "atom_axis_delta"])
+def test_indexed_npz_forces_reconstruct_known_constants_and_spectrum(tmp_path, layout):
+    from corral_md.scoring.common import Evidence
+    from corral_md.scoring.task_4 import energies, read_record
+
+    from .test_workflow_task_4 import independent_energies
+
+    original, record = indexed_forces(layout)
+    # Archive round-trip also exercises NumPy string arrays for chemical symbols.
+    np.savez(tmp_path / "forces.npz", **record)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"artifacts": {"force_log": "forces.npz"}}))
+    converted = read_record(Evidence(manifest))
+    for key in (
+        "positions_A",
+        "displacements_A",
+        "forces_eV_A",
+        "numbers",
+        "masses_amu",
+    ):
+        np.testing.assert_allclose(converted[key], original[key])
+    phi, sites, _ = prepare(converted)
+    np.testing.assert_allclose(phi, original["force_constants_eV_A2"])
+    q = np.random.default_rng(27).random((19, 3))
+    np.testing.assert_allclose(energies(phi, sites, q), independent_energies(q))
+    # Each force row must retain its association with the displaced geometry.
+    order = np.random.default_rng(33).permutation(len(record["forces"]))
+    for key in ("displacements", "forces"):
+        record[key] = record[key][order]
+    np.testing.assert_allclose(prepare(normalize_force_record(record))[0], phi)
+
+
+@pytest.mark.parametrize("layout", ["atom_xyz", "atom_axis_delta"])
+def test_indexed_displacements_agree_with_explicit_cartesian_vectors(layout):
+    original, record = indexed_forces(layout)
+    record["displacements_A"] = original["displacements_A"].copy()
+    normalize_force_record(record)
+    record["displacements_A"][1, 0] += 0.001
+    with pytest.raises(EvidenceError, match="Conflicting displacement records"):
+        normalize_force_record(record)
+
+
+@pytest.mark.parametrize("layout", ["atom_xyz", "atom_axis_delta"])
+def test_indexed_displacements_do_not_accept_wrong_forces_or_missing_pairs(layout):
+    _, record = indexed_forces(layout)
+    record["forces"] = record["forces"].copy()
+    record["forces"][[1, 7], 0, 0] += 1
+    with pytest.raises(EvidenceError, match="force constants disagree"):
+        prepare(normalize_force_record(record))
+    _, record = indexed_forces(layout)
+    for key in ("displacements", "forces"):
+        record[key] = np.delete(record[key], 1, axis=0)
+    with pytest.raises(EvidenceError, match="both central force differences"):
+        prepare(normalize_force_record(record))
+
+
+@pytest.mark.parametrize("layout", ["atom_xyz", "atom_axis_delta"])
+def test_indexed_displacements_do_not_silently_move_another_atom(layout):
+    _, record = indexed_forces(layout)
+    record["displacements"][:, 0] = 1
+    with pytest.raises(UnsupportedEvidence, match="atom-order adapter"):
+        normalize_force_record(record)
+    record["displaced_atom"] = 0
+    with pytest.raises(EvidenceError, match="Conflicting displaced atom indices"):
+        normalize_force_record(record)
+
+
+@pytest.mark.parametrize("atom", [-1, 0.5, 125])
+def test_atom_xyz_displacements_reject_invalid_indices(atom):
+    _, record = indexed_forces("atom_xyz")
+    record["displacements"][0, 0] = atom
+    with pytest.raises(EvidenceError, match="Invalid displaced atom indices"):
+        normalize_force_record(record)
+
+
+@pytest.mark.parametrize("defect", ["symbol", "shape", "numbers"])
+def test_force_symbols_reject_invalid_or_conflicting_species(defect):
+    _, record = indexed_forces("atom_xyz")
+    if defect == "symbol":
+        record["symbols"][0] = "XX"
+    elif defect == "shape":
+        record["symbols"] = record["symbols"][:, None]
+    else:
+        record["numbers"] = np.full(125, 47)
+    with pytest.raises(EvidenceError):
+        normalize_force_record(record)
+
+
+def test_explicit_cartesian_displacements_are_never_interpreted_as_indices():
+    _, record = indexed_forces("atom_axis_delta")
+    record["displacements_A"] = record.pop("displacements")
+    converted = normalize_force_record(record)
+    np.testing.assert_array_equal(
+        converted["displacements_A"], record["displacements_A"]
+    )
+    with pytest.raises(EvidenceError, match="both central force differences"):
+        prepare(converted)

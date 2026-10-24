@@ -41,14 +41,14 @@ def _require(condition, detail):
         raise EvidenceError(detail)
 
 
-def strain_pairs(level):
-    return np.asarray(list(product(STRAINS, [0.0] if level == 1 else STRAINS)))
+def strain_pairs():
+    return np.asarray(list(product(STRAINS, STRAINS)))
 
 
 @artifact_reader
-def read_log(e, level):
+def read_log(e):
     """Validate the complete grid and the actual unrelaxed calculation inputs."""
-    log = phonon_log(e.json("calculation_log"), level)
+    log = phonon_log(e.json("calculation_log"), 2)
     _require(
         log.get("model") != "student.model"
         and log.get("default_dtype", "float64") in {"float32", "float64"}
@@ -56,7 +56,7 @@ def read_log(e, level):
         "Use the supplied MACE-MP-0 teacher.model without dispersion",
     )
     rows = log["calculations"]
-    expected = strain_pairs(level)
+    expected = strain_pairs()
     _require(
         isinstance(rows, list) and len(rows) == len(expected), "Incomplete strain grid"
     )
@@ -129,8 +129,7 @@ def mode_energies(hessian, masses):
     return energies
 
 
-def reconstruct(log, level):
-    del level  # The retained calculations determine reconstruction at either level.
+def reconstruct(log):
     rows = log["calculations"]
     hessians, modes = [], []
     for row in rows:
@@ -219,13 +218,15 @@ def build_plan(e, log, hessians, challenge):
     return plan
 
 
-def evaluate_submission(submission, *, level, verifier=None, review=None):
+def evaluate_submission(submission, *, level, verifier=None):
+    if level != 2:
+        raise ValueError("Task 5 Level 1 uses FinalQuantityScorer")
     r = Rubric(5, binary=True, fail_fast=True)
     calculated, verification = {}, {}
     try:
         e = Evidence(submission, task_number=5, level=level)
         fingerprint = e.fingerprint()
-        log = read_log(e, level)
+        log = read_log(e)
     except Exception as exc:
         r.error("calculation_log", 100, exc)
         return {**r.as_dict(), "level": level, "calculated_results": calculated}
@@ -233,7 +234,7 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
     hessians = []
 
     def phonons():
-        matrices, modes = reconstruct(log, level)
+        matrices, modes = reconstruct(log)
         hessians.extend(matrices)
         calculated["strain_pairs"] = [
             [row["isotropic_strain"], row["uniaxial_strain"]]
@@ -246,7 +247,7 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
     r.check("phonon_reconstruction_and_sensitivity", 25, phonons)
     r.check(
         "highest_positive_energies",
-        35 if level == 1 else 15,
+        15,
         lambda: (
             ("highest_positive_energies_eV" not in e.results)
             or result_close(
@@ -257,30 +258,28 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
         ),
     )
 
-    if level == 2:
-
-        def fit():
-            design = np.column_stack([np.ones(25), calculated["strain_pairs"]])
-            y = np.asarray(calculated["highest_positive_energies_eV"])
-            coefficients = np.linalg.lstsq(design, y, rcond=None)[0]
-            calculated["fit"] = {
-                "intercept_eV": float(coefficients[0]),
-                "isotropic_coefficient_eV_per_strain": float(coefficients[1]),
-                "uniaxial_coefficient_eV_per_strain": float(coefficients[2]),
-                "residuals_eV": (y - design @ coefficients).tolist(),
+    def fit():
+        design = np.column_stack([np.ones(25), calculated["strain_pairs"]])
+        y = np.asarray(calculated["highest_positive_energies_eV"])
+        coefficients = np.linalg.lstsq(design, y, rcond=None)[0]
+        calculated["fit"] = {
+            "intercept_eV": float(coefficients[0]),
+            "isotropic_coefficient_eV_per_strain": float(coefficients[1]),
+            "uniaxial_coefficient_eV_per_strain": float(coefficients[2]),
+            "residuals_eV": (y - design @ coefficients).tolist(),
+        }
+        return all(
+            result_close(value, e.results["fit"][key], atol=1e-7)
+            for key, value in calculated["fit"].items()
+            if key
+            in {
+                "isotropic_coefficient_eV_per_strain",
+                "uniaxial_coefficient_eV_per_strain",
             }
-            return all(
-                result_close(value, e.results["fit"][key], atol=1e-7)
-                for key, value in calculated["fit"].items()
-                if key
-                in {
-                    "isotropic_coefficient_eV_per_strain",
-                    "uniaxial_coefficient_eV_per_strain",
-                }
-                or key in e.results["fit"]
-            )
+            or key in e.results["fit"]
+        )
 
-        r.check("unweighted_fit_and_residuals", 20, fit)
+    r.check("unweighted_fit_and_residuals", 20, fit)
 
     def independent():
         if verifier is None:
@@ -351,8 +350,6 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
     identity = hashlib.sha256(
         f"task5.level_{level}\0{fingerprint}\0{verification.get('release_id')}".encode()
     ).hexdigest()
-    if review is not None:
-        r.apply_review(review, identity)
     return {
         **r.as_dict(),
         "level": level,

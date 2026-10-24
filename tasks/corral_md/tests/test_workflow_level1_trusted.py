@@ -1,13 +1,13 @@
 """Focused checks for Level 1's evaluator-owned MACE verification plan."""
 
 import pytest
-from corral_md.scoring.common import Rubric
+from corral_md.scoring.common import EvaluationError, Rubric
 from corral_md.scoring.verification import apply_verification
 
 MODEL_TARGET = "independent_model_calculation"
 
 
-def test_required_independent_calculation_keeps_binary_score_pending_until_passed():
+def test_required_independent_calculation_errors_unless_verified():
     def rubric():
         result = Rubric(3, binary=True)
         result.check("saved_evidence", 99, True)
@@ -16,7 +16,8 @@ def test_required_independent_calculation_keeps_binary_score_pending_until_passe
 
     pending = rubric()
     apply_verification(pending, None)
-    assert pending.score is None
+    with pytest.raises(EvaluationError, match=MODEL_TARGET):
+        _ = pending.score
 
     passed = rubric()
     apply_verification(
@@ -37,18 +38,6 @@ def test_required_independent_calculation_keeps_binary_score_pending_until_passe
         unavailable,
         {"checks": [{"id": "spot", "status": "unverified", "targets": [MODEL_TARGET]}]},
     )
-    assert unavailable.score is None
-    with pytest.raises(ValueError, match="trusted verification"):
-        unavailable.apply_review(
-            {
-                "evidence_sha256": "frozen-evidence",
-                "decisions": {
-                    MODEL_TARGET: {
-                        "passed": True,
-                        "reviewer": "evaluator",
-                        "reason": "No remote calculation was available",
-                    }
-                },
-            },
-            "frozen-evidence",
-        )
+    with pytest.raises(EvaluationError, match=MODEL_TARGET):
+        _ = unavailable.score
+    assert not hasattr(unavailable, "apply_review")

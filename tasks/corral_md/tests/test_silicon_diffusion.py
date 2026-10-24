@@ -27,6 +27,8 @@ def _save(path, data):
 def _write_dump(path, data):
     with path.open("w") as stream:
         for i, step in enumerate(data.steps):
+            if data.times_ps and data.times_ps[i] is not None:
+                stream.write(f"ITEM: TIME\n{data.times_ps[i]:.12g}\n")
             stream.write(
                 f"ITEM: TIMESTEP\n{step}\nITEM: NUMBER OF ATOMS\n216\nITEM: BOX BOUNDS pp pp pp\n"
             )
@@ -121,7 +123,12 @@ def _grader(level=2):
     return WorkflowScorer(1, level=level)
 
 
-def test_reconstructs_known_diffusion_with_only_two_records(submission):
+@pytest.mark.parametrize("time_headers", [False, True])
+def test_reconstructs_known_diffusion_with_only_two_records(submission, time_headers):
+    if time_headers:
+        path = submission.parent / "run.lammpstrj"
+        data = scoring.read_trajectory(path)
+        _write_dump(path, replace(data, times_ps=tuple(data.steps * 0.001)))
     report = _grader().evaluate(submission)
     assert report["score"] == 1, report
     assert report["calculated"]["diffusion_m2_s"] == pytest.approx(1.74e-8, rel=0.1)
@@ -135,13 +142,186 @@ def test_reconstructs_known_diffusion_with_only_two_records(submission):
     }
 
 
+@pytest.fixture
+def short_dump(tmp_path):
+    path = tmp_path / "short.lammpstrj"
+    _write_dump(
+        path,
+        scoring.Trajectory(
+            np.array([0, 2]),
+            np.tile(np.eye(3), (2, 1, 1)),
+            np.zeros((2, 216, 3)),
+            np.zeros((2, 216, 3)),
+        ),
+    )
+    return path
+
+
+@pytest.mark.parametrize("times", [(0.0, 0.002), (None, 0.002), (0.0, None)])
+def test_optional_time_headers_preserve_trajectory(short_dump, times):
+    original = scoring.read_trajectory(short_dump)
+    _write_dump(short_dump, replace(original, times_ps=times))
+    actual = scoring.read_trajectory(short_dump)
+    assert actual.times_ps == times
+    for field in ("steps", "cells", "positions", "velocities"):
+        np.testing.assert_array_equal(getattr(actual, field), getattr(original, field))
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "-1", "invalid", ""])
+def test_malformed_time_headers_are_rejected(short_dump, value):
+    short_dump.write_text(f"ITEM: TIME\n{value}\n" + short_dump.read_text())
+    with pytest.raises(EvidenceError, match="Invalid trajectory TIME value"):
+        scoring.read_trajectory(short_dump)
+
+
+@pytest.mark.parametrize("tail", ["", "0\n", "0\nITEM: TIME\n0\n"])
+def test_incomplete_or_duplicate_time_headers_are_rejected(short_dump, tail):
+    short_dump.write_text("ITEM: TIME\n" + tail)
+    with pytest.raises(EvidenceError):
+        scoring.read_trajectory(short_dump)
+
+
+@pytest.mark.parametrize("times", [(0, 0), (None, 0), (0, None), (0, 1)])
+def test_time_headers_at_repeated_frame_boundaries(short_dump, times):
+    _, first, second = short_dump.read_text().split("ITEM: TIMESTEP\n")
+    repeated = "".join(
+        (f"ITEM: TIME\n{time}\n" if time is not None else "")
+        + "ITEM: TIMESTEP\n"
+        + first
+        for time in times
+    )
+    short_dump.write_text(repeated + "ITEM: TIMESTEP\n" + second)
+    if times == (0, 1):
+        with pytest.raises(EvidenceError, match="Conflicting TIME headers"):
+            scoring.read_trajectory(short_dump)
+    else:
+        actual = scoring.read_trajectory(short_dump)
+        assert actual.times_ps == (0, None)
+        assert actual.steps.tolist() == [0, 2]
+
+
+def test_time_headers_must_match_recorded_run_clock(submission):
+    path = submission.parent / "run.lammpstrj"
+    data = scoring.read_trajectory(path)
+    # Positive, increasing times are still invalid if they contradict the log.
+    _write_dump(path, replace(data, times_ps=tuple(data.steps * 0.002)))
+    report = _grader().evaluate(submission)
+    assert report["score"] == 0, report
+    assert "Trajectory TIME headers contradict recorded run times" in str(report)
+
+
 def test_default_scorer_completes_from_recorded_evidence(submission):
     result = check_level2_workflow(1).evaluate_submission(submission)
     report = result.metadata["workflow_evaluation"]
     assert result.score == 1, report
     assert report["status"] == "complete"
-    assert report["pending_checks"] == []
+    assert "pending_checks" not in report
     assert report["earned_points"] == report["possible_points"] == 100
+    assert report["scoring_policy"] == scoring.DIFFUSION_POLICY
+    assert report["mode"] == "final_quantities"
+
+
+@pytest.mark.parametrize("clock_source", ["log", "dump", "both", "coarse_log"])
+@pytest.mark.parametrize("local_clock", [False, True])
+def test_diffusion_needs_only_production_times_and_positions(
+    submission, clock_source, local_clock
+):
+    """Regression for a log switched after setup, plus production-only output."""
+    log = submission.parent / "run.log"
+    _, thermal = scoring.read_log(log)
+    path = submission.parent / "run.lammpstrj"
+    original = scoring.read_trajectory(path)
+    selected = original.steps >= 1000000
+    steps = original.steps[selected] - (1000000 if local_clock else 0)
+    times = thermal[thermal[:, 1] >= 1000, 1] - (1000 if local_clock else 0)
+    data = scoring.Trajectory(
+        steps,
+        original.cells[selected],
+        original.positions[selected],
+        original.velocities[selected],
+        times_ps=tuple(times) if clock_source in {"dump", "both"} else (),
+    )
+    _write_dump(path, data)
+    if clock_source == "dump":
+        log.write_text("LAMMPS retained production output\n")
+    else:
+        stride = 5 if clock_source == "coarse_log" else 1
+        with log.open("w") as stream:
+            stream.write("Step Time\n")
+            np.savetxt(stream, np.column_stack([steps, times])[::stride], fmt="%.12g")
+    # No velocity information is needed, even when its optional columns exist.
+    text = path.read_text().replace(" vx ", " unused ")
+    path.write_text(text)
+    report = check_level2_workflow(1).evaluate(submission)
+    assert report["score"] == 1, report
+    assert report["calculated"]["analysis_interval_ps"] == (
+        [0, 500] if local_clock else [1000, 1500]
+    )
+    assert report["calculated"]["diffusion_m2_s"] == pytest.approx(1.74e-8, rel=0.1)
+    assert not {
+        "heating_and_production_protocol",
+        "state_and_thermal_continuity",
+        "liquid_state",
+        "stable_production",
+    } & {c["name"] for c in report["checks"]}
+
+
+@pytest.mark.parametrize("source", ["log", "dump"])
+def test_explicit_incompatible_units_cannot_be_silently_assumed_metal(
+    submission, source
+):
+    path = submission.parent / ("run.log" if source == "log" else "run.lammpstrj")
+    if source == "log":
+        path.write_text(path.read_text().replace("units metal", "units real"))
+    else:
+        path.write_text("ITEM: UNITS\nreal\n" + path.read_text())
+    report = _grader().evaluate(submission)
+    assert report["score"] == 0
+    assert "units" in str(report)
+
+
+def test_dump_units_header_is_supported(submission):
+    path = submission.parent / "run.lammpstrj"
+    path.write_text("ITEM: UNITS\nmetal\n" + path.read_text())
+    assert _grader().evaluate(submission)["score"] == 1
+
+
+def test_missing_physical_time_does_not_guess_a_timestep(submission):
+    log = submission.parent / "run.log"
+    log.write_text("Step Temp\n1000000 2500\n1500000 2500\n")
+    report = _grader().evaluate(submission)
+    assert report["score"] == 0
+    assert "physical times" in str(report)
+
+
+@pytest.mark.parametrize("mutation", ["reversed", "reset", "nonfinite", "conflicting"])
+def test_invalid_output_clock_is_rejected(submission, mutation):
+    log = submission.parent / "run.log"
+    _, thermal = scoring.read_log(log)
+    clock = thermal[:, :2].copy()
+    if mutation == "reversed":
+        clock = clock[::-1]
+    elif mutation == "reset":
+        clock[clock[:, 1] >= 1100, 1] -= 1100
+    elif mutation == "nonfinite":
+        clock[-1, 1] = np.nan
+    else:
+        duplicate = clock[-1].copy()
+        duplicate[1] += 1
+        clock = np.vstack([clock, duplicate])
+    with log.open("w") as stream:
+        stream.write("Step Time\n")
+        np.savetxt(stream, clock, fmt="%.12g")
+    assert _grader().evaluate(submission)["score"] == 0
+
+
+def test_production_clock_can_be_used_with_a_full_trajectory(submission):
+    log = submission.parent / "run.log"
+    _, thermal = scoring.read_log(log)
+    with log.open("w") as stream:
+        stream.write("Step Time\n")
+        np.savetxt(stream, thermal[thermal[:, 1] >= 1000, :2], fmt="%.12g")
+    assert _grader().evaluate(submission)["score"] == 1
 
 
 @pytest.mark.parametrize(
@@ -179,7 +359,7 @@ def test_consistent_but_wrong_diffusion_fails_reference(submission, factor):
     report = result.metadata["workflow_evaluation"]
     assert result.score == 0, report
     assert report["status"] == "complete"
-    assert report["pending_checks"] == []
+    assert "pending_checks" not in report
     assert report["calculated"]["diffusion_m2_s"] == pytest.approx(
         factor * original, rel=1e-8, abs=0
     )
@@ -254,10 +434,11 @@ def test_reference_answer_still_requires_trajectory_consistency(submission):
         ("iso 0 0", "iso 10 10"),
     ],
 )
-def test_wrong_protocol_and_state_resets_fail(submission, old, new):
+def test_setup_commands_do_not_grade_level2_diffusion(submission, old, new):
     log = submission.parent / "run.log"
     log.write_text(log.read_text().replace(old, new))
-    assert _grader().evaluate(submission)["score"] == 0
+    report = _grader().evaluate(submission)
+    assert report["score"] == 1, report
 
 
 @pytest.mark.parametrize(
@@ -267,8 +448,7 @@ def test_wrong_protocol_and_state_resets_fail(submission, old, new):
         "nonfinite",
         "identity",
         "frozen",
-        "hot",
-        "wrong_cell",
+        "singular_cell",
         "wrapped",
         "jump",
     ],
@@ -290,10 +470,8 @@ def test_bad_trajectory_fails(submission, mutation):
             )
         elif mutation == "frozen":
             data.positions[:] = data.positions[0]
-        elif mutation == "hot":
-            data.velocities[-1] *= 3
-        elif mutation == "wrong_cell":
-            data.cells[-1] *= 1.1
+        elif mutation == "singular_cell":
+            data.cells[-1, 0] = 0
         elif mutation == "wrapped":
             data.positions %= np.diag(data.cells[0])
         elif mutation == "jump":
@@ -302,9 +480,28 @@ def test_bad_trajectory_fails(submission, mutation):
     assert _grader().evaluate(submission)["score"] == 0
 
 
-def test_temperatures_come_from_thermo_when_velocity_columns_are_absent(submission):
+def test_diffusion_does_not_require_velocity_columns(submission):
     path = submission.parent / "run.lammpstrj"
     path.write_text(path.read_text().replace(" vx ", " wrong "))
+    report = _grader().evaluate(submission)
+    assert report["score"] == 1, report
+
+
+def test_thermal_diagnostics_and_initial_crystal_are_not_diffusion_gates(submission):
+    path = submission.parent / "run.lammpstrj"
+    data = scoring.read_trajectory(path)
+    # Preserve every production displacement while changing irrelevant initial
+    # geometry and optional velocities. No full-cycle state check should run.
+    data.positions[data.steps < 1000000] = 0
+    data.velocities[:] = np.nan
+    _write_dump(path, data)
+    log = submission.parent / "run.log"
+    text = log.read_text().split("Step Time Temp Press Density\n", 1)[1]
+    rows = np.loadtxt(text.splitlines())
+    rows[:, 2:] = np.nan
+    with log.open("w") as stream:
+        stream.write("Step Time Temp Press Density\n")
+        np.savetxt(stream, rows, fmt="%.12g")
     report = _grader().evaluate(submission)
     assert report["score"] == 1, report
 
@@ -327,7 +524,10 @@ def test_production_only_trajectory_is_sufficient_for_diffusion(submission):
 
 @pytest.mark.parametrize("phase", ["crystalline", "liquid"])
 @pytest.mark.parametrize("mutation", [None, "wrong_protocol", "truncated", "hot"])
-def test_level1_stops_at_preparation_without_results(submission, phase, mutation):
+@pytest.mark.parametrize("time_headers", [False, True])
+def test_level1_stops_at_preparation_without_results(
+    submission, phase, mutation, time_headers
+):
     log = submission.parent / "run.log"
     text = log.read_text().replace(
         "unfix heat\nfix production all npt temp 2500 2500 0.1 iso 0 0 1\nrun 500000\n",
@@ -364,6 +564,7 @@ def test_level1_stops_at_preparation_without_results(submission, phase, mutation
             data.cells[mask],
             data.positions[mask],
             data.velocities[mask],
+            times_ps=tuple(data.steps[mask] * 0.001) if time_headers else (),
         ),
     )
     manifest = json.loads(submission.read_text())
@@ -382,7 +583,7 @@ def test_level1_stops_at_preparation_without_results(submission, phase, mutation
     assert _grader().evaluate(submission)["score"] == 0
 
 
-def test_level2_still_requires_a_mobile_liquid(submission):
+def test_level2_still_requires_resolved_diffusive_motion(submission):
     path = submission.parent / "run.lammpstrj"
     data = scoring.read_trajectory(path)
     vibration = np.random.default_rng(23).normal(scale=0.1, size=data.positions.shape)
@@ -391,7 +592,7 @@ def test_level2_still_requires_a_mobile_liquid(submission):
     _write_dump(path, data)
     report = _grader().evaluate(submission)
     assert report["score"] == 0, report
-    assert "do not support a mobile liquid" in str(report)
+    assert "diffusive MSD regime" in str(report)
 
 
 def test_collective_translation_and_cell_breathing_are_removed(recorded_run):
@@ -460,7 +661,7 @@ def test_cli_completes_from_recorded_evidence(submission, monkeypatch):
     assert main() == 0
     report = json.loads(output.read_text())
     assert report["score"] == 1
-    assert report["pending_checks"] == []
+    assert "pending_checks" not in report
     assert report["calculated"]["diffusion_m2_s"] > 0
     assert report["calculated"]["analysis_interval_ps"] == [1000, 1500]
 

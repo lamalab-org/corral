@@ -9,7 +9,7 @@ import pytest
 from ase import units
 from ase.build import bulk
 from corral_md.scoring import WorkflowScorer
-from corral_md.scoring.common import Evidence
+from corral_md.scoring.common import EvaluationError, Evidence
 from corral_md.scoring.level1_trusted import PINNED_TEACHER_SHA256
 from corral_md.scoring.task_4 import NODES, build_plan, prepare, read_record
 from corral_md.scoring.verification import ModalVerifier
@@ -311,7 +311,8 @@ def test_level1_force_constants_do_not_require_a_resolved_phonon_spectrum(submis
 
 
 def test_offline_cannot_establish_model_identity(submission):
-    assert WorkflowScorer(4).evaluate(submission)["score"] is None
+    with pytest.raises(EvaluationError):
+        WorkflowScorer(4).evaluate(submission)
 
 
 def test_histogram_and_file_arrays(submission):

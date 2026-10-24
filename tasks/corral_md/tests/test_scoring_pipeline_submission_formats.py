@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from corral_md.scoring.common import EvidenceError
+from corral_md.scoring.common import EvaluationError, EvidenceError
 from corral_md.scoring.pipeline_data import read_pipeline
 from corral_md.scoring.task_8 import _validation_splits
 
@@ -112,7 +112,7 @@ def test_manifest_freeze_and_nested_numerical_state_are_independently_scored(
     submission = manifest_submission(tmp_path, runtime)
     report = scorer().evaluate(submission)
     assert report["score"] == 1, report
-    assert not report["pending_checks"]
+    assert "pending_checks" not in report
     assert report["verification"]["teacher_configurations"] == 300
     assert len(report["calculated_results"]["strain_groups"]) == 5
     assert [row["size"] for row in report["calculated_results"]["learning_curve"]] == [
@@ -147,7 +147,7 @@ def test_manifest_adapter_preserves_scientific_failure_checks(
     (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
     report = scorer().evaluate(submission)
     assert report["score"] == 0, report
-    assert not report["pending_checks"]
+    assert "pending_checks" not in report
 
 
 def redundant_fit_records(rows, frozen):
@@ -219,7 +219,7 @@ def test_redundant_fit_records_cannot_override_contradictory_evidence(
     assert report["score"] == (1 if defect in (None, "reordered_indices") else 0), (
         report
     )
-    assert not report["pending_checks"]
+    assert "pending_checks" not in report
 
 
 @pytest.mark.parametrize("seed", [0, 17])
@@ -235,7 +235,7 @@ def test_redundant_validation_specs_are_compared_semantically(tmp_path, runtime,
     (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
     report = scorer().evaluate(submission)
     assert report["score"] == (1 if seed == 0 else 0), report
-    assert not report["pending_checks"]
+    assert "pending_checks" not in report
 
 
 def test_repeated_fold_prose_keeps_repetition_and_seed():
@@ -338,4 +338,100 @@ def test_seeded_level1_dataset_rejects_inconsistent_retained_evidence(
     (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
     report = scorer(level=1).evaluate(submission)
     assert report["score"] == 0, report
-    assert not report["pending_checks"]
+    assert "pending_checks" not in report
+
+
+DESCRIPTIVE_GENERATOR = (
+    "numpy.default_rng(seed).normal(0, sigma, (64,3)) sequentially per config"
+)
+
+
+def coordinate_submission(root, model, method, layout="metadata_rows"):
+    submission, _ = fixtures.make_submission(root, model, level=1)
+    header, dataset, end = read_log(root)
+    header.update(seed=dataset["seed"], rng=method)
+    if layout == "dataset":
+        dataset["rng"] = method
+        rows = [header, dataset, end]
+    else:
+        rows = [
+            {**header, **row, "event": "config", "config_index": i}
+            for i, row in enumerate(dataset["rows"])
+        ]
+        if layout == "metadata_rows":
+            rows = [header, *rows]
+    (root / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
+    return submission
+
+
+@pytest.mark.parametrize("layout", ["metadata_rows", "dataset", "rows_only"])
+@pytest.mark.parametrize(
+    "method", [DESCRIPTIVE_GENERATOR, "NumPy Gaussian draws", None]
+)
+def test_retained_coordinates_verify_generator_without_required_label_spelling(
+    tmp_path, runtime, method, layout
+):
+    submission = coordinate_submission(tmp_path, runtime, method, layout)
+    report = scorer(level=1).evaluate(submission)
+    assert report["score"] == 1, report
+    assert report["verification"]["status"] == "passed"
+
+
+@pytest.mark.parametrize(
+    "defect", ["energy", "cell", "hash", "order", "known_generator"]
+)
+def test_retained_coordinates_still_reject_inconsistent_evidence(
+    tmp_path, runtime, defect
+):
+    submission = coordinate_submission(tmp_path, runtime, DESCRIPTIVE_GENERATOR)
+    rows = read_log(tmp_path)
+    if defect == "energy":
+        rows[1]["energy_eV"] += 1
+    elif defect == "cell":
+        rows[1]["cell"][0][0] += 1
+    elif defect == "hash":
+        rows[1]["positions_sha256"] = "0" * 64
+    elif defect == "order":
+        rows[1], rows[2] = rows[2], rows[1]
+    else:
+        # An explicit supported name remains a scientific claim to verify.
+        rows[0]["rng"] = "numpy.random.RandomState"
+    (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
+    report = scorer(level=1).evaluate(submission)
+    assert report["score"] == 0, report
+    assert "pending_checks" not in report
+
+
+@pytest.mark.parametrize("defect", ["positions", "seed", "missing_positions"])
+def test_descriptive_generator_needs_reproducible_retained_coordinates(
+    tmp_path, runtime, defect
+):
+    submission = coordinate_submission(tmp_path, runtime, DESCRIPTIVE_GENERATOR)
+    rows = read_log(tmp_path)
+    if defect == "positions":
+        rows[1]["positions"][0][0] += 0.01
+    elif defect == "seed":
+        for row in rows:
+            row["seed"] += 1
+    else:
+        rows[1].pop("positions")
+    (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
+    with pytest.raises(EvaluationError) as caught:
+        scorer(level=1).evaluate(submission)
+    report = caught.value.report
+    assert "score" not in report
+    assert report["unsupported_checks"] == ["calculation_log"]
+
+
+def test_coordinate_free_description_still_needs_an_identified_generator(
+    tmp_path, runtime
+):
+    submission = seeded_submission(tmp_path, runtime)
+    rows = read_log(tmp_path)
+    rows[0]["rng"] = DESCRIPTIVE_GENERATOR
+    (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
+    with pytest.raises(EvaluationError) as caught:
+        scorer(level=1).evaluate(submission)
+    report = caught.value.report
+    assert "score" not in report
+    assert "Coordinate-free" in report["checks"][0]["detail"]

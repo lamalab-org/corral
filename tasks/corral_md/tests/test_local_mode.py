@@ -87,7 +87,7 @@ def test_local_factory_uses_local_scoring_and_local_assets(
         work_dir=str(tmp_path / "work"), level=level,
         assets_dir=str(assets), **backend_options,
     )
-    selected = environments[f"level_{level}_task_3"]
+    selected = environments[f"level_{level}_task_4"]
     assert selected.local_mode is True
     assert isinstance(
         selected.current_task.scoring_fn.verifier,
@@ -121,7 +121,7 @@ def test_modal_factory_remains_an_explicit_option(tmp_path, monkeypatch, level):
     )
     selected = env.create_environments(
         work_dir=str(tmp_path / "work"), level=level, local=False,
-    )[f"level_{level}_task_3"]
+    )[f"level_{level}_task_4"]
     assert selected.local_mode is False
     assert selected.for_task("modal-prompt-test").local_mode is False
     assert "run_verified_md" in selected.tools
@@ -156,7 +156,7 @@ def test_scoring_cli_defaults_to_local_with_explicit_backend_overrides(
     # A legacy remote setting must not silently override the CLI's local default.
     monkeypatch.setenv("CORRAL_MD_VERIFICATION", "modal")
     arguments = [
-        "corral_md.scoring", "3", str(manifest), "--level", str(level),
+        "corral_md.scoring", "4", str(manifest), "--level", str(level),
         "--assets-dir", str(assets), "--output", str(output),
     ]
     if verification is not None:

@@ -210,588 +210,11 @@ def event_record(value):
     return row
 
 
-def _stage_samples(stage):
-    samples = aliased_value(stage, "samples", "frames", "records", required=False)
-    if samples is not None:
-        if not isinstance(samples, list):
-            raise EvidenceError("Stage samples must be a list")
-        return [physical_record(row) for row in samples]
-    # Frame-major arrays are another lossless representation of the same samples.
-    times = stage.get("time_fs")
-    if isinstance(times, list):
-        count = len(times)
-        dimensions = {
-            "time_fs": 1,
-            "step": 1,
-            "positions_A": 3,
-            "momenta": 3,
-            "cell_A": 3,
-            "potential_energy_eV": 1,
-            "forces_eV_A": 3,
-            "temperature_K": 1,
-            "kinetic_energy_eV": 1,
-            "pressure_GPa": 1,
-        }
-        rows = [{} for _ in range(count)]
-        for key, ndim in dimensions.items():
-            if key not in stage:
-                continue
-            values = stage[key]
-            if np.asarray(values).ndim == ndim:
-                if len(values) != count:
-                    raise EvidenceError(f"Misaligned frame-major {key}")
-                for row, value in zip(rows, values, strict=True):
-                    row[key] = value
-        return rows
-    raise UnsupportedEvidence(
-        "Cannot identify the samples in this stage representation"
-    )
-
-
-def md_records(path, task):
-    """Normalize explicit stage objects or ordered rows to the internal protocol.
-
-    Completion markers are optional serialization details. Completion is still
-    established from declared run lengths and actual samples by the scorer.
-    """
-    value = records(path)
-    if isinstance(value, list):
-        rows = [event_record(row) for row in value]
-        # Retain the existing protocol, including malformed/truncated end markers.
-        if rows[0].get("event") == "start" and any(
-            r.get("event") == "stage" for r in rows
-        ):
-            return rows
-        first = rows[0]
-        if first.get("event") == "start" or first.get("phase") in {"meta", "metadata"}:
-            header, samples = first, rows[1:]
-        else:
-            raise UnsupportedEvidence(
-                "Cannot identify MD settings separately from samples"
-            )
-        header = physical_record(header)
-        samples = [r for r in samples if r.get("event") != "end"]
-        if not samples:
-            raise EvidenceError("No molecular-dynamics samples were retained")
-        expected = header.get("steps")
-        if (
-            expected is None
-            and "equilibration_steps" in header
-            and "production_steps" in header
-        ):
-            expected = header["equilibration_steps"] + header["production_steps"]
-        if (
-            expected is not None
-            and all(isinstance(r.get("step"), int) for r in samples)
-            and max(r["step"] for r in samples) < expected
-        ):
-            raise EvidenceError(
-                "Recorded simulation ends before its declared final step"
-            )
-        groups = []
-        for row in samples:
-            label = row.get("stage", row.get("phase"))
-            if task in (7, 10) and label in {
-                None,
-                "equilibration",
-                "equil",
-                "production",
-                "prod",
-            }:
-                label = 0
-            if not groups or groups[-1][0] != label:
-                groups.append((label, []))
-            groups[-1][1].append(row)
-        stages = [
-            {**header, "name": label, "samples": samples} for label, samples in groups
-        ]
-    else:
-        header = physical_record(
-            value.get("header", value.get("metadata", value.get("settings", {})))
-        )
-        stages = value.get("stages")
-        if stages is None:
-            stages = [value]
-        if not isinstance(stages, list) or not stages:
-            raise EvidenceError("No molecular-dynamics stages were retained")
-        stages = [physical_record(stage) for stage in stages]
-    output = [{**header, "event": "start"}]
-    for index, original in enumerate(stages):
-        stage = physical_record({**header, **original})
-        samples = _stage_samples(stage)
-        if not samples:
-            raise EvidenceError("Empty molecular-dynamics stage")
-        for row in samples:
-            if (
-                "cell_A" not in row
-                and "cell_A" in stage
-                and np.asarray(stage["cell_A"]).ndim == 2
-            ):
-                row["cell_A"] = stage["cell_A"]
-        stage.pop("samples", None)
-        stage.pop("frames", None)
-        stage.pop("records", None)
-        stage["event"] = "stage"
-        if task in (6, 9):
-            names = {
-                "equil": "equilibration",
-                "eq": "equilibration",
-                "prod": "production",
-            }
-            stage["name"] = names.get(stage.get("name"), stage.get("name"))
-            name = stage.get("name")
-            if name in {"equilibration", "production"} and f"{name}_steps" in stage:
-                stage["steps"] = stage[f"{name}_steps"]
-        elif task == 10 and "stage" not in stage:
-            stage["stage"] = index  # explicit list order, not temperature sorting
-        end = original.get("end", {})
-        end = physical_record(end) if isinstance(end, dict) else {}
-        end.update(event="end")
-        for key in ("name", "stage"):
-            if key in stage:
-                end.setdefault(key, stage[key])
-        if "step" in samples[-1]:
-            end.setdefault("step", samples[-1]["step"])
-            end.setdefault("steps", samples[-1]["step"])
-        if "time_fs" in samples[-1]:
-            end.setdefault("time_fs", samples[-1]["time_fs"])
-        if task == 7:
-            keys = ("cell_A", "positions_A", "momenta")
-            if all(k in samples[0] for k in keys):
-                stage.setdefault("state", {k: samples[0][k] for k in keys})
-            if all(k in samples[-1] for k in keys):
-                end.setdefault("state", {k: samples[-1][k] for k in keys})
-        output.append(stage)
-        output.extend({**row, "event": "sample"} for row in samples)
-        output.append(end)
-    return output
-
-
-def thermodynamic_stage(evidence, task):
-    """Read a Level 1 scalar MD log and its explicitly linked restart state.
-
-    The task asks for sampled thermodynamics and a restart, not atom-wise arrays
-    at every sampling time. Keep those two representations distinct: this adapter
-    never fills absent trajectories with copies of a final structure.
-    """
-    from ase.io import read
-
-    path = evidence.artifact("run_log")
-    value = records(path)
-    if not isinstance(value, list):
-        return None
-    rows = [event_record(row) for row in value]
-    if rows[0].get("event") != "start":
-        return None
-    header = rows[0]
-    samples = [row for row in rows[1:] if row.get("event") == "sample"]
-    if not samples or any("positions_A" in row or "momenta" in row for row in samples):
-        return None
-    if not any("temperature_K" in row or "kinetic_energy_eV" in row for row in samples):
-        return None
-    if any(row.get("event") not in {"sample", "summary", "end"} for row in rows[1:]):
-        raise UnsupportedEvidence(
-            "Unrecognized records mixed into thermodynamic MD log"
-        )
-
-    def require(condition, message):
-        if not condition:
-            raise EvidenceError(message)
-
-    def field(mapping, key):
-        require(key in mapping, f"Thermodynamic log is missing {key}")
-        return mapping[key]
-
-    links = []
-    for role in ("restart_state", "restart_state_traj", "final_state"):
-        if role in evidence._artifacts:
-            links.extend(evidence.artifacts(role))
-    for row in rows:
-        values = row.get("restart_files", [])
-        if not isinstance(values, list):
-            raise EvidenceError("restart_files must list saved restart artifacts")
-        links.extend(
-            evidence.linked_path(value, path, register=True) for value in values
-        )
-    links = list(dict.fromkeys(links))
-    require(bool(links), "Thermodynamic log does not link a restartable final state")
-    final = None
-    sidecars = []
-    for link in links:
-        if link.suffix.lower() in {".extxyz", ".xyz", ".traj"}:
-            try:
-                frames = read(
-                    link,
-                    index=":",
-                    format="traj" if link.suffix == ".traj" else "extxyz",
-                )
-            except (OSError, ValueError, TypeError) as exc:
-                raise EvidenceError(
-                    f"Cannot read restart state {link.name}: {exc}"
-                ) from exc
-            require(len(frames) == 1, "A final restart artifact must contain one state")
-            atoms = frames[0]
-            require("momenta" in atoms.arrays, "Final restart state has no momenta")
-            sidecars.append(
-                {
-                    "numbers": atoms.numbers,
-                    "positions": atoms.positions,
-                    "cell": atoms.cell.array,
-                    "momenta": atoms.get_momenta(),
-                }
-            )
-            if final is None:
-                final = atoms
-        elif link.suffix.lower() == ".npz":
-            try:
-                with np.load(link, allow_pickle=False) as archive:
-                    keys = {"numbers", "positions", "cell", "momenta"}
-                    require(
-                        keys <= set(archive.files),
-                        "Restart NPZ lacks species, geometry or momenta",
-                    )
-                    sidecars.append({key: finite_array(archive[key]) for key in keys})
-            except (OSError, ValueError, TypeError) as exc:
-                raise EvidenceError(
-                    f"Cannot read restart NPZ {link.name}: {exc}"
-                ) from exc
-    if final is None:
-        raise UnsupportedEvidence(
-            "Cannot identify an ASE restart state in the linked artifacts"
-        )
-    count = 64 if task == 6 else 108
-    require(
-        len(final) == count and np.all(final.numbers == 13),
-        f"Expected a restart state containing Al{count}",
-    )
-    require(np.all(final.pbc), "The restart state must preserve periodic boundaries")
-    masses = finite_array(final.get_masses(), shape=(count,))
-    require(
-        np.allclose(masses, 26.9815385, rtol=0, atol=1e-3),
-        "Incorrect aluminum restart masses",
-    )
-    cell = finite_array(final.cell.array, shape=(3, 3))
-    require(abs(np.linalg.det(cell)) > 1e-8, "Restart cell is singular")
-    expected_gram = np.eye(3) * (3 * 4.05) ** 2
-    if task == 6:
-        expected_gram = np.full((3, 3), (2 * 4.05) ** 2)
-        np.fill_diagonal(expected_gram, 2 * (2 * 4.05) ** 2)
-    require(
-        np.allclose(np.abs(cell @ cell.T), expected_gram, rtol=0, atol=1e-5),
-        "Incorrect fixed FCC cell in restart state",
-    )
-    require(
-        np.allclose(
-            finite_array(field(header, "cell_A"), shape=(3, 3)), cell, rtol=0, atol=1e-7
-        ),
-        "Restart cell differs from the logged fixed cell",
-    )
-    for key in ("numbers", "n_atoms", "natoms"):
-        if key in header:
-            expected = final.numbers if key == "numbers" else count
-            require(
-                np.array_equal(header[key], expected),
-                "Logged atom identities/count disagree with restart",
-            )
-    require(
-        type(field(header, "random_seed")) is int,
-        "Record an integer initialization seed",
-    )
-    require(header.get("ensemble", "NVT") == "NVT", "Use the NVT ensemble")
-    require(
-        field(header, "integrator")
-        in {"Langevin", "NVTBerendsen", "NoseHooverChainNVT", "Bussi", "Andersen"},
-        "Use a supported fixed-cell NVT thermostat",
-    )
-    require(float(field(header, "target_temperature_K")) == 300, "Equilibrate at 300 K")
-    removed = aliased_value(
-        header, "com_removed_once", "com_momentum_removed_once", required=False
-    )
-    require(removed is True, "Record removal of center-of-mass momentum once")
-    require(
-        header.get("velocity_rescaling", False) is False,
-        "Do not reset or rescale velocities during the run",
-    )
-    timestep = float(finite_array(field(header, "timestep_fs"), shape=()))
-    if task == 10:
-        require(timestep == 1, "Use an integration timestep of 1 fs")
-    else:
-        require(0 < timestep <= 2, "Use an integration timestep of at most 2 fs")
-    interval = field(header, "interval")
-    require(
-        type(interval) is int and interval > 0,
-        "Invalid thermodynamic sampling interval",
-    )
-    if task == 6:
-        total = field(header, "steps")
-        equil = total
-        production = 0
-    else:
-        equil = field(header, "equilibration_steps")
-        production = field(header, "production_steps")
-        require(
-            type(equil) is int
-            and equil > 0
-            and type(production) is int
-            and production > 0,
-            "Invalid equilibration/production lengths",
-        )
-        total = equil + production
-    require(
-        type(total) is int and total > 0 and total % interval == 0,
-        "Invalid declared run length",
-    )
-    require(
-        equil * timestep >= 2000 and interval * timestep <= 100,
-        "Retain at least 2 ps equilibration and sample at most every 100 fs",
-    )
-    if task == 10:
-        require(
-            equil % interval == 0
-            and production % interval == 0
-            and production * timestep >= 3000
-            and production // interval >= 32,
-            "Retain at least 3 ps production and 32 uniformly sampled production points",
-        )
-    steps = np.arange(total // interval + 1) * interval
-    require(
-        len(samples) == len(steps)
-        and all(type(row.get("step")) is int for row in samples)
-        and np.array_equal([row["step"] for row in samples], steps),
-        "Missing, duplicate, unordered or truncated thermodynamic samples",
-    )
-    time = finite_array(
-        [field(row, "time_fs") for row in samples], shape=(len(samples),)
-    )
-    require(
-        np.allclose(time, steps * timestep, rtol=0, atol=1e-6),
-        "Sample times disagree with the recorded timestep",
-    )
-    potential = finite_array(
-        [field(row, "potential_energy_eV") for row in samples], shape=(len(samples),)
-    )
-    kinetic = finite_array(
-        [field(row, "kinetic_energy_eV") for row in samples], shape=(len(samples),)
-    )
-    require(np.all(kinetic > 0), "Kinetic energies must be positive")
-    temperature = finite_array(
-        [field(row, "temperature_K") for row in samples], shape=(len(samples),)
-    )
-    dof = header.get("dof", 3 * count)
-    require(
-        type(dof) is int and dof in {3 * count, 3 * count - 3},
-        "Invalid temperature degrees of freedom",
-    )
-    require(
-        np.allclose(temperature, 2 * kinetic / (dof * units.kB), rtol=1e-6, atol=1e-6),
-        "Temperatures disagree with recorded kinetic energies",
-    )
-    require(150 < temperature[0] < 450, "Invalid 300 K velocity initialization")
-    directional = None
-    if task == 10:
-        directional = finite_array(
-            [[field(row, key) for key in ("Tx_K", "Ty_K", "Tz_K")] for row in samples],
-            shape=(len(samples), 3),
-        )
-        require(
-            np.all(directional > 0)
-            and np.allclose(
-                directional.mean(axis=1), temperature, rtol=1e-6, atol=1e-6
-            ),
-            "Directional and overall temperatures disagree",
-        )
-    for row, epot, ekin in zip(samples, potential, kinetic, strict=True):
-        for key, expected in (
-            ("etot_eV", epot + ekin),
-            ("etot_per_atom_eV", (epot + ekin) / count),
-            ("epot_per_atom_eV", epot / count),
-            ("volume_A3", abs(np.linalg.det(cell))),
-            (
-                "density_g_cm3",
-                masses.sum() / units.mol / (abs(np.linalg.det(cell)) * 1e-24),
-            ),
-        ):
-            if key in row:
-                require(
-                    np.isclose(
-                        float(finite_array(row[key], shape=())),
-                        expected,
-                        rtol=1e-6,
-                        atol=1e-6,
-                    ),
-                    f"Inconsistent recorded {key}",
-                )
-        if "cell_A" in row:
-            require(
-                np.allclose(
-                    finite_array(row["cell_A"], shape=(3, 3)), cell, rtol=0, atol=1e-7
-                ),
-                "Cell changed during the calculation",
-            )
-    final_momenta = finite_array(final.get_momenta(), shape=(count, 3))
-    if "com_momentum" in samples[0]:
-        require(
-            np.allclose(
-                finite_array(samples[0]["com_momentum"], shape=(3,)),
-                0,
-                rtol=0,
-                atol=1e-6,
-            ),
-            "Initial center-of-mass momentum was not removed",
-        )
-    if "com_momentum" in samples[-1]:
-        require(
-            np.allclose(
-                final_momenta.sum(axis=0),
-                finite_array(samples[-1]["com_momentum"], shape=(3,)),
-                rtol=0,
-                atol=1e-6,
-            ),
-            "Final center-of-mass momentum disagrees with the recorded sample",
-        )
-    require(
-        np.isclose(final.get_kinetic_energy(), kinetic[-1], rtol=1e-6, atol=1e-6),
-        "Final restart momenta disagree with the last logged kinetic energy",
-    )
-    if directional is not None:
-        restart_directional = (final_momenta**2 / masses[:, None]).sum(axis=0) / (
-            (dof / 3) * units.kB
-        )
-        require(
-            np.allclose(restart_directional, directional[-1], rtol=1e-6, atol=1e-6),
-            "Final restart momenta disagree with directional temperatures",
-        )
-    stored_energy = getattr(final.calc, "results", {}).get("energy")
-    if stored_energy is not None:
-        require(
-            np.isclose(stored_energy, potential[-1], rtol=1e-7, atol=1e-6),
-            "Restart potential energy differs from the final logged energy",
-        )
-    for state in sidecars:
-        require(
-            np.array_equal(state["numbers"], final.numbers),
-            "Conflicting restart species",
-        )
-        require(
-            np.allclose(
-                finite_array(state["cell"], shape=(3, 3)), cell, rtol=0, atol=1e-7
-            ),
-            "Conflicting restart cells",
-        )
-        delta = (
-            finite_array(state["positions"], shape=(count, 3)) - final.positions
-        ) @ np.linalg.inv(cell)
-        require(
-            np.allclose(delta - np.rint(delta), 0, rtol=0, atol=1e-7)
-            and np.allclose(
-                finite_array(state["momenta"], shape=(count, 3)),
-                final_momenta,
-                rtol=0,
-                atol=1e-7,
-            ),
-            "Restart artifacts contain different final states",
-        )
-    distances = final.get_all_distances(mic=True)
-    np.fill_diagonal(distances, np.inf)
-    require(distances.min() > 1.0, "Final aluminum state has overlapping atoms")
-    counts = {"n_samples": len(samples)}
-    claims = {}
-    if task == 6:
-        tail = temperature[len(temperature) // 2 :]
-        claims.update(
-            final_half_mean_T_K=float(tail.mean()), final_half_std_T_K=float(tail.std())
-        )
-    else:
-        selected = steps > equil
-        energies = (potential[selected] + kinetic[selected]) / count
-        counts["n_prod_samples"] = int(selected.sum())
-        claims.update(
-            mean_etot_per_atom_eV=float(energies.mean()),
-            mean_T=float(temperature[selected].mean()),
-            first_half_E=float(energies[: len(energies) // 2].mean()),
-            second_half_E=float(energies[len(energies) // 2 :].mean()),
-        )
-        claims.update(
-            {
-                key: float(directional[selected, index].mean())
-                for index, key in enumerate(("mean_Tx", "mean_Ty", "mean_Tz"))
-            }
-        )
-    for summary in (row for row in rows if row.get("event") == "summary"):
-        for key, expected in counts.items():
-            if key in summary:
-                require(
-                    type(summary[key]) is int and summary[key] == expected,
-                    f"Summary {key} disagrees with retained samples",
-                )
-        for key, expected in claims.items():
-            if key in summary:
-                actual = float(finite_array(summary[key], shape=()))
-                require(
-                    np.isclose(actual, expected, rtol=0.01, atol=1e-6),
-                    f"Summary {key} disagrees with retained samples",
-                )
-    check_units(
-        header, {"time": "fs", "position": "Angstrom", "energy": "eV", "momenta": "ASE"}
-    )
-    return {
-        **header,
-        "name": "equilibration",
-        "stage": 0,
-        "time": time,
-        "temperature": temperature,
-        "directional": directional,
-        "potential": potential,
-        "kinetic": kinetic,
-        "energy": (potential + kinetic) / (count if task == 10 else 1),
-        "cell": cell,
-        "masses": masses,
-        "production": steps > equil,
-        "equilibration_steps": equil,
-        "production_steps": production,
-        "scalar_thermodynamics": True,
-        "final_atoms": final,
-    }
-
-
 def check_model_digest(header, expected):
     """Check an explicitly retained digest; absence is not a different model."""
     if "model_sha256" in header and header["model_sha256"] != expected:
         raise EvidenceError(
             "Recorded checkpoint digest differs from the supplied model"
-        )
-
-
-def check_initial_momenta(atoms, header, target, momenta):
-    """Check initialization physically; reproduce a generator only if declared."""
-    from ase.md.velocitydistribution import MaxwellBoltzmannDistribution, Stationary
-
-    observed = finite_array(momenta, shape=(len(atoms), 3))
-    temperature = np.sum(observed**2 / atoms.get_masses()[:, None]) / (
-        3 * len(atoms) * units.kB
-    )
-    if (
-        not np.allclose(observed.sum(axis=0), 0, rtol=0, atol=1e-7)
-        or not 0.5 * target < temperature < 1.5 * target
-    ):
-        raise EvidenceError(
-            "Invalid initialization temperature or center-of-mass momentum"
-        )
-    method = header.get("velocity_rng", header.get("rng"))
-    if method is None:
-        return
-    if method in {"numpy.default_rng", "numpy.default_rng(PCG64)", "PCG64"}:
-        rng = np.random.default_rng(header["random_seed"])
-    elif method in {"numpy.random.RandomState", "numpy.RandomState", "RandomState"}:
-        rng = np.random.RandomState(header["random_seed"])
-    else:
-        raise UnsupportedEvidence(f"Unsupported declared velocity generator: {method}")
-    expected = atoms.copy()
-    MaxwellBoltzmannDistribution(expected, temperature_K=target, rng=rng)
-    Stationary(expected, preserve_temperature=header.get("preserve_temperature", True))
-    if not np.allclose(expected.get_momenta(), observed, rtol=0, atol=1e-7):
-        raise EvidenceError(
-            "Initial momenta do not reproduce the declared seed and velocity generator"
         )
 
 
@@ -1009,6 +432,58 @@ def phonon_log(value, level):
     return log
 
 
+def _force_displacements(value, *, indexed=False, displaced_atom=None):
+    """Read Cartesian vectors or the indexed tables saved by force calculations.
+
+    Only the generic ``displacements`` field admits indexed tables. The explicit
+    ``displacements_A`` field always denotes Cartesian vectors. A three-column
+    indexed table is recognizable by its integer atom/axis columns and coverage
+    of all three axes; ordinary central Cartesian differences have signed
+    coordinate columns instead.
+    """
+    displacement = finite_array(value)
+    atom_xyz = indexed and displacement.ndim == 2 and displacement.shape[1] == 4
+    atom_axis = (
+        indexed
+        and displacement.ndim == 2
+        and displacement.shape[1] == 3
+        and np.all(displacement[:, 0] == np.rint(displacement[:, 0]))
+        and np.all((displacement[:, 0] >= 0) & (displacement[:, 0] < 125))
+        and set(displacement[:, 1]) == {0, 1, 2}
+    )
+    if atom_xyz or atom_axis:
+        atoms = displacement[:, 0]
+        if not np.all((atoms == np.rint(atoms)) & (atoms >= 0) & (atoms < 125)):
+            raise EvidenceError("Invalid displaced atom indices")
+        if displaced_atom is not None and not np.all(
+            atoms == finite_array(displaced_atom, shape=())
+        ):
+            raise EvidenceError("Conflicting displaced atom indices")
+        if np.any(atoms != 0):
+            raise UnsupportedEvidence(
+                "Force displacements on atoms other than atom zero need an atom-order adapter"
+            )
+        if atom_xyz:
+            displacement = displacement[:, 1:]
+        else:
+            vectors = np.zeros_like(displacement)
+            vectors[np.arange(len(vectors)), displacement[:, 1].astype(int)] = (
+                displacement[:, 2]
+            )
+            displacement = vectors
+    if displacement.ndim == 3:
+        if displacement.shape[1:] != (125, 3):
+            raise EvidenceError("Incorrect displacement-array dimensions")
+        if not np.allclose(displacement[:, 1:], 0, rtol=0, atol=1e-12):
+            raise UnsupportedEvidence(
+                "Force displacements on multiple atoms need a different reconstruction adapter"
+            )
+        displacement = displacement[:, 0]
+    if displacement.ndim != 2 or displacement.shape[1] != 3:
+        raise UnsupportedEvidence("Cannot interpret the retained displacement layout")
+    return displacement
+
+
 def normalize_force_record(value):
     """Normalize NPZ force calculations; displacement order is not prescribed."""
     record = rename(
@@ -1019,7 +494,6 @@ def normalize_force_record(value):
             "numbers": ("supercell_numbers", "atomic_numbers"),
             "masses_amu": ("supercell_masses", "masses"),
             "forces_eV_A": ("forces", "forces_eV_per_A"),
-            "displacements_A": ("displacements",),
             "energies_eV": ("energies",),
             "force_constants_eV_A2": (
                 "force_constants_raw",
@@ -1027,6 +501,34 @@ def normalize_force_record(value):
             ),
         },
     )
+    if "symbols" in record:
+        symbols = np.asarray(record["symbols"])
+        if symbols.ndim != 1 or not len(symbols):
+            raise EvidenceError("Retain one chemical symbol per atom")
+        try:
+            numbers = np.array([atomic_numbers[s] for s in symbols])
+        except (KeyError, TypeError) as exc:
+            raise EvidenceError("Invalid atomic symbol") from exc
+        if "numbers" in record and not np.array_equal(record["numbers"], numbers):
+            raise EvidenceError("Conflicting chemical symbols and atomic numbers")
+        record["numbers"] = numbers
+    displacement = None
+    for key in ("displacements_A", "displacements"):
+        if key not in record:
+            continue
+        candidate = _force_displacements(
+            record[key],
+            indexed=key == "displacements",
+            displaced_atom=record.get("displaced_atom"),
+        )
+        if displacement is not None and (
+            displacement.shape != candidate.shape
+            or not np.allclose(displacement, candidate, rtol=0, atol=1e-12)
+        ):
+            raise EvidenceError("Conflicting displacement records")
+        displacement = candidate
+    if displacement is not None:
+        record["displacements_A"] = displacement
     metadata = record.get("metadata", {})
     if isinstance(metadata, np.ndarray):
         try:
@@ -1076,17 +578,6 @@ def normalize_force_record(value):
             "Cannot locate displaced force calculations in this NPZ layout"
         )
     displacement = finite_array(record["displacements_A"])
-    if displacement.ndim == 3:
-        if displacement.shape[1:] != (125, 3):
-            raise EvidenceError("Incorrect displacement-array dimensions")
-        if not np.allclose(displacement[:, 1:], 0, rtol=0, atol=1e-12):
-            raise UnsupportedEvidence(
-                "Force displacements on multiple atoms need a different reconstruction adapter"
-            )
-        displacement = displacement[:, 0]
-        record["displacements_A"] = displacement
-    if displacement.ndim != 2 or displacement.shape[1] != 3 or not len(displacement):
-        raise EvidenceError("Retain a nonempty array of Cartesian displacement vectors")
     if "positions_A" not in record and "supercell_positions" in record:
         reference = finite_array(record["supercell_positions"], shape=(125, 3))
         positions = np.repeat(reference[None], len(displacement), axis=0)

@@ -5,7 +5,8 @@ import json
 
 import numpy as np
 import pytest
-from corral_md.scoring import PendingReviewError, WorkflowScorer
+from corral_md.scoring import EvaluationError, WorkflowScorer
+from corral_md.scoring.final_quantities import FinalQuantityScorer
 from corral_md.scoring.task_5 import ENERGY_FACTOR, mode_energies
 from corral_md.scoring.verification import ModalVerifier
 
@@ -106,7 +107,10 @@ def transport(plan, fingerprint):
 
 
 def scorer(level=2, backend=transport):
-    return WorkflowScorer(5, level=level, verifier=ModalVerifier(transport=backend))
+    verifier = ModalVerifier(transport=backend)
+    if level == 1:
+        return FinalQuantityScorer(5, verifier=verifier)
+    return WorkflowScorer(5, level=2, verifier=verifier)
 
 
 @pytest.mark.parametrize("level", [1, 2])
@@ -120,10 +124,9 @@ def test_minimal_log_reconstructs_expected_answers(tmp_path, level, method):
     report = scorer(level).evaluate(path)
     assert report["score"] == 1, report
     assert report["possible_points"] == 100
-    assert len(report["calculated_results"]["highest_positive_energies_eV"]) == (
-        5 if level == 1 else 25
-    )
-    assert ("fit" in report["calculated_results"]) is (level == 2)
+    calculated = report["computed" if level == 1 else "calculated_results"]
+    assert len(calculated["highest_positive_energies_eV"]) == (5 if level == 1 else 25)
+    assert ("fit" in calculated) is (level == 2)
     assert "artifacts" in json.loads(path.read_text())
 
 
@@ -285,7 +288,9 @@ def test_reference_plan_or_live_fallback(tmp_path, level, dtype):
 
     def inspect(plan, fingerprint):
         job = plan.jobs[0]
-        assert job["operation"] == ("reference" if dtype == "float64" else "mace")
+        assert job["operation"] == (
+            "reference" if level == 1 or dtype == "float64" else "mace"
+        )
         assert len(job["frames"]) == (5 if level == 1 else 25)
         assert all("hessian" not in frame for frame in job["frames"])
         return transport(plan, fingerprint)
@@ -293,12 +298,14 @@ def test_reference_plan_or_live_fallback(tmp_path, level, dtype):
     assert scorer(level, inspect).evaluate(path)["score"] == 1
 
 
-def test_unavailable_backend_is_pending_but_wrong_answers_fail(tmp_path):
+def test_unavailable_backend_is_an_error_but_wrong_answers_fail(tmp_path):
     path = make_submission(tmp_path)
     grader = WorkflowScorer(5)
-    report = grader.evaluate(path)
-    assert report["pending_checks"] == ["independent_hessian_accuracy"]
-    with pytest.raises(PendingReviewError):
+    with pytest.raises(EvaluationError) as caught:
+        grader.evaluate(path)
+    report = caught.value.report
+    assert report["unsupported_checks"] == ["independent_hessian_accuracy"]
+    with pytest.raises(EvaluationError):
         grader.score_submission(path)
     manifest = json.loads(path.read_text())
     manifest["results"]["fit"]["intercept_eV"] = 4
@@ -324,8 +331,11 @@ def test_backend_protocol(tmp_path, failure):
             response["jobs"][0]["status"] = failure
         return response
 
-    report = scorer(backend=bad_response).evaluate(path)
-    assert report["score"] is None if failure == "unsupported" else report["score"] == 0
+    if failure == "unsupported":
+        with pytest.raises(EvaluationError):
+            scorer(backend=bad_response).evaluate(path)
+    else:
+        assert scorer(backend=bad_response).evaluate(path)["score"] == 0
 
 
 def test_log_must_stay_inside_workspace(tmp_path):

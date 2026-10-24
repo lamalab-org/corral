@@ -4,7 +4,7 @@ import json
 
 import pytest
 from corral_md import env
-from corral_md.scoring import PendingReviewError
+from corral_md.scoring import EvaluationError
 
 from corral.core.state import ExecutionState, RuntimeState
 from corral.evaluation import TaskScorer
@@ -53,16 +53,16 @@ def test_shared_scorer_propagates_pending_instead_of_recording_zero(
     rubric = Rubric(10, binary=True)
     rubric.check("independent_model_calculation", 100, None, "Backend unavailable")
     monkeypatch.setattr(
-        task.scoring_fn.module,
-        "evaluate_submission",
+        task.scoring_fn,
+        "evaluate",
         lambda *_a, **_kw: rubric.as_dict(),
     )
     state = _state("{}")
     before = state.model_dump()
-    with pytest.raises(PendingReviewError) as pending:
+    with pytest.raises(EvaluationError) as pending:
         TaskScorer(task, workspace=tmp_path).evaluate(state)
-    assert pending.value.report["score"] is None
-    assert pending.value.report["status"] == "pending_review"
+    assert "score" not in pending.value.report
+    assert pending.value.report["status"] == "evaluation_error"
     assert state.model_dump() == before
 
 

@@ -34,7 +34,15 @@ class UnsupportedEvidence(ValueError):
 
 
 class EvaluationError(RuntimeError):
-    """An unexpected scorer defect; no scientific score can be assigned."""
+    """A scorer limitation or defect; no scientific score can be assigned."""
+
+    def __init__(self, message: str, *, report: dict | None = None):
+        super().__init__(message)
+        self.report = report or {
+            "status": "evaluation_error",
+            "error_type": "scorer_error",
+            "detail": message,
+        }
 
 
 def read_json(path: Path) -> Any:
@@ -264,7 +272,7 @@ class Evidence:
             return {}
 
     def fingerprint(self) -> str:
-        """Bind external review to the manifest and every linked evidence file.
+        """Bind independent verification to the manifest and every linked evidence file.
 
         Hash bytes, including opaque checkpoints, without deserializing or running
         them. Missing/invalid links remain part of the identity; their ordinary
@@ -272,7 +280,7 @@ class Evidence:
         """
         digest = hashlib.sha256(b"corral_md.workflow\0")
         # Direct-dict submissions may contain nonfinite results; those fail the
-        # numerical checks, but must still have an identity for pending review.
+        # numerical checks, but must still have an identity for verification.
         digest.update(json.dumps(self.manifest, sort_keys=True).encode())
 
         def visit(value, role):
@@ -553,7 +561,7 @@ class Rubric:
     ) -> bool:
         if not np.isfinite(points) or points < 0:
             raise ValueError("Rubric points must be finite and nonnegative")
-        if self.fail_fast and points > 0 and (self.failed or self.pending_checks):
+        if self.fail_fast and points > 0 and (self.failed or self.unverified_checks):
             self.checks.append(
                 {
                     "name": name,
@@ -606,88 +614,46 @@ class Rubric:
         self.check(name, points, failure)
 
     @property
-    def pending_checks(self) -> list[dict]:
+    def unverified_checks(self) -> list[dict]:
         return [
             c for c in self.checks if c["points"] > 0 and c["status"] == "unverified"
         ]
 
     @property
-    def score(self) -> float | None:
-        """A verifier limitation must never become an implicit zero or free credit."""
+    def score(self) -> float:
+        """Return a numerical result or raise a terminal scorer error."""
         if self.binary and self.failed:
             return 0.0
-        if self.pending_checks:
-            return None
+        if self.unverified_checks:
+            detail = "; ".join(
+                f"{c['name']}: {c['detail'] or 'Required calculation is unsupported'}"
+                for c in self.unverified_checks
+            )
+            message = f"Task {self.task_number} cannot be scored: {detail}"
+            raise EvaluationError(
+                message,
+                report={
+                    "task_number": self.task_number,
+                    "status": "evaluation_error",
+                    "error_type": "unsupported_evidence",
+                    "detail": message,
+                    "unsupported_checks": [c["name"] for c in self.unverified_checks],
+                    "checks": [dict(c) for c in self.checks],
+                },
+            )
         earned = sum(c["earned"] for c in self.checks)
         if self.binary:
             return float(earned >= 100.0)
         return min(1.0, earned / 100.0)
 
-    def apply_review(self, review: Mapping, evidence_sha256: str) -> None:
-        """Apply explicit evaluator-supplied decisions, never submission metadata.
-
-        Reviews can resolve only pending checks. They cannot override failed raw
-        evidence checks. Validate the whole bundle before applying any decision.
-        """
-        if (
-            not isinstance(review, Mapping)
-            or review.get("evidence_sha256") != evidence_sha256
-        ):
-            raise ValueError("Review must match the current evidence_sha256")
-        decisions = review.get("decisions")
-        if not isinstance(decisions, Mapping) or not decisions:
-            raise ValueError("Review requires a nonempty decisions mapping")
-        pending = {c["name"]: c for c in self.pending_checks}
-        for name, decision in decisions.items():
-            if name not in pending:
-                raise ValueError(f"Review can resolve only pending checks: {name}")
-            if (
-                not isinstance(decision, Mapping)
-                or type(decision.get("passed")) is not bool
-            ):
-                raise ValueError(f"Review decision for {name} requires boolean passed")
-            if name == "independent_model_calculation" and decision["passed"]:
-                raise ValueError(
-                    "Independent model calculation can pass only through trusted verification"
-                )
-            if any(
-                not isinstance(decision.get(k), str) or not decision[k].strip()
-                for k in ("reviewer", "reason")
-            ):
-                raise ValueError(
-                    f"Review decision for {name} requires reviewer and reason"
-                )
-        for name, decision in decisions.items():
-            check = pending[name]
-            check["status"] = "passed" if decision["passed"] else "failed"
-            check["earned"] = check["points"] if decision["passed"] else 0.0
-            check["review"] = dict(decision)
-
     def as_dict(self) -> dict:
         score = self.score
-        pending = self.pending_checks if score is None else []
-        if self.binary:
-            bounds = [score, score] if score is not None else [0.0, 1.0]
-        else:
-            bounds = [
-                min(1.0, sum(c["earned"] for c in self.checks) / 100.0),
-                min(
-                    1.0,
-                    (
-                        sum(c["earned"] for c in self.checks)
-                        + sum(c["points"] for c in self.pending_checks)
-                    )
-                    / 100.0,
-                ),
-            ]
         return {
             "task_number": self.task_number,
             "mode": "artifact_only",
             "score": score,
-            "status": "pending_review" if score is None else "complete",
-            "pending_checks": [c["name"] for c in pending],
-            "pending_points": sum(c["points"] for c in pending),
-            "score_bounds": bounds,
+            "status": "complete",
+            "score_bounds": [score, score],
             "earned_points": sum(c["earned"] for c in self.checks),
             "possible_points": 100.0,
             "checks": self.checks,

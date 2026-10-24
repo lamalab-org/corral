@@ -14,7 +14,7 @@ from ase.build import bulk
 from ase.calculators.emt import EMT
 from ase.io import read
 from corral_md.scoring import WorkflowScorer, check_level2_workflow
-from corral_md.scoring.common import Evidence, Rubric
+from corral_md.scoring.common import EvaluationError, Evidence, Rubric
 from corral_md.scoring.verification import (
     ModalVerifier,
     Plan,
@@ -613,10 +613,12 @@ def test_outage_or_wrong_response_never_awards_verification(tmp_path, defect):
             value["jobs"] *= 2
         return value
 
-    report = WorkflowScorer(4, verifier=ModalVerifier(transport=broken)).evaluate(path)
-    assert report["score"] is None
-    assert report["status"] == "pending_review"
-    assert report["possible_points"] == 100
+    with pytest.raises(EvaluationError) as caught:
+        WorkflowScorer(4, verifier=ModalVerifier(transport=broken)).evaluate(path)
+    report = caught.value.report
+    assert "score" not in report
+    assert report["status"] == "evaluation_error"
+    assert report["error_type"] == "unsupported_evidence"
 
 
 def test_mutation_during_verification_is_rejected(tmp_path):
@@ -911,8 +913,8 @@ def test_backend_rejects_agent_attestations_and_altered_hashes(
 
 def test_modal_factory_is_lazy_and_offline_is_explicit(monkeypatch):
     monkeypatch.setenv("CORRAL_MD_VERIFICATION", "modal")
-    assert isinstance(check_level2_workflow(10).verifier, ModalVerifier)
-    assert check_level2_workflow(10, verification_backend="offline").verifier is None
+    assert isinstance(check_level2_workflow(4).verifier, ModalVerifier)
+    assert check_level2_workflow(4, verification_backend="offline").verifier is None
 
 
 def test_verification_cannot_upgrade_failed_artifacts():

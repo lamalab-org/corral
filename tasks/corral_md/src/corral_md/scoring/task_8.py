@@ -38,6 +38,10 @@ from .formats import (
 )
 from .level1_trusted import PINNED_TEACHER_SHA256
 from .pipeline_data import read_pipeline
+from .pipeline_records import normalize as normalize_pipeline_records
+from .pipeline_records import parameters as _pipeline_parameters
+from .pipeline_records import selection_metric
+from .pipeline_records import stage as _pipeline_stage
 from .regression import (
     metrics,
     partition,
@@ -53,28 +57,37 @@ def _require(condition, message):
         raise EvidenceError(message)
 
 
-def _matches_generated_dataset(name, frames, seed, method=None):
+def _dataset_generator(method):
+    """Resolve explicit generator labels without evaluating submitted text."""
+    generators = {
+        "numpy.default_rng": np.random.default_rng,
+        "numpy.default_rng(PCG64)": np.random.default_rng,
+        "PCG64": np.random.default_rng,
+        "numpy.random.RandomState": np.random.RandomState,
+        "numpy.RandomState": np.random.RandomState,
+        "RandomState": np.random.RandomState,
+        "numpy.default_rng(seed).normal, one (64,3) draw per config in order": np.random.default_rng,
+    }
+    return generators.get(method) if isinstance(method, str) else None
+
+
+def _matches_generated_dataset(
+    name, frames, seed, method=None, *, restore_precision=False
+):
     """Check the same seed, cell and displacement schedule for either log layout."""
     _require(type(seed) is int and seed >= 0, "Invalid generation seed")
     _require(len(frames) == 100, "Each dataset needs exactly 100 structures")
-    generators = {
-        "numpy.default_rng": lambda seed=seed: np.random.default_rng(seed),
-        "numpy.default_rng(PCG64)": lambda seed=seed: np.random.default_rng(seed),
-        "PCG64": lambda seed=seed: np.random.default_rng(seed),
-        "numpy.random.RandomState": lambda seed=seed: np.random.RandomState(seed),
-        "numpy.RandomState": lambda seed=seed: np.random.RandomState(seed),
-        "RandomState": lambda seed=seed: np.random.RandomState(seed),
-    }
-    if method is not None and method not in generators:
-        raise UnsupportedEvidence(
-            f"Dataset generator {method!r} is not supported by the independent seed check"
-        )
+    constructor = _dataset_generator(method)
+    # Full coordinates let us identify a supported generator by numerical replay,
+    # without requiring a particular spelling of an optional prose description.
+    # An explicit supported label still restricts the check to that generator.
     choices = (
-        [generators[method]()]
-        if method
+        [constructor(seed)]
+        if constructor is not None
         else [np.random.default_rng(seed), np.random.RandomState(seed)]
     )
     matching_generators = [True] * len(choices)
+    replay = [[] for _ in choices]
     ideal = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
     for i, frame in enumerate(frames):
         strain = (-0.02 + 0.01 * (i // 20)) if name == "strained_test" else 0
@@ -86,19 +99,37 @@ def _matches_generated_dataset(name, frames, seed, method=None):
         )
         for index, rng in enumerate(choices):
             expected = ideal.positions * (1 + strain) + rng.normal(0, sigma, (64, 3))
+            replay[index].append((cell, expected))
             delta = (frame.positions - expected) @ np.linalg.inv(cell)
             matching_generators[index] &= np.allclose(
                 delta - np.rint(delta), 0, rtol=0, atol=1e-8
             )
-    return any(matching_generators)
+    matched = any(matching_generators)
+    if not matched and constructor is None and method is not None:
+        raise UnsupportedEvidence(
+            "Recorded coordinates do not reproduce the seed and displacement "
+            "schedule with a supported generator; the recorded generator "
+            "description is not recognized"
+        )
+    if matched and restore_precision:
+        # Text trajectories commonly round coordinates to eight decimal places.
+        # SOAP features near zero can amplify that rounding during standardization.
+        # Replay only a generator already matched to every saved coordinate/cell;
+        # retained energy labels and the bytes used for the fingerprint stay intact.
+        chosen = matching_generators.index(True)
+        for frame, (cell, positions) in zip(frames, replay[chosen], strict=True):
+            frame.set_cell(cell)
+            frame.positions = positions
+    return matched
 
 
 def _seeded_level1_records(raw):
-    """Expand a declared dataset recipe; energies remain the recorded values.
+    """Normalize level-1 rows, reconstructing coordinates only when absent.
 
     Level 1 asks for seeds, row identities, checkpoint digest and total energies,
     not serialized coordinates. A declared generator makes its unrelaxed task
     geometries reproducible, and retained coordinate hashes are checked too.
+    Complete coordinates are preserved and independently replayed by read_log.
     """
     if not isinstance(raw, list) or len(raw) < 2:
         return None
@@ -116,17 +147,9 @@ def _seeded_level1_records(raw):
     seed = header.get("random_seed")
     _require(type(seed) is int and seed >= 0, "Retain a reproducible dataset seed")
     method = header.get("rng")
-    if method == "numpy.default_rng(seed).normal, one (64,3) draw per config in order":
-        method = "numpy.default_rng"
-    constructors = {
-        "numpy.default_rng": np.random.default_rng,
-        "numpy.default_rng(PCG64)": np.random.default_rng,
-        "PCG64": np.random.default_rng,
-        "numpy.random.RandomState": np.random.RandomState,
-        "numpy.RandomState": np.random.RandomState,
-        "RandomState": np.random.RandomState,
-    }
-    if method not in constructors:
+    constructor = _dataset_generator(method)
+    retained_positions = all("positions_A" in row for row in rows)
+    if not retained_positions and constructor is None:
         raise UnsupportedEvidence(
             "Coordinate-free dataset needs an identified reproducible generator"
         )
@@ -144,7 +167,7 @@ def _seeded_level1_records(raw):
             header["pbc"] is True or np.array_equal(header["pbc"], [True] * 3),
             "Incorrect silicon dataset pbc",
         )
-    rng = constructors[method](seed)
+    rng = None if retained_positions else constructor(seed)
     ideal = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
     expanded = []
     for i, row in enumerate(rows):
@@ -158,28 +181,31 @@ def _seeded_level1_records(raw):
             np.isclose(row.get("std_A", sigma), sigma),
             "Incorrect Gaussian displacement schedule",
         )
-        positions = ideal.positions + rng.normal(0, sigma, (64, 3))
+        if retained_positions:
+            positions = finite_array(row["positions_A"], shape=(64, 3))
+        else:
+            positions = ideal.positions + rng.normal(0, sigma, (64, 3))
+            if "positions_A" in row:
+                _require(
+                    np.allclose(positions, row["positions_A"], rtol=0, atol=1e-8),
+                    "Recorded positions disagree with their generation seed",
+                )
         if "positions_sha256" in row:
             _require(
                 hashlib.sha256(positions.tobytes()).hexdigest()
                 == row["positions_sha256"],
-                "Recorded coordinate hash disagrees with its dataset seed and generator",
+                "Recorded coordinate hash disagrees with its dataset coordinates",
             )
-        if "positions_A" in row:
-            _require(
-                np.allclose(positions, row["positions_A"], rtol=0, atol=1e-8),
-                "Recorded positions disagree with their generation seed",
-            )
-        if "cell_A" in row:
-            _require(
-                np.allclose(ideal.cell.array, row["cell_A"], rtol=0, atol=1e-8),
-                "Incorrect silicon dataset cell",
-            )
+        cell = finite_array(row.get("cell_A", ideal.cell.array), shape=(3, 3))
+        _require(
+            np.allclose(ideal.cell.array, cell, rtol=0, atol=1e-8),
+            "Incorrect silicon dataset cell",
+        )
         expanded.append(
             {
                 **row,
                 "positions": positions.tolist(),
-                "cell": ideal.cell.array.tolist(),
+                "cell": cell.tolist(),
                 "energy_eV": row["potential_energy_eV"],
             }
         )
@@ -574,6 +600,14 @@ def _validation_splits(record, size):
                 r"(n_splits|n_repeats|random_state)\s*=\s*(\d+)", match[2]
             )
         }
+        positional = re.match(r"\s*(\d+)\s*(?:,|$)", match[2])
+        if positional:
+            count = int(positional[1])
+            _require(
+                "n_splits" not in arguments or arguments["n_splits"] == count,
+                "Conflicting validation fold count",
+            )
+            arguments["n_splits"] = count
         # Human-readable records often spell out the same constructor values.
         for key, expression in (
             ("n_splits", r"\b(\d+)\s+splits\b"),
@@ -623,25 +657,6 @@ def _cross_validation(x, y, candidate, splits):
     }
 
 
-def _pipeline_stage(row):
-    stage = row.get("stage", row.get("event"))
-    return {
-        "hyperparameter_search": "model_selection",
-        "pipelines_frozen": "freeze",
-    }.get(stage, stage)
-
-
-def _pipeline_parameters(record):
-    """Flatten explicit descriptor parameters without inventing fitted settings."""
-    result = dict(record)
-    nested = result.pop("soap", {})
-    _require(isinstance(nested, dict), "SOAP settings must be an object")
-    for key, value in nested.items():
-        _require(key not in result or result[key] == value, f"Conflicting SOAP {key}")
-        result[key] = value
-    return result
-
-
 def _check_fit_agreement(record, reference, linked):
     """Reject conflicting descriptions of the same retained fitted artifact."""
     _require(
@@ -677,12 +692,13 @@ def _check_fit_agreement(record, reference, linked):
             )
 
 
-def _saved_pipeline_records(rows, linked):
+def _saved_pipeline_records(rows, linked, log_path=None):
     """Read separate fit records or a combined, explicitly frozen manifest.
 
     The manifest certifies the final and learning-curve fits at its position in
     the original event log. It does not add timestamps or infer unrecorded fits.
     """
+    rows = normalize_pipeline_records(rows, linked, log_path)
     stages = [_pipeline_stage(row) for row in rows]
     required = (
         "train_labels",
@@ -693,7 +709,7 @@ def _saved_pipeline_records(rows, linked):
     )
     _require(
         all(stages.count(stage) == 1 for stage in required),
-        "Retain training, fitting, freeze and test calculation records",
+        "Retain unambiguous training, validation, freeze and test evidence",
     )
     order = [stages.index(stage) for stage in required]
     _require(
@@ -819,7 +835,7 @@ def _evaluate_saved_pipelines(
         return path
 
     def parse():
-        records = _saved_pipeline_records(rows, linked)
+        records = _saved_pipeline_records(rows, linked, evidence.artifact("run_log"))
         train, tests = records["train_labels"], records["test_labels"]
         model_digest = train.get("model_sha256")
         if model_digest is not None:
@@ -861,12 +877,20 @@ def _evaluate_saved_pipelines(
             finite_array(dataset["labels"], shape=(100,))
             _require(
                 _matches_generated_dataset(
-                    name, dataset["frames"], dataset["seed"], dataset["rng"]
+                    name,
+                    dataset["frames"],
+                    dataset["seed"],
+                    dataset["rng"],
+                    restore_precision=True,
                 ),
                 "Saved structures do not reproduce their recorded seed and displacement schedule",
             )
         selection, final = records["model_selection"], records["final_fit"]
-        grid = read_json(linked(selection["file"]))
+        grid = (
+            selection["candidates"]
+            if "candidates" in selection
+            else read_json(linked(selection["file"]))
+        )
         if isinstance(grid, dict):
             if "cv" in grid and "cv" in selection:
                 recorded = _validation_splits(selection, 100)
@@ -881,6 +905,13 @@ def _evaluate_saved_pipelines(
                     "Selection record and grid disagree on validation splits",
                 )
             selection = {**selection, "cv": grid.get("cv", selection.get("cv"))}
+            for key in ("selection_metric", "metric", "scoring"):
+                if key in grid:
+                    _require(
+                        key not in selection or selection[key] == grid[key],
+                        "Conflicting model selection metric declarations",
+                    )
+                    selection[key] = grid[key]
             grid = grid["results"]
         _require(
             isinstance(grid, list) and len(grid) >= 2,
@@ -891,6 +922,7 @@ def _evaluate_saved_pipelines(
             "Validation grid exceeds the supported calculation budget",
         )
         grid = [_pipeline_parameters(candidate) for candidate in grid]
+        criterion = selection_metric(selection, grid)
         splits = _validation_splits(selection, 100)
         final_path = linked(final["file"])
         model, descriptor = read_pipeline(final_path)
@@ -945,11 +977,12 @@ def _evaluate_saved_pipelines(
             final=final,
             model=model,
             curves=curves,
+            criterion=criterion,
         )
         return True
 
     rubric.check("saved_datasets_and_frozen_pipelines", 20, parse)
-    if rubric.failed or rubric.pending_checks:
+    if rubric.failed or rubric.unverified_checks:
         return fingerprint
     fingerprint = hashlib.sha256(
         json.dumps(
@@ -1077,17 +1110,10 @@ def _evaluate_saved_pipelines(
                 )
             }
             _require(
-                "cv_rmse" in candidate,
-                "Retain the training-validation selection metric",
-            )
-            _require(
                 aggregations,
                 "Recorded training-only CV metrics disagree with independently reconstructed fits",
             )
             validation.append(score)
-        aggregation = "pooled" if "pooled" in aggregations else "fold_mean"
-        validation = [row[aggregation] for row in validation]
-        calculated["validation_aggregation"] = aggregation
         final = parsed["final"]["params"]
         matches = [
             i
@@ -1099,15 +1125,26 @@ def _evaluate_saved_pipelines(
             len(matches) == 1,
             "Final pipeline is not a unique recorded validation candidate",
         )
-        _require(
-            np.isclose(
-                validation[matches[0]]["rmse"],
-                min(row["rmse"] for row in validation),
+        criterion = parsed["criterion"]
+        optimum = max if criterion == "r2" else min
+        aggregations = {
+            method
+            for method in aggregations
+            if np.isclose(
+                validation[matches[0]][method][criterion],
+                optimum(row[method][criterion] for row in validation),
                 rtol=1e-5,
                 atol=1e-7,
-            ),
+            )
+        }
+        _require(
+            aggregations,
             "Final selection contradicts training-only validation",
         )
+        aggregation = "pooled" if "pooled" in aggregations else "fold_mean"
+        validation = [row[aggregation] for row in validation]
+        calculated["validation_aggregation"] = aggregation
+        calculated["selection_metric"] = criterion
         x = features["train", _descriptor_key(final)]
 
         def check_model(state, settings, indices):
@@ -1261,7 +1298,7 @@ def _evaluate_inline_pipelines(
     rubric.check("independent_teacher_and_soap", 80 if level == 1 else 20, independent)
 
 
-def evaluate_submission(submission, *, level, verifier=None, review=None):
+def evaluate_submission(submission, *, level, verifier=None):
     rubric = Rubric(8, binary=True, fail_fast=True)
     calculated, verification = {}, {}
     try:
@@ -1291,8 +1328,6 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
     identity = hashlib.sha256(
         f"task8.level_{level}\0{fingerprint}\0{verification.get('release_id')}".encode()
     ).hexdigest()
-    if review is not None:
-        rubric.apply_review(review, identity)
     return {
         **rubric.as_dict(),
         "level": level,
