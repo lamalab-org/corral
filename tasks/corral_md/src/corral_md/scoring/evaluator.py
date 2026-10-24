@@ -90,11 +90,11 @@ class WorkflowScorer:
             )
         rubric = Rubric(self.task_number, binary=True)
         try:
-            evidence = Evidence(submission)
-        except Exception as exc:
-            rubric.check(
-                "readable_manifest", 100, False, f"{type(exc).__name__}: {exc}"
+            evidence = Evidence(
+                submission, task_number=self.task_number, level=self.level
             )
+        except Exception as exc:
+            rubric.error("readable_manifest", 100, exc)
             if review is not None:
                 raise ValueError(
                     "An unreadable submission cannot receive review credit"
@@ -113,7 +113,7 @@ class WorkflowScorer:
                 )
             except (ValueError, KeyError, IndexError, OSError, TypeError) as exc:
                 remaining = 100 - sum(c["points"] for c in rubric.checks)
-                rubric.check("usable_recorded_evidence", remaining, False, str(exc))
+                rubric.error("usable_recorded_evidence", remaining, exc)
             fingerprint = evidence.fingerprint()
             if review is not None:
                 rubric.apply_review(review, fingerprint)

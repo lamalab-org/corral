@@ -236,7 +236,8 @@ def test_bad_records_do_not_pass(submission, defect):
     elif defect == "displacement":
         record["positions_A"][2, 1, 0] += 0.01
     elif defect == "forces":
-        record["forces_eV_A"][7, 0, 0] += 1
+        # Neither retained displacement may support the claimed derivative.
+        record["forces_eV_A"][[1, 7], 0, 0] += 1
     elif defect == "constants":
         record["force_constants_eV_A2"] *= 2
     elif defect == "nan":
@@ -296,8 +297,17 @@ def test_displacement_sensitivity_requires_resolution(submission):
     record["forces_eV_A"][1:7] *= 1.3
     save_record(submission.parent / "phonons.npz", record)
     report = score(submission)
-    assert report["score"] is None
+    assert report["score"] == 0
     assert "accuracy" in report["checks"][0]["detail"]
+
+
+def test_level1_force_constants_do_not_require_a_resolved_phonon_spectrum(submission):
+    record = read_record(Evidence(submission))
+    record["forces_eV_A"][1:7] *= 1.005
+    save_record(submission.parent / "phonons.npz", record)
+    report = score(submission, level=1)
+    assert report["score"] == 1, report
+    assert report["calculated_results"]["imaginary_tolerance_eV"] > 5e-4
 
 
 def test_offline_cannot_establish_model_identity(submission):
@@ -399,3 +409,25 @@ def test_level1_factory_uses_the_new_calculation_plan(submission):
     scorer = check_level1_workflow(4)
     scorer.verifier.transport = response
     assert scorer.evaluate(submission)["score"] == 1
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_npz_fields_and_displacement_order_are_not_a_hidden_contract(submission, level):
+    path = submission.parent / "phonons.npz"
+    with np.load(path, allow_pickle=False) as data:
+        record = dict(data)
+    permutation = np.array([12, 1, 4, 7, 10, 2, 5, 8, 11, 3, 6, 9, 0])
+    for key in ("positions_A", "displacements_A", "forces_eV_A", "energies_eV"):
+        record[key] = record[key][permutation]
+    record.pop("metadata")
+    for old, new in [
+        ("positions_A", "positions"),
+        ("cell_A", "cell"),
+        ("masses_amu", "masses"),
+        ("forces_eV_A", "forces"),
+        ("displacements_A", "displacements"),
+    ]:
+        record[new] = record.pop(old)
+    np.savez_compressed(path, **record)
+    report = score(submission, level=level)
+    assert report["score"] == 1, report

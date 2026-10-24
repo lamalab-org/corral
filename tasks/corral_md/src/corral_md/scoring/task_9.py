@@ -8,12 +8,10 @@ validated production runs remains necessary before freezing benchmark cutoffs.
 
 from __future__ import annotations
 
-import json
 import secrets
 
 import numpy as np
 from ase import Atoms, units
-from ase.md.velocitydistribution import MaxwellBoltzmannDistribution, Stationary
 
 from .common import (
     Evidence,
@@ -25,6 +23,16 @@ from .common import (
     result_close,
 )
 from .dynamics import matches_pinned_cu32, sampled_motion
+from .formats import (
+    artifact_reader,
+    check_initial_momenta,
+    check_model_digest,
+    check_units,
+    event_record,
+    md_records,
+    records,
+    scientific_record,
+)
 from .level1_trusted import PINNED_TEACHER_SHA256
 from .regression import (
     metrics,
@@ -58,21 +66,19 @@ def _number(value):
 
 
 def _records(path):
-    with path.open() as stream:
-        return [json.loads(line) for line in stream]
+    value = records(path)
+    if isinstance(value, dict):
+        value = value.get("records", [value])
+    return scientific_record([event_record(row) for row in value])
 
 
+@artifact_reader
 def read_run(path, target):
-    rows = _records(path)
+    rows = md_records(path, 9)
     header = rows[0]
-    _require(
-        header["event"] == "start" and header["model_sha256"] == PINNED_TEACHER_SHA256,
-        "Use the supplied MACE-MP-0 model",
-    )
-    _require(
-        header["units"]
-        == {"time": "fs", "position": "Angstrom", "energy": "eV", "momenta": "ASE"},
-        "Incorrect run-log units",
+    check_model_digest(header, PINNED_TEACHER_SHA256)
+    check_units(
+        header, {"time": "fs", "position": "Angstrom", "energy": "eV", "momenta": "ASE"}
     )
     _require(
         header["numbers"] == [29] * 32 and header["target_temperature_K"] == target,
@@ -178,15 +184,7 @@ def read_run(path, target):
     eq, prod = stages
     initial = eq["frames"][0]
     _require(matches_pinned_cu32(initial), "Initialize from the supplied Cu32 cell")
-    expected = initial.copy()
-    MaxwellBoltzmannDistribution(
-        expected, temperature_K=target, rng=np.random.default_rng(seed)
-    )
-    Stationary(expected, preserve_temperature=True)
-    _require(
-        close(initial.get_momenta(), expected.get_momenta(), rtol=0, atol=1e-7),
-        "Initial momenta do not reproduce the recorded seed and COM removal",
-    )
+    check_initial_momenta(initial, header, target, initial.get_momenta())
     for key in (
         "positions_A",
         "momenta",
@@ -397,6 +395,7 @@ def check_energy_claims(claims, expected):
             )
 
 
+@artifact_reader
 def regression(path, runs):
     """Rebuild predictions and audit nested fits, budgets and freeze ordering."""
     rows = _records(path)
@@ -605,10 +604,10 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
     rubric = Rubric(9, binary=True, fail_fast=True)
     computed, runs, features, soap, verification = {}, {}, {}, {}, {}
     try:
-        evidence = Evidence(submission)
+        evidence = Evidence(submission, task_number=9, level=level)
         fingerprint = evidence.fingerprint()
     except Exception as exc:
-        rubric.check("calculation_logs", 100, False, str(exc))
+        rubric.error("calculation_logs", 100, exc)
         return {**rubric.as_dict(), "level": level, "computed": computed}
 
     def trajectories():

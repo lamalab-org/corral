@@ -7,7 +7,6 @@ Recorded model identity and continuity are consistency checks, not attestation.
 
 from __future__ import annotations
 
-import json
 import secrets
 
 import numpy as np
@@ -18,6 +17,13 @@ from scipy.integrate import cumulative_trapezoid
 from corral.evaluation import SubmissionScore
 
 from .common import Evidence, EvidenceError, Rubric, UnsupportedEvidence, finite_array
+from .formats import (
+    artifact_reader,
+    check_model_digest,
+    check_units,
+    md_records,
+    thermodynamic_stage,
+)
 from .level1_trusted import PINNED_TEACHER_SHA256
 from .sampling import mean_standard_error
 from .verification import Plan, geometry
@@ -35,87 +41,84 @@ def _number(value):
     return float(value)
 
 
+@artifact_reader
 def read_log(evidence, level):
     """Read completed stages in execution order, retaining restartable samples."""
+    if level == 1:
+        scalar = thermodynamic_stage(evidence, 6)
+        if scalar is not None:
+            check_model_digest(scalar, PINNED_TEACHER_SHA256)
+            return [scalar]
     stages = []
     current = None
-    with evidence.artifact("run_log").open() as stream:
-        header = json.loads(next(stream))
-        _require(header["event"] == "start", "Missing run header")
-        _require(
-            header["model_sha256"] == PINNED_TEACHER_SHA256,
-            "Use the supplied MACE-MP-0 model",
-        )
-        _require(type(header["random_seed"]) is int, "Record the initialization seed")
-        _require(
-            header["units"]
-            == {"time": "fs", "position": "Angstrom", "energy": "eV", "momenta": "ASE"},
-            "Incorrect log units",
-        )
-        _require(header["numbers"] == [13] * 64, "Expected 64 aluminum atoms")
-        masses = finite_array(header["masses_amu"], shape=(64,))
-        _require(
-            np.allclose(masses, 26.9815385, atol=1e-3, rtol=0),
-            "Incorrect aluminum masses",
-        )
-        for line in stream:
-            record = json.loads(line)
-            event = record["event"]
-            if event == "stage":
-                expected = "equilibration" if not stages else "production"
+    records = md_records(evidence.artifact("run_log"), 6)
+    header = records[0]
+    check_model_digest(header, PINNED_TEACHER_SHA256)
+    _require(type(header["random_seed"]) is int, "Record the initialization seed")
+    check_units(
+        header, {"time": "fs", "position": "Angstrom", "energy": "eV", "momenta": "ASE"}
+    )
+    _require(header["numbers"] == [13] * 64, "Expected 64 aluminum atoms")
+    masses = finite_array(header["masses_amu"], shape=(64,))
+    _require(
+        np.allclose(masses, 26.9815385, atol=1e-3, rtol=0),
+        "Incorrect aluminum masses",
+    )
+    for record in records[1:]:
+        event = record["event"]
+        if event == "stage":
+            expected = "equilibration" if not stages else "production"
+            _require(
+                current is None and len(stages) < level and record["name"] == expected,
+                "Incorrect stage order",
+            )
+            _require(
+                all(
+                    type(record[k]) is int and record[k] > 0
+                    for k in ("steps", "interval")
+                ),
+                "Invalid stage sampling schedule",
+            )
+            _require(
+                record["steps"] % record["interval"] == 0,
+                "Retain both stage endpoints",
+            )
+            dt = _number(record["timestep_fs"])
+            _require(0 < dt <= 2, "Use an integration timestep of at most 2 fs")
+            if expected == "production":
                 _require(
-                    current is None
-                    and len(stages) < level
-                    and record["name"] == expected,
-                    "Incorrect stage order",
+                    record["integrator"] == "VelocityVerlet"
+                    and record["target_temperature_K"] is None,
+                    "Production must use unthermostatted NVE dynamics",
                 )
-                _require(
-                    all(
-                        type(record[k]) is int and record[k] > 0
-                        for k in ("steps", "interval")
-                    ),
-                    "Invalid stage sampling schedule",
-                )
-                _require(
-                    record["steps"] % record["interval"] == 0,
-                    "Retain both stage endpoints",
-                )
-                dt = _number(record["timestep_fs"])
-                _require(0 < dt <= 2, "Use an integration timestep of at most 2 fs")
-                if expected == "production":
-                    _require(
-                        record["integrator"] == "VelocityVerlet"
-                        and record["target_temperature_K"] is None,
-                        "Production must use unthermostatted NVE dynamics",
-                    )
-                else:
-                    _require(
-                        record["integrator"]
-                        in {
-                            "Langevin",
-                            "NVTBerendsen",
-                            "NoseHooverChainNVT",
-                            "Bussi",
-                            "Andersen",
-                        }
-                        and record["target_temperature_K"] == 300,
-                        "Equilibrate with a 300 K thermostat",
-                    )
-                current = {**record, "samples": []}
-            elif event == "sample":
-                _require(current is not None, "Sample outside a stage")
-                current["samples"].append(record)
-            elif event == "end":
-                _require(
-                    current is not None
-                    and record["name"] == current["name"]
-                    and record["steps"] == current["steps"],
-                    "Incomplete stage",
-                )
-                stages.append(current)
-                current = None
             else:
-                raise EvidenceError(f"Unexpected log event: {event}")
+                _require(
+                    record["integrator"]
+                    in {
+                        "Langevin",
+                        "NVTBerendsen",
+                        "NoseHooverChainNVT",
+                        "Bussi",
+                        "Andersen",
+                    }
+                    and record["target_temperature_K"] == 300,
+                    "Equilibrate with a 300 K thermostat",
+                )
+            current = {**record, "samples": []}
+        elif event == "sample":
+            _require(current is not None, "Sample outside a stage")
+            current["samples"].append(record)
+        elif event == "end":
+            _require(
+                current is not None
+                and record["name"] == current["name"]
+                and record["steps"] == current["steps"],
+                "Incomplete stage",
+            )
+            stages.append(current)
+            current = None
+        else:
+            raise EvidenceError(f"Unexpected log event: {event}")
     _require(
         current is None and len(stages) == level,
         "Log does not contain every completed stage",
@@ -238,7 +241,7 @@ def read_log(evidence, level):
 def equilibration_statistics(stage):
     time, temperature = stage["time"], stage["temperature"]
     _require(
-        time[-1] - time[0] >= 2000 and np.max(np.diff(time)) <= 100,
+        len(time) >= 32 and time[-1] - time[0] >= 2000 and np.max(np.diff(time)) <= 100,
         "Retain at least 2 ps of equilibration, sampled at most every 100 fs",
     )
     tail = temperature[len(temperature) // 2 :]
@@ -252,29 +255,34 @@ def equilibration_statistics(stage):
         and abs(tail[-1] - mean) <= 90,
         "Equilibration temperature has not settled near 300 K",
     )
-    _require(
-        np.max(np.ptp(stage["positions"], axis=0)) > 1e-4, "No recorded atomic motion"
-    )
-    directional = stage["directional"][len(temperature) // 2 :]
-    directional_mean = directional.mean(axis=0)
-    directional_se = np.array([mean_standard_error(v) for v in directional.T])
-    _require(
-        np.max(np.abs(directional_mean - 300)) <= 60
-        and np.max(directional_se) <= 15
-        and np.max(
-            np.ptp(
-                [part.mean(axis=0) for part in np.array_split(directional, 4)], axis=0
-            )
-        )
-        <= 90,
-        "Equilibration directional temperatures have not settled near 300 K",
-    )
     diagnostics = {
         "equilibration_temperature_K": mean,
         "equilibration_temperature_se_K": se,
-        "equilibration_directional_temperature_K": directional_mean.tolist(),
-        "equilibration_directional_temperature_se_K": directional_se.tolist(),
     }
+    if not stage.get("scalar_thermodynamics"):
+        _require(
+            np.max(np.ptp(stage["positions"], axis=0)) > 1e-4,
+            "No recorded atomic motion",
+        )
+        directional = stage["directional"][len(temperature) // 2 :]
+        directional_mean = directional.mean(axis=0)
+        directional_se = np.array([mean_standard_error(v) for v in directional.T])
+        _require(
+            np.max(np.abs(directional_mean - 300)) <= 60
+            and np.max(directional_se) <= 15
+            and np.max(
+                np.ptp(
+                    [part.mean(axis=0) for part in np.array_split(directional, 4)],
+                    axis=0,
+                )
+            )
+            <= 90,
+            "Equilibration directional temperatures have not settled near 300 K",
+        )
+        diagnostics.update(
+            equilibration_directional_temperature_K=directional_mean.tolist(),
+            equilibration_directional_temperature_se_K=directional_se.tolist(),
+        )
     tail_time = time[len(temperature) // 2 :] / 1000
     for name, values in (("potential", stage["potential"]), ("total", stage["energy"])):
         energy = values[len(temperature) // 2 :] / 64
@@ -295,9 +303,11 @@ def equilibration_statistics(stage):
         diagnostics[f"equilibration_{name}_energy_eV_per_atom"] = float(energy.mean())
         diagnostics[f"equilibration_{name}_energy_se_eV_per_atom"] = error
         diagnostics[f"equilibration_{name}_energy_drift_eV_atom_ps"] = drift
-    final = Atoms(
-        "Al64", positions=stage["positions"][-1], cell=stage["cell"], pbc=True
-    )
+    final = stage.get("final_atoms")
+    if final is None:
+        final = Atoms(
+            "Al64", positions=stage["positions"][-1], cell=stage["cell"], pbc=True
+        )
     distances = final.get_all_distances(mic=True)
     np.fill_diagonal(distances, np.inf)
     _require(distances.min() > 1.0, "Final aluminum state has overlapping atoms")
@@ -479,14 +489,18 @@ class Task6Scorer:
         computed = {}
         stages, verification = [], {}
         try:
-            evidence = Evidence(submission)
+            evidence = Evidence(submission, task_number=6, level=self.level)
             fingerprint = evidence.fingerprint()
         except Exception as exc:
-            rubric.check("recorded_aluminum_dynamics", 100, False, str(exc))
+            rubric.error("recorded_aluminum_dynamics", 100, exc)
             return {**rubric.as_dict(), "level": self.level, "computed": computed}
 
         def check():
-            stages.extend(read_log(evidence, self.level))
+            nonlocal fingerprint
+            try:
+                stages.extend(read_log(evidence, self.level))
+            finally:
+                fingerprint = evidence.fingerprint()
             computed.update(equilibration_statistics(stages[0]))
             tolerances = {"equilibration_temperature_K": 1.0}
             required = ()
@@ -540,6 +554,19 @@ class Task6Scorer:
                 )
             plan = Plan(evidence, 6, secrets.token_hex(32))
             for stage in stages:
+                if stage.get("scalar_thermodynamics"):
+                    plan.frames(
+                        stage["name"],
+                        [stage["final_atoms"]],
+                        count=1,
+                        values=[{"energy": float(stage["potential"][-1])}],
+                        parameters={
+                            "model": "teacher.model",
+                            "default_dtype": "float64",
+                            "dispersion": False,
+                        },
+                    )
+                    continue
                 n = len(stage["time"])
                 indices = sorted({0, n - 1, *plan.sample(n, 3, stage["name"])})
                 plan.add(

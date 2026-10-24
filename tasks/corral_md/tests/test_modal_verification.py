@@ -560,8 +560,8 @@ def test_mutation_during_artifact_grading_is_rejected(tmp_path, monkeypatch):
     grader = WorkflowScorer(4, verifier=ModalVerifier(transport=response))
     original = grader.module.prepare
 
-    def changed(record):
-        result = original(record)
+    def changed(record, **kwargs):
+        result = original(record, **kwargs)
         artifact = tmp_path / "phonons.npz"
         artifact.write_bytes(artifact.read_bytes() + b" ")
         return result

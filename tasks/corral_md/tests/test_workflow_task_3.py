@@ -7,13 +7,13 @@ import numpy as np
 import pytest
 from ase import units
 from ase.build import bulk
+from corral_md.scoring.common import Evidence
 from corral_md.scoring.evaluator import (
     PendingReviewError,
     WorkflowScorer,
     check_level1_workflow,
     check_level2_workflow,
 )
-from corral_md.scoring.common import Evidence
 from corral_md.scoring.task_3 import build_plan
 from corral_md.scoring.verification import file_ref
 
@@ -362,8 +362,6 @@ def test_no_required_improvement_or_bulk_temperature_success(submission):
     assert score(submission, verifier=PoorFit())["score"] == 1
 
 
-
-
 def test_frozen_evidence_is_checked(submission):
     class Mutating(SyntheticVerifier):
         def _calculate(self, plan, fingerprint):
@@ -435,3 +433,31 @@ def test_nonfinite_derived_errors_do_not_escape_into_the_report(submission):
     report = score(submission, verifier=Overflow())
     assert report["score"] == 0
     json.dumps(report, allow_nan=False)
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_reference_settings_use_aliases_and_explicit_calculator_description(
+    submission, level
+):
+    log_path = submission.parent / "run.json"
+    log = json.loads(log_path.read_text())
+    log["teacher_model"] = "/workspace/resources/models/teacher.model"
+    log["energy_units"] = log.pop("energy_unit")
+    log["force_units"] = "eV/A"
+    log.pop("force_unit")
+    log["calculator"] = (
+        f"MACECalculator(dispersion=True, default_dtype={log.pop('default_dtype')})"
+    )
+    log.pop("dispersion")
+    write(log_path, log)
+    assert score(submission, level=level)["score"] == 1
+
+
+def test_checkpoint_identity_is_derived_without_unrequested_hash_fields(submission):
+    path = submission.parent / "run.json"
+    log = json.loads(path.read_text())
+    log["training"] = {}
+    log.pop("student_model")
+    log["md"].pop("checkpoint_sha256")
+    write(path, log)
+    assert score(submission)["score"] == 1

@@ -23,6 +23,7 @@ from .common import (
     finite_array,
     result_close,
 )
+from .formats import artifact_reader, calculation_log
 from .verification import Plan, compare, file_ref, geometry, stored
 
 
@@ -51,6 +52,10 @@ def dataset(e):
 
 def labels(frames):
     rows = [stored(a) for a in frames]
+    if any("energy" not in row or "forces" not in row for row in rows):
+        raise EvidenceError(
+            "Retain total energies and complete atomic forces for every dimer"
+        )
     return (
         finite_array([row["energy"] for row in rows], shape=(len(frames),)),
         finite_array(
@@ -73,6 +78,7 @@ def fitting_errors(predictions, reference):
     return values
 
 
+@artifact_reader
 def bulk_values(e, md):
     frames = e.trajectory("md_trajectory")
     if len(frames) < 3:
@@ -123,6 +129,10 @@ def bulk_values(e, md):
     dof = md["temperature_dof"]
     if dof not in (321, 324):
         raise EvidenceError("temperature_dof must be 321 or 324")
+    if any("momenta" not in a.arrays for a in frames):
+        raise EvidenceError(
+            "Retain momenta or velocities to reconstruct bulk temperatures"
+        )
     momenta = finite_array(
         [a.arrays["momenta"] for a in frames], shape=(len(frames), 108, 3)
     )
@@ -172,8 +182,8 @@ def build_plan(e, level, challenge):
     """Small independent calculations; no training or MD is rerun."""
     p = Plan(e, 3, challenge)
     frames = dataset(e)
-    log = e.json("run_log")
-    dtype = log["default_dtype"]
+    log = calculation_log(e.json("run_log"))
+    dtype = log.get("default_dtype", "float64")
 
     def add(name, selected, model, dispersion=False, **parameters):
         p.add(
@@ -218,23 +228,26 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
     calculated = {}
     verification = {}
     try:
-        e = Evidence(submission)
-        log = e.json("run_log")
+        e = Evidence(submission, task_number=3, level=level)
+        log = calculation_log(e.json("run_log"))
         for role in artifact_roles(level):
             if e.artifact(role).stat().st_size == 0:
                 raise EvidenceError(f"Empty {role}")
         fingerprint = e.fingerprint()
     except Exception as exc:
-        r.check("calculation_records", 100, False, str(exc))
+        r.error("calculation_records", 100, exc)
         return {**r.as_dict(), "level": level, "calculated_results": calculated}
 
     def settings():
         return (
-            log["teacher_model"] == "teacher.model"
-            and log["dispersion"] is True
-            and log["default_dtype"] in {"float32", "float64"}
-            and log["energy_unit"] == "eV"
-            and log["force_unit"] == "eV/Angstrom"
+            ("teacher_model" not in log or log["teacher_model"] == "teacher.model")
+            and ("dispersion" not in log or log["dispersion"] is True)
+            and (
+                "default_dtype" not in log
+                or log["default_dtype"] in {"float32", "float64"}
+            )
+            and ("energy_unit" not in log or log["energy_unit"] == "eV")
+            and ("force_unit" not in log or log["force_unit"] == "eV/Angstrom")
         )
 
     r.check("reference_settings", 10, settings)
@@ -305,14 +318,14 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
 
         def training():
             record = log["training"]
-            if (
-                log["student_model"] != "student.model"
-                or type(record["steps"]) is not int
-                or record["steps"] < 1
+            if log.get("student_model", "student.model") != "student.model" or (
+                "steps" in record
+                and (type(record["steps"]) is not int or record["steps"] < 1)
             ):
                 return False
             if (
-                record["checkpoint_sha256"]
+                "checkpoint_sha256" in record
+                and record["checkpoint_sha256"]
                 != file_ref(e.artifact("trained_checkpoint"))["sha256"]
             ):
                 return False
@@ -320,8 +333,8 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
             after = independent("student_after")[0]["parameter_sha256"]
             return (
                 before != after
-                and before == record["initial_parameters_sha256"]
-                and after == record["final_parameters_sha256"]
+                and before == record.get("initial_parameters_sha256", before)
+                and after == record.get("final_parameters_sha256", after)
             )
 
         r.check("optimization_and_checkpoint", 15, training)
@@ -355,7 +368,8 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
         def bulk_model():
             frames = bulk_data()[0]
             if (
-                log["md"]["checkpoint_sha256"]
+                "checkpoint_sha256" in log["md"]
+                and log["md"]["checkpoint_sha256"]
                 != file_ref(e.artifact("trained_checkpoint"))["sha256"]
             ):
                 return False

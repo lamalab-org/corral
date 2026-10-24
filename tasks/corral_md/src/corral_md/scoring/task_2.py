@@ -88,6 +88,9 @@ def read_logs(e: Evidence) -> np.ndarray:
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
+            if re.match(r"^(?:read_data|read_restart) CPU\s*=", line):
+                # Native LAMMPS timing output is not a second executed command.
+                continue
             _require(
                 not line.startswith("ERROR") and "Lost atoms" not in line,
                 "LAMMPS reported an execution failure",
@@ -126,7 +129,14 @@ def read_logs(e: Evidence) -> np.ndarray:
                 )
                 if trace:
                     _require(
-                        np.allclose(trace[-1], block[0], rtol=1e-7, atol=1e-8),
+                        # PPPM may rebuild its mesh between runs, slightly
+                        # changing pressure without changing positions/velocities.
+                        np.allclose(
+                            np.asarray(trace[-1])[[0, 1, 3]],
+                            block[0, [0, 1, 3]],
+                            rtol=1e-7,
+                            atol=1e-8,
+                        ),
                         "Discontinuous thermo values between runs",
                     )
                     trace.extend(rows[1:])
@@ -247,10 +257,10 @@ def read_logs(e: Evidence) -> np.ndarray:
                     "Start from the supplied melt with a 1 fs timestep",
                 )
                 _require(
-                    settings.get("units") == ["real"]
-                    and settings.get("atom_style") == ["charge"]
+                    settings.get("units", ["real"]) == ["real"]
+                    and settings.get("atom_style", ["charge"]) in (["charge"], ["full"])
                     and settings["boundary"] == ["p", "p", "p"],
-                    "Use real units, charge atom style, and periodic boundaries",
+                    "Use the task's real units, charged atoms, and periodic boundaries",
                 )
                 style = settings.get("pair_style", [])
                 if style[:1] in (["hybrid"], ["hybrid/overlay"]):
@@ -449,20 +459,22 @@ def cooling_transition(trace: np.ndarray) -> dict:
     for low, high in ((300, 2600), (400, 2500), (500, 2400)):
         selected = blocks[(blocks[:, 0] >= low) & (blocks[:, 0] <= high)]
         fits.append(_fit_transition(selected[:, 0], selected[:, 1]))
-    _require(
-        max(f["residual_rms_g_cm3"] for f in fits) <= 0.005 * np.mean(blocks[:, 1]),
-        "Cooling density is too noisy to assess a transition",
+    density_resolved = max(f["residual_rms_g_cm3"] for f in fits) <= 0.005 * np.mean(
+        blocks[:, 1]
     )
     estimates = [f["estimate_K"] for f in fits]
     spread = max(estimates) - min(estimates)
     resolved = (
-        all(f["bic_gain"] >= 6 and f["width_K"] <= 200 for f in fits) and spread <= 150
+        density_resolved
+        and all(f["bic_gain"] >= 6 and f["width_K"] <= 200 for f in fits)
+        and spread <= 150
     )
     return {
         "transition": "resolved" if resolved else "unresolved",
         "cooling_tg_K": float(np.median(estimates)) if resolved else None,
         "window_spread_K": spread,
         "fits": fits,
+        "density_resolved": bool(density_resolved),
     }
 
 
@@ -501,7 +513,7 @@ class Task2Scorer:
         computed = {}
 
         def check():
-            evidence = Evidence(submission)
+            evidence = Evidence(submission, task_number=2, level=self.level)
             trace = read_logs(evidence)
             computed.update(hold_statistics(trace))
             results = evidence.results

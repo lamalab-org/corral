@@ -516,3 +516,19 @@ def test_equilibration_diagnostics_are_recomputed_and_optional_claims_checked(
     answer["results"][key] = [300, 300, 900]
     submission.write_text(json.dumps(answer))
     assert grade(submission)["score"] == 0
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("representation", ["nested", "aliased"])
+def test_scientific_score_is_independent_of_md_log_layout(
+    submission, rewrite_md_recording, level, representation
+):
+    path = submission[0] if isinstance(submission, tuple) else submission
+    answer = json.loads(path.read_text())
+    log = path.parent / answer["artifacts"]["run_log"]
+    if level == 1:
+        answer.pop("results", None)
+        path.write_text(json.dumps(answer))
+    rewrite_md_recording(log, representation, first_stage=level == 1)
+    report = scorer(level=level).evaluate(path)
+    assert report["score"] == 1, report

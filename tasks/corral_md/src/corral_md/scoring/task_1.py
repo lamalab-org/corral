@@ -2,6 +2,7 @@
 
 No submitted analysis or executable code is used. Diffusion is reconstructed
 from the prescribed 500 ps interval at 2500 K and compared with the answer.
+Both coefficients must also agree with the fixed benchmark reference.
 """
 
 from __future__ import annotations
@@ -13,11 +14,17 @@ import numpy as np
 from ase import units
 from ase.build import bulk
 
-from .common import EvidenceError
+from .common import EvidenceError, UnsupportedEvidence
 
 SILICON_MASS = 28.0855
 THERMO_COLUMNS = ("Step", "Time", "Temp", "Press", "Density")
 DUMP_COLUMNS = ("id", "type", "xu", "yu", "zu", "vx", "vy", "vz")
+
+# Evaluator-owned target and relative tolerance from Level 2 Task 1 in commit
+# 9880925185b52e006212c41878fac70cfed31e57. Submission uncertainty must not
+# widen this range; the trajectory comparison below has its own tolerance.
+REFERENCE_DIFFUSION_M2_S = 1.74e-8
+REFERENCE_DIFFUSION_RTOL = 0.1
 
 
 def _require(condition, message):
@@ -62,13 +69,15 @@ class Trajectory:
     steps: np.ndarray
     cells: np.ndarray
     positions: np.ndarray
-    velocities: np.ndarray
+    velocities: np.ndarray | None
+    wrapped: bool = False
 
 
 def read_trajectory(path) -> Trajectory:
     """Read orthogonal native dumps, preserving images and sorting persistent IDs."""
     steps, cells, positions, velocities = [], [], [], []
     identities = None
+    wrapped = None
     with path.open() as stream:
         while line := stream.readline():
             if not line.strip():
@@ -81,21 +90,51 @@ def read_trajectory(path) -> Trajectory:
             )
             _require(int(stream.readline()) == 216, "Task 1 requires 216 atoms")
             box = stream.readline().split()
+            triclinic = box == [
+                "ITEM:",
+                "BOX",
+                "BOUNDS",
+                "xy",
+                "xz",
+                "yz",
+                "pp",
+                "pp",
+                "pp",
+            ]
             _require(
-                box == ["ITEM:", "BOX", "BOUNDS", "pp", "pp", "pp"],
+                triclinic or box == ["ITEM:", "BOX", "BOUNDS", "pp", "pp", "pp"],
                 "Retain orthogonal, fully periodic cells for isotropic NPT",
             )
             bounds = np.array([stream.readline().split() for _ in range(3)], float)
-            _require(bounds.shape == (3, 2), "Invalid box bounds")
+            _require(bounds.shape == (3, 3 if triclinic else 2), "Invalid box bounds")
+            if triclinic:
+                if not np.allclose(bounds[:, 2], 0, rtol=0, atol=1e-10):
+                    raise UnsupportedEvidence(
+                        "Nonorthogonal dump cells require a triclinic trajectory adapter"
+                    )
+                bounds = bounds[:, :2]
             lengths = bounds[:, 1] - bounds[:, 0]
             _require(np.isfinite(bounds).all() and (lengths > 0).all(), "Invalid cell")
             header = stream.readline().split()
             _require(header[:2] == ["ITEM:", "ATOMS"], "Missing atom columns")
             columns = header[2:]
             _require(
-                set(DUMP_COLUMNS) <= set(columns),
-                "Dump must retain id type xu yu zu vx vy vz",
+                {"id", "type"} <= set(columns), "Retain persistent atom identities"
             )
+            has_velocities = {"vx", "vy", "vz"} <= set(columns)
+            unwrapped = {"xu", "yu", "zu"} <= set(columns)
+            scaled = {"xs", "ys", "zs"} <= set(columns)
+            imaged = {"ix", "iy", "iz"} <= set(columns)
+            _require(
+                unwrapped or scaled or {"x", "y", "z"} <= set(columns),
+                "Retain atomic coordinates",
+            )
+            is_wrapped = not unwrapped and not imaged
+            _require(
+                wrapped is None or wrapped == is_wrapped,
+                "Coordinate convention changed between frames",
+            )
+            wrapped = is_wrapped
             rows = np.array([stream.readline().split() for _ in range(216)], float)
             _require(
                 rows.shape == (216, len(columns)) and np.isfinite(rows).all(),
@@ -114,12 +153,30 @@ def read_trajectory(path) -> Trajectory:
                 identities = ids
             _require(np.array_equal(ids, identities), "Atom identities changed")
             cell = np.diag(lengths)
-            pos = rows[:, [columns.index(c) for c in ("xu", "yu", "zu")]] - bounds[:, 0]
-            vel = rows[:, [columns.index(c) for c in ("vx", "vy", "vz")]]
+            coordinates = (
+                ("xu", "yu", "zu")
+                if unwrapped
+                else (("xs", "ys", "zs") if scaled else ("x", "y", "z"))
+            )
+            pos = rows[:, [columns.index(c) for c in coordinates]]
+            pos = pos * lengths if scaled and not unwrapped else pos - bounds[:, 0]
+            if imaged and not unwrapped:
+                images = rows[:, [columns.index(c) for c in ("ix", "iy", "iz")]]
+                _require(
+                    np.array_equal(images, np.rint(images)),
+                    "Image counters must be integers",
+                )
+                pos += images * lengths
+            vel = (
+                rows[:, [columns.index(c) for c in ("vx", "vy", "vz")]]
+                if has_velocities
+                else None
+            )
             if steps and step == steps[-1]:
                 _require(
                     all(
-                        _close(a, b)
+                        (a is None and b is None)
+                        or (a is not None and b is not None and _close(a, b))
                         for a, b in zip(
                             (cell, pos, vel),
                             (cells[-1], positions[-1], velocities[-1]),
@@ -136,7 +193,11 @@ def read_trajectory(path) -> Trajectory:
             velocities.append(vel)
     _require(len(steps) >= 2, "Retain a nonempty trajectory including endpoints")
     return Trajectory(
-        np.array(steps), np.array(cells), np.array(positions), np.array(velocities)
+        np.array(steps),
+        np.array(cells),
+        np.array(positions),
+        np.array(velocities) if all(v is not None for v in velocities) else None,
+        bool(wrapped),
     )
 
 
@@ -337,11 +398,11 @@ def _times(steps, segments):
 
 def _states(data, thermal, segments, end):
     times = _times(data.steps, segments)
+    valid_start = _close(times[0], 0) if end == 1000 else times[0] <= 1000
     _require(
-        _close(times[[0, -1]], [0, end]) and np.any(np.isclose(times, 1000)),
-        "Trajectory must include initialization, heating end, and final state",
+        _close(times[-1], end) and valid_start and np.any(np.isclose(times, 1000)),
+        "Retain the final state and the full interval needed for the requested calculation",
     )
-    _require(np.max(np.diff(times)) <= 2.01, "Trajectory sampling is too sparse")
     lengths = np.diagonal(data.cells, axis1=1, axis2=2)
     _require(
         np.allclose(lengths, lengths[:, :1], rtol=0.002),
@@ -362,12 +423,8 @@ def _states(data, thermal, segments, end):
         ):
             matches = True
             break
-    _require(matches, "Initial state is not the 3 x 3 x 3 diamond repeat")
-    temperature = (
-        SILICON_MASS
-        * np.sum((data.velocities / (1000 * units.fs)) ** 2, axis=(1, 2))
-        / (645 * units.kB)
-    )
+    if _close(times[0], 0):
+        _require(matches, "Initial state is not the 3 x 3 x 3 diamond repeat")
     density = 216 * SILICON_MASS * 1.66053906660 / np.linalg.det(data.cells)
     indices = np.searchsorted(thermal[:, 0], data.steps)
     _require(
@@ -375,25 +432,44 @@ def _states(data, thermal, segments, end):
         and np.array_equal(thermal[indices, 0], data.steps),
         "Retain a thermal row for each trajectory frame",
     )
+    temperature = thermal[indices, 2]
+    if data.velocities is not None:
+        measured = (
+            SILICON_MASS
+            * np.sum((data.velocities / (1000 * units.fs)) ** 2, axis=(1, 2))
+            / (645 * units.kB)
+        )
+        _require(
+            np.allclose(measured, temperature, rtol=0.02, atol=1),
+            "Trajectory velocities contradict temperature logs",
+        )
     _require(
-        np.allclose(temperature, thermal[indices, 2], rtol=0.02, atol=1)
-        and np.allclose(density, thermal[indices, 4], rtol=0.002),
-        "Trajectory velocities or cells contradict temperature/density logs",
+        np.allclose(density, thermal[indices, 4], rtol=0.002),
+        "Trajectory cells contradict density logs",
     )
-    _require(abs(temperature[0] - 300) < 60, "Prepared velocities are not at 300 K")
+    if _close(times[0], 0):
+        _require(abs(temperature[0] - 300) < 60, "Initial temperature is not at 300 K")
     _require(
         abs(temperature[-1] - 2500) < 500,
         "Final state is not near the requested 2500 K",
     )
     # Fractional increments remove homogeneous barostat motion, then COM drift.
     fractional = np.einsum("faj,fjk->fak", data.positions, np.linalg.inv(data.cells))
+    increments_fractional = np.diff(fractional, axis=0)
+    if data.wrapped:
+        _require(
+            end == 1000, "Diffusion requires unwrapped positions or image counters"
+        )
+        # Minimum-image motion is sufficient to establish mobility, not to
+        # estimate diffusion. Level 1 asks only for the heated state.
+        increments_fractional -= np.rint(increments_fractional)
     motion = np.einsum(
         "faj,fjk->fak",
-        np.diff(fractional, axis=0),
+        increments_fractional,
         (data.cells[1:] + data.cells[:-1]) / 2,
     )
     motion -= motion.mean(axis=1, keepdims=True)
-    high_temperature = times[1:] >= 900
+    high_temperature = times[1:] >= (1000 if end > 1000 else times[-2])
     increments = np.mean(np.sum(motion[high_temperature] ** 2, axis=-1), axis=1)
     _require(
         increments.max() <= 10 * max(float(np.median(increments)), 1e-6),
@@ -403,10 +479,10 @@ def _states(data, thermal, segments, end):
     return times, positions
 
 
-def _liquid(data, times, positions, level):
+def _phase(data, times, positions, level):
     start = 900 if level == 1 else 1100
     indices = np.flatnonzero(times >= start)
-    _require(len(indices) >= 25, "Insufficient high-temperature liquid samples")
+    _require(len(indices) >= 2, "Retain multiple high-temperature states")
     adjacency = []
     coordination = []
     for i in indices[:: max(1, len(indices) // 10)]:
@@ -422,14 +498,13 @@ def _liquid(data, times, positions, level):
     displacement = float(
         np.mean(np.sum((positions[-1] - positions[indices[0]]) ** 2, axis=1))
     )
-    _require(
-        3 < np.mean(coordination) < 12 and survival < 0.5 and displacement > 9,
-        "Structure and neighbor exchange do not support a mobile liquid",
-    )
     return {
         "neighbor_survival": float(survival),
         "mean_coordination": float(np.mean(coordination)),
         "displacement_A2": displacement,
+        "liquid_criteria_met": bool(
+            3 < np.mean(coordination) < 12 and survival < 0.5 and displacement > 9
+        ),
     }
 
 
@@ -506,14 +581,19 @@ def diffusion(times, positions):
                 break
             correlation += rho
     correlation_time = float(correlation * np.mean(np.diff(t)))
-    _require(
-        (t[-1] - t[0]) / 4 >= 10 * correlation_time,
-        "Production blocks are too short relative to dynamical correlation",
-    )
-    blocks = np.array_split(np.arange(len(t)), 4)
-    block_values = [_msd_fit(t[b], p[b]) for b in blocks]
+    if len(t) >= 100:
+        blocks = np.array_split(np.arange(len(t)), 4)
+        block_values = [_msd_fit(t[b], p[b]) for b in blocks]
+        uncertainty_basis = "time_blocks"
+    else:
+        # Saved coordinates can be sparse while each frame contains all 216
+        # particle displacements. Do not require an unpublished
+        # dump interval: retain the full fitting interval for atom-group estimates.
+        groups = np.array_split(np.arange(p.shape[1]), 4)
+        block_values = [_msd_fit(t, p[:, group]) for group in groups]
+        uncertainty_basis = "atom_groups"
     sem = float(np.std(block_values, ddof=1) / 2)
-    # Student-t 95% interval for four independent time blocks (3 degrees of freedom).
+    # Student-t 95% interval from the four estimates (3 degrees of freedom).
     uncertainty = 3.182 * sem
     spread = float(np.max(np.abs(np.array(estimates) - value)))
     _require(
@@ -527,6 +607,7 @@ def diffusion(times, positions):
         "window_spread_m2_s": spread,
         "block_diffusion_m2_s": block_values,
         "correlation_time_ps": correlation_time,
+        "uncertainty_basis": uncertainty_basis,
     }
 
 
@@ -548,17 +629,25 @@ def evaluate(e, r, *, level=2):
     segments = _protocol(commands, thermal, end)
     r.check("heating_and_production_protocol", 25, True)
     times, positions = _states(data, thermal, segments, end)
-    r.check("state_and_thermal_continuity", 25, True)
-    diagnostics["liquid"] = _liquid(data, times, positions, level)
-    r.check("liquid_state", 40 if level == 1 else 10, True)
+    phase = _phase(data, times, positions, level)
+    r.check("state_and_thermal_continuity", 65 if level == 1 else 25, True)
+    diagnostics["phase" if level == 1 else "liquid"] = phase
     if level == 1:
         return diagnostics
+    _require(
+        phase["liquid_criteria_met"],
+        "Structure and neighbor exchange do not support a mobile liquid",
+    )
+    r.check("liquid_state", 10, True)
     diagnostics["production"] = _production(thermal)
     r.check("stable_production", 5, True)
     diagnostics.update(diffusion(times, positions))
     r.check("resolved_stable_diffusion", 10, True)
     value = diagnostics["diffusion_m2_s"]
     reported = e.results.get("diffusion_m2_s")
+    valid_reported = (
+        type(reported) in (int, float) and np.isfinite(reported) and reported > 0
+    )
     tolerance = max(
         0.01 * value,
         diagnostics["uncertainty_95_m2_s"],
@@ -566,11 +655,25 @@ def evaluate(e, r, *, level=2):
     )
     r.check(
         "reported_diffusion",
-        15,
-        type(reported) in (int, float)
-        and np.isfinite(reported)
-        and reported > 0
-        and abs(reported - value) <= tolerance,
+        5,
+        valid_reported and abs(reported - value) <= tolerance,
         f"Independent MSD: {value:.8g} m2/s; comparison tolerance: {tolerance:.3g} m2/s",
+    )
+    reference_tolerance = REFERENCE_DIFFUSION_RTOL * REFERENCE_DIFFUSION_M2_S
+    lower = REFERENCE_DIFFUSION_M2_S - reference_tolerance
+    upper = REFERENCE_DIFFUSION_M2_S + reference_tolerance
+    diagnostics["reference_diffusion"] = {
+        "diffusion_m2_s": REFERENCE_DIFFUSION_M2_S,
+        "relative_tolerance": REFERENCE_DIFFUSION_RTOL,
+        "accepted_range_m2_s": [lower, upper],
+    }
+    r.check(
+        "reference_diffusion",
+        10,
+        valid_reported and lower <= reported <= upper and lower <= value <= upper,
+        f"Reference: {REFERENCE_DIFFUSION_M2_S:.8g} m2/s; "
+        f"accepted range: [{lower:.8g}, {upper:.8g}] m2/s; "
+        f"reported: {reported!r}; independent MSD: {value:.8g} m2/s. "
+        "Both coefficients must lie within the fixed reference range.",
     )
     return diagnostics

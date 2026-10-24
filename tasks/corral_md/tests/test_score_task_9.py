@@ -276,6 +276,7 @@ def submission(tmp_path, _soap_stub):
                 "event": "start",
                 "model_sha256": PINNED_TEACHER_SHA256,
                 "random_seed": seed,
+                "velocity_rng": "numpy.default_rng",
                 "target_temperature_K": target,
                 "numbers": atoms.numbers.tolist(),
                 "masses_amu": atoms.get_masses().tolist(),
@@ -683,3 +684,20 @@ def test_independent_checks_cannot_silently_pass(submission, change):
 
     report = scorer(transport=changed).evaluate(submission)
     assert report["score"] is None if change == "unavailable" else report["score"] == 0
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("representation", ["nested", "aliased"])
+def test_copper_log_layout_does_not_change_scientific_score(
+    submission, rewrite_md_recording, level, representation
+):
+    answer = json.loads(submission.read_text())
+    if level == 1:
+        answer = {
+            "artifacts": {"run_logs": {"main": answer["artifacts"]["run_logs"]["main"]}}
+        }
+        submission.write_text(json.dumps(answer))
+    for name in answer["artifacts"]["run_logs"].values():
+        rewrite_md_recording(submission.parent / name, representation)
+    report = scorer(level=level).evaluate(submission)
+    assert report["score"] == 1, report

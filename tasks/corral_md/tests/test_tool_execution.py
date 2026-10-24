@@ -24,9 +24,9 @@ from corral.runtime import permissions
 from corral.runtime.tool_execution import ToolArgumentError, ToolExecutor
 
 
-def _execution(root, *, file_resources=None, file_resource_sources=None):
+def _execution(root, *, file_resources=None, file_resource_sources=None, local=False):
     def file_tools(workspace):
-        bound = _md_file_tools(workspace)
+        bound = _md_file_tools(workspace, local=local)
         for item in bound.values():
             item.resources = tuple(file_resources or {})
         return bound
@@ -391,6 +391,64 @@ def test_python_each_invocation_starts_in_workspace_without_environment_variable
         for key in ("stdout", "stderr"):
             assert (tmp_path / receipt[key].removeprefix("/workspace/")).is_file()
     assert (tmp_path / "output/result.txt").read_text() == "ok"
+
+
+def test_python_preserves_resource_controls_without_credentials(tmp_path, monkeypatch):
+    for name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        monkeypatch.setenv(name, "2")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "private-test-value")
+    monkeypatch.setenv("MP_API_KEY", "private-test-value")
+    (tmp_path / "probe.py").write_text(
+        "import os\nimport numpy as np\nfrom scipy import linalg\n"
+        "from threadpoolctl import threadpool_info\n"
+        "assert os.environ['CUDA_VISIBLE_DEVICES'] == '1'\n"
+        "assert os.environ['OMP_NUM_THREADS'] == '2'\n"
+        "assert 'ANTHROPIC_API_KEY' not in os.environ\n"
+        "assert 'MP_API_KEY' not in os.environ\n"
+        "assert np.allclose(linalg.inv(np.eye(3)), np.eye(3))\n"
+        "pools = [p for p in threadpool_info() if p['user_api'] == 'blas']\n"
+        "assert pools and all(p['num_threads'] == 2 for p in pools), pools\n"
+    )
+    result = json.loads(tools._run_python_locally(
+        tmp_path, "/workspace/probe.py", [], 30,
+    ))
+    assert result["success"]
+
+
+@pytest.mark.skipif(
+    os.environ.get("CORRAL_PERMISSION_TESTS") != "1"
+    or os.environ.get("CORRAL_GPU_TESTS") != "1",
+    reason="requires the real Docker trial permission boundary and an assigned GPU",
+)
+def test_local_gpu_script_preserves_assignment_and_thread_limits(tmp_path, monkeypatch):
+    root = Path(tempfile.mkdtemp(prefix="md-gpu-permissions-", dir="/workspace"))
+    environment, state = _execution(root, local=True)
+    checkpoints = tmp_path / "checkpoints"
+    checkpoints.mkdir(mode=0o700)
+    selected = os.environ["CUDA_VISIBLE_DEVICES"]
+    monkeypatch.setattr(permissions, "_enabled", False)
+    monkeypatch.setenv("MP_API_KEY", "controller-only")
+    permissions.configure(checkpoints)
+    (root / "scripts/probe.py").write_text(
+        "import os\nimport numpy as np\nimport torch\n"
+        "from scipy import linalg\nfrom mace.calculators import MACECalculator\n"
+        "from threadpoolctl import threadpool_info\n"
+        "assert os.getuid() != 0\n"
+        "assert 'MP_API_KEY' not in os.environ\n"
+        f"assert os.environ['CUDA_VISIBLE_DEVICES'] == {selected!r}\n"
+        "assert torch.cuda.device_count() == 1\n"
+        "assert torch.ones(3, device='cuda').sum().item() == 3\n"
+        "assert torch.get_num_threads() == 2\n"
+        "assert np.allclose(linalg.inv(np.eye(3)), np.eye(3))\n"
+        "pools = threadpool_info()\n"
+        "assert pools and all(p['num_threads'] <= 2 for p in pools), pools\n"
+    )
+    result = _call(
+        environment, state, "execute_python_script",
+        script_path="/workspace/scripts/probe.py", use_gpu=True,
+    )
+    assert json.loads(result)["success"]
 
 
 def test_local_lammps_passes_restricted_hidden_argument_validation(tmp_path, monkeypatch):

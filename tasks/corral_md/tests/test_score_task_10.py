@@ -54,6 +54,7 @@ def submission(tmp_path):
             "event": "start",
             "model_sha256": PINNED_TEACHER_SHA256,
             "random_seed": seed,
+            "velocity_rng": "numpy.default_rng",
             "numbers": atoms.numbers.tolist(),
             "masses_amu": atoms.get_masses().tolist(),
             "units": {
@@ -333,3 +334,19 @@ def test_missing_log_fails(tmp_path):
     path = tmp_path / "answer.json"
     path.write_text('{"artifacts": {}, "results": {}}')
     assert scorer().evaluate(path)["score"] == 0
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("representation", ["nested", "aliased"])
+def test_scientific_score_is_independent_of_md_log_layout(
+    submission, rewrite_md_recording, level, representation
+):
+    path = submission[0] if isinstance(submission, tuple) else submission
+    answer = json.loads(path.read_text())
+    log = path.parent / answer["artifacts"]["run_log"]
+    if level == 1:
+        answer.pop("results", None)
+        path.write_text(json.dumps(answer))
+    rewrite_md_recording(log, representation, first_stage=level == 1)
+    report = scorer(level=level).evaluate(path)
+    assert report["score"] == 1, report

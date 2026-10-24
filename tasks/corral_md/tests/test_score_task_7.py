@@ -534,3 +534,19 @@ def test_new_scorer_and_no_legacy_examples(level, tmp_path):
     with pytest.raises(ValueError, match="Task7Scorer"):
         WorkflowScorer(7, level=level)
     assert not (tmp_path / "submission_examples").exists()
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("representation", ["nested", "aliased"])
+def test_scientific_score_is_independent_of_md_log_layout(
+    submission, rewrite_md_recording, level, representation
+):
+    path = submission[0] if isinstance(submission, tuple) else submission
+    answer = json.loads(path.read_text())
+    log = path.parent / answer["artifacts"]["run_log"]
+    if level == 1:
+        answer.pop("results", None)
+        path.write_text(json.dumps(answer))
+    rewrite_md_recording(log, representation, first_stage=level == 1)
+    report = Task7Scorer(level=level).evaluate(path)
+    assert report["score"] == 1, report

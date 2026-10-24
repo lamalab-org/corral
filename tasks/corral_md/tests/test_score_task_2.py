@@ -189,9 +189,14 @@ def test_unresolved_data_fail_even_with_a_reported_tg(tmp_path, transition, tg):
     result = Task2Scorer(level=2).evaluate_submission(submission)
     report = result.metadata["workflow_evaluation"]
     assert result.score == 0, report
-    assert "requires a resolved Tg" in result.feedback
-    assert report["computed"]["transition"] == "unresolved"
-    assert report["computed"]["cooling_tg_K"] is None
+    if tg is None:
+        assert (
+            "results.cooling_tg_K must be a finite numerical result" in result.feedback
+        )
+    else:
+        assert "requires a resolved Tg" in result.feedback
+        assert report["computed"]["transition"] == "unresolved"
+        assert report["computed"]["cooling_tg_K"] is None
     assert report["pending_checks"] == []
 
 
@@ -210,7 +215,24 @@ def test_missing_tg_fails_even_with_a_resolved_transition(tmp_path):
     path.write_text(json.dumps(answer))
     result = Task2Scorer(level=2).evaluate_submission(path)
     assert result.score == 0
-    assert "finite numerical cooling_tg_K" in result.feedback
+    assert "Missing requested submission field: results.cooling_tg_K" in result.feedback
+
+
+def test_rotated_log_retains_protocol_without_repeating_initial_units(tmp_path):
+    path, _, log = calculation(tmp_path)
+    text = (
+        log.read_text().replace("units real\n", "").replace("atom_style charge\n", "")
+    )
+    lines = text.splitlines()
+    # A PPPM mesh initialization changes pressure at the shared run boundary,
+    # without changing the retained temperature, density or elapsed step.
+    boundary = [i for i, line in enumerate(lines) if line.startswith("370000 ")]
+    assert len(boundary) == 2
+    fields = lines[boundary[1]].split()
+    fields[3] = "7"
+    lines[boundary[1]] = " ".join(fields)
+    log.write_text("\n".join(lines) + "\n")
+    assert score(path)["score"] == 1
 
 
 def test_measured_temperature_and_cutoff_determine_fit(tmp_path):
@@ -459,3 +481,14 @@ def test_task_routes_to_log_scorer_without_examples_or_validator(tmp_path, level
     assert result.score == 1
     assert result.metadata["workflow_evaluation"]["mode"] == "saved_logs"
     assert Task2Scorer(level=level).evaluate_submission("{}").score == 0
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_native_read_data_timing_is_not_another_command(tmp_path, level):
+    path, _, log = calculation(tmp_path)
+    log.write_text(
+        log.read_text().replace(
+            "  192 atoms\n", "  192 atoms\n  read_data CPU = 0.002 seconds\n"
+        )
+    )
+    assert score(path, level=level)["score"] == 1

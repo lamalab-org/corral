@@ -127,6 +127,19 @@ def test_minimal_log_reconstructs_expected_answers(tmp_path, level, method):
     assert "artifacts" in json.loads(path.read_text())
 
 
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("method", ["analytical", "analytical_hessian"])
+def test_equivalent_derivative_method_names(tmp_path, level, method):
+    path = make_submission(tmp_path, level)
+    manifest = json.loads(path.read_text())
+    log_path = tmp_path / manifest["artifacts"]["calculation_log"]
+    log = json.loads(log_path.read_text())
+    for row in log["calculations"]:
+        row["method"] = method
+    write(log_path, log)
+    assert scorer(level).evaluate(path)["score"] == 1
+
+
 def test_level2_needs_fit_parameters_without_repeated_tables(tmp_path):
     path = make_submission(tmp_path)
     manifest = json.loads(path.read_text())
@@ -157,7 +170,6 @@ def test_level2_needs_fit_parameters_without_repeated_tables(tmp_path):
         "acoustic",
         "nan",
         "force_sign",
-        "missing_sensitivity",
         "sensitivity_step",
         "sensitivity_forces",
         "energy",
@@ -194,8 +206,7 @@ def test_invalid_evidence_and_answers_fail(tmp_path, mutation):
             row["forces_minus_eV_A"],
             row["forces_plus_eV_A"],
         )
-    elif mutation == "missing_sensitivity":
-        del row["sensitivity"]
+
     elif mutation == "sensitivity_step":
         row["sensitivity"]["displacement_A"] = 0.01
     elif mutation == "sensitivity_forces":
@@ -353,3 +364,37 @@ def test_rounding_is_allowed(tmp_path):
     manifest["results"]["fit"]["intercept_eV"] *= 1.005
     write(path, manifest)
     assert scorer().evaluate(path)["score"] == 1
+
+
+def test_half_step_force_records_are_optional_when_independent_hessians_agree(tmp_path):
+    path = make_submission(tmp_path, method="central_difference")
+    log = json.loads((tmp_path / "calculations.json").read_text())
+    for row in log["calculations"]:
+        row.pop("sensitivity", None)
+    write(tmp_path / "calculations.json", log)
+    assert scorer().evaluate(path)["score"] == 1
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_retained_modes_and_flat_geometry_are_verified_independently(tmp_path, level):
+    path = make_submission(tmp_path, level=level)
+    log = json.loads((tmp_path / "calculations.json").read_text())
+    converted = []
+    for row in log["calculations"]:
+        energies = mode_energies(
+            np.asarray(row["hessian_eV_A2"]), row["structure"]["masses"]
+        )
+        converted.append(
+            {
+                "isotropic_strain": row["isotropic_strain"],
+                "uniaxial_strain": row["uniaxial_strain"],
+                **row["structure"],
+                "gamma_mode_energies_eV": energies.tolist(),
+            }
+        )
+    write(tmp_path / "calculations.json", {"calculations": converted})
+    report = scorer(level=level).evaluate(path)
+    assert report["score"] == 1, report
+    converted[0]["gamma_mode_energies_eV"][-1] *= 2
+    write(tmp_path / "calculations.json", {"calculations": converted})
+    assert scorer(level=level).evaluate(path)["score"] == 0

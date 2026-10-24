@@ -53,7 +53,9 @@ def test_shared_scorer_propagates_pending_instead_of_recording_zero(
     rubric = Rubric(10, binary=True)
     rubric.check("independent_model_calculation", 100, None, "Backend unavailable")
     monkeypatch.setattr(
-        task.scoring_fn.module, "evaluate_submission", lambda *_a, **_kw: rubric.as_dict()
+        task.scoring_fn.module,
+        "evaluate_submission",
+        lambda *_a, **_kw: rubric.as_dict(),
     )
     state = _state("{}")
     before = state.model_dump()
@@ -86,11 +88,9 @@ def test_partial_answer_survives_workspace_restoration(tmp_path):
     task = env.load_tasks_from_json(
         env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_1.json"
     )["level_2_task_1"]
-    result = TaskScorer(task, workspace=restored).evaluate(
-        _state(json.dumps(manifest))
-    )
+    result = TaskScorer(task, workspace=restored).evaluate(_state(json.dumps(manifest)))
     assert result.score == 0
     assert result.metrics == {"score": result.score}
     assert result.metadata["workflow_evaluation"]["score"] == 0
-    assert "recorded_log_and_trajectory" in result.feedback
+    assert "Missing requested submission field: artifacts.lammps_log" in result.feedback
     assert not (outputs / "manifest.json").exists()

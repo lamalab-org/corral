@@ -7,14 +7,13 @@ are explicit evaluator policy and need calibration against validated MACE runs.
 
 from __future__ import annotations
 
-import json
-
 import numpy as np
 from ase import Atoms, units
 
 from corral.evaluation import SubmissionScore
 
 from .common import Evidence, EvidenceError, Rubric, finite_array
+from .formats import artifact_reader, check_model_digest, check_units, md_records
 from .level1_trusted import PINNED_TEACHER_SHA256
 
 
@@ -48,49 +47,44 @@ def _same_state(first, second):
     )
 
 
+@artifact_reader
 def read_log(evidence, level):
     """Require complete chronological stages, raw pressure, and NPT continuity."""
     stages, current = [], None
-    with evidence.artifact("run_log").open() as stream:
-        header = json.loads(next(stream))
-        _require(
-            header["event"] == "start"
-            and header["model_sha256"] == PINNED_TEACHER_SHA256,
-            "Use the supplied MACE-MP-0 model",
-        )
-        _require(type(header["random_seed"]) is int, "Record the initialization seed")
-        _require(header["numbers"] == [13] * 108, "Expected Al108")
-        masses = finite_array(header["masses_amu"], shape=(108,))
-        _require(
-            np.allclose(masses, 26.9815385, atol=1e-3, rtol=0),
-            "Incorrect aluminum masses",
-        )
-        _require(
-            header["units"]
-            == {
-                "time": "fs",
-                "cell": "Angstrom",
-                "energy": "eV",
-                "pressure": "GPa",
-                "momenta": "ASE",
-            },
-            "Incorrect log units",
-        )
-        for line in stream:
-            row = json.loads(line)
-            if row["event"] == "stage":
-                _require(current is None, "Unfinished stage")
-                current = {**row, "samples": []}
-            elif row["event"] == "sample":
-                _require(current is not None, "Sample outside a stage")
-                current["samples"].append(row)
-            elif row["event"] == "end":
-                _require(current is not None, "End outside a stage")
-                current["end"] = row
-                stages.append(current)
-                current = None
-            else:
-                raise EvidenceError("Unexpected log event")
+    records = md_records(evidence.artifact("run_log"), 7)
+    header = records[0]
+    check_model_digest(header, PINNED_TEACHER_SHA256)
+    _require(type(header["random_seed"]) is int, "Record the initialization seed")
+    _require(header["numbers"] == [13] * 108, "Expected Al108")
+    masses = finite_array(header["masses_amu"], shape=(108,))
+    _require(
+        np.allclose(masses, 26.9815385, atol=1e-3, rtol=0),
+        "Incorrect aluminum masses",
+    )
+    check_units(
+        header,
+        {
+            "time": "fs",
+            "cell": "Angstrom",
+            "energy": "eV",
+            "pressure": "GPa",
+            "momenta": "ASE",
+        },
+    )
+    for row in records[1:]:
+        if row["event"] == "stage":
+            _require(current is None, "Unfinished stage")
+            current = {**row, "samples": []}
+        elif row["event"] == "sample":
+            _require(current is not None, "Sample outside a stage")
+            current["samples"].append(row)
+        elif row["event"] == "end":
+            _require(current is not None, "End outside a stage")
+            current["end"] = row
+            stages.append(current)
+            current = None
+        else:
+            raise EvidenceError("Unexpected log event")
     _require(
         current is None and stages and (level == 2 or len(stages) == 1),
         "Missing completed stages or extra Level 1 stages",
@@ -579,7 +573,7 @@ class Task7Scorer:
         rubric, computed = Rubric(7, binary=True), {}
 
         def check():
-            evidence = Evidence(submission)
+            evidence = Evidence(submission, task_number=7, level=self.level)
             stages = read_log(evidence, self.level)
             computed["stages"] = [stage_statistics(s) for s in stages]
 

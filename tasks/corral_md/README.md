@@ -238,12 +238,17 @@ checkpoint trajectories cannot satisfy the restored full-range task by rescoring
 
 Task 6 uses `scoring/task_6.py` for both levels. Submit `results` and
 `artifacts.run_log`, pointing to the final calculation's JSON-lines log.
-The agent implements the ASE dynamics and writes start, stage, sample, and end
-records using the field names and units in the task's submission instructions.
+The agent implements the ASE dynamics and retains the sampled calculation in
+its own log layout. The scorer accepts event records and equivalent data layouts.
 Initialize velocities once and retain continuous equilibration followed by
 optional VelocityVerlet NVE production, including restartable endpoints.
 
-Level 1 needs only the equilibration log. Level 2 reports two scalar VDOS
+Level 1 submits only the equilibration log link. Scalar thermodynamic samples
+with an explicitly linked restart state are supported; per-sample atomic
+coordinates are not required. The scorer checks the restart against the final
+sample and independently verifies its potential energy. Referenced restart
+files are confined to the workspace and included in the evidence fingerprint.
+Level 2 reports two scalar VDOS
 summaries in THz: `mean_frequency_THz` and `std_frequency_THz`, the VDOS-weighted
 mean and standard deviation. The evaluator also derives `frequency_95pct_THz`,
 the first frequency enclosing 95% of the integrated spectral weight. No spectrum arrays
@@ -415,7 +420,8 @@ Task 4 uses [its own scorer](src/corral_md/scoring/task_4.py) at both levels.
 The agent writes one `phonons.npz` archive containing the final geometry,
 central force calculations at two displacement magnitudes, model digest,
 masses, and raw force constants. Analytical Hessians can also be included.
-The scorer expects specific array names, shapes, order, and units.
+The scorer normalizes equivalent array names, compact displacement records, and
+lattice-indexed force-constant tensors while checking their consistency.
 Link it as `artifacts.force_log`; no settings documents, scripts, reports, or templates are
 needed. Level 1 stops at usable force constants and reconstructed diagnostics.
 Level 2 supplies only `results.zpe_eV_per_atom` (null for resolved instability).
@@ -445,21 +451,29 @@ files, or submission examples are needed.
 
 The scorer checks the heating schedule and state continuity, reconstructs
 temperature/density and neighbor exchange, and stops there for Level 1.
-Level 2 reconstructs the diffusion coefficient using the Einstein relation and
+Level 1 accepts either a crystalline or liquid endpoint after the prescribed
+heating; phase diagnostics do not determine its score. Level 2 requires a mobile
+liquid and reconstructs the diffusion coefficient using the Einstein relation and
 multi-origin MSD from the full prescribed 500 ps interval at 2500 K (1000–1500 ps
 after initialization), after removing collective translation and homogeneous
 cell motion. It checks thermal stability, tests shorter analysis and fit windows,
 and estimates uncertainty from time blocks, checking their duration against a
 dynamical correlation estimate. The reported diffusion coefficient is compared
 with this independently reconstructed value using bounded uncertainty and window
-spread. The MSD approach is described in the
+spread. Both the reported and reconstructed coefficients must also lie within
+10% of the fixed benchmark reference, 1.74e-8 m2/s: the inclusive acceptance range
+is [1.566e-8, 1.914e-8] m2/s. This target and relative tolerance come from
+Level 2 Task 1 in commit `9880925185b52e006212c41878fac70cfed31e57`.
+Submission uncertainty and fitting-window spread cannot widen this reference
+range. The MSD approach is described in the
 [LAMMPS diffusion documentation](https://docs.lammps.org/Howto_diffusion.html).
 
-Task 1 scores directly from the retained evidence and reported answer, without
-an external diffusion reference range. Valid submissions receive a completed
-score through both the benchmark and CLI. The repository has no validated
-calibration cohort; the remaining numerical screens still need validation on
-real runs before benchmarking.
+Level 2 Task 1 requires the protocol, state, stability, answer-consistency, and reference
+checks to pass for a score of 1. It scores directly through both the benchmark
+and CLI, using the reference embedded in the evaluator; submissions cannot
+override it. Level 1 stops at the end of heating. The repository has no
+validated calibration cohort; the inherited 10% reference tolerance and remaining
+numerical screens still need validation on real runs before benchmarking.
 Saved logs establish internal consistency, not tamper-proof execution provenance.
 
 Task 3 uses [a separate scorer](src/corral_md/scoring/task_3.py).
@@ -497,9 +511,11 @@ optional `results.highest_positive_energies_eV` and `results.fit.residuals_eV`
 are checked in calculation-log order.
 
 The agent writes one JSON calculation log containing the actual structures,
-masses, calculator settings, and raw Hessians or six Cartesian force pairs.
+masses, calculator settings, and raw Hessians, six Cartesian force pairs, or
+the complete signed mode spectrum for independent comparison.
 Finite differences also need half-step force checks at endpoint/reference
-strains. The task instructions specify the record keys and array shapes.
+strains. Row containers such as `calculations`, `results`, and `data` are accepted;
+equivalent quantity names are normalized without discarding contradictory values.
 Submit the log path and required coefficients directly in the JSON answer.
 
 The scorer validates strains and fixed geometry, checks raw symmetry/acoustic
@@ -594,10 +610,14 @@ inference script, report, or submission templates are needed.
 
 The agent generates and labels the 100 prescribed training structures and
 writes their identities, seeds, geometry, and total energies to a JSONL log.
-Level 1 contains only start, training-dataset, and end records. Level 2 also
+Level 1 accepts grouped training-dataset records or a metadata record followed
+by configuration rows. An explicit generation seed and RNG together with
+matching coordinate hashes can identify reproducible geometry without storing
+coordinate arrays again. Level 2 also
 retains candidate validation fits, a freeze record containing the final and
 learning-curve pipelines, and the two test datasets and their descriptors.
-The task instructions specify all record fields and fitted-state layouts.
+Equivalent event labels and linked freeze manifests are supported. Saved SOAP
+and Ridge numerical state is read without executing submitted model methods.
 Fit and select using training data only; freeze every pipeline before generating
 test labels and use test results only for the final analysis.
 
@@ -621,11 +641,14 @@ Task 10 uses `scoring/task_10.py` for both levels. Submit only `artifacts.run_lo
 and `results`, directly as JSON. The agent implements the temperature cycle,
 initializes momenta once, and writes one JSONL log containing the cumulative
 clock, fixed cell, positions, momenta, potential energies, and stage endpoints.
-The task instructions specify start, stage, sample, and end record fields.
+Equivalent record layouts are normalized by the evaluator.
 To resume a calculation, restore the saved state and preserve its cumulative
 time, model, and seed.
 
-Level 1 stops after the initial 300 K stage and submits only the log. Temperature,
+Level 1 stops after the initial 300 K stage and submits only the log. Scalar
+thermodynamic samples with a linked restart state are also accepted and checked
+against the saved final state and an independent potential-energy calculation.
+Temperature,
 directional temperature and energy summaries are derived. Level 2 runs targets 300, 400, 500, 600, 700, 800, 900, 300 K
 continuously; its stage table is derived from the log and need not be repeated.
 An optional table must contain all eight stages in order and is checked.

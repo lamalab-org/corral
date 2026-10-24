@@ -33,15 +33,27 @@ class UnsupportedEvidence(ValueError):
     """
 
 
+class EvaluationError(RuntimeError):
+    """An unexpected scorer defect; no scientific score can be assigned."""
+
+
 def read_json(path: Path) -> Any:
     def invalid(value: str) -> None:
         raise EvidenceError(f"Non-finite JSON value: {value}")
 
-    return json.loads(path.read_text(), parse_constant=invalid)
+    try:
+        return json.loads(path.read_text(), parse_constant=invalid)
+    except json.JSONDecodeError as exc:
+        raise EvidenceError(
+            f"Malformed JSON in {path.name}: line {exc.lineno}"
+        ) from exc
 
 
 def finite_array(value: Any, ndim: int | None = None, shape=None) -> np.ndarray:
-    array = np.asarray(value, dtype=float)
+    try:
+        array = np.asarray(value, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise EvidenceError("Expected a rectangular numerical array") from exc
     if not array.size or not np.isfinite(array).all():
         raise EvidenceError("Expected nonempty finite numerical data")
     if ndim is not None and array.ndim != ndim:
@@ -166,7 +178,7 @@ def _json_frames(data):
 class Evidence:
     """A submission's data and artifacts, with paths confined when contextualized."""
 
-    def __init__(self, submission: Any):
+    def __init__(self, submission: Any, *, task_number=None, level=None):
         workspace = getattr(submission, "workspace", None)
         base = getattr(submission, "manifest_dir", None)
         self.root = Path(workspace).resolve() if workspace is not None else None
@@ -179,7 +191,13 @@ class Evidence:
             except json.JSONDecodeError:
                 value = submission
             if isinstance(value, str):
+                if not value.strip():
+                    raise EvidenceError(
+                        "Expected a nonempty JSON manifest or file path"
+                    )
                 path = Path(value).resolve()
+                if path.is_dir():
+                    raise EvidenceError("Expected a manifest file, not a directory")
                 self.base = path.parent
                 self.root = self.root or path.parent
                 value = read_json(path)
@@ -200,6 +218,11 @@ class Evidence:
         report = value.get("report")
         self.report = report if isinstance(report, dict) else self._document(report)
         self._cache: dict[tuple, Any] = {}
+        self._linked_evidence: set[Path] = set()
+        if task_number is not None:
+            from .contracts import validate_manifest
+
+            validate_manifest(self, task_number, level)
 
     def _path(self, value: Any) -> Path:
         if not isinstance(value, str | Path) or not str(value):
@@ -276,18 +299,42 @@ class Evidence:
                 # Inline narrative is already hashed with the manifest above.
                 continue
             visit(self.manifest.get(role), role)
+        for path in sorted(self._linked_evidence):
+            relative = path.relative_to(self.root) if self.root is not None else path
+            visit(str(path), f"linked_evidence.{relative}")
         return digest.hexdigest()
 
     def artifact(self, *names: str) -> Path:
         return self._path(_lookup(self._artifacts, names))
 
-    def linked_path(self, value: str, document: Path) -> Path:
-        """Resolve a document's sidecar and require it in the fingerprinted manifest."""
+    def linked_path(
+        self, value: str, document: Path, *, register: bool = False
+    ) -> Path:
+        """Resolve a confined sidecar explicitly referenced by retained evidence.
+
+        ``register=True`` includes a sidecar in subsequent fingerprints without
+        requiring an extra, unpublished final-answer key. Readers must finish
+        registering dependencies before computing the verification fingerprint.
+        """
+        if not isinstance(value, str) or not value:
+            raise EvidenceError("Expected a linked artifact path")
+        document = self._path(document)
         path = Path(value)
         if not path.is_absolute():
-            path = (document.parent / path).resolve()
+            path = document.parent / path
         path = self._path(path)
         declared = {item for role in self._artifacts for item in self.artifacts(role)}
+        if register:
+            if document not in declared | self._linked_evidence:
+                raise EvidenceError("Sidecar links must originate in retained evidence")
+            boundary = self.root or document.parent
+            if not path.is_relative_to(boundary):
+                raise EvidenceError(
+                    "Linked artifact path escapes the scoring workspace"
+                )
+            if path not in declared:
+                self._linked_evidence.add(path)
+            return path
         if path not in declared:
             raise EvidenceError(
                 f"Linked evidence {path.name} must also be listed in manifest.artifacts"
@@ -506,14 +553,14 @@ class Rubric:
     ) -> bool:
         if not np.isfinite(points) or points < 0:
             raise ValueError("Rubric points must be finite and nonnegative")
-        if self.fail_fast and points > 0 and self.failed:
+        if self.fail_fast and points > 0 and (self.failed or self.pending_checks):
             self.checks.append(
                 {
                     "name": name,
                     "points": float(points),
                     "earned": 0.0,
                     "status": "skipped",
-                    "detail": "Not evaluated after an earlier required check failed.",
+                    "detail": "Not evaluated after an earlier required check failed or remained unverified.",
                 }
             )
             return False
@@ -530,8 +577,12 @@ class Rubric:
         except UnsupportedEvidence as exc:
             status = "unverified"
             detail = str(exc)
-        except Exception as exc:
+        except (EvidenceError, FileNotFoundError, UnicodeError) as exc:
             detail = f"{type(exc).__name__}: {exc}"
+        except Exception as exc:
+            raise EvaluationError(
+                f"Task {self.task_number}, check {name}: {type(exc).__name__}: {exc}"
+            ) from exc
         self.checks.append(
             {
                 "name": name,
@@ -545,6 +596,14 @@ class Rubric:
 
     def unverified(self, name: str, detail: str, points: float = 0) -> None:
         self.check(name, points, None, detail)
+
+    def error(self, name: str, points: float, exception: Exception) -> None:
+        """Use the same classification for errors while opening/normalizing data."""
+
+        def failure():
+            raise exception
+
+        self.check(name, points, failure)
 
     @property
     def pending_checks(self) -> list[dict]:

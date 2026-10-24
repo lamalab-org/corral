@@ -391,6 +391,26 @@ def _run_python_locally(
         "TMPDIR": str(scratch),
         "XDG_CACHE_HOME": str(scratch / "cache"),
     }
+    # Keep container resource controls in fresh interpreters. Otherwise BLAS
+    # sizes its pools for the host, and CUDA loses the assigned device mask.
+    for key in (
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "OMP_NUM_THREADS",
+        "OMP_THREAD_LIMIT",
+        "MKL_NUM_THREADS",
+        "BLIS_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "NUMEXPR_MAX_THREADS",
+        "CUDA_VISIBLE_DEVICES",
+        "CUDA_HOME",
+        "CUDA_PATH",
+        "LD_LIBRARY_PATH",
+        "NVIDIA_VISIBLE_DEVICES",
+    ):
+        if key in os.environ:
+            environment[key] = os.environ[key]
     if gpu:
         try:
             import torch
@@ -400,17 +420,6 @@ def _run_python_locally(
             ) from exc
         if not torch.cuda.is_available():
             raise RuntimeError("Local GPU Python requires an available CUDA GPU")
-        # The local worker may use a different interpreter from the controller.
-        # Preserve the host CUDA runtime variables when dispatching it.
-        for key in (
-            "CUDA_VISIBLE_DEVICES",
-            "CUDA_HOME",
-            "CUDA_PATH",
-            "LD_LIBRARY_PATH",
-            "NVIDIA_VISIBLE_DEVICES",
-        ):
-            if key in os.environ:
-                environment[key] = os.environ[key]
     timed_out = False
     with (
         tempfile.TemporaryFile() as stdout_stream,

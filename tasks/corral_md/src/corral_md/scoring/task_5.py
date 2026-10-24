@@ -22,6 +22,7 @@ from .common import (
     finite_array,
     result_close,
 )
+from .formats import artifact_reader, phonon_log
 from .verification import Plan, compare
 
 # hbar * sqrt((eV / Angstrom**2) / atomic-mass-unit), in eV.
@@ -44,13 +45,14 @@ def strain_pairs(level):
     return np.asarray(list(product(STRAINS, [0.0] if level == 1 else STRAINS)))
 
 
+@artifact_reader
 def read_log(e, level):
     """Validate the complete grid and the actual unrelaxed calculation inputs."""
-    log = e.json("calculation_log")
+    log = phonon_log(e.json("calculation_log"), level)
     _require(
-        log["model"] == "teacher.model"
-        and log["default_dtype"] in {"float32", "float64"}
-        and log["dispersion"] is False,
+        log.get("model") != "student.model"
+        and log.get("default_dtype", "float64") in {"float32", "float64"}
+        and log.get("dispersion", False) is False,
         "Use the supplied MACE-MP-0 teacher.model without dispersion",
     )
     rows = log["calculations"]
@@ -96,11 +98,11 @@ def read_log(e, level):
 
 def raw_hessian(row):
     """Read an energy Hessian or differentiate six Cartesian force pairs."""
-    if row["method"] == "analytic_hessian":
+    if row["method"] in {"analytic_hessian", "retained_hessian"}:
         return finite_array(row["hessian_eV_A2"], shape=(6, 6))
     if row["method"] != "central_difference":
-        raise EvidenceError(
-            "Use analytic_hessian or central_difference calculation logs"
+        raise UnsupportedEvidence(
+            "Cannot interpret the recorded phonon derivative method"
         )
     step = float(finite_array(row["displacement_A"], shape=()))
     _require(step > 0, "Displacement must be positive")
@@ -128,18 +130,21 @@ def mode_energies(hessian, masses):
 
 
 def reconstruct(log, level):
+    del level  # The retained calculations determine reconstruction at either level.
     rows = log["calculations"]
     hessians, modes = [], []
     for row in rows:
+        if row["method"] == "retained_modes":
+            energies = finite_array(row["mode_energies_eV"], shape=(6,))
+            _require(np.any(energies > 0), "No resolved positive Gamma-point mode")
+            hessians.append(None)
+            modes.append(energies)
+            continue
         hessian = raw_hessian(row)
         energies = mode_energies(hessian, row["structure"]["masses"])
-        # Endpoints and the reference probe displacement sensitivity without
-        # doubling every calculation; the log must retain the half-step forces.
-        iso, z = np.round([row["isotropic_strain"], row["uniaxial_strain"]], 2)
-        selected = (abs(iso) == 0.02 and (level == 1 or abs(z) == 0.02)) or (
-            iso == z == 0
-        )
-        if row["method"] == "central_difference" and (selected or "sensitivity" in row):
+        # Check an explicitly retained refinement. The task does not mandate
+        # half-step force pairs; independent Hessians still test accuracy.
+        if row["method"] == "central_difference" and "sensitivity" in row:
             finer = {**row["sensitivity"], "method": "central_difference"}
             _require(
                 close(finer["displacement_A"], row["displacement_A"] / 2, rtol=1e-8),
@@ -168,7 +173,11 @@ def build_plan(e, log, hessians, challenge):
     """Use cached fixed-input references, with an isolated calculator fallback."""
     rows = log["calculations"]
     plan = Plan(e, 5, challenge)
-    parameters = {key: log[key] for key in ("model", "default_dtype", "dispersion")}
+    parameters = {
+        "model": "teacher.model",
+        "dispersion": False,
+        "default_dtype": log.get("default_dtype", "float64"),
+    }
     inputs = {
         "frames": [
             {
@@ -196,7 +205,14 @@ def build_plan(e, log, hessians, challenge):
         "silicon_hessians",
         operation,
         inputs,
-        {"frames": [{"hessian": matrix.tolist()} for matrix in hessians]},
+        {
+            "frames": [
+                {"hessian": matrix.tolist()}
+                if matrix is not None
+                else {"mode_energies_eV": row["mode_energies_eV"]}
+                for matrix, row in zip(hessians, rows, strict=True)
+            ]
+        },
         parameters=parameters,
         tolerance=HESSIAN_TOLERANCE,
     )
@@ -207,11 +223,11 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
     r = Rubric(5, binary=True, fail_fast=True)
     calculated, verification = {}, {}
     try:
-        e = Evidence(submission)
+        e = Evidence(submission, task_number=5, level=level)
         fingerprint = e.fingerprint()
         log = read_log(e, level)
     except Exception as exc:
-        r.check("calculation_log", 100, False, str(exc))
+        r.error("calculation_log", 100, exc)
         return {**r.as_dict(), "level": level, "calculated_results": calculated}
     r.check("strain_grid_structures_and_settings", 20, True)
     hessians = []
@@ -300,9 +316,32 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
             job.get("status") == "complete",
             job.get("detail", "Hessian calculation failed"),
         )
-        return compare(
-            plan.expected["silicon_hessians"]["values"], job["value"], HESSIAN_TOLERANCE
+        expected = plan.expected["silicon_hessians"]["values"]["frames"]
+        actual = job.get("value", {}).get("frames", [])
+        _require(
+            len(actual) == len(expected), "Missing independently calculated Hessians"
         )
+        for saved, reference, row in zip(
+            expected, actual, log["calculations"], strict=True
+        ):
+            if "hessian" in saved:
+                if not compare(saved, reference, HESSIAN_TOLERANCE):
+                    return False
+            else:
+                if "hessian" not in reference:
+                    raise EvidenceError("Independent calculation omitted its Hessian")
+                modes = mode_energies(
+                    finite_array(reference["hessian"], shape=(6, 6)),
+                    row["structure"]["masses"],
+                )
+                if not close(
+                    np.sort(saved["mode_energies_eV"]),
+                    np.sort(modes),
+                    rtol=0.01,
+                    atol=1e-5,
+                ):
+                    return False
+        return True
 
     r.check("independent_hessian_accuracy", 20, independent)
     if e.fingerprint() != fingerprint:

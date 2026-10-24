@@ -10,10 +10,14 @@ import numpy as np
 import pytest
 from ase import units
 from ase.build import bulk
-from corral_md.scoring import WorkflowScorer, check_level1_workflow, check_level2_workflow
-from corral_md.submission import resolve_submission
+from corral_md.scoring import (
+    WorkflowScorer,
+    check_level1_workflow,
+    check_level2_workflow,
+)
 from corral_md.scoring import task_1 as scoring
 from corral_md.scoring.common import EvidenceError
+from corral_md.submission import resolve_submission
 
 
 def _save(path, data):
@@ -45,7 +49,9 @@ def recorded_run(tmp_path_factory):
     rng = np.random.default_rng(17)
     times = np.arange(0, 1501, 2)
     atoms = bulk("Si", "diamond", a=5.43, cubic=True).repeat((3, 3, 3))
-    motion = rng.normal(scale=np.sqrt(8), size=(len(times), 216, 3))
+    # Synthetic D = 1.74e-8 m2/s = 1.74 A2/ps, so each coordinate has
+    # variance 2 * D * dt = 2 * 1.74 * 2 A2. This is not a calibration run.
+    motion = rng.normal(scale=np.sqrt(6.96), size=(len(times), 216, 3))
     motion[times < 800] = 0
     positions = atoms.positions + np.cumsum(motion, axis=0)
     velocities = rng.normal(size=positions.shape)
@@ -98,7 +104,7 @@ run 500000
         root / "manifest.json",
         {
             "artifacts": {"lammps_log": "run.log", "trajectory": "run.lammpstrj"},
-            "results": {"diffusion_m2_s": 2e-8},
+            "results": {"diffusion_m2_s": 1.74e-8},
         },
     )
     return root
@@ -118,10 +124,15 @@ def _grader(level=2):
 def test_reconstructs_known_diffusion_with_only_two_records(submission):
     report = _grader().evaluate(submission)
     assert report["score"] == 1, report
-    assert report["calculated"]["diffusion_m2_s"] == pytest.approx(2e-8, rel=0.1)
+    assert report["calculated"]["diffusion_m2_s"] == pytest.approx(1.74e-8, rel=0.1)
     assert report["calculated"]["analysis_interval_ps"] == [1000, 1500]
     assert 0 < report["calculated"]["uncertainty_95_m2_s"] < 4e-9
     assert sum(c["points"] for c in report["checks"]) == 100
+    assert report["calculated"]["reference_diffusion"] == {
+        "diffusion_m2_s": 1.74e-8,
+        "relative_tolerance": 0.1,
+        "accepted_range_m2_s": pytest.approx([1.566e-8, 1.914e-8], abs=1e-20),
+    }
 
 
 def test_default_scorer_completes_from_recorded_evidence(submission):
@@ -142,6 +153,92 @@ def test_wrong_answer_or_units_cannot_pass(submission, value):
     manifest["results"]["uncertainty_m2_s"] = 1e9
     _save(submission, manifest)
     assert _grader().evaluate(submission)["score"] == 0
+
+
+@pytest.mark.parametrize("factor", [0.5, 2.0])
+def test_consistent_but_wrong_diffusion_fails_reference(submission, factor):
+    original = _grader().evaluate(submission)["calculated"]["diffusion_m2_s"]
+    path = submission.parent / "run.lammpstrj"
+    data = scoring.read_trajectory(path)
+    # Change the actual displacements, preserving linear MSD and its stability.
+    data.positions[:] = data.positions[0] + np.sqrt(factor) * (
+        data.positions - data.positions[0]
+    )
+    _write_dump(path, data)
+    manifest = json.loads(submission.read_text())
+    manifest["results"]["diffusion_m2_s"] = factor * original
+    # Submission metadata cannot replace the evaluator's reference or tolerance.
+    manifest["results"]["uncertainty_m2_s"] = 1e9
+    manifest["reference_diffusion"] = {
+        "diffusion_m2_s": factor * original,
+        "relative_tolerance": 1e9,
+    }
+    _save(submission, manifest)
+
+    result = check_level2_workflow(1).evaluate_submission(submission)
+    report = result.metadata["workflow_evaluation"]
+    assert result.score == 0, report
+    assert report["status"] == "complete"
+    assert report["pending_checks"] == []
+    assert report["calculated"]["diffusion_m2_s"] == pytest.approx(
+        factor * original, rel=1e-8, abs=0
+    )
+    assert [c["name"] for c in report["checks"] if c["status"] != "passed"] == [
+        "reference_diffusion"
+    ]
+    assert "Reference: 1.74e-08" in result.feedback
+
+
+@pytest.mark.parametrize(
+    ("reported", "reconstructed", "expected"),
+    [
+        (1.566e-8, 1.566e-8, 1),
+        (1.914e-8, 1.914e-8, 1),
+        (1.565999e-8, 1.566e-8, 0),
+        (1.914001e-8, 1.914e-8, 0),
+        (1.566e-8, 1.565999e-8, 0),
+        (1.914e-8, 1.914001e-8, 0),
+    ],
+)
+def test_reference_bounds_apply_to_both_coefficients(
+    submission, monkeypatch, reported, reconstructed, expected
+):
+    # Isolate exact boundary decisions from trajectory serialization/fit rounding.
+    diagnostics = _grader().evaluate(submission)["calculated"]
+    monkeypatch.setattr(
+        scoring,
+        "diffusion",
+        lambda *_: {**diagnostics, "diffusion_m2_s": reconstructed},
+    )
+    manifest = json.loads(submission.read_text())
+    manifest["results"]["diffusion_m2_s"] = reported
+    _save(submission, manifest)
+    report = _grader().evaluate(submission)
+    checks = {c["name"]: c for c in report["checks"]}
+    assert checks["reported_diffusion"]["status"] == "passed", report
+    assert report["score"] == expected, report
+    assert checks["reference_diffusion"]["status"] == (
+        "passed" if expected else "failed"
+    )
+
+
+def test_reference_answer_still_requires_trajectory_consistency(submission):
+    original = _grader().evaluate(submission)["calculated"]["diffusion_m2_s"]
+    path = submission.parent / "run.lammpstrj"
+    data = scoring.read_trajectory(path)
+    # Keep the reconstructed value inside the reference range, but far enough
+    # from the reported value to fail the independently bounded MSD comparison.
+    data.positions[:] = data.positions[0] + np.sqrt(1.58e-8 / original) * (
+        data.positions - data.positions[0]
+    )
+    _write_dump(path, data)
+    manifest = json.loads(submission.read_text())
+    manifest["results"]["diffusion_m2_s"] = 1.9e-8
+    _save(submission, manifest)
+    report = _grader().evaluate(submission)
+    assert report["score"] == 0, report
+    checks = {c["name"]: c for c in report["checks"]}
+    assert checks["reported_diffusion"]["status"] == "failed", report
 
 
 @pytest.mark.parametrize(
@@ -167,7 +264,6 @@ def test_wrong_protocol_and_state_resets_fail(submission, old, new):
     "mutation",
     [
         "truncated",
-        "missing_velocities",
         "nonfinite",
         "identity",
         "frozen",
@@ -179,9 +275,7 @@ def test_wrong_protocol_and_state_resets_fail(submission, old, new):
 )
 def test_bad_trajectory_fails(submission, mutation):
     path = submission.parent / "run.lammpstrj"
-    if mutation == "missing_velocities":
-        path.write_text(path.read_text().replace(" vx ", " wrong "))
-    elif mutation == "identity":
+    if mutation == "identity":
         path.write_text(path.read_text().replace("\n216 1 ", "\n215 1 ", 1))
     elif mutation == "nonfinite":
         path.write_text(path.read_text().replace("0 16.29", "0 nan", 1))
@@ -208,7 +302,32 @@ def test_bad_trajectory_fails(submission, mutation):
     assert _grader().evaluate(submission)["score"] == 0
 
 
-def test_level1_stops_at_preparation_without_results(submission):
+def test_temperatures_come_from_thermo_when_velocity_columns_are_absent(submission):
+    path = submission.parent / "run.lammpstrj"
+    path.write_text(path.read_text().replace(" vx ", " wrong "))
+    report = _grader().evaluate(submission)
+    assert report["score"] == 1, report
+
+
+def test_production_only_trajectory_is_sufficient_for_diffusion(submission):
+    path = submission.parent / "run.lammpstrj"
+    data = scoring.read_trajectory(path)
+    selected = data.steps >= 1000000
+    _write_dump(
+        path,
+        scoring.Trajectory(
+            data.steps[selected],
+            data.cells[selected],
+            data.positions[selected],
+            data.velocities[selected],
+        ),
+    )
+    assert _grader().evaluate(submission)["score"] == 1
+
+
+@pytest.mark.parametrize("phase", ["crystalline", "liquid"])
+@pytest.mark.parametrize("mutation", [None, "wrong_protocol", "truncated", "hot"])
+def test_level1_stops_at_preparation_without_results(submission, phase, mutation):
     log = submission.parent / "run.log"
     text = log.read_text().replace(
         "unfix heat\nfix production all npt temp 2500 2500 0.1 iso 0 0 1\nrun 500000\n",
@@ -225,7 +344,19 @@ def test_level1_stops_at_preparation_without_results(submission):
     )
     path = submission.parent / "run.lammpstrj"
     data = scoring.read_trajectory(path)
+    if phase == "crystalline":
+        vibration = np.random.default_rng(23).normal(
+            scale=0.1, size=data.positions.shape
+        )
+        vibration[0] = 0
+        data.positions[:] = data.positions[0] + vibration
     mask = data.steps <= 1000000
+    if mutation == "wrong_protocol":
+        log.write_text(log.read_text().replace("temp 300 2500", "temp 300 2000"))
+    elif mutation == "truncated":
+        mask = data.steps < 1000000
+    elif mutation == "hot":
+        data.velocities[data.steps == 1000000] *= 3
     _write_dump(
         path,
         scoring.Trajectory(
@@ -239,9 +370,28 @@ def test_level1_stops_at_preparation_without_results(submission):
     del manifest["results"]
     _save(submission, manifest)
     report = check_level1_workflow(1).evaluate(submission)
+    if mutation is not None:
+        assert report["score"] == 0, report
+        return
     assert report["score"] == 1, report
+    assert report["earned_points"] == report["possible_points"] == 100
+    assert report["calculated"]["phase"]["liquid_criteria_met"] == (phase == "liquid")
+    assert "liquid_state" not in {c["name"] for c in report["checks"]}
     assert "diffusion_m2_s" not in report["calculated"]
+    assert "reference_diffusion" not in {c["name"] for c in report["checks"]}
     assert _grader().evaluate(submission)["score"] == 0
+
+
+def test_level2_still_requires_a_mobile_liquid(submission):
+    path = submission.parent / "run.lammpstrj"
+    data = scoring.read_trajectory(path)
+    vibration = np.random.default_rng(23).normal(scale=0.1, size=data.positions.shape)
+    vibration[0] = 0
+    data.positions[:] = data.positions[0] + vibration
+    _write_dump(path, data)
+    report = _grader().evaluate(submission)
+    assert report["score"] == 0, report
+    assert "do not support a mobile liquid" in str(report)
 
 
 def test_collective_translation_and_cell_breathing_are_removed(recorded_run):
@@ -367,3 +517,16 @@ def test_environment_records_task1_and_seeds_no_examples(
     assert "trajectory: /workspace/output/heat.lammpstrj" in result
     assert "log: /workspace/output/heat.recorded.log" in result
     assert source.read_text() == original
+
+
+def test_orthogonal_cell_written_in_triclinic_dump_format(submission):
+    path = submission.parent / "run.lammpstrj"
+    lines = path.read_text().splitlines()
+    for i, line in enumerate(lines):
+        if line == "ITEM: BOX BOUNDS pp pp pp":
+            lines[i] = "ITEM: BOX BOUNDS xy xz yz pp pp pp"
+            for offset in (1, 2, 3):
+                lines[i + offset] += " 0.0"
+    path.write_text("\n".join(lines) + "\n")
+    report = _grader().evaluate(submission)
+    assert report["score"] == 1, report

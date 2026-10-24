@@ -8,7 +8,6 @@ model. No submitted scripts, reports, settings documents, or BZ samples are used
 from __future__ import annotations
 
 import itertools
-import json
 from functools import lru_cache
 
 import numpy as np
@@ -24,6 +23,8 @@ from corral_md.scoring.common import (
 )
 from corral_md.scoring.level1_trusted import PINNED_TEACHER_SHA256
 from corral_md.scoring.verification import Plan, apply_verification
+
+from .formats import artifact_reader, normalize_force_record
 
 STANDARD = 3.89 / 2 * (np.ones((3, 3)) - np.eye(3))
 NODES = np.array(
@@ -45,14 +46,18 @@ def require(condition, message):
 
 
 def read_record(e):
-    with np.load(e.artifact("force_log"), allow_pickle=False) as archive:
-        record = {key: archive[key] for key in archive.files}
-    record["metadata"] = json.loads(str(record["metadata"].item()))
-    return record
+    try:
+        with np.load(e.artifact("force_log"), allow_pickle=False) as archive:
+            record = {key: archive[key] for key in archive.files}
+    except ValueError as exc:
+        raise EvidenceError(f"Unreadable numerical NPZ archive: {exc}") from exc
+    return normalize_force_record(record)
 
 
+@artifact_reader
 def geometry(record):
-    positions = finite_array(record["positions_A"], shape=(13, 125, 3))
+    positions = finite_array(record["positions_A"], ndim=3)
+    require(positions.shape[1:] == (125, 3), "Expected force calculations for Pd125")
     cell = finite_array(record["cell_A"], shape=(3, 3)) / 5
     require(
         close(cell @ cell.T, STANDARD @ STANDARD.T, rtol=0, atol=1e-6)
@@ -61,7 +66,10 @@ def geometry(record):
         and close(record["masses_amu"], np.full(125, 106.42), rtol=0, atol=1e-4),
         "Expected the fixed periodic FCC Pd125 cell, a=3.89 A, with Pd masses",
     )
-    fractional = (positions[0] - positions[0, 0]) @ np.linalg.inv(cell)
+    displacement = finite_array(record["displacements_A"], shape=(len(positions), 3))
+    reference = positions[0].copy()
+    reference[0] -= displacement[0]
+    fractional = (reference - reference[0]) @ np.linalg.inv(cell)
     sites = np.rint(fractional).astype(int)
     require(
         close(fractional, sites, rtol=0, atol=1e-6)
@@ -72,23 +80,10 @@ def geometry(record):
     sites = (sites + 2) % 5 - 2
     lookup = {tuple(site): i for i, site in enumerate(sites)}
     opposite = np.array([lookup[tuple(-site)] for site in sites])
-    displacement = finite_array(record["displacements_A"], shape=(13, 3))
-    delta = float(displacement[1, 0])
-    require(delta > 0, "Displacement magnitude must be positive")
-    expected = np.vstack(
-        [
-            np.zeros((1, 3)),
-            delta * np.eye(3),
-            -delta * np.eye(3),
-            delta / 2 * np.eye(3),
-            -delta / 2 * np.eye(3),
-        ]
-    )
-    require(
-        close(displacement, expected, rtol=0, atol=1e-10),
-        "Retain central displacements at delta and delta/2 in the documented order",
-    )
-    error = positions - positions[0]
+    nonzero = np.abs(displacement[np.abs(displacement) > 1e-12])
+    require(nonzero.size > 0, "No displaced force calculations")
+    delta = float(nonzero.max())
+    error = positions - reference
     error[:, 0] -= displacement
     scaled = error @ np.linalg.inv(5 * cell)
     require(
@@ -114,18 +109,52 @@ def cubic_average(phi, cell, sites):
     return average / 48
 
 
-def prepare(record):
+@artifact_reader
+def prepare(record, *, require_mode_accuracy=True):
     cell, sites, opposite, delta = geometry(record)
-    finite_array(record["energies_eV"], shape=(13,))
-    forces = finite_array(record["forces_eV_A"], shape=(13, 125, 3))
-    coarse = -((forces[1:4] - forces[4:7]) / (2 * delta)).transpose(1, 2, 0)
-    fine = -((forces[7:10] - forces[10:13]) / delta).transpose(1, 2, 0)
-    raw = finite_array(record["force_constants_eV_A2"], shape=(125, 3, 3))
+    displacements = finite_array(record["displacements_A"], ndim=2)
+    forces = finite_array(record["forces_eV_A"], shape=(len(displacements), 125, 3))
+    if "energies_eV" in record:
+        finite_array(record["energies_eV"], shape=(len(displacements),))
+    sizes = sorted(
+        set(np.round(np.abs(displacements[np.abs(displacements) > 1e-12]), 12))
+    )
+    derivatives = []
+    for size in sizes:
+        columns = []
+        for axis in np.eye(3):
+            plus = np.flatnonzero(
+                np.all(
+                    np.isclose(displacements, size * axis, rtol=0, atol=1e-10), axis=1
+                )
+            )
+            minus = np.flatnonzero(
+                np.all(
+                    np.isclose(displacements, -size * axis, rtol=0, atol=1e-10), axis=1
+                )
+            )
+            require(
+                len(plus) == len(minus) == 1,
+                "Retain both central force differences for every displaced direction",
+            )
+            columns.append(-(forces[plus[0]] - forces[minus[0]]) / (2 * size))
+        derivatives.append(np.stack(columns, axis=-1))
+    fine, coarse = derivatives[0], derivatives[-1]
+    raw = finite_array(record.get("force_constants_eV_A2", fine), shape=(125, 3, 3))
+    if not any(close(raw, candidate, atol=1e-7) for candidate in derivatives):
+        transposed = raw.swapaxes(-1, -2)
+        if any(close(transposed, candidate, atol=1e-7) for candidate in derivatives):
+            # Both (force axis, displacement axis) and its transpose are common
+            # tensor conventions. Recorded force differences disambiguate them.
+            raw = transposed
     metadata = record["metadata"]
     require(
-        metadata["checkpoint_sha256"] == PINNED_TEACHER_SHA256
-        and metadata["default_dtype"] in {"float32", "float64"}
-        and metadata["dispersion"] is False,
+        (
+            "checkpoint_sha256" not in metadata
+            or metadata["checkpoint_sha256"] == PINNED_TEACHER_SHA256
+        )
+        and metadata.get("default_dtype", "float64") in {"float32", "float64"}
+        and metadata.get("dispersion", False) is False,
         "Force record must identify the supplied checkpoint without dispersion",
     )
     if metadata["method"] == "analytical":
@@ -135,7 +164,11 @@ def prepare(record):
         )
         expected = matrix.reshape(125, 3, 125, 3)[:, :, 0, :]
     elif metadata["method"] == "central_difference":
-        expected = fine
+        # The task permits choosing an accurate displacement; the smallest
+        # retained displacement need not be the one used for the final result.
+        expected = min(
+            derivatives, key=lambda candidate: float(np.max(abs(raw - candidate)))
+        )
     else:
         raise UnsupportedEvidence("Unsupported derivative method in the force record")
     require(
@@ -152,12 +185,15 @@ def prepare(record):
         ),
         "acoustic_residual_eV_A2": float(np.max(abs(raw.sum(axis=0)))),
         "cubic_symmetry_residual_eV_A2": float(np.max(abs(raw - cubic))),
-        "displacement_sensitivity_eV_A2": float(np.max(abs(fine - coarse))),
     }
+    if len(derivatives) > 1:
+        diagnostics["displacement_sensitivity_eV_A2"] = float(
+            np.max(abs(fine - coarse))
+        )
     scale = max(float(np.max(abs(raw))), 1e-8)
     accuracy = max(*diagnostics.values(), float(np.max(abs(raw - fine))))
     if accuracy > 1e-4 + 0.01 * scale:
-        raise UnsupportedEvidence(
+        raise EvidenceError(
             "Force constants need better displacement/derivative accuracy or symmetry/acoustic checks"
         )
     q = grid([8, 8, 8], [0.5, 0.5, 0.5])
@@ -167,8 +203,8 @@ def prepare(record):
         for change in (fine - coarse, raw - fine, raw - phi)
     )
     tolerance = max(1e-7, float(ENERGY_FACTOR * np.sqrt(error)))
-    if tolerance > 5e-4:
-        raise UnsupportedEvidence(
+    if require_mode_accuracy and tolerance > 5e-4:
+        raise EvidenceError(
             "Numerical mode uncertainty exceeds 0.5 meV; improve force accuracy"
         )
     diagnostics["imaginary_tolerance_eV"] = tolerance
@@ -384,7 +420,7 @@ def build_plan(e, challenge):
     parameters = {
         "model": "teacher.model",
         "dispersion": False,
-        "default_dtype": record["metadata"]["default_dtype"],
+        "default_dtype": record["metadata"].get("default_dtype", "float64"),
     }
     targets = ["independent_model_calculation"]
     plan.frames(
@@ -393,12 +429,17 @@ def build_plan(e, challenge):
         count=4,
         parameters=parameters,
         targets=targets,
-        properties=["energy", "forces"],
+        properties=(["energy", "forces"] if "energies_eV" in record else ["forces"]),
         values=[
-            {"energy": float(energy), "forces": forces.tolist()}
-            for energy, forces in zip(
-                record["energies_eV"], record["forces_eV_A"], strict=True
-            )
+            {
+                "forces": forces.tolist(),
+                **(
+                    {"energy": float(record["energies_eV"][index])}
+                    if "energies_eV" in record
+                    else {}
+                ),
+            }
+            for index, forces in enumerate(record["forces_eV_A"])
         ],
         tolerance={"energy": [1e-5, 1e-3], "forces": [1e-5, 1e-4]},
     )
@@ -420,15 +461,15 @@ def evaluate_submission(submission, *, level=2, verifier=None, review=None):
     r = Rubric(4, binary=True, fail_fast=True)
     calculated = {}
     try:
-        e = Evidence(submission)
+        e = Evidence(submission, task_number=4, level=level)
         fingerprint = e.fingerprint()
     except (OSError, ValueError, TypeError) as exc:
-        r.check("readable_submission", 100, False, str(exc))
+        r.error("readable_submission", 100, exc)
         return {**r.as_dict(), "level": level, "calculated_results": calculated}
 
     @lru_cache(None)
     def prepared():
-        return prepare(read_record(e))
+        return prepare(read_record(e), require_mode_accuracy=level == 2)
 
     def constants():
         _, _, diagnostics = prepared()

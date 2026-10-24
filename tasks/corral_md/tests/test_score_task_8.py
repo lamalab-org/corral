@@ -421,7 +421,6 @@ def test_poor_predictions_are_a_valid_scientific_outcome(tmp_path, runtime):
         "soap_species",
         "soap_local",
         "cv_metric",
-        "missing_cv_metric",
         "nan",
     ],
 )
@@ -486,8 +485,6 @@ def test_invalid_calculations_fail(tmp_path, runtime, mutation):
         candidate["config"]["soap"]["average"] = "off"
     elif mutation == "cv_metric":
         candidate["folds"][0]["metrics"]["rmse"] += 0.1
-    elif mutation == "missing_cv_metric":
-        candidate["folds"][0]["metrics"].pop("rmse")
     else:
         rows[1]["rows"][0]["energy_eV"] = float("nan")
     write_log(tmp_path, rows)
@@ -585,3 +582,62 @@ def test_real_soap_pipeline_roundtrip(tmp_path, runtime, monkeypatch, kind):
     path, _ = make_submission(tmp_path, runtime, preprocessing=kind)
     report = scorer(backend=independent).evaluate(path)
     assert report["score"] == 1, report
+
+
+def test_dataset_rows_need_no_start_dataset_end_wrapper(tmp_path, runtime):
+    path, _ = make_submission(tmp_path, runtime, level=1)
+    original = read_log(tmp_path)
+    header, dataset = original[:2]
+    rows = [
+        {
+            **row,
+            "row_id": i,
+            "seed": dataset["seed"],
+            "rng": dataset["rng"],
+            "model_sha256": header["model_sha256"],
+            "default_dtype": header["default_dtype"],
+        }
+        for i, row in enumerate(dataset["rows"])
+    ]
+    write_log(tmp_path, rows)
+    report = scorer(level=1).evaluate(path)
+    assert report["score"] == 1, report
+
+
+def test_validation_metrics_can_be_derived_from_retained_fits(tmp_path, runtime):
+    path, _ = make_submission(tmp_path, runtime)
+    rows = read_log(tmp_path)
+    for row in rows:
+        if row.get("event") == "candidate":
+            for fold in row["folds"]:
+                fold["metrics"].pop("rmse")
+    write_log(tmp_path, rows)
+    assert scorer().evaluate(path)["score"] == 1
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_dataset_event_labels_are_not_a_required_field_name(tmp_path, runtime, level):
+    path, _ = make_submission(tmp_path, runtime, level=level)
+    rows = read_log(tmp_path)
+    for row in rows:
+        row["type"] = row.pop("event")
+    rows[0]["type"] = "metadata"
+    write_log(tmp_path, rows)
+    assert scorer(level=level).evaluate(path)["score"] == 1
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_dataset_identity_uses_independent_checks_and_record_order(
+    tmp_path, runtime, level
+):
+    path, _ = make_submission(tmp_path, runtime, level=level)
+    rows = read_log(tmp_path)
+    for key in ("model_sha256", "units", "default_dtype"):
+        rows[0].pop(key)
+    for row in rows:
+        if row.get("event") == "dataset":
+            row.pop("rng")
+            for structure in row["rows"]:
+                structure.pop("row_id")
+    write_log(tmp_path, rows)
+    assert scorer(level=level).evaluate(path)["score"] == 1

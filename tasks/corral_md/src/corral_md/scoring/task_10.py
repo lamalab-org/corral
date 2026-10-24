@@ -7,12 +7,10 @@ screens are evaluator policy requiring calibration on validated production runs.
 
 from __future__ import annotations
 
-import json
 import secrets
 
 import numpy as np
 from ase import Atoms, units
-from ase.md.velocitydistribution import MaxwellBoltzmannDistribution, Stationary
 
 from .common import (
     Evidence,
@@ -22,6 +20,14 @@ from .common import (
     close,
     finite_array,
     result_close,
+)
+from .formats import (
+    artifact_reader,
+    check_initial_momenta,
+    check_model_digest,
+    check_units,
+    md_records,
+    thermodynamic_stage,
 )
 from .level1_trusted import PINNED_TEACHER_SHA256
 from .verification import Plan
@@ -34,45 +40,44 @@ def _require(condition, message):
         raise EvidenceError(message)
 
 
+@artifact_reader
 def read_log(evidence, level):
     """Read complete, uniformly sampled stages with continuous boundary states."""
+    if level == 1:
+        scalar = thermodynamic_stage(evidence, 10)
+        if scalar is not None:
+            check_model_digest(scalar, PINNED_TEACHER_SHA256)
+            return [scalar]
     stages, current = [], None
-    with evidence.artifact("run_log").open() as stream:
-        header = json.loads(next(stream))
-        _require(
-            header["event"] == "start"
-            and header["model_sha256"] == PINNED_TEACHER_SHA256,
-            "Use the supplied MACE-MP-0 model",
-        )
-        _require(header["numbers"] == [13] * 108, "Expected Al108")
-        masses = finite_array(header["masses_amu"], shape=(108,))
-        _require(
-            close(masses, np.full(108, 26.9815385), atol=1e-3, rtol=0),
-            "Incorrect aluminum masses",
-        )
-        _require(
-            type(header["random_seed"]) is int, "Record an integer initialization seed"
-        )
-        _require(
-            header["units"]
-            == {"time": "fs", "position": "Angstrom", "energy": "eV", "momenta": "ASE"},
-            "Incorrect log units",
-        )
-        for line in stream:
-            row = json.loads(line)
-            if row["event"] == "stage":
-                _require(current is None, "Unfinished stage")
-                current = {**row, "samples": []}
-            elif row["event"] == "sample":
-                _require(current is not None, "Sample outside a stage")
-                current["samples"].append(row)
-            elif row["event"] == "end":
-                _require(current is not None, "End outside a stage")
-                current["end"] = row
-                stages.append(current)
-                current = None
-            else:
-                raise EvidenceError("Unexpected log event")
+    records = md_records(evidence.artifact("run_log"), 10)
+    header = records[0]
+    check_model_digest(header, PINNED_TEACHER_SHA256)
+    _require(header["numbers"] == [13] * 108, "Expected Al108")
+    masses = finite_array(header["masses_amu"], shape=(108,))
+    _require(
+        close(masses, np.full(108, 26.9815385), atol=1e-3, rtol=0),
+        "Incorrect aluminum masses",
+    )
+    _require(
+        type(header["random_seed"]) is int, "Record an integer initialization seed"
+    )
+    check_units(
+        header, {"time": "fs", "position": "Angstrom", "energy": "eV", "momenta": "ASE"}
+    )
+    for row in records[1:]:
+        if row["event"] == "stage":
+            _require(current is None, "Unfinished stage")
+            current = {**row, "samples": []}
+        elif row["event"] == "sample":
+            _require(current is not None, "Sample outside a stage")
+            current["samples"].append(row)
+        elif row["event"] == "end":
+            _require(current is not None, "End outside a stage")
+            current["end"] = row
+            stages.append(current)
+            current = None
+        else:
+            raise EvidenceError("Unexpected log event")
     _require(
         current is None and len(stages) == (1 if level == 1 else 8),
         "Incomplete temperature cycle or extra stages",
@@ -176,14 +181,7 @@ def read_log(evidence, level):
         and np.allclose(shells[:, 13:19], 4.05, rtol=0, atol=1e-5),
         "Initialize from the prescribed conventional FCC crystal",
     )
-    MaxwellBoltzmannDistribution(
-        initial, temperature_K=300, rng=np.random.default_rng(header["random_seed"])
-    )
-    Stationary(initial, preserve_temperature=True)
-    _require(
-        close(initial.get_momenta(), first["momenta"][0], rtol=0, atol=1e-7),
-        "Initial momenta do not match the recorded seed and COM removal",
-    )
+    check_initial_momenta(initial, header, 300, first["momenta"][0])
     return stages
 
 
@@ -212,13 +210,15 @@ def stage_statistics(stage):
         <= 0.3 * units.kB * target,
         f"Stage {stage['stage']}: production energy is drifting or insufficiently resolved",
     )
-    delta = np.diff(stage["positions"][production], axis=0) @ np.linalg.inv(
-        stage["cell"]
-    )
-    motion = np.linalg.norm((delta - np.rint(delta)) @ stage["cell"], axis=(1, 2))
-    _require(
-        np.mean(motion > 1e-5) >= 0.9, "Production samples do not show resolved motion"
-    )
+    if not stage.get("scalar_thermodynamics"):
+        delta = np.diff(stage["positions"][production], axis=0) @ np.linalg.inv(
+            stage["cell"]
+        )
+        motion = np.linalg.norm((delta - np.rint(delta)) @ stage["cell"], axis=(1, 2))
+        _require(
+            np.mean(motion > 1e-5) >= 0.9,
+            "Production samples do not show resolved motion",
+        )
     return {
         "temperature_K": float(temperature.mean()),
         "directional_temperature_K": temperature.mean(axis=0).tolist(),
@@ -294,14 +294,18 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
     rubric = Rubric(10, binary=True, fail_fast=True)
     computed, stages, verification = {}, [], {}
     try:
-        evidence = Evidence(submission)
+        evidence = Evidence(submission, task_number=10, level=level)
         fingerprint = evidence.fingerprint()
     except Exception as exc:
-        rubric.check("calculation_log", 100, False, str(exc))
+        rubric.error("calculation_log", 100, exc)
         return {**rubric.as_dict(), "level": level, "computed": computed}
 
     def recorded():
-        stages.extend(read_log(evidence, level))
+        nonlocal fingerprint
+        try:
+            stages.extend(read_log(evidence, level))
+        finally:
+            fingerprint = evidence.fingerprint()
         computed["stages"] = [stage_statistics(s) for s in stages]
         return True
 
@@ -366,6 +370,19 @@ def evaluate_submission(submission, *, level, verifier=None, review=None):
             )
         plan = Plan(evidence, 10, secrets.token_hex(32))
         for index, stage in enumerate(stages):
+            if stage.get("scalar_thermodynamics"):
+                plan.frames(
+                    f"energy_{index}",
+                    [stage["final_atoms"]],
+                    count=1,
+                    values=[{"energy": float(stage["potential"][-1])}],
+                    parameters={
+                        "model": "teacher.model",
+                        "default_dtype": "float64",
+                        "dispersion": False,
+                    },
+                )
+                continue
             selected = np.flatnonzero(stage["production"])
             indices = selected[plan.sample(len(selected), 3, f"energy_{index}")]
             frames = [

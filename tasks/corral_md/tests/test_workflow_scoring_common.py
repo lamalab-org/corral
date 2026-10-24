@@ -6,6 +6,12 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from corral_md.scoring.common import (
+    Evidence,
+    EvidenceError,
+    Rubric,
+    UnsupportedEvidence,
+)
 from corral_md.scoring.evaluator import (
     PendingReviewError,
     WorkflowScorer,
@@ -14,12 +20,6 @@ from corral_md.scoring.evaluator import (
     main,
 )
 from corral_md.submission import resolve_submission
-from corral_md.scoring.common import (
-    Evidence,
-    EvidenceError,
-    Rubric,
-    UnsupportedEvidence,
-)
 
 
 def test_columnar_json_frames_keep_labels_geometry_and_time_aligned(tmp_path):
@@ -223,7 +223,7 @@ def test_rubric_distinguishes_failure_and_unverified():
     rubric.check("valid", 25, True)
     rubric.check("invalid", 25, lambda: (False, "wrong value"))
     rubric.check("unsupported", 25, None)
-    rubric.check("missing", 25, lambda: {}["missing"])
+    rubric.error("missing", 25, EvidenceError("Missing required scientific quantity"))
     assert rubric.score is None
     assert rubric.as_dict()["score_bounds"] == [0.25, 0.5]
     assert rubric.as_dict()["pending_points"] == 25
@@ -233,7 +233,7 @@ def test_rubric_distinguishes_failure_and_unverified():
         "unverified",
         "failed",
     ]
-    assert "KeyError" in rubric.checks[-1]["detail"]
+    assert "EvidenceError" in rubric.checks[-1]["detail"]
 
 
 def test_binary_rubric_is_terminal_on_failure_and_keeps_pending_distinct():
@@ -261,9 +261,9 @@ def test_workflow_failure_skips_later_checks_and_modal_verification(manifest):
 
     report = WorkflowScorer(10, verifier=Verifier()).evaluate(path)
     assert report["score"] == 0
-    assert report["checks"][0]["name"] == "recorded_temperature_cycle"
-    assert report["checks"][1]["status"] == "skipped"
-    assert report["checks"][2]["status"] == "skipped"
+    assert report["checks"][0]["name"] == "calculation_log"
+    assert report["checks"][0]["status"] == "failed"
+    assert all(check["status"] != "passed" for check in report["checks"])
 
 
 def test_missing_log_fails_before_task_evaluation(manifest):
