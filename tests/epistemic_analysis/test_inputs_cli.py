@@ -434,14 +434,16 @@ def test_multiple_saved_configurations_require_explicit_selection(tmp_path):
     assert len(load_annotations(entry, configuration="0")) == 1
 
 
-def test_optional_dependencies_are_not_imported_by_library():
+def test_provider_and_cli_dependencies_are_not_imported_by_library():
     import subprocess
 
+    # dotenv is imported transitively by the core agent/tool dependencies.
+    # Annotation providers and the CLI must still remain unloaded.
     subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys; import corral.epistemic_analysis; assert not {'litellm', 'langfuse', 'dotenv', 'fire'} & sys.modules.keys()",
+            "import sys; import corral.epistemic_analysis; assert not {'litellm', 'langfuse', 'fire'} & sys.modules.keys()",
         ],
         check=True,
     )

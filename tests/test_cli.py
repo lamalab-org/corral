@@ -593,14 +593,16 @@ def test_run_executes_one_task_without_a_benchmark(
     default_limit,
     max_iterations,
 ):
+    from corral import run
+
     iteration_limits = []
-    original_execute = cli.execute_task
+    original_execute = run.execute_task
 
     async def record_execute(**kwargs):
         iteration_limits.append(kwargs["task"].max_iterations)
         return await original_execute(**kwargs)
 
-    monkeypatch.setattr(cli, "execute_task", record_execute)
+    monkeypatch.setattr(run, "execute_task", record_execute)
     monkeypatch.setattr(
         cli,
         "load_environment_group",

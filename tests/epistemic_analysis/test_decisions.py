@@ -227,8 +227,9 @@ async def test_real_sdk_transport_batches_motifs_and_preserves_observations():
         assert motif.name not in rendered_report
     for description in RELATION_DESCRIPTIONS.values():
         assert description in request["input"]
-    assert "You do not\nreceive previous classifier results" in request["input"]
-    assert "Reassess every motif from the supplied\ntrajectory" in request["input"]
+    input_text = " ".join(request["input"].split())
+    assert "You do not receive previous classifier results" in input_text
+    assert "Reassess every motif from the supplied trajectory" in input_text
     convergence = next(
         q for q in request["questions"] if q["name"] == "convergent_multi_test_evidence"
     )

@@ -57,11 +57,9 @@ def test_current_prompt_snapshots_and_shared_jev_criteria_match():
 
 
 def test_current_pattern_definition_tables_match_snapshots():
-    assert (
-        reporting.build_productive_motifs_latex()
-        == (FIXTURES / "productive_motifs.tex").read_text()
-    )
-    assert (
-        reporting.build_reasoning_breakdowns_latex()
-        == (FIXTURES / "reasoning_breakdowns.tex").read_text()
-    )
+    assert reporting.build_productive_motifs_latex() == (
+        FIXTURES / "productive_motifs.tex"
+    ).read_text().removesuffix("\n")
+    assert reporting.build_reasoning_breakdowns_latex() == (
+        FIXTURES / "reasoning_breakdowns.tex"
+    ).read_text().removesuffix("\n")

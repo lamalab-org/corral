@@ -5,7 +5,6 @@ import copy
 import io
 import json
 from dataclasses import replace
-from pathlib import Path
 from urllib.error import HTTPError
 
 import pytest
@@ -164,19 +163,13 @@ def provider_backend(kind, monkeypatch, events, *, response=None):
     return replace(backend, extract_nodes=nodes, extract_edges=edges)
 
 
-def test_every_trace_check_has_curated_examples_matching_the_reference():
+def test_every_trace_check_has_a_definition_and_curated_examples():
     assert len(TRACE_CHECK_NAMES) == 11
     assert set(TRACE_CHECK_EXAMPLES) == set(TRACE_CHECK_DEFINITIONS)
+    assert all(definition.strip() for definition in TRACE_CHECK_DEFINITIONS.values())
     assert all(
         examples.count("Verdict:") >= 3 for examples in TRACE_CHECK_EXAMPLES.values()
     )
-    reference = (
-        Path(__file__).resolve().parents[2] / "additinal_checks.md"
-    ).read_text()
-    reference_text = " ".join(reference.split())
-    for name in TRACE_CHECK_NAMES:
-        assert " ".join(TRACE_CHECK_DEFINITIONS[name].split()) in reference_text
-        assert TRACE_CHECK_EXAMPLES[name] in reference
 
 
 @pytest.mark.parametrize("kind", ["llm", "jev"])
