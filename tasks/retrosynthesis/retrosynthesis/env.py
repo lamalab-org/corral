@@ -7,6 +7,7 @@ from pathlib import Path
 from time import perf_counter
 
 from retrosynthesis.checks import check_database
+from retrosynthesis.route_contract import validate_contract
 from retrosynthesis.score import (
     check_apply_template,
     check_list_molecules,
@@ -60,6 +61,15 @@ def load_tasks_from_json(
                 if raw_target == "input_from_task"
                 else raw_target
             )
+            constraints = {}
+            if task["scoring_function"] in {
+                "score_final",
+                "check_reactants",
+                "score_final_without_price",
+            }:
+                contract = task["route_constraints"]
+                validate_contract(contract)
+                constraints["route_constraints"] = contract
             tasks[task_id] = TaskDefinition(
                 name=task["name"],
                 description=task["input"]["prompt"],
@@ -67,6 +77,7 @@ def load_tasks_from_json(
                 scoring_fn=with_fixed_inputs(
                     SCORING_FUNCTIONS[str(task["scoring_function"])],
                     target=scoring_target,
+                    **constraints,
                 ),
                 scoring_inputs=raw_target,
                 submission_format=task.get("submission_format", ""),
@@ -74,6 +85,13 @@ def load_tasks_from_json(
                 initial_input=initial_input,
                 prompt_fn=_retro_prompt,
                 resolve_answer=False,
+                # Root identity and the question's step limits now affect grading.
+                scorer_version="retrosynthesis-route-contract-v2"
+                if constraints
+                else None,
+                execution_version="retrosynthesis-route-contract-v2"
+                if constraints
+                else None,
             )
     return tasks
 

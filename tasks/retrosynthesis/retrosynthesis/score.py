@@ -4,6 +4,7 @@ import json
 import psycopg2
 from loguru import logger
 from rdkit import Chem
+from retrosynthesis.route_contract import matches_contract, validate_contract
 from retrosynthesis.retrosynthesis_utils import (
     apply_template_retro,
     check_price,
@@ -74,7 +75,9 @@ def validate_reactions_with_products(node, expected_product=None):
     return valid
 
 
-def score_final(prediction: dict, target: dict) -> float:
+def score_final(
+    prediction: dict, target: dict, *, route_constraints: dict | None = None
+) -> float:
     """
     Function to score the retrosynthesis route based on the provided conditions.
     These conditions include:
@@ -90,6 +93,8 @@ def score_final(prediction: dict, target: dict) -> float:
     Returns:
         float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.
     """
+    if route_constraints is not None:
+        validate_contract(route_constraints)
     try:
         max_steps = int(target.get("max_steps"))
         if max_steps is None:
@@ -106,6 +111,10 @@ def score_final(prediction: dict, target: dict) -> float:
 
         # Step 0: Check if the number of reactions exceeds max_steps
         num_reactions = count_reactions(prediction)
+        if route_constraints is not None and not matches_contract(
+            prediction, num_reactions, route_constraints
+        ):
+            return 0.0
         if num_reactions > max_steps:
             return 0.0
 
@@ -147,7 +156,9 @@ def score_final(prediction: dict, target: dict) -> float:
         return 0.0
 
 
-def score_final_without_price(prediction: dict, target: list) -> float:
+def score_final_without_price(
+    prediction: dict, target: list, *, route_constraints: dict | None = None
+) -> float:
     """
     Function to score the retrosynthesis route based on the conditions:
         - All reactions must be valid.
@@ -162,9 +173,15 @@ def score_final_without_price(prediction: dict, target: list) -> float:
     Returns:
         1.0 if all conditions are met, else 0.0.
     """
+    if route_constraints is not None:
+        validate_contract(route_constraints)
     prediction = prediction.replace("```json", "").replace("```", "").strip()
     try:
         prediction = json.loads(prediction)
+        if route_constraints is not None and not matches_contract(
+            prediction, count_reactions(prediction), route_constraints
+        ):
+            return 0.0
         # Step 1: Validate all reactions in the pathway
         if not validate_reactions_with_products(prediction):
             return 0.0
@@ -218,14 +235,18 @@ def score_final_without_price(prediction: dict, target: list) -> float:
         return 0.0
 
 
-def check_reactants(prediction: dict, target: list) -> float:
+def check_reactants(
+    prediction: dict, target: list, *, route_constraints: dict | None = None
+) -> float:
     """Require valid catalog reactions as well as the expected leaf molecules.
 
     ``target`` is the list of required starting-material SMILES. As before,
     their comparison ignores atom maps and stereochemistry and permits extra
     leaves, but every leaf must now be connected by a validated reaction.
     """
-    return score_final_without_price(prediction, target)
+    return score_final_without_price(
+        prediction, target, route_constraints=route_constraints
+    )
 
 
 def check_template(prediction: str, target: str) -> float:
