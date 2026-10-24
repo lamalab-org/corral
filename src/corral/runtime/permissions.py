@@ -538,6 +538,11 @@ def drop_privileges(
                 "LANG",
                 "LC_ALL",
                 "LD_LIBRARY_PATH",
+                # Retain the launcher's GPU assignment across tool workers.
+                "CUDA_VISIBLE_DEVICES",
+                "CUDA_HOME",
+                "CUDA_PATH",
+                "NVIDIA_VISIBLE_DEVICES",
                 # Numeric libraries may be imported only after this boundary.
                 # Keep resource controls while stripping provider credentials.
                 "OPENBLAS_NUM_THREADS",

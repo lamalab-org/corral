@@ -1,25 +1,34 @@
-"""Saved-force reconstruction, independent phonon sums, and evidence defects."""
+"""Task 4 recording, independent phonon reconstruction, and failure cases."""
 
+import copy
+import itertools
 import json
-import pickle
 
 import numpy as np
 import pytest
 from ase import units
-from ase.calculators.singlepoint import SinglePointCalculator
-from corral_md.workflow_scoring.common import Evidence, Rubric
-from corral_md.workflow_scoring.task_4 import STANDARD, _apply_corrections, evaluate
+from ase.build import bulk
+from corral_md.scoring import WorkflowScorer
+from corral_md.scoring.common import Evidence
+from corral_md.scoring.level1_trusted import PINNED_TEACHER_SHA256
+from corral_md.scoring.task_4 import NODES, build_plan, prepare, read_record
+from corral_md.scoring.verification import ModalVerifier
 
 
-def _write(path, value):
-    path.write_text(json.dumps(value))
-    return str(path)
+def neighbors():
+    sites = np.indices((5,) * 3).reshape(3, -1).T
+    sites = (sites + 2) % 5 - 2
+    cell = 3.89 / 2 * (np.ones((3, 3)) - np.eye(3))
+    nn = np.isclose(np.linalg.norm(sites @ cell, axis=1), 3.89 / np.sqrt(2))
+    return sites, nn
 
 
-def _energy(q, sign=1):
-    # Independent analytic dispersion for three identical nearest-cell springs.
+def independent_energies(q, sign=1):
+    sites, nn = neighbors()
     eigenvalue = (
-        sign * 2 * np.sum(1 - np.cos(2 * np.pi * np.asarray(q)), axis=1) / 106.42
+        sign
+        * np.sum(1 - np.cos(2 * np.pi * np.asarray(q) @ sites[nn].T), axis=1)
+        / 106.42
     )
     factor = units._hbar * 1e10 / np.sqrt(units._e * units._amu)
     return np.repeat(
@@ -27,150 +36,86 @@ def _energy(q, sign=1):
     )
 
 
-def _samples(mesh, shift=0, sign=1):
-    q = (np.indices((mesh,) * 3).reshape(3, -1).T + shift) / mesh
-    energy = _energy(q, sign)
-    return {
-        "qpoints": q.tolist(),
-        "weights": [1 / len(q)] * len(q),
-        "energies_eV": energy.tolist(),
-        "integration": {
-            "kind": "uniform_grid",
-            "mesh": [mesh] * 3,
-            "shift": [shift] * 3,
-        },
-    }
-
-
-def _summary(samples):
-    values = np.array(samples["energies_eV"])
-    weights = np.array(samples["weights"])[:, None]
-    return float(np.sum(weights * np.maximum(values, 0)) / 2), float(
-        np.sum(weights * (values < 0))
-    )
-
-
-def _submission(tmp_path, sign=1):
-    primitive = 3.89 / 2 * np.array([[0.0, 1, 1], [1, 0, 1], [1, 1, 0]])
-    cells = np.indices((5,) * 3).reshape(3, -1).T - 2
-    indices = np.arange(125)[::-1]
-    origin_row = np.where(np.all(cells == 0, axis=1))[0][0]
-    source = int(indices[origin_row])
-    positions = np.empty((125, 3))
-    positions[indices] = (cells % 5) @ primitive
+def make_record(sign=1, analytical=False):
+    atoms = bulk("Pd", "fcc", a=3.89).repeat((5, 5, 5))
+    sites, nn = neighbors()
     phi = np.zeros((125, 3, 3))
-    phi[origin_row] = sign * 6 * np.eye(3)
-    phi[np.sum(np.abs(cells), axis=1) == 1] = -sign * np.eye(3)
-    displacements = np.vstack((np.zeros((1, 3)), np.eye(3) * 0.01, -np.eye(3) * 0.01))
-    weights = np.zeros((3, 7))
-    weights[:, 1:4] = np.eye(3) * 50
-    weights[:, 4:7] = -np.eye(3) * 50
-    frames = []
-    for u in displacements:
-        displaced = positions.copy()
-        displaced[source] += u
-        force = np.zeros((125, 3))
-        force[indices] = -np.einsum("rba,a->rb", phi, u)
-        frames.append(
-            {
-                "symbols": ["Pd"] * 125,
-                "positions": displaced.tolist(),
-                "pbc": True,
-                "cell": (5 * primitive).tolist(),
-                "masses": [106.42] * 125,
-                "energy": float(-125 + 0.5 * u @ phi[origin_row] @ u),
-                "forces": force.tolist(),
-            }
-        )
-    fc = {
-        "primitive_cell_A": primitive.tolist(),
-        "cell_translations": cells.tolist(),
-        "atom_indices": indices.tolist(),
-        "source_atom_index": source,
-        "reference_frame": 0,
-        "mass_amu": 106.42,
-        "layout": "response_source",
-        "values_eV_A2": phi.tolist(),
-        "derivative": {
-            "method": "finite_difference",
-            "frame_indices": list(range(7)),
-            "displacements_A": displacements.tolist(),
-            "derivative_weights_A_inv": weights.tolist(),
-        },
-        "corrections": ["pair_symmetry", "acoustic_sum_rule"],
-    }
-    nodes = np.array(
+    phi[nn] = -sign * np.eye(3)
+    phi[0] = sign * 12 * np.eye(3)
+    displacements = np.vstack(
         [
-            [0.0, 0, 0],
-            [0.5, 0, 0.5],
-            [0.625, 0.25, 0.625],
-            [0.5, 0.5, 0.5],
-            [0, 0, 0],
-            [0.375, 0.375, 0.75],
+            np.zeros((1, 3)),
+            0.01 * np.eye(3),
+            -0.01 * np.eye(3),
+            0.005 * np.eye(3),
+            -0.005 * np.eye(3),
         ]
     )
-    bands = {
-        "qpoints": nodes.tolist(),
-        "node_indices": list(range(6)),
-        "energies_eV": _energy(nodes, sign).tolist(),
-    }
-    samples = _samples(2, sign=sign)
-    alternate = _samples(3, 0.5, sign)
-    dos = {
-        "representation": "sticks",
-        "energies_eV": np.array(samples["energies_eV"]).ravel().tolist(),
-        "weights": np.repeat(samples["weights"], 3).tolist(),
-    }
-    zpe, imaginary = _summary(samples)
-    altzpe, altimaginary = _summary(alternate)
-    results = {
-        "zpe_eV_per_atom": zpe,
-        "zpe_kind": "harmonic_zpe" if sign == 1 else "real_modes_only",
-        "imaginary_weight": imaginary,
-        "resolved_imaginary_weight": imaginary,
-        "validation": {
-            "pair_symmetry_residual_eV_A2": 0,
-            "acoustic_residual_eV_A2": 0,
-            "gamma_energies_eV": [0, 0, 0],
-            "sensitivity_zpe_change_eV_per_atom": altzpe - zpe,
-            "sensitivity_imaginary_weight_change": altimaginary - imaginary,
+    positions = np.repeat(atoms.positions[None], 13, axis=0)
+    positions[:, 0] += displacements
+    record = {
+        "positions_A": positions,
+        "cell_A": atoms.cell.array,
+        "numbers": atoms.numbers,
+        "pbc": atoms.pbc,
+        "masses_amu": atoms.get_masses(),
+        "displacements_A": displacements,
+        "forces_eV_A": -np.einsum("rba,fa->frb", phi, displacements),
+        "energies_eV": -125
+        + 0.5 * np.einsum("fa,ab,fb->f", displacements, phi[0], displacements),
+        "force_constants_eV_A2": phi,
+        "metadata": {
+            "checkpoint_sha256": PINNED_TEACHER_SHA256,
+            "default_dtype": "float64",
+            "method": "analytical" if analytical else "central_difference",
+            "dispersion": False,
         },
     }
-    artifacts = {
-        name: _write(tmp_path / f"{name}.json", value)
-        for name, value in [
-            ("structures", frames),
-            ("force_constants", fc),
-            ("bands", bands),
-            ("bz_samples", samples),
-            ("dos", dos),
-            ("sensitivity", {"kind": "sampling", "samples": alternate}),
-        ]
-    }
-    script = tmp_path / "submitted.py"
-    script.write_text(
-        "raise RuntimeError('Scoring must never execute submitted code')\n"
+    if analytical:
+        lookup = {tuple(site): i for i, site in enumerate(sites)}
+        hessian = np.empty((125, 3, 125, 3))
+        for i in range(125):
+            for j in range(125):
+                hessian[i, :, j, :] = phi[
+                    lookup[tuple((sites[i] - sites[j] + 2) % 5 - 2)]
+                ]
+        record["hessian_eV_A2"] = hessian.reshape(375, 375)
+    return record
+
+
+def save_record(path, record):
+    np.savez_compressed(path, **{**record, "metadata": json.dumps(record["metadata"])})
+
+
+def _submission(tmp_path, sign=1, analytical=False, mesh=20):
+    save_record(tmp_path / "phonons.npz", make_record(sign, analytical))
+    q = (np.indices((mesh,) * 3).reshape(3, -1).T + 0.5) / mesh
+    samples = independent_energies(q, sign)
+    band_q = np.concatenate(
+        [np.linspace(a, b, 11)[:-1] for a, b in itertools.pairwise(NODES)]
+        + [NODES[-1:]]
     )
-    settings = {
-        "checkpoint": "MACE-MP-0",
-        "checkpoint_sha256": "01bfe22100139f424713cf921144e5509cbe353d67aa9fa1be9c6e1e0ed35845",
-        "software_versions": {"ase": "saved-version"},
-        "force_constant_method": "central displacement",
-    }
-    manifest = {
-        "artifacts": artifacts,
-        "results": results,
-        "settings": _write(tmp_path / "settings.json", settings),
-        "scripts": [str(script)],
-        "report": _write(
-            tmp_path / "report.json",
-            {
-                "assessment": "Finite mesh sensitivity and signed unstable modes assessed."
-            },
-        ),
+    results = {
+        "bands": {
+            "qpoints": band_q.tolist(),
+            "node_indices": [0, 10, 20, 30, 40, 50],
+            "energies_eV": independent_energies(band_q, sign).tolist(),
+        },
+        "dos": {
+            "representation": "sticks",
+            "mesh": [mesh] * 3,
+            "shift": [0.5] * 3,
+            "energies_eV": samples.ravel().tolist(),
+            "weights": [1 / len(q)] * samples.size,
+        },
+        "zpe_eV_per_atom": float(samples.sum(axis=1).mean() / 2) if sign > 0 else None,
+        "imaginary_weight": 0 if sign > 0 else 3,
+        "resolved_imaginary_weight": 0 if sign > 0 else 3,
     }
     path = tmp_path / "manifest.json"
-    _write(path, manifest)
+    path.write_text(
+        json.dumps({"artifacts": {"force_log": "phonons.npz"}, "results": results})
+    )
     return path
 
 
@@ -179,549 +124,310 @@ def submission(tmp_path):
     return _submission(tmp_path)
 
 
-def _score(path):
-    rubric = Rubric(4)
-    evaluate(Evidence(path), rubric)
-    return rubric
+def response(plan, fingerprint):
+    return {
+        "evidence_sha256": fingerprint,
+        "challenge": plan.challenge,
+        "jobs": [
+            {
+                "id": job["id"],
+                "status": "complete",
+                "value": copy.deepcopy(plan.expected[job["id"]]["values"]),
+            }
+            for job in plan.jobs
+        ],
+    }
 
 
-def _check(rubric, name):
-    return next(item for item in rubric.checks if item["name"] == name)
+def score(path, level=2):
+    return WorkflowScorer(
+        4, level=level, verifier=ModalVerifier(transport=response)
+    ).evaluate(path)
 
 
-def _edit(path, function):
-    doc = json.loads(path.read_text())
-    function(doc)
-    _write(path, doc)
+def change_answer(path, update):
+    data = json.loads(path.read_text())
+    update(data["results"])
+    path.write_text(json.dumps(data))
 
 
-def test_task4_complete_synthetic_evidence_and_no_execution(submission, monkeypatch):
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("Executable data or force evaluation attempted")
-
-    monkeypatch.setattr(SinglePointCalculator, "calculate", forbidden)
-    monkeypatch.setattr(pickle, "load", forbidden)
-    monkeypatch.setattr(pickle, "loads", forbidden)
-    result = _score(submission)
-    assert result.score == pytest.approx(0.9), result.checks
-    assert sum(check["points"] for check in result.checks) == 90
-    assert _check(result, "execution_provenance")["status"] == "unverified"
+def test_stable_spectrum_and_level1_scope(submission):
+    report = score(submission)
+    assert report["score"] == 1, report
+    assert report["calculated_results"]["mesh"][0] >= 20
+    assert report["calculated_results"]["zpe_sampling_error_eV"] < 1e-5
+    change_answer(submission, lambda results: results.clear())
+    assert score(submission, level=1)["score"] == 1
+    assert score(submission)["score"] == 0
 
 
-def test_task4_level1_stops_before_level2_observables(submission, monkeypatch):
-    original_json = Evidence.json
-
-    def reject_level2_artifacts(self, *names):
-        if names[0] in {"bands", "bz_samples", "dos"}:
-            raise AssertionError(f"Level 1 read Level-2-only artifact {names[0]!r}")
-        return original_json(self, *names)
-
-    monkeypatch.setattr(Evidence, "json", reject_level2_artifacts)
-    rubric = Rubric(4, fail_fast=True)
-    evaluate(Evidence(submission), rubric, level=1)
-
-    assert rubric.score == pytest.approx(0.9), rubric.checks
-    assert sum(check["points"] for check in rubric.checks) == 90
-    assert {
-        "band_path_and_signed_energies",
-        "dos_from_signed_bz_samples",
-        "zpe_and_imaginary_mode_accounting",
-    }.isdisjoint(check["name"] for check in rubric.checks)
+def test_only_zpe_is_required_and_spectra_are_derived(submission):
+    data = json.loads(submission.read_text())
+    data["results"] = {"zpe_eV_per_atom": data["results"]["zpe_eV_per_atom"]}
+    submission.write_text(json.dumps(data))
+    report = score(submission)
+    assert report["score"] == 1, report
+    assert report["calculated_results"]["resolved_imaginary_weight"] == 0
+    assert len(report["calculated_results"]["bands"]["energies_eV"]) == 251
+    assert "dos_summary" in report["calculated_results"]
+    data["results"].pop("zpe_eV_per_atom")
+    submission.write_text(json.dumps(data))
+    assert score(submission)["score"] == 0
 
 
-def test_level1_accepts_ase_repeat_indices_and_central_pairs(submission):
-    path = submission.parent / "force_constants.json"
-    fc = json.loads(path.read_text())
-    fc["cell_translations"] = (np.asarray(fc["cell_translations"]) % 5).tolist()
-    fc["atom_indices"] = [0] * 125  # One primitive Pd atom per cell.
-    fc["derivative"]["method"] = "central_finite_difference"
-    fc["derivative"]["frame_indices"] = [[1, 4], [2, 5], [3, 6]]
-    fc["derivative"]["displacements_A"] = [[0.01, -0.01]] * 3
-    fc["corrections"] = [
-        "Average translationally equivalent pair-interchanged blocks K(R) and K(-R)^T",
-        "Subtract sum of symmetrized blocks from onsite block to impose acoustic sum rule",
-    ]
-    _write(path, fc)
+def test_force_constants_and_bands_against_analytic_dispersion(submission):
+    from corral_md.scoring.task_4 import energies
 
-    rubric = Rubric(4, fail_fast=True)
-    evaluate(Evidence(submission), rubric, level=1)
+    phi, sites, diagnostics = prepare(read_record(Evidence(submission)))
+    q = np.random.default_rng(31).random((29, 3))
+    assert np.allclose(energies(phi, sites, q), independent_energies(q), atol=1e-12)
+    assert diagnostics["imaginary_tolerance_eV"] == 1e-7
 
-    assert rubric.score == pytest.approx(0.9), rubric.checks
 
-    fc["cell_translations"][1] = fc["cell_translations"][0]
-    _write(path, fc)
-    rubric = Rubric(4, fail_fast=True)
-    evaluate(Evidence(submission), rubric, level=1)
-    assert _check(rubric, "fcc_supercell_and_mapping")["status"] == "failed"
+def test_signed_instability_has_no_harmonic_zpe(tmp_path):
+    path = _submission(tmp_path, sign=-1)
+    assert score(path)["score"] == 1
+    change_answer(path, lambda r: r.update(zpe_eV_per_atom=0))
+    assert score(path)["score"] == 0
+    change_answer(path, lambda r: r.update(zpe_eV_per_atom=None))
+    change_answer(
+        path,
+        lambda r: r["bands"].update(
+            energies_eV=abs(np.array(r["bands"]["energies_eV"])).tolist()
+        ),
+    )
+    assert score(path)["score"] == 0
+
+
+def test_analytical_derivative_uses_same_answer_and_independent_check(tmp_path):
+    path = _submission(tmp_path, analytical=True)
+    plan = build_plan(Evidence(path), "challenge")
+    assert [job["id"] for job in plan.jobs] == ["palladium_forces", "palladium_hessian"]
+    assert len(plan.jobs[0]["frames"]) == 4
+    assert "hessian" not in plan.jobs[1]["frames"][0]
+    assert score(path)["score"] == 1
 
 
 @pytest.mark.parametrize(
-    ("change", "check"),
+    "defect",
     [
-        ("cell", "fcc_supercell_and_mapping"),
-        ("force", "force_constant_transformations"),
-        ("positions", "derivative_reconstruction"),
-        ("weights", "derivative_reconstruction"),
-        ("dos", "dos_from_signed_bz_samples"),
-        ("path", "band_path_and_signed_energies"),
-        ("zpe", "zpe_and_imaginary_mode_accounting"),
-        ("sample_energy", "zpe_and_imaginary_mode_accounting"),
-        ("missing_force", "raw_energy_force_records"),
-        ("diagnostic", "symmetry_and_acoustic_diagnostics"),
-        ("grid", "dos_from_signed_bz_samples"),
+        "cell",
+        "mass",
+        "species",
+        "mapping",
+        "displacement",
+        "forces",
+        "constants",
+        "nan",
+        "truncated",
+        "model",
     ],
 )
-def test_task4_detects_false_or_incomplete_evidence(submission, change, check):
-    directory = submission.parent
-    if change in {"cell", "force", "positions", "missing_force"}:
-
-        def defect(frames):
-            if change == "cell":
-                frames[0]["cell"][0][0] += 0.1
-            elif change == "force":
-                frames[1]["forces"][0][0] += 1
-            elif change == "positions":
-                frames[1]["positions"][0][0] += 0.1
-            else:
-                frames[0].pop("forces")
-
-        _edit(directory / "structures.json", defect)
-    elif change == "weights":
-        _edit(
-            directory / "force_constants.json",
-            lambda d: d["derivative"]["derivative_weights_A_inv"][0].__setitem__(
-                1, 100
-            ),
-        )
-    elif change == "dos":
-        _edit(directory / "dos.json", lambda d: d["weights"].__setitem__(0, 0.3))
-    elif change == "path":
-        _edit(
-            directory / "bands.json",
-            lambda d: d["qpoints"].__setitem__(1, [0.25, 0.25, 0.25]),
-        )
-    elif change == "zpe":
-        _edit(submission, lambda d: d["results"].__setitem__("zpe_eV_per_atom", 42))
-    elif change == "sample_energy":
-        _edit(
-            directory / "bz_samples.json",
-            lambda d: d["energies_eV"][1].__setitem__(0, 1),
-        )
-    elif change == "not_sensitivity":
-        doc = json.loads((directory / "bz_samples.json").read_text())
-        for key in ("qpoints", "weights", "energies_eV"):
-            doc[key].reverse()
-        _write(directory / "sensitivity.json", {"kind": "sampling", "samples": doc})
-    elif change == "diagnostic":
-        _edit(
-            submission,
-            lambda d: d["results"]["validation"].__setitem__(
-                "acoustic_residual_eV_A2", 2
-            ),
-        )
-    elif change == "grid":
-        _edit(
-            directory / "bz_samples.json",
-            lambda d: d["qpoints"].__setitem__(0, d["qpoints"][1]),
-        )
-    result = _score(submission)
-    assert _check(result, check)["status"] == "failed", result.checks
-    assert result.score < 0.9
-    if change in {"force", "positions", "weights", "missing_force"}:
-        for dependent in (
-            "band_path_and_signed_energies",
-            "dos_from_signed_bz_samples",
-            "zpe_and_imaginary_mode_accounting",
-            "symmetry_and_acoustic_diagnostics",
-        ):
-            assert _check(result, dependent)["earned"] == 0, result.checks
-
-
-def test_task4_signed_instability_can_receive_numerical_credit(tmp_path):
-    submission = _submission(tmp_path, sign=-1)
-    result = _score(submission)
-    assert result.score == pytest.approx(0.9), result.checks
-    _edit(submission, lambda d: d["results"].__setitem__("zpe_kind", "harmonic_zpe"))
-    assert (
-        _check(_score(submission), "zpe_and_imaginary_mode_accounting")["status"]
-        == "failed"
-    )
-
-
-def test_task4_residual_label_needs_numerical_tolerance_but_not_prose(tmp_path):
-    submission = _submission(tmp_path, sign=-1)
-    data = json.loads(submission.read_text())
-    data.pop("report")
-    data["results"].update(
-        zpe_kind="residual_corrected_zpe",
-        imaginary_tolerance_eV=1.0,
-        resolved_imaginary_weight=0,
-    )
-    _write(submission, data)
-    result = _score(submission)
-    assert result.score == pytest.approx(0.9), result.checks
-    data["results"]["imaginary_tolerance_eV"] = 0
-    _write(submission, data)
-    assert (
-        _check(_score(submission), "zpe_and_imaginary_mode_accounting")["status"]
-        == "failed"
-    )
-
-
-def test_task4_cannot_discard_or_absolute_value_imaginary_modes(tmp_path):
-    submission = _submission(tmp_path, sign=-1)
-    _edit(
-        tmp_path / "bands.json",
-        lambda d: d.__setitem__("energies_eV", np.abs(d["energies_eV"]).tolist()),
-    )
-    _edit(
-        tmp_path / "dos.json",
-        lambda d: d.__setitem__("energies_eV", np.abs(d["energies_eV"]).tolist()),
-    )
-    result = _score(submission)
-    assert _check(result, "band_path_and_signed_energies")["status"] == "failed"
-    assert _check(result, "dos_from_signed_bz_samples")["status"] == "failed"
-
-
-@pytest.mark.parametrize("representation", ["histogram", "gaussian"])
-def test_task4_supported_continuous_dos(submission, representation):
-    samples = json.loads((submission.parent / "bz_samples.json").read_text())
-    energy = np.array(samples["energies_eV"]).ravel()
-    weights = np.repeat(samples["weights"], 3)
-    grid = np.linspace(-0.01, energy.max() + 0.01, 101)
-    if representation == "histogram":
-        density = np.histogram(energy, grid, weights=weights)[0] / np.diff(grid)
-        dos = {
-            "representation": representation,
-            "bin_edges_eV": grid.tolist(),
-            "density_per_eV": density.tolist(),
-        }
+def test_bad_records_do_not_pass(submission, defect):
+    record = read_record(Evidence(submission))
+    if defect == "cell":
+        record["cell_A"] *= 1.1
+    elif defect == "mass":
+        record["masses_amu"] *= 2
+    elif defect == "species":
+        record["numbers"][1] = 47
+    elif defect == "mapping":
+        record["positions_A"][:, 2] = record["positions_A"][:, 3]
+    elif defect == "displacement":
+        record["positions_A"][2, 1, 0] += 0.01
+    elif defect == "forces":
+        # Neither retained displacement may support the claimed derivative.
+        record["forces_eV_A"][[1, 7], 0, 0] += 1
+    elif defect == "constants":
+        record["force_constants_eV_A2"] *= 2
+    elif defect == "nan":
+        record["forces_eV_A"][1, 0, 0] = np.nan
+    elif defect == "truncated":
+        record["positions_A"] = record["positions_A"][:-1]
     else:
-        sigma = 0.003
-        density = np.sum(
-            weights[:, None]
-            * np.exp(-0.5 * ((grid[None, :] - energy[:, None]) / sigma) ** 2)
-            / (sigma * np.sqrt(2 * np.pi)),
-            axis=0,
-        )
-        density *= 3 / np.trapezoid(density, grid)
-        dos = {
-            "representation": representation,
-            "energy_grid_eV": grid.tolist(),
-            "density_per_eV": density.tolist(),
-            "sigma_eV": sigma,
-            "normalization": "global",
-        }
-    _write(submission.parent / "dos.json", dos)
-    assert _score(submission).score == pytest.approx(0.9)
+        record["metadata"]["checkpoint_sha256"] = "0" * 64
+    save_record(submission.parent / "phonons.npz", record)
+    assert score(submission)["score"] == 0
 
 
-def test_task4_ase_array_and_irreducible_quadrature(submission):
-    directory = submission.parent
-    fc = json.loads((directory / "force_constants.json").read_text())
-    values = np.array(fc.pop("values_eV_A2")).swapaxes(1, 2)
-    np.save(directory / "ase_c_n.npy", values)
-    fc.update(layout="ASE_C_N", values_artifact="ase_c_n")
-    _write(directory / "force_constants.json", fc)
-    _edit(
-        submission,
-        lambda d: d["artifacts"].__setitem__("ase_c_n", str(directory / "ase_c_n.npy")),
-    )
-    samples = json.loads((directory / "bz_samples.json").read_text())
-    energy = np.array(samples["energies_eV"])
-    _, representative, inverse = np.unique(
-        energy, axis=0, return_index=True, return_inverse=True
-    )
-    reduced = {
-        "qpoints": np.array(samples["qpoints"])[representative].tolist(),
-        "weights": (np.bincount(inverse) / len(energy)).tolist(),
-        "energies_eV": energy[representative].tolist(),
-        "full_grid_qpoints": samples["qpoints"],
-        "representative_index": inverse.tolist(),
-        "integration": dict(samples["integration"], kind="symmetry_reduced"),
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "zpe",
+        "imaginary",
+        "resolved",
+        "band_units",
+        "band_path",
+        "dos_weight",
+        "dos_shape",
+    ],
+)
+def test_altered_answers_fail(submission, defect):
+    def update(r):
+        if defect == "zpe":
+            r["zpe_eV_per_atom"] *= 2
+        elif defect in {"imaginary", "resolved"}:
+            r[
+                {
+                    "imaginary": "imaginary_weight",
+                    "resolved": "resolved_imaginary_weight",
+                }[defect]
+            ] = 1
+        elif defect == "band_units":
+            r["bands"]["energies_eV"] = (
+                1000 * np.array(r["bands"]["energies_eV"])
+            ).tolist()
+        elif defect == "band_path":
+            r["bands"]["qpoints"][10] = [0, 0, 0]
+        elif defect == "dos_weight":
+            r["dos"]["weights"] = (np.array(r["dos"]["weights"]) / 3).tolist()
+        else:
+            r["dos"]["energies_eV"] = [0] * len(r["dos"]["energies_eV"])
+
+    change_answer(submission, update)
+    assert score(submission)["score"] == 0
+
+
+def test_coarse_sampling_does_not_hide_behind_matching_answers(tmp_path):
+    assert score(_submission(tmp_path, mesh=2))["score"] == 0
+
+
+def test_displacement_sensitivity_requires_resolution(submission):
+    record = read_record(Evidence(submission))
+    record["forces_eV_A"][1:7] *= 1.3
+    save_record(submission.parent / "phonons.npz", record)
+    report = score(submission)
+    assert report["score"] == 0
+    assert "accuracy" in report["checks"][0]["detail"]
+
+
+def test_level1_force_constants_do_not_require_a_resolved_phonon_spectrum(submission):
+    record = read_record(Evidence(submission))
+    record["forces_eV_A"][1:7] *= 1.005
+    save_record(submission.parent / "phonons.npz", record)
+    report = score(submission, level=1)
+    assert report["score"] == 1, report
+    assert report["calculated_results"]["imaginary_tolerance_eV"] > 5e-4
+
+
+def test_offline_cannot_establish_model_identity(submission):
+    assert WorkflowScorer(4).evaluate(submission)["score"] is None
+
+
+def test_histogram_and_file_arrays(submission):
+    data = json.loads(submission.read_text())
+    samples = np.asarray(data["results"]["dos"]["energies_eV"])
+    edges = np.linspace(samples.min() - 1e-8, samples.max() + 1e-8, 31)
+    density = np.histogram(samples, edges)[0] * 3 / samples.size / np.diff(edges)
+    data["results"]["dos"] = {
+        "representation": "histogram",
+        "mesh": [20] * 3,
+        "shift": [0.5] * 3,
+        "bin_edges_eV": edges.tolist(),
+        "density_per_eV": "density",
     }
-    _write(directory / "bz_samples.json", reduced)
-    _write(
-        directory / "dos.json",
-        {
-            "representation": "sticks",
-            "energies_eV": np.array(reduced["energies_eV"]).ravel().tolist(),
-            "weights": np.repeat(reduced["weights"], 3).tolist(),
-        },
+    np.save(submission.parent / "density.npy", density)
+    data["artifacts"]["density"] = "density.npy"
+    (submission.parent / "bands.json").write_text(
+        json.dumps(data["results"].pop("bands"))
     )
-    result = _score(submission)
-    assert result.score == pytest.approx(0.9), result.checks
+    data["artifacts"]["bands"] = "bands.json"
+    submission.write_text(json.dumps(data))
+    assert score(submission)["score"] == 1
 
 
-def test_task4_unsupported_methods_are_unverified(submission):
-    _edit(
-        submission.parent / "force_constants.json",
-        lambda d: d["derivative"].__setitem__("method", "external_analytic_format"),
+def test_tiny_imaginary_modes_remain_signed_but_are_numerical_residuals(tmp_path):
+    path = _submission(tmp_path, sign=-1e-12)
+    change_answer(
+        path, lambda r: r.update(zpe_eV_per_atom=0, resolved_imaginary_weight=0)
     )
-    result = _score(submission)
-    assert _check(result, "derivative_reconstruction")["status"] == "unverified"
-    assert _check(result, "force_constant_transformations")["status"] == "unverified"
-    assert _check(result, "band_path_and_signed_energies")["status"] == "passed"
-    assert result.score is None
+    report = score(path)
+    assert report["score"] == 1, report
+    assert report["calculated_results"]["spectrum_status"] == "numerical_residuals"
+    assert report["calculated_results"]["imaginary_weight"] == 3
 
 
-@pytest.mark.parametrize("descriptive_labels", [False, True])
-@pytest.mark.parametrize("level", [1, 2])
-def test_task4_cubic_projection_reconstructs_known_nearest_neighbor_shell(
-    submission, descriptive_labels, level
-):
-    path = submission.parent / "force_constants.json"
-    data = json.loads(path.read_text())
-    cells = np.asarray(data["cell_translations"])
-    # Six primitive bonds distribute evenly over the 12 FCC nearest neighbors.
-    expected = np.zeros((125, 3, 3))
-    nearest = np.isclose(np.sum((cells @ STANDARD) ** 2, axis=1), 3.89**2 / 2)
-    assert nearest.sum() == 12
-    expected[nearest] = -0.5 * np.eye(3)
-    expected[np.all(cells == 0, axis=1)] = 6 * np.eye(3)
-    data["values_eV_A2"] = expected.tolist()
-    data["corrections"] = (
-        [
-            "48-operation cubic O_h group projection",
-            "pair projection Phi(R)=Phi(-R)^T",
-            "onsite replacement enforcing acoustic sum rule",
-        ]
-        if descriptive_labels
-        else ["cubic_symmetry", "pair_symmetry", "acoustic_sum_rule"]
-    )
-    _write(path, data)
-    rubric = Rubric(4)
-    evaluate(Evidence(submission), rubric, level=level)
-    assert _check(rubric, "derivative_reconstruction")["status"] == "passed"
-    assert _check(rubric, "force_constant_transformations")["status"] == "passed"
-    assert _check(rubric, "symmetry_and_acoustic_diagnostics")["status"] == "passed"
-
-    data["values_eV_A2"][0][0][0] += 0.1
-    _write(path, data)
-    rubric = Rubric(4)
-    evaluate(Evidence(submission), rubric, level=level)
-    assert _check(rubric, "force_constant_transformations")["status"] == "failed"
-
-
-@pytest.mark.parametrize("rotated", [False, True])
-@pytest.mark.parametrize("alternate_basis", [False, True])
-def test_cubic_projection_rotates_tensor_and_site_independently_of_basis(
-    rotated, alternate_basis
-):
-    cells = np.indices((5,) * 3).reshape(3, -1).T - 2
-    positions = cells @ STANDARD
-    transform = (
-        np.array([[1, 1, 0], [0, 1, 0], [0, 0, 1]])
-        if alternate_basis
-        else np.eye(3, dtype=int)
-    )
-    angle = 0.37 if rotated else 0
-    orientation = np.array(
+def test_rotated_cell_and_permuted_atoms_keep_the_same_spectrum(submission):
+    record = read_record(Evidence(submission))
+    permutation = np.r_[0, np.random.default_rng(9).permutation(np.arange(1, 125))]
+    angle = 0.37
+    rotation = np.array(
         [
             [np.cos(angle), -np.sin(angle), 0],
             [np.sin(angle), np.cos(angle), 0],
             [0, 0, 1],
         ]
     )
-    # One radial bond has an orbit of 12 bonds with equal weight. This analytic
-    # expectation checks both Cartesian tensor indices, not just site mapping.
-    raw = np.zeros((125, 3, 3))
-    source = np.flatnonzero(np.all(cells == [1, 0, 0], axis=1))[0]
-    direction = positions[source] @ orientation
-    direction /= np.linalg.norm(direction)
-    raw[source] = np.outer(direction, direction)
-    nearest = np.isclose(np.sum(positions**2, axis=1), 3.89**2 / 2)
-    directions = positions[nearest] @ orientation / (3.89 / np.sqrt(2))
-    expected = np.zeros_like(raw)
-    expected[nearest] = np.einsum("ri,rj->rij", directions, directions) / 12
-    mapped_cells = np.rint(cells @ np.linalg.inv(transform)).astype(int) % 5
-    order = np.arange(125)[::-1]
-    data = {
-        "primitive_cell_A": (transform @ STANDARD @ orientation).tolist(),
-        "primitive_to_standard": transform.tolist(),
-        "cell_translations": mapped_cells[order].tolist(),
-        "corrections": ["cubic_symmetry"],
+    record["cell_A"] = record["cell_A"] @ rotation
+    record["positions_A"] = record["positions_A"][:, permutation] @ rotation
+    # Displace Cartesian axes in the rotated laboratory frame.
+    record["positions_A"][:] = record["positions_A"][0]
+    record["positions_A"][:, 0] += record["displacements_A"]
+    record["force_constants_eV_A2"] = (
+        rotation.T @ record["force_constants_eV_A2"][permutation] @ rotation
+    )
+    record["forces_eV_A"] = -np.einsum(
+        "rba,fa->frb", record["force_constants_eV_A2"], record["displacements_A"]
+    )
+    save_record(submission.parent / "phonons.npz", record)
+    assert score(submission)["score"] == 1
+
+
+def test_pickle_arrays_are_rejected_without_loading_objects(submission):
+    record = read_record(Evidence(submission))
+    record["forces_eV_A"] = np.full((13, 125, 3), object(), dtype=object)
+    save_record(submission.parent / "phonons.npz", record)
+    assert score(submission)["score"] == 0
+
+
+def test_gaussian_dos_matches_signed_mode_sum(submission):
+    data = json.loads(submission.read_text())
+    values = np.asarray(data["results"]["dos"]["energies_eV"])
+    sigma = 0.002
+    axis = np.linspace(values.min() - 5 * sigma, values.max() + 5 * sigma, 180)
+    density = np.mean(np.exp(-0.5 * ((axis[:, None] - values) / sigma) ** 2), axis=1)
+    density *= 3 / (sigma * np.sqrt(2 * np.pi))
+    data["results"]["dos"] = {
+        "representation": "gaussian",
+        "mesh": [20] * 3,
+        "shift": [0.5] * 3,
+        "energy_grid_eV": axis.tolist(),
+        "sigma_eV": sigma,
+        "density_per_eV": density.tolist(),
     }
-    np.testing.assert_allclose(
-        _apply_corrections(raw[order], data), expected[order], atol=1e-14
-    )
+    submission.write_text(json.dumps(data))
+    assert score(submission)["score"] == 1
+    data["results"]["dos"]["density_per_eV"] = (density / 3).tolist()
+    submission.write_text(json.dumps(data))
+    assert score(submission)["score"] == 0
 
 
-def test_unknown_correction_does_not_block_raw_derivative_check(submission):
-    _edit(
-        submission.parent / "force_constants.json",
-        lambda data: data.__setitem__("corrections", ["external_projection"]),
-    )
-    result = _score(submission)
-    assert _check(result, "derivative_reconstruction")["status"] == "passed"
-    assert _check(result, "force_constant_transformations")["status"] == "unverified"
+def test_level1_factory_uses_the_new_calculation_plan(submission):
+    from corral_md.scoring import check_level1_workflow
+
+    change_answer(submission, lambda results: results.clear())
+    scorer = check_level1_workflow(4)
+    scorer.verifier.transport = response
+    assert scorer.evaluate(submission)["score"] == 1
 
 
-def test_task4_forward_stencil_is_an_equivalent_workflow(submission):
-    path = submission.parent / "force_constants.json"
-    data = json.loads(path.read_text())
-    derivative = data["derivative"]
-    derivative["frame_indices"] = [0, 1, 2, 3]
-    derivative["displacements_A"] = derivative["displacements_A"][:4]
-    derivative["derivative_weights_A_inv"] = (
-        np.column_stack([-np.ones(3), np.eye(3)]) / 0.01
-    ).tolist()
-    _write(path, data)
-    assert _score(submission).score == pytest.approx(0.9)
-
-
-@pytest.mark.parametrize("norm", ["rms", "frobenius", "unimplemented_norm"])
-def test_task4_diagnostic_norm_is_a_choice(submission, norm):
-    manifest = json.loads(submission.read_text())
-    manifest["results"]["validation"]["residual_norm"] = norm
-    del manifest["results"]["validation"]["gamma_energies_eV"]
-    _write(submission, manifest)
-    result = _score(submission)
-    if norm == "unimplemented_norm":
-        assert result.score is None
-        assert (
-            _check(result, "symmetry_and_acoustic_diagnostics")["status"]
-            == "unverified"
-        )
-    else:
-        assert result.score == pytest.approx(0.9), result.checks
-
-
-def test_task4_missing_and_malformed_evidence_do_not_crash():
-    for manifest in (
-        {},
-        {"artifacts": {}, "results": {"zpe_eV_per_atom": "malformed"}},
-    ):
-        result = _score(manifest)
-        assert result.score == 0
-        assert sum(check["points"] for check in result.checks) == 90
-
-
-@pytest.mark.parametrize(
-    ("method", "description_key"),
-    [("analytical", "description"), ("analytical_hessian", "details")],
-)
-def test_task4_analytical_hessian_is_read_as_data(
-    submission, method, description_key
-):
-    directory = submission.parent
-    fc = json.loads((directory / "force_constants.json").read_text())
-    phi = np.array(fc["values_eV_A2"])
-    indices = fc["atom_indices"]
-    source = fc["source_atom_index"]
-    hessian = np.zeros((125, 3, 125, 3))
-    hessian[indices, :, source, :] = phi
-    hessian[source, :, indices, :] = phi.swapaxes(1, 2)
-    np.save(directory / "hessian.npy", hessian.reshape(375, 375))
-    fc["derivative"] = {
-        "method": method,
-        description_key: "Saved Cartesian energy Hessian",
-    }
-    _write(directory / "force_constants.json", fc)
-    _edit(
-        submission,
-        lambda d: d["artifacts"].__setitem__(
-            "raw_hessian", str(directory / "hessian.npy")
-        ),
-    )
-    result = _score(submission)
-    assert result.score == pytest.approx(0.9), result.checks
-
-
-def test_task4_analytical_hessian_alias_still_requires_raw_hessian(submission):
-    directory = submission.parent
-    fc = json.loads((directory / "force_constants.json").read_text())
-    fc["derivative"] = {
-        "method": "analytical_hessian",
-        "details": "Cartesian Hessian from automatic differentiation",
-    }
-    _write(directory / "force_constants.json", fc)
-    result = _score(submission)
-    check = next(c for c in result.checks if c["name"] == "derivative_reconstruction")
-    assert check["status"] == "failed"
-    assert "raw_hessian" in check["detail"]
-
-
-def test_task4_accepts_equivalent_primitive_basis(submission):
-    directory = submission.parent
-    fc = json.loads((directory / "force_constants.json").read_text())
-    transform = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])
-    fc["primitive_to_standard"] = transform.tolist()
-    fc["primitive_cell_A"] = (transform @ np.array(fc["primitive_cell_A"])).tolist()
-    fc["cell_translations"] = (np.array(fc["cell_translations"]) @ transform.T).tolist()
-    _write(directory / "force_constants.json", fc)
-    _edit(
-        directory / "structures.json",
-        lambda frames: [
-            f.__setitem__("cell", (transform @ np.array(f["cell"])).tolist())
-            for f in frames
-        ],
-    )
-    _edit(
-        directory / "bands.json",
-        lambda d: d.__setitem__(
-            "qpoints", (np.array(d["qpoints"]) @ transform.T).tolist()
-        ),
-    )
-    _edit(
-        directory / "bz_samples.json",
-        lambda d: d.__setitem__(
-            "qpoints", (np.array(d["qpoints"]) @ transform.T).tolist()
-        ),
-    )
-    _edit(
-        directory / "sensitivity.json",
-        lambda d: d["samples"].__setitem__(
-            "qpoints", (np.array(d["samples"]["qpoints"]) @ transform.T).tolist()
-        ),
-    )
-    result = _score(submission)
-    assert result.score == pytest.approx(0.9), result.checks
-
-
-def test_task4_absolute_values_do_not_hide_force_constant_instability(tmp_path):
-    submission = _submission(tmp_path, sign=-1)
-    _edit(
-        tmp_path / "bz_samples.json",
-        lambda d: d.__setitem__("energies_eV", np.abs(d["energies_eV"]).tolist()),
-    )
-    _edit(
-        submission,
-        lambda d: d["results"].update(
-            imaginary_weight=0, resolved_imaginary_weight=0, zpe_kind="harmonic_zpe"
-        ),
-    )
-    result = _score(submission)
-    assert _check(result, "zpe_and_imaginary_mode_accounting")["status"] == "failed"
-    assert _check(result, "dos_from_signed_bz_samples")["status"] == "failed"
-
-
-def test_histogram_descriptive_density_name_is_numerically_verified(submission):
-    e = Evidence(submission)
-    samples = e.json("bz_samples")
-    energies = np.asarray(samples["energies_eV"]).ravel()
-    weights = np.repeat(samples["weights"], 3)
-    edges = np.linspace(energies.min() - 1e-8, energies.max() + 1e-8, 31)
-    density = np.histogram(energies, edges, weights=weights)[0] / np.diff(edges)
-    path = e.artifact("dos")
-    doc = {
-        "representation": "histogram",
-        "bin_edges_eV": edges.tolist(),
-        "density_modes_per_eV_per_primitive_cell": density.tolist(),
-    }
-    path.write_text(json.dumps(doc))
-    check = next(
-        c
-        for c in _score(submission).checks
-        if c["name"] == "dos_from_signed_bz_samples"
-    )
-    assert check["status"] == "passed", check
-    doc["density_per_eV"] = (density + 1).tolist()
-    path.write_text(json.dumps(doc))
-    check = next(
-        c
-        for c in _score(submission).checks
-        if c["name"] == "dos_from_signed_bz_samples"
-    )
-    assert check["status"] == "failed"
-    assert "Conflicting" in check["detail"]
+@pytest.mark.parametrize("level", [1, 2])
+def test_npz_fields_and_displacement_order_are_not_a_hidden_contract(submission, level):
+    path = submission.parent / "phonons.npz"
+    with np.load(path, allow_pickle=False) as data:
+        record = dict(data)
+    permutation = np.array([12, 1, 4, 7, 10, 2, 5, 8, 11, 3, 6, 9, 0])
+    for key in ("positions_A", "displacements_A", "forces_eV_A", "energies_eV"):
+        record[key] = record[key][permutation]
+    record.pop("metadata")
+    for old, new in [
+        ("positions_A", "positions"),
+        ("cell_A", "cell"),
+        ("masses_amu", "masses"),
+        ("forces_eV_A", "forces"),
+        ("displacements_A", "displacements"),
+    ]:
+        record[new] = record.pop(old)
+    np.savez_compressed(path, **record)
+    report = score(submission, level=level)
+    assert report["score"] == 1, report

@@ -41,12 +41,7 @@ from corral.core.action import submit_answer_action
 # (the `[mcp_servers.<name>]` config table key).
 _MCP_SERVER_NAME = "corral"
 
-# MCP tools that create/place a file the model may later submit a path to. When
-# any of these is available, the model is told to use relative paths: the corral
-# filesystem tools and the scorer both resolve a relative path against the
-# server-side execution workspace, whereas an absolute path built from Codex's
-# advertised sandbox cwd points at a throwaway temp dir this agent deletes before
-# scoring (so the file — and the submission referencing it — is lost).
+# MCP tools that create/place a file the model may later submit a path to.
 _FILE_WRITING_TOOLS = frozenset({"write_file", "copy_file", "move_file", "mkdir"})
 
 # Terminal status of a single harness run. Distinguishing these lets the
@@ -212,19 +207,13 @@ class CodexAgent(BaseAgent):
             "operate in an isolated per-run workspace; use the MCP tools for task "
             "environment data and actions. Do not invent tool outputs. "
         )
-        # Only mention file paths when a file-writing tool is actually available,
-        # so a task without one sees the exact same instructions as before. The
-        # harness advertises a sandbox working directory, but that directory is a
-        # throwaway temp dir — files must be addressed relative to the task
-        # workspace (handled by the corral filesystem tools), not by an absolute
-        # path built from the advertised cwd.
+        # The task environment owns its public path contract; the harness's
+        # separate scratch directory is not a task artifact destination.
         if tool_names and _FILE_WRITING_TOOLS.intersection(tool_names):
             instructions += (
                 "When a tool writes a file and you submit or reference its path, "
-                "use a RELATIVE path (a bare filename like `result.cif`), never an "
-                "absolute path: paths are resolved against the task workspace, and "
-                "an absolute path built from the working directory shown to you "
-                "points outside it and will not be found. "
+                "follow the task environment's public path contract. Do not "
+                "construct task paths from Codex's isolated working directory. "
             )
         instructions += final_answer_directive
         if enable_surrender:

@@ -1,12 +1,16 @@
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
 from corral_md import env
 from hatchling.builders.wheel import WheelBuilder
+
+from corral.core.environment import Toolset
+from corral.core.state import ExecutionState, RuntimeState
 
 
 @pytest.mark.parametrize(
@@ -26,8 +30,12 @@ def test_all_shipped_tasks_load_from_unrelated_cwd(
     assert all("work_dir" not in task.initial_input for task in tasks.values())
     expected_level = int(source.split("/")[0].removeprefix("level_"))
     assert all(task.scoring_fn.level == expected_level for task in tasks.values())
+    for task in tasks.values():
+        assert "validate_submission" not in task.submission_format
+        assert task.scoring_fn.evaluate("{}")["score"] == 0
 
 
+@pytest.mark.usefixtures("md_assets")
 def test_wheel_loads_both_levels_without_editable_source(tmp_path):
     task_root = Path(__file__).resolve().parents[1]
     wheel = next(WheelBuilder(str(task_root)).build(directory=str(tmp_path)))
@@ -51,8 +59,6 @@ sys.path = [str(installed)] + [
     path for path in sys.path if Path(path).resolve() != source
 ]
 from corral_md import env
-from corral_md.submission_examples import load_example
-from corral_md.workflow_scoring.lammps_checks import supplied_cu32_cell
 
 assert Path(env.__file__).is_relative_to(installed)
 assert env.PACKAGE_DATA_ROOT.is_relative_to(installed)
@@ -63,11 +69,15 @@ for level in (1, 2):
     assert len(environments) == 10
     for environment in environments.values():
         simulation = environment.tools["run_lammps"]
-        assert simulation.trusted
-        assert "corral_action_id" in simulation.hidden_args
-    for number in range(1, 11):
-        assert load_example(number, level=level)["manifest"]
-assert len(supplied_cu32_cell()) == 32
+        assert environment.local_mode
+        assert not simulation.trusted
+        assert "corral_action_id" not in simulation.hidden_args
+        assert "run_verified_md" not in environment.tools
+        assert "validate_submission" not in environment.tools
+        task = environment.current_task
+        assert "validate_submission" not in task.submission_format
+        assert task.scoring_fn.evaluate("{}")["score"] == 0
+    assert not list(Path(env.__file__).parent.glob("*_recording.py"))
 """,
             str(installed),
             str(task_root / "src"),
@@ -86,7 +96,7 @@ def test_removed_subtasks_are_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(
         env,
         "build_environments",
-        lambda *args, **kwargs: pytest.fail("No removed subtasks should be built"),
+        lambda *_args, **_kwargs: pytest.fail("No removed subtasks should be built"),
     )
 
     with pytest.raises(ValueError, match="no subtasks; select level 1 or 2"):
@@ -100,16 +110,47 @@ def test_expansion_prompt_constructs_its_aluminum_cell(level):
     path = env.PACKAGE_DATA_ROOT / level / "tasks_json/task_7.json"
     description = json.loads(path.read_text())[0]["description"]
     assert (
-        "conventional cubic FCC cell with lattice parameter 4.05 Å 3 x 3 x 3"
-        in description
+        r"Start with a conventional FCC unit cell of Aluminum (a = 4.05 \u00c5) "
+        r"and replicate it into a 3 \u00d7 3 \u00d7 3 supercell." in description
     )
     assert "supplied periodic 108-atom FCC aluminum cell" not in description
 
 
-def test_regression_prompt_requires_replayable_generation_script():
+def test_regression_prompt_requires_agent_written_calculations():
     path = env.PACKAGE_DATA_ROOT / "level_2/tasks_json/task_8.json"
     description = json.loads(path.read_text())[0]["description"]
-    assert "generation script needed to replay the structures" in description
+    assert "with your own code" in description
+    assert "freeze the final and learning-curve pipelines" in description
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("number", range(1, 11))
+def test_agent_workspace_and_prompt_do_not_supply_recording_helpers(
+    tmp_path, level, number
+):
+    task_id = f"level_{level}_task_{number}"
+    task = env.load_tasks_from_json(
+        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_{number}.json"
+    )[task_id]
+    environment = env.MolecularDynamicsEnvironment(
+        task_id,
+        replace(task, tools=[]),
+        workspace_path=str(tmp_path),
+        base_work_dir=str(tmp_path),
+        toolset=Toolset(workspace_factory=None),
+    )
+    environment._ensure_seed_directories()
+    assert not any(path.is_file() for path in tmp_path.rglob("*"))
+    state = ExecutionState(
+        through_commit_hash="a" * 64,
+        execution_id=task_id,
+        branch_id="main",
+        runtime=RuntimeState(status="submitted"),
+        submission="{}",
+    )
+    prompt = environment.get_task_prompt(state)
+    assert "Recorder" not in prompt
+    assert "_recording.py" not in prompt
 
 
 @pytest.mark.parametrize(
@@ -124,6 +165,7 @@ def test_regression_prompt_requires_replayable_generation_script():
         ),
     ],
 )
+@pytest.mark.usefixtures("md_assets")
 def test_invalid_tasks_fail_before_environments_are_built(
     name, params, error, tmp_path, monkeypatch
 ):
@@ -143,7 +185,7 @@ def test_invalid_tasks_fail_before_environments_are_built(
     )
     monkeypatch.setattr(env, "PACKAGE_DATA_ROOT", tmp_path)
 
-    def unexpected_build(*args, **kwargs):
+    def unexpected_build(*_args, **_kwargs):
         pytest.fail("Environments must not be built for invalid tasks")
 
     monkeypatch.setattr(env, "build_environments", unexpected_build)
@@ -151,3 +193,29 @@ def test_invalid_tasks_fail_before_environments_are_built(
         env.create_environments(work_dir=str(tmp_path / "work"))
     assert "invalid_task" in str(exc.value)
     assert str(task_file) in str(exc.value)
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.usefixtures("md_assets")
+def test_all_tasks_require_direct_json_answers(tmp_path, level, local):
+    tasks = env.load_tasks_from_json(
+        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json", local=local
+    )
+    for task in tasks.values():
+        assert "JSON object directly as your final answer" in task.submission_format
+        assert "relative to /workspace/" in task.submission_format
+        instructions, example_block = task.submission_format.split("\n\n```json\n")
+        assert "Save artifact files under /workspace/" in instructions
+        assert example_block.endswith("\n```")
+        answer = example_block.removesuffix("\n```")
+        assert isinstance(json.loads(answer)["artifacts"], dict)
+        resolved = task.submission_resolver(answer, tmp_path)
+        expected = json.loads(answer.replace("/workspace/", f"{tmp_path}/"))
+        assert json.loads(resolved) == expected
+        if local:
+            invalid = task.submission_resolver("/workspace/manifest.json", tmp_path)
+            assert json.loads(invalid)["invalid_submission"]
+        else:
+            with pytest.raises(ValueError, match="JSON object directly"):
+                task.submission_resolver("/workspace/manifest.json", tmp_path)

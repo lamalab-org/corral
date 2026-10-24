@@ -30,10 +30,10 @@ will mark the experiment partial. Return
 arguments, purpose, and expected information when another measurement would
 advance this experiment. Return `decision="finish"`, no action fields, and a
 brief evidence-grounded conclusion when the experiment is complete or no
-useful action remains. Keep output paths relative to the node's branch
-workspace (`branch_workspace` above), even if the task prompt names the enclosing
-trial workspace. Starting files have been copied into this directory. Other
-nodes' directories and the main agent's files are not accessible from your tools.
+useful action remains. The node's branch workspace (`branch_workspace` above)
+contains its starting files and follows the task environment's public path
+contract. Other nodes' directories and the main agent's files are not accessible
+from your tools.
 Do not call scoring or answer-submission tools.
 Unless the experiment node says `physical_state_inherited=true`, parent results
 are scientific context only: reproduce every state/configuration needed for

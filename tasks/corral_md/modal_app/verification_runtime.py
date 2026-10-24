@@ -48,7 +48,29 @@ def _job_identity(job, release_id):
 
 
 BOOTSTRAP = """
-import ctypes, os, sys
+import ctypes, hashlib, json, os, sys
+from pathlib import Path
+resources = Path('/workspace/resources')
+resources.mkdir(parents=True, mode=0o755)
+for spec in json.loads(sys.argv[1]):
+    source = Path('/assets') / spec['relative']
+    if source.is_symlink() or not source.is_file():
+        raise ValueError('Invalid declared resource source')
+    destination = resources / spec['name'] / source.name
+    destination.parent.mkdir(mode=0o755)
+    digest = hashlib.sha256()
+    size = 0
+    with source.open('rb') as incoming, destination.open('wb') as outgoing:
+        while chunk := incoming.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+            outgoing.write(chunk)
+    if digest.hexdigest() != spec['sha256'] or size != spec['size']:
+        raise ValueError('Declared resource failed hash validation')
+    destination.chmod(0o444)
+    destination.parent.chmod(0o555)
+resources.chmod(0o555)
+os.chmod('/assets', 0o700)
 os.chown('/output', 10001, 10001)
 os.makedirs('/tmp/corral-verifier', exist_ok=True)
 os.chown('/tmp/corral-verifier', 10001, 10001)
@@ -59,7 +81,7 @@ os.setuid(10001)
 if ctypes.CDLL(None, use_errno=True).prctl(38, 1, 0, 0, 0):
     raise RuntimeError('Cannot disable privilege escalation')
 os.chdir('/output')
-os.execv(sys.executable, [sys.executable, '-I', *sys.argv[1:]])
+os.execv(sys.executable, [sys.executable, '-I', *sys.argv[2:]])
 """
 
 
@@ -83,23 +105,12 @@ class VerificationRuntime:
                 for job in payload["jobs"]
             )
         )
-        restart_only = (
-            program == "verification_worker.py"
-            and bool(payload.get("jobs"))
-            and all(
-                job.get("operation") == "lammps_restart"
-                and isinstance(job.get("parameters"), dict)
-                and set(job["parameters"])
-                == {"checkpoint", "checkpoint_sha256"}
-                for job in payload["jobs"]
-            )
-        )
         # Open MPI's local PMIx listener cannot start with all sockets disabled.
         # Only fixed, data-only LAMMPS operations get loopback access. They
         # remain isolated from submitted executable checkpoints and scripts.
         network = (
             {"cidr_allowlist": ["127.0.0.0/8"]}
-            if sw_only or restart_only
+            if sw_only
             else {"block_network": True}
         )
         with modal.Volume.ephemeral() as inputs, modal.Volume.ephemeral() as outputs:
@@ -117,6 +128,13 @@ class VerificationRuntime:
                 "-I",
                 "-c",
                 BOOTSTRAP,
+                json.dumps(
+                    [
+                        spec
+                        for spec in w._authorized_asset_files(None)
+                        if Path(spec["relative"]).parts[0] in {"models", "potentials"}
+                    ]
+                ),
                 f"/opt/corral-md/{program}",
                 "/evidence/request.json",
                 "/output" if program == "trusted_md.py" else "/output/result.json",
@@ -132,8 +150,8 @@ class VerificationRuntime:
                 volumes={
                     "/evidence": inputs.read_only(),
                     "/output": outputs,
-                    "/workspace/models": w.volume_models.read_only(),
-                    "/workspace/potentials": w.volume_potential.read_only(),
+                    "/assets/models": w.volume_models.read_only(),
+                    "/assets/potentials": w.volume_potential.read_only(),
                 },
             )
             try:
@@ -151,7 +169,7 @@ class VerificationRuntime:
                 w._collect_workspace(outputs, root)
                 yield_result = {
                     "sandbox_id": sandbox.object_id,
-                    "network": "loopback_only" if sw_only or restart_only else "disabled",
+                    "network": "loopback_only" if sw_only else "disabled",
                     "files": w._manifest(root),
                     "stdout": stdout[-2000:],
                     "stderr": stderr[-2000:],
@@ -311,7 +329,7 @@ class VerificationRuntime:
             trusted, sw, isolated = [], [], []
             for job in prepared:
                 if (
-                    job["operation"] in {"pipeline", "lammps_restart"}
+                    job["operation"] == "pipeline"
                     or job.get("parameters", {}).get("model") == "submitted"
                 ):
                     isolated.append([job])

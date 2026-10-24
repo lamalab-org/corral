@@ -1,6 +1,8 @@
 import argparse
+import asyncio
 import json
 import os
+import tempfile
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -9,17 +11,20 @@ from typing import Any, ClassVar
 
 from corral_md.local_runtime import assets_directory
 from corral_md.modal_workspace import (
+    authorized_resources,
+    configured_asset_volume_name,
     pinned_release,
     recovery_snapshot,
 )
-from corral_md.score import (
+from corral_md.resources import asset_descriptors, asset_relative_paths
+from corral_md.scoring import (
+    Task6Scorer,
+    Task7Scorer,
     WorkflowScorer,
     check_level1_workflow,
     check_level2_workflow,
 )
 from corral_md.submission import resolve_local_submission, resolve_submission
-from corral_md.submission_examples import example_prompt, seed_examples
-from corral_md.submission_validation import build_validate_submission_tool
 from corral_md.tools import (
     build_execute_python_script_tool,
     build_md_terminal_tool,
@@ -31,16 +36,24 @@ from corral_md.tools import (
     get_structure_from_mp_text,
     keyword_log_extractor,
     visualisation_tool,
+    with_task1_recording,
 )
 from corral_md.workspace import MDWorkspaceFilesystem, local_path
 
 from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.events import ExecutionStarted
+from corral.core.resources import (
+    RESOURCE_CATALOG_METADATA_KEY,
+    FileResourceDescriptor,
+    ResourceCatalogMismatchError,
+    resource_file_matches,
+)
 from corral.core.state import ExecutionState
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
 from corral.core.workspace import WorkspaceState
 from corral.report.logging import event, exception_fields
+from corral.runtime import permissions
 from corral.runtime.tool_execution import PreparedToolCall
 from corral.utils.context7_tools import get_library_documentation
 from corral.workspace import (
@@ -142,23 +155,18 @@ def _md_file_tools(
     workspace: str, *, local: bool = False, assets_dir: str | None = None
 ) -> dict[str, Tool]:
     """MD filesystem and LAMMPS tools bound to one local workspace."""
-    tools = build_workspace_tools(
-        MDWorkspaceFilesystem(workspace, assets_dir=assets_dir if local else None)
-    )
-    # Preserve MD's read-only asset namespace in every file operation. Generic
-    # worker filesystem tools do not know about MD's virtual asset catalogs.
-    # These confined operations only read/write data; they never execute it.
+    tools = build_workspace_tools(MDWorkspaceFilesystem(workspace))
+    resources = tuple(asset_descriptors())
     for name in (
         "list_files",
         "read_file",
-        "write_file",
         "file_info",
         "copy_file",
         "cat_files",
         "grep",
     ):
-        tools[name].trusted = True
-    return {
+        tools[name].resources = resources
+    selected = {
         **{
             name: tools[name]
             for name in (
@@ -182,12 +190,62 @@ def _md_file_tools(
         ),
         **({} if local else {"run_verified_md": build_run_verified_md_tool(workspace)}),
     }
+    for name in ("terminal", "execute_python_script", "run_lammps", "run_verified_md"):
+        if name in selected:
+            selected[name].resources = resources
+    return selected
 
 
 class MolecularDynamicsEnvironment(Environment):
     """Confine every agent-controlled domain-tool path to this task workspace."""
 
     local_mode = False
+
+    def ensure_file_resources_durable(
+        self, names: tuple[str, ...] | None = None
+    ) -> None:
+        """Cache pinned Modal assets once, then use ordinary Corral resources."""
+        selected = tuple(self.file_resources) if names is None else names
+        relative_paths = asset_relative_paths()
+        with self._resource_materialization_lock:
+            for name in selected:
+                if (
+                    name not in self.file_resources
+                    or name in self.file_resource_sources
+                ):
+                    continue
+                descriptor = self.file_resources[name]
+                store = self.workspace_manager.artifact_store
+                if asyncio.run(store.contains(descriptor.blob_ref)):
+                    continue
+                destination = (
+                    Path(self.base_work_dir)
+                    / ".corral"
+                    / "md-assets"
+                    / descriptor.sha256
+                    / descriptor.filename
+                )
+                if not resource_file_matches(destination, descriptor):
+                    import modal
+
+                    kind, relative = relative_paths[name].split("/", 1)
+                    volume = modal.Volume.from_name(configured_asset_volume_name(kind))
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with tempfile.TemporaryDirectory(
+                        dir=destination.parent
+                    ) as temporary:
+                        downloaded = Path(temporary) / descriptor.filename
+                        with downloaded.open("wb") as stream:
+                            for chunk in volume.read_file("/" + relative):
+                                stream.write(chunk)
+                        if not resource_file_matches(downloaded, descriptor):
+                            raise ResourceCatalogMismatchError(
+                                f"MD asset {name!r} does not match its pinned descriptor"
+                            )
+                        downloaded.replace(destination)
+                    destination.chmod(0o444)
+                self.file_resource_sources[name] = destination
+        super().ensure_file_resources_durable(names)
 
     def for_task(self, task_execution_id: str, **kwargs):
         bound = super().for_task(task_execution_id, **kwargs)
@@ -197,17 +255,13 @@ class MolecularDynamicsEnvironment(Environment):
     def _resolve_tools(self, workspace: str | None) -> dict[str, Tool]:
         tools = super()._resolve_tools(workspace)
         scorer = self.current_task.scoring_fn
-        if workspace and isinstance(scorer, WorkflowScorer):
-            tools["validate_submission"] = build_validate_submission_tool(
-                workspace,
-                scorer.task_number,
-                level=scorer.level,
-                require_provenance=(
-                    scorer.level == 2
-                    and scorer.task_number == 10
-                    and getattr(scorer.verifier, "require_provenance", False)
-                ),
-            )
+        if (
+            workspace
+            and isinstance(scorer, WorkflowScorer)
+            and scorer.task_number == 1
+            and "run_lammps" in tools
+        ):
+            tools["run_lammps"] = with_task1_recording(tools["run_lammps"], workspace)
         return tools
 
     def _ensure_seed_directories(self) -> None:
@@ -217,11 +271,6 @@ class MolecularDynamicsEnvironment(Environment):
             )
             for name in seed["directories"]:
                 (Path(self.workspace_path) / name).mkdir(parents=True, exist_ok=True)
-            scorer = self.current_task.scoring_fn
-            if isinstance(scorer, WorkflowScorer):
-                seed_examples(
-                    self.workspace_path, scorer.task_number, level=scorer.level
-                )
 
     def initial_event(self, **kwargs: Any) -> ExecutionStarted:
         """Create the standard local MD workspace before the first tool call."""
@@ -238,7 +287,23 @@ class MolecularDynamicsEnvironment(Environment):
     ) -> Any:
         release = state.runtime.metadata.get("corral_md_release_id")
         volume_name = state.runtime.metadata.get("corral_md_volume_name")
+        # Preserve the authority frozen by central preparation. Resource names
+        # alone do not authorize mounts, and the live catalog may have changed.
+        catalog = state.task.environment.get(RESOURCE_CATALOG_METADATA_KEY, {})
+        descriptors = {}
+        for name, (_source, public_path) in prepared.resource_mounts.items():
+            if name not in prepared.resources or name not in catalog:
+                raise ResourceCatalogMismatchError(
+                    f"Prepared MD resource {name!r} has no pinned authorization"
+                )
+            descriptor = FileResourceDescriptor.model_validate(catalog[name])
+            if descriptor.public_path != public_path:
+                raise ResourceCatalogMismatchError(
+                    f"Prepared MD resource {name!r} has a different public path"
+                )
+            descriptors[name] = descriptor
         with (
+            authorized_resources(descriptors),
             pinned_release(
                 release if isinstance(release, str) else None,
                 volume_name if isinstance(volume_name, str) else None,
@@ -270,6 +335,17 @@ class MolecularDynamicsEnvironment(Environment):
         for argument in self._PATH_ARGUMENTS.get(tool_name, ()):
             value = parsed.get(argument)
             if value is not None:
+                if (
+                    tool_name == "convert_structure_to_lammps_data"
+                    and argument == "structure_path"
+                ):
+                    authorized = getattr(self.tools.get(tool_name), "resources", ())
+                    if any(
+                        descriptor.public_path == value
+                        for name, descriptor in self.file_resources.items()
+                        if name in authorized
+                    ):
+                        continue
                 # Keep the public path in prepared calls and durable actions.
                 # Restricted workers mount /workspace; the shared executor
                 # translates these values only for the local fallback.
@@ -282,56 +358,24 @@ def _md_task_prompt(env: Environment, state: ExecutionState) -> str:
     prompt = env._default_task_prompt(state)
 
     scorer = env.current_task.scoring_fn
-    if isinstance(scorer, WorkflowScorer):
-        prompt += example_prompt(
-            scorer.task_number, workspace=bool(env.workspace_path), level=scorer.level
+    if env.workspace_path:
+        prompt += (
+            "\nShared MD assets are immutable declared resources listed under "
+            "/workspace/resources. Their public paths are available to file tools "
+            "and sandboxed execution. Use copy_file when an editable copy is needed. "
+            "Run MACE simulations with ASE through execute_python_script(use_gpu=True); "
+            "use run_lammps for SW, Tersoff, EAM, and BKS potentials. "
+            "Leave use_gpu=False for CPU analysis, plotting, and conversion.\n\n"
         )
-        if (
-            scorer.level == 2
-            and scorer.task_number == 10
-            and getattr(scorer.verifier, "require_provenance", False)
+        if not isinstance(scorer, Task6Scorer | Task7Scorer) and not (
+            isinstance(scorer, WorkflowScorer) and scorer.task_number == 9
         ):
             prompt += (
-                "\nThis task requires trusted execution provenance. Run the aluminum "
-                "cycle with run_verified_md, then analyze its saved artifacts. Read "
-                "submission_examples/README.md for its configuration and receipt "
-                "instructions before starting the simulation.\n"
+                "Record Step, Temperature, Pressure, and Density for each simulation "
+                "where applicable, at a sampling interval suitable for the task "
+                "(typically 1000 timesteps). Use get_nth_run_log and "
+                "keyword_log_extractor to inspect large LAMMPS logs.\n"
             )
-
-    if env.workspace_path:
-        if getattr(env, "local_mode", False):
-            prompt += (
-                "\nLAMMPS and execute_python_script(use_gpu=True) run on this host. "
-                "The terminal also runs locally. In scripts and LAMMPS inputs, "
-                "use paths relative to the workspace, such as input/data.lmp "
-                "and output/results.json. Shared assets remain read-only in the "
-                "file tools; copy needed assets into /workspace/input "
-                "before running local scripts. Use /workspace paths for tool "
-                "arguments. Local GPU work requires CUDA and the installed "
-                "Python packages on this host.\n\n"
-            )
-        else:
-            prompt += (
-                "\nShared MD assets in /workspace/structures, /workspace/potentials, "
-                "and /workspace/models are read-only catalogs available through the "
-                "file tools and Modal runtime. They are not mounted in the local "
-                "terminal or CPU runtime. Use copy_file to copy structures and "
-                "potentials into /workspace/input before local analysis. GPU scripts "
-                "can use /workspace/models/teacher.model and "
-                "/workspace/models/student.model directly.\n\n"
-                "Run MACE simulations with ASE through execute_python_script(use_gpu=True) "
-                "on Modal's A100. Use run_lammps for other potentials, including SW, "
-                "Tersoff, EAM, and BKS. Leave use_gpu=False for CPU analysis, plotting, "
-                "and conversion. Inside local scripts and terminal commands, use paths "
-                "relative to the current workspace, such as output/results.json. "
-                "Modal GPU scripts start in /workspace.\n\n"
-            )
-        prompt += (
-            "Record Step, Temperature, Pressure, and Density for each simulation "
-            "where applicable, at a sampling interval suitable for the task "
-            "(typically 1000 timesteps). Use get_nth_run_log and "
-            "keyword_log_extractor to inspect large LAMMPS logs.\n"
-        )
 
     event(
         "DEBUG",
@@ -350,9 +394,10 @@ def create_environments(
     subtask_level: bool = False,
     level: int = 1,
     taskgroup_common_tools: dict[str, Tool] | None = None,
-    local: bool = False,
+    local: bool = True,
     assets_dir: str | None = None,
 ) -> dict[str, Environment]:
+    """Build MD runs with local simulation and scoring unless Modal is selected."""
     # The shared environment loader can still pass the legacy selector.
     if subtask_level:
         raise ValueError("Corral MD has no subtasks; select level 1 or 2.")
@@ -369,7 +414,16 @@ def create_environments(
     work_dir = str(Path(work_dir).expanduser().resolve())
     if type(local) is not bool:
         raise ValueError("local must be a boolean")
-    local_assets = str(assets_directory(assets_dir)) if local else None
+    if permissions.enabled() and Path("/usr/local/share/corral-md-assets").exists():
+        raise ValueError(
+            "Rebuild the MD image with assets under /opt/corral/assets/corral_md "
+            "and remove /usr/local/share/corral-md-assets: the legacy /usr catalog "
+            "is visible to workers without resource authorization."
+        )
+    configured_assets = assets_dir or os.getenv("CORRAL_MD_ASSETS_DIR")
+    local_assets = (
+        str(assets_directory(configured_assets)) if local or configured_assets else None
+    )
     json_path = PACKAGE_DATA_ROOT / f"level_{level}" / "tasks_json"
 
     # Create environments for all tasks
@@ -396,6 +450,13 @@ def create_environments(
                 ),
             ),
             env_cls=MolecularDynamicsEnvironment,
+            file_resources=asset_descriptors(),
+            file_resource_sources={
+                name: Path(local_assets) / relative
+                for name, relative in asset_relative_paths().items()
+            }
+            if local_assets
+            else None,
         )
         for environment in environments.values():
             environment.local_mode = local
