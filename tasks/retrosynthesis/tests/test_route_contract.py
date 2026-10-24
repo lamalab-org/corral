@@ -139,3 +139,28 @@ def test_loader_binds_product_constraint_and_fails_closed_if_missing(tmp_path):
     file.write_text(json.dumps(original))
     with pytest.raises(KeyError, match="route_constraints"):
         load_tasks_from_json(tmp_path)
+
+
+def test_assembled_subtask_routes_keep_the_requested_product():
+    checked = 0
+    for file in ROOT.glob("*/subtasks_json/*.json"):
+        main = json.loads((file.parent.parent / "tasks_json" / file.name).read_text())[
+            0
+        ]
+        tasks = load_tasks_from_json(file.parent)
+        for task in json.loads(file.read_text()):
+            if task["scoring_function"] != "check_reactants":
+                continue
+            assert task["route_constraints"] == {
+                "product_smiles": main["route_constraints"]["product_smiles"]
+            }
+            with patch("retrosynthesis.score.check_price") as prices:
+                assert (
+                    tasks[task["id"]].scoring_fn(
+                        json.dumps({"type": "mol", "smiles": "C"})
+                    )
+                    == 0.0
+                )
+                prices.assert_not_called()
+            checked += 1
+    assert checked == 16
