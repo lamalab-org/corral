@@ -13,6 +13,7 @@ from corral_md.submission_examples import example_files, load_example
 
 from corral.core.environment import Toolset
 from corral.core.state import ExecutionState, RuntimeState
+from corral.core.tool import tool
 from corral.evaluation import TaskScorer
 
 
@@ -24,6 +25,30 @@ def _state(submission):
         runtime=RuntimeState(status="submitted"),
         submission=submission,
     )
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("number", range(1, 11))
+def test_verified_cycle_tool_only_appears_on_its_supported_task(
+    level, number, tmp_path
+):
+    @tool
+    def run_verified_md() -> str:
+        """Stand-in executor; resolving tools must not run a simulation."""
+        raise AssertionError("must not execute")
+
+    task = env.load_tasks_from_json(
+        env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json/task_{number}.json"
+    )[f"level_{level}_task_{number}"]
+    environment = env.MolecularDynamicsEnvironment(
+        "tool-contract",
+        task,
+        workspace_path=str(tmp_path),
+        toolset=Toolset(
+            workspace_factory=lambda _: {"run_verified_md": run_verified_md}
+        ),
+    )
+    assert ("run_verified_md" in environment.tools) == (level == 2 and number == 10)
 
 
 @pytest.mark.parametrize("required", [False, True])

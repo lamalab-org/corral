@@ -197,6 +197,14 @@ class MolecularDynamicsEnvironment(Environment):
     def _resolve_tools(self, workspace: str | None) -> dict[str, Tool]:
         tools = super()._resolve_tools(workspace)
         scorer = self.current_task.scoring_fn
+        # This executor implements only the level-2 aluminum-cycle protocol.
+        # Workspace tools are added after TaskDefinition.tools is selected.
+        if not (
+            isinstance(scorer, WorkflowScorer)
+            and scorer.level == 2
+            and scorer.task_number == 10
+        ):
+            tools.pop("run_verified_md", None)
         if workspace and isinstance(scorer, WorkflowScorer):
             tools["validate_submission"] = build_validate_submission_tool(
                 workspace,
