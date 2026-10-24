@@ -217,6 +217,7 @@ async def _project_trial(
             if evaluation is not None
             else None
             if result.evaluation_error is not None
+            or (result.state is None and result.error is not None)
             else 0.0
         ),
         state=state_data,
