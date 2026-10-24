@@ -35,7 +35,7 @@ DEFAULT_PASS_RULE: dict[str, Any] = {"kind": "headroom", "min_closed": 0.5}
 
 
 def headroom_closed(n_correct: int, baseline: float, n_items: int) -> float | None:
-    """Share of the baseline's wrong answers the policy got right; None at ceiling."""
+    """Net accuracy improvement divided by baseline headroom; None at ceiling."""
     baseline_correct = round(baseline * n_items)
     if baseline_correct >= n_items:
         return None

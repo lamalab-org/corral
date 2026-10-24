@@ -45,7 +45,9 @@ Every experiment costs real inference. `dry_run_policy` is much cheaper than
 
 ## Submitting
 
-When you are done - or when your budget is nearly gone - call `submit_policy('{policy_dir}')`, then pass the exact string it returns to `submit_answer`.
+When you are done - or when your budget is nearly gone - call `submit_policy('{policy_dir}')`.
+If its JSON response confirms `staged: true`, pass the value of `submit_answer_with`
+(`submission.json`) to `submit_answer`.
 A policy that is never submitted scores nothing, so submit early and re-submit if you improve on it.
 """
 
@@ -84,9 +86,10 @@ def _scoring_summary(config: dict) -> str:
     share = f"{float(rule.get('min_closed', 0.5)):.0%}"
     lines = [
         "- Your submitted policy is run on the held-out test split. The task passes "
-        f"(score 1) if the policy answers correctly at least {share} of the test "
-        "questions the student's measured zero-shot baseline gets wrong; otherwise "
-        "it scores 0.",
+        f"(score 1) if its net accuracy gain closes at least {share} of the gap "
+        "between the student's measured zero-shot accuracy on that same test split "
+        "and 100%; otherwise it scores 0. Improvements and regressions both count. "
+        "The train baseline is not the test baseline.",
     ]
     if joint:
         lines.append("- With two student models, both must reach this to pass.")
