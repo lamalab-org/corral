@@ -3,53 +3,7 @@ from wetlab.engine import Precipitate, Solution, StockSolution, VolumeError
 
 from corral.core.tool import Tool, tool
 
-CATIONS = [
-    "Ag+",
-    "Al+3",
-    "Ba+2",
-    "Ca+2",
-    "Cd+2",
-    "Co+2",
-    "Cs+",
-    "Cu+2",
-    "Fe+2",
-    "Fe+3",
-    "Hg+2",
-    "Hg2+2",
-    "K+",
-    "Li+",
-    "Mg+2",
-    "Mn+2",
-    "Na+",
-    "NH4+",
-    "Ni+2",
-    "Pb+2",
-    "Rb+",
-    "Sr+2",
-    "Zn+2",
-]
-
-ANIONS = [
-    "Br-",
-    "Cl-",
-    "CO3-2",
-    "HCO3-",
-    "CrO4-2",
-    "HCrO4-",
-    "Cr2O7-2",
-    "F-",
-    "I-",
-    "NO3-",
-    "OH-",
-    "PO4-3",
-    "HPO4-2",
-    "H2PO4-",
-    "S-2",
-    "HS-",
-    "SCN-",
-    "SO4-2",
-    "HSO4-",
-]
+from wetlab.ions import ANIONS, CATIONS
 
 FLAME_COLORS = {
     "Ba+2": "green",

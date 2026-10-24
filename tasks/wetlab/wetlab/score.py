@@ -1,4 +1,4 @@
-from wetlab.tools import CATIONS, ANIONS
+from wetlab.ions import CATIONS, ANIONS
 from typing import Dict
 import json
 
@@ -62,7 +62,9 @@ def score_salt(prediction: str, ground_truth: Dict, binarize=True) -> float:
     except json.JSONDecodeError:
         return 0.0
 
-    if set(pred_dict.keys()) != {'cation', 'anion'}:
+    if not isinstance(pred_dict, dict) or set(pred_dict) != {'cation', 'anion'}:
+        return 0.0
+    if not all(isinstance(value, str) for value in pred_dict.values()):
         return 0.0
     
     true_cation = ground_truth['cation']
