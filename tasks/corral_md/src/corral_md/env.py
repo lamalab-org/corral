@@ -259,7 +259,9 @@ class MolecularDynamicsEnvironment(Environment):
             and scorer.task_number == 1
             and "run_lammps" in tools
         ):
-            tools["run_lammps"] = with_task1_recording(tools["run_lammps"], workspace)
+            tools["run_lammps"] = with_task1_recording(
+                tools["run_lammps"], workspace, level=scorer.level
+            )
         return tools
 
     def _ensure_seed_directories(self) -> None:

@@ -6,8 +6,10 @@ import json
 
 import numpy as np
 import pytest
-from ase import units
+from ase import Atoms, units
 from ase.build import bulk
+from ase.calculators.singlepoint import SinglePointCalculator
+from ase.io.trajectory import Trajectory
 from corral_md.scoring import WorkflowScorer
 from corral_md.scoring.common import EvaluationError, Evidence
 from corral_md.scoring.level1_trusted import PINNED_TEACHER_SHA256
@@ -145,6 +147,97 @@ def score(path, level=2):
     ).evaluate(path)
 
 
+def save_native_forces(submission, *, force_scale=1, defect=None, record=None):
+    record = make_record() if record is None else record
+    frames = []
+    for positions, forces, energy in zip(
+        record["positions_A"], record["forces_eV_A"], record["energies_eV"], strict=True
+    ):
+        atoms = Atoms(
+            numbers=record["numbers"],
+            positions=positions,
+            cell=record["cell_A"],
+            pbc=record["pbc"],
+            masses=record["masses_amu"],
+        )
+        if defect == "wrapped":
+            atoms.wrap()
+        atoms.calc = SinglePointCalculator(
+            atoms, forces=force_scale * forces, energy=energy
+        )
+        frames.append(atoms)
+    frames[0].info.update(record["metadata"])
+    if defect == "cell":
+        frames[-1].cell *= 1.01
+    elif defect == "mass":
+        frames[-1].set_masses(np.full(125, 100))
+    elif defect == "missing_forces":
+        frames[-1].calc = None
+    elif defect == "missing_displacement":
+        frames.pop()
+    with Trajectory(submission.parent / "forces.traj", "w") as writer:
+        for atoms in frames:
+            writer.write(atoms)
+    data = json.loads(submission.read_text())
+    data["artifacts"]["force_log"] = "forces.traj"
+    submission.write_text(json.dumps(data))
+
+
+@pytest.mark.parametrize(
+    ("level", "force_scale", "defect"),
+    [(1, 1, None), (2, 1, None), (1, 2, None), (2, 1, "wrapped")],
+)
+def test_native_force_frames_use_existing_science_and_verifier(
+    submission, level, force_scale, defect
+):
+    save_native_forces(submission, force_scale=force_scale, defect=defect)
+    oracle = make_record()
+    seen = []
+
+    def independent(plan, fingerprint):
+        seen.append(plan)
+        jobs = []
+        for job in plan.jobs:
+            values = []
+            for frame in job["frames"]:
+                displacement = (
+                    np.asarray(frame["positions"])[0] - oracle["positions_A"][0, 0]
+                )
+                fractional = displacement @ np.linalg.inv(oracle["cell_A"])
+                displacement = (fractional - np.rint(fractional)) @ oracle["cell_A"]
+                phi = oracle["force_constants_eV_A2"]
+                values.append(
+                    {
+                        "forces": (-phi @ displacement).tolist(),
+                        "energy": float(
+                            -125 + 0.5 * displacement @ phi[0] @ displacement
+                        ),
+                    }
+                )
+            jobs.append(
+                {"id": job["id"], "status": "complete", "value": {"frames": values}}
+            )
+        return {
+            "evidence_sha256": fingerprint,
+            "challenge": plan.challenge,
+            "jobs": jobs,
+        }
+
+    report = WorkflowScorer(
+        4, level=level, verifier=ModalVerifier(transport=independent)
+    ).evaluate(submission)
+    assert seen
+    assert report["score"] == (1 if force_scale == 1 else 0), report
+
+
+@pytest.mark.parametrize(
+    "defect", ["cell", "mass", "missing_forces", "missing_displacement"]
+)
+def test_incomplete_or_inconsistent_native_force_frames_fail(submission, defect):
+    save_native_forces(submission, defect=defect)
+    assert score(submission, level=1)["score"] == 0
+
+
 def change_answer(path, update):
     data = json.loads(path.read_text())
     update(data["results"])
@@ -206,6 +299,97 @@ def test_analytical_derivative_uses_same_answer_and_independent_check(tmp_path):
     assert len(plan.jobs[0]["frames"]) == 4
     assert "hessian" not in plan.jobs[1]["frames"][0]
     assert score(path)["score"] == 1
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("analytical", [False, True])
+def test_documented_compact_npz_uses_the_selected_derivative(
+    tmp_path, level, analytical
+):
+    path = _submission(tmp_path, analytical=analytical)
+    record = make_record(analytical=analytical)
+    expected = record["force_constants_eV_A2"]
+    # Keep resolved, slightly different force differences so substituting the
+    # smallest displacement for the selected/analytical tensor is detectable.
+    record["forces_eV_A"][7:] *= 1.00001
+    compact = {
+        "supercell_positions": record["positions_A"][0],
+        "cell_A": record["cell_A"],
+        "numbers": record["numbers"],
+        "displacements_A": record["displacements_A"],
+        "forces_eV_A": record["forces_eV_A"],
+    }
+    if analytical:
+        compact["hessian_eV_A2"] = record["hessian_eV_A2"]
+    else:
+        compact["metadata"] = json.dumps({"selected_displacement_A": 0.01})
+    np.savez_compressed(tmp_path / "phonons.npz", **compact)
+    manifest = json.loads(path.read_text())
+    manifest["results"] = (
+        {"zpe": manifest["results"]["zpe_eV_per_atom"]} if level == 2 else {}
+    )
+    path.write_text(json.dumps(manifest))
+
+    converted = read_record(Evidence(path, task_number=4, level=level))
+    phi, _, _ = prepare(converted)
+    np.testing.assert_allclose(phi, expected, rtol=1e-12, atol=1e-12)
+    assert not np.allclose(phi, expected * 1.00001, rtol=1e-12, atol=1e-12)
+    assert score(path, level=level)["score"] == 1
+    if analytical:
+        assert "force_constants_eV_A2" not in converted
+        plan = build_plan(Evidence(path), "challenge")
+        assert [job["id"] for job in plan.jobs] == [
+            "palladium_forces",
+            "palladium_hessian",
+        ]
+    else:
+        del converted["metadata"]["selected_displacement_A"]
+        default_phi, _, _ = prepare(converted)
+        np.testing.assert_allclose(
+            default_phi, expected * 1.00001, rtol=1e-12, atol=1e-12
+        )
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_native_frames_select_a_retained_displacement_without_a_tensor(
+    submission, level
+):
+    record = make_record()
+    record["forces_eV_A"][7:] *= 1.00001
+    record["metadata"]["selected_displacement_A"] = 0.01
+    save_native_forces(submission, record=record)
+    converted = read_record(Evidence(submission))
+    assert "force_constants_eV_A2" not in converted
+    phi, _, _ = prepare(converted)
+    np.testing.assert_allclose(
+        phi, record["force_constants_eV_A2"], rtol=1e-12, atol=1e-12
+    )
+    assert score(submission, level=level)["score"] == 1
+
+
+@pytest.mark.parametrize("selected", [None, True, "0.01", 0, -0.01, 0.007])
+def test_invalid_or_unretained_displacement_selection_fails(submission, selected):
+    record = make_record()
+    record["metadata"]["selected_displacement_A"] = selected
+    save_record(submission.parent / "phonons.npz", record)
+    report = score(submission, level=1)
+    assert report["score"] == 0
+    assert "selected_displacement_A" in report["checks"][0]["detail"]
+
+
+def test_legacy_tensor_cannot_override_the_selected_displacement(submission):
+    record = make_record()
+    record["forces_eV_A"][1:7] *= 1.0001
+    record["metadata"]["selected_displacement_A"] = 0.01
+    save_record(submission.parent / "phonons.npz", record)
+    report = score(submission, level=1)
+    assert report["score"] == 0
+    assert "force constants disagree" in report["checks"][0]["detail"]
+    # The same saved tensor remains valid at the smaller displacement it came
+    # from, with the other displacement retained as an accuracy check.
+    record["metadata"]["selected_displacement_A"] = 0.005
+    save_record(submission.parent / "phonons.npz", record)
+    assert score(submission, level=1)["score"] == 1
 
 
 @pytest.mark.parametrize(
@@ -308,6 +492,62 @@ def test_level1_force_constants_do_not_require_a_resolved_phonon_spectrum(submis
     report = score(submission, level=1)
     assert report["score"] == 1, report
     assert report["calculated_results"]["imaginary_tolerance_eV"] > 5e-4
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_zpe_is_calculated_despite_large_imaginary_mode_bound(submission, native):
+    record = read_record(Evidence(submission))
+    # Select the larger retained displacement with a slightly different spring
+    # stiffness. The analytic mode integral scales as sqrt(stiffness).
+    stiffness = 1.005
+    record["forces_eV_A"][1:7] *= stiffness
+    record["force_constants_eV_A2"] *= stiffness
+    record["metadata"]["selected_displacement_A"] = 0.01
+    data = json.loads(submission.read_text())
+    expected = data["results"]["zpe_eV_per_atom"] * np.sqrt(stiffness)
+    data["results"] = {"zpe": expected}
+    submission.write_text(json.dumps(data))
+    if native:
+        save_native_forces(submission, record=record)
+    else:
+        save_record(submission.parent / "phonons.npz", record)
+
+    report = score(submission)
+    assert report["score"] == 1, report
+    calculated = report["calculated_results"]
+    assert calculated["imaginary_tolerance_eV"] > 5e-4
+    assert calculated["zpe_eV_per_atom"] == pytest.approx(expected, abs=1e-8)
+    assert calculated["resolved_imaginary_weight"] == 0
+    assert report["checks"][-1]["status"] == "passed"
+
+    # A large diagnostic bound must not widen the numerical answer tolerance.
+    wrong_value = expected * 1.02
+    assert 1e-5 + 0.01 * wrong_value < wrong_value - expected
+    assert wrong_value - expected < calculated["imaginary_tolerance_eV"]
+    change_answer(submission, lambda results: results.update(zpe=wrong_value))
+    wrong = score(submission)
+    assert wrong["score"] == 0, wrong
+    assert wrong["checks"][2]["status"] == "failed"
+    assert wrong["calculated_results"]["zpe_eV_per_atom"] == pytest.approx(
+        expected, abs=1e-8
+    )
+
+
+def test_large_imaginary_mode_bound_still_requires_null_for_instability(tmp_path):
+    path = _submission(tmp_path, sign=-1)
+    record = read_record(Evidence(path))
+    record["forces_eV_A"][1:7] *= 1.005
+    save_record(path.parent / "phonons.npz", record)
+    report = score(path)
+    assert report["score"] == 1, report
+    calculated = report["calculated_results"]
+    assert calculated["imaginary_tolerance_eV"] > 5e-4
+    assert calculated["resolved_imaginary_weight"] > 0
+    assert calculated["spectrum_status"] == "unstable"
+    assert calculated["zpe_eV_per_atom"] is None
+
+    change_answer(path, lambda results: results.update(zpe_eV_per_atom=0))
+    assert score(path)["score"] == 0
 
 
 def test_offline_cannot_establish_model_identity(submission):

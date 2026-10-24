@@ -181,6 +181,84 @@ def test_saved_model_metrics_are_reconstructed(tmp_path, saved_runtime):
     assert "pending_checks" not in report
 
 
+def minimal_records(root):
+    rows = read_log(root)
+    rows = [row for row in rows if row["stage"] != "test_evaluation"]
+    for row in rows:
+        if row["stage"] == "final_fit":
+            row.pop("sha256")
+            parameters = row.pop("params")
+            candidates = json.loads((root / "grid.json").read_text())
+            row["candidate_index"] = next(
+                i
+                for i, candidate in enumerate(candidates)
+                if all(candidate[key] == value for key, value in parameters.items())
+            )
+        elif row["stage"] == "learning_curve_fits":
+            for fit in row["pipelines"]:
+                for name in ("sha256", "n_train", "scale"):
+                    fit.pop(name)
+    return rows
+
+
+def test_saved_models_need_no_repeated_metrics_counts_or_digests(
+    tmp_path, saved_runtime
+):
+    path = stage_submission(tmp_path, saved_runtime)
+    original = scorer().evaluate(path)
+    rows = minimal_records(tmp_path)
+    (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
+    report = scorer().evaluate(path)
+    assert report["score"] == 1, report
+    assert report["calculated_results"] == original["calculated_results"]
+
+
+@pytest.mark.parametrize(
+    "defect", ["frozen_digest", "missing_digest", "count", "candidate", "params"]
+)
+def test_minimal_saved_models_still_check_frozen_state_and_optional_counts(
+    tmp_path, saved_runtime, defect
+):
+    path = stage_submission(tmp_path, saved_runtime)
+    rows = minimal_records(tmp_path)
+    if defect == "frozen_digest":
+        rows[4]["frozen"]["final.pkl"] = "0" * 64
+    elif defect == "missing_digest":
+        del rows[4]["frozen"]["final.pkl"]
+    elif defect == "count":
+        rows[3]["pipelines"][0]["n_train"] = 31
+    elif defect == "candidate":
+        rows[2]["candidate_index"] = 10
+    else:
+        candidates = json.loads((tmp_path / "grid.json").read_text())
+        rows[2]["params"] = candidates[1 - rows[2]["candidate_index"]]
+    (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
+    assert scorer().evaluate(path)["score"] == 0
+
+
+def test_saved_dataset_precision_controls_independent_teacher_checks(
+    tmp_path, saved_runtime
+):
+    path = stage_submission(tmp_path, saved_runtime)
+    rows = minimal_records(tmp_path)
+    rows[0]["default_dtype"] = "float32"
+    (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
+    precisions = []
+
+    def independent(plan, fingerprint):
+        precisions.extend(
+            job["parameters"]["default_dtype"]
+            for job in plan.jobs
+            if job["operation"] == "mace"
+        )
+        return fixtures.transport(plan, fingerprint)
+
+    report = scorer(backend=independent).evaluate(path)
+    assert report["score"] == 1, report
+    assert precisions
+    assert set(precisions) == {"float32"}
+
+
 @pytest.mark.parametrize("artifact", ["run.jsonl", "final.pkl"])
 def test_saved_pipeline_scoring_rejects_evidence_changed_during_verification(
     tmp_path, saved_runtime, artifact

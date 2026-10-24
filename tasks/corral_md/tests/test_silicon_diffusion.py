@@ -123,6 +123,17 @@ def _grader(level=2):
     return WorkflowScorer(1, level=level)
 
 
+def test_short_diffusion_result_keeps_numerical_checks(submission):
+    manifest = json.loads(submission.read_text())
+    results = manifest["results"]
+    results["diffusion"] = results.pop("diffusion_m2_s")
+    _save(submission, manifest)
+    assert _grader().evaluate(submission)["score"] == 1
+    results["diffusion"] *= 2
+    _save(submission, manifest)
+    assert _grader().evaluate(submission)["score"] == 0
+
+
 @pytest.mark.parametrize("time_headers", [False, True])
 def test_reconstructs_known_diffusion_with_only_two_records(submission, time_headers):
     if time_headers:
@@ -525,7 +536,7 @@ def test_production_only_trajectory_is_sufficient_for_diffusion(submission):
 @pytest.mark.parametrize("phase", ["crystalline", "liquid"])
 @pytest.mark.parametrize("mutation", [None, "wrong_protocol", "truncated", "hot"])
 @pytest.mark.parametrize("time_headers", [False, True])
-def test_level1_stops_at_preparation_without_results(
+def test_level1_scores_final_temperature_without_results(
     submission, phase, mutation, time_headers
 ):
     log = submission.parent / "run.log"
@@ -557,6 +568,11 @@ def test_level1_stops_at_preparation_without_results(
         mask = data.steps < 1000000
     elif mutation == "hot":
         data.velocities[data.steps == 1000000] *= 3
+        lines = log.read_text().splitlines()
+        final = lines[-1].split()
+        final[2] = "8000"
+        lines[-1] = " ".join(final)
+        log.write_text("\n".join(lines) + "\n")
     _write_dump(
         path,
         scoring.Trajectory(
@@ -571,12 +587,15 @@ def test_level1_stops_at_preparation_without_results(
     del manifest["results"]
     _save(submission, manifest)
     report = check_level1_workflow(1).evaluate(submission)
-    if mutation is not None:
+    if mutation == "hot":
         assert report["score"] == 0, report
         return
     assert report["score"] == 1, report
     assert report["earned_points"] == report["possible_points"] == 100
-    assert report["calculated"]["phase"]["liquid_criteria_met"] == (phase == "liquid")
+    assert report["calculated"]["final_temperature_K"] == 2500
+    assert report["mode"] == "final_temperature"
+    assert report["scoring_policy"] == "level1-task1-temperature-v1"
+    assert "phase" not in report["calculated"]
     assert "liquid_state" not in {c["name"] for c in report["checks"]}
     assert "diffusion_m2_s" not in report["calculated"]
     assert "reference_diffusion" not in {c["name"] for c in report["checks"]}
@@ -675,13 +694,32 @@ def test_workspace_restoration_confines_evidence(submission, tmp_path):
     assert _grader().evaluate(submission)["score"] == 0
 
 
-def test_recording_adapter_preserves_run_and_physics_commands():
+@pytest.mark.parametrize("level", [1, 2])
+def test_recording_adapter_preserves_run_and_physics_commands(level):
     source = "timestep 0.002\nfix heat all npt temp 300 2500 0.1 iso 0 0 1\nrun 500000\nunfix heat\nrun 250000\n"
-    recorded = scoring.recording_input(source, "/workspace/output/run.lammpstrj")
+    recorded = scoring.recording_input(
+        source, "/workspace/output/run.lammpstrj", level=level
+    )
     assert all(line in recorded.splitlines() for line in source.splitlines())
-    assert recorded.count("dump corral_task1") == 1
-    assert recorded.count("thermo_style custom step time temp press density") == 2
-    assert "id type xu yu zu vx vy vz" in recorded
+    if level == 1:
+        assert recorded.splitlines() == [
+            "timestep 0.002",
+            "fix heat all npt temp 300 2500 0.1 iso 0 0 1",
+            "thermo_style custom step temp",
+            "thermo_modify format float %.16g",
+            "run 500000",
+            "unfix heat",
+            "thermo_style custom step temp",
+            "thermo_modify format float %.16g",
+            "run 250000",
+        ]
+    else:
+        assert recorded == scoring.recording_input(
+            source, "/workspace/output/run.lammpstrj"
+        )
+        assert recorded.count("dump corral_task1") == 1
+        assert recorded.count("thermo_style custom step time temp press density") == 2
+        assert "id type xu yu zu vx vy vz" in recorded
 
 
 @pytest.mark.parametrize("level", [1, 2])
@@ -706,18 +744,62 @@ def test_environment_records_task1_and_seeds_no_examples(
         assert str(workspace) == str(root)
         assert assets_dir == str(md_assets)
         recorded = root / input_file.removeprefix("/workspace/")
-        assert "dump corral_task1" in recorded.read_text()
+        if level == 1:
+            assert recorded.read_text() == (
+                "units metal\nthermo_style custom step temp\n"
+                "thermo_modify format float %.16g\nrun 1000\n"
+            )
+        else:
+            assert "dump corral_task1" in recorded.read_text()
         log = root / "output" / "heat.recorded.log"
-        log.write_text("retained log")
+        log.write_text("Step Temp\n1000 2500\nLoop time of 1\n")
         return log
 
     monkeypatch.setattr(tools, "run_lammps_locally", simulate)
     result = environment.tools["run_lammps"].execute(
         input_file="/workspace/input/heat.in"
     )
-    assert "trajectory: /workspace/output/heat.lammpstrj" in result
+    if level == 1:
+        assert result == (
+            "Simulation completed locally; log: /workspace/output/heat.recorded.log"
+        )
+        assert list((root / "output").iterdir()) == [
+            root / "output" / "heat.recorded.log"
+        ]
+    else:
+        assert "trajectory: /workspace/output/heat.lammpstrj" in result
     assert "log: /workspace/output/heat.recorded.log" in result
     assert source.read_text() == original
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_recording_wrapper_preserves_remote_dispatch(tmp_path, monkeypatch, level):
+    from corral_md import tools
+
+    source = tmp_path / "heat.in"
+    source.write_text("units metal\nrun 1000\n")
+    calls = []
+
+    def simulate(workspace, input_file, *, action_id):
+        calls.append((workspace, input_file, action_id))
+        return "Simulation completed; log: /workspace/output/heat.recorded.log"
+
+    monkeypatch.setattr(tools, "_run_lammps_for_workspace", simulate)
+    simulator = tools.build_run_lammps_tool(tmp_path)
+    original_execute = simulator.execute
+    recorded = tools.with_task1_recording(simulator, tmp_path, level=level)
+    assert recorded.trusted
+    assert recorded.hidden_args == simulator.hidden_args
+    assert recorded.workspace_args == simulator.workspace_args
+    result = recorded.execute(
+        input_file="/workspace/heat.in", corral_action_id="preserved-action-id"
+    )
+    assert calls == [
+        (tmp_path, str(tmp_path / "input/heat.recorded.in"), "preserved-action-id")
+    ]
+    assert simulator.execute == original_execute
+    assert source.read_text() == "units metal\nrun 1000\n"
+    assert ("trajectory:" in result) == (level == 2)
 
 
 def test_orthogonal_cell_written_in_triclinic_dump_format(submission):

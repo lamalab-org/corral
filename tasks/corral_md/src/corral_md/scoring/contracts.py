@@ -1,4 +1,4 @@
-"""Use the unchanged task examples as the final-answer interface contract."""
+"""Validate the documented answer interface and normalize older result names."""
 
 from __future__ import annotations
 
@@ -9,6 +9,51 @@ from functools import lru_cache
 from pathlib import Path
 
 from .common import EvidenceError
+
+RESULT_ALIASES = {
+    1: {"diffusion": "diffusion_m2_s"},
+    2: {"tg": "cooling_tg_K"},
+    4: {"zpe": "zpe_eV_per_atom"},
+    6: {
+        "mean_frequency": "mean_frequency_THz",
+        "std_frequency": "std_frequency_THz",
+    },
+    7: {"beta": "beta_volume"},
+}
+FIT_ALIASES = {
+    "isotropic": "isotropic_coefficient_eV_per_strain",
+    "uniaxial": "uniaxial_coefficient_eV_per_strain",
+}
+
+
+def normalize_results(results: dict, task_number: int, level: int) -> dict:
+    """Return canonical inputs without changing the submitted evidence or units."""
+    if level != 2:
+        return results
+
+    def rename(values, aliases):
+        result = dict(values)
+        for name, old in aliases.items():
+            if old not in result:
+                continue
+            previous = result.pop(old)
+            if name in result:
+                actual = result[name]
+                same = actual is None and previous is None
+                if type(actual) in (int, float) and type(previous) in (int, float):
+                    same = math.isfinite(actual) and actual == previous
+                if not same:
+                    raise EvidenceError(f"Conflicting result fields: {name}, {old}")
+            else:
+                result[name] = previous
+        return result
+
+    result = rename(results, RESULT_ALIASES.get(task_number, {}))
+    if task_number == 5 and isinstance(result.get("fit"), dict):
+        result["fit"] = rename(result["fit"], FIT_ALIASES)
+    if task_number == 10 and isinstance(result.get("heat_capacity"), dict):
+        result["heat_capacity"] = result["heat_capacity"].get("eV_per_atom_K")
+    return result
 
 
 @lru_cache(None)
@@ -57,13 +102,10 @@ def validate_manifest(evidence, task_number: int, level: int) -> None:
                 check(value, example[0], path)
         elif path[0] == "artifacts":
             evidence._path(actual)
-        elif (
-            actual is None
-            and task_number == 4
-            and path == ("results", "zpe_eV_per_atom")
-        ):
+        elif actual is None and task_number == 4 and path == ("results", "zpe"):
             return
         elif type(actual) not in (int, float) or not math.isfinite(actual):
             raise EvidenceError(f"{location} must be a finite numerical result")
 
-    check(evidence.manifest, submission_example(task_number, level), ())
+    manifest = {**evidence.manifest, "results": evidence.results}
+    check(manifest, submission_example(task_number, level), ())

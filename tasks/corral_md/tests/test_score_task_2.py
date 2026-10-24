@@ -1,4 +1,4 @@
-"""Score final logs, including failures that self-reported summaries can hide."""
+"""Reconstruct final quantities from logs without simulation-protocol gates."""
 
 import json
 import subprocess
@@ -119,9 +119,9 @@ def change_pressure(log, function):
 
 @pytest.mark.parametrize("level", [1, 2])
 @pytest.mark.parametrize("change", ["wrong_target", "drift", "noise"])
-def test_measured_hold_pressure_must_settle_near_zero(tmp_path, level, change):
+def test_pressure_does_not_gate_final_quantities(tmp_path, level, change):
     path, answer, log = calculation(tmp_path)
-    answer["results"] = {} if level == 1 else {"cooling_tg_K": 1576.88}
+    answer["results"] = {} if level == 1 else {"tg": 1576.88}
     path.write_text(json.dumps(answer))
 
     def pressure(step):
@@ -133,22 +133,24 @@ def test_measured_hold_pressure_must_settle_near_zero(tmp_path, level, change):
 
     change_pressure(log, pressure)
     result = Task2Scorer(level=level).evaluate_submission(path)
-    assert result.score == 0
-    assert "pressure" in result.feedback
+    assert result.score == 1, result.feedback
 
 
-def test_pressure_is_checked_in_hold_and_reported_in_lammps_real_units(tmp_path):
-    path, answer, log = calculation(tmp_path)
-    # Cooling is nonstationary; its pressures must not be treated as hold data.
-    change_pressure(log, lambda step: 1e6 if step < 390000 else 200)
-    answer["results"] = {"hold_pressure_atm": 200}
+@pytest.mark.parametrize("level", [1, 2])
+def test_unrelated_reported_diagnostics_do_not_gate_final_quantities(tmp_path, level):
+    path, answer, _ = calculation(tmp_path)
+    answer["results"] = {
+        "tg": 1576.88,
+        "transition": "unresolved",
+        "hold_pressure_atm": 1e9,
+        "pressure_se_atm": 1e9,
+        "hold_pressure_drift_atm_ps": 1e9,
+        "hold_density_drift_g_cm3_ps": 1e9,
+    }
+    if level == 2:
+        answer["results"].update(hold_temperature_K=1000, hold_density_g_cm3=1e9)
     path.write_text(json.dumps(answer))
-    report = Task2Scorer(level=1).evaluate(path)
-    assert report["score"] == 1, report
-    assert report["computed"]["hold_pressure_atm"] == pytest.approx(200)
-    answer["results"]["hold_pressure_atm"] = 200 * 1.01325e-4
-    path.write_text(json.dumps(answer))
-    assert Task2Scorer(level=1)(path) == 0
+    assert score(path, level=level)["score"] == 1
 
 
 def test_sampled_pressure_fluctuations_are_allowed(tmp_path):
@@ -166,14 +168,16 @@ def test_complete_log_passes_without_other_documents(tmp_path, split, level):
     if level == 1:
         answer.pop("results")
     else:
-        answer["results"] = {"cooling_tg_K": answer["results"]["cooling_tg_K"]}
+        answer["results"] = {"tg": answer["results"]["cooling_tg_K"]}
     path.write_text(json.dumps(answer))
     report = score(path, level=level)
     assert report["score"] == 1, report
-    assert report["computed"]["hold_temperature_K"] == pytest.approx(300)
-    assert report["computed"]["hold_density_g_cm3"] == pytest.approx(2.6006)
-    assert report["computed"]["hold_density_drift_g_cm3_ps"] == pytest.approx(1e-5)
-    assert ("cooling_tg_K" in report["computed"]) is (level == 2)
+    if level == 1:
+        assert report["computed"]["hold_temperature_K"] == pytest.approx(300)
+        assert report["computed"]["hold_density_g_cm3"] == pytest.approx(2.6006)
+    else:
+        assert report["computed"]["cooling_tg_K"] == pytest.approx(1576.88)
+        assert "hold_temperature_K" not in report["computed"]
     assert {p.name for p in tmp_path.iterdir()} == {"run.log", "answer.json"}
     json.dumps(report, allow_nan=False)
 
@@ -192,9 +196,7 @@ def test_unresolved_data_fail_even_with_a_reported_tg(tmp_path, transition, tg, 
     report = result.metadata["workflow_evaluation"]
     assert result.score == 0, report
     if tg is None:
-        assert (
-            "results.cooling_tg_K must be a finite numerical result" in result.feedback
-        )
+        assert "results.tg must be a finite numerical result" in result.feedback
     else:
         assert "requires a resolved Tg" in result.feedback
         assert report["computed"]["transition"] == "unresolved"
@@ -217,7 +219,7 @@ def test_missing_tg_fails_even_with_a_resolved_transition(tmp_path):
     path.write_text(json.dumps(answer))
     result = Task2Scorer(level=2).evaluate_submission(path)
     assert result.score == 0
-    assert "Missing requested submission field: results.cooling_tg_K" in result.feedback
+    assert "Missing requested submission field: results.tg" in result.feedback
 
 
 def test_rotated_log_retains_protocol_without_repeating_initial_units(tmp_path):
@@ -365,29 +367,25 @@ def test_parallel_regimes_or_extrapolated_intersection_are_unresolved(
 
 
 @pytest.mark.parametrize(
-    ("key", "value"),
+    ("level", "key", "value"),
     [
-        ("hold_temperature_K", 350),
-        ("hold_density_g_cm3", 3.0),
-        ("hold_density_drift_g_cm3_ps", 0.01),
-        ("pressure_se_atm", 100),
-        ("hold_pressure_drift_atm_ps", 100),
-        ("cooling_tg_K", 2000),
-        ("transition", "unresolved"),
-        ("cooling_tg_K", None),
-        ("cooling_tg_K", True),
-        ("cooling_tg_K", "1400"),
-        ("cooling_tg_K", float("nan")),
-        ("cooling_tg_K", float("inf")),
-        ("hold_temperature_K", True),
-        ("hold_density_g_cm3", float("nan")),
+        (1, "hold_temperature_K", 350),
+        (1, "hold_density_g_cm3", 3.0),
+        (1, "hold_temperature_K", True),
+        (1, "hold_density_g_cm3", float("nan")),
+        (2, "cooling_tg_K", 2000),
+        (2, "cooling_tg_K", None),
+        (2, "cooling_tg_K", True),
+        (2, "cooling_tg_K", "1400"),
+        (2, "cooling_tg_K", float("nan")),
+        (2, "cooling_tg_K", float("inf")),
     ],
 )
-def test_altered_answers_fail(tmp_path, key, value):
+def test_altered_final_answers_fail(tmp_path, level, key, value):
     path, answer, _ = calculation(tmp_path)
     answer["results"][key] = value
     path.write_text(json.dumps(answer))
-    assert score(path)["score"] == 0
+    assert score(path, level=level)["score"] == 0
 
 
 @pytest.mark.parametrize(
@@ -413,60 +411,38 @@ def test_altered_answers_fail(tmp_path, key, value):
         ),
         ("run 100000\n", "run 100000 every 1000 'velocity all zero linear'\n"),
         ("timestep 1\n", "timestep 1\necho none\n"),
-        ("Step Time Temp Press Density Atoms", "Step Time Temp Press Volume Atoms"),
         ("100000 steps with 192 atoms", "99999 steps with 192 atoms"),
         ("100000 steps with 192 atoms", "100000 steps with 191 atoms"),
     ],
 )
-def test_log_protocol_contradictions_fail(tmp_path, old, new):
+@pytest.mark.parametrize("level", [1, 2])
+def test_setup_and_completion_metadata_do_not_gate_quantities(
+    tmp_path, old, new, level
+):
     path, _, log = calculation(tmp_path)
     text = log.read_text()
     assert old in text
     log.write_text(text.replace(old, new))
-    assert score(path)["score"] == 0
+    assert score(path, level=level)["score"] == 1
 
 
 @pytest.mark.parametrize(
-    "mutation",
-    [
-        "truncated",
-        "missing_cooling",
-        "reheating",
-        "duplicate",
-        "boundary",
-        "nonfinite",
-        "time_units",
-        "wrong_source",
-    ],
+    "mutation", ["missing_cooling", "nonfinite", "missing_density"]
 )
-def test_bad_log_evidence_fails(tmp_path, mutation):
-    path, answer, log = calculation(tmp_path)
+def test_unusable_cooling_data_fail(tmp_path, mutation):
+    path, _, log = calculation(tmp_path)
     text = log.read_text()
-    if mutation == "truncated":
-        text = text[: text.rfind("Loop time")]
-    elif mutation == "missing_cooling":
+    if mutation == "missing_cooling":
         text = text[text.index(HOLD) :]
-    elif mutation == "reheating":
-        text += "unfix hold\nfix heating all npt temp 300 1000 100 iso 0 0 5000\nrun 70000\n"
-    elif mutation == "duplicate":
-        answer["artifacts"]["raw_logs"] *= 2
-    elif mutation == "boundary":
-        text = text.replace(
-            "370000 370000 300 0 2.6 192", "370000 370000 310 0 2.6 192", 1
-        )
     elif mutation == "nonfinite":
         text = text.replace(
             "370000 370000 300 0 2.6 192", "370000 370000 nan 0 2.6 192"
         )
-    elif mutation == "time_units":
-        text = text.replace("370000 370000 300", "370000 370 300")
     else:
-        (tmp_path / "wrong.dat").write_text("wrong system")
         text = text.replace(
-            "/workspace/resources/md-structures-melt-liq4000/liq4000.dat", "wrong.dat"
+            "Step Time Temp Press Density Atoms", "Step Time Temp Press Volume Atoms"
         )
     log.write_text(text)
-    path.write_text(json.dumps(answer))
     assert score(path)["score"] == 0
 
 
@@ -477,12 +453,13 @@ def test_inadequate_data_cannot_pass_as_unresolved(tmp_path, interval, noise):
     assert report["score"] == 0, report
 
 
-def test_continuing_hold_drift_fails_even_when_correctly_reported(tmp_path):
+@pytest.mark.parametrize("level", [1, 2])
+def test_hold_drift_does_not_gate_final_quantities(tmp_path, level):
     path, _, _ = calculation(tmp_path, drift=0.005)
-    assert score(path, level=1)["score"] == 0
+    assert score(path, level=level)["score"] == 1
 
 
-def test_level1_also_checks_measured_cooling_temperature(tmp_path):
+def test_level1_does_not_check_cooling_temperature_tracking(tmp_path):
     path, _, log = calculation(tmp_path)
     lines = log.read_text().splitlines()
     for i, line in enumerate(lines):
@@ -491,25 +468,18 @@ def test_level1_also_checks_measured_cooling_temperature(tmp_path):
             fields[2] = "300"
             lines[i] = " ".join(fields)
     log.write_text("\n".join(lines))
-    assert score(path, level=1)["score"] == 0
+    assert score(path, level=1)["score"] == 1
 
 
-def test_local_source_copy_is_checked_without_an_extra_manifest_link(tmp_path):
-    from zipfile import ZipFile
-
+@pytest.mark.parametrize("level", [1, 2])
+def test_source_artifact_is_not_read_during_quantity_scoring(tmp_path, level):
     path, _, log = calculation(tmp_path)
-    with ZipFile(env.PACKAGE_DATA_ROOT.parent / "structures.zip") as archive:
-        (tmp_path / "liq4000.dat").write_bytes(
-            archive.read("structures/melt/liq4000.dat")
-        )
     log.write_text(
         log.read_text().replace(
-            "/workspace/resources/md-structures-melt-liq4000/liq4000.dat", "liq4000.dat"
+            "/workspace/resources/md-structures-melt-liq4000/liq4000.dat", "missing.dat"
         )
     )
-    assert score(path)["score"] == 1
-    (tmp_path / "liq4000.dat").write_text("changed")
-    assert score(path)["score"] == 0
+    assert score(path, level=level)["score"] == 1
 
 
 def test_ordered_logs_and_workspace_resolution(tmp_path):
@@ -521,7 +491,7 @@ def test_ordered_logs_and_workspace_resolution(tmp_path):
     resolved = resolve_submission(json.dumps(answer), tmp_path)
     assert score(resolved)["score"] == 1
     answer["artifacts"]["raw_logs"].reverse()
-    assert score(resolve_submission(json.dumps(answer), tmp_path))["score"] == 0
+    assert score(resolve_submission(json.dumps(answer), tmp_path))["score"] == 1
 
 
 def test_log_paths_are_confined(tmp_path):
@@ -607,3 +577,83 @@ def test_native_read_data_timing_is_not_another_command(tmp_path, level):
         )
     )
     assert score(path, level=level)["score"] == 1
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("clock", ["Step", "Time"])
+def test_only_relevant_thermo_samples_are_required(tmp_path, level, clock):
+    path, _, log = calculation(tmp_path, interval=10000)
+    rows = []
+    for line in log.read_text().splitlines():
+        fields = line.split()
+        if len(fields) != 6 or not fields[0].isdigit():
+            continue
+        step = int(fields[0])
+        if (level == 1 and 390000 <= step <= 470000) or (
+            level == 2 and 150000 <= step <= 360000
+        ):
+            rows.append(f"{fields[0]} {fields[2]} {fields[4]}")
+    # No setup, pressure, initialization, endpoints or completion messages.
+    log.write_text(f"{clock} Temp Density\n" + "\n".join(rows))
+    report = score(path, level=level)
+    assert report["score"] == 1, report
+    if level == 2:
+        assert report["computed"]["cooling_tg_K"] == pytest.approx(1576.88)
+
+
+def test_irregular_cooling_samples_are_fitted_without_resampling(tmp_path):
+    path, _, log = calculation(tmp_path)
+    rows = []
+    for line in log.read_text().splitlines():
+        fields = line.split()
+        if len(fields) == 6 and fields[0].isdigit():
+            step = int(fields[0])
+            if step <= 370000 and (step // 1000) % 7 in (0, 2):
+                rows.append(f"{fields[4]} {fields[0]} {fields[2]} nan")
+    log.write_text("Density Step Temp Press\n" + "\n".join(rows))
+    report = score(path)
+    assert report["score"] == 1, report
+    assert report["computed"]["cooling_tg_K"] == pytest.approx(1576.88)
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_repeated_logs_do_not_reweight_samples(tmp_path, level):
+    path, answer, _ = calculation(tmp_path)
+    original = score(path, level=level)
+    answer["artifacts"]["raw_logs"] *= 2
+    path.write_text(json.dumps(answer))
+    assert score(path, level=level) == original
+
+
+def test_level2_does_not_require_a_settled_hold(tmp_path):
+    path, _, log = calculation(tmp_path)
+    lines = log.read_text().splitlines()
+    for i, line in enumerate(lines):
+        fields = line.split()
+        if len(fields) == 6 and fields[0].isdigit() and int(fields[0]) > 370000:
+            fields[2], fields[3], fields[4] = "nan", "nan", "nan"
+            lines[i] = " ".join(fields)
+    log.write_text("\n".join(lines))
+    assert score(path)["score"] == 1
+    assert score(path, level=1)["score"] == 0
+
+
+def test_level1_still_requires_the_final_temperature(tmp_path):
+    path, answer, log = calculation(tmp_path)
+    answer["results"] = {}
+    path.write_text(json.dumps(answer))
+    log.write_text("Step Temp Density\n390000 450 2.6\n470000 450 2.6\n")
+    result = Task2Scorer(level=1).evaluate_submission(path)
+    assert result.score == 0
+    assert "Mean hold temperature" in result.feedback
+
+
+def test_level1_settling_and_cadence_do_not_gate_correct_mean(tmp_path):
+    path, answer, log = calculation(tmp_path)
+    answer["results"] = {}
+    path.write_text(json.dumps(answer))
+    log.write_text("Step Temp Density\n390000 200 1.5\n470000 400 3.5\n")
+    report = score(path, level=1)
+    assert report["score"] == 1, report
+    assert report["computed"]["hold_temperature_K"] == 300
+    assert report["computed"]["hold_density_g_cm3"] == 2.5

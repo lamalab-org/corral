@@ -61,6 +61,7 @@ def _dataset_generator(method):
     """Resolve explicit generator labels without evaluating submitted text."""
     generators = {
         "numpy.default_rng": np.random.default_rng,
+        "numpy.random.default_rng": np.random.default_rng,
         "numpy.default_rng(PCG64)": np.random.default_rng,
         "PCG64": np.random.default_rng,
         "numpy.random.RandomState": np.random.RandomState,
@@ -81,11 +82,14 @@ def _matches_generated_dataset(
     # Full coordinates let us identify a supported generator by numerical replay,
     # without requiring a particular spelling of an optional prose description.
     # An explicit supported label still restricts the check to that generator.
-    choices = (
-        [constructor(seed)]
-        if constructor is not None
-        else [np.random.default_rng(seed), np.random.RandomState(seed)]
-    )
+    if constructor is not None:
+        choices = [constructor(seed)]
+    else:
+        choices = [np.random.default_rng(seed)]
+        # default_rng accepts arbitrary nonnegative integer seeds; the legacy
+        # generator only accepts uint32 seeds and must not limit replay.
+        if seed <= np.iinfo(np.uint32).max:
+            choices.append(np.random.RandomState(seed))
     matching_generators = [True] * len(choices)
     replay = [[] for _ in choices]
     ideal = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
@@ -126,7 +130,7 @@ def _matches_generated_dataset(
 def _seeded_level1_records(raw):
     """Normalize level-1 rows, reconstructing coordinates only when absent.
 
-    Level 1 asks for seeds, row identities, checkpoint digest and total energies,
+    Level 1 asks for seeds, row identities and total energies,
     not serialized coordinates. A declared generator makes its unrelaxed task
     geometries reproducible, and retained coordinate hashes are checked too.
     Complete coordinates are preserved and independently replayed by read_log.
@@ -143,7 +147,6 @@ def _seeded_level1_records(raw):
         len(rows) == header.get("n_configs", 100) == 100,
         "Retain all 100 generated energies",
     )
-    _require("model_sha256" in header, "Retain the checkpoint digest")
     seed = header.get("random_seed")
     _require(type(seed) is int and seed >= 0, "Retain a reproducible dataset seed")
     method = header.get("rng")
@@ -225,6 +228,43 @@ def _seeded_level1_records(raw):
 @artifact_reader
 def read_log(evidence, level):
     path = evidence.artifact("run_log")
+    if level == 1 and path.suffix.lower() in {".traj", ".extxyz", ".xyz"}:
+        frames = evidence.trajectory("run_log")
+        header = dict(frames[0].info)
+        _require(
+            "seed" in header, "Retain the generation seed in the first frame's info"
+        )
+        check_model_digest(header, PINNED_TEACHER_SHA256)
+        header.setdefault("default_dtype", "float64")
+        _require(
+            header["default_dtype"] in {"float32", "float64"},
+            "Invalid teacher precision",
+        )
+        check_units(header, {"energy": "eV", "length": "Angstrom"})
+        labels = []
+        for frame in frames:
+            _require(
+                np.array_equal(frame.numbers, np.full(64, 14)) and frame.pbc.all(),
+                "Expected periodic Si64 frames",
+            )
+            finite_array(frame.positions, shape=(64, 3))
+            value = stored(frame)
+            _require("energy" in value, "Save calculated energy in every ASE frame")
+            labels.append(finite_array(value["energy"], shape=()).item())
+        _require(
+            _matches_generated_dataset(
+                "train", frames, header["seed"], header.get("rng")
+            ),
+            "Structures do not reproduce the recorded independent Gaussian draws",
+        )
+        datasets = {
+            "train": {
+                "frames": frames,
+                "labels": np.array(labels),
+                "seed": header["seed"],
+            }
+        }
+        return header, datasets, [], None
     log = _seeded_level1_records(records(path)) if level == 1 else None
     log = dataset_records(path, level) if log is None else log
     _require(len(log) >= 3, "Truncated calculation log")
@@ -660,12 +700,12 @@ def _cross_validation(x, y, candidate, splits):
 def _check_fit_agreement(record, reference, linked):
     """Reject conflicting descriptions of the same retained fitted artifact."""
     _require(
-        isinstance(record, dict) and {"file", "sha256"}.issubset(record),
+        isinstance(record, dict) and "file" in record,
         "Retain the identity of explicitly recorded pipeline fits",
     )
     _require(
         linked(record["file"]) == linked(reference["file"])
-        and record["sha256"] == reference["sha256"],
+        and ("sha256" not in record or record["sha256"] == reference["sha256"]),
         "Fit record and frozen manifest disagree on pipeline identity",
     )
     observed = _pipeline_parameters(record.get("params", record))
@@ -679,6 +719,7 @@ def _check_fit_agreement(record, reference, linked):
         "rbf",
         "scale",
         "alpha",
+        "candidate_index",
         "indices",
         "n_train",
     ):
@@ -705,7 +746,6 @@ def _saved_pipeline_records(rows, linked, log_path=None):
         "model_selection",
         "freeze",
         "test_labels",
-        "test_evaluation",
     )
     _require(
         all(stages.count(stage) == 1 for stage in required),
@@ -715,6 +755,14 @@ def _saved_pipeline_records(rows, linked, log_path=None):
     _require(
         order == sorted(order),
         "Training and all fits must precede freezing and test-label generation",
+    )
+    _require(
+        stages.count("test_evaluation") <= 1
+        and (
+            "test_evaluation" not in stages
+            or stages.index("test_evaluation") > order[-1]
+        ),
+        "Reported test evaluation must follow test-label generation",
     )
     result = {_pipeline_stage(row): dict(row) for row in rows}
     freeze = result["freeze"]
@@ -780,7 +828,9 @@ def _saved_pipeline_records(rows, linked, log_path=None):
                 "Freeze record and manifest disagree on frozen pipeline digest",
             )
             frozen_hashes[name] = row["sha256"]
-        result["final_fit"] = {**final, "params": _pipeline_parameters(final)}
+        result["final_fit"] = dict(final)
+        if "params" not in final and "candidate_index" not in final:
+            result["final_fit"]["params"] = _pipeline_parameters(final)
         result["learning_curve_fits"] = {"pipelines": normalized_curves}
         freeze["frozen"] = frozen_hashes
         if "frozen_at" in manifest and "time" in freeze:
@@ -809,7 +859,7 @@ def _saved_pipeline_records(rows, linked, log_path=None):
         )
         for index, name in enumerate(("independent", "strained")):
             tests[name] = {"file": tests["files"][index], "seed": tests[f"seed_{name}"]}
-    evaluation = result["test_evaluation"]
+    evaluation = result.get("test_evaluation", {})
     if "final" in evaluation:
         evaluation = dict(evaluation["final"])
         result["test_evaluation"] = evaluation
@@ -837,6 +887,8 @@ def _evaluate_saved_pipelines(
     def parse():
         records = _saved_pipeline_records(rows, linked, evidence.artifact("run_log"))
         train, tests = records["train_labels"], records["test_labels"]
+        dtype = train.get("default_dtype", "float64")
+        _require(dtype in {"float32", "float64"}, "Invalid teacher precision")
         model_digest = train.get("model_sha256")
         if model_digest is not None:
             _require(
@@ -922,13 +974,28 @@ def _evaluate_saved_pipelines(
             "Validation grid exceeds the supported calculation budget",
         )
         grid = [_pipeline_parameters(candidate) for candidate in grid]
+        if "candidate_index" in final:
+            selected = final["candidate_index"]
+            _require(
+                type(selected) is int and 0 <= selected < len(grid),
+                "Final candidate_index must identify a recorded validation candidate",
+            )
+            chosen = grid[selected]
+            if "params" in final:
+                declared = _pipeline_parameters(final["params"])
+                _require(
+                    _descriptor_key(declared) == _descriptor_key(chosen)
+                    and all(declared[key] == chosen[key] for key in ("scale", "alpha")),
+                    "Final candidate_index and retained parameters disagree",
+                )
+            final = {**final, "params": chosen}
         criterion = selection_metric(selection, grid)
         splits = _validation_splits(selection, 100)
         final_path = linked(final["file"])
         model, descriptor = read_pipeline(final_path)
         _require(
-            paths[str(final_path)] == final["sha256"],
-            "Final pipeline changed after fitting",
+            paths[str(final_path)] == final.get("sha256"),
+            "Final pipeline digest is missing or changed after fitting",
         )
         _require(
             all(
@@ -943,18 +1010,20 @@ def _evaluate_saved_pipelines(
             "Final pipeline differs from its frozen digest",
         )
         curves = []
-        for row in records["learning_curve_fits"]["pipelines"]:
+        for fit_record in records["learning_curve_fits"]["pipelines"]:
+            row = {"scale": final["params"]["scale"], **fit_record}
             path = linked(row["file"])
             state, descriptor = read_pipeline(path)
             _require(
-                paths[str(path)] == row["sha256"] == frozen.get(path.name),
+                paths[str(path)] == row.get("sha256") == frozen.get(path.name),
                 "Learning-curve pipeline differs from its frozen digest",
             )
             indices = finite_array(row["indices"], ndim=1)
             _require(
                 np.array_equal(indices, indices.astype(int))
                 and np.all((indices >= 0) & (indices < 100))
-                and len(set(indices)) == len(indices) == row["n_train"],
+                and len(set(indices)) == len(indices)
+                and len(indices) == row.get("n_train", len(indices)),
                 "Invalid learning-curve training subset",
             )
             _require(
@@ -978,6 +1047,7 @@ def _evaluate_saved_pipelines(
             model=model,
             curves=curves,
             criterion=criterion,
+            default_dtype=dtype,
         )
         return True
 
@@ -1008,7 +1078,7 @@ def _evaluate_saved_pipelines(
                 parameters={
                     "model": "teacher.model",
                     "dispersion": False,
-                    "default_dtype": "float64",
+                    "default_dtype": parsed["default_dtype"],
                 },
             )
         descriptors = {
@@ -1207,7 +1277,7 @@ def _evaluate_saved_pipelines(
     rubric.check("reconstructed_validation_and_predictions", 40, reconstruct)
 
     def reported():
-        record = parsed["records"]["test_evaluation"]
+        record = parsed["records"].get("test_evaluation", {})
         _require(
             all(
                 compare(
@@ -1219,6 +1289,7 @@ def _evaluate_saved_pipelines(
                     ("independent", "id_test"),
                     ("strained_pooled", "strained_pooled"),
                 )
+                if name in record
             ),
             "Recorded test metrics disagree with saved pipeline predictions",
         )
@@ -1304,7 +1375,7 @@ def evaluate_submission(submission, *, level, verifier=None):
     try:
         evidence = Evidence(submission, task_number=8, level=level)
         manifest_fingerprint = evidence.fingerprint()
-        raw = records(evidence.artifact("run_log"))
+        raw = records(evidence.artifact("run_log")) if level == 2 else None
     except Exception as exc:
         rubric.error("calculation_log", 100, exc)
         return {**rubric.as_dict(), "level": level, "calculated_results": calculated}

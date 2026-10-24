@@ -1064,7 +1064,9 @@ def _run_lammps_for_workspace(
         ) from None
 
 
-def with_task1_recording(simulator: Tool, workspace: str | Path) -> Tool:
+def with_task1_recording(
+    simulator: Tool, workspace: str | Path, *, level: int = 2
+) -> Tool:
     """Preserve the selected execution backend while adding Task 1 recording."""
     from copy import copy
 
@@ -1079,9 +1081,12 @@ def with_task1_recording(simulator: Tool, workspace: str | Path) -> Tool:
         trajectory = f"/workspace/output/{source.stem}.lammpstrj"
         recorded.parent.mkdir(parents=True, exist_ok=True)
         local_path(root, "/workspace/output", allow_root=True).mkdir(exist_ok=True)
-        recorded.write_text(recording_input(source.read_text(), trajectory))
+        recorded.write_text(
+            recording_input(source.read_text(), trajectory, level=level)
+        )
         arguments["input_file"] = "/workspace/" + recorded.relative_to(root).as_posix()
-        return simulator.execute(**arguments) + f"; trajectory: {trajectory}"
+        result = simulator.execute(**arguments)
+        return result if level == 1 else result + f"; trajectory: {trajectory}"
 
     recorded_tool.execute = execute
     return recorded_tool

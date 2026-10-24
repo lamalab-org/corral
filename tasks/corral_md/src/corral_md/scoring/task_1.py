@@ -1,4 +1,4 @@
-"""Task 1: assess preparation at Level 1 and numerical diffusion at Level 2.
+"""Task 1: final temperature at Level 1 and numerical diffusion at Level 2.
 
 No submitted analysis or executable code is used. Diffusion is reconstructed
 from recorded times and unwrapped positions over the prescribed 500 ps interval.
@@ -8,7 +8,9 @@ Both diffusion coefficients must agree with the fixed benchmark reference.
 
 from __future__ import annotations
 
+import re
 import shlex
+from contextlib import suppress
 from dataclasses import dataclass
 
 import numpy as np
@@ -27,6 +29,9 @@ DUMP_COLUMNS = ("id", "type", "xu", "yu", "zu", "vx", "vy", "vz")
 REFERENCE_DIFFUSION_M2_S = 1.74e-8
 REFERENCE_DIFFUSION_RTOL = 0.1
 DIFFUSION_POLICY = "level2-diffusion-quantities-v1"
+TEMPERATURE_POLICY = "level1-task1-temperature-v1"
+FINAL_TEMPERATURE_K = 2500.0
+TEMPERATURE_TOLERANCE_K = 500.0
 
 
 def _require(condition, message):
@@ -38,13 +43,25 @@ def _close(actual, expected):
     return np.allclose(actual, expected, rtol=2e-5, atol=1e-6)
 
 
-def recording_input(source: str, trajectory: str) -> str:
+def recording_input(source: str, trajectory: str, *, level: int = 2) -> str:
     """Add native recording to a copy of a Task 1 input, without changing MD."""
     lines = source.splitlines()
     first = next(
         (i for i, line in enumerate(lines) if line.split()[:1] == ["run"]), None
     )
     _require(first is not None, "Task 1 recording needs a run command in the input")
+    if level == 1:
+        result = []
+        for line in lines:
+            if line.split()[:1] == ["run"]:
+                result.extend(
+                    [
+                        "thermo_style custom step temp",
+                        "thermo_modify format float %.16g",
+                    ]
+                )
+            result.append(line)
+        return "\n".join(result) + "\n"
     lines.insert(
         first,
         f'dump corral_task1 all custom $(ceil(1.0/dt):%.0f) "{trajectory}" '
@@ -64,6 +81,49 @@ def recording_input(source: str, trajectory: str) -> str:
             )
         result.append(line)
     return "\n".join(result) + "\n"
+
+
+def read_final_temperature(path) -> float:
+    """Read only the endpoint of the last native thermo table, in kelvin.
+
+    Earlier temperatures and other columns do not gate this final-quantity
+    policy. A malformed or empty final table must not select an earlier value.
+    """
+    header, final = None, None
+    with path.open() as stream:
+        for line in stream:
+            fields = line.split()
+            if not fields or fields[0].startswith(("#", "WARNING")):
+                continue
+            if fields[0] in {"Loop", "Total", "ERROR", "ERROR:", "Performance:"}:
+                header = None
+                continue
+            # Native headings use capitalized quantities or compute/fix/variable
+            # references. A later table without Temp invalidates the old endpoint.
+            if "Temp" in fields or all(
+                re.fullmatch(r"(?:[A-Z][A-Za-z0-9_]*|[cfv]_[A-Za-z0-9_\[\]]+)", field)
+                for field in fields
+            ):
+                header, final = fields, None
+                continue
+            if header is None:
+                continue
+            # Numeric rows belong to the current table. Preserve an invalid
+            # endpoint instead of silently falling back to a preceding sample.
+            try:
+                float(fields[0])
+            except ValueError:
+                final, header = None, None
+                continue
+            final = None
+            if len(fields) == len(header) and header.count("Temp") == 1:
+                with suppress(ValueError):
+                    final = float(fields[header.index("Temp")])
+    _require(
+        final is not None and np.isfinite(final),
+        "The final thermo table must end with a finite Temp value in kelvin",
+    )
+    return final
 
 
 @dataclass
@@ -751,6 +811,22 @@ def diffusion(times, positions):
 def evaluate(e, r, *, level=2):
     """Populate a binary rubric and return independently calculated diagnostics."""
     diagnostics = {}
+    if level == 1:
+        temperature = read_final_temperature(e.artifact("lammps_log"))
+        diagnostics.update(
+            final_temperature_K=temperature,
+            target_temperature_K=FINAL_TEMPERATURE_K,
+            tolerance_K=TEMPERATURE_TOLERANCE_K,
+            reference_basis="last_recorded_thermo_temperature",
+        )
+        r.check(
+            "final_temperature",
+            100,
+            abs(temperature - FINAL_TEMPERATURE_K) < TEMPERATURE_TOLERANCE_K,
+            f"Final temperature: {temperature:g} K; "
+            f"required |T - {FINAL_TEMPERATURE_K:g}| < {TEMPERATURE_TOLERANCE_K:g} K",
+        )
+        return diagnostics
     if not r.check(
         "recorded_log_and_trajectory",
         10,
@@ -759,15 +835,6 @@ def evaluate(e, r, *, level=2):
         ),
     ):
         r.check("remaining_evidence", 90, False)
-        return diagnostics
-    if level == 1:
-        commands, thermal = read_log(e.artifact("lammps_log"))
-        data = read_trajectory(e.artifact("trajectory"))
-        segments = _protocol(commands, thermal, 1000)
-        r.check("heating_and_production_protocol", 25, True)
-        times, positions = _states(data, thermal, segments, 1000)
-        diagnostics["phase"] = _phase(data, times, positions, level)
-        r.check("state_and_thermal_continuity", 65, True)
         return diagnostics
     commands, clock = read_log(
         e.artifact("lammps_log"),
@@ -786,7 +853,7 @@ def evaluate(e, r, *, level=2):
     diagnostics["reference_basis"] = "logged_times_and_unwrapped_trajectory"
     r.check("resolved_stable_diffusion", 15, True)
     value = diagnostics["diffusion_m2_s"]
-    reported = e.results.get("diffusion_m2_s")
+    reported = e.results.get("diffusion")
     valid_reported = (
         type(reported) in (int, float) and np.isfinite(reported) and reported > 0
     )

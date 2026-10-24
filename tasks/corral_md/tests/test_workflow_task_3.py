@@ -199,3 +199,37 @@ def test_reference_plan_or_live_fallback(submission, dtype):
     (job,) = build_plan(Evidence(submission), "challenge").jobs
     assert job["operation"] == ("reference" if dtype == "float64" else "mace")
     assert job["parameters"]["dispersion"] is True
+
+
+@pytest.mark.parametrize("dtype", [None, "float32", "float64"])
+def test_native_dataset_alone_retains_labels_and_calculation_precision(
+    submission, dtype
+):
+    from ase.io import write as write_trajectory
+
+    frames = Evidence(submission).trajectory("dataset")
+    if dtype is not None:
+        frames[0].info["default_dtype"] = dtype
+    path = submission.parent / "dataset.extxyz"
+    write_trajectory(path, frames, format="extxyz")
+    write(submission, {"artifacts": {"dataset": path.name}})
+    # An unsubmitted legacy filename has no effect on the canonical submission.
+    (submission.parent / "run.json").write_text("invalid unrelated data")
+    report = score(submission)
+    assert report["score"] == 1, report
+    (job,) = build_plan(Evidence(submission), "challenge").jobs
+    assert job["parameters"]["default_dtype"] == (dtype or "float64")
+    assert job["operation"] == ("mace" if dtype == "float32" else "reference")
+    frames[10].calc.results["energy"] += 1
+    write_trajectory(path, frames, format="extxyz")
+    assert score(submission)["score"] == 0
+
+
+def test_dataset_and_legacy_log_must_agree_on_precision(submission):
+    path = submission.parent / "dataset.json"
+    rows = json.loads(path.read_text())
+    rows[0]["info"] = {"default_dtype": "float32"}
+    write(path, rows)
+    report = score(submission)
+    assert report["score"] == 0
+    assert "disagree on default_dtype" in report["checks"][0]["detail"]

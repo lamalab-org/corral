@@ -12,6 +12,8 @@ import pytest
 from ase import Atoms
 from ase.build import bulk
 from ase.calculators.calculator import Calculator, all_changes
+from ase.calculators.singlepoint import SinglePointCalculator
+from ase.io.trajectory import Trajectory
 from corral_md.scoring import task_8 as score_task_8
 from corral_md.scoring.evaluator import (
     EvaluationError,
@@ -342,6 +344,84 @@ def read_log(root):
 
 def write_log(root, rows):
     (root / "run.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        None,
+        "energy",
+        "seed",
+        "digest",
+        "missing_energy",
+        "species",
+        "periodicity",
+        "order",
+    ],
+)
+def test_native_dataset_frames_use_existing_science_and_verifier(
+    tmp_path, runtime, defect
+):
+    path, _ = make_submission(tmp_path, runtime, level=1)
+    log = read_log(tmp_path)
+    frames = []
+    for row in log[1]["rows"]:
+        atoms = Atoms("Si64", positions=row["positions"], cell=row["cell"], pbc=True)
+        if defect == "species":
+            atoms.numbers[0] = 13
+        if defect == "periodicity":
+            atoms.pbc = False
+        atoms.calc = SinglePointCalculator(
+            atoms, energy=row["energy_eV"] + (1 if defect == "energy" else 0)
+        )
+        frames.append(atoms)
+    if defect == "order":
+        frames.reverse()
+    frames[0].info.update(
+        seed=18 if defect == "seed" else log[1]["seed"],
+        model_sha256="wrong" if defect == "digest" else log[0]["model_sha256"],
+    )
+    if defect == "missing_energy":
+        frames[-1].calc = None
+    with Trajectory(tmp_path / "dataset.traj", "w") as writer:
+        for atoms in frames:
+            writer.write(atoms)
+    path.write_text(json.dumps({"artifacts": {"run_log": "dataset.traj"}}))
+    seen = []
+
+    def independent(plan, fingerprint):
+        seen.extend(frame for job in plan.jobs for frame in job["frames"])
+        return transport(plan, fingerprint)
+
+    report = scorer(1, independent).evaluate(path)
+    assert report["score"] == (1 if defect is None else 0), report
+    if defect in (None, "energy"):
+        assert len(seen) == 100
+
+
+@pytest.mark.parametrize("seed", [17, 2**80 + 17])
+@pytest.mark.parametrize("rng_name", [None, "numpy.random.default_rng"])
+@pytest.mark.usefixtures("runtime")
+def test_native_dataset_accepts_default_rng_seeds_without_checkpoint_digest(
+    tmp_path, seed, rng_name
+):
+    rng = np.random.default_rng(seed)
+    ideal = bulk("Si", "diamond", a=5.43, cubic=True).repeat((2, 2, 2))
+    with Trajectory(tmp_path / "dataset.traj", "w") as writer:
+        for index in range(100):
+            atoms = ideal.copy()
+            atoms.positions += rng.normal(0, 0.01 + 0.001 * index, (64, 3))
+            atoms.calc = SinglePointCalculator(atoms, energy=energy(atoms))
+            if index == 0:
+                atoms.info.update(seed=seed, default_dtype="float64")
+                if rng_name is not None:
+                    atoms.info["rng"] = rng_name
+            writer.write(atoms)
+    manifest = tmp_path / "answer.json"
+    manifest.write_text(json.dumps({"artifacts": {"run_log": "dataset.traj"}}))
+    report = scorer(level=1).evaluate(manifest)
+    assert report["score"] == 1, report
+    assert report["verification"]["status"] == "passed"
 
 
 @pytest.mark.parametrize("level", [1, 2])

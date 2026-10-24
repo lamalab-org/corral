@@ -22,6 +22,7 @@ from .common import (
     finite_array,
     result_close,
 )
+from .contracts import FIT_ALIASES
 from .formats import artifact_reader, phonon_log
 from .verification import Plan, compare
 
@@ -268,15 +269,14 @@ def evaluate_submission(submission, *, level, verifier=None):
             "uniaxial_coefficient_eV_per_strain": float(coefficients[2]),
             "residuals_eV": (y - design @ coefficients).tolist(),
         }
+        keys = {old: name for name, old in FIT_ALIASES.items()}
+        expected = {
+            keys.get(key, key): value for key, value in calculated["fit"].items()
+        }
         return all(
             result_close(value, e.results["fit"][key], atol=1e-7)
-            for key, value in calculated["fit"].items()
-            if key
-            in {
-                "isotropic_coefficient_eV_per_strain",
-                "uniaxial_coefficient_eV_per_strain",
-            }
-            or key in e.results["fit"]
+            for key, value in expected.items()
+            if key in FIT_ALIASES or key in e.results["fit"]
         )
 
     r.check("unweighted_fit_and_residuals", 20, fit)

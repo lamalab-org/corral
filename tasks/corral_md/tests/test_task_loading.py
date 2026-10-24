@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 from dataclasses import replace
@@ -203,17 +204,10 @@ def test_all_tasks_require_direct_json_answers(tmp_path, level, local):
         env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json", local=local
     )
     for task in tasks.values():
-        assert "JSON object directly as your final answer" in task.submission_format
-        assert "relative to /workspace/" in task.submission_format
-        instructions, example_block = task.submission_format.split("\n\n```json\n")
-        save_instruction = (
-            "Save the trajectory under /workspace/"
-            if (level, task.scoring_fn.task_number) == (2, 3)
-            else "Save artifact files under /workspace/"
-        )
-        assert save_instruction in instructions
-        assert example_block.endswith("\n```")
-        answer = example_block.removesuffix("\n```")
+        assert task.submission_format.startswith("Return JSON:\n\n```json\n")
+        example = re.search(r"```json\n(.*?)\n```", task.submission_format, re.S)
+        assert example is not None
+        answer = example[1]
         assert isinstance(json.loads(answer)["artifacts"], dict)
         resolved = task.submission_resolver(answer, tmp_path)
         expected = json.loads(answer.replace("/workspace/", f"{tmp_path}/"))

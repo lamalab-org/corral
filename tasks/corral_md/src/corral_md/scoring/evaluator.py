@@ -101,13 +101,11 @@ class WorkflowScorer:
             fingerprint = evidence.fingerprint()
             return {
                 **rubric.as_dict(),
-                **(
-                    {
-                        "mode": "final_quantities",
-                        "scoring_policy": self.module.DIFFUSION_POLICY,
-                    }
-                    if self.level == 2
-                    else {}
+                "mode": "final_temperature" if self.level == 1 else "final_quantities",
+                "scoring_policy": (
+                    self.module.TEMPERATURE_POLICY
+                    if self.level == 1
+                    else self.module.DIFFUSION_POLICY
                 ),
                 "level": self.level,
                 "evidence_sha256": fingerprint,

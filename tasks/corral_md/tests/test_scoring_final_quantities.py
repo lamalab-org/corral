@@ -96,6 +96,41 @@ def test_energy_total_and_per_atom_are_equivalent(tmp_path):
     assert result["computed"]["stages"][0]["energy_eV_per_atom"] == pytest.approx(-3.6)
 
 
+def test_task10_derives_overall_temperature_from_directional_samples(tmp_path):
+    submission, path, rows = aluminum_log(tmp_path, 10)
+    for row in rows[1:]:
+        row.pop("Temperature")
+        row["Tx"] += 10
+        row["Ty"] -= 4
+        row["Tz"] -= 6
+    write_log(path, rows)
+    report = check_level1_workflow(10).evaluate(submission)
+    assert report["score"] == 1, report
+    stage = report["computed"]["stages"][0]
+    assert stage["temperature_K"] == 300
+    assert stage["directional_temperature_K"] == [310, 296, 294]
+
+
+def test_task10_rejects_inconsistent_optional_overall_temperature(tmp_path):
+    submission, path, rows = aluminum_log(tmp_path, 10)
+    # Both temperatures independently meet the target, but contradict each other.
+    for row in rows[1:]:
+        row["Temperature"] += 20
+    write_log(path, rows)
+    result = check_level1_workflow(10).evaluate_submission(submission)
+    assert result.score == 0
+    assert "Overall temperature disagrees" in result.feedback
+
+
+def test_task10_checks_target_without_optional_overall_temperature(tmp_path):
+    submission, path, rows = aluminum_log(tmp_path, 10)
+    for row in rows[1:]:
+        row.pop("Temperature")
+        row.update(Tx=340, Ty=340, Tz=340)
+    write_log(path, rows)
+    assert check_level1_workflow(10)(submission) == 0
+
+
 def test_unknown_layout_reports_error_instead_of_validation_crash(tmp_path):
     submission, path, rows = aluminum_log(tmp_path, 7)
     for row in rows[1:]:
@@ -194,10 +229,15 @@ def copper_log(tmp_path, dense=False):
     ]
     path = tmp_path / "main.jsonl"
     write_log(path, rows)
+    artifacts = {"run_logs": {"main": str(path)}}
     if dense:
         np.save(tmp_path / "prod_pe_every_step.npy", energies)
         (tmp_path / "settings.json").write_text(json.dumps({"dt_fs": 2}))
-    return {"artifacts": {"run_logs": {"main": str(path)}}}, energies, path
+        artifacts.update(
+            energy_series=str(tmp_path / "prod_pe_every_step.npy"),
+            settings=str(tmp_path / "settings.json"),
+        )
+    return {"artifacts": artifacts}, energies, path
 
 
 @pytest.mark.parametrize("dense", [False, True])
@@ -226,6 +266,26 @@ def test_dense_sidecar_changes_evidence_identity(tmp_path):
     second = scorer.evaluate(submission)
     assert first["score"] == second["score"] == 1
     assert first["evidence_sha256"] != second["evidence_sha256"]
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["settings.json", "analysis.json", "prod_pe_every_step.npy", "energy_series.npy"],
+)
+def test_unsubmitted_neighboring_files_do_not_affect_correlation(tmp_path, filename):
+    submission, _, _ = copper_log(tmp_path)
+    scorer = check_level1_workflow(9)
+    original = scorer.evaluate(submission)
+    (tmp_path / filename).write_bytes(b"unrelated file, not scoring evidence")
+    assert scorer.evaluate(submission) == original
+
+
+def test_explicit_correlation_analysis_is_still_checked(tmp_path):
+    submission, _, _ = copper_log(tmp_path, dense=True)
+    analysis = tmp_path / "analysis.json"
+    analysis.write_text(json.dumps({"full_step_1e_fs": 10000}))
+    submission["artifacts"]["analysis"] = str(analysis)
+    assert check_level1_workflow(9)(submission) == 0
 
 
 def test_constant_energy_correlation_is_undefined(tmp_path):

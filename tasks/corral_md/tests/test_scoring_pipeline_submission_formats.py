@@ -121,6 +121,23 @@ def test_manifest_freeze_and_nested_numerical_state_are_independently_scored(
     ]
 
 
+@pytest.mark.parametrize("misordered", [False, True])
+def test_frozen_manifest_needs_no_repeated_metrics_but_preserves_chronology(
+    tmp_path, runtime, misordered
+):
+    submission = manifest_submission(tmp_path, runtime)
+    rows = read_log(tmp_path)
+    rows = [row for row in rows if row["event"] != "test_evaluation"]
+    if misordered:
+        rows[2], rows[3] = rows[3], rows[2]
+    (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
+    report = scorer().evaluate(submission)
+    assert report["score"] == (0 if misordered else 1), report
+    if not misordered:
+        assert "id_test" in report["calculated_results"]
+        assert len(report["calculated_results"]["learning_curve"]) == 2
+
+
 @pytest.mark.parametrize(
     "defect", ["chronology", "post_test_fit", "hash", "missing", "descriptor", "metric"]
 )
@@ -313,6 +330,16 @@ def test_seeded_level1_dataset_does_not_require_unrequested_coordinate_arrays(
     assert report["score"] == (0 if pbc == [True, True, False] else 1), report
     if report["score"] == 1:
         assert report["verification"]["status"] == "passed"
+
+
+def test_seeded_level1_dataset_needs_no_repeated_checkpoint_identity(tmp_path, runtime):
+    submission = seeded_submission(tmp_path, runtime)
+    rows = read_log(tmp_path)
+    del rows[0]["model_sha256"]
+    (tmp_path / "run.jsonl").write_text("\n".join(map(json.dumps, rows)))
+    report = scorer(level=1).evaluate(submission)
+    assert report["score"] == 1, report
+    assert report["verification"]["status"] == "passed"
 
 
 @pytest.mark.parametrize(

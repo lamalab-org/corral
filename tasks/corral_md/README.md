@@ -191,32 +191,29 @@ run 100000
 ```
 
 Both levels include cooling and the hold: 470 ps and 470,000 steps. The
-simulation ends after the hold. Task 2 is scored by `scoring/task_2.py` using only
-`results` and `artifacts.raw_logs` (an ordered list of the final calculation's
-logs). Return that JSON directly as the final answer. No submission
-examples, settings files, analysis documents, exported traces, or boundary
-snapshots are required. The simulation tool already retains raw logs; keep
-command echo enabled and record `Step Temp Press Density` at least every
-1000 steps, including all run endpoints and completion lines.
+simulation ends after the hold. Task 2 is scored by `scoring/task_2.py` using the
+`task2-final-quantities-v1` policy and only `results` and `artifacts.raw_logs`.
+Return that JSON directly as the final answer. The logs need native thermo
+tables containing `Step` (using the prescribed 1 fs timestep) or `Time` (elapsed
+fs), `Temp` in kelvin, and `Density` in g/cm3. Supply the log files containing
+the samples used by the relevant level. Multiple files and repeated boundary
+records are supported; file order does not affect the calculation.
 
-The scorer checks the supplied melt, BKS coefficients, PPPM, schedule, damping,
-completed step counts, and continuity of adjacent logged runs. It computes the
-mean hold temperature, mean density, and density slope over steps 390,000–470,000
-on a 1 ps grid. These hold diagnostics are derived at both levels; optional
-reported values are checked. It also reconstructs measured hold pressure in
-atmospheres (LAMMPS `real` units), requiring consistency with zero pressure,
-bounded sampling error, and stable half-run means and fitted drift. Sampling
-errors use the largest independent-sample, autocorrelation, or block-mean error.
-The pressure error limit is 0.1 GPa converted to atmospheres; the target allowance
-is three standard errors plus 0.05 GPa. The final 75% and 50% of the hold-analysis
-window must also support the pressure target and precision, with error limits
-scaled for their shorter lengths. Level 1 needs only the existing logs. Hold
-checks assess settling, not glass equilibrium; no stationarity test is applied
-to the cooling ramp.
+The scorer reads numerical samples directly, without imposing a sampling
+cadence or resampling onto a fixed grid. Setup commands, source and potential
+files, pressure, run completion, trajectory continuity, and settling diagnostics
+do not gate the score. The simulation instructions still define the requested
+calculation; the scorer evaluates its final quantities from the saved data.
 
-Level 2 requires only a finite numerical `cooling_tg_K` in kelvin. The transition
-status is derived; an optional `transition` claim must be `"resolved"`. The
-independent analysis excludes measured T > 2600 K and fits separate low- and
+Level 1 calculates mean temperature and density over elapsed times
+390,000–470,000 fs. The mean temperature must be within 15 K of 300 K, and the
+temperature and density samples must be finite and positive. Optional reported
+`hold_temperature_K` and `hold_density_g_cm3` must agree with the calculated
+means. No Tg or separate stability check is required at this level.
+
+Level 2 requires a finite numerical `tg` in kelvin and only the cooling samples
+used to fit it; hold data and reported hold diagnostics do not affect its score.
+The independent analysis excludes measured T > 2600 K and fits separate low- and
 high-temperature lines to the cooling samples. It selects the partition with
 the smallest combined squared residuals, with at least three samples and
 distinct temperatures per regime, then calculates the lines' intersection.
@@ -245,13 +242,12 @@ reference check.
 The reference is the recorded benchmark result; its derivation has not been
 independently reproduced from a reference trajectory. The fit-resolution screens
 still need calibration against validated trajectories across seeds.
-Saved logs establish the recorded protocol and continuity, but do not provide
-independent protection against fabricated logs. No simulation is rerun during
-scoring.
+Saved logs supply the numerical evidence for these quantities, but do not
+provide independent protection against fabricated logs. No simulation is rerun
+during scoring.
 
 Rebuild local assets or upload the new versioned structures volume and redeploy
-the Modal runtime before launching trials against this protocol. Earlier
-checkpoint trajectories cannot satisfy the restored full-range task by rescoring.
+the Modal runtime before launching trials against this protocol.
 
 The Level 1 Task 6 scorer, `Task6Scorer` in `scoring/task_6.py`, reads sampled
 temperatures and elapsed times from `artifacts.run_log`. Direct construction
@@ -274,8 +270,8 @@ The default `check_level1_workflow` factory uses policy
 `level1-final-quantities-v1` for tasks **5, 7, 9 and 10**. It calculates the
 requested observables from numerical logs; it does not grade atomic geometry,
 seeds, thermostat settings, restart completeness, trajectory continuity, or
-effective-sampling/convergence diagnostics. Task descriptions and agent-facing
-submission examples are unchanged. Other Level 1 policies are unchanged.
+effective-sampling/convergence diagnostics. The submission examples retain the
+numerical inputs used by each calculation.
 Level 2 tasks 6, 7, 9 and 10 use the final-quantity policy described below.
 
 - Task 5 compares the highest positive phonon energy for each of the five
@@ -290,15 +286,20 @@ Level 2 tasks 6, 7, 9 and 10 use the final-quantity policy described below.
   validation of the trajectory or potential.
 - Task 9 calculates potential-energy correlation from chronological uniformly
   spaced production energies. A separately retained `energy_series` artifact is
-  accepted; conventional `prod_pe_every_step.npy`, `settings.json` and
-  `analysis.json` sidecars are also read and included in the evidence digest.
+  accepted when explicitly linked in `artifacts.energy_series`. Companion
+  settings and analysis files must likewise be linked as `artifacts.settings`
+  and `artifacts.analysis`; neighboring files are not discovered automatically.
+  An alternate energy series needs its sampling interval in the linked settings
+  or log header. Linked files are included in the evidence digest.
   Time spacing is required to interpret the result in fs. The default ACF is
   unbiased; the 1/e crossing and integrated time with a self-consistent window
   factor of 5 are calculated. Explicit normalization and integration cutoffs
   are supported. A first-lag crossing is an upper bound, and no crossing is a
   lower bound. Numerical correlation claims are checked against the saved data.
 - Task 10 computes mean total energy per atom and overall/directional
-  temperatures. It retains final temperature allowances of ±30 K overall and
+  temperatures. Overall temperature is derived from the three directional
+  temperatures; a separately reported overall temperature is optional and must
+  agree. It retains final temperature allowances of ±30 K overall and
   ±45 K per direction around 300 K. Explicitly reported means are checked
   against the production data. No independent absolute mean-energy target is
   available; no single-frame model or restart verification is required.
@@ -334,6 +335,9 @@ negative R², can pass if the final metrics are correctly calculated. Task 9
 requires all five evaluation groups; aggregate metrics alone are insufficient
 without numerical inputs from which to recompute them. Its energy correlation
 is included as a diagnostic and does not block prediction-metric scoring.
+Task 7's local expansion, pressure-response and cooling comparisons, and Task 9's
+production temperatures, remain agent analyses rather than evaluator outputs;
+their raw inputs are not required by the submission format.
 
 Flat JSONL records and nested stage/sample logs are supported, including
 `part: prod`, `phase: production`, and declared equilibration cutoffs. Scalars
@@ -348,7 +352,8 @@ Use `check_level1_workflow` and `check_level2_workflow` to select the scoring
 policy. The superseded workflow policies for tasks 7, 9 and 10, Level 2 task 3,
 and Level 1 task 5 have been removed. `WorkflowScorer` is limited to tasks 1,
 4 and 8 at both levels, task 3 at Level 1, and task 5 at Level 2.
-Existing saved logs remain readable by the current policies. Historical reports
+Existing data layouts remain readable; alternate companion files must be linked
+explicitly. Historical reports
 remain unchanged; rescoring writes a separate report with the policy version
 and source/artifact provenance.
 
@@ -382,78 +387,115 @@ with `python -m corral_md.scoring 2 /path/to/answer.json --level 2`.
 
 Submit the `artifacts` links and main scientific answers in `results` specified
 by each task. Agents implement the calculations and save the evidence themselves.
-Each task's submission format contains only the final-answer JSON Schema and
-instructions for artifact paths under `/workspace/`. Detailed simulation and
-artifact-writing instructions are omitted; no simulation or recording helper
-modules are supplied.
-The evaluator always reconstructs diagnostics and repeated tables and applies
-the scientific checks, even when those values are omitted from the answer.
-Previously required diagnostic summaries remain optional; supplied values must
-still agree with the evidence.
+Each task's submission format documents the final-answer JSON and artifact paths
+under `/workspace/`. Task 4 (both levels) and Task 8 (Level 1) use native ASE
+trajectories with short recording instructions. They share the existing
+`Evidence.trajectory` reader; no new file format or recording framework is needed.
+LAMMPS tasks retain their existing native logs and dumps where supported.
+Each scoring policy reconstructs its requested quantities and tables from the
+retained evidence. Optional numerical claims recognized by that policy must
+agree with the evidence; exploratory diagnostics outside the policy are unscored.
 
-Each Level 2 answer contains at most two required scalar quantities. Model
-training tasks submit their saved calculation records and model artifacts;
-the evaluator reconstructs predictions and metrics. All Level 1 submissions
-contain only artifacts. Optional diagnostics are checked when supplied.
+Each Level 2 answer contains at most two required scalar quantities. Task 8
+retains datasets and fitted pipelines for prediction reconstruction; Task 9
+can supply labels and predictions directly. All Level 1 submissions contain
+only artifacts.
 
 | Task | Level 1 quantities | Level 2 quantities | Required Level 2 answer beyond artifacts |
 |---|---:|---:|---|
-| 1 | 0 | 1 | `diffusion_m2_s` |
-| 2 | 0 | 1 | `cooling_tg_K`; unresolved Tg fails |
+| 1 | 0 | 1 | `diffusion` in m²/s |
+| 2 | 0 | 1 | `tg` in K; unresolved Tg fails |
 | 3 | 0 | 0 | `md_trajectory` with saved momenta |
-| 4 | 0 | 1 | `zpe_eV_per_atom` (null for resolved instability) |
-| 5 | 0 | 2 | `fit.isotropic_coefficient_eV_per_strain`, `fit.uniaxial_coefficient_eV_per_strain` |
-| 6 | 0 | 2 | `mean_frequency_THz`, `std_frequency_THz` |
-| 7 | 0 | 1 | `beta_volume` in K⁻¹ |
+| 4 | 0 | 1 | `zpe` in eV/atom (null for resolved instability) |
+| 5 | 0 | 2 | `fit.isotropic`, `fit.uniaxial` in eV per unit strain |
+| 6 | 0 | 2 | `mean_frequency`, `std_frequency` in THz |
+| 7 | 0 | 1 | `beta` in K⁻¹ |
 | 8 | 0 | 0 | Calculation log containing fitted pipelines and datasets |
-| 9 | 0 | 0 | Four trajectory logs and regression log containing fitted models |
-| 10 | 0 | 1 | `heat_capacity.eV_per_atom_K` |
+| 9 | 0 | 0 | Four energy logs and regression log containing validation indices and predictions |
+| 10 | 0 | 1 | `heat_capacity` in eV/(atom K) |
+
+The evaluator accepts the previous result names for saved submissions. Conflicting
+old and new names are rejected. Result renaming does not convert units.
+
+Task 3 Level 1 needs only the labeled `dataset.extxyz`. The first frame may
+record `info.default_dtype` as `float32` or `float64` (default `float64`) for the
+independent teacher calculation. Model, dispersion and units are fixed by the
+task, so no separate settings file or repeated assertions are required. An
+explicitly linked legacy `run_log` remains supported; its settings must agree
+with any corresponding dataset metadata.
 
 Task 4 uses [its own scorer](src/corral_md/scoring/task_4.py) at both levels.
-The agent writes one `phonons.npz` archive containing the final geometry,
-central force calculations at the retained displacement magnitudes,
-masses, and raw force constants. Analytical Hessians can also be included.
-The scorer normalizes equivalent array names, compact displacement records, and
-lattice-indexed force-constant tensors while checking their consistency.
-Chemical symbols are accepted as well as atomic numbers. The `displacements`
-array can contain Cartesian vectors, `[atom, dx, dy, dz]` rows, or
-`[atom, axis, delta]` rows with Cartesian axis indices 0, 1 and 2. Indexed
-three-column tables must cover all three axes; the explicitly named
-`displacements_A` array always means Cartesian vectors. Conflicting species or
-displacement representations fail rather than silently overriding each other.
+The agent writes one `forces.traj` using `ase.io.trajectory.Trajectory`, calling
+`atoms.get_forces()` before `writer.write(atoms)` so ASE saves calculator results.
+The first frame is the undisplaced reference; subsequent frames contain both
+signs of each Cartesian displacement of atom 0 at each retained magnitude.
+Atom order, cell and masses remain fixed. The scorer derives displacements and
+central force constants from the saved geometry and forces. The smallest
+retained displacement is the default; first-frame `info.selected_displacement_A`
+can select another retained magnitude without repeating its force-constant tensor.
+The submission formats also document a compact numerical NPZ alternative for
+analytical Hessians and displaced-force checks. Its raw atom-zero tensor is
+derived from the Hessian, so no duplicate tensor is needed. Legacy explicit
+force-constant tensors remain readable and are checked against the derivatives.
 Link it as `artifacts.force_log`; no settings documents, scripts, reports, or templates are
 needed. Level 1 stops at usable force constants and reconstructed diagnostics.
-Level 2 supplies only `results.zpe_eV_per_atom` (null for resolved instability).
+Level 2 supplies only `results.zpe` (null for resolved instability).
 Bands, DOS integration and imaginary-mode weights are reconstructed from the
-force archive. Optional submitted bands/DOS and diagnostic values are checked
+force frames. Optional submitted bands/DOS and diagnostic values are checked
 against the same evidence; they are not required artifacts.
 
 The scorer reconstructs derivatives and atom indexing, checks numerical
 sensitivity and raw symmetry/acoustic residuals, and independently computes
 signed bands, three-mode DOS normalization, and ZPE. It refines the reciprocal
 mesh using the retained constants. Small pinned-model spot checks establish
-force identity; unavailable verification or unresolved numerical accuracy raises
-an evaluation error. The numerical screens are conservative numerical
-limits and still need calibration against validated MACE runs before benchmarking.
+force identity; unavailable verification or unresolved reciprocal-space
+integration raises an evaluation error. The derivative/correction uncertainty
+bound distinguishes resolved imaginary modes from numerical residuals. Its
+magnitude alone does not reject a submission: Level 2 calculates the ZPE from
+the selected force constants, refines the mode integral, and compares the result
+with the reported value using the existing numerical tolerance. Resolved
+instability still requires a null ZPE, and independent force checks still apply.
+
+Task 8 Level 1 saves all 100 configurations in `dataset.traj`, linked as
+`artifacts.run_log`. Call `atoms.get_potential_energy()` before writing each frame.
+The first frame's `info` contains `seed` (nonnegative integer);
+`default_dtype` is optional and defaults to `float64`. The teacher checkpoint is
+pinned by the evaluator, so its digest need not be repeated. Generate the
+configurations with `numpy.random.default_rng(seed)` in order. Frame order is the
+row identity, and ASE stores geometry and energy without a separate JSON log.
+The evaluator checks the seed/displacement schedule and independently recalculates
+all teacher energies. Legacy JSON logs remain readable.
+
+Task 8 Level 2 retains datasets, candidate settings, validation folds, selected
+pipelines and learning-curve training indices. The final fit identifies its
+candidate by a zero-based index instead of repeating its settings. Teacher
+precision is recorded once in the training record, defaulting to `float64`.
+Each pipeline digest is recorded once at the freeze stage; training sizes and prediction metrics are
+derived from the retained data. Learning-curve pipelines inherit the selected
+SOAP and scaling settings. Separate test-metric summaries, training-size counts
+and repeated digests are optional legacy claims and must agree if supplied.
+The evaluator still checks training-only validation, fitted model state and
+the order of fitting, freezing and test-label generation.
 
 Task 1 uses [a separate scorer](src/corral_md/scoring/task_1.py)
-for both levels. Return a JSON object directly with only `artifacts.lammps_log` and
-`artifacts.trajectory`; Level 2 also requires `results.diffusion_m2_s`.
-The Task 1 `run_lammps` tool adds native recording to a copy of the input and
-returns the log and trajectory paths. No settings, scripts, converted tables,
-analysis summaries, separate restart files, or submission examples are needed.
+for both levels. Level 1 returns only `artifacts.lammps_log`; Level 2 additionally
+requires `artifacts.trajectory` and `results.diffusion`.
+The Task 1 `run_lammps` tool records native `Step Temp` thermo output at Level 1,
+without adding a trajectory dump. Level 2 retains its native log and trajectory
+recording. The tool works from a copy of the input and preserves the original.
 
-Level 1 checks preparation. Run the complete heating cycle in one input.
-Direct LAMMPS runs can retain the same evidence: echoed commands, thermal columns
-`Step Time Temp Press Density`, and an orthogonal periodic custom dump with
-`id type xu yu zu vx vy vz`. Keep matching thermal and trajectory samples at
-least every 2 ps, including initialization and the heating endpoint.
-Optional `ITEM: TIME` headers from `dump_modify ... time yes` are supported;
-their timestamps must agree with the simulation times reconstructed from the log.
-The scorer checks the heating schedule and state continuity and reconstructs
-temperature/density and neighbor exchange.
-Level 1 accepts either a crystalline or liquid endpoint after the prescribed
-heating; phase diagnostics do not determine its score.
+Level 1 uses policy `level1-task1-temperature-v1`: read the last row of the last
+native thermo table and score 1 exactly when its finite `Temp` value satisfies
+`abs(Temp - 2500) < 500 K`, otherwise 0. This preserves the former endpoint
+allowance. A single final sample is sufficient; the only required column is
+`Temp` in kelvin. Missing or malformed final data fails instead of falling back
+to an earlier valid temperature. No separate numerical answer is required.
+
+The simulation instructions still specify heating silicon from 300 to 2500 K
+with the SW potential under zero-pressure NPT. Scoring assesses only the final
+recorded temperature: protocol history, seed, elapsed time, atom geometry,
+trajectory continuity, density, pressure and melting diagnostics do not gate
+Level 1. Legacy extra trajectory links are ignored by its numerical check.
 
 Level 2 grades the diffusion quantity, without requiring the echoed setup,
 heating history, initial crystal, velocity initialization, thermostat or potential
@@ -495,8 +537,8 @@ numerical screens still need validation on real runs before benchmarking.
 Saved logs establish internal consistency, not tamper-proof execution provenance.
 
 Task 3 Level 1 uses [the reference-dataset scorer](src/corral_md/scoring/task_3.py).
-It requires the labeled dimer dataset and calculation log, and independently
-checks all 45 teacher energy/force labels. Level 1 is unchanged.
+It requires only the labeled dimer dataset, with optional precision metadata,
+and independently checks all 45 teacher energy/force labels.
 
 Task 3 Level 2 defaults to
 [the trajectory-temperature scorer](src/corral_md/scoring/task_3_temperature.py),
@@ -526,8 +568,8 @@ Task 5 Level 1 uses [the final-quantity scorer](src/corral_md/scoring/final_quan
 for the five isotropic-strain phonon maxima described above. Level 2 uses
 [the log-based reconstruction scorer](src/corral_md/scoring/task_5.py). Both levels
 submit `artifacts.calculation_log`. Level 2 requires all 25 isotropic/Cartesian-z
-calculations but reports only `results.fit.isotropic_coefficient_eV_per_strain`
-and `results.fit.uniaxial_coefficient_eV_per_strain`. The intercept, 25 energies
+calculations but reports only `results.fit.isotropic`
+and `results.fit.uniaxial`. The intercept, 25 energies
 and fit residuals are derived;
 optional `results.highest_positive_energies_eV` and `results.fit.residuals_eV`
 are checked in calculation-log order.
@@ -605,18 +647,17 @@ sections above for accepted numerical inputs, estimators and reporting tolerance
 
 ### Silicon SOAP-Ridge regression (Task 8)
 
-Both levels use [task_8.py](src/corral_md/scoring/task_8.py). Return a JSON object directly
-with only `artifacts.run_log` pointing to one JSONL calculation log. No settings document, separate checkpoint,
-inference script, report, or submission templates are needed.
+Both levels use [task_8.py](src/corral_md/scoring/task_8.py) and return a JSON
+object with `artifacts.run_log`. Level 1 links its native ASE dataset trajectory;
+Level 2 links the JSONL calculation log and saved datasets/pipelines described
+in the submission format. No separate settings document, inference script or
+report is required.
 
-The agent generates and labels the 100 prescribed training structures and
-writes their identities, seeds, geometry, and total energies to a JSONL log.
-Level 1 accepts grouped training-dataset records or a metadata record followed
-by configuration rows. An explicit generation seed and RNG together with
-matching coordinate hashes can identify reproducible geometry without storing
-coordinate arrays again. Level 2 also
-retains candidate validation fits, a freeze record containing the final and
-learning-curve pipelines, and the two test datasets and their descriptors.
+Legacy Level 1 JSON logs remain readable as grouped training-dataset records or
+metadata followed by configuration rows. A seed and identified generator can
+reconstruct omitted coordinates, with any retained coordinate hashes checked.
+Level 2 records the candidate validation settings, selected final and
+learning-curve pipelines, their freeze digests, and the two test datasets.
 Event names are not a grading requirement: identifiable record contents,
 equivalent event labels, individual fit records, and linked freeze manifests
 are normalized before checking the workflow. Numeric and ISO timestamps are
@@ -657,7 +698,7 @@ Task 10 uses [the Level 1 final-quantity scorer](src/corral_md/scoring/final_qua
 and [the Level 2 quantity scorer](src/corral_md/scoring/level2_quantities.py).
 Both levels submit `artifacts.run_log` directly as JSON. Level 1 evaluates the
 initial 300 K production means; Level 2 additionally requires
-`results.heat_capacity.eV_per_atom_K`, fitted from the five forward 300–700 K
+`results.heat_capacity`, fitted from the five forward 300–700 K
 stages. The full temperature cycle remains part of the task instructions.
 The quantities, accepted fit methods and numerical checks are described in the
 final-quantity sections above. Neither level requires a restart or independent

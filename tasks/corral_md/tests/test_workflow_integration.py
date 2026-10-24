@@ -30,8 +30,12 @@ def test_task1_prompt_describes_records_without_examples(level):
     assert "Blank manifest" not in prompt
     assert "submission_examples/" not in prompt
     assert "lammps_log" in prompt
-    assert "trajectory" in prompt
-    assert "diffusion_m2_s" in prompt if level == 2 else "diffusion_m2_s" not in prompt
+    assert (
+        '"trajectory"' in task.submission_format
+        if level == 2
+        else '"trajectory"' not in task.submission_format
+    )
+    assert '"diffusion"' in prompt if level == 2 else '"diffusion"' not in prompt
 
 
 def test_manifest_path_is_rejected_as_a_final_answer(tmp_path):

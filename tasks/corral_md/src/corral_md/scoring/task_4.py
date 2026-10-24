@@ -12,6 +12,7 @@ from functools import lru_cache
 
 import numpy as np
 from ase import Atoms, units
+from ase.geometry import find_mic
 from corral_md.scoring.common import (
     Evidence,
     EvidenceError,
@@ -22,9 +23,9 @@ from corral_md.scoring.common import (
     result_close,
 )
 from corral_md.scoring.level1_trusted import PINNED_TEACHER_SHA256
-from corral_md.scoring.verification import Plan, apply_verification
+from corral_md.scoring.verification import Plan, apply_verification, stored
 
-from .formats import artifact_reader, normalize_force_record
+from .formats import artifact_reader, check_model_digest, normalize_force_record
 
 STANDARD = 3.89 / 2 * (np.ones((3, 3)) - np.eye(3))
 NODES = np.array(
@@ -46,6 +47,47 @@ def require(condition, message):
 
 
 def read_record(e):
+    if e.artifact("force_log").suffix.lower() != ".npz":
+        frames = e.trajectory("force_log")
+        reference = frames[0]
+        require(len(reference) == 125, "Expected force calculations for Pd125")
+        require(reference.cell.rank == 3, "Expected a full periodic supercell")
+        values = []
+        for frame in frames:
+            require(
+                np.array_equal(frame.numbers, reference.numbers)
+                and np.array_equal(frame.pbc, reference.pbc)
+                and close(frame.cell.array, reference.cell.array, rtol=0, atol=1e-8)
+                and close(
+                    frame.get_masses(), reference.get_masses(), rtol=0, atol=1e-8
+                ),
+                "Force frames must retain the same cell, species, masses and atom order",
+            )
+            check_model_digest(frame.info, PINNED_TEACHER_SHA256)
+            value = stored(frame)
+            require("forces" in value, "Save calculated forces in every ASE frame")
+            values.append(value)
+        positions = finite_array([frame.positions for frame in frames], ndim=3)
+        displacements, _ = find_mic(
+            positions[:, 0] - positions[0, 0], reference.cell, reference.pbc
+        )
+        return {
+            "positions_A": positions,
+            "cell_A": reference.cell.array,
+            "numbers": reference.numbers,
+            "pbc": reference.pbc,
+            "masses_amu": reference.get_masses(),
+            "displacements_A": displacements,
+            "forces_eV_A": finite_array(
+                [value["forces"] for value in values], shape=(len(frames), 125, 3)
+            ),
+            **(
+                {"energies_eV": [value["energy"] for value in values]}
+                if all("energy" in value for value in values)
+                else {}
+            ),
+            "metadata": {**reference.info, "method": "central_difference"},
+        }
     try:
         with np.load(e.artifact("force_log"), allow_pickle=False) as archive:
             record = {key: archive[key] for key in archive.files}
@@ -110,7 +152,7 @@ def cubic_average(phi, cell, sites):
 
 
 @artifact_reader
-def prepare(record, *, require_mode_accuracy=True):
+def prepare(record):
     cell, sites, opposite, delta = geometry(record)
     displacements = finite_array(record["displacements_A"], ndim=2)
     forces = finite_array(record["forces_eV_A"], shape=(len(displacements), 125, 3))
@@ -140,13 +182,6 @@ def prepare(record, *, require_mode_accuracy=True):
             columns.append(-(forces[plus[0]] - forces[minus[0]]) / (2 * size))
         derivatives.append(np.stack(columns, axis=-1))
     fine, coarse = derivatives[0], derivatives[-1]
-    raw = finite_array(record.get("force_constants_eV_A2", fine), shape=(125, 3, 3))
-    if not any(close(raw, candidate, atol=1e-7) for candidate in derivatives):
-        transposed = raw.swapaxes(-1, -2)
-        if any(close(transposed, candidate, atol=1e-7) for candidate in derivatives):
-            # Both (force axis, displacement axis) and its transpose are common
-            # tensor conventions. Recorded force differences disambiguate them.
-            raw = transposed
     metadata = record["metadata"]
     require(
         (
@@ -157,20 +192,54 @@ def prepare(record, *, require_mode_accuracy=True):
         and metadata.get("dispersion", False) is False,
         "Force record must identify the supplied checkpoint without dispersion",
     )
+    selected = metadata.get("selected_displacement_A")
+    selected_derivative = None
+    if "selected_displacement_A" in metadata:
+        require(
+            type(selected) in (int, float) and np.isfinite(selected) and selected > 0,
+            "selected_displacement_A must be a finite positive magnitude",
+        )
+        matches = np.flatnonzero(np.isclose(sizes, selected, rtol=0, atol=1e-10))
+        require(
+            len(matches) == 1,
+            "selected_displacement_A must identify one retained displacement magnitude",
+        )
+        require(
+            metadata["method"] == "central_difference",
+            "selected_displacement_A applies only to finite differences",
+        )
+        selected_derivative = derivatives[matches[0]]
     if metadata["method"] == "analytical":
         matrix = finite_array(record["hessian_eV_A2"], shape=(375, 375))
         require(
             close(matrix, matrix.T, atol=1e-7), "Analytical Hessian is not symmetric"
         )
         expected = matrix.reshape(125, 3, 125, 3)[:, :, 0, :]
+        # The Hessian already retains the requested atom-zero tensor. Do not
+        # require a redundant copy or substitute a finite-difference estimate.
+        default_constants = expected
     elif metadata["method"] == "central_difference":
-        # The task permits choosing an accurate displacement; the smallest
-        # retained displacement need not be the one used for the final result.
-        expected = min(
-            derivatives, key=lambda candidate: float(np.max(abs(raw - candidate)))
-        )
+        default_constants = fine if selected_derivative is None else selected_derivative
     else:
         raise UnsupportedEvidence("Unsupported derivative method in the force record")
+    raw = finite_array(
+        record.get("force_constants_eV_A2", default_constants), shape=(125, 3, 3)
+    )
+    candidates = [expected] if metadata["method"] == "analytical" else derivatives
+    if not any(close(raw, candidate, atol=1e-7) for candidate in candidates):
+        transposed = raw.swapaxes(-1, -2)
+        if any(close(transposed, candidate, atol=1e-7) for candidate in candidates):
+            # Both (force axis, displacement axis) and its transpose are common
+            # tensor conventions. Recorded derivatives disambiguate them.
+            raw = transposed
+    if metadata["method"] == "central_difference":
+        # The task permits choosing an accurate displacement; the smallest
+        # retained displacement need not be the one used for the final result.
+        expected = (
+            min(derivatives, key=lambda candidate: float(np.max(abs(raw - candidate))))
+            if selected_derivative is None
+            else selected_derivative
+        )
     require(
         close(raw, expected, atol=1e-7),
         "Retained force constants disagree with the recorded derivative",
@@ -203,10 +272,10 @@ def prepare(record, *, require_mode_accuracy=True):
         for change in (fine - coarse, raw - fine, raw - phi)
     )
     tolerance = max(1e-7, float(ENERGY_FACTOR * np.sqrt(error)))
-    if require_mode_accuracy and tolerance > 5e-4:
-        raise EvidenceError(
-            "Numerical mode uncertainty exceeds 0.5 meV; improve force accuracy"
-        )
+    # This conservative bound distinguishes resolved imaginary modes from
+    # derivative/correction noise; it is not an error estimate for the ZPE.
+    # Calculate the selected tensor's spectrum and compare its converged mode
+    # integral with the submitted ZPE, without a separate ceiling on this bound.
     diagnostics["imaginary_tolerance_eV"] = tolerance
     diagnostics["gamma_energies_eV"] = energies(phi, sites, [[0, 0, 0]])[0].tolist()
     return phi, sites, diagnostics
@@ -469,7 +538,7 @@ def evaluate_submission(submission, *, level=2, verifier=None):
 
     @lru_cache(None)
     def prepared():
-        return prepare(read_record(e), require_mode_accuracy=level == 2)
+        return prepare(read_record(e))
 
     def constants():
         _, _, diagnostics = prepared()
@@ -560,8 +629,7 @@ def evaluate_submission(submission, *, level=2, verifier=None):
             )
             if unstable:
                 require(
-                    "zpe_eV_per_atom" in e.results
-                    and e.results["zpe_eV_per_atom"] is None,
+                    "zpe" in e.results and e.results["zpe"] is None,
                     "Resolved instability has no harmonic ZPE; report null",
                 )
                 if "real_mode_energy_eV_per_atom" in e.results:
@@ -575,7 +643,7 @@ def evaluate_submission(submission, *, level=2, verifier=None):
                     )
                 return True
             return result_close(
-                e.results["zpe_eV_per_atom"],
+                e.results["zpe"],
                 calculated["zpe_eV_per_atom"],
                 atol=max(1e-5, 2 * calculated["zpe_sampling_error_eV"]),
             )

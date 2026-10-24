@@ -203,7 +203,7 @@ def normalize(rows, linked, log_path=None):
                     fit["sha256"] = by_name[Path(fit["file"]).name]
 
     final = next((row for row in output if row["stage"] == "final_fit"), {})
-    if final and "params" not in final:
+    if final and "params" not in final and "candidate_index" not in final:
         final["params"] = parameters(final)
     shared = parameters(final.get("params", {}))
     for selection in selections:
@@ -215,9 +215,9 @@ def normalize(rows, linked, log_path=None):
             ):
                 candidate["scale"] = shared["scale"]
     for row in output:
-        if row["stage"] == "learning_curve_fits":
+        if row["stage"] == "learning_curve_fits" and "scale" in shared:
             for fit in row["pipelines"]:
-                fit.setdefault("scale", shared.get("scale"))
+                fit.setdefault("scale", shared["scale"])
 
     def locate(record, labels):
         if "file" in record or labels is None or log_path is None:

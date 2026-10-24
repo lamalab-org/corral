@@ -219,9 +219,12 @@ def vdos(evidence):
         power = power.sum(axis=(1, 2))
         source = "logged_velocities_hann_welch"
     computed = spectral_summaries(frequency, power)
-    for name in ("mean_frequency_THz", "std_frequency_THz"):
+    for name in ("mean_frequency", "std_frequency"):
         compare(
-            required_result(evidence.results, name), computed[name], name, atol=1e-6
+            required_result(evidence.results, name),
+            computed[f"{name}_THz"],
+            name,
+            atol=1e-6,
         )
     return {**computed, "reference_basis": source}
 
@@ -304,7 +307,7 @@ def expansion(evidence):
         [s["temperature_K"] for s in heating], [s["volume_A3"] for s in heating]
     )
     beta = slope / reference
-    compare(required_result(evidence.results, "beta_volume"), beta, "beta_volume")
+    compare(required_result(evidence.results, "beta"), beta, "beta")
     return {
         "beta_volume": beta,
         "volume_slope_A3_per_K": slope,
@@ -402,10 +405,7 @@ def heat_capacity(evidence):
         evidence.results.get("fit"),
     )
     claim = required_result(evidence.results, "heat_capacity")
-    require(isinstance(claim, Mapping), "Heat capacity must be an object")
-    compare(
-        required_result(claim, "eV_per_atom_K"), slope, "heat_capacity.eV_per_atom_K"
-    )
+    compare(claim, slope, "heat_capacity")
     return {
         "heat_capacity": {
             "eV_per_atom_K": slope,

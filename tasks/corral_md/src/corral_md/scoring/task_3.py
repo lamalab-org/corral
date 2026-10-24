@@ -51,10 +51,26 @@ def labels(frames):
     )
 
 
+def calculation_settings(e):
+    """Read optional precision from the dataset or an explicitly linked legacy log."""
+    metadata = calculation_log(e.trajectory("dataset")[0].info)
+    legacy = calculation_log(e.json("run_log")) if "run_log" in e._artifacts else {}
+    for key in (
+        "teacher_model",
+        "dispersion",
+        "default_dtype",
+        "energy_unit",
+        "force_unit",
+    ):
+        if key in metadata and key in legacy and metadata[key] != legacy[key]:
+            raise EvidenceError(f"Dataset and calculation log disagree on {key}")
+    return {**legacy, **metadata}
+
+
 def build_plan(e, challenge):
     """Check every teacher label; no training or MD is rerun."""
     plan = Plan(e, 3, challenge)
-    dtype = calculation_log(e.json("run_log")).get("default_dtype", "float64")
+    dtype = calculation_settings(e).get("default_dtype", "float64")
     plan.add(
         "teacher",
         "mace",
@@ -86,10 +102,7 @@ def evaluate_submission(submission, *, level, verifier=None):
     verification = {}
     try:
         e = Evidence(submission, task_number=3, level=level)
-        log = calculation_log(e.json("run_log"))
-        for role in ("dataset", "run_log"):
-            if e.artifact(role).stat().st_size == 0:
-                raise EvidenceError(f"Empty {role}")
+        log = calculation_settings(e)
         fingerprint = e.fingerprint()
     except Exception as exc:
         r.error("calculation_records", 100, exc)

@@ -228,8 +228,9 @@ class Evidence:
         self._cache: dict[tuple, Any] = {}
         self._linked_evidence: set[Path] = set()
         if task_number is not None:
-            from .contracts import validate_manifest
+            from .contracts import normalize_results, validate_manifest
 
+            self.results = normalize_results(self.results, task_number, level)
             validate_manifest(self, task_number, level)
 
     def _path(self, value: Any) -> Path:

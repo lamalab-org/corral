@@ -156,7 +156,13 @@ def aluminum(evidence, task):
         momenta = value(row, "momenta", "momenta_ase_units")
         if momenta is not None and (
             value(row, "temperature_K", "Temperature", "T_K") is None
-            or (task == 10 and value(row, "Tx_K", "Tx") is None)
+            or (
+                task == 10
+                and any(
+                    value(row, *keys) is None
+                    for keys in (("Tx_K", "Tx"), ("Ty_K", "Ty"), ("Tz_K", "Tz"))
+                )
+            )
         ):
             p = finite_array(momenta, shape=(108, 3))
             masses = finite_array(
@@ -174,6 +180,22 @@ def aluminum(evidence, task):
             )
             for key, number in zip(("Tx_K", "Ty_K", "Tz_K"), directions, strict=True):
                 row.setdefault(key, float(number))
+        if task == 10:
+            temperature = float(
+                np.mean(
+                    [
+                        scalar(row, *keys)
+                        for keys in (("Tx_K", "Tx"), ("Ty_K", "Ty"), ("Tz_K", "Tz"))
+                    ]
+                )
+            )
+            reported = value(row, "temperature_K", "Temperature", "T_K")
+            if reported is not None:
+                require(
+                    result_close(reported, temperature, atol=1e-6),
+                    "Overall temperature disagrees with directional temperatures",
+                )
+            row["temperature_K"] = temperature
         if task == 7 and value(row, "volume_A3", "volume", "Volume") is None:
             cell = value(row, "cell_A", "cell")
             if cell is not None:
@@ -416,12 +438,10 @@ def phonons(evidence, verifier):
     }
 
 
-def sidecar(evidence, log, role, filenames):
+def optional_artifact(evidence, role):
+    """Read alternate evidence only when it is explicitly submitted."""
     if role in evidence._artifacts:
         return evidence.artifact(role)
-    for filename in filenames:
-        if (log.parent / filename).is_file():
-            return evidence.linked_path(filename, log, register=True)
     return None
 
 
@@ -477,16 +497,14 @@ def correlation_values(
 def copper(evidence):
     log = evidence.artifact("run_logs.main")
     header, rows, _ = read_samples(log)
-    settings_path = sidecar(evidence, log, "settings", ("settings.json",))
+    settings_path = optional_artifact(evidence, "settings")
     settings = records(settings_path) if settings_path else {}
     require(isinstance(settings, Mapping), "MD settings must be an object")
     options = {**settings, **header}
-    analysis_path = sidecar(evidence, log, "analysis", ("analysis.json",))
+    analysis_path = optional_artifact(evidence, "analysis")
     analysis = records(analysis_path) if analysis_path else {}
     require(isinstance(analysis, Mapping), "Correlation analysis must be an object")
-    energy_path = sidecar(
-        evidence, log, "energy_series", ("prod_pe_every_step.npy", "energy_series.npy")
-    )
+    energy_path = optional_artifact(evidence, "energy_series")
     if energy_path:
         with energy_path.open("rb") as stream:
             energy = finite_array(np.load(stream, allow_pickle=False), ndim=1)
