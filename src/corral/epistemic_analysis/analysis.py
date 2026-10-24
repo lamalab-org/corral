@@ -93,7 +93,13 @@ def analyze_graph(graph: AnnotatedGraph | dict[str, Any]) -> AnalysisResult:
     Empty graphs retain their historical fixed_belief_trace measurement. They
     are marked uninformative, allowing aggregation to expose their exclusion.
     """
-    from .schema import AnalysisResult, AnnotatedGraph, content_hash, read_graph
+    from .schema import (
+        ANALYZABLE_COMPLETION_STATUSES,
+        AnalysisResult,
+        AnnotatedGraph,
+        content_hash,
+        read_graph,
+    )
 
     if not isinstance(graph, AnnotatedGraph):
         graph = read_graph(graph)
@@ -101,7 +107,7 @@ def analyze_graph(graph: AnnotatedGraph | dict[str, Any]) -> AnalysisResult:
     if status == "complete":
         if graph.reconstruction_status != "complete":
             status = graph.reconstruction_status
-        elif graph.completion_status not in {"complete", "unspecified"}:
+        elif graph.completion_status not in ANALYZABLE_COMPLETION_STATUSES:
             status = graph.completion_status
         elif not graph.nodes:
             status = "uninformative"
@@ -123,6 +129,8 @@ def analyze_graph(graph: AnnotatedGraph | dict[str, Any]) -> AnalysisResult:
     coverage = graph.qc.get("context_coverage", {})
     row.update(
         {
+            "completion_status": graph.completion_status,
+            "reconstruction_status": graph.reconstruction_status,
             "clipped_outputs": coverage.get("clipped_outputs", 0),
             "original_tool_chars": coverage.get("original_tool_chars"),
             "retained_tool_chars": coverage.get("retained_tool_chars"),

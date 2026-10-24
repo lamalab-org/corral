@@ -74,6 +74,11 @@ async def test_epistemic_prompt_overrides_leave_base_agent_unchanged(monkeypatch
         model="test-model",
         annotator=annotator_with_transport(AsyncMock(return_value=decision_payload())),
     )
+    enabled = ToolCallingAgent(
+        model="test-model",
+        epistemic=True,
+        annotator=annotator_with_transport(AsyncMock(return_value=decision_payload())),
+    )
     catalog = (*Session.tools, submit_answer_tool())
     original_catalog = deepcopy(catalog)
     model = AsyncMock()
@@ -81,7 +86,7 @@ async def test_epistemic_prompt_overrides_leave_base_agent_unchanged(monkeypatch
 
     # Reuse the same catalog and base agent after the epistemic run to catch
     # prompt or tool-description mutations leaking between agents.
-    for agent in (base, epistemic, base):
+    for agent in (base, enabled, epistemic, enabled, base):
         model.reset_mock()
         model.side_effect = [
             response(content="Compare the hypotheses before choosing an action."),
@@ -104,6 +109,9 @@ async def test_epistemic_prompt_overrides_leave_base_agent_unchanged(monkeypatch
             if m["role"] == "user" and m.get("name") != REPORT_MESSAGE_NAME
         )
         assert session.prompt in user_prompt
+        assert any(m.get("name") == REPORT_MESSAGE_NAME for m in session.messages) == (
+            agent is not base
+        )
         if agent is epistemic:
             assert "Before every tool call, including `submit_answer`" in user_prompt
             assert "A tool call is not required on every turn" in user_prompt

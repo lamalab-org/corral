@@ -8,16 +8,12 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from corral.epistemic_analysis.epistemic_prompts import VIEW_INSTRUCTIONS
+
 from .schema import AnnotationConfig, Message, NormalizedTrace, content_hash
 
 VIEW_VERSION = "head-tail-submit-answer-v2"
 SUBMIT_ANSWER_ACTION = re.compile(r"<action>\s*submit_answer\s*</action>")
-VIEW_INSTRUCTIONS = (
-    "[ANNOTATION VIEW: ...] marks omitted, unavailable context. Excerpts of JSON "
-    "and tables are incomplete text. Cite only contiguous verbatim retained text, "
-    "never the marker or across its gap. Missing details in an excerpt do not "
-    "prove their absence from the original output."
-)
 
 
 def is_tool_result(message: dict, source: dict | None = None) -> bool:

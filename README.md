@@ -411,11 +411,34 @@ agent = ToolCallingAgent(
 )
 ```
 
+Both `ReActAgent` and `ToolCallingAgent` accept `epistemic=True` to enable the
+same annotations, actor feedback, and submission review as `EpistemicAgent`:
+
+```python
+agent = ReActAgent(model="gpt-4o", epistemic=True)
+# Or: ToolCallingAgent(model="gpt-4o", epistemic=True)
+```
+
+The mode is off by default. When enabled, it saves structured reports, shows
+feedback before subsequent turns, and reviews every proposed answer before
+executing `submit_answer`. It preserves the agent's system and user prompts,
+submission tool description, and any custom prompts. The dedicated scientific
+prompts belong to `EpistemicAgent`. A held answer must be validated, revised, or
+justified and submitted again within the existing iteration limit. ReAct retains
+its XML action format and uses `<thought>` for explanations; thought-only turns
+are allowed. Both agents accept the `epistemic_*`, `annotator`, and
+`actor_refusal_max_retries` settings documented below. Annotation calls add to
+the run's usage and latency; an annotation failure stops the run without
+accepting an unreviewed answer.
+
+The existing CLI also supports the mode through
+`--agent react --agent-kwargs '{"epistemic":true}'` (or `--agent tool-calling`).
+
 ### EpistemicAgent
 
-Extends `ToolCallingAgent` with a Decisions assessment after each public actor
-turn. The initial turn receives no epistemic report and makes no
-annotation API calls: the agent states initial hypotheses and justifies its first
+Extends `ToolCallingAgent` with dedicated scientific prompts and a Decisions
+assessment after each public actor turn. The initial turn receives no epistemic
+report and makes no annotation API calls: the agent states initial hypotheses and justifies its first
 experiments without judging nonexistent prior experiments or reports.
 It classifies the seven productive motifs and eleven
 antipatterns from the final graph aggregation in `reasoning_reports/analyze.py`.
@@ -440,10 +463,11 @@ a brief scientific explanation of observations, evidence, and the purpose of
 each tool call, including when using several tools in one response. It also
 permits text-only explanations, which count toward the iteration limit.
 The system prompt, continuation reminder, and submission tool description are
-overridden for this agent; the base `ToolCallingAgent` keeps its original prompts
-and reminder. These are prompt instructions, not a runtime guarantee that the
-model will provide an explanation. Text-only turns are assessed before the
-next actor turn; earlier epistemic reports remain excluded from the annotator.
+overridden only for this agent; `ToolCallingAgent` keeps its original prompts
+and reminder even with `epistemic=True`. These are prompt instructions, not a
+runtime guarantee that the model will provide an explanation. Text-only turns
+are assessed before the next actor turn; earlier epistemic reports remain
+excluded from the annotator.
 Only public assistant text, tool calls, and observations enter the conversation
 and epistemic trajectory. Provider thinking and reasoning summaries are never
 promoted to visible text. Empty assistant turns (including legacy saved turns)
@@ -461,8 +485,8 @@ toward the iteration limit. The retry allowance resets after a non-refused
 response. If refusals persist, the trial ends with `agent_failure`, retaining
 the final public refusal text and usage from all attempts.
 Set `actor_refusal_max_retries=0` to disable this behavior or choose another
-non-negative retry limit. This setting belongs only to `EpistemicAgent`;
-the base `ToolCallingAgent` still stops immediately on a refusal.
+non-negative retry limit. This setting applies in epistemic mode;
+the default `ToolCallingAgent` still stops immediately on a refusal.
 Classifier retries remain controlled separately by `epistemic_max_retries`.
 
 ```python
@@ -495,13 +519,16 @@ helper when available, or its generic `POST /decisions` transport on older SDKs.
 
 Offline graph annotation (`corral analyze`, with either `--annotator llm` or
 `--annotator jev`) also labels the 11 behavioral checks defined in
-[`additional_checks.md`](additional_checks.md). A third pass runs after node and
-edge extraction and makes one request per check per trace (11 requests per trace).
-Each request contains only that check's definition and the entire normalized
-trace, including full tool outputs and messages after submission; `--window`,
+[`epistemic_prompts.py`](src/corral/epistemic_analysis/epistemic_prompts.py).
+A third pass runs after node and edge extraction and makes one request per check
+per trace (11 requests per trace).
+Each request contains only that check's definition, its three few-shot examples,
+and the entire normalized trace, including full tool outputs and messages after
+submission; `--window`,
 `--overlap`, and `--tool-output-max-chars` only control the graph passes.
-The package includes a copy of the definitions for installed runs; update both
-copies together (a regression test checks that they match).
+The same module contains the node, edge, motif, annotation, and explanation
+prompts. Installed runs use these Python definitions directly; no Markdown prompt
+files are required.
 
 Saved graphs contain `trace_checks` and `trace_checks_status` alongside `nodes`
 and `edges`. Each check is `present`, `absent`, or `uncertain`;

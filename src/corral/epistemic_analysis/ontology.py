@@ -2,6 +2,28 @@
 
 from __future__ import annotations
 
+from corral.epistemic_analysis.epistemic_prompts import (
+    NODE_CRITERIA,
+    PASS_A_INSTRUCTIONS,
+    PASS_A_SYSTEM,
+    PASS_B_INSTRUCTIONS,
+    PASS_B_SYSTEM,
+)
+
+# Preserve the existing ontology imports while prompt text lives in one module.
+__all__ = [
+    "ALLOWED_EDGE_TYPE_COMBOS",
+    "EDGE_RELATIONS",
+    "EDGE_RELATIONS_SET",
+    "NODE_CRITERIA",
+    "NODE_TYPES",
+    "NODE_TYPES_SET",
+    "PASS_A_INSTRUCTIONS",
+    "PASS_A_SYSTEM",
+    "PASS_B_INSTRUCTIONS",
+    "PASS_B_SYSTEM",
+]
+
 NODE_TYPES = ["H", "T", "E", "J", "C", "N", "F"]
 
 
@@ -44,129 +66,3 @@ ALLOWED_EDGE_TYPE_COMBOS: set[tuple[str, str, str]] = {
     ("informs", "J", "H"),
     ("informs", "J", "J"),
 }
-
-
-PASS_A_SYSTEM = """You are a careful annotator. You MUST only extract information explicitly present in the provided messages.
-Rules:
-- Do NOT invent hidden thoughts or implied steps.
-- Do not borrow any external knowledge or make assumptions beyond the text.
-- Do not judge or correct the content, only label supported nodes.
-- For messages with several nodes, you MUST follow the order in which they appear in the text to assign message indices.
-- If uncertain, omit the node rather than guessing.
-- Output JSON only, matching the required schema.
-"""
-
-
-NODE_CRITERIA = {
-    "H": 'Hypothesis: a candidate explanation, or a working assumption about the system. It should be a revisable claim, proposal, suggestion, or the current best guess about the answer. Information in task definitions or environment descriptions do not count as hypotheses (H). Partial or full reiteration of the task descriptionn does not count as hypothesis (H). Correcting a typo in a tool argument does not count as a Hypothesis (H). We consider a Hypothesis (H) to be present if the agent states a claim similar to "I think the answer is X", "This suggests that X might be the solution", "The most likely explanation is X", "X could be the case if...", "It seems that the answer can be X", etc.',
-    "E": "Evidence: all Observation messages must be assigned with and only with an Evidence (E) node. Only Observation messages can be Evidence (E) nodes, with the exception of the task description message.",
-    "N": "Neutral: a fallback for boilerplate operations like writing or copying files, non-scientific tool calls, or runtime notices. Assign N only when no other node type is assigned to the same span. Unlabelled runtime budget-exhaustion notices receive N during postprocessing.",
-    "T": "Test: any information-seeking action, including experiments, evaluations, or lookups. Both the intention and the concrete tool call qualify as one test (T) - each tool call is one test; what matters is that the system is seeking new scientific information to evaluate a hypothesis (H) or a judgment (J). If both the intention/plan to run a test and the actual tool call are present within the same message, count only the tool call as the test (T) node. If both T and N are selected for a tool call (with the tag <action>), keep T. If no node type is assigned to a tool call, use N.",
-    "J": "Judgment: an interpretation of test results (Observation) that goes beyond the literal repetition of the raw output. If the agent restates an observation while adding any evaluative, comparative, or inferential content, even brief it is a judgment (J).",
-    "F": "Final Answer: Only the message that contains a final submisssion (with action `submit_answer`), must be a assigned with a Final Answer (F) node.",
-    "C": (
-        "Commitment: observable unsupported closure on an answer, or observable "
-        "resistance to relevant revision or validation. Unsupported closure "
-        "means treating a specific unevaluated claim as settled, or excluding "
-        "a specific live alternative without a discriminating basis. It can "
-        "occur on the first assertion; no prior challenge or refusal is required. "
-        "Resistance means dismissing relevant evidence, a live alternative, or "
-        "an available useful check without an evidence-based reason. Identify "
-        "the concrete support gap or dismissal in recorded statements or "
-        "actions; do not infer private intent. C may be a pseudo-node when "
-        "behavior demonstrates closure or resistance without an explicit "
-        "declaration. A provisional hypothesis, ordinary test plan, confident "
-        "wording, or final submission alone is insufficient. A supported "
-        "submission with acknowledged uncertainty is not C. A Final Answer "
-        "(F) can also be C only when unsupported closure or resistance is "
-        "independently established, not merely because it is final."
-    ),
-}
-
-PASS_A_INSTRUCTIONS = f"""Extract 0..k nodes from the provided message window.
-
-Every non-Observation message must be assigned with at least one node. It is possible that some messages will have multiple nodes (e.g., a message that both states a hypothesis and describes a test). Avoid repeated nodes of the **same type** within a single message, unless the text explicitly supports multiple distinct instances.
-
-Node types:
-H = {NODE_CRITERIA["H"]}
-E = {NODE_CRITERIA["E"]}
-N = {NODE_CRITERIA["N"]}
-T = {NODE_CRITERIA["T"]}
-J = {NODE_CRITERIA["J"]}
-F = {NODE_CRITERIA["F"]}
-
-Constraints for nodes:
-- Only label what is explicitly present in text.
-- Every node must have support quotes (exact substrings) and msg indices.
-- If you normalize text, still cite original quote(s).
-
-Pseudo-nodes (not explicitly stated but can be inferred):
-C = {NODE_CRITERIA["C"]}
-
-Constrains for pseudo-nodes:
-- Only Commitment (C) can be a pseudo-node.
-- For the quote support of a pseudo-node, you can cite the text that implies the commitment, even if it is not explicit. You are allowed to add a brief explanation to clarify the implication, but it must be concise and directly tied to the quote.
-
-
-Return JSON with keys:
-{{
-  "nodes": [
-    {{
-      "node_id": "N1",
-      "type": "H|T|E|J|C|F",
-      "time": <int message index of earliest support>,
-      "text": <normalized short node text>,
-      "support": [{{"msg_idx": <int>, "quote": <exact substring from that message>}}],
-    }}, ...
-  ]
-}}
-"""
-
-
-PASS_B_SYSTEM = """You are a careful annotator. You MUST only add edges supported by explicit text.
-Rules:
-- You may only connect nodes provided to you.
-- Do not borrow any external knowledge or make assumptions beyond the text.
-- Do not judge or correct the content, only label supported edges.
-- Every edge MUST include at least one support quote with message indices.
-- If uncertain, omit the edge rather than guessing.
-- Output JSON only, matching the required schema.
-"""
-
-
-PASS_B_INSTRUCTIONS = """Given the message window and a list of extracted nodes (with node_id and text), extract supported edges among these nodes.
-
-Only the following edge types are allowed, any other combination is forbidden:
-- tests: Allowed only between: H -> T, J -> T.
-    H -> T: the Test (T) directly addresses the Hypothesis' claim (H), or attempts to falsify or verify it.
-    J -> T: the Test (T) is designed in response to the Judgment (J), or the Judgment (J) motivates the test design.
-- observes: Allowed only between: T -> E.
-    T -> E: the Evidence (E) is a direct result of the Test (T).
-- updates_to: Allowed only between: H -> H.
-    H -> H: the later Hypothesis (H) is a revision of the earlier one, based on the nodes in between.
-- competes_with: Allowed only between: H -> H.
-    H -> H: the two Hypotheses (H) are alternative explanations that are directly compared or evaluated against each other. Both hypotheses should be plausible and co-existing at the same time. If another hypothesis is introduced later as a revision of the first one, then it should be connected with updates_to instead of competes_with.
-- contradicts: Allowed only between: E -> H, J -> H.
-    E -> H: the Evidence (E) contradicts the claim of the Hypothesis (H).
-    J -> H: the Judgment (J) contradicts the claim of the Hypothesis (H).
-- informs: Allowed only between: E -> H, E -> J, E -> C, J -> C, J -> H, J -> J.
-    E -> H: the Evidence (E) provides information relevant to the claim of the Hypothesis (H).
-    E -> J: the Judgment (J) is an interpretation of the Evidence (E).
-    E -> C: the Commitment (C) is informed by the Evidence (E) but not necessarily in an explicit way.
-    J -> H: the Judgment (J) provides information relevant to the claim of the Hypothesis (H).
-    J -> J: the later Judgment (J) is a refinement, an extension, or a combination of one or serveral earlier judgments (J).
-    J -> C: the Commitment (C) is informed by the Judgment (J) but not necessarily in an explicit way.
-
-Return JSON with keys:
-{
-  "edges": [
-    {
-      "src": "<node_id>",
-      "dst": "<node_id>",
-      "relation": "<one of allowed>",
-      "time": <int message index of earliest support>,
-      "support": [{"msg_idx": <int>, "quote": <exact substring from that message>}]
-    }, ...
-  ]
-}
-"""

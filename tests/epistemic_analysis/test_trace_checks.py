@@ -18,15 +18,16 @@ from corral.epistemic_analysis import (
     aggregate,
     analyze_graph,
     annotate_trace,
+    epistemic_prompts,
     read_graph,
 )
 from corral.epistemic_analysis.aggregation import compute_aggregate_stats
 from corral.epistemic_analysis.annotators import jev, llm
 from corral.epistemic_analysis.budget import RequestBudgetExceeded
 from corral.epistemic_analysis.context import current_context
+from corral.epistemic_analysis.epistemic_prompts import TRACE_CHECK_EXAMPLES
 from corral.epistemic_analysis.pipeline import can_reuse
 from corral.epistemic_analysis.trace_checks import (
-    DEFINITIONS_DOCUMENT,
     TRACE_CHECK_DEFINITIONS,
     TRACE_CHECK_NAMES,
     validate_trace_checks,
@@ -67,6 +68,21 @@ def provider_backend(kind, monkeypatch, events, *, response=None):
             f"Assess the behavioral check `{name}` across the entire supplied trace."
         )
         assert f"Definition of `{name}`:\n{TRACE_CHECK_DEFINITIONS[name]}" in prompt
+        assert TRACE_CHECK_EXAMPLES[name] in prompt
+        assert prompt.count("Verdict:") == TRACE_CHECK_EXAMPLES[name].count("Verdict:")
+        assert (
+            "flag = present; do_not_flag = absent; insufficient_evidence = uncertain"
+            in prompt
+        )
+        assert (
+            "Examples are reference cases, not evidence from the supplied trace"
+            in prompt
+        )
+        assert all(
+            examples not in prompt
+            for other, examples in TRACE_CHECK_EXAMPLES.items()
+            if other != name
+        )
         assert "check.name" not in prompt
         assert "check.definition" not in prompt
         assert "check.allowed_statuses" not in prompt
@@ -148,10 +164,19 @@ def provider_backend(kind, monkeypatch, events, *, response=None):
     return replace(backend, extract_nodes=nodes, extract_edges=edges)
 
 
-def test_packaged_definitions_match_requested_document():
-    root = Path(__file__).resolve().parents[2]
-    assert (root / "additional_checks.md").read_text() == DEFINITIONS_DOCUMENT
+def test_every_trace_check_has_curated_examples_matching_the_reference():
     assert len(TRACE_CHECK_NAMES) == 11
+    assert set(TRACE_CHECK_EXAMPLES) == set(TRACE_CHECK_DEFINITIONS)
+    assert all(
+        examples.count("Verdict:") >= 3 for examples in TRACE_CHECK_EXAMPLES.values()
+    )
+    reference = (
+        Path(__file__).resolve().parents[2] / "additinal_checks.md"
+    ).read_text()
+    reference_text = " ".join(reference.split())
+    for name in TRACE_CHECK_NAMES:
+        assert " ".join(TRACE_CHECK_DEFINITIONS[name].split()) in reference_text
+        assert TRACE_CHECK_EXAMPLES[name] in reference
 
 
 @pytest.mark.parametrize("kind", ["llm", "jev"])
@@ -201,14 +226,23 @@ def test_one_request_per_check_after_graph_with_every_unclipped_message(
         )
         assert "resolved-check-model" in graph.provenance["resolved_models"]
     assert current_context() is None
+    name = "contradiction_ignored"
+    for table in (TRACE_CHECK_DEFINITIONS, TRACE_CHECK_EXAMPLES):
+        with monkeypatch.context() as patch:
+            patch.setitem(table, name, table[name] + "\nUpdated repair policy.")
+            assert not can_reuse(graph, source, backend, config)
+        assert can_reuse(graph, source, backend, config)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            epistemic_prompts,
+            "TRACE_CHECK_RULES",
+            epistemic_prompts.TRACE_CHECK_RULES + "\nUpdated temporal scope.",
+        )
+        assert not can_reuse(graph, source, backend, config)
 
 
 @pytest.mark.parametrize(
-    "response",
-    [
-        {"trace_checks": assessments()},
-        {"trace_check": assessments()[1]},
-    ],
+    "response", [{"trace_checks": assessments()}, {"trace_check": assessments()[1]}]
 )
 def test_llm_rejects_combined_results_or_a_different_check(response):
     calls = []

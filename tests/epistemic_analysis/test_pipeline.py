@@ -157,6 +157,72 @@ def test_analysis_versions_do_not_invalidate_annotations(monkeypatch):
     assert annotation_fingerprint(source, backend, config) == before
 
 
+def test_iteration_limit_run_can_be_annotated_and_counted_without_changing_outcome():
+    source = replace(trace(), completion_status="failed")
+    source.source = replace(
+        source.source,
+        details={"execution_error": "agent exhausted its 50 interaction budget"},
+    )
+    backend, config = fake_backend(), AnnotationConfig("model")
+    graph = asyncio.run(annotate_trace(source, backend, config))
+    restored = read_graph(json.loads(json.dumps(graph.to_dict())))
+    result = analyze_graph(restored)
+
+    assert restored.nodes
+    assert restored.completion_status == "failed"
+    assert restored.reconstruction_status == "complete"
+    assert restored.source.details == source.source.details
+    assert restored.annotation_status == result.status == "complete"
+    assert result.eligible
+    assert result.row["completion_status"] == "failed"
+    summary = aggregate([result])
+    stats = next(iter(summary.configurations.values()))["overall"]
+    assert stats["n_traces"] == 1
+    assert stats["n_excluded"] == 0
+    assert can_reuse(restored, source, backend, config)
+    assert not can_reuse(
+        restored, replace(source, completion_status="complete"), backend, config
+    )
+    assert not can_reuse(
+        restored, replace(source, reconstruction_status="incomplete"), backend, config
+    )
+    for annotation_status in ("failed", "incomplete"):
+        rejected = analyze_graph(replace(restored, annotation_status=annotation_status))
+        assert rejected.status == annotation_status
+        assert not rejected.eligible
+
+
+@pytest.mark.parametrize(
+    ("completion", "reconstruction"),
+    [
+        ("incomplete", "complete"),
+        ("unsupported", "complete"),
+        ("missing", "complete"),
+        ("failed", "incomplete"),
+        ("failed", "missing"),
+        ("failed", "unsupported"),
+        ("failed", "failed"),
+    ],
+)
+def test_invalid_trace_is_rejected_before_backend_calls(completion, reconstruction):
+    async def unexpected_call(**kwargs):
+        pytest.fail("Invalid traces must not reach the annotation backend")
+
+    source = replace(
+        trace(), completion_status=completion, reconstruction_status=reconstruction
+    )
+    backend = AnnotationBackend(unexpected_call, unexpected_call, {"annotator": "fake"})
+    with pytest.raises(ValueError, match="incomplete or unsupported trace"):
+        asyncio.run(annotate_trace(source, backend, AnnotationConfig("model")))
+    graph = AnnotatedGraph(
+        [node("N1", "T", 2, source.messages)],
+        [],
+        completion_status=completion,
+        reconstruction_status=reconstruction,
+    )
+    assert not analyze_graph(graph).eligible
+
+
 def test_status_denominators_configuration_partitioning_and_snapshot_selection():
     source, backend = trace(), fake_backend()
     graph = asyncio.run(annotate_trace(source, backend, AnnotationConfig("model")))

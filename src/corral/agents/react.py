@@ -6,8 +6,8 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
+from corral.agents._epistemic import EpistemicSupport
 from corral.agents.base_agent import (
-    BaseAgent,
     _UsageAccumulator,
     call_model,
     provider_messages,
@@ -23,9 +23,9 @@ from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
 from corral.core.action import (
     SUBMIT_ANSWER_TOOL_NAME,
     Action,
-    with_submit_answer_tool,
 )
 from corral.core.errors import concise_error_message
+from corral.core.messages import EMPTY_RESPONSE_REMINDER, public_message
 from corral.report.logging import logger
 
 if TYPE_CHECKING:
@@ -75,7 +75,7 @@ def _python_literals_to_json(text: str) -> str:
     return "".join(out)
 
 
-class ReActAgent(BaseAgent):
+class ReActAgent(EpistemicSupport):
     """Run a text-based thought/action/observation loop inside an AgentSession."""
 
     def __init__(
@@ -86,6 +86,8 @@ class ReActAgent(BaseAgent):
         user_prompt: str | None = None,
         surrender_prompt: str | None = None,
         temperature: float = 0.7,
+        *,
+        epistemic: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -95,6 +97,7 @@ class ReActAgent(BaseAgent):
             user_prompt=user_prompt or "react/user_prompt",
             surrender_prompt=surrender_prompt,
             temperature=temperature,
+            epistemic=epistemic,
             **kwargs,
         )
 
@@ -135,7 +138,7 @@ class ReActAgent(BaseAgent):
             enable_surrender=session.surrender_allowed,
         )
         catalog = json.dumps(
-            with_submit_answer_tool(session.tools),
+            self._tools(session),
             indent=2,
             ensure_ascii=False,
         )
@@ -186,14 +189,70 @@ class ReActAgent(BaseAgent):
             return AgentOutcome(status="surrendered", usage=usage.outcome())
         return AgentOutcome(status="completed", answer=answer, usage=usage.outcome())
 
+    async def _handle_submission(
+        self,
+        action: Action,
+        *,
+        session: AgentSession,
+        messages: list[dict[str, Any]],
+        usage: _UsageAccumulator,
+        turn_usage: Mapping[str, Any] | None,
+    ) -> AgentOutcome | None:
+        answer = action.arguments["answer"].strip()
+        if (
+            self.epistemic
+            and answer
+            and not (
+                session.surrender_allowed
+                and answer.casefold() == SURRENDER_SENTINEL.casefold()
+            )
+        ):
+            try:
+                # The committed history contains only actions that actually ran,
+                # with canonical tool results, even after resuming a session.
+                accepted = await self._review_submission(
+                    action,
+                    session=session,
+                    messages=messages,
+                    trajectory=provider_messages(session.messages),
+                    usage=usage,
+                    turn_usage=turn_usage,
+                )
+            except BudgetExhaustedError as exc:
+                return AgentOutcome(
+                    status="budget_exhausted",
+                    error=concise_error_message(exc),
+                    usage=usage.outcome(),
+                )
+            except Exception as exc:
+                return AgentOutcome(
+                    status="agent_failure",
+                    error=concise_error_message(exc),
+                    usage=usage.outcome(),
+                )
+            if not accepted:
+                return None
+            action = Action.model_validate({**action.model_dump(), "content": None})
+            turn_usage = None  # The proposal already recorded the actor usage.
+        return await self._submit_outcome(
+            answer, session, usage, action=action, turn_usage=turn_usage
+        )
+
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Own the ReAct model/tool loop for one task-bound session."""
         messages = self._initial_messages(session)
         usage = _UsageAccumulator(self._usage)
         iteration_limit = session.iteration_limit
+        refresh_feedback = True
+        consecutive_empty = 0
+        consecutive_refusals = 0
 
         for _iteration in range(iteration_limit):
             try:
+                if refresh_feedback:
+                    await self._before_turn(
+                        session, messages, provider_messages(session.messages), usage
+                    )
                 response = await call_model(
                     model=self.model,
                     messages=messages,
@@ -216,8 +275,60 @@ class ReActAgent(BaseAgent):
                 )
 
             usage.add(getattr(response, "usage", None))
+            refresh_feedback = True
             turn_usage = getattr(response, "usage", None) or {}
             content = getattr(response, "content", None) or ""
+            if self.epistemic:
+                public = public_message(
+                    {
+                        "role": "assistant",
+                        "content": content,
+                        "content_source": getattr(response, "content_source", "text"),
+                    }
+                )
+                content = public["content"] if public else ""
+                finish_reason = getattr(response, "finish_reason", None)
+                if finish_reason in {"content_filter", "refusal"}:
+                    consecutive_refusals += 1
+                    if _iteration + 1 < iteration_limit and self._should_retry_refusal(
+                        consecutive_refusals
+                    ):
+                        await session.record_messages((), usage=turn_usage)
+                        refresh_feedback = False
+                        continue
+                    await session.record_messages(
+                        (public,) if public else (), usage=turn_usage
+                    )
+                    return AgentOutcome(
+                        status="agent_failure",
+                        error=f"actor provider stopped the response (finish_reason={finish_reason!r})",
+                        usage=usage.outcome(),
+                    )
+                consecutive_refusals = 0
+                if public is None:
+                    await session.record_messages((), usage=turn_usage)
+                    refresh_feedback = False
+                    consecutive_empty += 1
+                    if consecutive_empty >= 3:
+                        return AgentOutcome(
+                            status="protocol_failure",
+                            error="actor returned 3 consecutive responses without public text",
+                            usage=usage.outcome(),
+                        )
+                    if consecutive_empty == 1:
+                        feedback = {
+                            "role": "user",
+                            "name": EMPTY_RESPONSE_REMINDER,
+                            "content": (
+                                "Your last response contained no public text. Continue "
+                                "with <thought> and, when useful, <action>/<action_input>. "
+                                "Use submit_answer when finished."
+                            ),
+                        }
+                        messages.append(feedback)
+                        await session.record_message(feedback)
+                    continue
+                consecutive_empty = 0
             assistant = dict(
                 LiteLLMMessage(
                     role="assistant",
@@ -242,10 +353,29 @@ class ReActAgent(BaseAgent):
                     turn_usage=turn_usage,
                 )
 
-            _thoughts, actions = self.parse_llm_response(content)
+            thoughts, actions = self.parse_llm_response(content)
+            explanation = (
+                re.sub(
+                    r"<action>.*?</action>(?:.*?<action_input>.*?</action_input>)?",
+                    "",
+                    content,
+                    flags=re.DOTALL,
+                )
+                .replace("<thought>", "")
+                .replace("</thought>", "")
+                .strip()
+                if self.epistemic
+                else content
+            )
 
             if actions:
                 for index, parsed in enumerate(actions):
+                    action = Action(
+                        id=parsed.id,
+                        name=parsed.name,
+                        arguments=parsed.arguments,
+                        content=explanation if index == 0 else None,
+                    )
                     if parsed.name == SUBMIT_ANSWER_TOOL_NAME:
                         answer = parsed.arguments.get("answer")
                         if not isinstance(answer, str):
@@ -261,29 +391,36 @@ class ReActAgent(BaseAgent):
                             messages.append(feedback)
                             await session.record_message(
                                 assistant,
-                                usage=turn_usage,
+                                usage=turn_usage if index == 0 else None,
                             )
                             await session.record_message(feedback)
                             break
-                        return await self._submit_outcome(
-                            answer,
-                            session,
-                            usage,
-                            action=Action(
-                                id=parsed.id,
-                                name=parsed.name,
-                                arguments=parsed.arguments,
-                                content=content if index == 0 else None,
-                            ),
-                            turn_usage=turn_usage,
+                        if self.epistemic:
+                            # Do not retain a held submission or any later action
+                            # as an executed action in the actor's conversation.
+                            if index:
+                                assistant["content"] = (
+                                    f"<thought>{explanation}</thought>\n"
+                                    + "\n".join(
+                                        f"<action>{a.name}</action>"
+                                        f"<action_input>{json.dumps(a.arguments)}</action_input>"
+                                        for a in actions[:index]
+                                    )
+                                )
+                            else:
+                                messages.remove(assistant)
+                        outcome = await self._handle_submission(
+                            action,
+                            session=session,
+                            messages=messages,
+                            usage=usage,
+                            turn_usage=turn_usage if index == 0 else None,
                         )
+                        if outcome is not None:
+                            return outcome
+                        refresh_feedback = False  # Review already supplied feedback.
+                        break
 
-                    action = Action(
-                        id=parsed.id,
-                        name=parsed.name,
-                        arguments=parsed.arguments,
-                        content=content if index == 0 else None,
-                    )
                     observation = await session.execute(
                         action,
                         usage=(turn_usage if index == 0 else None),
@@ -312,7 +449,9 @@ class ReActAgent(BaseAgent):
                 LiteLLMMessage(
                     role="user",
                     content=(
-                        "No valid action was found. Plain-text final answers do "
+                        self._text_only_feedback()
+                        if self.epistemic and thoughts and "<action>" not in content
+                        else "No valid action was found. Plain-text final answers do "
                         "not complete the task. Return one or more complete "
                         "<action>/<action_input> pairs; when finished, call "
                         "submit_answer with a string answer."

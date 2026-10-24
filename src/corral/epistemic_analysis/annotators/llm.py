@@ -11,10 +11,7 @@ from typing import Any
 
 from loguru import logger
 
-from corral.epistemic_analysis._utils import (
-    format_window,
-    iter_windows,
-)
+from corral.epistemic_analysis._utils import format_window, iter_windows
 from corral.epistemic_analysis.budget import (
     RequestBudgetExceeded,
     estimate_request,
@@ -23,41 +20,37 @@ from corral.epistemic_analysis.budget import (
     record_request,
 )
 from corral.epistemic_analysis.context import current_context, view_instructions
-from corral.epistemic_analysis.graph import (
-    coerce_edge,
-    coerce_node,
+from corral.epistemic_analysis.epistemic_prompts import (
+    LLM_PASS_A_INSTRUCTIONS as PASS_A_INSTRUCTIONS,
 )
+from corral.epistemic_analysis.epistemic_prompts import (
+    LLM_PASS_A_SYSTEM as PASS_A_SYSTEM,
+)
+from corral.epistemic_analysis.epistemic_prompts import (
+    LLM_PASS_B_INSTRUCTIONS as PASS_B_INSTRUCTIONS,
+)
+from corral.epistemic_analysis.epistemic_prompts import (
+    LLM_PASS_B_SYSTEM as PASS_B_SYSTEM,
+)
+from corral.epistemic_analysis.epistemic_prompts import (
+    LLM_PROMPT_VERSION as PROMPT_VERSION,
+)
+from corral.epistemic_analysis.epistemic_prompts import (
+    llm_edge_prompt,
+    llm_node_prompt,
+    trace_check_system,
+)
+from corral.epistemic_analysis.graph import coerce_edge, coerce_node
 from corral.epistemic_analysis.schema import content_hash
 from corral.epistemic_analysis.trace_checks import (
     TRACE_CHECK_NAMES,
-    trace_check_prompt,
     trace_check_state,
     validate_trace_checks,
 )
 
 from .base import AnnotationBackend, record_model
-from .prompts import (
-    PASS_A_INSTRUCTIONS,
-    PASS_A_SYSTEM,
-    PASS_B_INSTRUCTIONS,
-    PASS_B_SYSTEM,
-    PROMPT_VERSION,
-)
 
 NODE_WINDOW_POLICY = "first-window-per-message-v1"
-
-
-def trace_check_system(name: str) -> str:
-    return f"""{trace_check_prompt(name)}
-Return JSON only: {{"trace_check": {{"name": "{name}", "status": "present",
-"explanation": "Brief evidence-based assessment", "support": [
-{{"msg_idx": 0, "quote": "Exact source substring"}}]}}}}.
-Return exactly one object with name "{name}" and an allowed status.
-Include a short explanation. A present assessment needs exact source
-quotes identifying the incident and the evidence required by its definition,
-including relevant task boundaries, contradicting results, and later actions.
-Do not use invented quotes or cite a derived node as source evidence.
-"""
 
 
 class LLMError(RuntimeError):
@@ -114,12 +107,7 @@ async def llm_json_call_async(
         options["max_tokens"] = max_output_tokens
     if temperature is not None:
         options["temperature"] = temperature
-    body = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-        **options,
-    }
+    body = {"model": model, "messages": messages, "stream": True, **options}
     estimated, estimator = estimate_request(body)
     try:
         # LiteLLM selects the model tokenizer where available (otherwise estimates).
@@ -152,11 +140,7 @@ async def llm_json_call_async(
 
     async def read_response():
         response_stream = await litellm.acompletion(
-            model=model,
-            messages=messages,
-            timeout=timeout_s,
-            stream=True,
-            **options,
+            model=model, messages=messages, timeout=timeout_s, stream=True, **options
         )
         async with aclosing(response_stream):
             chunks = [chunk async for chunk in response_stream]
@@ -251,13 +235,7 @@ async def _extract_nodes(
         first_new = max(start, covered_end)
         covered_end = end
         window_text = format_window(messages, start, end)
-        user = (
-            f"{PASS_A_INSTRUCTIONS}\n\n"
-            f"Message window:\n{window_text}\n\n"
-            f"Only return new nodes whose earliest supporting message index is "
-            f"in [{first_new}, {end}). Earlier messages are context only.\n"
-            f"Return at most {max_nodes_per_window} nodes."
-        )
+        user = llm_node_prompt(window_text, first_new, end, max_nodes_per_window)
         if view_instructions():
             user += "\n\n" + view_instructions()
 
@@ -347,10 +325,8 @@ async def _extract_edges(
             }
             for n in window_nodes
         ]
-        user = (
-            f"{PASS_B_INSTRUCTIONS}\n\n"
-            f"Message window:\n{window_text}\n\n"
-            f"Nodes:\n{json.dumps(node_list, ensure_ascii=False, indent=2)}"
+        user = llm_edge_prompt(
+            window_text, json.dumps(node_list, ensure_ascii=False, indent=2)
         )
         if view_instructions():
             user += "\n\n" + view_instructions()

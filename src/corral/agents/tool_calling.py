@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from corral.agents._epistemic import EpistemicSupport
 from corral.agents.base_agent import (
-    BaseAgent,
     _UsageAccumulator,
     call_model,
     provider_messages,
@@ -18,7 +18,7 @@ from corral.agents.schema import (
     BudgetExhaustedError,
 )
 from corral.agents.utils import LiteLLMMessage
-from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action, with_submit_answer_tool
+from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
 from corral.core.messages import EMPTY_RESPONSE_REMINDER, public_message
 from corral.report.logging import logger
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from corral.agents.session import AgentSession
 
 
-class ToolCallingAgent(BaseAgent):
+class ToolCallingAgent(EpistemicSupport):
     """Own the provider call, tool execution, and observation loop."""
 
     def __init__(
@@ -40,6 +40,8 @@ class ToolCallingAgent(BaseAgent):
         user_prompt: str | None = None,
         surrender_prompt: str | None = None,
         temperature: float = 0.7,
+        *,
+        epistemic: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -47,6 +49,7 @@ class ToolCallingAgent(BaseAgent):
             api_endpoint=api_endpoint,
             system_prompt=system_prompt,
             user_prompt=user_prompt or "tool_calling/user_prompt",
+            epistemic=epistemic,
             surrender_prompt=surrender_prompt,
             temperature=temperature,
             **kwargs,
@@ -331,48 +334,73 @@ class ToolCallingAgent(BaseAgent):
             usage=usage.outcome(),
         )
 
-    def _tools(self, session: AgentSession) -> list[dict[str, Any]]:
-        """Prepare a provider catalog without modifying the session's tools."""
-        return with_submit_answer_tool(session.tools)
-
     async def _handle_submission(
         self,
         action: Action,
         *,
         session: AgentSession,
-        messages: list[dict[str, Any]],  # noqa: ARG002 - Used by submission-review overrides.
-        trajectory: list[dict[str, Any]],  # noqa: ARG002 - Used by submission-review overrides.
-        response_message: dict[str, Any],  # noqa: ARG002 - Used by submission-review overrides.
-        tool_call_index: int,  # noqa: ARG002 - Used by submission-review overrides.
+        messages: list[dict[str, Any]],
+        trajectory: list[dict[str, Any]],
+        response_message: dict[str, Any],
+        tool_call_index: int,
         usage: _UsageAccumulator,
         turn_usage: Mapping[str, Any] | None,
     ) -> AgentOutcome | None:
-        """Submit normally; an agent may defer and supply the next-turn context."""
+        answer = action.arguments["answer"].strip()
+        # Surrender is an explicit admission of no answer, not a scientific claim.
+        if (
+            not self.epistemic
+            or not answer
+            or (
+                session.surrender_allowed
+                and answer.casefold() == SURRENDER_SENTINEL.casefold()
+            )
+        ):
+            return await self._submit_outcome(
+                answer, action, session, usage, turn_usage
+            )
+
+        # Only preceding tool calls have executed. The submission and any later
+        # calls are proposals, not observations or pending provider tool calls.
+        # Preserve preceding calls/results, including their visible explanation.
+        preceding_calls = response_message["tool_calls"][:tool_call_index]
+        if preceding_calls:
+            response_message["tool_calls"] = preceding_calls
+        else:
+            messages.remove(response_message)
+            trajectory.remove(response_message)
+        try:
+            accepted = await self._review_submission(
+                action,
+                session=session,
+                messages=messages,
+                trajectory=trajectory,
+                usage=usage,
+                turn_usage=turn_usage,
+            )
+        except BudgetExhaustedError as exc:
+            return AgentOutcome(
+                status="budget_exhausted",
+                error=concise_error_message(exc),
+                usage=usage.outcome(),
+            )
+        except Exception as exc:
+            return AgentOutcome(
+                status="agent_failure",
+                error=concise_error_message(exc),
+                usage=usage.outcome(),
+            )
+        if not accepted:
+            return None
+        # Usage and justification were recorded with the proposal. Only this
+        # native execution may accept the answer and terminate the session.
         return await self._submit_outcome(
-            action.arguments["answer"], action, session, usage, turn_usage
+            answer,
+            Action.model_validate({**action.model_dump(), "content": None}),
+            session,
+            usage,
+            None,
         )
-
-    def _should_retry_refusal(self, _consecutive_refusals: int) -> bool:
-        """Provider refusals are terminal unless an agent explicitly opts in."""
-        return False
-
-    def _text_only_feedback(self) -> str:
-        """Remind the actor of the native submission protocol."""
-        return (
-            "A plain-text answer does not finish the task. Call "
-            "submit_answer with the complete answer, or call an "
-            "available environment tool."
-        )
-
-    async def _before_turn(
-        self,
-        _session: AgentSession,
-        messages: list[dict[str, Any]],
-        _trajectory: list[dict[str, Any]],
-        _usage: _UsageAccumulator,
-    ) -> list[dict[str, Any]]:
-        """Prepare model context without changing the tool/submission protocol."""
-        return messages
 
 
 __all__ = ["ToolCallingAgent"]

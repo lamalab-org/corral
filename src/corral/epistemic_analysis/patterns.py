@@ -4,43 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from corral.epistemic_analysis.epistemic_prompts import (
+    ANTIPATTERN_DESCRIPTIONS,
+    SUBGRAPH_DESCRIPTIONS,
+)
 from corral.epistemic_analysis.graph import (
     build_index,
     earliest_time_of_type,
     node_time,
 )
-
-SUBGRAPH_DESCRIPTIONS: dict[str, str] = {
-    "refutation_driven_belief_revision": (
-        "Evidence triggers a belief update to a new hypothesis "
-        "[H -tests-> T -observes-> E -informs-> J, H -updates_to-> H2]."
-    ),
-    "fixed_hypothesis_test_tuning": (
-        "Hypothesis is held fixed while tests are iteratively adjusted "
-        "[H -tests-> T -observes-> E -informs-> J -tests-> T2]."
-    ),
-    "explore_then_test_transition": (
-        "Exploration precedes hypothesis formation, which then drives testing "
-        "[T -observes-> E ... H ... H -tests-> T]."
-    ),
-    "hypothesis_reranking": (
-        "Competing hypotheses are compared as new evidence arrives "
-        "[H1 -competes_with- H2, both tested]."
-    ),
-    "evidence_led_hypothesis_generation": (
-        "Evidence is observed first; a hypothesis is formed afterward "
-        "[E -informs-> J ... H ... H -tests-> T]."
-    ),
-    "convergent_multi_test_evidence": (
-        "One hypothesis is evaluated via multiple independent tests "
-        "[H -tests-> T1/T2/T3..., each -> E]."
-    ),
-    "evidence_guided_test_redesign": (
-        "A judgment motivates a new test, which then produces new evidence "
-        "[J -tests-> T -observes-> E]."
-    ),
-}
-
 
 SUBGRAPH_NAMES = list(SUBGRAPH_DESCRIPTIONS.keys())
 
@@ -54,76 +26,6 @@ SUBGRAPH_NAMES = list(SUBGRAPH_DESCRIPTIONS.keys())
     SG_CONVERGENT_MULTI_TEST_EVIDENCE,
     SG_EVIDENCE_GUIDED_TEST_REDESIGN,
 ) = SUBGRAPH_NAMES
-
-
-ANTIPATTERN_DESCRIPTIONS: dict[str, str] = {
-    "untested_claim": (
-        "Hypothesis never linked to a test [H with no tests]. "
-        "For current activity the claim must remain in use after an opportunity "
-        "to evaluate it; earlier relevant tests count and withdrawal is repair."
-    ),
-    "evidence_non_uptake": (
-        "Evidence collected but never used [E with no informs to J or H]. "
-        "Current activity requires an unaddressed relevant observation; "
-        "interpreting why a result is excluded counts as uptake."
-    ),
-    "unsupported_judgment": (
-        "Judgment made without supporting evidence [J with no E via informs]. "
-        "Support must address the particular inference or asserted attribute; "
-        "a plausible overall answer does not support every detail. "
-        "A corrected or retracted judgment is not still active unless retained "
-        "in the current reasoning."
-    ),
-    "stalled_revision": (
-        "Revised hypothesis never tested "
-        "[H target of updates_to with no outgoing tests]. "
-        "Current activity requires an adopted revision still awaiting "
-        "evaluation, not a withdrawal or an already evaluated correction."
-    ),
-    "contradiction_without_repair": (
-        "Contradiction unresolved by any update or alternative "
-        "[E -contradicts-> H, no updates_to/competes_with]. "
-        "Evidence-based withdrawal or narrowing can also repair the conflict."
-    ),
-    "premature_commitment": (
-        "Commitment (explicit or inferred) to a hypothesis without testing it first "
-        "[J -informs-> C, J -informs-> H, H with no tests]. "
-        "Identify the specific untested claim treated as settled. First-time "
-        "unsupported closure suffices; prior resistance to revision is not "
-        "required, and submission alone does not establish commitment."
-    ),
-    "uninformative_test": (
-        "Test produces no observed evidence [T with no E]. "
-        "A failed test with an observed result or reported error does not count. "
-        "Pending, superseded, or abandoned unused results are not active "
-        "omissions in current reasoning."
-    ),
-    "fixed_belief_trace": (
-        "No hypothesis revision in the entire trace [No updates_to edges in trace]. "
-        "This descriptive measurement is not a defect and never blocks submission."
-    ),
-    "disconnected_evidence": (
-        "Evidence node with no edges [Isolated E]. "
-        "Later attribution or interpretation resolves the disconnection."
-    ),
-    "one_sided_confirmation": (
-        "Selective commitment to a supported hypothesis while neglecting a "
-        "specific live rival or an available useful discriminating check. "
-        "Treating favorable support as excluding that rival can establish "
-        "selectivity on the first occurrence, without a separate refusal. "
-        "Legacy graph candidate: [J -informs-> C, J -informs-> H, H has support "
-        "but no contradicts]. Absence of contradiction alone is insufficient "
-        "for the current behavioral motif."
-    ),
-    "precommitted_test_plan": (
-        "Commitment (explicit or inferred) before evidence collection "
-        "[C before E; then H -tests-> T]. "
-        "Unsupported closure before testing can establish commitment without "
-        "a prior challenge or refusal; a provisional plan cannot. "
-        "Current activity requires continuing unsupported closure; later "
-        "evidence-responsive evaluation can resolve the historical instance."
-    ),
-}
 
 
 ANTIPATTERN_NAMES = list(ANTIPATTERN_DESCRIPTIONS.keys())

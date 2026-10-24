@@ -10,7 +10,7 @@ from typing import Any, Literal, TypedDict
 GRAPH_SCHEMA_VERSION = 1
 NORMALIZATION_VERSION = "corral-messages-v1"
 ANNOTATION_VERSION = "7"
-ANALYSIS_VERSION = "3"
+ANALYSIS_VERSION = "4"
 PATTERN_VERSION = "1"
 
 
@@ -54,6 +54,11 @@ Status = Literal[
     "missing",
     "uninformative",
 ]
+
+# Execution failure (including exhausting the interaction budget) does not
+# invalidate a fully reconstructed trace. Reconstruction and annotation status
+# independently determine whether its evidence can be analyzed.
+ANALYZABLE_COMPLETION_STATUSES = frozenset({"complete", "unspecified", "failed"})
 
 
 def content_hash(value: Any) -> str:

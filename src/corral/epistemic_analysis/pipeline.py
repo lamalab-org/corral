@@ -28,6 +28,7 @@ from .graph import (
     validate_support_quotes,
 )
 from .schema import (
+    ANALYZABLE_COMPLETION_STATUSES,
     ANNOTATION_VERSION,
     GRAPH_SCHEMA_VERSION,
     AnnotatedGraph,
@@ -141,6 +142,8 @@ def can_reuse(
     return (
         graph.schema_version == GRAPH_SCHEMA_VERSION
         and graph.annotation_status == "complete"
+        and graph.completion_status == trace.completion_status
+        and graph.reconstruction_status == trace.reconstruction_status == "complete"
         and graph.source is not None
         and graph.source.identity == trace.source.identity
         and graph.source.content_hash == trace.source.content_hash
@@ -263,12 +266,10 @@ async def annotate_trace(
 ) -> AnnotatedGraph:
     if annotator.provenance.get("annotator") == "jev" and config.window > MAX_WINDOW:
         raise ValueError(f"Decisions graph annotation requires window <= {MAX_WINDOW}")
-    if trace.reconstruction_status != "complete" or trace.completion_status in {
-        "incomplete",
-        "unsupported",
-        "failed",
-        "missing",
-    }:
+    if (
+        trace.reconstruction_status != "complete"
+        or trace.completion_status not in ANALYZABLE_COMPLETION_STATUSES
+    ):
         raise ValueError("Cannot annotate an incomplete or unsupported trace")
     messages = trace.messages
     diagnostics, attempts, requests = [], [], []
