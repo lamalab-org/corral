@@ -406,75 +406,71 @@ def hold_statistics(trace: np.ndarray) -> dict:
 
 
 def _fit_transition(x, y):
-    """Compare a continuous two-slope fit with a straight line on identical data."""
+    """Choose two independent linear regimes and calculate their intersection."""
     order = np.argsort(x)
     x, y = x[order], y[order]
     _require(
-        len(x) >= 24 and np.ptp(x) >= 1600,
-        "Insufficient temperature coverage for transition analysis",
+        len(x) >= 6 and np.ptp(x) > 0,
+        "Insufficient cooling data to fit two linear regimes",
     )
-    linear = np.column_stack([np.ones(len(x)), x - x.mean()])
-    residual = y - linear @ np.linalg.lstsq(linear, y, rcond=None)[0]
-    single_sse = float(residual @ residual)
+    origin = x.mean()
     fits = []
-    for split in range(6, len(x) - 6):
-        knot = (x[split - 1] + x[split]) / 2
-        design = np.column_stack([linear, np.maximum(x - knot, 0)])
-        coef = np.linalg.lstsq(design, y, rcond=None)[0]
-        residual = y - design @ coef
-        fits.append((float(residual @ residual), float(knot), float(coef[2])))
-    sse, knot, slope_change = min(fits)
-    floor = np.finfo(float).eps * float(y @ y)
-    gain = len(x) * np.log(max(single_sse, floor) / max(sse, floor)) - 2 * np.log(
-        len(x)
+    # Three samples per regime leave residual degrees of freedom. Select the
+    # partition from the data, without fixed temperature windows or averaging.
+    for split in range(3, len(x) - 2):
+        if x[split - 1] == x[split]:
+            continue
+        lines = []
+        for temperatures, densities in (
+            (x[:split], y[:split]),
+            (x[split:], y[split:]),
+        ):
+            centered = temperatures - temperatures.mean()
+            sxx = float(centered @ centered)
+            if sxx == 0:
+                break
+            slope = float(centered @ (densities - densities.mean()) / sxx)
+            intercept = float(densities.mean() + slope * (origin - temperatures.mean()))
+            residual = densities - (intercept + slope * (temperatures - origin))
+            lines.append((intercept, slope, float(residual @ residual), sxx))
+        if len(lines) == 2:
+            fits.append((sum(line[2] for line in lines), split, lines))
+    _require(bool(fits), "Insufficient distinct temperatures in the two regimes")
+    sse, split, (low, high) = min(fits, key=lambda fit: fit[0])
+    slope_change = high[1] - low[1]
+    # The task still requires an independently resolved transition. Parallel
+    # lines, or a slope difference explained by residual noise, cannot supply
+    # one. Pool the residual variance so a tiny segment cannot claim spurious
+    # precision merely because its few points happen to be nearly collinear.
+    slope_se = float(np.sqrt(sse / (len(x) - 4) * (1 / low[3] + 1 / high[3])))
+    numerical_floor = 32 * np.finfo(float).eps * np.max(np.abs(y)) / np.ptp(x)
+    separated = abs(slope_change) > max(3 * slope_se, numerical_floor)
+    estimate = float(origin + (low[0] - high[0]) / slope_change) if separated else None
+    resolved = bool(
+        estimate is not None and np.isfinite(estimate) and x[0] < estimate < x[-1]
     )
-    # Profile-likelihood width is a diagnostic, not permission for arbitrarily
-    # broad answer tolerances. Window stability is assessed separately below.
-    candidates = [
-        k for error, k, _ in fits if error <= max(sse, floor) * (1 + 4 / (len(x) - 4))
-    ]
-    width = max(candidates) - min(candidates)
     return {
-        "estimate_K": knot,
-        "bic_gain": float(gain),
-        "width_K": width,
-        "residual_rms_g_cm3": float(np.sqrt(sse / len(x))),
+        "resolved": resolved,
+        "estimate_K": estimate
+        if estimate is not None and np.isfinite(estimate)
+        else None,
+        "split_temperature_K": float((x[split - 1] + x[split]) / 2),
+        "low_slope_g_cm3_K": low[1],
+        "high_slope_g_cm3_K": high[1],
         "slope_change_g_cm3_K": slope_change,
+        "slope_change_se_g_cm3_K": slope_se,
+        "residual_rms_g_cm3": float(np.sqrt(sse / len(x))),
     }
 
 
 def cooling_transition(trace: np.ndarray) -> dict:
-    """Fit measured T <= 2600 K, with 5 ps blocks and three fitting windows."""
+    """Estimate Tg from two fitted lines using only cooling data at T <= 2600 K."""
     cooling = trace[(trace[:, 0] <= COOLING_STEPS) & (trace[:, 1] <= 2600)]
-    _require(len(cooling) >= 180, "Too few cooling samples below 2600 K")
-    groups = cooling[:, 0].astype(int) // 5000
-    blocks = np.array(
-        [
-            cooling[groups == group][:, [1, 3]].mean(axis=0)
-            for group in np.unique(groups)
-            if np.count_nonzero(groups == group) >= 3
-        ]
-    )
-    fits = []
-    for low, high in ((300, 2600), (400, 2500), (500, 2400)):
-        selected = blocks[(blocks[:, 0] >= low) & (blocks[:, 0] <= high)]
-        fits.append(_fit_transition(selected[:, 0], selected[:, 1]))
-    density_resolved = max(f["residual_rms_g_cm3"] for f in fits) <= 0.005 * np.mean(
-        blocks[:, 1]
-    )
-    estimates = [f["estimate_K"] for f in fits]
-    spread = max(estimates) - min(estimates)
-    resolved = (
-        density_resolved
-        and all(f["bic_gain"] >= 6 and f["width_K"] <= 200 for f in fits)
-        and spread <= 150
-    )
+    fit = _fit_transition(cooling[:, 1], cooling[:, 3])
     return {
-        "transition": "resolved" if resolved else "unresolved",
-        "cooling_tg_K": float(np.median(estimates)) if resolved else None,
-        "window_spread_K": spread,
-        "fits": fits,
-        "density_resolved": bool(density_resolved),
+        "transition": "resolved" if fit["resolved"] else "unresolved",
+        "cooling_tg_K": fit["estimate_K"] if fit["resolved"] else None,
+        "fit": fit,
     }
 
 

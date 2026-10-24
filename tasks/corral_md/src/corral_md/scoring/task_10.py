@@ -105,13 +105,13 @@ def read_log(evidence, level):
             "Invalid sampling schedule",
         )
         dt = float(finite_array(stage["timestep_fs"], shape=()))
+        _require(dt == 1, "Use an integration timestep of 1 fs")
         _require(
-            0 < dt <= 2
-            and eq * dt >= 2000
+            eq * dt >= 2000
             and prod * dt >= 3000
             and interval * dt <= 100
             and prod // interval >= 32,
-            "Use <=2 fs steps, >=2 ps equilibration, >=3 ps production and >=32 production samples at <=100 fs",
+            "Use >=2 ps equilibration, >=3 ps production and >=32 production samples at <=100 fs",
         )
         rows = stage.pop("samples")
         steps = np.arange((eq + prod) // interval + 1) * interval

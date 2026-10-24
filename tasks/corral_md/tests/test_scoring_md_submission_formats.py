@@ -118,6 +118,27 @@ def test_scalar_log_and_restart_are_scored_without_atomwise_samples(
 
 
 @pytest.mark.parametrize("task", [6, 10])
+@pytest.mark.parametrize("timestep_fs", [0.5, 2.0])
+def test_scalar_task10_requires_one_fs_timestep(tmp_path, task, timestep_fs):
+    manifest, rows, _ = _scalar_submission(tmp_path, task)
+    header = rows[0]
+    header["timestep_fs"] = timestep_fs
+    # Keep the duration and sample spacing fixed to isolate the timestep check.
+    for key in ("sample_interval_steps", "nsteps", "equil_steps", "prod_steps"):
+        if key in header:
+            header[key] = int(header[key] / timestep_fs)
+    for row in rows[1:-1]:
+        row["step"] = int(row["step"] / timestep_fs)
+    (tmp_path / "run.jsonl").write_text("\n".join(json.dumps(row) for row in rows))
+    verifier = RestartVerifier()
+    report = _evaluate(manifest, task, verifier)
+    assert report["score"] == (0 if task == 10 else 1), report
+    if task == 10:
+        assert "integration timestep of 1 fs" in report["checks"][0]["detail"]
+        assert not verifier.plans
+
+
+@pytest.mark.parametrize("task", [6, 10])
 @pytest.mark.parametrize(
     "corruption",
     [

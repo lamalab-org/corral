@@ -209,6 +209,34 @@ def test_level1_needs_only_initial_stage_and_restartable_log(submission):
     assert scorer().evaluate(path)["score"] == 0
 
 
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("timestep_fs", [0.5, 2.0])
+def test_other_timesteps_fail_with_valid_durations_and_sampling(
+    submission, level, timestep_fs
+):
+    path, manifest, rows = submission
+    if level == 1:
+        end = next(i for i, row in enumerate(rows) if row["event"] == "end")
+        rows = rows[: end + 1]
+        manifest.pop("results")
+        path.write_text(json.dumps(manifest))
+    # Preserve physical durations, sampling intervals, and cumulative timestamps.
+    for row in rows:
+        if row["event"] == "stage":
+            row["timestep_fs"] = timestep_fs
+            for key in ("equilibration_steps", "production_steps", "interval"):
+                row[key] = int(row[key] / timestep_fs)
+        elif row["event"] in {"sample", "end"}:
+            row["step"] = int(row["step"] / timestep_fs)
+    write_log(path.parent / "cycle.jsonl", rows)
+    report = scorer(level).evaluate(path)
+    assert report["score"] == 0, report
+    assert any(
+        "integration timestep of 1 fs" in check.get("detail", "")
+        for check in report["checks"]
+    )
+
+
 def test_level2_still_requires_heat_capacity(submission):
     path, manifest, _ = submission
     manifest.pop("results")

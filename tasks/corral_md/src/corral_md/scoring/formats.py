@@ -513,7 +513,10 @@ def thermodynamic_stage(evidence, task):
         "Do not reset or rescale velocities during the run",
     )
     timestep = float(finite_array(field(header, "timestep_fs"), shape=()))
-    require(0 < timestep <= 2, "Use an integration timestep of at most 2 fs")
+    if task == 10:
+        require(timestep == 1, "Use an integration timestep of 1 fs")
+    else:
+        require(0 < timestep <= 2, "Use an integration timestep of at most 2 fs")
     interval = field(header, "interval")
     require(
         type(interval) is int and interval > 0,

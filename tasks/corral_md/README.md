@@ -215,16 +215,23 @@ checks assess settling, not glass equilibrium; no stationarity test is applied
 to the cooling ramp.
 
 Level 2 requires only a finite numerical `cooling_tg_K` in kelvin. The transition
-status is derived; an optional `transition` claim must be `"resolved"`. The independent analysis excludes measured
-T > 2600 K, averages in 5 ps blocks, and compares continuous two-slope and
-single-line fits over 300–2600, 400–2500, and 500–2400 K. A resolved estimate
-requires a BIC gain of at least 6 in each window, profile widths at most 200 K,
-and window estimates within 150 K. Reported Tg must agree within 100 K.
+status is derived; an optional `transition` claim must be `"resolved"`. The
+independent analysis excludes measured T > 2600 K and fits separate low- and
+high-temperature lines to the cooling samples. It selects the partition with
+the smallest combined squared residuals, with at least three samples and
+distinct temperatures per regime, then calculates the lines' intersection.
+To support a resolved transition, the slope difference must exceed three pooled
+regression standard errors (and numerical roundoff), and the intersection must
+lie inside the sampled temperature range. Reported Tg must agree within 100 K.
+There is no prescribed 5 ps averaging, three-window agreement requirement,
+single-line model comparison, BIC threshold, profile-width limit, or fixed
+density-residual cutoff. These fitting choices do not constrain the agent's
+analysis method; the evaluator independently derives its estimate from the logs.
 An unresolved transition or a missing, null, or nonnumerical Tg receives zero
 credit, even with adequately sampled, low-noise data. A reported number cannot
 pass unless the retained data independently support a resolved transition.
-Missing or excessively noisy data also fail. There is no fixed target Tg and
-no scientific-review queue for Task 2.
+Missing data or noise that obscures the slope change also fail. There is no fixed
+target Tg and no scientific-review queue for Task 2.
 
 These numerical screens are provisional evaluator policy. They still need
 calibration against validated trajectories across seeds before benchmark use.
@@ -326,7 +333,7 @@ nor zero heating/cooling differences are required for credit.
 The scorer checks initial FCC geometry, model digest, NPT boundary continuity,
 isotropic/fixed cells, complete sampling, and kinetic pressure. Each stage
 requires at least 2 ps equilibration, 3 ps production and 32 production samples
-at intervals no longer than 100 fs; timesteps are at most 2 fs. At both levels,
+at intervals no longer than 100 fs; timesteps must be 1 fs. At both levels,
 the scorer takes the largest mean-error estimate from independent-sample,
 autocorrelation, and 4-, 8-, and 16-block analyses, using blocks with at least
 two samples. The resulting precision must support at least 16 effective samples,
@@ -657,7 +664,7 @@ temperatures use 3N total and N directional degrees of freedom. The scorer check
 fixed-cell continuity, seeded initialization, thermal settling, energy drift,
 and block sampling precision. Each stage needs at least 2 ps equilibration,
 3 ps production, and 32 production samples at intervals no longer than 100 fs.
-Integration steps may be at most 2 fs.
+The integration timestep must be 1 fs.
 
 Level 2 reports only `results.heat_capacity.eV_per_atom_K`. The evaluator derives
 `kB_per_atom`, high-temperature residuals (800/900 K), the return-state energy

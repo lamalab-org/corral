@@ -47,6 +47,7 @@ def calculation(
     split=False,
     drift=1e-5,
     temperature_offset=0,
+    tg_K=1400,
 ):
     rng = np.random.default_rng(74)
     rows = {}
@@ -58,7 +59,7 @@ def calculation(
             temperature = target + temperature_offset * np.sin(np.pi * step / 370000)
             density = 2.6 - 4e-5 * (temperature - 300)
             if resolved:
-                density -= 7e-5 * max(temperature - 1400, 0)
+                density -= 7e-5 * max(temperature - tg_K, 0)
             density += noise * rng.normal()
         else:
             temperature = 300 + 2 * np.sin(2 * np.pi * (step / 1000 - 370) / 10)
@@ -94,7 +95,7 @@ def calculation(
             "hold_density_g_cm3": 2.6 + 60 * drift,
             "hold_density_drift_g_cm3_ps": drift,
             "transition": "resolved" if resolved else "unresolved",
-            "cooling_tg_K": 1400 if resolved else None,
+            "cooling_tg_K": tg_K if resolved else None,
         },
     }
     path = root / "answer.json"
@@ -181,8 +182,9 @@ def test_complete_log_passes_without_other_documents(tmp_path, split, level):
     ("transition", "tg"),
     [("unresolved", None), ("resolved", 1400), ("unresolved", 1400)],
 )
-def test_unresolved_data_fail_even_with_a_reported_tg(tmp_path, transition, tg):
-    path, answer, _ = calculation(tmp_path, resolved=False, noise=0.0005)
+@pytest.mark.parametrize("noise", [0, 0.0005, 0.3])
+def test_unresolved_data_fail_even_with_a_reported_tg(tmp_path, transition, tg, noise):
+    path, answer, _ = calculation(tmp_path, resolved=False, noise=noise)
     answer["results"].update(transition=transition, cooling_tg_K=tg)
     path.write_text(json.dumps(answer))
     submission = resolve_submission(path.read_text(), workspace=tmp_path)
@@ -247,6 +249,64 @@ def test_measured_temperature_and_cutoff_determine_fit(tmp_path):
     report = score(path)
     assert report["score"] == 1, report
     assert report["computed"]["cooling_tg_K"] == pytest.approx(1400, abs=50)
+
+
+@pytest.mark.parametrize("tg_K", [450, 2450])
+def test_resolved_transition_outside_old_fitting_windows_passes(tmp_path, tg_K):
+    path, _, _ = calculation(tmp_path, tg_K=tg_K)
+    report = score(path)
+    assert report["score"] == 1, report
+    assert report["computed"]["cooling_tg_K"] == pytest.approx(tg_K, abs=1e-6)
+
+
+def test_tg_is_the_line_intersection_between_sampled_temperatures(tmp_path):
+    path, _, _ = calculation(tmp_path, tg_K=1437)
+    report = score(path)
+    assert report["score"] == 1, report
+    assert report["computed"]["cooling_tg_K"] == pytest.approx(1437, abs=1e-6)
+
+
+def test_resolved_noisy_transition_does_not_require_old_window_checks(tmp_path):
+    path, _, _ = calculation(tmp_path, noise=0.02)
+    report = score(path)
+    assert report["score"] == 1, report
+    assert report["computed"]["cooling_tg_K"] == pytest.approx(1400, abs=100)
+
+
+@pytest.mark.parametrize(
+    ("offset", "expected"), [(-101, 0), (-99, 1), (99, 1), (101, 0)]
+)
+def test_reported_tg_must_agree_with_independent_intersection(
+    tmp_path, offset, expected
+):
+    path, answer, _ = calculation(tmp_path, tg_K=1437)
+    answer["results"]["cooling_tg_K"] += offset
+    path.write_text(json.dumps(answer))
+    report = score(path)
+    assert report["score"] == expected, report
+
+
+@pytest.mark.parametrize("slope_change", [0, 1e-5])
+def test_parallel_regimes_or_extrapolated_intersection_are_unresolved(
+    tmp_path, slope_change
+):
+    path, _, log = calculation(tmp_path)
+    lines = log.read_text().splitlines()
+    for i, line in enumerate(lines):
+        fields = line.split()
+        if len(fields) == 6 and fields[0].isdigit() and int(fields[0]) <= 370000:
+            temperature = float(fields[2])
+            density = 2.6 - 4e-5 * (temperature - 300)
+            if temperature > 1400:
+                density += -0.1 + slope_change * (temperature - 1400)
+            fields[4] = str(density)
+            lines[i] = " ".join(fields)
+    log.write_text("\n".join(lines))
+    report = score(path)
+    assert report["score"] == 0, report
+    assert report["computed"]["transition"] == "unresolved"
+    assert report["computed"]["cooling_tg_K"] is None
+    json.dumps(report, allow_nan=False)
 
 
 @pytest.mark.parametrize(

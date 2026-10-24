@@ -216,6 +216,33 @@ def reference_submission(submission):
     return submission
 
 
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("timestep_fs", [0.5, 1.0, 2.0])
+def test_requires_one_fs_timestep_with_consistent_sampling(
+    submission, level, timestep_fs
+):
+    log = submission.parent / "run.jsonl"
+    rows = read_log(log)
+    if level == 1:
+        end = next(i for i, row in enumerate(rows) if row["event"] == "end")
+        rows = rows[: end + 1]
+        submission.write_text(json.dumps({"artifacts": {"run_log": "run.jsonl"}}))
+    # Preserve elapsed times, durations, and sample counts at each timestep.
+    for row in rows:
+        if row["event"] == "stage":
+            row["timestep_fs"] = timestep_fs
+            for key in ("equilibration_steps", "production_steps", "interval"):
+                row[key] = int(row[key] / timestep_fs)
+        elif row["event"] in {"sample", "end"}:
+            row["step"] = int(row["step"] / timestep_fs)
+    write_log(log, rows)
+
+    result = Task7Scorer(level=level).evaluate_submission(submission)
+    assert result.score == (1 if timestep_fs == 1 else 0), result.feedback
+    if timestep_fs != 1:
+        assert "Use an integration timestep of 1 fs" in result.feedback
+
+
 def replace_reference_measurements(submission, data):
     """Change thermal evidence while preserving its units and boundary checks."""
     log = submission.parent / "run.jsonl"
