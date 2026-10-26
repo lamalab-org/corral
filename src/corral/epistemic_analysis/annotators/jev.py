@@ -54,6 +54,11 @@ from corral.epistemic_analysis.ontology import (
     PASS_A_SYSTEM,
     PASS_B_INSTRUCTIONS,
 )
+from corral.epistemic_analysis.trace_check_explanations import (
+    DEFAULT_EXPLANATION_CONCURRENCY,
+    EXPLANATION_RULES,
+    explain_trace_checks,
+)
 from corral.epistemic_analysis.trace_checks import (
     TRACE_CHECK_DEFINITIONS,
     trace_check_prompt,
@@ -438,10 +443,18 @@ class JevAnnotator:
         client: JevClient | None,
         min_confidence: float = 0.5,
         max_span_chars: int = 1200,
+        explanation_concurrency: int = DEFAULT_EXPLANATION_CONCURRENCY,
     ):
+        if (
+            isinstance(explanation_concurrency, bool)
+            or not isinstance(explanation_concurrency, int)
+            or explanation_concurrency < 1
+        ):
+            raise ValueError("explanation_concurrency must be a positive integer")
         self.client = client
         self.min_confidence = min_confidence
         self.max_span_chars = max_span_chars
+        self.explanation_concurrency = explanation_concurrency
 
     def backend(self) -> AnnotationBackend:
         return AnnotationBackend(
@@ -456,6 +469,11 @@ class JevAnnotator:
                 "node_decisions": "independent_choices_v1",
                 "min_confidence": self.min_confidence,
                 "max_span_chars": self.max_span_chars,
+                "trace_check_explanations": {
+                    "policy": "present-check-responses-v1",
+                    "concurrency": self.explanation_concurrency,
+                    "prompt_sha1": sha1_hex(EXPLANATION_RULES),
+                },
                 "endpoint": getattr(self.client, "endpoint", DEFAULT_ENDPOINT),
                 "batch_size": getattr(self.client, "batch_size", 32),
                 "timeout_s": getattr(self.client, "timeout_s", 120),
@@ -498,7 +516,20 @@ class JevAnnotator:
             checks.append(
                 {"name": name, "status": status, "support": [], "jev": answer}
             )
-        return checks
+        return await explain_trace_checks(
+            trace,
+            nodes,
+            edges,
+            model,
+            checks,
+            api_key=self.client.api_key,
+            base_url=self.client.endpoint.rsplit("/", 1)[0] + "/",
+            timeout_s=self.client.timeout_s,
+            # Jev counts attempts; the SDK counts retries after the first attempt.
+            max_retries=self.client.max_retries - 1,
+            max_request_tokens=self.client.max_request_tokens,
+            concurrency=self.explanation_concurrency,
+        )
 
     async def extract_nodes(
         self,

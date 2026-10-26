@@ -147,6 +147,8 @@ def test_whole_trace_checks_survive_viewer_projection(run):
             "name": "false_reporting",
             "status": "present",
             "support": [{"msg_idx": 3, "quote": "Post-submission text."}],
+            "explanation": "The final claim conflicts with the observed result.",
+            "explanation_supported": True,
         }
     ]
     result["graph"].update(trace_checks=checks, trace_checks_status="complete")

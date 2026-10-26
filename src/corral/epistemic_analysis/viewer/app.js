@@ -363,12 +363,15 @@ function renderGraph(method) {
   for (const check of data.trace_checks || []) {
     const row = details(`${human(check.name)} · ${human(check.status)}`);
     if (check.explanation) row.append(el("p", "", check.explanation));
+    if (typeof check.explanation_supported === "boolean") {
+      row.append(el("p", "microcopy", check.explanation_supported ? "Follow-up review supports this flag." : "Follow-up review does not support this flag; the original classification is retained."));
+    }
     if (check.jev) {
       row.append(el("p", "microcopy", `Confidence ${pct(check.jev.confidence)} · selected ${human(check.jev.choice)}`));
       for (const [label, probability] of Object.entries(check.jev.probabilities || {})) {
         row.append(el("p", "microcopy", `${human(label)}: ${pct(probability)}`));
       }
-      row.append(el("p", "microcopy", "Decisions returns classifications and probabilities; source quotes are not returned by this pass."));
+      if (!check.explanation) row.append(el("p", "microcopy", "No follow-up explanation is saved for this check."));
     }
     for (const support of check.support || []) row.append(quoteButton(support));
     checks.append(row);
