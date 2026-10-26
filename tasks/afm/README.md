@@ -44,10 +44,20 @@ Set these once on the Windows instrument host, replacing **all placeholders** wi
 the actual application's registered ProgID, executable name and scan-head ID. Do
 not select an application class by trial and error. The matching Nanosurf process
 must already be running, with scripting enabled and automatic gallery saving
-configured. The driver uses `GetActiveObject` to attach to an instance registered
+configured. By default, the driver uses `GetActiveObject` to attach to an instance registered
 in the COM running-object table; it never falls back to Dispatch or starts an
 application. If the installed version does not register an active object, setup
-fails closed. Verify this on the workstation before a benchmark run.
+fails closed by default. Verify this on the workstation before a benchmark run.
+
+For CX installations where `GetActiveObject` fails with `Operation unavailable`,
+set `AFM_CONNECTION_METHOD=dispatch` to use the Nanosurf SDK's explicit-ProgID
+connection method. The default is `active_object`, with no automatic fallback.
+Both methods require exactly one configured process before connecting and check
+that its PID and creation time remain unchanged afterwards. Head identity and
+subsystem checks still apply. **Dispatch can activate an application**: this opt-in
+does not preserve the default guarantee against launching a server, and the process
+checks cannot eliminate that race. Keep CX running and validate the connection on
+the instrument workstation. Health records include the selected connection method.
 
 ```bat
 set "AFM_MACHINE_ID=<stable lab machine label>"
