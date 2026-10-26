@@ -55,8 +55,11 @@ class Config:
     stable_seconds: float = 1.0
     interframe_seconds: float = 1.0
     command_seconds: float = 3600.0
+    connection_method: str = "active_object"
 
     def __post_init__(self):
+        if self.connection_method not in ("active_object", "dispatch"):
+            raise ValueError("AFM_CONNECTION_METHOD must be active_object or dispatch")
         if not self.machine_id.strip() or self.machine_id != self.machine_id.strip():
             raise ValueError(
                 "AFM_MACHINE_ID must be a nonempty stable label without surrounding whitespace"
@@ -116,6 +119,7 @@ class Config:
             os.environ[required[2]],
             Path(os.environ[required[3]]),
             machine_id=os.environ["AFM_MACHINE_ID"],
+            connection_method=os.environ.get("AFM_CONNECTION_METHOD", "active_object"),
             **options,
         )
 
@@ -220,10 +224,13 @@ class WindowsDriver:
 
         pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
         self.initialized = True
-        before = self.identity()  # Do not auto-launch or probe other application types.
-        # Attach only. Dispatch can launch another instance if the running
-        # application is not registered in the COM running-object table.
-        self.app = win32com.client.GetActiveObject(self.config.progid)
+        before = self.identity()  # Require exactly one configured process first.
+        if self.config.connection_method == "dispatch":
+            # Explicit SDK-compatible opt-in. Dispatch can activate a server;
+            # process checks cannot guarantee that it never starts an instance.
+            self.app = win32com.client.Dispatch(self.config.progid)
+        else:
+            self.app = win32com.client.GetActiveObject(self.config.progid)
         if self.identity() != before:
             raise InstrumentUnavailable("Nanosurf process changed during connection")
         return self.app
@@ -397,6 +404,7 @@ class Session:
             "process": current,
             "version": str(self.get("Application", "Version")),
             "head_id": head,
+            "connection_method": self.config.connection_method,
             "tip": str(self.get("ScanHead", "CantileverByGUID")),
             "mode": self.get("OperatingMode", "OperatingMode"),
             "setpoint": self.get("ZController", "SetPoint"),

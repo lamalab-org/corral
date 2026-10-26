@@ -423,8 +423,9 @@ def test_failed_recovery_keeps_marker(config):
         worker.close()
 
 
+@pytest.mark.parametrize("method", ["active_object", "dispatch"])
 def test_windows_com_initialization_balanced_even_when_connection_fails(
-    config, monkeypatch
+    config, monkeypatch, method
 ):
     calls = []
     com = SimpleNamespace(
@@ -438,7 +439,7 @@ def test_windows_com_initialization_balanced_even_when_connection_fails(
     )
     monkeypatch.setitem(sys.modules, "win32com.client", SimpleNamespace())
     monkeypatch.setattr(afm_runtime.os, "name", "nt")
-    driver = WindowsDriver(config)
+    driver = WindowsDriver(replace(config, connection_method=method))
     monkeypatch.setattr(
         driver, "identity", lambda: (_ for _ in ()).throw(RuntimeError("no process"))
     )
@@ -465,8 +466,10 @@ def load_function(filename, name, namespace):
     return namespace[name]
 
 
-def test_windows_driver_only_attaches_to_registered_running_instance(
-    config, monkeypatch
+@pytest.mark.parametrize("method", ["active_object", "dispatch"])
+@pytest.mark.parametrize("changed", [False, True])
+def test_windows_driver_connection_method_and_process_identity(
+    config, monkeypatch, method, changed
 ):
     calls = []
     app = object()
@@ -476,17 +479,41 @@ def test_windows_driver_only_attaches_to_registered_running_instance(
         CoUninitialize=lambda: calls.append("uninit"),
     )
     client = SimpleNamespace(
-        GetActiveObject=lambda progid: (calls.append(progid), app)[1]
+        GetActiveObject=lambda progid: (calls.append(("active_object", progid)), app)[1],
+        Dispatch=lambda progid: (calls.append(("dispatch", progid)), app)[1],
     )
     monkeypatch.setitem(sys.modules, "pythoncom", com)
     monkeypatch.setitem(sys.modules, "win32com", SimpleNamespace(client=client))
     monkeypatch.setitem(sys.modules, "win32com.client", client)
     monkeypatch.setattr(afm_runtime.os, "name", "nt")
-    driver = WindowsDriver(config)
-    monkeypatch.setattr(driver, "identity", lambda: (42, 100))
-    assert driver.open() is app
+    driver = WindowsDriver(replace(config, connection_method=method))
+    identities = iter([(42, 100), (43, 101) if changed else (42, 100)])
+    monkeypatch.setattr(driver, "identity", lambda: next(identities))
+    if changed:
+        with pytest.raises(InstrumentUnavailable, match="process changed"):
+            driver.open()
+    else:
+        assert driver.open() is app
     driver.close()
-    assert calls == ["init", config.progid, "uninit"]
+    assert calls == ["init", (method, config.progid), "uninit"]
+
+
+def test_connection_method_from_env(config, monkeypatch):
+    for key, value in {
+        "AFM_PROGID": config.progid,
+        "AFM_PROCESS_NAME": config.process_name,
+        "AFM_EXPECTED_HEAD_ID": config.expected_head_id,
+        "AFM_STATE_DIR": str(config.state_dir),
+        "AFM_MACHINE_ID": config.machine_id,
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("AFM_CONNECTION_METHOD", raising=False)
+    assert Config.from_env().connection_method == "active_object"
+    monkeypatch.setenv("AFM_CONNECTION_METHOD", "dispatch")
+    assert Config.from_env().connection_method == "dispatch"
+    monkeypatch.setenv("AFM_CONNECTION_METHOD", "invalid")
+    with pytest.raises(ValueError, match="AFM_CONNECTION_METHOD"):
+        Config.from_env()
 
 
 def test_code_executor_routes_entire_script_to_owner():
