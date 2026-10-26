@@ -287,6 +287,42 @@ async def test_llm_call_basic(monkeypatch):
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
+    ("content", "expected_content"),
+    [
+        (None, "Provider-returned reasoning summary."),
+        ("", "Provider-returned reasoning summary."),
+        (" \n", " \n"),
+        ("Visible justification.", "Visible justification."),
+    ],
+)
+async def test_reasoning_fallback_preserves_existing_text_and_tool_calls(
+    monkeypatch, content, expected_content
+):
+    _, raw = setup_mock_litellm(monkeypatch)
+    message = raw.choices[0].message
+    message.content = content
+    message.reasoning_content = "Provider-returned reasoning summary."
+    message.tool_calls = [{"id": "finish", "function": {"name": "submit_answer"}}]
+    result = await llm_call(model="test-model", messages=[], temperature=None)
+    assert result.content == expected_content
+    assert result.content_source == "text"
+    assert result.tool_calls == message.tool_calls
+    assert result.message.reasoning_content == "Provider-returned reasoning summary."
+
+
+@pytest.mark.anyio
+async def test_empty_response_preserves_finish_reason_and_usage(monkeypatch):
+    _, raw = setup_mock_litellm(monkeypatch, return_usage=True)
+    raw.choices[0].message.content = None
+    raw.choices[0].finish_reason = "length"
+    result = await llm_call(model="test-model", messages=[], temperature=None)
+    assert result.content is None
+    assert result.finish_reason == "length"
+    assert result.usage["completion_tokens"] == 20
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
     "tool_choice",
     [
         None,
