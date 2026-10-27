@@ -66,6 +66,14 @@ All runs together used 5.90B input tokens and 146M output tokens. Input tokens m
 - **codex is the second most expensive.** Its 1.13B input tokens went mostly to retrosynthesis and resistor_network.
 - **retrosynthesis and resistor_network cost the most** of the environments. afm is cheap only because three of its agent and model pairs have no runs.
 
+## Heatmaps
+
+Mean tokens (input + output) and mean list-price cost per trial. In each figure, the top panel has one column per task, grouped by environment, with dashed lines between levels. The bottom panel averages each environment. Grey means no run. The colour scales are logarithmic.
+
+![Mean tokens per trial](figures/tokens_heatmap.png)
+
+![Mean cost per trial](figures/cost_heatmap.png)
+
 ## Average cost per trial
 
 Cost of one attempt at one task, averaged over every trial of that environment's tasks at both levels. Each cell is list price / 90% cache estimate.
