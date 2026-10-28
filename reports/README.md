@@ -56,21 +56,6 @@ the trace browser and indexed trial data. Conversations show exactly what was
 saved: missing prompts, empty thinking messages, and unrecorded SDK activity
 cannot be reconstructed.
 
-## Results dashboard
-
-Build a standalone HTML page that compares every agent and model pair across
-the environments (AFM is left out by default): a leaderboard with a level
-toggle, pass@k and pass^k curves, consistency, cost per solved trial, a
-per-level heatmap, native agent vs ReAct, and passing vs failing trials.
-
-```bash
-python reports/dashboard/build_dashboard.py          # rewrites reports/dashboard/corral_dashboard.html
-```
-
-It reads only `*/trials.csv` and needs no packages beyond the standard
-library. The page loads d3 from a CDN. Prices for the cost estimates are at
-the top of the script and match [`cost_estimate.md`](cost_estimate.md).
-
 ## Layout
 
 ```
