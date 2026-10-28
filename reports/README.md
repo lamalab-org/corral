@@ -64,7 +64,7 @@ toggle, pass@k and pass^k curves, consistency, cost per solved trial, a
 per-level heatmap, native agent vs ReAct, and passing vs failing trials.
 
 ```bash
-python reports/dashboard/build_dashboard.py          # writes reports/dashboard/corral_dashboard.html
+python reports/dashboard/build_dashboard.py          # rewrites reports/dashboard/corral_dashboard.html
 ```
 
 It reads only `*/trials.csv` and needs no packages beyond the standard
