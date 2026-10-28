@@ -1,21 +1,35 @@
-# Resistor network v4 Docker-sandboxed reports
+# Resistor network v4 results
 
-All 14 runs (7 agent/model pairs × 2 levels; 10 tasks × 5 trials) in this report set used Docker sandboxing. The Codex, Claude Code, and OpenHands reports below replace their earlier outside-Docker runs. ReAct and AI Scientist reports are unchanged because those runs already used Docker.
+All results in this report set come from agents running in Docker sandboxes. It contains 14 runs: seven agent/model combinations, each tested on levels 1 and 2. Every run has 50 trials per level.
 
-| Agent | Model | L1 passes | L1 error trials | L2 passes | L2 error trials | Sandbox |
-|---|---|---:|---:|---:|---:|---|
-| ai-scientist | claude-opus-5-5 | 49/50 | 0 | 33/50 | 0 | Docker |
-| claude-code | claude-opus-5-5 | 40/50 | 10 | 12/50 | 37 | Docker |
-| codex | gpt-5.6-sol | 47/50 | 0 | 19/50 | 0 | Docker |
-| openhands | kimi-k3 | 10/50 | 40 | 0/50 | 50 | Docker |
-| react | claude-opus-5-5 | 39/50 | 0 | 27/50 | 9 | Docker |
-| react | gpt-5.6-sol | 45/50 | 1 | 28/50 | 11 | Docker |
-| react | kimi-k3 | 10/50 | 11 | 1/50 | 19 | Docker |
+| Agent | Model | Level 1 | Level 2 |
+|---|---|---:|---:|
+| AI Scientist | Claude Opus 5.5 | 49/50 | 33/50 |
+| Claude Code | Claude Opus 5.5 | 40/50 | 12/50 |
+| Codex | GPT-5.6-Sol | 47/50 | 19/50 |
+| OpenHands | Kimi K3 | 10/50 | 0/50 |
+| ReAct | Claude Opus 5.5 | 39/50 | 27/50 |
+| ReAct | GPT-5.6-Sol | 45/50 | 28/50 |
+| ReAct | Kimi K3 | 10/50 | 1/50 |
 
-Scores count exact circuit matches after simulation-based equivalence checking; a score below 1 is a failed trial. Error-trial counts include harness/model errors and iteration or turn limits, while incorrect submissions without a harness error can also score 0. OpenHands reached its 50-iteration limit in 87 of 100 selected trials; two other trials ended without a final submission.
+Each value is the number of trials that produced a correct circuit out of 50. The evaluator accepts circuits that match the measurements in simulation, including circuits that are electrically indistinguishable. An error or an incorrect answer receives a score of zero. Some incorrect answers do not produce a separate error, so error counts can be lower than the number of failed trials.
 
-The Claude Code, Codex, and OpenHands Docker results use 2 CPUs, 4 GiB RAM, and a 256-process limit per container. Their final reports select one result for each of 100 trial slots per agent after infrastructure recovery. `native-agent-attempts.csv` records the 380 Docker execution attempts for these three agents (300 initial trial runs and 80 retries). `technical-reruns.csv` maps selected replacements across this report set, including the earlier Docker ReAct and AI Scientist reruns.
+## Docker runs and retries
 
-The outside-Docker runs are not part of this report set. Their workspaces could expose benchmark files, and the audit found evidence of hidden-answer access in some traces.
+Claude Code, Codex, and OpenHands each had 100 final trial results: 50 per level. Their containers had 2 CPUs, 4 GiB of memory, and a 256-process limit. When infrastructure problems interrupted a trial, a retry could provide the final result for that same trial slot.
 
-Layout, names, and index columns follow [`../README.md`](../README.md). Rebuild `runs.csv` and `trials.csv` with `python reports/build_index.py reports/resistor_network`.
+`native-agent-attempts.csv` records all 380 executions for those three agents: the original 300 attempts plus 80 retries. These are execution attempts, not 380 additional scored trials. `technical-reruns.csv` maps selected retries back to the trial slots they replace across the report set, including earlier ReAct and AI Scientist retries.
+
+The OpenHands agent reached its 50-iteration limit in 87 of its 100 final trials. Two more ended without a final submission.
+
+## Scope
+
+The earlier runs made outside Docker are excluded. Their workspace access could expose benchmark files, and the audit found hidden-answer access in some of their traces. ReAct and AI Scientist results remain from their original runs because those runs already used Docker.
+
+The `runs.csv` and `trials.csv` files list the final selected results and Langfuse trace IDs. Rebuild them with:
+
+```bash
+python reports/build_index.py reports/resistor_network
+```
+
+The report layout and CSV columns are described in [`../README.md`](../README.md).
