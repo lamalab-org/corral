@@ -163,6 +163,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     html = build(set(args.exclude))
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(html, encoding="utf-8")
     sys.stdout.write(f"Wrote {args.out} ({len(html) / 1e6:.1f} MB)\n")
 
