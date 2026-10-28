@@ -1,7 +1,8 @@
 # Benchmark reports
 
-Final benchmark reports, one folder per environment. Every environment uses the
-same layout, names and index files, so runs can be compared across them.
+Benchmark reports, one folder per environment. The standard layout, names and
+index files allow runs to be compared across environments. AFM currently retains
+its original run-folder names and uncompressed JSON instead; see the note below.
 
 | Environment | Folder | Branch | Runs | Trials |
 |---|---|---|---:|---:|
@@ -15,9 +16,17 @@ same layout, names and index files, so runs can be compared across them.
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
 
-All nine environments together have **117 runs and 6,550 trials**. Each
-environment has its own indexes, with report paths relative to its folder. The
-`runs` and `trials` configs of the Hugging Face summary dataset combine them.
+All nine environments together have **117 runs and 6,550 trials**. Standardized
+environments have indexes with report paths relative to their folders. The
+`runs` and `trials` configs of the Hugging Face summary dataset combine the indexed
+reports.
+
+AFM retains five original named run folders, each containing `report.json` and
+`run-metadata.json`. Its previous standardized reports, indexes and historical
+archive have been removed from the current tree. AFM is therefore not available
+in the index-based trace browser or summary tooling, and does not currently pass
+`check_reports.py`, which requires the standard layout and CSV indexes. The
+new AFM files have not been synchronized to Hugging Face in this update.
 
 The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).
