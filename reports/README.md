@@ -5,7 +5,7 @@ same layout, names and index files, so runs can be compared across them.
 
 | Environment | Folder | Branch | Runs | Trials |
 |---|---|---|---:|---:|
-| AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
+| AFM | [`afm/`](afm/) | `report_audit` | 5 | 250 |
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics | [`psychometrics/`](psychometrics/) | `psychometric_hint_cleanup_clean` | 14 | 700 |
 | Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
@@ -15,7 +15,7 @@ same layout, names and index files, so runs can be compared across them.
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
 
-All nine environments together have **116 runs and 6,500 trials**. Each
+All nine environments together have **117 runs and 6,550 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
