@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from build_corral_mini import make_matrices, ranking_panel, read_tasks, scores, spearman
 from loguru import logger
+from scipy.stats import rankdata
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -90,6 +91,54 @@ def select(
         cost_by_task = (
             costs[key].loc[pool.index, training].sum(axis=1).to_numpy(dtype=float)
         )
+        if method in {
+            "spearman_rank",
+            "unsaturated_spearman_rank",
+            "guarded_spearman_rank",
+            "unsaturated_guarded_spearman_rank",
+        }:
+            combinations = np.asarray(
+                list(itertools.combinations(range(len(pool)), k)), dtype=np.int32
+            )
+            candidate_scores = profile[combinations].mean(axis=1)
+            target_ranks = rankdata(target)
+            candidate_ranks = rankdata(candidate_scores, axis=1)
+            target_centered = target_ranks - target_ranks.mean()
+            candidate_centered = candidate_ranks - candidate_ranks.mean(
+                axis=1, keepdims=True
+            )
+            denominators = np.linalg.norm(candidate_centered, axis=1) * np.linalg.norm(
+                target_centered
+            )
+            correlations = np.divide(
+                candidate_centered @ target_centered,
+                denominators,
+                out=np.zeros(len(combinations), dtype=float),
+                where=denominators > 0,
+            )
+            if np.linalg.norm(target_centered) == 0:
+                correlations = (np.linalg.norm(candidate_centered, axis=1) == 0).astype(
+                    float
+                )
+            errors = candidate_scores - target
+            max_errors = np.max(abs(errors), axis=1)
+            mean_squared_errors = np.mean(errors**2, axis=1)
+            eligible_indexes = np.arange(len(combinations))
+            if "guarded" in method:
+                eligible_indexes = eligible_indexes[
+                    max_errors <= max_errors.min() + 0.02 + 1e-12
+                ]
+            order = np.lexsort(
+                (
+                    mean_squared_errors[eligible_indexes],
+                    max_errors[eligible_indexes],
+                    -correlations[eligible_indexes],
+                )
+            )
+            result[key] = tuple(
+                str(pool.index[i]) for i in combinations[eligible_indexes[order[0]]]
+            )
+            continue
         best = None
         candidates = []
         rank_method = method in {
@@ -458,6 +507,10 @@ def main() -> None:
         ("unsaturated_profile", "unsaturated_profile", 0.0),
         ("level_rank", "level_rank", 0.0),
         ("unsaturated_level_rank", "unsaturated_level_rank", 0.0),
+        ("spearman_rank", "spearman_rank", 0.0),
+        ("unsaturated_spearman_rank", "unsaturated_spearman_rank", 0.0),
+        ("guarded_spearman_rank", "guarded_spearman_rank", 0.0),
+        ("unsaturated_guarded_spearman_rank", "unsaturated_guarded_spearman_rank", 0.0),
         ("guarded_level_rank", "guarded_level_rank", 0.0),
         ("unsaturated_guarded_level_rank", "unsaturated_guarded_level_rank", 0.0),
         ("cheapest", "cheapest", 0.0),

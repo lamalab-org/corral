@@ -31,6 +31,13 @@ This writes [`comparison.json`](comparison.json). Both scripts use the pinned
 `tasks` table. The comparison uses the fixed historical USD prices in
 [`prices.json`](prices.json).
 
+Generate the task-count sweep and figure with:
+
+```bash
+python scripts/sweep_corral_mini.py --revision <40-character-HF-commit>
+uv run --no-project --with matplotlib python scripts/plot_corral_mini_sweep.py
+```
+
 ## Selection protocol
 
 1. Exclude AFM, then treat every remaining `(environment, level)` as a stratum
@@ -78,6 +85,17 @@ within individual strata can be less precise.
 
 ## Sampler choices and within-level comparison
 
+![Mean within-level Spearman correlation by tasks per level](figures/rank_correlation_vs_tasks.png)
+
+The line is the mean within-level Spearman correlation with the full reports.
+The shaded band is the 25th–75th percentile of environment averages across
+the eight included environments. Random lines average 200 seeded samples at
+each task count. The plotted values are in [`sweep.csv`](sweep.csv), with
+environment values in [`sweep_environments.json`](sweep_environments.json).
+Ranking selectors are optimized on the historical agents, so their plotted
+agreement is an in-sample result. The held-out-model checks below assess how
+well the choices transfer to agents whose model was absent during selection.
+
 All methods below select four tasks from each of the same 16 strata. “Random”
 rows summarize 500 seeded draws; the other rows are deterministic. A task is
 called **saturated** when every observed agent solved it at least once in five
@@ -90,8 +108,10 @@ saturated. “Unsaturated” methods exclude those tasks.
 | Unsaturated random, median | 0.825 | 11 | 0.405 | $9,823 |
 | Score profile (current manifest) | 0.882 | 5 | 0.134 | $10,024 |
 | Unsaturated score profile | 0.876 | 5 | 0.134 | $10,156 |
-| Rank only | 0.994 | 0 | 0.400 | $10,233 |
-| Rank with score guard | 0.967 | 5 | 0.117 | $9,761 |
+| Pairwise ranking | 0.994 | 0 | 0.400 | $10,233 |
+| Pairwise ranking with score guard | 0.967 | 5 | 0.117 | $9,761 |
+| Best Spearman | 0.996 | 1 | 0.400 | $10,738 |
+| Spearman with score guard | 0.970 | 5 | 0.120 | $10,121 |
 | Cheapest tasks | 0.670 | 14 | 0.588 | $6,589 |
 | Cost-aware, 0.02 profile tolerance | 0.908 | 8 | 0.148 | $7,989 |
 | Unsaturated cost-aware, 0.02 tolerance | 0.907 | 9 | 0.148 | $8,046 |
@@ -102,7 +122,7 @@ ranking signal. The correlation averages the other 15 levels. A material
 ordering loss means a pair separated by at least five percentage points in
 the full level ties or reverses in the mini level. Lower counts are better.
 The worst level score error is the largest absolute change for one agent in
-one level. The rank-only sampler illustrates why rank agreement and score
+one level. The ranking samplers illustrate why rank agreement and score
 agreement need to be checked together. When an entire model is withheld at
 four tasks per stratum, the score-profile baseline has a material ordering
 loss in 14 of the 15 informative levels.
@@ -116,10 +136,12 @@ That check is stricter than comparing the agents used to choose tasks.
 |---|---:|---:|---:|---:|---:|
 | Score profile | 0.962 | 5 | 11 | 0.100 | $11,747 |
 | Unsaturated score profile | 0.953 | 4 | 9 | 0.100 | $11,850 |
-| Rank only | 0.997 | 0 | 10 | 0.200 | $12,692 |
-| Unsaturated rank only | 0.997 | 0 | 8 | 0.200 | $12,700 |
-| Rank with score guard | 0.990 | 1 | 10 | 0.100 | $12,540 |
-| Unsaturated rank with score guard | 0.990 | 1 | 8 | 0.100 | $12,538 |
+| Pairwise ranking | 0.997 | 0 | 10 | 0.200 | $12,692 |
+| Unsaturated pairwise ranking | 0.997 | 0 | 8 | 0.200 | $12,700 |
+| Best Spearman | 0.999 | 0 | 9 | 0.200 | $12,819 |
+| Unsaturated best Spearman | 0.999 | 0 | 8 | 0.200 | $12,819 |
+| Pairwise ranking with score guard | 0.990 | 1 | 10 | 0.100 | $12,540 |
+| Spearman with score guard | 0.993 | 1 | 9 | 0.100 | $12,778 |
 | Cost-aware, 0.02 profile tolerance | 0.857 | 9 | 12 | 0.133 | $10,004 |
 
 The complete five-task comparison is in
@@ -132,9 +154,10 @@ Pass@5 profile root-mean-square error is within 0.02 of that stratum's best
 profile match. The estimated USD total replays the observed seven agent/model
 combinations with five trials per task, using 2026-10-27 list prices without
 cache discounts. It is a comparison of historical task cost; the price and
-token mix for future models may differ. The rank-with-score-guard method keeps
+token mix for future models may differ. The rank-with-score-guard methods keep
 each level's maximum score error within 0.02 of the best possible maximum for
-that level, then minimizes ordering losses. The full comparison includes
+that level, then optimize either pairwise order or Spearman correlation.
+The full comparison includes
 per-level rankings, random-sample ranges, and checks with each agent or whole
 model withheld during selection. These checks show how much the choices depend
 on the agents already in the reports. The protocol has **not yet been chosen**;
