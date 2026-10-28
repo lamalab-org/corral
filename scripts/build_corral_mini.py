@@ -31,6 +31,12 @@ def parse_args() -> argparse.Namespace:
         "--tasks-parquet", type=Path, help="Use an already downloaded tasks table"
     )
     parser.add_argument("--output-dir", type=Path, default=Path("corral_mini"))
+    parser.add_argument(
+        "--exclude-environment",
+        action="append",
+        default=["afm"],
+        help="Environment to omit; repeat to omit more (default: afm)",
+    )
     parser.add_argument("--min-k", type=int, default=1)
     parser.add_argument("--max-k", type=int, default=10)
     parser.add_argument("--min-spearman", type=float, default=0.95)
@@ -122,7 +128,7 @@ def ranking_panel(matrices: dict) -> tuple[list[str], list[tuple[str, int]]]:
 
 
 def best_subset(matrix: pd.DataFrame, k: int, subjects: list[str]) -> tuple[str, ...]:
-    """Match the full stratum's agent success-rate profile by squared error.
+    """Match the full stratum's agent Pass@5 profile by squared error.
 
     Enumerating combinations is exact for the current pools (10 or 20 tasks).
     Sorted task IDs give a deterministic tie break.
@@ -227,6 +233,10 @@ def assess_k(
 def main() -> None:
     args = parse_args()
     data, digest = read_tasks(args)
+    source_rows = len(data)
+    data = data[~data.environment.isin(args.exclude_environment)].copy()
+    if data.empty:
+        raise ValueError("no task rows remain after environment exclusions")
     matrices = make_matrices(data, "pass_at_5")
     subjects, common = ranking_panel(matrices)
     full = scores(matrices, common, subjects)
@@ -262,6 +272,8 @@ def main() -> None:
         by_environment.setdefault(environment, {})[f"level_{level}"] = list(task_ids)
     manifest = {
         "name": "corral-mini",
+        "status": "candidate_baseline",
+        "selection_strategy": "score_profile",
         "source": {
             "repo": REPO,
             "revision": args.revision,
@@ -269,12 +281,15 @@ def main() -> None:
             "sha256": digest,
         },
         "method": "equal tasks per environment/level; exact Pass@5 profile-matching subset",
+        "excluded_environments": sorted(set(args.exclude_environment)),
         "tasks_per_stratum": metrics["tasks_per_stratum"],
         "total_tasks": metrics["total_tasks"],
         "tasks_by_environment": by_environment,
     }
     assessment = {
-        "source_rows": len(data),
+        "source_rows": source_rows,
+        "eligible_rows": len(data),
+        "excluded_environments": sorted(set(args.exclude_environment)),
         "strata": [f"{env}/level_{level}" for env, level in matrices],
         "subjects_by_stratum": {
             f"{env}/level_{level}": list(matrix.columns)
