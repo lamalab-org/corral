@@ -1,6 +1,8 @@
 # Cost estimate
 
-Estimated API cost of the 116 runs in `reports/<environment>/runs.csv`, by environment and by agent and model. Token counts come from the `input_tokens` and `output_tokens` columns of `runs.csv` on `report_audit` at `d2882940c` (2026-10-27).
+Historical estimate of the 116 runs from `reports/<environment>/runs.csv`, by environment and by agent and model. The tables and figures below use the `report_audit` snapshot at `d2882940c` (2026-10-27). The current resistor reports replace the native agents' host runs with Docker sandbox runs, so their resistor cells and the corresponding totals and heatmaps are superseded.
+
+Using the same prices and cache assumption, the **current resistor runs** cost an estimated **$4,909** at list price or **$1,353** with 90% of input tokens cached. By agent/model, the list-price estimates are AI Scientist $2,023, Claude Code $334, Codex $998, OpenHands $473, ReAct Opus $229, ReAct GPT $563, and ReAct Kimi $289. These figures use the current `resistor_network/runs.csv`; the detailed tables below remain a dated snapshot.
 
 **Summary:** about **$24.8k** at list price with no cache discount, which is an upper bound. If about 90% of input tokens were served from the prompt cache, the cost is closer to **$6.4k**.
 

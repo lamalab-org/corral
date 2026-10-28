@@ -15,6 +15,7 @@ from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.usage import usage_from_mapping
 from corral.agents.utils import llm_call as _default_llm_call
+from corral.core.messages import public_message
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -106,8 +107,8 @@ class _UsageAccumulator:
     reasoning_tokens: int = 0
     llm_calls: int = 0
 
-    def add(self, usage: Mapping[str, Any] | None) -> None:
-        normalized = self.convert(usage, llm_calls=1)
+    def add(self, usage: Mapping[str, Any] | None, *, llm_calls: int = 1) -> None:
+        normalized = self.convert(usage, llm_calls=llm_calls)
         self.input_tokens += normalized.input_tokens
         self.output_tokens += normalized.output_tokens
         self.reasoning_tokens += normalized.reasoning_tokens
@@ -148,18 +149,11 @@ async def call_model(
 def provider_messages(
     messages: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Return provider-safe copies of canonical session messages."""
-    provider_fields = {
-        "role",
-        "content",
-        "name",
-        "tool_call_id",
-        "tool_calls",
-        "function_call",
-    }
+    """Return public history without empty assistant turns or private reasoning."""
     return [
-        {key: value for key, value in message.items() if key in provider_fields}
+        public
         for message in messages
+        if (public := public_message(message)) is not None
     ]
 
 

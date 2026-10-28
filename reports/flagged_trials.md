@@ -1,6 +1,6 @@
 # Flagged trials from the benchmark audit
 
-Trials worth a closer look, from the environment and cheating audits of all nine environments (2026-10-21). Trial numbers are 0-based, as in `trials.csv`. Score is taken from `trials.csv`.
+Trials worth a closer look, from the environment and cheating audits of all nine environments (2026-10-21). Trial numbers are 0-based, as in `trials.csv`. Resistor rows document the superseded host-run reports; their scores and Langfuse links are historical and are not rows in the current resistor `trials.csv`.
 
 Verdicts:
 
@@ -26,7 +26,7 @@ Verdicts:
 
 ## resistor_network
 
-Only environment where agents read the answer. Host-run agents could open the task JSON.
+The host-run agents could open task JSONs, and some read the answers. Those runs were replaced by Docker sandbox runs in the current reports. The rows below preserve the audit evidence from the excluded runs; use `resistor_network/trials.csv` for the scored results.
 
 | Level | Agent / model | Task | Trial | Score | Verdict | Category | Note | Langfuse |
 |---|---|---|---|---|---|---|---|---|
