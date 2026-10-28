@@ -7,8 +7,7 @@ same layout, names and index files, so runs can be compared across them.
 |---|---|---|---:|---:|
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics | [`psychometrics/`](psychometrics/) | `psychometric_hint_cleanup_clean` | 14 | 700 |
-| Resistor network (v4, terminal) | [`resistor_network/`](resistor_network/) | `resistor_level` | 14 | 700 |
-| Resistor network v4 (native agents, Docker sandbox) | [`resistor_network_native_docker/`](resistor_network_native_docker/) | `resistor-network-native-docker-reports` | 6 | 300 |
+| Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
 
 Each branch holds only its own environment's folder. This file and
 `build_index.py` are identical on every branch.
