@@ -11,10 +11,13 @@ from corral.agents.ai_scientist.agent import _BranchSessionRegistry
 from corral.agents.schema import AgentOutcome
 from corral.agents.session import AgentSession, run_agent_session
 from corral.core import Action, ActorRef, AgentStarted, CommitRequest
+from corral.core.action import submit_answer_action
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
 from corral.core.tool_catalog import state_tool_catalog
 from corral.persistence import SQLiteCommitStore
+from corral.report.projection import _token_usage, _tool_statistics
+from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 from corral.workspace import AbsoluteWorkspaceFilesystem, build_terminal_tool
 
 
@@ -79,6 +82,98 @@ async def workspace_session(tmp_path):
             state_store=store,
             max_iterations=10,
         )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("after_submission", [False, True])
+async def test_sdk_tools_persist_and_appear_in_verbose_reports(
+    workspace_session, after_submission
+):
+    session = workspace_session
+    if after_submission:
+        assert (await session.execute(submit_answer_action("done"))).success
+
+    native = Action(id="native-read", name="Read", arguments={"path": "notes.txt"})
+    failed = Action(id="native-shell", name="Bash", arguments={"command": "false"})
+    # SDK call ids differ from the ids assigned by the Corral MCP server.
+    echoed = Action(id="sdk-submit", name="submit_answer", arguments={"answer": "done"})
+    prefixed = Action(id="claude-submit", name="mcp__corral__submit_answer")
+    await session.record_messages(
+        (
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    call.to_tool_call() for call in (native, echoed, prefixed, failed)
+                ],
+            },
+            {"role": "tool", "tool_call_id": echoed.id, "content": "submitted"},
+            {"role": "tool", "tool_call_id": prefixed.id, "content": "submitted"},
+        ),
+        usage={"input_tokens": 10, "output_tokens": 2},
+    )
+    # An in-flight SDK tool must not block Corral actions or become recovery work.
+    assert native.id not in session.state.actions
+    if not after_submission:
+        assert (await session.execute(submit_answer_action("done"))).success
+    await session.record_messages(
+        (
+            {
+                "role": "tool",
+                "tool_call_id": native.id,
+                "name": "tool_result",
+                "content": "contents",
+            },
+            {
+                "role": "tool",
+                "tool_call_id": failed.id,
+                "content": "exit 1",
+                "is_error": True,
+                "duration_ms": 25,
+            },
+        )
+    )
+
+    state = await session.state_store.materialize(session.branch_id)
+    assert state.usage.tool_calls == 3
+    assert state.usage.llm_calls == 1
+    assert state.usage.input_tokens == 10
+    assert state.tool_statistics == {"submit_answer": 1, "Read": 1, "Bash": 1}
+    messages = state.model_dump(mode="json")["conversations"][session.actor.run_id]
+    calls = [call for message in messages for call in message.get("tool_calls", ())]
+    assert {call["function"]["name"] for call in calls} == {
+        "submit_answer",
+        "Read",
+        "Bash",
+    }
+    assert len(calls) == 3
+
+    trial = TaskTrialResult(
+        task_id="task",
+        trial_id="trial",
+        score=1.0,
+        state=state.model_dump(mode="json"),
+        tool_statistics=_tool_statistics(state),
+        messages=messages,
+        token_usage=_token_usage(state),
+    )
+    report = BenchmarkResult(
+        task_results={"task": TaskTrialResults(task_id="task", trials=[trial])},
+        verbose=True,
+    )
+    data = report._prepare_report_data({})["task_results"]["task"]["trials"][0]
+    by_name = {call["tool_name"]: call for call in data["tool_calls"]}
+    assert by_name["Read"]["arguments"] == {"path": "notes.txt"}
+    assert by_name["Read"]["result"] == "contents"
+    assert by_name["Read"]["status"] == "completed"
+    assert by_name["Bash"]["status"] == "failed"
+    assert by_name["Bash"]["error_message"] == "exit 1"
+    assert by_name["Bash"]["duration"] == 0.025
+    assert data["token_usage"]["tool_calls"] == 3
+    report.verbose = False
+    quiet = report._prepare_report_data({})["task_results"]["task"]["trials"][0]
+    assert "messages" not in quiet
+    assert "tool_calls" not in quiet
 
 
 @pytest.mark.anyio

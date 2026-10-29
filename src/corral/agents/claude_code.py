@@ -527,6 +527,7 @@ class ClaudeCodeAgent:
                 for block in content:
                     if isinstance(block, ToolResultBlock):
                         is_error = bool(getattr(block, "is_error", False))
+                        tool_content = _stringify_tool_content(block.content)
                         if is_error:
                             # Count (but don't terminate on) MCP tool errors:
                             # recovering from them is legitimate agent behaviour,
@@ -534,11 +535,19 @@ class ClaudeCodeAgent:
                             run.metadata["tool_errors"] = (
                                 run.metadata.get("tool_errors", 0) + 1
                             )
+                            # Client-side MCP errors may have no canonical tool
+                            # transition, so retain their details in run metadata.
+                            run.metadata.setdefault("tool_error_details", []).append(
+                                {
+                                    "tool_call_id": block.tool_use_id,
+                                    "content": tool_content,
+                                }
+                            )
                         transcript.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": block.tool_use_id,
-                                "content": _stringify_tool_content(block.content),
+                                "content": tool_content,
                                 "name": "tool_result",
                                 "is_error": is_error,
                             }

@@ -12,7 +12,7 @@ from mcp.client.streamable_http import streamablehttp_client
 pytest.importorskip("openai_codex")
 
 from corral.agents import CodexAgent
-from corral.agents.codex import HarnessRunResult
+from corral.agents.codex import HarnessRunResult, _RunState
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
@@ -126,6 +126,89 @@ def test_codex_extracts_usage_from_nested_total():
     assert usage.output_tokens == 5
     assert usage.reasoning_tokens == 2
     assert usage.llm_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("payload", "tool_name", "arguments", "is_error"),
+    [
+        (
+            {
+                "type": "commandExecution",
+                "command": "pwd",
+                "cwd": "/tmp",
+                "commandActions": [],
+                "status": "completed",
+                "aggregatedOutput": "/tmp",
+                "exitCode": 0,
+                "durationMs": 12,
+            },
+            "commandExecution",
+            {"command": "pwd", "cwd": "/tmp"},
+            False,
+        ),
+        (
+            {
+                "type": "commandExecution",
+                "command": "false",
+                "cwd": "/tmp",
+                "commandActions": [],
+                "status": "completed",
+                "exitCode": 1,
+            },
+            "commandExecution",
+            {"command": "false", "cwd": "/tmp"},
+            True,
+        ),
+        (
+            {"type": "fileChange", "changes": [], "status": "declined"},
+            "fileChange",
+            {"changes": []},
+            True,
+        ),
+        (
+            {"type": "webSearch", "query": "Corral"},
+            "webSearch",
+            {"query": "Corral", "action": None},
+            False,
+        ),
+        (
+            {"type": "imageView", "path": "/tmp/image.png"},
+            "imageView",
+            {"path": "/tmp/image.png"},
+            False,
+        ),
+        (
+            {
+                "type": "dynamicToolCall",
+                "tool": "custom",
+                "arguments": {"value": 1},
+                "status": "completed",
+                "success": False,
+            },
+            "custom",
+            {"value": 1},
+            True,
+        ),
+    ],
+)
+def test_codex_records_native_tool_items(payload, tool_name, arguments, is_error):
+    import json
+
+    from openai_codex.generated.v2_all import ThreadItem
+
+    item = ThreadItem.model_validate({"id": "native-call", **payload}).root
+    run = _RunState()
+    CodexAgent(system_prompt="system")._record_item(item, run)
+
+    call, result = run.messages
+    assert call["sdk_native"] is True
+    function = call["tool_calls"][0]["function"]
+    assert function["name"] == tool_name
+    assert json.loads(function["arguments"]) == arguments
+    assert result["tool_call_id"] == "native-call"
+    assert result["is_error"] is is_error
+    assert json.loads(result["content"]) == item.model_dump(mode="json")
+    assert result["duration_ms"] == getattr(item, "duration_ms", None)
 
 
 @pytest.mark.anyio

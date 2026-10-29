@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
+from corral.core.action import Action
 from corral.core.events import (
     AgentStarted,
     AgentTurnRecorded,
@@ -455,6 +456,9 @@ class LangfuseObserver:
         input_messages: Any = None,
         usage: UsageDelta | None = None,
         set_trace_input: bool = False,
+        tool_invocation_id: str | None = None,
+        duration_ms: float | None = None,
+        failed: bool = False,
     ) -> None:
         key = (commit.execution_id, run_id)
         if self._restoring:
@@ -482,9 +486,7 @@ class LangfuseObserver:
                 self._step_numbers[key] = self._step_numbers.get(key, 0) + 1
                 self._restored_steps.add(key)
             if as_type == "tool":
-                self._tool_starts.pop(
-                    (commit.execution_id, commit.event.invocation_id), None
-                )
+                self._tool_starts.pop((commit.execution_id, tool_invocation_id), None)
             self._last_times[key] = commit.occurred_at
             return
         metadata = self._metadata(commit, run_id=run_id)
@@ -525,11 +527,13 @@ class LangfuseObserver:
         started_at = self._last_times.get(key, commit.occurred_at)
         if as_type == "tool":
             started_at = self._tool_starts.pop(
-                (commit.execution_id, commit.event.invocation_id), commit.occurred_at
+                (commit.execution_id, tool_invocation_id), commit.occurred_at
             )
             metadata.update(
-                execution_duration_ms=commit.event.duration_ms,
-                timing_source="tool_start_and_completion_commits",
+                execution_duration_ms=duration_ms,
+                timing_source="sdk_transcript_commits"
+                if isinstance(commit.event, AgentTurnRecorded)
+                else "tool_start_and_completion_commits",
             )
         else:
             metadata.update(
@@ -559,9 +563,6 @@ class LangfuseObserver:
                 commit.occurred_at,
             )
         else:
-            failed = (
-                isinstance(commit.event, ToolFailed) or commit.event.status != "success"
-            )
             span.update(
                 output=self._mask(data=dict(output)),
                 level="ERROR" if failed else "DEFAULT",
@@ -579,6 +580,31 @@ class LangfuseObserver:
             return
         key = (commit.execution_id, commit.author.run_id)
         messages = [dict(message) for message in event.messages]
+        for message in messages:
+            if not message.get("sdk_native"):
+                continue
+            for raw in message.get("tool_calls", ()):
+                action = Action.from_tool_call(raw)
+                self._actions[(commit.execution_id, action.id)] = dict(action.arguments)
+                self._tool_starts[(commit.execution_id, action.id)] = commit.occurred_at
+            if message.get("role") == "tool":
+                call_id = message["tool_call_id"]
+                self._pending_inputs.setdefault(key, []).append(message)
+                self._record_delta(
+                    commit,
+                    context,
+                    name=message["name"],
+                    as_type="tool",
+                    output=message,
+                    input_messages=self._actions.pop(
+                        (commit.execution_id, call_id), None
+                    ),
+                    run_id=commit.author.run_id,
+                    tool_invocation_id=call_id,
+                    duration_ms=message.get("duration_ms"),
+                    failed=bool(message.get("is_error")),
+                )
+                return
         assistant_indexes = [
             index
             for index, message in enumerate(messages)
@@ -659,6 +685,9 @@ class LangfuseObserver:
                 (commit.execution_id, event.action_id), None
             ),
             run_id=event.requested_by_run_id,
+            tool_invocation_id=event.invocation_id,
+            duration_ms=event.duration_ms,
+            failed=isinstance(event, ToolFailed) or event.status != "success",
         )
 
     def restore_commit(

@@ -150,6 +150,58 @@ def _json(span, attribute):
     return json.loads(span.attributes[f"langfuse.observation.{attribute}"])
 
 
+@pytest.mark.parametrize("failed", [False, True])
+def test_sdk_native_transcript_exports_tool_span(observer, failed):
+    instance, exporter, _ = observer
+    action = Action(id="native-call", name="Bash", arguments={"command": "pwd"})
+    events = [
+        *_events()[:2],
+        AgentTurnRecorded(
+            messages=({**action.to_message(), "sdk_native": True},),
+            usage_delta=UsageDelta(tool_calls=1),
+        ),
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "role": "tool",
+                    "name": "Bash",
+                    "tool_call_id": action.id,
+                    "content": "failure" if failed else "/tmp",
+                    "sdk_native": True,
+                    "is_error": failed,
+                    "duration_ms": 25,
+                },
+            )
+        ),
+        AgentTurnRecorded(messages=({"role": "assistant", "content": "done"},)),
+        ExecutionCompleted(status="submitted"),
+    ]
+    _record(instance, events)
+    spans = exporter.get_finished_spans()
+    tool = next(span for span in spans if span.name == "Bash")
+    assert _json(tool, "input") == {"command": "pwd"}
+    assert _json(tool, "output")["content"] == ("failure" if failed else "/tmp")
+    assert tool.attributes["langfuse.observation.type"] == "tool"
+    assert tool.attributes["langfuse.observation.level"] == (
+        "ERROR" if failed else "DEFAULT"
+    )
+    assert tool.attributes["langfuse.observation.metadata.execution_duration_ms"] == 25
+    assert (
+        tool.attributes["langfuse.observation.metadata.timing_source"]
+        == "sdk_transcript_commits"
+    )
+    generation = next(
+        span
+        for span in spans
+        if span.attributes.get("langfuse.observation.type") == "generation"
+        and _json(span, "output").get("content") == "done"
+    )
+    assert any(
+        message.get("tool_call_id") == action.id
+        for message in _json(generation, "input")
+    )
+
+
 def test_task_tree_has_one_real_root_and_correct_step_parents(observer):
     instance, exporter, _ = observer
     _record(instance, _events())

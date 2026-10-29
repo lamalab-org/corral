@@ -491,13 +491,43 @@ class AgentSession:
         usage: Mapping[str, Any] | None = None,
         llm_calls: int = 1,
     ) -> None:
-        """Commit messages or usage alone when no public output was returned."""
+        """Commit provider messages, retaining tools executed by the SDK.
+
+        Corral tools already have authored action/result commits. SDK tools
+        remain transcript-only so recovery never tries to execute them.
+        """
         messages: list[Mapping[str, JsonValue]] = []
+        native_calls = {
+            call["id"]: call["function"]["name"]
+            for message in self.messages
+            if message.get("sdk_native")
+            for call in message.get("tool_calls", ())
+        }
+        task_tools = {tool["function"]["name"] for tool in self.tools}
         for raw in raw_messages:
             message = dict(raw)
-            if message.get("role") == "tool" or message.get("tool_calls"):
-                continue
-            if message.get("content") is None and not message.get("name"):
+            if message.get("tool_calls"):
+                calls = [
+                    call
+                    for call in message["tool_calls"]
+                    if message.get("sdk_native")
+                    or (
+                        call["function"]["name"] not in task_tools
+                        and not call["function"]["name"].startswith("mcp__corral__")
+                    )
+                ]
+                if not calls:
+                    continue
+                message.update(tool_calls=calls, sdk_native=True)
+                native_calls.update(
+                    (call["id"], call["function"]["name"]) for call in calls
+                )
+            elif message.get("role") == "tool":
+                name = native_calls.get(message.get("tool_call_id"))
+                if name is None:
+                    continue
+                message.update(name=name, sdk_native=True)
+            elif message.get("content") is None and not message.get("name"):
                 continue
             detached = _json_value(message)
             if not isinstance(detached, Mapping):
@@ -509,18 +539,28 @@ class AgentSession:
             usage,
             llm_calls=llm_calls if usage is not None else 0,
         )
-        await self._append_agent(
-            AgentTurnRecorded(
-                messages=tuple(messages),
-                usage_delta=UsageDelta(
-                    input_tokens=normalized.input_tokens,
-                    output_tokens=normalized.output_tokens,
-                    reasoning_tokens=normalized.reasoning_tokens,
-                    llm_calls=normalized.llm_calls,
-                ),
-            ),
-            f"agent:{self.actor.run_id}:turn:{uuid4()}",
+        # Keep native call/result boundaries visible to streaming observers.
+        batches = (
+            [(message,) for message in messages]
+            if any(message.get("sdk_native") for message in messages)
+            else [tuple(messages)]
         )
+        for index, batch in enumerate(batches):
+            await self._append_agent(
+                AgentTurnRecorded(
+                    messages=batch,
+                    usage_delta=UsageDelta(
+                        input_tokens=normalized.input_tokens if index == 0 else 0,
+                        output_tokens=normalized.output_tokens if index == 0 else 0,
+                        reasoning_tokens=normalized.reasoning_tokens
+                        if index == 0
+                        else 0,
+                        llm_calls=normalized.llm_calls if index == 0 else 0,
+                        tool_calls=sum(len(m.get("tool_calls", ())) for m in batch),
+                    ),
+                ),
+                f"agent:{self.actor.run_id}:turn:{uuid4()}",
+            )
 
     async def record_message(
         self,

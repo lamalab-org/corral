@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from corral.core.task import TaskDefinition
 from corral.core.tool import ToolConnection
 from corral.core.tool_catalog import ToolCatalogSnapshot
 from corral.persistence import SQLiteCommitStore
+from corral.report.projection import _tool_statistics
 from corral.runtime import TaskRuntime
 
 
@@ -336,6 +338,41 @@ async def test_sdk_failures_are_typed_not_error_answers(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("harness_error", [False, True])
+async def test_client_tool_errors_survive_in_outcome_metadata(
+    monkeypatch, harness_error
+):
+    structured_error = [{"type": "text", "text": "Connection closed"}]
+
+    async def factory(_options, _captured):
+        return [
+            FakeUserMessage(
+                [
+                    FakeToolResultBlock("tu-1", "The operation timed out.", True),
+                    FakeToolResultBlock("tu-2", structured_error, True),
+                    FakeToolResultBlock("tu-3", "tool-ok"),
+                ]
+            ),
+            FakeResultMessage(
+                "42",
+                subtype="error_unknown" if harness_error else "success",
+                is_error=harness_error,
+            ),
+        ]
+
+    _install_fake_sdk(monkeypatch, factory)
+    session = FakeSession(submission="42", submission_status="submitted")
+    outcome = await ClaudeCodeAgent().run_session(session)
+
+    assert outcome.status == ("harness_failure" if harness_error else "completed")
+    assert outcome.metadata["tool_errors"] == 2
+    assert outcome.metadata["tool_error_details"] == [
+        {"tool_call_id": "tu-1", "content": "The operation timed out."},
+        {"tool_call_id": "tu-2", "content": json.dumps(structured_error)},
+    ]
+
+
+@pytest.mark.anyio
 async def test_wall_clock_timeout_is_a_typed_failure(monkeypatch):
     async def factory(options, captured):
         await asyncio.sleep(1)
@@ -488,7 +525,10 @@ async def test_bare_mode_real_sdk_preflight_exposes_corral_tools(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_claude_submits_through_the_session_mcp_tool(monkeypatch, tmp_path):
+@pytest.mark.parametrize("native_error", [None, False, True])
+async def test_claude_submits_through_the_session_mcp_tool(
+    monkeypatch, tmp_path, native_error
+):
     async def factory(options, captured):
         url = options.mcp_servers["corral"]["url"]
         async with (
@@ -498,12 +538,37 @@ async def test_claude_submits_through_the_session_mcp_tool(monkeypatch, tmp_path
             await mcp_session.initialize()
             result = await mcp_session.call_tool("submit_answer", {"answer": "42"})
             assert result.isError is False
+        messages = []
+        if native_error is not None:
+            messages.extend(
+                [
+                    FakeAssistantMessage(
+                        [
+                            FakeToolUseBlock("native-bash", "Bash", {"command": "pwd"}),
+                            FakeToolUseBlock(
+                                "sdk-submit",
+                                "mcp__corral__submit_answer",
+                                {"answer": "42"},
+                            ),
+                        ]
+                    ),
+                    FakeUserMessage(
+                        [
+                            FakeToolResultBlock(
+                                "native-bash", "shell output", is_error=native_error
+                            ),
+                            FakeToolResultBlock("sdk-submit", "submitted"),
+                        ]
+                    ),
+                ]
+            )
         return [
+            *messages,
             FakeResultMessage(
                 "42",
                 usage={"input_tokens": 5, "output_tokens": 2},
                 num_turns=1,
-            )
+            ),
         ]
 
     _install_fake_sdk(monkeypatch, factory)
@@ -535,6 +600,28 @@ async def test_claude_submits_through_the_session_mcp_tool(monkeypatch, tmp_path
     assert final.usage.input_tokens == 5
     assert final.usage.output_tokens == 2
     assert final.usage.llm_calls == 1
-    assert final.usage.tool_calls == 1
+    assert final.usage.tool_calls == (1 if native_error is None else 2)
     assert final.usage.agent_steps == 1
-    assert final.tool_statistics == {"submit_answer": 1}
+    assert final.tool_statistics == (
+        {"submit_answer": 1}
+        if native_error is None
+        else {"submit_answer": 1, "Bash": 1}
+    )
+    if native_error is not None:
+        native = next(
+            call
+            for call in _tool_statistics(final)["tool_calls"]
+            if call["tool_name"] == "Bash"
+        )
+        assert native["arguments"] == {"command": "pwd"}
+        assert native["result"] == "shell output"
+        assert native["status"] == ("failed" if native_error else "completed")
+        messages = [
+            message
+            for conversation in final.conversations.values()
+            for message in conversation
+        ]
+        assert any(message.get("tool_call_id") == "native-bash" for message in messages)
+        assert not any(
+            message.get("tool_call_id") == "sdk-submit" for message in messages
+        )

@@ -41,6 +41,16 @@ from corral.core.action import submit_answer_action
 # (the `[mcp_servers.<name>]` config table key).
 _MCP_SERVER_NAME = "corral"
 
+_NATIVE_TOOL_ITEMS = {
+    "commandExecution",
+    "fileChange",
+    "webSearch",
+    "imageView",
+    "imageGeneration",
+    "dynamicToolCall",
+    "collabAgentToolCall",
+}
+
 # MCP tools that create/place a file the model may later submit a path to. When
 # any of these is available, the model is told to use relative paths: the corral
 # filesystem tools and the scorer both resolve a relative path against the
@@ -398,7 +408,7 @@ class CodexAgent(BaseAgent):
                     item = getattr(payload, "item", None)
                     root = getattr(item, "root", item)
                     kind = getattr(root, "type", None)
-                    if kind == "mcpToolCall":
+                    if kind == "mcpToolCall" or kind in _NATIVE_TOOL_ITEMS:
                         tool_calls += 1
                     elif kind == "agentMessage":
                         phase = getattr(getattr(root, "phase", None), "value", None)
@@ -486,18 +496,55 @@ class CodexAgent(BaseAgent):
                 run.messages.append(
                     LiteLLMMessage(role="assistant", content=text, name="thinking")
                 )
-        elif kind == "mcpToolCall":
+        elif kind == "mcpToolCall" or kind in _NATIVE_TOOL_ITEMS:
             self._record_tool_call(item, run)
 
     def _record_tool_call(self, item: Any, run: _RunState) -> None:
-        """Record an MCP tool call and its result as transcript messages."""
-        tool = getattr(item, "tool", "")
+        """Record SDK tool items, including tools executed outside Corral MCP."""
+        native = item.type in _NATIVE_TOOL_ITEMS
+        tool = getattr(item, "tool", None) or item.type
+        tool = getattr(tool, "value", tool)
         call_id = getattr(item, "id", "")
         arguments = getattr(item, "arguments", None)
+        error = getattr(item, "error", None)
+        is_error = error is not None
+        result = getattr(item, "result", None)
+        if native:
+            payload = item.model_dump(mode="json")
+            arguments = (
+                arguments
+                if arguments is not None
+                else {
+                    key: value
+                    for key, value in payload.items()
+                    if key
+                    in {
+                        "command",
+                        "cwd",
+                        "changes",
+                        "query",
+                        "action",
+                        "path",
+                        "prompt",
+                        "receiver_thread_ids",
+                        "model",
+                        "reasoning_effort",
+                    }
+                }
+            )
+            # Preserve the SDK's complete result, including exit codes, patches,
+            # and child-agent status. Some native items have no separate output.
+            result = payload
+            is_error = (
+                payload.get("status") in {"failed", "declined"}
+                or payload.get("success") is False
+                or payload.get("exit_code") not in {None, 0}
+            )
         run.messages.append(
             {
                 "role": "assistant",
                 "content": "",
+                "sdk_native": native,
                 "tool_calls": [
                     {
                         "id": call_id,
@@ -509,13 +556,14 @@ class CodexAgent(BaseAgent):
                 ],
             }
         )
-        error = getattr(item, "error", None)
-        is_error = error is not None
         if is_error:
             run.metadata["tool_errors"] = run.metadata.get("tool_errors", 0) + 1
+        if error is not None:
             content = getattr(error, "message", None) or str(error)
         else:
-            content = json.dumps(getattr(item, "result", None), default=str)
+            if hasattr(result, "model_dump"):
+                result = result.model_dump(mode="json")
+            content = json.dumps(result, default=str)
         run.messages.append(
             {
                 "role": "tool",
@@ -525,6 +573,7 @@ class CodexAgent(BaseAgent):
                 # generic "tool_result", so tool-level analysis stays possible.
                 "name": tool or "tool_result",
                 "is_error": is_error,
+                "duration_ms": getattr(item, "duration_ms", None),
             }
         )
 
