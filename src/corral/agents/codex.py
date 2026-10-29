@@ -206,8 +206,7 @@ class CodexAgent(BaseAgent):
         )
         instructions = (
             self.system_prompt
-            + "\n\nYou are solving a task in a sandboxed evaluation environment. "
-            "You may use Codex's built-in tools as well as the provided "
+            + "\n\nYou may use Codex's built-in tools as well as the provided "
             f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
             "operate in an isolated per-run workspace; use the MCP tools for task "
             "environment data and actions. Do not invent tool outputs. "

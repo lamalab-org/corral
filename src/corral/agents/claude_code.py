@@ -219,8 +219,7 @@ class ClaudeCodeAgent:
             "not complete the task."
         )
         append = (
-            self.system_prompt
-            + "\n\nYou are solving a task in a sandboxed environment. You may use "
+            self.system_prompt + "\n\nYou may use "
             "Claude Code's built-in tools as well as the provided "
             f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
             "start in a fresh per-run workspace and remain governed by Claude "

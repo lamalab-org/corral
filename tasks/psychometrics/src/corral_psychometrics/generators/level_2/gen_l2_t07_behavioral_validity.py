@@ -82,9 +82,9 @@ SUBMISSION_FORMAT = """A single JSON object:
 }
 
 The model must cover every HSNS item, include `behavior`, and include both the
-latent factor and `gender` in the behavioural regression. The scorer refits the
-submitted measurement model in the training and holdout samples and performs
-the within-group and item checks from that model.
+latent factor and `gender` in the behavioural regression. Provide a complete,
+runnable measurement model that supports fitting the training and holdout
+samples and reproducing the within-group and item checks.
 """
 
 

@@ -79,8 +79,8 @@ A single JSON object:
   }
 }
 
-Give a model for every population. Each is re-fitted on that population's
-reference sample during evaluation, so it must be complete and runnable.
+Give a complete, runnable model for every population so its fit on that
+population's reference sample can be reproduced.
 Include every case exactly once; each value is a list of compatible population
 identifiers, in any order.
 """

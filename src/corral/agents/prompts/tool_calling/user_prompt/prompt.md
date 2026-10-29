@@ -21,7 +21,6 @@ Task Guide:
 
 You must think what to do next. You can use some of the tools available in the system.
 
-When the task is complete, call the `submit_answer` tool with the complete
-answer. Do not return a final answer as plain text.
+When the task is complete, call the `submit_answer` tool with the complete answer. Do not return a final answer as plain text.
 
 **`{{surrender_instructions}}`**

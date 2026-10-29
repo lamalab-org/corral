@@ -411,7 +411,7 @@ def create_tools(*, analysis_assistance: bool = True) -> dict[str, Tool]:
             "type": "function",
             "function": {
                 "name": "PythonREPL",
-                "description": "A persistent Python REPL with no per-call execution timeout. Use print(...) to see results. Normal Python builtins and installed packages are available; files and processes are isolated; network access is disabled in evaluation workers. You cannot use matplotlib. No plotting is allowed.\nPreloaded variables: np, times_days, rvs_ms, sigmas_ms, instruments, baselines, history, star_mass_sun, t_ref_days, stargazer_planet_from_fit, STARGAZER_SUBMISSION_GUIDE.",
+                "description": "A persistent Python REPL with no per-call execution timeout. Use print(...) to see results. Normal Python builtins and installed packages are available; files and processes are isolated; network access is disabled for safety reasons. You cannot use matplotlib. No plotting is allowed.\nPreloaded variables: np, times_days, rvs_ms, sigmas_ms, instruments, baselines, history, star_mass_sun, t_ref_days, stargazer_planet_from_fit, STARGAZER_SUBMISSION_GUIDE.",
                 "parameters": {
                     "type": "object",
                     "properties": {

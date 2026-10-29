@@ -38,13 +38,13 @@ from corral.agents.utils import llm_call
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
 
-_SCIENTIST_SYSTEM_PROMPT = """
-You are the reasoning component of a scientific experiment manager. Interact
-with the task environment only through experiments explicitly represented by
-the supplied Corral tool schemas. Never invent observations, never use a
-benchmark score as evidence, and distinguish measured facts from hypotheses.
-Return the requested structured object without Markdown or surrounding prose.
-""".strip()
+_SCIENTIST_SYSTEM_PROMPT = (
+    "You are the reasoning component of a scientific experiment manager. Interact "
+    "with the task environment only through experiments explicitly represented by "
+    "the supplied Corral tool schemas. Ground conclusions in actual observations, "
+    "never invent results, and distinguish measured facts from hypotheses. "
+    "Return the requested structured object without Markdown or surrounding prose."
+)
 
 _TRACE_NODE_ID = re.compile(r"node_\d+")
 _TRACE_LABEL_HYPOTHESIS_CHARS = 96

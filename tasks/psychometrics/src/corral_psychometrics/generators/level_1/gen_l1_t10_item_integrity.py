@@ -95,8 +95,8 @@ A single JSON object:
   "item_quality": {"<item>": "<class>", ...}
 }
 
-Give a class for every item of the instrument. `model_syntax` is re-fitted during
-evaluation, so it must be complete and runnable.
+Give a class for every item of the instrument. `model_syntax` must be complete
+and runnable so the fit can be reproduced.
 """
 
 

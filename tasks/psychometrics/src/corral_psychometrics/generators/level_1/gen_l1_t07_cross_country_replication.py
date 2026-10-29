@@ -153,8 +153,8 @@ A single JSON object:
   }
 }
 
-Name the two instruments `hsns` and `dirty_dozen`. `model_syntax` is re-fitted on the
-United States sample during evaluation, so it must be complete and runnable.
+Name the two instruments `hsns` and `dirty_dozen`. `model_syntax` must be complete
+and runnable so the fit on the United States sample can be reproduced.
 """
 
 

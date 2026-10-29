@@ -14,5 +14,4 @@ created_at: '2025-11-13T15:41:27.537389+00:00'
 updated_at: '2025-11-13T15:41:27.537389+00:00'
 ---
 
-If you cannot solve the task or determine it is unsolvable, you can surrender from it.
-To surrender, call `submit_answer` with `{"answer": "SURRENDER"}`.
+If you cannot solve the task or determine it is unsolvable, you can surrender from it. To surrender, call `submit_answer` with `{"answer": "SURRENDER"}`.

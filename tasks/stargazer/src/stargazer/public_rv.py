@@ -1,7 +1,7 @@
-"""Public RV numerics shared by analysis helpers and final evaluation.
+"""Public RV numerics for candidate models and analysis helpers.
 
 Only observations, public conventions and submitted parameters enter this module.
-It also works as a standalone module: no task loaders or scoring imports.
+It also works as a standalone module using only its supplied inputs.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ M_JUPITER_KG = 1.89813e27
 
 
 class CandidatePlanet(BaseModel):
-    """Canonical planet fields for normalized submissions and reference audits."""
+    """Canonical planet fields for normalized candidate models."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -35,7 +35,7 @@ class CandidatePlanet(BaseModel):
     Omega_rad: float | None = None
 
     def to_planet_params(self) -> PlanetParams:
-        """Convert the public schema to the evaluator's native dataclass."""
+        """Convert the public schema to the numerical model's native dataclass."""
         return PlanetParams(
             P_days=self.P_days,
             m_sin_i_mjup=self.m_sin_i_mjup,
@@ -278,8 +278,8 @@ def simulate_submission_rv(
 ) -> np.ndarray:
     """Reproduce the original action builder's REBOUND model and analytic fallback.
 
-    This model estimates omitted jitter. The evaluator independently uses the
-    analytic RV-only model when computing its likelihood and matching score.
+    This model estimates omitted jitter. Fit diagnostics use the analytic
+    RV-only model when computing likelihoods.
     """
     times = np.asarray(task.observations.times_days, dtype=float)
     axis = task.los_axis
@@ -435,7 +435,7 @@ def _parse_phase_to_l_rad(
     2. Otherwise infer from legacy phase fields using this order:
        phase_frac, phase_rad/phase_deg/phase, T0_days/T_peri.
 
-    This keeps parser behavior consistent with semantic validation and scoring:
+    This keeps parser behavior consistent with semantic validation:
     when `l_rad` is provided, legacy aliases are treated as non-canonical hints.
 
     Legacy priority (when `l_rad` is absent):
@@ -782,7 +782,7 @@ def normalize_candidate(submission, task: PublicFitContext) -> CandidateSubmissi
         default=float(np.average(observed, weights=weights)),
     )
     # The original builder uses REBOUND for omitted-jitter residuals, even
-    # though evaluation fits analytic RV-only curves and instrument offsets.
+    # though fit diagnostics use analytic RV-only curves and instrument offsets.
     candidate = CandidateSubmission(planets=planets)
     if plan.get("noise_jitter_ms") is None:
         model = np.full_like(observed, offset)
@@ -903,7 +903,7 @@ class FitDiagnostics:
     residuals_ms: np.ndarray
 
     def public_payload(self) -> dict[str, Any]:
-        """Explicit public allowlist; never serialize a private evaluation."""
+        """Serialize the supported observation-based diagnostics."""
         return {
             "valid": True,
             "errors": [],
@@ -995,7 +995,7 @@ def compute_fit(
 def validate_fit(
     public_context: PublicFitContext, payload: Any, *, include_arrays: bool = False
 ) -> dict[str, Any]:
-    """Validate a candidate without any reference-dependent code path."""
+    """Validate a candidate against the supplied observations and conventions."""
     try:
         parsed = parse_submission(payload)
         check = validate_submission_semantics(
@@ -1015,7 +1015,7 @@ def validate_fit(
     warnings = list(check["warnings"])
     if len(parsed["planets"]) > public_context.max_planets:
         warnings.append(
-            f"Only the first {public_context.max_planets} planets are evaluated."
+            f"Only the first {public_context.max_planets} planets are included in the fit."
         )
     warnings.append(
         "The returned candidate contains effective clipped parameters and jitter (minimum 0.1 m/s)."
@@ -1077,7 +1077,7 @@ class PublicRV:
     def diagnostics(self, planets, noise_jitter_ms=0.1, *, rv_offset_ms=None):
         """Return validator scalars plus planet_model_ms, model_ms, residuals_ms.
 
-        None jitter preserves the evaluator's legacy REBOUND estimate. Invalid
+        None jitter preserves the legacy REBOUND estimate. Invalid
         candidates return the same compact errors as validate_fit, without arrays.
         """
         return validate_fit(
