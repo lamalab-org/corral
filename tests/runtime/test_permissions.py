@@ -522,6 +522,134 @@ class ProbeAgent:
         return AgentOutcome(status="completed", answer=answer)
 
 
+class NativeWorkspaceProbeAgent:
+    tool_transport = "python"
+    session_capabilities = AgentSessionCapabilities(native_workspace=True)
+
+    def __init__(self, submit):
+        self.submit = submit
+
+    async def run_session(self, session):
+        import asyncio
+        import json
+        import sys
+        from pathlib import Path
+
+        from corral.agents.schema import AgentOutcome
+        from corral.core.action import Action
+
+        assert os.getuid() != 0
+        assert session.native_tool_workspace == "/workspace"
+        assert Path.cwd() == Path("/workspace")
+        for path in ("/opt/corral/pyproject.toml", "/corral-state/commits.sqlite3"):
+            with pytest.raises((PermissionError, FileNotFoundError)):
+                Path(path).read_text()
+        response = await session.execute(
+            Action(
+                name="write_file",
+                arguments={"path": "/workspace/seed.txt", "content": "from MCP"},
+            )
+        )
+        assert response.success, response.error
+        assert Path("seed.txt").read_text() == "from MCP"
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('native.txt').write_text(Path('seed.txt').read_text() + ' via native')",
+        )
+        assert await process.wait() == 0
+        Path("seed.txt").unlink()
+        await session.record_messages(
+            [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "native-write",
+                            "function": {
+                                "name": "native_shell",
+                                "arguments": json.dumps(
+                                    {"command": "write native.txt"}
+                                ),
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "native-write",
+                    "content": "done",
+                    "duration_ms": 1.0,
+                },
+            ]
+        )
+        response = await session.execute(
+            Action(name="read_file", arguments={"path": "/workspace/native.txt"})
+        )
+        assert response.success
+        assert "from MCP via native" in response.result
+        # Even writes without a subsequent SDK result must survive a failed run.
+        Path("tail.txt").write_text("last native write")
+        if self.submit:
+            await session.execute(
+                Action(name="submit_answer", arguments={"answer": "native.txt"})
+            )
+            return AgentOutcome(status="completed", answer="native.txt")
+        return AgentOutcome(status="iteration_limit", error="probe stopped")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("submit", [False, True])
+async def test_native_and_mcp_tools_share_only_the_assigned_workspace(
+    workspace, tmp_path, submit
+):
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from corral.core.environment import Toolset, default_file_tools
+    from corral.core.task import TaskDefinition
+    from corral.observability import NoOpObserver
+    from corral.persistence import SQLiteCommitStore
+    from corral.runtime import TaskRuntime
+
+    task = TaskDefinition(
+        name="native-workspace",
+        description="Share native and MCP files",
+        tools=[],
+        scoring_fn=lambda answer: 1.0,
+        submission_format={},
+    )
+    environment = Environment(
+        "native-workspace",
+        task,
+        base_work_dir=workspace,
+        task_execution_id="native-workspace",
+        toolset=Toolset(workspace_factory=default_file_tools),
+    )
+    async with SQLiteCommitStore(
+        tmp_path / "native.sqlite3", execution_id="native-workspace"
+    ) as store:
+        try:
+            state = await TaskRuntime(store, NoOpObserver()).run(
+                NativeWorkspaceProbeAgent(submit),
+                environment,
+                execution_id="native-workspace",
+                max_iterations=10,
+                started_at=datetime.now(timezone.utc),
+            )
+            assert "native.txt" in state.workspace.files, (
+                state.runtime.model_dump_json()
+            )
+            assert "tail.txt" in state.workspace.files
+            assert "seed.txt" not in state.workspace.files
+            assert (
+                Path(environment.workspace_path) / "native.txt"
+            ).read_text() == "from MCP via native"
+            assert (state.submission == "native.txt") is submit
+        finally:
+            environment.shutdown_jobs()
+
+
 class DelegatingProbeAgent:
     tool_transport = "python"
     session_capabilities = AgentSessionCapabilities(inspect_subagents=True)

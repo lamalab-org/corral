@@ -85,6 +85,37 @@ async def workspace_session(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_native_file_changes_are_checkpointed_without_replay(
+    workspace_session, monkeypatch
+):
+    session = workspace_session
+    monkeypatch.setattr(
+        AgentSession, "native_tool_workspace", property(lambda self: self.workspace)
+    )
+    root = Path(session.workspace)
+    (root / "notes.txt").unlink()
+    (root / "native.txt").write_text("created outside MCP")
+    await session.record_messages(
+        [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    Action(
+                        id="native", name="Bash", arguments={"command": "write"}
+                    ).to_tool_call()
+                ],
+            },
+            {"role": "tool", "tool_call_id": "native", "content": "done"},
+        ]
+    )
+    assert "native.txt" in session.state.workspace.files
+    assert "notes.txt" not in session.state.workspace.files
+    assert "native" not in session.state.actions
+    restored = await session.state_store.materialize("main")
+    assert restored.workspace == session.state.workspace
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("after_submission", [False, True])
 async def test_sdk_tools_persist_and_appear_in_verbose_reports(
     workspace_session, after_submission

@@ -3,12 +3,13 @@ import json
 import math
 import os
 import platform
-import shutil
 import tempfile
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Literal
 
 from corral.report.logging import logger
@@ -54,7 +55,7 @@ from pydantic import SecretStr
 
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
 from corral.agents.schema import SURRENDER_SENTINEL, AgentOutcome, AgentUsage
-from corral.agents.session import AgentSession
+from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.usage import usage_field
 from corral.agents.utils import LiteLLMMessage
 
@@ -133,8 +134,11 @@ class _TimeoutMCPToolProvider:
     of changing SDK globals, so concurrent agents can have different limits.
     """
 
-    def __init__(self, tool_timeout_s: float):
+    def __init__(
+        self, tool_timeout_s: float, native_tool_names: set[str] | None = None
+    ):
         self.tool_timeout_s = tool_timeout_s
+        self.native_tool_names = native_tool_names or set()
 
     def create_tools(
         self, mcp_config: dict[str, MCPServer], timeout: float = 30.0
@@ -163,7 +167,14 @@ class _TimeoutMCPToolProvider:
                 )
                 # SDK tool definitions are frozen; replace each definition in
                 # the same registry populated by _connect_and_list_tools.
-                client._tools[index] = tool.model_copy(update={"executor": executor})
+                schema = tool.mcp_tool
+                if tool.name in self.native_tool_names:
+                    schema = schema.model_copy(
+                        update={"name": f"mcp__corral__{tool.name}"}
+                    )
+                client._tools[index] = tool.model_copy(
+                    update={"executor": executor, "mcp_tool": schema}
+                )
         except BaseException:
             client.sync_close()
             raise
@@ -218,6 +229,8 @@ class _RunState:
     metadata: dict[str, Any] = field(default_factory=dict)
     available_tools: list[dict[str, Any]] = field(default_factory=list)
     result: HarnessRunResult | None = None
+    tool_started_at: dict[str, float] = field(default_factory=dict)
+    native_workspace: str | None = None
 
 
 class _OpenHandsError(RuntimeError):
@@ -304,6 +317,7 @@ class OpenHandsAgent(BaseAgent):
     """
 
     tool_transport = "mcp"
+    session_capabilities = AgentSessionCapabilities(native_workspace=True)
 
     def __init__(
         self,
@@ -419,6 +433,7 @@ class OpenHandsAgent(BaseAgent):
         mcp_url: str,
         enable_surrender: bool,
         mcp_tool_names: set[str] | None = None,
+        corral_sandbox: bool = False,
     ) -> Any:
         """Assemble the reproducible OpenHands `Agent` for a run."""
         # SDK 1.35 caches this path before Corral enters the worker filesystem.
@@ -428,12 +443,13 @@ class OpenHandsAgent(BaseAgent):
         sdk_agent_base._BUILTIN_PROMPT_DIR = str(
             Path(sdk_agent_base._BUILTIN_PROMPT_DIR).resolve()
         )
-        # Docker provides a task-scoped terminal through MCP. The SDK rejects
-        # duplicate tool names, so prefer the task capability when it overlaps
-        # with a native tool, while retaining the rest of the standard preset.
+        # Shared Docker workspaces retain the complete native preset. The MCP
+        # provider namespaces overlapping task tools so both remain available.
         task_tools = mcp_tool_names or set()
         native_tools = [
-            tool for tool in get_default_tools() if tool.name not in task_tools
+            tool
+            for tool in get_default_tools()
+            if corral_sandbox or tool.name not in task_tools
         ]
         return Agent(
             llm=llm,
@@ -552,7 +568,9 @@ class OpenHandsAgent(BaseAgent):
 
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Run OpenHands using the MCP tool connection provided by the runtime."""
-        run = _RunState()
+        run = _RunState(
+            native_workspace=getattr(session, "native_tool_workspace", None)
+        )
         iteration_limit = session.iteration_limit
         tools = [dict(tool) for tool in session.tools]
         run.available_tools = tools
@@ -570,6 +588,16 @@ class OpenHandsAgent(BaseAgent):
             iteration_limit=iteration_limit,
         )
         run.metadata["dropped_image_parts"] = dropped_images
+        run.metadata["workspace_access"] = (
+            "corral_sandbox"
+            if run.native_workspace
+            else "isolated_sdk_workspace_and_mcp"
+        )
+        if run.native_workspace is not None:
+            prompt += (
+                "\nNative tools and Corral MCP tools share the task workspace at "
+                f"{run.native_workspace}. Corral provides the execution sandbox."
+            )
         # Keep a conservative fallback for adapters/tests that do not expose
         # SDK metrics. The real OpenHands path replaces this with the count
         # of per-completion token-usage records in `_record_usage`.
@@ -648,22 +676,22 @@ class OpenHandsAgent(BaseAgent):
         precise terminal status via :meth:`_harness_failure_answer`. Completion
         still requires the session's `submit_answer` MCP tool.
         """
-        # Fresh, empty, per-episode working directory; cleaned up afterwards.
-        cwd = tempfile.mkdtemp(prefix="corral-openhands-")
-
         try:
-            final_answer = await self._execute_openhands(
-                prompt=prompt,
-                mcp_url=mcp_url,
-                cwd=cwd,
-                enable_surrender=enable_surrender,
-                iteration_limit=iteration_limit,
-                run=run,
-            )
+            with (
+                nullcontext(run.native_workspace)
+                if run.native_workspace is not None
+                else tempfile.TemporaryDirectory(prefix="corral-openhands-")
+            ) as cwd:
+                final_answer = await self._execute_openhands(
+                    prompt=prompt,
+                    mcp_url=mcp_url,
+                    cwd=cwd,
+                    enable_surrender=enable_surrender,
+                    iteration_limit=iteration_limit,
+                    run=run,
+                )
         except Exception as e:  # surface as infra failure, not a model answer
             return self._harness_failure_answer(e, run)
-        finally:
-            shutil.rmtree(cwd, ignore_errors=True)
 
         return self._finalize_answer(final_answer, task_id, enable_surrender, run)
 
@@ -778,12 +806,18 @@ class OpenHandsAgent(BaseAgent):
                 for tool in run.available_tools
                 if tool.get("function", {}).get("name")
             },
+            corral_sandbox=run.native_workspace is not None,
         )
         # The generic Conversation factory in SDK 1.35.0 does not expose the
         # provider hook. This adapter always uses a local workspace.
         conversation = LocalConversation(
             agent=agent,
-            mcp_tool_provider=_TimeoutMCPToolProvider(self.tool_timeout_s),
+            mcp_tool_provider=_TimeoutMCPToolProvider(
+                self.tool_timeout_s,
+                {tool.name for tool in get_default_tools()}
+                if run.native_workspace
+                else None,
+            ),
             callbacks=[on_event],
             # OpenHands deliberately falls back to a blocking response when
             # streaming is enabled without a token callback. A no-op callback
@@ -919,6 +953,8 @@ class OpenHandsAgent(BaseAgent):
         # nameless tool call would only duplicate it.
         if isinstance(getattr(event, "action", None), FinishAction):
             return
+        call_id = getattr(event, "tool_call_id", "") or ""
+        run.tool_started_at[call_id] = perf_counter()
         thought = _content_to_text(getattr(event, "thought", "") or "")
         if thought:
             run.messages.append(
@@ -928,6 +964,13 @@ class OpenHandsAgent(BaseAgent):
             {
                 "role": "assistant",
                 "content": "",
+                **(
+                    {"sdk_native": True}
+                    if run.native_workspace
+                    and getattr(event, "tool_name", "")
+                    in {tool.name for tool in get_default_tools()}
+                    else {}
+                ),
                 "tool_calls": [
                     {
                         "id": getattr(event, "tool_call_id", "") or "",
@@ -992,6 +1035,11 @@ class OpenHandsAgent(BaseAgent):
         if is_error:
             run.metadata["tool_errors"] = run.metadata.get("tool_errors", 0) + 1
         tool_name = getattr(event, "tool_name", "") or ""
+        call_id = getattr(event, "tool_call_id", "") or ""
+        started_at = run.tool_started_at.pop(call_id, None)
+        duration_ms = (
+            None if started_at is None else (perf_counter() - started_at) * 1000
+        )
         run.messages.append(
             {
                 "role": "tool",
@@ -1001,6 +1049,7 @@ class OpenHandsAgent(BaseAgent):
                 # "tool_result", so tool-level analysis stays possible.
                 "name": tool_name or "tool_result",
                 "is_error": is_error,
+                "duration_ms": duration_ms,
             }
         )
 
@@ -1074,7 +1123,12 @@ class OpenHandsAgent(BaseAgent):
             return  # tools not introspectable (e.g. a stubbed conversation)
         run.metadata["runtime_tools"] = sorted(runtime)
         corral_tools = {
-            t["function"]["name"]
+            (
+                f"mcp__corral__{t['function']['name']}"
+                if run.native_workspace
+                and t["function"]["name"] in {tool.name for tool in get_default_tools()}
+                else t["function"]["name"]
+            )
             for t in run.available_tools
             if t.get("function", {}).get("name")
         }

@@ -276,6 +276,27 @@ def test_codex_configuration_keeps_native_tools_and_scopes_task_mcp_tools():
 
 
 @pytest.mark.anyio
+async def test_codex_uses_and_preserves_corral_workspace(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_turn(self, *, workspace, codex_home, run, **kwargs):
+        assert workspace == tmp_path
+        assert codex_home != workspace
+        assert run.metadata["sandbox"] == "externalSandbox"
+        (workspace / "native.txt").write_text("native output")
+        return "42"
+
+    monkeypatch.setattr(CodexAgent, "_execute_codex_turn", fake_turn)
+    session = Session()
+    session.native_tool_workspace = str(tmp_path)
+    outcome = await CodexAgent(system_prompt="system").run_session(session)
+    assert outcome.status == "completed"
+    assert (tmp_path / "native.txt").read_text() == "native output"
+    assert outcome.metadata["workspace_access"] == "corral_sandbox"
+    assert outcome.metadata["codex_cwd_is_execution_workspace"] is True
+
+
+@pytest.mark.anyio
 async def test_codex_never_receives_the_physical_task_workspace(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     task_workspace = tmp_path / "task-a"

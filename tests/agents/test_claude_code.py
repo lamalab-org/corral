@@ -92,6 +92,40 @@ class FakeClaudeAgentOptions:
         self.__dict__.update(kwargs)
 
 
+def test_native_tool_durations_follow_call_ids_and_preserve_unknowns(monkeypatch):
+    _install_fake_sdk(monkeypatch, None)
+    times = iter([10.0, 12.0, 13.0, 17.0])
+    monkeypatch.setattr(claude_code_module, "perf_counter", lambda: next(times))
+    agent = ClaudeCodeAgent()
+    run = _RunState()
+    agent._consume_message(
+        FakeAssistantMessage(
+            [
+                FakeToolUseBlock("a", "Bash", {"command": "first"}),
+                FakeToolUseBlock("b", "Bash", {"command": "second"}),
+            ]
+        ),
+        [],
+        None,
+        run,
+    )
+    _, results = agent._consume_message(
+        FakeUserMessage(
+            [
+                FakeToolResultBlock("b", "failed", is_error=True),
+                FakeToolResultBlock("a", "done"),
+                FakeToolResultBlock("unknown", "no start event"),
+            ]
+        ),
+        [],
+        None,
+        run,
+    )
+    assert [r["duration_ms"] for r in results] == [1000, 7000, None]
+    assert results[0]["is_error"] is True
+    assert not run.tool_started_at
+
+
 def _default_mcp_status(options):
     exposed = [
         {"name": name.removeprefix("mcp__corral__")}
@@ -194,6 +228,24 @@ def test_claude_is_only_a_new_session_agent():
     assert not hasattr(agent, "arun_agent")
     assert not hasattr(agent, "messages")
     assert not hasattr(agent, "harness_result")
+
+
+@pytest.mark.anyio
+async def test_claude_uses_and_preserves_corral_workspace(monkeypatch, tmp_path):
+    async def messages(options, captured):
+        assert options.cwd == str(tmp_path)
+        assert options.sandbox["enabled"] is False
+        assert options.permission_mode == "auto"
+        Path(options.cwd, "native.txt").write_text("native output")
+        return [FakeResultMessage("done")]
+
+    _install_fake_sdk(monkeypatch, messages)
+    session = FakeSession(submission="done", submission_status="submitted")
+    session.native_tool_workspace = str(tmp_path)
+    outcome = await ClaudeCodeAgent().run_session(session)
+    assert outcome.status == "completed"
+    assert (tmp_path / "native.txt").read_text() == "native output"
+    assert outcome.metadata["workspace_access"] == "corral_sandbox"
 
 
 def test_claude_usage_includes_cached_and_cache_created_input_tokens():

@@ -19,7 +19,7 @@ from corral.report.logging import logger
 # an environment without the extra gets an actionable install hint instead of a
 # bare ModuleNotFoundError deep in the import chain.
 try:
-    from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
+    from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox, TurnHandle
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
     raise ModuleNotFoundError(
         "CodexAgent requires the OpenAI Codex SDK, which ships as the optional "
@@ -32,7 +32,7 @@ from corral.agents.schema import (
     AgentOutcome,
     AgentUsage,
 )
-from corral.agents.session import AgentSession
+from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.usage import usage_field
 from corral.agents.utils import LiteLLMMessage
 from corral.core.action import submit_answer_action
@@ -91,6 +91,7 @@ class HarnessRunResult:
 class _RunState:
     """Mutable scratch owned by one invocation, never by the agent instance."""
 
+    native_workspace: str | None = None
     messages: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -169,6 +170,7 @@ class CodexAgent(BaseAgent):
     """
 
     tool_transport = "mcp"
+    session_capabilities = AgentSessionCapabilities(native_workspace=True)
     unsupported_model_parameters = frozenset({"temperature"})
 
     def __init__(
@@ -354,7 +356,7 @@ class CodexAgent(BaseAgent):
                 cwd=str(workspace),
                 developer_instructions=developer_instructions,
                 approval_mode=ApprovalMode.auto_review,
-                sandbox=Sandbox.read_only,
+                sandbox=None if run.native_workspace is not None else Sandbox.read_only,
                 ephemeral=True,
             )
             return self._drive_turn(thread, prompt, run)
@@ -367,12 +369,30 @@ class CodexAgent(BaseAgent):
         (b) select the final answer with the SDK's phase-aware logic, and
         (c) enforce a wall-clock deadline via a watchdog that interrupts the turn.
         """
-        turn = thread.turn(
-            prompt,
-            effort=self.reasoning_effort,
-            sandbox=Sandbox.read_only,
-            approval_mode=ApprovalMode.auto_review,
-        )
+        if run.native_workspace is not None:
+            # SDK 0.1's preset enum omits externalSandbox. Use its wire client
+            # for this policy, retaining the normal SDK streaming turn handle.
+            started = thread._client.turn_start(
+                thread.id,
+                prompt,
+                params={
+                    "effort": self.reasoning_effort,
+                    "sandboxPolicy": {
+                        "type": "externalSandbox",
+                        "networkAccess": "enabled",
+                    },
+                    "approvalPolicy": "on-request",
+                    "approvalsReviewer": "auto_review",
+                },
+            )
+            turn = TurnHandle(thread._client, thread.id, started.turn.id)
+        else:
+            turn = thread.turn(
+                prompt,
+                effort=self.reasoning_effort,
+                sandbox=Sandbox.read_only,
+                approval_mode=ApprovalMode.auto_review,
+            )
 
         # Watchdog: interrupt the turn if it outlives the wall-clock deadline.
         timed_out = threading.Event()
@@ -663,7 +683,9 @@ class CodexAgent(BaseAgent):
                 ),
             )
 
-        run = _RunState()
+        run = _RunState(
+            native_workspace=getattr(session, "native_tool_workspace", None)
+        )
         iteration_limit = session.iteration_limit
 
         # Resolve verbosity once and use the *same* value for the REST allowlist
@@ -687,6 +709,11 @@ class CodexAgent(BaseAgent):
         developer_instructions = self._developer_instructions(
             session.surrender_allowed, tool_names
         )
+        if run.native_workspace is not None:
+            developer_instructions += (
+                "\nNative tools and Corral MCP tools share the task workspace at "
+                f"{run.native_workspace}. Corral provides the execution sandbox."
+            )
         mcp_url = session.tool_connection.mcp_url
         run.metadata = self._harness_metadata(
             mcp_url,
@@ -696,6 +723,8 @@ class CodexAgent(BaseAgent):
             iteration_limit=iteration_limit,
         )
         run.metadata["dropped_image_parts"] = dropped_images
+        if run.native_workspace is not None:
+            run.metadata["sandbox"] = "externalSandbox"
         # A Codex thread.turn(...) is one SDK turn for Corral usage
         # accounting, even though it can contain many internal events.
         run.metadata["sdk_turns"] = 1
@@ -808,16 +837,22 @@ class CodexAgent(BaseAgent):
         codex_home = root / "codex-home"
         codex_home.mkdir()
 
-        # Codex never receives the server-side execution path. Its built-in
-        # filesystem/shell tools operate in an empty per-run directory, while
-        # task file operations remain available through the capability-scoped
-        # MCP endpoint. This prevents project discovery from exposing sibling
-        # task workspaces without disabling the native tools.
-        run_workspace = root / "workspace"
-        run_workspace.mkdir()
+        # A Docker worker exposes only the assigned task at a public mount.
+        # Local runs keep a throwaway workspace, never a controller-side path.
+        run_workspace = (
+            Path(run.native_workspace) if run.native_workspace else root / "workspace"
+        )
+        if run.native_workspace is None:
+            run_workspace.mkdir()
         run.metadata["codex_cwd"] = str(run_workspace)
-        run.metadata["codex_cwd_is_execution_workspace"] = False
-        run.metadata["workspace_access"] = "isolated_sdk_workspace_and_mcp"
+        run.metadata["codex_cwd_is_execution_workspace"] = (
+            run.native_workspace is not None
+        )
+        run.metadata["workspace_access"] = (
+            "corral_sandbox"
+            if run.native_workspace
+            else "isolated_sdk_workspace_and_mcp"
+        )
 
         try:
             final_answer = self._execute_codex_turn(
