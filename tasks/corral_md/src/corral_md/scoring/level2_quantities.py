@@ -1,7 +1,8 @@
 """Level-2 final numerical quantities from saved logs, without workflow gates.
 
-This policy checks log-derived answers, not MD provenance, convergence, model
-identity, fitting history, or independent accuracy of the saved trajectories.
+Answers must agree with the retained observations and the historical physical
+references or quality thresholds. MD provenance and fitting history are not
+replayed.
 """
 
 from __future__ import annotations
@@ -23,9 +24,15 @@ from .common import (
 )
 from .final_quantities import correlation_values, require, scalar, value
 from .formats import records
+from .physical_reference import (
+    ALUMINUM_EXPANSION_PER_K,
+    REFERENCE_COMMIT,
+    require_physical_reference,
+    require_reference_spectrum,
+)
 from .regression import metrics, predict
 
-VERSION = "level2-final-quantities-v1"
+VERSION = "level2-final-quantities-v2"
 RUNS = ("main", "independent_800", "independent_500", "independent_1100")
 STRATEGIES = ("randomized", "time_aware")
 
@@ -226,7 +233,11 @@ def vdos(evidence):
             name,
             atol=1e-6,
         )
-    return {**computed, "reference_basis": source}
+    return {
+        **computed,
+        "physical_reference_spectrum": require_reference_spectrum(frequency, power),
+        "reference_basis": source,
+    }
 
 
 def target(row):
@@ -307,13 +318,21 @@ def expansion(evidence):
         [s["temperature_K"] for s in heating], [s["volume_A3"] for s in heating]
     )
     beta = slope / reference
-    compare(required_result(evidence.results, "beta"), beta, "beta")
+    reported = required_result(evidence.results, "beta")
+    compare(reported, beta, "beta")
+    physical_reference = require_physical_reference(
+        beta, ALUMINUM_EXPANSION_PER_K, "Recomputed volumetric expansion coefficient"
+    )
+    require_physical_reference(
+        reported, ALUMINUM_EXPANSION_PER_K, "Reported volumetric expansion coefficient"
+    )
     return {
         "beta_volume": beta,
         "volume_slope_A3_per_K": slope,
         "volume_intercept_A3": intercept,
         "reference_volume_A3": reference,
         "stages": stages,
+        "physical_reference": physical_reference,
         "reference_basis": "logged_production_samples",
     }
 
@@ -384,10 +403,10 @@ def heat_capacity(evidence):
     if all(type(index) is int for index, _ in groups):
         groups.sort(key=lambda pair: pair[0])
         require(
-            [i for i, _ in groups[:5]] == list(range(5)),
-            "Heat capacity needs forward stages 0 through 4",
+            [i for i, _ in groups[:7]] == list(range(7)),
+            "Heat capacity needs forward stages 0 through 6",
         )
-    require(len(groups) >= 5, "Heat capacity needs five forward temperature stages")
+    require(len(groups) >= 7, "Heat capacity needs seven forward temperature stages")
     stages = [
         {
             "stage": index,
@@ -399,6 +418,14 @@ def heat_capacity(evidence):
         }
         for index, batch in groups
     ]
+    # The original task grades seven forward thermostat temperatures. The
+    # optional closing 300 K stage is outside this reference comparison, and
+    # the heat-capacity estimator still uses only the first five stages.
+    physical_reference = require_physical_reference(
+        [s["temperature_K"] for s in stages[:7]],
+        [300, 400, 500, 600, 700, 800, 900],
+        "Forward-stage mean temperatures (K)",
+    )
     slope, intercept = linear_fit(
         [s["temperature_K"] for s in stages[:5]],
         [s["energy_eV_per_atom"] for s in stages[:5]],
@@ -413,6 +440,7 @@ def heat_capacity(evidence):
             "intercept_eV_per_atom": intercept,
         },
         "stages": stages,
+        "physical_reference": physical_reference,
         "reference_basis": "logged_production_samples",
     }
 
@@ -565,7 +593,21 @@ def copper_metrics(evidence):
             require(name in fits, f"Missing {name} validation partition")
             fit = fits[name]
             test = indices(fit.get("test_indices"), len(energies["main"]))
+            if name == "time_aware":
+                train = indices(fit.get("train_indices"), len(energies["main"]))
+                require(
+                    np.max(train) < np.min(test),
+                    "Time-aware training rows must precede the held-out test rows "
+                    "without overlap",
+                )
             y = energies["main"][test]
+            if name == "time_aware":
+                variance = np.sum((y - y.mean()) ** 2)
+                require(
+                    len(y) >= 2 and np.isfinite(variance) and variance > 0,
+                    "Time-aware held-out R2 requires at least two test labels "
+                    "with nonzero variance",
+                )
         else:
             y = energies[name]
         predictions = value(event, "predictions", "predictions_eV", "y_pred")
@@ -604,6 +646,14 @@ def copper_metrics(evidence):
     for name, claim in evidence.results.get("metrics", {}).items():
         require(strategy(name) in outputs, f"Unknown prediction metric group {name}")
         compare_metrics(claim, outputs[strategy(name)], name)
+    # The historical task used chronological holdout predictions and R2 >= .98.
+    # Apply that quality floor to the current time-aware holdout, while retaining
+    # the other split/generalization measurements as separate diagnostics.
+    require(
+        outputs["time_aware"]["r2"] >= 0.98,
+        "Time-aware held-out R2 misses the historical quality threshold 0.98; "
+        f"recomputed {outputs['time_aware']['r2']:g}",
+    )
     # Correlation diagnostics do not block prediction-metric scoring.
     try:
         times = finite_array([scalar(r, "time_fs") for r in runs["main"]], ndim=1)
@@ -614,12 +664,18 @@ def copper_metrics(evidence):
         "metrics": outputs,
         "correlation": correlation,
         "prediction_sources": prediction_sources,
+        "physical_reference": {
+            "metric": "time_aware.r2",
+            "minimum": 0.98,
+            "evaluation_basis": "current_time_aware_holdout",
+            "source_commit": REFERENCE_COMMIT,
+        },
         "reference_basis": "logged_labels_and_predictions_or_recomputed_soap_ridge",
     }
 
 
 class Level2QuantityScorer:
-    """Default minimal policy for level-2 tasks 6, 7, 9 and 10."""
+    """Numerical and historical-reference policy for level-2 tasks 6, 7, 9 and 10."""
 
     def __init__(self, task_number):
         if type(task_number) is not int or task_number not in (6, 7, 9, 10):
@@ -627,7 +683,7 @@ class Level2QuantityScorer:
         self.task_number, self.level = task_number, 2
 
     def evaluate(self, submission):
-        rubric, computed, evidence = Rubric(self.task_number, binary=True), {}, None
+        rubric, computed, evidence = Rubric(self.task_number), {}, None
 
         def calculate():
             nonlocal evidence

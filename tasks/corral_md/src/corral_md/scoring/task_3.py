@@ -97,7 +97,7 @@ def build_plan(e, challenge):
 def evaluate_submission(submission, *, level, verifier=None):
     if level != 1:
         raise ValueError("Task 3 Level 2 uses Task3TemperatureScorer")
-    r = Rubric(3, binary=True, fail_fast=True)
+    r = Rubric(3, fail_fast=True)
     calculated = {}
     verification = {}
     try:

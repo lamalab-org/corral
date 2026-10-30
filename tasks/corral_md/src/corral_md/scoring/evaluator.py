@@ -76,7 +76,7 @@ class WorkflowScorer:
             return self.module.evaluate_submission(
                 submission, level=self.level, verifier=self.verifier
             )
-        rubric = Rubric(self.task_number, binary=True)
+        rubric = Rubric(self.task_number)
         try:
             evidence = Evidence(
                 submission, task_number=self.task_number, level=self.level

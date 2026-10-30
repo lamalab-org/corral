@@ -125,13 +125,12 @@ def test_full_credit_without_statistics_and_numerical_allowance(
 
 
 @pytest.mark.parametrize("number", range(1, 11))
-def test_prompts_omit_statistical_deliverables_and_grading_thresholds(number):
-    if number in (4, 5, 6, 7):
-        return  # These tasks publish their numerical checks in the prompt.
+def test_prompts_omit_statistical_deliverables(number):
     root = Path(__file__).parents[1]
     task = _read(root / f"environments/level_2/tasks_json/task_{number}.json")[0]
     prompt = task["description"] + task["submission_format"]
-    assert not re.search(r"uncertaint|sensitiv|rtol|atol|\d\s*%", prompt, re.I)
+    # Physical reference acceptance intervals are part of the task contract.
+    assert not re.search(r"uncertaint|sensitiv|rtol|atol", prompt, re.I)
 
 
 def test_numerical_policy_handles_sign_zero_scale_and_invalid_arrays():

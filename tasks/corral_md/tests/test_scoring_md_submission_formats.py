@@ -64,11 +64,11 @@ def _scalar_submission(tmp_path, task, *, dof_correction=False):
         }
         if task == 10:
             row.update(
-                stage="equilibration" if step <= 2000 else "production",
+                phase="equilibration" if step <= 2000 else "production",
                 Tx_K=temperature,
                 Ty_K=temperature,
                 Tz_K=temperature,
-                etot_per_atom_eV=(energy + row["ekin_eV"]) / n,
+                energy_eV_per_atom=(energy + row["ekin_eV"]) / n,
             )
         rows.append(row)
     rows.append({"type": "summary", "restart_files": [restart.name]})

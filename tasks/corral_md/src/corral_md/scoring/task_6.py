@@ -175,7 +175,7 @@ class Task6Scorer:
         )
 
     def evaluate(self, submission):
-        rubric, computed = Rubric(6, binary=True), {}
+        rubric, computed = Rubric(6), {}
         evidence = None
 
         def check():

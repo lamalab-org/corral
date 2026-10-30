@@ -9,7 +9,7 @@ MODEL_TARGET = "independent_model_calculation"
 
 def test_required_independent_calculation_errors_unless_verified():
     def rubric():
-        result = Rubric(3, binary=True)
+        result = Rubric(3)
         result.check("saved_evidence", 99, True)
         result.unverified(MODEL_TARGET, "Awaiting trusted calculation", points=1)
         return result

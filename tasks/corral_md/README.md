@@ -221,9 +221,9 @@ To support a resolved transition, the slope difference must exceed three pooled
 regression standard errors (and numerical roundoff), and the intersection must
 lie inside the sampled temperature range. Reported Tg must agree within 100 K.
 Both the independently fitted Tg and the reported Tg must also fall within
-**100 K** of the historical **1576.88 K** reference: **1476.88–1676.88 K**, inclusive.
-This uses an absolute tolerance around the target recorded in
-[`632800bf`'s Level 2 task definition](https://github.com/lamalab-org/corral/blob/632800bf64a3f85ddcb003181f69ce12196a6244/tasks/corral_md/environments/level_2/tasks_json/task_2.json).
+**10%** of the historical **1576.88 K** reference: **1419.192–1734.568 K**, inclusive.
+The reference is recorded in
+[`75d7b356`'s Level 2 task definition](https://github.com/lamalab-org/corral/blob/75d7b3560b7ab922a63fe4fbff9c01d73f83dff3/tasks/corral_md/environments/level_2/tasks_json/task_2.json).
 The reference does not enter the fit, restrict its search, or replace an
 unresolved estimate. In particular, a self-consistent fit near the 2600 K
 data cutoff cannot pass. Evaluation diagnostics retain the fitted value and
@@ -267,7 +267,8 @@ VDOS final-quantity policy described below.
 ## Level 1 final-quantity scoring
 
 The default `check_level1_workflow` factory uses policy
-`level1-final-quantities-v1` for tasks **5, 7, 9 and 10**. It calculates the
+`level1-final-quantities-v1` for tasks **5 and 9**, and
+`level1-final-quantities-v2` for tasks **7 and 10**. It calculates the
 requested observables from numerical logs; it does not grade atomic geometry,
 seeds, thermostat settings, restart completeness, trajectory continuity, or
 effective-sampling/convergence diagnostics. The submission examples retain the
@@ -280,10 +281,9 @@ Level 2 tasks 6, 7, 9 and 10 use the final-quantity policy described below.
   submissions need not serialize geometry, forces or Hessians. Other modes do
   not affect the score. Derivative-only logs remain readable.
 - Task 7 computes production mean temperature, pressure and volume. It retains
-  final mean targets of 300 K ±15 K and 1.01325 bar ±0.05 GPa, and checks any
-  explicitly reported means against the log. There is no independent absolute
-  reference-volume target: this is log-derived numerical scoring, not independent
-  validation of the trajectory or potential.
+  final mean targets of 300 K ±15 K and 1.01325 bar ±0.05 GPa. There is no
+  independent absolute reference-volume target: this is log-derived numerical
+  scoring, not independent validation of the trajectory or potential.
 - Task 9 calculates potential-energy correlation from chronological uniformly
   spaced production energies. A separately retained `energy_series` artifact is
   accepted when explicitly linked in `artifacts.energy_series`. Companion
@@ -298,22 +298,23 @@ Level 2 tasks 6, 7, 9 and 10 use the final-quantity policy described below.
   lower bound. Numerical correlation claims are checked against the saved data.
 - Task 10 computes mean total energy per atom and overall/directional
   temperatures. Overall temperature is derived from the three directional
-  temperatures; a separately reported overall temperature is optional and must
-  agree. It retains final temperature allowances of ±30 K overall and
-  ±45 K per direction around 300 K. Explicitly reported means are checked
-  against the production data. No independent absolute mean-energy target is
+  temperatures. It retains final temperature allowances of ±30 K overall and
+  ±45 K per direction around 300 K. No independent absolute mean-energy target is
   available; no single-frame model or restart verification is required.
 
-For tasks 7 and 10, production is identified by phase labels or the logged
-equilibration cutoff. Common scalar field spellings and nested stage logs are
-accepted. Unit-bearing fields distinguish bar from GPa and total from per-atom
-energy. Numerical answer comparisons use the existing 1% reporting allowance.
-Non-finite or contradictory requested values fail. Unsupported layouts raise
-`EvaluationError` with the unsupported check and reason.
+For tasks 7 and 10, the scorer selects records with `type: "sample"` and
+`phase: "production"`. Task 7 reads exactly `temperature_K`, `volume_A3`, and
+`pressure_GPa`. Task 10 reads exactly `Tx_K`, `Ty_K`, `Tz_K`, and
+`energy_eV_per_atom`. These fields must be present in the samples themselves;
+metadata never supplies measured quantities. Other fields, metadata records,
+and unsolicited summaries or reported means do not affect the score. Aliases
+such as `T_K`, `Temperature`, and `pressure_bar` are ignored. Nested stage logs
+remain readable when their sample records contain the documented fields.
+Missing or non-finite required quantities fail as invalid submissions.
 
 ## Level 2 final-quantity scoring
 
-The default `check_level2_workflow` factory uses `level2-final-quantities-v1`
+The default `check_level2_workflow` factory uses `level2-final-quantities-v2`
 for tasks **6, 7, 9 and 10**, at every verification-backend setting. It grades
 only the requested final numerical quantities from the retained calculation.
 These tasks do not require a model-verification backend or an agent rerun.
@@ -330,8 +331,10 @@ model-verification backend.
 
 Numerical answer comparisons use the shared 1% relative reporting allowance,
 with absolute floors of 1e-6 for VDOS frequencies/prediction metrics and 1e-8
-for expansion/heat-capacity coefficients. Poor predictive accuracy, including
-negative R², can pass if the final metrics are correctly calculated. Task 9
+for expansion/heat-capacity coefficients. Task 9 additionally requires a
+chronological, disjoint training/test partition with held-out R² at least 0.98
+on at least two test labels with nonzero variance;
+correct reporting alone does not pass a poor predictor. Task 9
 requires all five evaluation groups; aggregate metrics alone are insufficient
 without numerical inputs from which to recompute them. Its energy correlation
 is included as a diagnostic and does not block prediction-metric scoring.
@@ -345,13 +348,52 @@ are sufficient where they determine the requested quantity. Task 10 can derive
 temperature from retained momenta. Optional provenance, seeds, thermostat
 settings, force arrays, restarts, convergence screens and additional diagnostic
 claims do not affect these scores. Submitted scripts and model methods are
-never executed. The policy establishes numerical consistency with the saved
-logs; it does not independently validate the potential or trajectories.
+never executed. Numerical consistency is required in addition to the physical
+reference checks below; the scalar logs do not independently authenticate the
+potential or trajectories.
 
-Use `check_level1_workflow` and `check_level2_workflow` to select the scoring
-policy. The superseded workflow policies for tasks 7, 9 and 10, Level 2 task 3,
-and Level 1 task 5 have been removed. `WorkflowScorer` is limited to tasks 1,
-4 and 8 at both levels, task 3 at Level 1, and task 5 at Level 2.
+### Level 2 physical reference requirements
+
+Every Level 2 task has a required physical-value or prediction-quality check.
+The historical source is commit `75d7b3560b7ab922a63fe4fbff9c01d73f83dff3`.
+Scalar reference intervals are inclusive and use `abs(value - reference) <=
+0.10 * abs(reference)`; signs are preserved, and submission uncertainty cannot
+widen the interval. Any failed requirement produces a binary score of 0.0.
+Existing evidence, numerical-consistency and independent-model checks also apply.
+Level 1 scoring is unchanged.
+
+| Task | Required reference check |
+|---|---|
+| 1 | Reported and trajectory-derived diffusion within 10% of 1.74e-8 m²/s |
+| 2 | Reported and fitted Tg within 10% of 1576.88 K, with a resolved transition |
+| 3 | Final-window kinetic temperature within 10% of 300 K |
+| 4 | Reported and reconstructed stable ZPE within 10% of 0.025437 eV/atom; null/unstable results receive zero |
+| 5 | Both reported and reconstructed coefficients within 10% of coefficients fitted to independently computed teacher-model phonons for the current strain definition |
+| 6 | Cosine similarity at least 0.9 to one of the five original Al VDOS spectra, aligned by physical frequency |
+| 7 | Reported and fitted volumetric expansion coefficient within 10% of 9.56133318e-5 K⁻¹ |
+| 8 | Independently reconstructed in-distribution test R² at least 0.98 |
+| 9 | Chronological held-out test R² at least 0.98, recomputed from the retained labels/predictions |
+| 10 | All seven forward production mean temperatures within 10% of their 300–900 K targets; heat capacity still uses only the first five stages |
+
+Task 5 keeps the current Cartesian-z deformation. The historical primitive-cell
+vector deformation and its coefficient are not interchangeable, so its reference
+is derived from the pinned model for the current geometry. Task 6 bundles the
+five original CSVs unchanged under `scoring/references/task_6`; the comparison
+interpolates both spectra onto a shared frequency grid and includes out-of-range
+power. It does not invent scalar moment references from the old spectra.
+Tasks 8 and 9 retain the historical one-sided R² threshold on the current test
+sets; the old fixed SOAP feature arrays cannot evaluate arbitrary current
+descriptors. Task 10's historical reference defines temperatures, not a heat
+capacity magnitude. These distinctions are retained rather than assigning
+unrelated historical values to changed quantities.
+
+Use `check_level1_workflow` and `check_level2_workflow` to construct the current
+scorer. Each task and level has one active policy; there is no historical-policy
+selector or partial-credit mode. Superseded workflow implementations and unused
+protocol, phase and convergence checks have been removed. `WorkflowScorer` is
+limited to tasks 1, 4 and 8 at both levels, task 3 at Level 1, and task 5 at Level 2.
+Policy version numbers are scoped to their tasks: the `v1` policies still named
+above are current for those tasks, not fallback implementations of task 7.
 Existing data layouts remain readable; alternate companion files must be linked
 explicitly. Historical reports
 remain unchanged; rescoring writes a separate report with the policy version
@@ -406,7 +448,7 @@ only artifacts.
 | 1 | 0 | 1 | `diffusion` in m²/s |
 | 2 | 0 | 1 | `tg` in K; unresolved Tg fails |
 | 3 | 0 | 0 | `md_trajectory` with saved momenta |
-| 4 | 0 | 1 | `zpe` in eV/atom (null for resolved instability) |
+| 4 | 0 | 1 | `zpe` in eV/atom (null documents instability and receives zero) |
 | 5 | 0 | 2 | `fit.isotropic`, `fit.uniaxial` in eV per unit strain |
 | 6 | 0 | 2 | `mean_frequency`, `std_frequency` in THz |
 | 7 | 0 | 1 | `beta` in K⁻¹ |
@@ -439,7 +481,8 @@ derived from the Hessian, so no duplicate tensor is needed. Legacy explicit
 force-constant tensors remain readable and are checked against the derivatives.
 Link it as `artifacts.force_log`; no settings documents, scripts, reports, or templates are
 needed. Level 1 stops at usable force constants and reconstructed diagnostics.
-Level 2 supplies only `results.zpe` (null for resolved instability).
+Level 2 supplies only `results.zpe` (null documents resolved instability but
+receives zero under the physical-reference requirement).
 Bands, DOS integration and imaginary-mode weights are reconstructed from the
 force frames. Optional submitted bands/DOS and diagnostic values are checked
 against the same evidence; they are not required artifacts.
@@ -454,7 +497,9 @@ bound distinguishes resolved imaginary modes from numerical residuals. Its
 magnitude alone does not reject a submission: Level 2 calculates the ZPE from
 the selected force constants, refines the mode integral, and compares the result
 with the reported value using the existing numerical tolerance. Resolved
-instability still requires a null ZPE, and independent force checks still apply.
+instability has no stable harmonic ZPE and receives zero. A passing finite ZPE
+must also satisfy the historical 10% reference interval, and independent force
+checks still apply.
 
 Task 8 Level 1 saves all 100 configurations in `dataset.traj`, linked as
 `artifacts.run_log`. Call `atoms.get_potential_energy()` before writing each frame.
@@ -577,8 +622,11 @@ are checked in calculation-log order.
 For Level 2, the agent writes one JSON calculation log containing the actual
 structures, masses, calculator settings, and raw Hessians, six Cartesian force pairs, or
 the complete signed mode spectrum for independent comparison.
-Finite differences also need half-step force checks at endpoint/reference
-strains. Row containers such as `calculations`, `results`, and `data` are accepted;
+The scorer uses mode energies when present, otherwise a Hessian, otherwise force
+pairs with their numerical displacement. `method` is optional descriptive metadata
+and never selects the scoring path. Half-step force checks are optional; when
+retained alongside force pairs, their displacement sensitivity is checked.
+Row containers such as `calculations`, `results`, and `data` are accepted;
 equivalent quantity names are normalized without discarding contradictory values.
 Submit the log path and required coefficients directly in the JSON answer.
 
@@ -588,7 +636,9 @@ then mass-weights and diagonalizes the Hessians. It preserves imaginary modes
 and independently fits the selected positive energies by unweighted OLS.
 The two coefficients and any optional intercept or tables must match the evidence; there is
 no minimum R². Cached evaluator-owned Hessians check numerical accuracy, with
-an isolated calculator fallback. Backend unavailability raises an evaluation
+an isolated calculator fallback. Level 2 also fits the independent phonon maxima
+and requires both reported and reconstructed coefficients within 10% of those
+trusted-model coefficients. Backend unavailability raises an evaluation
 error. Tolerances are numerical screens requiring calibration before
 benchmarking; saved logs alone are not execution attestation.
 
@@ -688,7 +738,8 @@ tables are reconstructed and included in the evaluator report. Optional
 `strain_groups` and `learning_curve` tables are checked in strain/subset order,
 using `strain` or `size` plus the three metrics for each entry. Energy errors use total eV.
 Reporting tolerance is 0.1% plus 1e-6 eV for MAE/RMSE and absolute 1e-4 for R².
-There is no required minimum prediction quality and no MD convergence check.
+Level 2 requires in-distribution test R² of at least 0.98. There is no MD
+convergence check.
 
 The log records the declared fitting and test-generation order. Its editable
 contents establish internal consistency, not an attestation that the agent
@@ -699,7 +750,9 @@ and [the Level 2 quantity scorer](src/corral_md/scoring/level2_quantities.py).
 Both levels submit `artifacts.run_log` directly as JSON. Level 1 evaluates the
 initial 300 K production means; Level 2 additionally requires
 `results.heat_capacity`, fitted from the five forward 300–700 K
-stages. The full temperature cycle remains part of the task instructions.
+stages. The log must additionally retain the 800 K and 900 K forward plateaus
+so all seven mean temperatures can be checked against their 10% target ranges.
+The full temperature cycle remains part of the task instructions.
 The quantities, accepted fit methods and numerical checks are described in the
 final-quantity sections above. Neither level requires a restart or independent
 model-verification backend.

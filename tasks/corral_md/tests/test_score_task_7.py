@@ -11,6 +11,7 @@ from corral_md.scoring import (
     check_level2_workflow,
 )
 from corral_md.scoring.level1_trusted import PINNED_TEACHER_SHA256
+from corral_md.scoring.physical_reference import ALUMINUM_EXPANSION_PER_K
 
 
 def write_log(path, rows):
@@ -42,10 +43,12 @@ def submission(tmp_path):
         }
 
     def volume(temperature):
-        return v0 * (1 + 1.5e-4 * (temperature - 300) + 1e-7 * (temperature - 300) ** 2)
+        # The first heating stage measures 301 K; its volume is the denominator
+        # of the expansion coefficient. Keep the analytic EOS at the true target.
+        return v0 * (1 + ALUMINUM_EXPANSION_PER_K * (temperature - 301))
 
     tc, vc = 401.0, volume(401)
-    modulus, pressure_beta = 70, 1.5e-4
+    modulus, pressure_beta = 70, ALUMINUM_EXPANSION_PER_K
     specs = [("heating", t, volume(t + 1)) for t in (300, 380, 400, 420, 500)]
     specs += [("cooling", t, volume(t + 1) + 0.5) for t in (400, 300)]
     specs += [
@@ -138,7 +141,7 @@ def submission(tmp_path):
     # Independent expected answers: polynomial mean volumes and analytic EOS.
     heating_t = np.array([301, 381, 401, 421, 501])
     slope = np.polyfit(heating_t, volume(heating_t), 1)[0]
-    local = v0 * (1.5e-4 + 2e-7 * 101) / vc
+    local = v0 * ALUMINUM_EXPANSION_PER_K / vc
     answer = {
         "artifacts": {"run_log": "run.jsonl"},
         "results": {
@@ -177,7 +180,7 @@ def test_malformed_submissions_score_zero(value):
 
 @pytest.mark.parametrize("level", [1, 2])
 @pytest.mark.parametrize("representation", ["nested", "aliased"])
-def test_scientific_score_is_independent_of_md_log_layout(
+def test_legacy_md_layouts_are_supported_only_at_level2(
     submission, rewrite_md_recording, level, representation
 ):
     path = submission[0] if isinstance(submission, tuple) else submission
@@ -189,7 +192,10 @@ def test_scientific_score_is_independent_of_md_log_layout(
     rewrite_md_recording(log, representation, first_stage=level == 1)
     factory = check_level1_workflow if level == 1 else check_level2_workflow
     report = factory(7).evaluate(path)
-    assert report["score"] == 1, report
+    # Level 1 requires the documented scalar sample fields. This legacy log
+    # instead supplies cell geometry and relies on inherited stage settings.
+    assert report["score"] == (1 if level == 2 else 0), report
+    assert report["status"] == "complete", report
 
 
 def test_default_level2_final_quantity_policy_accepts_numerical_legacy_log(submission):
@@ -199,4 +205,4 @@ def test_default_level2_final_quantity_policy_accepts_numerical_legacy_log(submi
         submission
     )
     assert report["score"] == 1, report
-    assert report["scoring_policy"] == "level2-final-quantities-v1"
+    assert report["scoring_policy"] == "level2-final-quantities-v2"

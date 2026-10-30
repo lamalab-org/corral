@@ -467,11 +467,15 @@ def test_supported_training_only_preprocessing(tmp_path, runtime, kind):
     assert scorer().evaluate(path)["score"] == 1
 
 
-def test_poor_predictions_are_a_valid_scientific_outcome(tmp_path, runtime):
+def test_self_consistent_poor_predictions_fail_reference_quality(tmp_path, runtime):
     path, _ = make_submission(tmp_path, runtime, alpha=1e12)
     report = scorer().evaluate(path)
-    assert report["score"] == 1, report
+    assert report["score"] == 0, report
+    assert report["calculated_results"]["id_test"]["r2"] < 0.98
     assert report["calculated_results"]["strained_pooled"]["r2"] < 0
+    assert report["verification"]["status"] == "passed"
+    assert report["checks"][-1]["name"] == "physical_reference_r2"
+    assert report["checks"][-1]["status"] == "failed"
 
 
 @pytest.mark.parametrize(
@@ -614,8 +618,12 @@ def test_self_consistent_fabrications_fail_independent_recalculation(
     path, _ = make_submission(tmp_path, runtime)
     report = scorer().evaluate(path)
     assert report["score"] == 0, report
-    assert report["checks"][-1]["name"] == "independent_teacher_and_soap"
-    assert report["checks"][-1]["status"] == "failed"
+    independent = next(
+        check
+        for check in report["checks"]
+        if check["name"] == "independent_teacher_and_soap"
+    )
+    assert independent["status"] == "failed"
 
 
 def test_independent_check_is_required_and_bound_to_evidence(tmp_path, runtime):
@@ -662,7 +670,13 @@ def test_real_soap_pipeline_roundtrip(tmp_path, runtime, monkeypatch, kind):
 
     path, _ = make_submission(tmp_path, runtime, preprocessing=kind)
     report = scorer(backend=independent).evaluate(path)
-    assert report["score"] == 1, report
+    # The synthetic teacher depends on absolute coordinates, which invariant
+    # SOAP cannot reliably predict. Reconstruction remains valid, but the
+    # independently measured poor predictive quality must now fail the task.
+    assert all(check["status"] == "passed" for check in report["checks"][:-1]), report
+    assert report["checks"][-1]["name"] == "physical_reference_r2"
+    assert report["calculated_results"]["id_test"]["r2"] < 0.98
+    assert report["score"] == 0, report
 
 
 def test_dataset_rows_need_no_start_dataset_end_wrapper(tmp_path, runtime):

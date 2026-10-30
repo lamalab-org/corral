@@ -131,16 +131,89 @@ def test_minimal_log_reconstructs_expected_answers(tmp_path, level, method):
 
 
 @pytest.mark.parametrize("level", [1, 2])
-@pytest.mark.parametrize("method", ["analytical", "analytical_hessian"])
-def test_equivalent_derivative_method_names(tmp_path, level, method):
-    path = make_submission(tmp_path, level)
-    manifest = json.loads(path.read_text())
-    log_path = tmp_path / manifest["artifacts"]["calculation_log"]
+@pytest.mark.parametrize("payload", ["modes", "hessian", "forces"])
+@pytest.mark.parametrize("label", ["missing", "custom", "misleading"])
+def test_phonon_payload_does_not_require_method_configuration(
+    tmp_path, level, payload, label
+):
+    path = make_submission(
+        tmp_path,
+        level,
+        method="central_difference" if payload == "forces" else "analytic_hessian",
+    )
+    log_path = tmp_path / "calculations.json"
     log = json.loads(log_path.read_text())
     for row in log["calculations"]:
-        row["method"] = method
+        if payload == "modes":
+            row["mode_energies_eV"] = mode_energies(
+                np.asarray(row.pop("hessian_eV_A2")), row["structure"]["masses"]
+            ).tolist()
+        if label == "missing":
+            row.pop("method")
+        elif label == "custom":
+            row["method"] = "finite_displacement_central_0.005A"
+        else:
+            row["method"] = (
+                "analytic_hessian" if payload == "modes" else "retained_modes"
+            )
     write(log_path, log)
-    assert scorer(level).evaluate(path)["score"] == 1
+    report = scorer(level).evaluate(path)
+    assert report["score"] == 1, report
+
+
+@pytest.mark.parametrize("level", [1, 2])
+@pytest.mark.parametrize("wrong_modes", [False, True])
+def test_retained_modes_take_precedence_and_cannot_fall_back_to_derivatives(
+    tmp_path, level, wrong_modes
+):
+    path = make_submission(tmp_path, level)
+    log_path = tmp_path / "calculations.json"
+    log = json.loads(log_path.read_text())
+    for row in log["calculations"]:
+        matrix = np.asarray(row["hessian_eV_A2"])
+        row["mode_energies_eV"] = (
+            mode_energies(matrix, row["structure"]["masses"])
+            * (1.5 if wrong_modes else 1)
+        ).tolist()
+        if not wrong_modes:
+            row["hessian_eV_A2"] = (matrix * 4).tolist()
+    write(log_path, log)
+    if wrong_modes:
+        # Keep the reported fit consistent, so only the independent reference
+        # can reject the inaccurate spectrum despite its correct extra Hessian.
+        manifest = json.loads(path.read_text())
+        manifest["results"].pop("highest_positive_energies_eV")
+        if level == 2:
+            for key, value in manifest["results"]["fit"].items():
+                manifest["results"]["fit"][key] = (np.asarray(value) * 1.5).tolist()
+        write(path, manifest)
+    report = scorer(level).evaluate(path)
+    assert report["score"] == (0 if wrong_modes else 1), report
+    if wrong_modes:
+        assert [c["name"] for c in report["checks"] if c["status"] == "failed"] == [
+            "final_quantities" if level == 1 else "independent_hessian_accuracy"
+        ]
+
+
+@pytest.mark.parametrize("method", [None, "retained_modes", "custom_solver"])
+def test_force_pair_sensitivity_is_validated_without_method_dispatch(tmp_path, method):
+    path = make_submission(tmp_path, method="central_difference")
+    log_path = tmp_path / "calculations.json"
+    log = json.loads(log_path.read_text())
+    for row in log["calculations"]:
+        if method is None:
+            row.pop("method")
+        else:
+            row["method"] = method
+    log["calculations"][0]["sensitivity"].update(
+        force_pairs(hessian(-0.02, -0.02) * 1.1, 0.005)
+    )
+    write(log_path, log)
+    report = scorer().evaluate(path)
+    assert report["score"] == 0, report
+    assert [c["name"] for c in report["checks"] if c["status"] == "failed"] == [
+        "phonon_reconstruction_and_sensitivity"
+    ]
 
 
 def test_level2_needs_fit_parameters_without_repeated_tables(tmp_path):

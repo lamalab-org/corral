@@ -282,9 +282,17 @@ def test_percentile_interpolates_first_crossing_before_a_plateau():
     assert result["frequency_95pct_THz"] == pytest.approx(1)
 
 
-def test_restored_workspace_resolves_log_without_extra_documents(trajectory_submission):
+def test_restored_workspace_resolves_log_without_extra_documents(
+    trajectory_submission, monkeypatch
+):
     from corral_md.submission import resolve_submission
 
+    # This fixture tests path restoration and velocity-to-spectrum mathematics.
+    # Its four discrete harmonic frequencies are not a physical Al reference.
+    monkeypatch.setattr(
+        "corral_md.scoring.level2_quantities.require_reference_spectrum",
+        lambda frequency, power: {"test_only": "synthetic harmonic spectrum"},
+    )
     resolved = resolve_submission(
         trajectory_submission.read_text(), trajectory_submission.parent
     )
@@ -305,8 +313,14 @@ def test_factories_use_only_the_new_scorer(backend, md_assets):
 @pytest.mark.parametrize("level", [1, 2])
 @pytest.mark.parametrize("representation", ["nested", "aliased"])
 def test_scientific_score_is_independent_of_md_log_layout(
-    trajectory_submission, rewrite_md_recording, level, representation
+    trajectory_submission, rewrite_md_recording, level, representation, monkeypatch
 ):
+    # Exercise the same reconstructed moments in every layout; the actual
+    # physical-spectrum gate is covered by the separate rejection test below.
+    monkeypatch.setattr(
+        "corral_md.scoring.level2_quantities.require_reference_spectrum",
+        lambda frequency, power: {"test_only": "synthetic harmonic spectrum"},
+    )
     path = trajectory_submission
     answer = json.loads(path.read_text())
     log = path.parent / answer["artifacts"]["run_log"]
@@ -319,7 +333,7 @@ def test_scientific_score_is_independent_of_md_log_layout(
     assert report["score"] == 1, report
 
 
-def test_default_level2_final_quantity_policy_accepts_numerical_legacy_log(
+def test_default_level2_rejects_unphysical_synthetic_spectrum(
     trajectory_submission,
 ):
     from corral_md.scoring import check_level2_workflow
@@ -327,5 +341,6 @@ def test_default_level2_final_quantity_policy_accepts_numerical_legacy_log(
     report = check_level2_workflow(6, verification_backend="offline").evaluate(
         trajectory_submission
     )
-    assert report["score"] == 1, report
-    assert report["scoring_policy"] == "level2-final-quantities-v1"
+    assert report["score"] == 0, report
+    assert "cosine similarity" in report["checks"][0]["detail"]
+    assert report["scoring_policy"] == "level2-final-quantities-v2"

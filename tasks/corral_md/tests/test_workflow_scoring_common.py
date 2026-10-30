@@ -224,11 +224,8 @@ def test_rubric_distinguishes_failure_and_unverified():
     rubric.check("invalid", 25, lambda: (False, "wrong value"))
     rubric.check("unsupported", 25, None)
     rubric.error("missing", 25, EvidenceError("Missing required scientific quantity"))
-    for finalize in (lambda: rubric.score, rubric.as_dict):
-        with pytest.raises(EvaluationError, match="unsupported") as caught:
-            finalize()
-        assert "score" not in caught.value.report
-        assert caught.value.report["unsupported_checks"] == ["unsupported"]
+    assert rubric.score == 0
+    assert rubric.as_dict()["score_bounds"] == [0, 0]
     assert [c["status"] for c in rubric.checks] == [
         "passed",
         "failed",
@@ -239,7 +236,7 @@ def test_rubric_distinguishes_failure_and_unverified():
 
 
 def test_binary_rubric_is_terminal_on_failure_and_keeps_errors_distinct():
-    failed = Rubric(1, binary=True)
+    failed = Rubric(1)
     failed.check("valid", 25, True)
     failed.check("invalid", 25, False)
     failed.check("unsupported", 50, None)
@@ -247,11 +244,27 @@ def test_binary_rubric_is_terminal_on_failure_and_keeps_errors_distinct():
     assert failed.as_dict()["score_bounds"] == [0, 0]
     assert failed.as_dict()["status"] == "complete"
 
-    pending = Rubric(1, binary=True)
+    pending = Rubric(1)
     pending.check("valid", 50, True)
     pending.check("unsupported", 50, None)
     with pytest.raises(EvaluationError, match="unsupported"):
         _ = pending.score
+    with pytest.raises(EvaluationError, match="unsupported") as caught:
+        pending.as_dict()
+    assert "score" not in caught.value.report
+    assert caught.value.report["unsupported_checks"] == ["unsupported"]
+
+
+@pytest.mark.parametrize("earned", [0, 25, 99, 100])
+def test_rubric_never_awards_partial_credit(earned):
+    rubric = Rubric(1)
+    rubric.check("verified_evidence", earned, True)
+    assert rubric.score == (1 if earned == 100 else 0)
+
+
+def test_retired_partial_credit_policy_cannot_be_selected():
+    with pytest.raises(TypeError, match="binary"):
+        Rubric(1, binary=False)
 
 
 def test_workflow_failure_skips_later_checks_and_modal_verification(manifest):
@@ -281,7 +294,7 @@ def test_factory_returns_scalar_and_keeps_json_checks_task_local(manifest, monke
     root, path, _ = manifest
 
     def evaluate_submission(value, **_kwargs):
-        rubric = Rubric(5, binary=True)
+        rubric = Rubric(5)
         rubric.check(
             "saved_value", 100, lambda: Evidence(value).json("data") == [1, 2, 3]
         )
@@ -331,7 +344,7 @@ def test_level1_factory_uses_independent_model_verification():
 
 def _unsupported_scorer(monkeypatch):
     def evaluate_submission(submission, **_kwargs):
-        r = Rubric(5, binary=True, fail_fast=True)
+        r = Rubric(5, fail_fast=True)
         try:
             e = Evidence(submission)
         except Exception as exc:

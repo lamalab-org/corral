@@ -1,4 +1,4 @@
-"""Read-only evidence access and diagnostic partial-credit scoring.
+"""Read-only evidence access and binary scoring with per-check diagnostics.
 
 Nothing in this module executes submitted code or loads executable model
 formats.
@@ -533,17 +533,15 @@ class Evidence:
 
 
 class Rubric:
-    """Independent checks with explicit possible points and failure diagnostics."""
+    """Binary scoring with explicit possible points and failure diagnostics."""
 
     def __init__(
         self,
         task_number: int | None = None,
         *,
-        binary: bool = False,
         fail_fast: bool = False,
     ):
         self.task_number = task_number
-        self.binary = binary
         self.fail_fast = fail_fast
         self.checks: list[dict] = []
 
@@ -623,7 +621,7 @@ class Rubric:
     @property
     def score(self) -> float:
         """Return a numerical result or raise a terminal scorer error."""
-        if self.binary and self.failed:
+        if self.failed:
             return 0.0
         if self.unverified_checks:
             detail = "; ".join(
@@ -643,9 +641,7 @@ class Rubric:
                 },
             )
         earned = sum(c["earned"] for c in self.checks)
-        if self.binary:
-            return float(earned >= 100.0)
-        return min(1.0, earned / 100.0)
+        return float(earned >= 100.0)
 
     def as_dict(self) -> dict:
         score = self.score

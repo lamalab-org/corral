@@ -18,10 +18,10 @@ SOURCE_SHA256 = "1674c66496b0bab9eda0ce79b439ad90f9ce2097c5d5450a86965442f5cdfa6
 COOLING_STEPS = 370_000
 TOTAL_STEPS = 470_000
 # Historical Level 2 Task 2 target, from environments/level_2/
-# tasks_json/task_2.json at commit 632800bf64a3f85ddcb003181f69ce12196a6244.
+# tasks_json/task_2.json at commit 75d7b3560b7ab922a63fe4fbff9c01d73f83dff3.
 # The 2600 K cutoff is only a data-selection limit, not an acceptable target Tg.
 REFERENCE_TG_K = 1576.88
-REFERENCE_TG_ATOL_K = 100.0
+REFERENCE_TG_ATOL_K = 0.1 * REFERENCE_TG_K
 VERSION = "task2-final-quantities-v1"
 
 
@@ -212,7 +212,7 @@ class Task2Scorer:
         )
 
     def evaluate(self, submission):
-        rubric = Rubric(2, binary=True)
+        rubric = Rubric(2)
         computed = {}
 
         def check():

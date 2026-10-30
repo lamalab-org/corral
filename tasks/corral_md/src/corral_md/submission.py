@@ -99,7 +99,7 @@ def resolve_submission(submission: str, workspace: str | Path) -> str:
             # Preserve external links for Evidence to reject per check; never
             # select another run's file by basename or read a host file.
             return str(supplied)
-        # Preserve safe missing paths for per-check partial credit.
+        # Preserve safe missing paths for per-check failure diagnostics.
         return str(
             confine_workspace_path(root, Path(posixpath.normpath(str(candidate))))
         )

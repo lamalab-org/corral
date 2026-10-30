@@ -1,8 +1,8 @@
 """Level-1 scoring of final observables, without workflow/evidence-shape gates.
 
-Only task 5 has a fixed-model reference. For the stochastic tasks, values are
-recomputed from the submitted production data and compared with any reported
-answers. This does not independently authenticate a trajectory or its model.
+Only task 5 has a fixed-model reference. The stochastic tasks recompute values
+from production data; tasks 7 and 10 read only the documented sample fields.
+This does not independently authenticate a trajectory or its model.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ import secrets
 from collections.abc import Mapping
 
 import numpy as np
-from ase import units
 
 from corral.evaluation import SubmissionScore
 
@@ -26,6 +25,7 @@ from .common import (
 from .formats import records
 
 VERSION = "level1-final-quantities-v1"
+ALUMINUM_VERSION = "level1-final-quantities-v2"
 
 
 def require(condition, detail):
@@ -52,11 +52,18 @@ def scalar(row, *names):
     return float(finite_array(answer, shape=()))
 
 
-def read_samples(path):
-    """Read flat or staged scalar logs; atomic arrays are never required."""
+def read_samples(path, *, sample_fields=None):
+    """Read scalar logs, optionally selecting only documented sample fields."""
     data = records(path)
-    if isinstance(data, Mapping) and ("phase" in data or "step" in data):
-        data = [data]
+    if isinstance(data, Mapping):
+        if sample_fields is not None:
+            if data.get("type") == "sample" or not any(
+                key in data
+                for key in ("stages", "samples", "frames", "records", "rows")
+            ):
+                data = [data]
+        elif "phase" in data or "step" in data:
+            data = [data]
     header, samples, summaries = {}, [], []
 
     def visit(items, inherited):
@@ -66,6 +73,17 @@ def read_samples(path):
             require(
                 isinstance(item, Mapping), "Each numerical record must be an object"
             )
+            if sample_fields is not None:
+                if item.get("type") == "sample":
+                    # Metadata and aliases must never supply measured quantities.
+                    samples.append(
+                        {
+                            key: item[key]
+                            for key in ("phase", *sample_fields)
+                            if key in item
+                        }
+                    )
+                continue
             label = str(
                 item.get("event", item.get("type", item.get("kind", "")))
             ).lower()
@@ -91,20 +109,24 @@ def read_samples(path):
     if isinstance(data, list):
         visit(data, {})
     else:
-        header.update(
-            data.get("header", data.get("metadata", data.get("settings", {})))
-        )
+        if sample_fields is None:
+            header.update(
+                data.get("header", data.get("metadata", data.get("settings", {})))
+            )
         stages = data.get("stages", [data])
         require(isinstance(stages, list), "Stages must be a list")
         for stage in stages:
-            context = {
-                **header,
-                **{
-                    k: v
-                    for k, v in stage.items()
-                    if k not in {"samples", "frames", "records", "rows"}
-                },
-            }
+            require(isinstance(stage, Mapping), "Each stage must be an object")
+            context = {}
+            if sample_fields is None:
+                context = {
+                    **header,
+                    **{
+                        k: v
+                        for k, v in stage.items()
+                        if k not in {"samples", "frames", "records", "rows"}
+                    },
+                }
             batch = next(
                 (
                     stage[k]
@@ -118,6 +140,11 @@ def read_samples(path):
             visit(batch, context)
     production = []
     for row in samples:
+        if sample_fields is not None:
+            require(
+                row.get("phase") in ("equilibration", "production"),
+                "Sample phase must be 'equilibration' or 'production'",
+            )
         phase = row.get("phase", row.get("name", row.get("stage")))
         if phase in {"production", "prod"}:
             production.append(row)
@@ -137,88 +164,25 @@ def read_samples(path):
     return header, production, summaries
 
 
-def compare_claims(claims, expected, aliases):
-    require(isinstance(claims, Mapping), "Reported numerical results must be an object")
-    for key, names in aliases.items():
-        for name in (key, *names):
-            if name in claims:
-                require(
-                    result_close(claims[name], expected[key], atol=1e-6),
-                    f"Incorrect {name}; recomputed {expected[key]}",
-                )
-
-
 def aluminum(evidence, task):
-    header, rows, summaries = read_samples(evidence.artifact("run_log"))
-    for row in rows:
-        # Derive a missing scalar only when the log retained its raw inputs.
-        # Atom-wise fields are optional, never an additional acceptance gate.
-        momenta = value(row, "momenta", "momenta_ase_units")
-        if momenta is not None and (
-            value(row, "temperature_K", "Temperature", "T_K") is None
-            or (
-                task == 10
-                and any(
-                    value(row, *keys) is None
-                    for keys in (("Tx_K", "Tx"), ("Ty_K", "Ty"), ("Tz_K", "Tz"))
-                )
-            )
-        ):
-            p = finite_array(momenta, shape=(108, 3))
-            masses = finite_array(
-                value(row, "masses_amu", "masses", default=[26.9815385] * 108),
-                shape=(108,),
-            )
-            dof = float(value(row, "dof", default=324))
-            require(
-                np.all(masses > 0) and dof > 0, "Invalid kinetic-energy normalization"
-            )
-            directions = np.sum(p**2 / masses[:, None], axis=0) / ((dof / 3) * units.kB)
-            row.setdefault("temperature_K", float(directions.mean()))
-            row.setdefault(
-                "kinetic_energy_eV", float(np.sum(p**2 / masses[:, None]) / 2)
-            )
-            for key, number in zip(("Tx_K", "Ty_K", "Tz_K"), directions, strict=True):
-                row.setdefault(key, float(number))
-        if task == 10:
-            temperature = float(
-                np.mean(
-                    [
-                        scalar(row, *keys)
-                        for keys in (("Tx_K", "Tx"), ("Ty_K", "Ty"), ("Tz_K", "Tz"))
-                    ]
-                )
-            )
-            reported = value(row, "temperature_K", "Temperature", "T_K")
-            if reported is not None:
-                require(
-                    result_close(reported, temperature, atol=1e-6),
-                    "Overall temperature disagrees with directional temperatures",
-                )
-            row["temperature_K"] = temperature
-        if task == 7 and value(row, "volume_A3", "volume", "Volume") is None:
-            cell = value(row, "cell_A", "cell")
-            if cell is not None:
-                row["volume_A3"] = abs(
-                    float(np.linalg.det(finite_array(cell, shape=(3, 3))))
-                )
-    temperature = [scalar(r, "temperature_K", "Temperature", "T_K") for r in rows]
-    result = {"sample_count": len(rows), "temperature_K": float(np.mean(temperature))}
-    if task == 7:
-        result["volume_A3"] = float(
-            np.mean([scalar(r, "volume_A3", "volume", "Volume") for r in rows])
+    fields = (
+        ("temperature_K", "volume_A3", "pressure_GPa")
+        if task == 7
+        else ("Tx_K", "Ty_K", "Tz_K", "energy_eV_per_atom")
+    )
+    _header, rows, _summaries = read_samples(
+        evidence.artifact("run_log"), sample_fields=fields
+    )
+    values = {}
+    for field in fields:
+        require(
+            all(field in row for row in rows),
+            f"Missing required production sample field: {field}",
         )
-        pressure = []
-        for row in rows:
-            if "pressure_GPa" in row:
-                pressure.append(scalar(row, "pressure_GPa"))
-            elif "pressure_bar" in row or "Pressure_bar" in row:
-                pressure.append(scalar(row, "pressure_bar", "Pressure_bar") * 1e-4)
-            else:
-                raise UnsupportedEvidence(
-                    "Pressure needs an identifiable unit (bar or GPa)"
-                )
-        result["pressure_GPa"] = float(np.mean(pressure))
+        values[field] = finite_array([row[field] for row in rows], ndim=1)
+    result = {"sample_count": len(rows)}
+    if task == 7:
+        result.update({field: float(np.mean(values[field])) for field in fields})
         require(result["volume_A3"] > 0, "Volume must be positive")
         require(
             abs(result["temperature_K"] - 300) <= 15,
@@ -230,37 +194,11 @@ def aluminum(evidence, task):
             abs(result["pressure_GPa"] - 1.01325e-4) <= 0.05,
             "Mean pressure misses the NPT target",
         )
-        aliases = {
-            "volume_A3": ("mean_V_A3",),
-            "temperature_K": ("mean_T_K",),
-            "pressure_GPa": (),
-        }
     else:
-        energies, directional = [], []
-        for row in rows:
-            direct = value(
-                row,
-                "energy_eV_per_atom",
-                "etot_per_atom_eV",
-                "Etot_per_atom_eV",
-                "total_energy_eV_per_atom",
-            )
-            if direct is None:
-                total = value(row, "etot_eV", "Etot_eV", "total_energy_eV")
-                if total is None:
-                    total = scalar(
-                        row, "potential_energy_eV", "epot_eV", "Epot_eV"
-                    ) + scalar(row, "kinetic_energy_eV", "ekin_eV", "Ekin_eV")
-                direct = float(finite_array(total, shape=())) / 108
-            energies.append(float(finite_array(direct, shape=())))
-            directional.append(
-                [
-                    scalar(row, *keys)
-                    for keys in (("Tx_K", "Tx"), ("Ty_K", "Ty"), ("Tz_K", "Tz"))
-                ]
-            )
+        directional = np.column_stack([values[field] for field in fields[:3]])
         result.update(
-            energy_eV_per_atom=float(np.mean(energies)),
+            temperature_K=float(np.mean(directional)),
+            energy_eV_per_atom=float(np.mean(values["energy_eV_per_atom"])),
             directional_temperature_K=np.mean(directional, axis=0).tolist(),
         )
         require(
@@ -269,29 +207,6 @@ def aluminum(evidence, task):
             <= 45,
             "Mean overall/directional temperatures miss the 300 K target",
         )
-        aliases = {
-            "energy_eV_per_atom": ("Etot_per_atom_eV_mean",),
-            "temperature_K": ("Temperature_mean",),
-            "directional_temperature_K": (),
-        }
-        for summary in summaries:
-            for axis, mean in zip(
-                ("Tx_mean", "Ty_mean", "Tz_mean"),
-                result["directional_temperature_K"],
-                strict=True,
-            ):
-                if axis in summary:
-                    require(result_close(summary[axis], mean), f"Incorrect {axis}")
-    claims = [evidence.results, evidence.manifest.get("summary", {}), *summaries]
-    for claim in claims:
-        compare_claims(claim, result, aliases)
-        if task == 7 and "mean_P_bar" in claim:
-            require(
-                result_close(claim["mean_P_bar"], result["pressure_GPa"] * 1e4),
-                "Incorrect mean_P_bar",
-            )
-        for stage in claim.get("stages", []):
-            compare_claims(stage, result, aliases)
     return {"stages": [result], "reference_basis": "logged_production_samples"}
 
 
@@ -346,11 +261,6 @@ def phonons(evidence, verifier):
             maximum = computed
         if maximum is None:
             # Old logs may retain derivatives rather than the final spectrum.
-            method = row.get("method", "retained_hessian")
-            method = {
-                "analytical": "analytic_hessian",
-                "analytical_hessian": "analytic_hessian",
-            }.get(method, method)
             if not (
                 "hessian_eV_A2" in row
                 or {"forces_plus_eV_A", "forces_minus_eV_A", "displacement_A"}
@@ -359,7 +269,7 @@ def phonons(evidence, verifier):
                 raise UnsupportedEvidence(
                     "Cannot identify a phonon energy or its numerical derivatives"
                 )
-            matrix = raw_hessian({**row, "method": method})
+            matrix = raw_hessian(row)
             eigenvalues = np.linalg.eigvalsh((matrix + matrix.T) / (2 * 28.0855))
             maximum = float(ENERGY_FACTOR * np.sqrt(max(0.0, eigenvalues[-1])))
         maximum = float(finite_array(maximum, shape=()))
@@ -588,7 +498,7 @@ class FinalQuantityScorer:
         self.task_number, self.level, self.verifier = task_number, 1, verifier
 
     def evaluate(self, submission):
-        rubric, computed = Rubric(self.task_number, binary=True), {}
+        rubric, computed = Rubric(self.task_number), {}
         evidence = None
 
         def calculate():
@@ -607,7 +517,9 @@ class FinalQuantityScorer:
             **rubric.as_dict(),
             "level": 1,
             "mode": "final_quantities",
-            "scoring_policy": VERSION,
+            "scoring_policy": (
+                ALUMINUM_VERSION if self.task_number in (7, 10) else VERSION
+            ),
             "computed": computed,
             "evidence_sha256": evidence.fingerprint() if evidence else None,
         }

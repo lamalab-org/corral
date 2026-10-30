@@ -60,7 +60,7 @@ def recorded_run(tmp_path_factory):
     velocities -= velocities.mean(axis=1, keepdims=True)
     target = np.minimum(2500, 300 + 2.2 * times)
     temperature = (
-        scoring.SILICON_MASS
+        28.0855
         * np.sum((velocities / (1000 * units.fs)) ** 2, axis=(1, 2))
         / (645 * units.kB)
     )
@@ -72,7 +72,7 @@ def recorded_run(tmp_path_factory):
         velocities,
     )
     _write_dump(root / "run.lammpstrj", data)
-    density = 216 * scoring.SILICON_MASS * 1.66053906660 / atoms.get_volume()
+    density = 216 * 28.0855 * 1.66053906660 / atoms.get_volume()
     commands = """units metal
 atom_style full
 read_data silicon.data
@@ -616,26 +616,28 @@ def test_level2_still_requires_resolved_diffusive_motion(submission):
 
 def test_collective_translation_and_cell_breathing_are_removed(recorded_run):
     data = scoring.read_trajectory(recorded_run / "run.lammpstrj")
-    commands, thermal = scoring.read_log(recorded_run / "run.log")
-    segments = scoring._protocol(commands, thermal, 1500)
-    times, positions = scoring._states(data, thermal, segments, 1500)
+    commands, clock = scoring.read_log(
+        recorded_run / "run.log", columns=("Step", "Time"), allow_missing=True
+    )
+    times, positions, _ = scoring._diffusion_states(data, commands, clock)
+    recorded_times = np.interp(data.steps, clock[:, 0], clock[:, 1])
     reference = scoring.diffusion(times, positions)["diffusion_m2_s"]
     # A large constant translation changes no relative motion.
     shifted = replace(
-        data, positions=data.positions + times[:, None, None] * np.array([1, 2, 3])
+        data,
+        positions=data.positions + recorded_times[:, None, None] * np.array([1, 2, 3]),
     )
-    _, motion = scoring._states(shifted, thermal, segments, 1500)
+    _, motion, _ = scoring._diffusion_states(shifted, commands, clock)
     assert scoring.diffusion(times, motion)["diffusion_m2_s"] == pytest.approx(
         reference, rel=1e-10
     )
-    scale = 1 + 0.005 * np.sin(times / 10)
+    scale = 1 + 0.005 * np.sin(recorded_times / 10)
     breathing = replace(
         data,
         cells=data.cells * scale[:, None, None],
         positions=data.positions[0] * scale[:, None, None],
     )
-    thermal[:, 4] /= scale**3
-    _, motion = scoring._states(breathing, thermal, segments, 1500)
+    _, motion, _ = scoring._diffusion_states(breathing, commands, clock)
     assert np.max(np.abs(motion)) < 1e-10
 
 

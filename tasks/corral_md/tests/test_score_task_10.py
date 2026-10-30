@@ -1,4 +1,4 @@
-"""Existing temperature-cycle logs remain readable by the quantity scorers."""
+"""Level 2 temperature-cycle logs remain readable by the quantity scorer."""
 
 import json
 
@@ -150,7 +150,7 @@ def test_missing_log_fails(tmp_path):
 
 @pytest.mark.parametrize("level", [1, 2])
 @pytest.mark.parametrize("representation", ["nested", "aliased"])
-def test_scientific_score_is_independent_of_md_log_layout(
+def test_legacy_md_layouts_are_supported_only_at_level2(
     submission, rewrite_md_recording, level, representation
 ):
     path = submission[0] if isinstance(submission, tuple) else submission
@@ -162,7 +162,10 @@ def test_scientific_score_is_independent_of_md_log_layout(
     rewrite_md_recording(log, representation, first_stage=level == 1)
     factory = check_level1_workflow if level == 1 else check_level2_workflow
     report = factory(10).evaluate(path)
-    assert report["score"] == 1, report
+    # Level 1 requires the documented directional temperatures and per-atom
+    # energy rather than reconstructing them from this legacy atomic log.
+    assert report["score"] == (1 if level == 2 else 0), report
+    assert report["status"] == "complete", report
 
 
 def test_default_level2_final_quantity_policy_accepts_numerical_legacy_log(submission):
@@ -172,4 +175,4 @@ def test_default_level2_final_quantity_policy_accepts_numerical_legacy_log(submi
         submission[0]
     )
     assert report["score"] == 1, report
-    assert report["scoring_policy"] == "level2-final-quantities-v1"
+    assert report["scoring_policy"] == "level2-final-quantities-v2"

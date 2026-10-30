@@ -21,7 +21,7 @@ class Task3TemperatureScorer:
     level = 2
 
     def evaluate(self, submission):
-        rubric, computed, evidence = Rubric(3, binary=True), {}, None
+        rubric, computed, evidence = Rubric(3), {}, None
 
         def calculate():
             nonlocal evidence

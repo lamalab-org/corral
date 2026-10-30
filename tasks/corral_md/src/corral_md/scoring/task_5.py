@@ -1,8 +1,9 @@
 """Reconstruct strained-silicon phonons and fits from one calculation log.
 
-Only raw derivatives/forces, their structures, and calculator settings are
-retained. Numerical screens are evaluator policy, pending calibration on real
-runs. Independent model checks establish accuracy, not execution provenance.
+Retained mode energies or numerical derivatives identify the data to evaluate;
+descriptive method labels do not select a scoring path. Numerical screens are
+evaluator policy, pending calibration on real runs. Independent model checks
+establish accuracy, not execution provenance.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from .common import (
 )
 from .contracts import FIT_ALIASES
 from .formats import artifact_reader, phonon_log
+from .physical_reference import require_physical_reference
 from .verification import Plan, compare
 
 # hbar * sqrt((eV / Angstrom**2) / atomic-mass-unit), in eV.
@@ -99,11 +101,11 @@ def read_log(e):
 
 def raw_hessian(row):
     """Read an energy Hessian or differentiate six Cartesian force pairs."""
-    if row["method"] in {"analytic_hessian", "retained_hessian"}:
+    if "hessian_eV_A2" in row:
         return finite_array(row["hessian_eV_A2"], shape=(6, 6))
-    if row["method"] != "central_difference":
+    if not {"forces_plus_eV_A", "forces_minus_eV_A", "displacement_A"} <= row.keys():
         raise UnsupportedEvidence(
-            "Cannot interpret the recorded phonon derivative method"
+            "Cannot identify a Hessian or complete Cartesian force pairs"
         )
     step = float(finite_array(row["displacement_A"], shape=()))
     _require(step > 0, "Displacement must be positive")
@@ -131,10 +133,11 @@ def mode_energies(hessian, masses):
 
 
 def reconstruct(log):
+    """Use mode energies, then a Hessian, then force pairs, independent of labels."""
     rows = log["calculations"]
     hessians, modes = [], []
     for row in rows:
-        if row["method"] == "retained_modes":
+        if "mode_energies_eV" in row:
             energies = finite_array(row["mode_energies_eV"], shape=(6,))
             _require(np.any(energies > 0), "No resolved positive Gamma-point mode")
             hessians.append(None)
@@ -144,8 +147,8 @@ def reconstruct(log):
         energies = mode_energies(hessian, row["structure"]["masses"])
         # Check an explicitly retained refinement. The task does not mandate
         # half-step force pairs; independent Hessians still test accuracy.
-        if row["method"] == "central_difference" and "sensitivity" in row:
-            finer = {**row["sensitivity"], "method": "central_difference"}
+        if "hessian_eV_A2" not in row and "sensitivity" in row:
+            finer = row["sensitivity"]
             _require(
                 close(finer["displacement_A"], row["displacement_A"] / 2, rtol=1e-8),
                 "Sensitivity forces must use half the original displacement",
@@ -222,7 +225,7 @@ def build_plan(e, log, hessians, challenge):
 def evaluate_submission(submission, *, level, verifier=None):
     if level != 2:
         raise ValueError("Task 5 Level 1 uses FinalQuantityScorer")
-    r = Rubric(5, binary=True, fail_fast=True)
+    r = Rubric(5, fail_fast=True)
     calculated, verification = {}, {}
     try:
         e = Evidence(submission, task_number=5, level=level)
@@ -320,19 +323,21 @@ def evaluate_submission(submission, *, level, verifier=None):
         _require(
             len(actual) == len(expected), "Missing independently calculated Hessians"
         )
+        reference_energies = []
         for saved, reference, row in zip(
             expected, actual, log["calculations"], strict=True
         ):
+            if "hessian" not in reference:
+                raise EvidenceError("Independent calculation omitted its Hessian")
+            modes = mode_energies(
+                finite_array(reference["hessian"], shape=(6, 6)),
+                row["structure"]["masses"],
+            )
+            reference_energies.append(float(modes.max()))
             if "hessian" in saved:
                 if not compare(saved, reference, HESSIAN_TOLERANCE):
                     return False
             else:
-                if "hessian" not in reference:
-                    raise EvidenceError("Independent calculation omitted its Hessian")
-                modes = mode_energies(
-                    finite_array(reference["hessian"], shape=(6, 6)),
-                    row["structure"]["masses"],
-                )
                 if not close(
                     np.sort(saved["mode_energies_eV"]),
                     np.sort(modes),
@@ -340,6 +345,29 @@ def evaluate_submission(submission, *, level, verifier=None):
                     atol=1e-5,
                 ):
                     return False
+        design = np.column_stack([np.ones(25), calculated["strain_pairs"]])
+        reference_fit = np.linalg.lstsq(design, reference_energies, rcond=None)[0]
+        reference_details = {
+            "basis": "independent_teacher_model",
+            "release_id": response.get("release_id"),
+            "fit": {},
+        }
+        calculated["physical_reference"] = reference_details
+        for (name, saved_key), target in zip(
+            FIT_ALIASES.items(), reference_fit[1:], strict=True
+        ):
+            reference_details["fit"][name] = require_physical_reference(
+                calculated["fit"][saved_key],
+                target,
+                f"Recomputed {name} strain coefficient (eV per unit strain)",
+                source_commit=None,
+            )
+            require_physical_reference(
+                e.results["fit"][name],
+                target,
+                f"Reported {name} strain coefficient (eV per unit strain)",
+                source_commit=None,
+            )
         return True
 
     r.check("independent_hessian_accuracy", 20, independent)

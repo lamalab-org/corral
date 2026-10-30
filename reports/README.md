@@ -62,11 +62,17 @@ failures.
 Each trial is one trace in project `cmsio90yc092lad0ggc5lyo0x` on
 `https://cloud.langfuse.com`:
 
-- trace ID = `sha256("corral:" + execution_id)[:32]`, as set by
-  `corral.observability.langfuse.deterministic_trace_id`
+- trace ID defaults to `sha256("corral:" + execution_id)[:32]`, as set by
+  `corral.observability.langfuse.deterministic_trace_id`. When a replacement keeps
+  its execution ID but uses a fresh trace, `run-metadata.json` records that ID in
+  `langfuse_trace_ids`, a mapping from execution ID to published trace ID.
 - session ID = the run part of `execution_id` (`<session>:<task_id>:<n>`).
   This is the `run_id`, except for a rerun substituted into a report, which
-  keeps the session it was run in.
+  keeps the session it was run in by default. When finished replacements are
+  moved into the original benchmark session, the report's `run-metadata.json`
+  records `langfuse_session_id`; the index uses that session for all its trials.
+  Session overrides do not change execution or trace IDs; trace overrides are
+  applied separately through `langfuse_trace_ids`.
 
 On 2026-10-16 every trace in the three `trials.csv` files (2,100 in total) was
 found in Langfuse (`build_index.py --verify`).

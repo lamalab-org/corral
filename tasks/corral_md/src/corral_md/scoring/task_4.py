@@ -26,6 +26,7 @@ from corral_md.scoring.level1_trusted import PINNED_TEACHER_SHA256
 from corral_md.scoring.verification import Plan, apply_verification, stored
 
 from .formats import artifact_reader, check_model_digest, normalize_force_record
+from .physical_reference import PALLADIUM_ZPE_EV_PER_ATOM, require_physical_reference
 
 STANDARD = 3.89 / 2 * (np.ones((3, 3)) - np.eye(3))
 NODES = np.array(
@@ -527,7 +528,7 @@ def build_plan(e, challenge):
 def evaluate_submission(submission, *, level=2, verifier=None):
     if type(level) is not int or level not in (1, 2):
         raise ValueError("level must be 1 or 2")
-    r = Rubric(4, binary=True, fail_fast=True)
+    r = Rubric(4, fail_fast=True)
     calculated = {}
     try:
         e = Evidence(submission, task_number=4, level=level)
@@ -627,21 +628,21 @@ def evaluate_submission(submission, *, level=2, verifier=None):
                 if np.any(spectrum() < 0) or np.any(values < 0)
                 else "stable"
             )
-            if unstable:
-                require(
-                    "zpe" in e.results and e.results["zpe"] is None,
-                    "Resolved instability has no harmonic ZPE; report null",
-                )
-                if "real_mode_energy_eV_per_atom" in e.results:
-                    require(
-                        result_close(
-                            e.results["real_mode_energy_eV_per_atom"],
-                            calculated["real_mode_energy_eV_per_atom"],
-                            atol=1e-5,
-                        ),
-                        "Real-mode-only energy disagrees with the refined integral",
-                    )
-                return True
+            require(
+                not unstable,
+                "Resolved instability has no harmonic ZPE and cannot satisfy "
+                "the physical reference",
+            )
+            calculated["physical_reference"] = require_physical_reference(
+                calculated["zpe_eV_per_atom"],
+                PALLADIUM_ZPE_EV_PER_ATOM,
+                "Recomputed palladium ZPE (eV per atom)",
+            )
+            require_physical_reference(
+                e.results.get("zpe"),
+                PALLADIUM_ZPE_EV_PER_ATOM,
+                "Reported palladium ZPE (eV per atom)",
+            )
             return result_close(
                 e.results["zpe"],
                 calculated["zpe_eV_per_atom"],

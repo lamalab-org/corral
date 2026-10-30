@@ -14,12 +14,9 @@ from contextlib import suppress
 from dataclasses import dataclass
 
 import numpy as np
-from ase import units
-from ase.build import bulk
 
 from .common import EvidenceError, UnsupportedEvidence
 
-SILICON_MASS = 28.0855
 THERMO_COLUMNS = ("Step", "Time", "Temp", "Press", "Density")
 DUMP_COLUMNS = ("id", "type", "xu", "yu", "zu", "vx", "vy", "vz")
 
@@ -371,148 +368,6 @@ def read_log(path, *, columns=THERMO_COLUMNS, allow_missing=False):
     return commands, np.array(samples).reshape(-1, len(columns))
 
 
-def _protocol(commands, thermal, end):
-    dt, step, elapsed, initialized = 0.001, 0, 0.0, False
-    active, settings, segments = {}, {}, []
-    for command in commands:
-        name, *args = command
-        if name in {"units", "atom_style", "pair_style", "pair_coeff"}:
-            settings[name] = args
-        elif name == "timestep":
-            dt = float(args[0])
-            _require(np.isfinite(dt) and dt > 0, "Invalid integration timestep")
-        elif name == "fix":
-            active[args[0]] = args[1:]
-        elif name == "unfix":
-            active.pop(args[0], None)
-        elif name == "velocity":
-            _require(
-                not segments
-                and not initialized
-                and args[:2] == ["all", "create"]
-                and float(args[2]) == 300
-                and int(args[3]) > 0,
-                "Initialize velocities once at 300 K before heating",
-            )
-            initialized = True
-        elif name == "reset_timestep":
-            _require(
-                not segments and args == ["0"], "Do not reset time during the cycle"
-            )
-        elif segments and name in {
-            "read_data",
-            "read_restart",
-            "clear",
-            "create_atoms",
-            "delete_atoms",
-            "change_box",
-            "set",
-            "displace_atoms",
-            "replicate",
-            "mass",
-            "minimize",
-        }:
-            raise EvidenceError("State was modified during the thermal cycle")
-        elif name == "run":
-            _require(
-                "every" not in args, "Retain separate echoed runs instead of run every"
-            )
-            count = int(args[0]) - (step if "upto" in args else 0)
-            _require(count >= 0, "Invalid run length")
-            if not count:
-                continue
-            _require(
-                settings.get("units") == ["metal"]
-                and settings.get("atom_style") == ["full"]
-                and settings.get("pair_style") == ["sw"],
-                "Use metal/full and the SW model",
-            )
-            coeff = settings.get("pair_coeff", [])
-            _require(
-                len(coeff) == 4
-                and coeff[:2] == ["*", "*"]
-                and coeff[-1] == "Si"
-                and (
-                    coeff[2] == "/workspace/resources/md-potentials-SW-Si/Si.sw"
-                    or coeff[2].endswith("/potentials/SW/Si.sw")
-                ),
-                "Use the supplied silicon SW potential",
-            )
-            _require(initialized, "Log the 300 K velocity initialization and seed")
-            integrators = [f for f in active.values() if f[1] in {"npt", "nvt", "nve"}]
-            _require(
-                len(integrators) == 1 and integrators[0][:2] == ["all", "npt"],
-                "Each stage requires one isotropic NPT integrator",
-            )
-            _require(
-                all(
-                    f is integrators[0]
-                    or f[1] in {"ave/time", "ave/correlate", "print", "vector"}
-                    for f in active.values()
-                ),
-                "Additional dynamics fixes are unsupported by the numerical evaluator",
-            )
-            fix = integrators[0]
-            ti, pi = fix.index("temp"), fix.index("iso")
-            _require(
-                _close([float(v) for v in fix[pi + 1 : pi + 3]], [0, 0])
-                and float(fix[ti + 3]) > 0
-                and float(fix[pi + 3]) > 0,
-                "Use zero target pressure and positive damping",
-            )
-            start = int(args[args.index("start") + 1]) if "start" in args else step
-            stop = int(args[args.index("stop") + 1]) if "stop" in args else step + count
-            _require(
-                start <= step < step + count <= stop, "Invalid temperature ramp bounds"
-            )
-            first, last = map(float, fix[ti + 1 : ti + 3])
-            targets = first + (last - first) * (
-                np.array([step, step + count]) - start
-            ) / (stop - start)
-            finish = elapsed + count * dt
-            expected = np.minimum(2500, 300 + 2.2 * np.array([elapsed, finish]))
-            _require(
-                finish <= (1000 if elapsed < 1000 - 1e-6 else end) + 1e-6
-                and _close(targets, expected),
-                "Incorrect heating or production schedule",
-            )
-            segments.append((step, step + count, elapsed, dt))
-            elapsed, step = finish, step + count
-    _require(_close(elapsed, end), f"Complete the requested {end:g} ps cycle")
-    _require(
-        _close(thermal[[0, -1], 1], [0, end])
-        and (np.diff(thermal[:, 0]) > 0).all()
-        and (np.diff(thermal[:, 1]) > 0).all()
-        and (thermal[:, [2, 4]] > 0).all(),
-        "Incomplete or unordered thermal history",
-    )
-    _require(np.max(np.diff(thermal[:, 1])) <= 5, "Thermal sampling is too sparse")
-    expected_times = _times(thermal[:, 0], segments)
-    _require(
-        _close(expected_times, thermal[:, 1]), "Thermal times contradict run commands"
-    )
-    # Heating is a ramp, not a stationary state. Compare block means to its target.
-    for block in np.array_split(thermal[thermal[:, 1] <= 1000], 10):
-        _require(
-            len(block) >= 2
-            and abs(np.mean(block[:, 2] - (300 + 2.2 * block[:, 1]))) < 200,
-            "Measured temperature does not follow heating",
-        )
-    return segments
-
-
-def _times(steps, segments):
-    times = np.full(len(steps), np.nan)
-    for first, last, start, dt in segments:
-        selected = (steps >= first) & (steps <= last)
-        times[selected] = start + (steps[selected] - first) * dt
-    _require(
-        np.isfinite(times).all() and (steps == steps.astype(int)).all(),
-        "Steps outside the recorded runs",
-    )
-    return times
-
-
 def _diffusion_states(data, commands, clock):
     """Read the calculation's clock directly, without reconstructing its setup.
 
@@ -601,128 +456,19 @@ def _diffusion_states(data, commands, clock):
     return times[selected] + (1000 - start), positions, [start, end]
 
 
-def _displacements(data, *, allow_wrapped=False):
+def _displacements(data):
     """Remove homogeneous cell motion and collective translation."""
     fractional = np.einsum("faj,fjk->fak", data.positions, np.linalg.inv(data.cells))
     increments = np.diff(fractional, axis=0)
-    if data.wrapped:
-        _require(
-            allow_wrapped, "Diffusion requires unwrapped positions or image counters"
-        )
-        increments -= np.rint(increments)
+    _require(
+        not data.wrapped, "Diffusion requires unwrapped positions or image counters"
+    )
     motion = np.einsum(
         "faj,fjk->fak",
         increments,
         (data.cells[1:] + data.cells[:-1]) / 2,
     )
     return motion - motion.mean(axis=1, keepdims=True)
-
-
-def _states(data, thermal, segments, end):
-    times = _times(data.steps, segments)
-    if data.times_ps:
-        _require(
-            len(data.times_ps) == len(times)
-            and all(
-                recorded is None or _close(recorded, expected)
-                for recorded, expected in zip(data.times_ps, times, strict=True)
-            ),
-            "Trajectory TIME headers contradict recorded run times",
-        )
-    valid_start = _close(times[0], 0) if end == 1000 else times[0] <= 1000
-    _require(
-        _close(times[-1], end) and valid_start and np.any(np.isclose(times, 1000)),
-        "Retain the final state and the full interval needed for the requested calculation",
-    )
-    lengths = np.diagonal(data.cells, axis1=1, axis2=2)
-    _require(
-        np.allclose(lengths, lengths[:, :1], rtol=0.002),
-        "Expected isotropic cubic cells",
-    )
-    lattice = lengths[0, 0] / 3
-    _require(5.3 < lattice < 5.6, "Initial cell is inconsistent with mp-149 silicon")
-    expected = bulk("Si", "diamond", a=lattice, cubic=True).repeat((3, 3, 3))
-    actual = data.positions[0]
-    matches = False
-    for anchor in expected.positions[:8]:
-        delta = actual[:, None] - actual[0] - (expected.positions[None] - anchor)
-        delta -= np.rint(delta / lengths[0]) * lengths[0]
-        distances = np.linalg.norm(delta, axis=-1)
-        if (
-            np.max(np.min(distances, axis=1)) < 0.02
-            and len(np.unique(np.argmin(distances, axis=1))) == 216
-        ):
-            matches = True
-            break
-    if _close(times[0], 0):
-        _require(matches, "Initial state is not the 3 x 3 x 3 diamond repeat")
-    density = 216 * SILICON_MASS * 1.66053906660 / np.linalg.det(data.cells)
-    indices = np.searchsorted(thermal[:, 0], data.steps)
-    _require(
-        (indices < len(thermal)).all()
-        and np.array_equal(thermal[indices, 0], data.steps),
-        "Retain a thermal row for each trajectory frame",
-    )
-    temperature = thermal[indices, 2]
-    if data.velocities is not None:
-        measured = (
-            SILICON_MASS
-            * np.sum((data.velocities / (1000 * units.fs)) ** 2, axis=(1, 2))
-            / (645 * units.kB)
-        )
-        _require(
-            np.allclose(measured, temperature, rtol=0.02, atol=1),
-            "Trajectory velocities contradict temperature logs",
-        )
-    _require(
-        np.allclose(density, thermal[indices, 4], rtol=0.002),
-        "Trajectory cells contradict density logs",
-    )
-    if _close(times[0], 0):
-        _require(abs(temperature[0] - 300) < 60, "Initial temperature is not at 300 K")
-    _require(
-        abs(temperature[-1] - 2500) < 500,
-        "Final state is not near the requested 2500 K",
-    )
-    # Minimum-image motion establishes Level 1 mobility, not diffusion.
-    motion = _displacements(data, allow_wrapped=end == 1000)
-    high_temperature = times[1:] >= (1000 if end > 1000 else times[-2])
-    increments = np.mean(np.sum(motion[high_temperature] ** 2, axis=-1), axis=1)
-    _require(
-        increments.max() <= 10 * max(float(np.median(increments)), 1e-6),
-        "Trajectory contains a discontinuous jump or an unwrapping error",
-    )
-    positions = np.concatenate([np.zeros((1, 216, 3)), np.cumsum(motion, axis=0)])
-    return times, positions
-
-
-def _phase(data, times, positions, level):
-    start = 900 if level == 1 else 1100
-    indices = np.flatnonzero(times >= start)
-    _require(len(indices) >= 2, "Retain multiple high-temperature states")
-    adjacency = []
-    coordination = []
-    for i in indices[:: max(1, len(indices) // 10)]:
-        delta = data.positions[i, :, None] - data.positions[i, None]
-        lengths = np.diag(data.cells[i])
-        delta -= np.rint(delta / lengths) * lengths
-        neighbors = (np.linalg.norm(delta, axis=-1) < 3.1) & ~np.eye(216, dtype=bool)
-        adjacency.append(neighbors)
-        coordination.append(float(neighbors.sum(axis=1).mean()))
-    survival = np.count_nonzero(adjacency[0] & adjacency[-1]) / max(
-        1, np.count_nonzero(adjacency[0])
-    )
-    displacement = float(
-        np.mean(np.sum((positions[-1] - positions[indices[0]]) ** 2, axis=1))
-    )
-    return {
-        "neighbor_survival": float(survival),
-        "mean_coordination": float(np.mean(coordination)),
-        "displacement_A2": displacement,
-        "liquid_criteria_met": bool(
-            3 < np.mean(coordination) < 12 and survival < 0.5 and displacement > 9
-        ),
-    }
 
 
 def _msd_fit(times, positions, low=0.1, high=0.3):

@@ -54,7 +54,7 @@ def test_shared_scorer_propagates_pending_instead_of_recording_zero(
     )["level_2_task_10"]
     from corral_md.scoring.common import Rubric
 
-    rubric = Rubric(10, binary=True)
+    rubric = Rubric(10)
     rubric.check("independent_model_calculation", 100, None, "Backend unavailable")
     monkeypatch.setattr(
         task.scoring_fn,

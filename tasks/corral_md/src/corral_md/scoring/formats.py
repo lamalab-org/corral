@@ -364,14 +364,6 @@ def phonon_log(value, level):
                 ),
             },
         )
-        methods = {
-            "analytical": "analytic_hessian",
-            "analytical_hessian": "analytic_hessian",
-            "finite_difference": "central_difference",
-            "finite-difference": "central_difference",
-        }
-        if isinstance(row.get("method"), str):
-            row["method"] = methods.get(row["method"], row["method"])
         if level == 1:
             row.setdefault(
                 "uniaxial_strain", 0.0
@@ -419,11 +411,11 @@ def phonon_log(value, level):
             if constants.shape != (6, 6):
                 raise UnsupportedEvidence("Unsupported force-constant tensor layout")
             row["hessian_eV_A2"] = constants.tolist()
-        if "hessian_eV_A2" in row:
-            row.setdefault("method", "retained_hessian")
-        elif "mode_energies_eV" in row:
-            row.setdefault("method", "retained_modes")
-        elif "method" not in row:
+        if not (
+            "mode_energies_eV" in row
+            or "hessian_eV_A2" in row
+            or {"forces_plus_eV_A", "forces_minus_eV_A", "displacement_A"} <= row.keys()
+        ):
             raise UnsupportedEvidence(
                 "Cannot identify forces, a Hessian, or mode energies in the phonon record"
             )

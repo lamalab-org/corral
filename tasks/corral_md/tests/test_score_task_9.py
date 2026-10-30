@@ -256,7 +256,9 @@ def submission(tmp_path, _soap_stub):
                 * units.fs
                 / (mass * 0.025)
             )
-            energy = -100 + 0.2 * np.sin(angle) + 0.04 * np.cos(0.037 * t)
+            # Both components lie in the synthetic descriptor's position basis,
+            # so a valid chronological Ridge fit clears the historical R2 floor.
+            energy = -100 + 0.2 * np.sin(angle) + 0.04 * np.cos(angle)
             if name != "main":
                 energy += 2  # Poor transfer is a valid measured result.
             return {
@@ -383,4 +385,4 @@ def test_default_level2_final_quantity_policy_accepts_numerical_legacy_log(submi
         submission
     )
     assert report["score"] == 1, report
-    assert report["scoring_policy"] == "level2-final-quantities-v1"
+    assert report["scoring_policy"] == "level2-final-quantities-v2"

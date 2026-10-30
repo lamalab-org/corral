@@ -253,7 +253,7 @@ def test_measured_temperature_and_cutoff_determine_fit(tmp_path):
     assert report["computed"]["cooling_tg_K"] == pytest.approx(1576.88, abs=50)
 
 
-@pytest.mark.parametrize("tg_K", [450, 1300, 1400, 1460, 1690, 2365, 2450, 2550])
+@pytest.mark.parametrize("tg_K", [450, 1300, 1400, 1750, 2365, 2450, 2550])
 def test_self_consistent_tg_outside_historical_reference_fails(tmp_path, tg_K):
     path, _, _ = calculation(tmp_path, tg_K=tg_K)
     report = score(path)
@@ -278,7 +278,7 @@ def test_2600_k_answer_cannot_pass_by_matching_a_fit_near_the_cutoff(tmp_path):
 
 @pytest.mark.parametrize(
     ("fitted_tg", "reported_tg"),
-    [(1460, 1500), (1690, 1650), (1500, 1460), (1650, 1690)],
+    [(1400, 1450), (1750, 1700), (1450, 1400), (1700, 1750)],
 )
 def test_reference_applies_to_both_fitted_and_reported_tg(
     tmp_path, fitted_tg, reported_tg
@@ -295,14 +295,16 @@ def test_reference_applies_to_both_fitted_and_reported_tg(
 @pytest.mark.parametrize(
     ("tg_K", "expected"),
     [
-        (1476.88 - 0.001, 0),
-        (1476.88, 1),
+        (1419.192 - 0.001, 0),
+        (1419.192, 1),
+        (1460, 1),
         (1576.88, 1),
-        (1676.88, 1),
-        (1676.88 + 0.001, 0),
+        (1690, 1),
+        (1734.568, 1),
+        (1734.568 + 0.001, 0),
     ],
 )
-def test_historical_reference_uses_100_kelvin_inclusive_tolerance(
+def test_historical_reference_uses_ten_percent_inclusive_tolerance(
     tmp_path, tg_K, expected
 ):
     path, _, _ = calculation(tmp_path, tg_K=tg_K)
@@ -310,8 +312,8 @@ def test_historical_reference_uses_100_kelvin_inclusive_tolerance(
     assert report["score"] == expected, report
     reference = report["computed"]["reference_tg"]
     assert reference["cooling_tg_K"] == 1576.88
-    assert reference["absolute_tolerance_K"] == 100
-    assert reference["accepted_range_K"] == pytest.approx([1476.88, 1676.88])
+    assert reference["absolute_tolerance_K"] == pytest.approx(157.688)
+    assert reference["accepted_range_K"] == pytest.approx([1419.192, 1734.568])
 
 
 def test_tg_is_the_line_intersection_between_sampled_temperatures(tmp_path):

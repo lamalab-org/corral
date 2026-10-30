@@ -45,13 +45,13 @@ def test_each_unchanged_submission_example_defines_required_keys(tmp_path, task,
 
 
 def test_unknown_representation_and_scorer_bug_have_distinct_outcomes():
-    pending = Rubric(8, binary=True)
+    pending = Rubric(8)
     pending.error("read_dataset", 100, UnsupportedEvidence("unknown record layout"))
     with pytest.raises(EvaluationError, match="unknown record layout") as caught:
         pending.as_dict()
     assert caught.value.report["status"] == "evaluation_error"
     assert "score" not in caught.value.report
-    wrong = Rubric(8, binary=True)
+    wrong = Rubric(8)
     wrong.error("labels", 100, EvidenceError("energies disagree with the teacher"))
     assert wrong.as_dict()["score"] == 0
     with pytest.raises(EvaluationError, match="Task 8, check reader_bug"):
@@ -59,7 +59,7 @@ def test_unknown_representation_and_scorer_bug_have_distinct_outcomes():
 
 
 def test_unsupported_required_reader_does_not_run_dependent_checks():
-    rubric = Rubric(6, binary=True, fail_fast=True)
+    rubric = Rubric(6, fail_fast=True)
     rubric.error("read", 80, UnsupportedEvidence("unsupported layout"))
     rubric.check("dependent", 20, lambda: pytest.fail("dependent check ran"))
     with pytest.raises(EvaluationError, match="unsupported layout"):

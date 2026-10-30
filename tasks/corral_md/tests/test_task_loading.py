@@ -12,6 +12,53 @@ from hatchling.builders.wheel import WheelBuilder
 
 from corral.core.environment import Toolset
 from corral.core.state import ExecutionState, RuntimeState
+from corral.evaluation import TaskScorer
+
+
+def _aluminum_submission(workspace, number):
+    rows = [{"type": "meta", "T_K": 300, "temperature_K": 900}]
+    for temperature in (290, 310):
+        row = {"type": "sample", "phase": "production"}
+        if number == 7:
+            row.update(
+                temperature_K=temperature, volume_A3=1800, pressure_GPa=1.01325e-4
+            )
+        else:
+            row.update(
+                Tx_K=temperature,
+                Ty_K=temperature,
+                Tz_K=temperature,
+                energy_eV_per_atom=-3.6,
+                temperature_K=900,
+            )
+        rows.append(row)
+    filename = f"run-{number}.jsonl"
+    (workspace / filename).write_text("\n".join(json.dumps(row) for row in rows))
+    return json.dumps({"artifacts": {"run_log": f"/workspace/{filename}"}})
+
+
+@pytest.mark.parametrize("number", [7, 10])
+def test_shipped_aluminum_tasks_ignore_conflicting_temperature_metadata(
+    tmp_path, monkeypatch, number
+):
+    monkeypatch.chdir(tmp_path)
+    task_id = f"level_1_task_{number}"
+    task = env.load_tasks_from_json(
+        env.PACKAGE_DATA_ROOT / f"level_1/tasks_json/task_{number}.json",
+        local=True,
+    )[task_id]
+    state = ExecutionState(
+        through_commit_hash="a" * 64,
+        execution_id=task_id,
+        branch_id="main",
+        runtime=RuntimeState(status="submitted"),
+        submission=_aluminum_submission(tmp_path, number),
+    )
+    result = TaskScorer(task, workspace=tmp_path).evaluate(state)
+    assert result.score == 1, result.feedback
+    report = result.metadata["workflow_evaluation"]
+    assert report["scoring_policy"] == "level1-final-quantities-v2"
+    assert report["computed"]["stages"][0]["temperature_K"] == 300
 
 
 @pytest.mark.parametrize(
@@ -38,6 +85,11 @@ def test_all_shipped_tasks_load_from_unrelated_cwd(
 
 @pytest.mark.usefixtures("md_assets")
 def test_wheel_loads_both_levels_without_editable_source(tmp_path):
+    (tmp_path / "aluminum-submissions.json").write_text(
+        json.dumps(
+            {number: _aluminum_submission(tmp_path, number) for number in (7, 10)}
+        )
+    )
     task_root = Path(__file__).resolve().parents[1]
     wheel = next(WheelBuilder(str(task_root)).build(directory=str(tmp_path)))
     installed = tmp_path / "installed"
@@ -52,6 +104,7 @@ def test_wheel_loads_both_levels_without_editable_source(tmp_path):
             "-I",
             "-c",
             """
+import json
 import sys
 from pathlib import Path
 
@@ -60,9 +113,12 @@ sys.path = [str(installed)] + [
     path for path in sys.path if Path(path).resolve() != source
 ]
 from corral_md import env
+from corral.core.state import ExecutionState, RuntimeState
+from corral.evaluation import TaskScorer
 
 assert Path(env.__file__).is_relative_to(installed)
 assert env.PACKAGE_DATA_ROOT.is_relative_to(installed)
+submissions = json.loads((installed.parent / "aluminum-submissions.json").read_text())
 for level in (1, 2):
     environments = env.create_environments(
         work_dir=str(installed.parent / "work"), level=level
@@ -78,6 +134,20 @@ for level in (1, 2):
         task = environment.current_task
         assert "validate_submission" not in task.submission_format
         assert task.scoring_fn.evaluate("{}")["score"] == 0
+        number = task.scoring_fn.task_number
+        if level == 1 and number in (7, 10):
+            state = ExecutionState(
+                through_commit_hash="a" * 64,
+                execution_id=f"packaged-task-{number}",
+                branch_id="main",
+                runtime=RuntimeState(status="submitted"),
+                submission=submissions[str(number)],
+            )
+            result = TaskScorer(task, workspace=installed.parent).evaluate(state)
+            assert result.score == 1, result.feedback
+            report = result.metadata["workflow_evaluation"]
+            assert report["scoring_policy"] == "level1-final-quantities-v2"
+            assert report["computed"]["stages"][0]["temperature_K"] == 300
     assert not list(Path(env.__file__).parent.glob("*_recording.py"))
 """,
             str(installed),
@@ -204,7 +274,7 @@ def test_all_tasks_require_direct_json_answers(tmp_path, level, local):
         env.PACKAGE_DATA_ROOT / f"level_{level}/tasks_json", local=local
     )
     for task in tasks.values():
-        assert task.submission_format.startswith("Return JSON:\n\n```json\n")
+        assert task.submission_format.startswith("Return a JSON object")
         example = re.search(r"```json\n(.*?)\n```", task.submission_format, re.S)
         assert example is not None
         answer = example[1]

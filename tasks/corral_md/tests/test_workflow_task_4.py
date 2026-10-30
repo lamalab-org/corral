@@ -16,6 +16,8 @@ from corral_md.scoring.level1_trusted import PINNED_TEACHER_SHA256
 from corral_md.scoring.task_4 import NODES, build_plan, prepare, read_record
 from corral_md.scoring.verification import ModalVerifier
 
+SPRING_CONSTANT = 0.63  # Synthetic stable Pd-like spectrum near 0.0254 eV/atom.
+
 
 def neighbors():
     sites = np.indices((5,) * 3).reshape(3, -1).T
@@ -29,6 +31,7 @@ def independent_energies(q, sign=1):
     sites, nn = neighbors()
     eigenvalue = (
         sign
+        * SPRING_CONSTANT
         * np.sum(1 - np.cos(2 * np.pi * np.asarray(q) @ sites[nn].T), axis=1)
         / 106.42
     )
@@ -42,8 +45,8 @@ def make_record(sign=1, analytical=False):
     atoms = bulk("Pd", "fcc", a=3.89).repeat((5, 5, 5))
     sites, nn = neighbors()
     phi = np.zeros((125, 3, 3))
-    phi[nn] = -sign * np.eye(3)
-    phi[0] = sign * 12 * np.eye(3)
+    phi[nn] = -sign * SPRING_CONSTANT * np.eye(3)
+    phi[0] = sign * SPRING_CONSTANT * 12 * np.eye(3)
     displacements = np.vstack(
         [
             np.zeros((1, 3)),
@@ -279,7 +282,7 @@ def test_force_constants_and_bands_against_analytic_dispersion(submission):
 
 def test_signed_instability_has_no_harmonic_zpe(tmp_path):
     path = _submission(tmp_path, sign=-1)
-    assert score(path)["score"] == 1
+    assert score(path)["score"] == 0
     change_answer(path, lambda r: r.update(zpe_eV_per_atom=0))
     assert score(path)["score"] == 0
     change_answer(path, lambda r: r.update(zpe_eV_per_atom=None))
@@ -539,7 +542,7 @@ def test_large_imaginary_mode_bound_still_requires_null_for_instability(tmp_path
     record["forces_eV_A"][1:7] *= 1.005
     save_record(path.parent / "phonons.npz", record)
     report = score(path)
-    assert report["score"] == 1, report
+    assert report["score"] == 0, report
     calculated = report["calculated_results"]
     assert calculated["imaginary_tolerance_eV"] > 5e-4
     assert calculated["resolved_imaginary_weight"] > 0
@@ -583,7 +586,7 @@ def test_tiny_imaginary_modes_remain_signed_but_are_numerical_residuals(tmp_path
         path, lambda r: r.update(zpe_eV_per_atom=0, resolved_imaginary_weight=0)
     )
     report = score(path)
-    assert report["score"] == 1, report
+    assert report["score"] == 0, report
     assert report["calculated_results"]["spectrum_status"] == "numerical_residuals"
     assert report["calculated_results"]["imaginary_weight"] == 3
 

@@ -37,6 +37,7 @@ from .formats import (
     records,
 )
 from .level1_trusted import PINNED_TEACHER_SHA256
+from .physical_reference import REFERENCE_COMMIT
 from .pipeline_data import read_pipeline
 from .pipeline_records import normalize as normalize_pipeline_records
 from .pipeline_records import parameters as _pipeline_parameters
@@ -1295,7 +1296,7 @@ def _evaluate_saved_pipelines(
         )
         return answers_match(evidence.results, calculated)
 
-    rubric.check("reported_metrics", 20, reported)
+    rubric.check("reported_metrics", 10, reported)
     if any(file_ref(Path(path))["sha256"] != digest for path, digest in paths.items()):
         raise EvaluationError("Linked calculation artifacts changed during scoring")
     return fingerprint
@@ -1320,7 +1321,7 @@ def _evaluate_inline_pipelines(
 
         rubric.check("training_only_pipelines_and_selection", 35, pipelines)
         rubric.check(
-            "reported_metrics", 25, lambda: answers_match(evidence.results, calculated)
+            "reported_metrics", 15, lambda: answers_match(evidence.results, calculated)
         )
 
     def independent():
@@ -1370,7 +1371,7 @@ def _evaluate_inline_pipelines(
 
 
 def evaluate_submission(submission, *, level, verifier=None):
-    rubric = Rubric(8, binary=True, fail_fast=True)
+    rubric = Rubric(8, fail_fast=True)
     calculated, verification = {}, {}
     try:
         evidence = Evidence(submission, task_number=8, level=level)
@@ -1392,6 +1393,23 @@ def evaluate_submission(submission, *, level, verifier=None):
         _evaluate_inline_pipelines(
             evidence, level, verifier, rubric, calculated, verification, fingerprint
         )
+    if level == 2:
+
+        def prediction_quality():
+            r2 = finite_array(calculated["id_test"]["r2"], shape=()).item()
+            _require(
+                r2 >= 0.98,
+                f"Independent in-distribution prediction R² {r2:.8g} is below "
+                "the historical reference threshold 0.98",
+            )
+            calculated["physical_reference"] = {
+                "minimum_r2": 0.98,
+                "source_commit": REFERENCE_COMMIT,
+                "evaluation_basis": "reconstructed_independent_in_distribution_test",
+            }
+            return True
+
+        rubric.check("physical_reference_r2", 10, prediction_quality)
     if evidence.fingerprint() != manifest_fingerprint:
         raise EvaluationError(
             "Submission changed during grading; retry with frozen evidence"

@@ -20,14 +20,18 @@ def write_log(path, rows):
 
 
 def aluminum_log(tmp_path, task, nested=False):
-    rows = [{"phase": "equilibration", "step": 0, "Temperature": 50}]
+    rows = [{"type": "sample", "phase": "equilibration", "step": 0}]
     for i in range(8):
         t = 300 + (-1) ** i
-        row = {"type": "thermo", "phase": "production", "step": i + 1, "Temperature": t}
+        row = {"type": "sample", "phase": "production", "step": i + 1}
         if task == 7:
-            row.update(volume_A3=1800 + (-1) ** i, pressure_bar=1.01325)
+            row.update(
+                temperature_K=t, volume_A3=1800 + (-1) ** i, pressure_GPa=1.01325e-4
+            )
         else:
-            row.update(Etot_per_atom_eV=-3.6 + 0.001 * (-1) ** i, Tx=t, Ty=t, Tz=t)
+            row.update(
+                energy_eV_per_atom=-3.6 + 0.001 * (-1) ** i, Tx_K=t, Ty_K=t, Tz_K=t
+            )
         rows.append(row)
     path = tmp_path / "run.jsonl"
     if nested:
@@ -47,6 +51,7 @@ def test_means_need_only_scalar_samples(tmp_path, task, nested):
         submission
     )
     assert report["score"] == 1, report
+    assert report["scoring_policy"] == "level1-final-quantities-v2"
     stage = report["computed"]["stages"][0]
     assert stage["sample_count"] == 8  # no hidden 32-sample quality gate
     assert stage["temperature_K"] == 300
@@ -56,40 +61,43 @@ def test_means_need_only_scalar_samples(tmp_path, task, nested):
 
 
 @pytest.mark.parametrize("task", [7, 10])
-def test_incorrect_final_answer_still_fails(tmp_path, task):
+def test_unrequested_results_do_not_change_the_sample_score(tmp_path, task):
     submission, _, _ = aluminum_log(tmp_path, task)
     submission["results"] = (
         {"volume_A3": 2500} if task == 7 else {"energy_eV_per_atom": -2.0}
     )
     result = check_level1_workflow(task).evaluate_submission(submission)
-    assert result.score == 0
-    assert "Incorrect" in result.feedback
+    assert result.score == 1
+    assert result.feedback is None
 
 
 @pytest.mark.parametrize("task", [7, 10])
 def test_wrong_final_temperature_fails(tmp_path, task):
     submission, path, rows = aluminum_log(tmp_path, task)
     for row in rows[1:]:
-        row["Temperature"] = 800
+        if task == 7:
+            row["temperature_K"] = 800
+        else:
+            row.update(Tx_K=800, Ty_K=800, Tz_K=800)
+        row.update(T_K=300, Temperature=300, Tx=300, Ty=300, Tz=300)
     write_log(path, rows)
     assert check_level1_workflow(task)(submission) == 0
 
 
-def test_bar_and_gpa_are_equivalent(tmp_path):
+def test_pressure_alias_does_not_override_documented_gpa(tmp_path):
     submission, path, rows = aluminum_log(tmp_path, 7)
     first = check_level1_workflow(7).evaluate(submission)
     for row in rows[1:]:
-        row["pressure_GPa"] = row.pop("pressure_bar") * 1e-4
+        row["pressure_bar"] = 100000
     write_log(path, rows)
     second = check_level1_workflow(7).evaluate(submission)
     assert first["computed"] == second["computed"]
 
 
-def test_energy_total_and_per_atom_are_equivalent(tmp_path):
+def test_extra_energy_fields_do_not_override_documented_per_atom_energy(tmp_path):
     submission, path, rows = aluminum_log(tmp_path, 10)
     for row in rows[1:]:
-        row["Epot_eV"] = row.pop("Etot_per_atom_eV") * 108 - 4
-        row["Ekin_eV"] = 4
+        row.update(Epot_eV="unused", Ekin_eV=None, Etot_per_atom_eV=-100)
     write_log(path, rows)
     result = check_level1_workflow(10).evaluate(submission)
     assert result["score"] == 1
@@ -99,10 +107,9 @@ def test_energy_total_and_per_atom_are_equivalent(tmp_path):
 def test_task10_derives_overall_temperature_from_directional_samples(tmp_path):
     submission, path, rows = aluminum_log(tmp_path, 10)
     for row in rows[1:]:
-        row.pop("Temperature")
-        row["Tx"] += 10
-        row["Ty"] -= 4
-        row["Tz"] -= 6
+        row["Tx_K"] += 10
+        row["Ty_K"] -= 4
+        row["Tz_K"] -= 6
     write_log(path, rows)
     report = check_level1_workflow(10).evaluate(submission)
     assert report["score"] == 1, report
@@ -111,34 +118,33 @@ def test_task10_derives_overall_temperature_from_directional_samples(tmp_path):
     assert stage["directional_temperature_K"] == [310, 296, 294]
 
 
-def test_task10_rejects_inconsistent_optional_overall_temperature(tmp_path):
+@pytest.mark.parametrize("field", ["temperature_K", "Temperature", "T_K"])
+def test_task10_ignores_unrequested_overall_temperature(tmp_path, field):
     submission, path, rows = aluminum_log(tmp_path, 10)
-    # Both temperatures independently meet the target, but contradict each other.
     for row in rows[1:]:
-        row["Temperature"] += 20
+        row[field] = 800
     write_log(path, rows)
     result = check_level1_workflow(10).evaluate_submission(submission)
-    assert result.score == 0
-    assert "Overall temperature disagrees" in result.feedback
+    assert result.score == 1
+    assert result.feedback is None
 
 
 def test_task10_checks_target_without_optional_overall_temperature(tmp_path):
     submission, path, rows = aluminum_log(tmp_path, 10)
     for row in rows[1:]:
-        row.pop("Temperature")
-        row.update(Tx=340, Ty=340, Tz=340)
+        row.update(Tx_K=340, Ty_K=340, Tz_K=340)
     write_log(path, rows)
     assert check_level1_workflow(10)(submission) == 0
 
 
-def test_unknown_layout_reports_error_instead_of_validation_crash(tmp_path):
+def test_missing_documented_field_reports_submission_failure(tmp_path):
     submission, path, rows = aluminum_log(tmp_path, 7)
     for row in rows[1:]:
         row["unrecognized_volume"] = row.pop("volume_A3")
     write_log(path, rows)
-    with pytest.raises(EvaluationError) as caught:
-        check_level1_workflow(7).evaluate_submission(submission)
-    assert "volume" in caught.value.report["checks"][0]["detail"]
+    result = check_level1_workflow(7).evaluate_submission(submission)
+    assert result.score == 0
+    assert "Missing required production sample field: volume_A3" in result.feedback
 
 
 def test_missing_production_is_not_automatically_credited(tmp_path):
@@ -149,7 +155,7 @@ def test_missing_production_is_not_automatically_credited(tmp_path):
 
 def test_nonfinite_quantity_is_not_credited(tmp_path):
     submission, path, rows = aluminum_log(tmp_path, 10)
-    rows[1]["Etot_per_atom_eV"] = float("nan")
+    rows[1]["energy_eV_per_atom"] = float("nan")
     write_log(path, rows)
     assert check_level1_workflow(10)(submission) == 0
 
@@ -162,6 +168,108 @@ def test_restart_markers_do_not_become_thermodynamic_samples(tmp_path):
     result = check_level1_workflow(10).evaluate(submission)
     assert result["score"] == 1, result
     assert result["computed"]["stages"][0]["sample_count"] == 8
+
+
+@pytest.mark.parametrize("task", [7, 10])
+@pytest.mark.parametrize("nested", [False, True])
+def test_metadata_targets_and_unused_fields_do_not_change_measurements(
+    tmp_path, task, nested
+):
+    submission, path, rows = aluminum_log(tmp_path, task)
+    for i, row in enumerate(rows[1:]):
+        temperature = 300 + 10 * (-1) ** i
+        if task == 7:
+            row["temperature_K"] = temperature
+        else:
+            row.update(Tx_K=temperature, Ty_K=temperature, Tz_K=temperature)
+    write_log(path, rows)
+    scorer = check_level1_workflow(task)
+    baseline = scorer.evaluate(submission)
+    assert baseline["score"] == 1
+    metadata = {
+        "type": "meta",
+        "seed": 12345,
+        "T_K": 300,
+        "temperature_K": 800,
+        "Tx_K": 800,
+        "volume_A3": -1,
+        "pressure_GPa": 100,
+        "energy_eV_per_atom": 100,
+    }
+    for row in rows[1:]:
+        row.update(
+            T_K=300,
+            Temperature="unused",
+            Tx=-100,
+            volume=-1,
+            momenta="unused",
+            momenta_ase_units=None,
+            event="warning",
+            name="equilibration",
+        )
+    rows.append({"type": "summary", "temperature_K": 800, "Tx_mean": 800})
+    if nested:
+        path.write_text(
+            json.dumps({"metadata": metadata, "stages": [{"samples": rows}]})
+        )
+    else:
+        write_log(path, [metadata, *rows])
+    result = scorer.evaluate(submission)
+    assert result["score"] == 1, result
+    assert result["computed"] == baseline["computed"]
+
+
+@pytest.mark.parametrize(
+    ("task", "field", "alias"),
+    [
+        (7, "temperature_K", "T_K"),
+        (7, "volume_A3", "volume"),
+        (7, "pressure_GPa", "pressure_bar"),
+        (10, "Tx_K", "Tx"),
+        (10, "Ty_K", "Ty"),
+        (10, "Tz_K", "Tz"),
+        (10, "energy_eV_per_atom", "Etot_per_atom_eV"),
+    ],
+)
+@pytest.mark.parametrize("nested", [False, True])
+def test_metadata_or_alias_cannot_supply_a_missing_sample_field(
+    tmp_path, task, field, alias, nested
+):
+    submission, path, rows = aluminum_log(tmp_path, task)
+    missing = rows[1].pop(field)
+    rows[1][alias] = missing
+    metadata = {"type": "meta", field: missing}
+    if nested:
+        path.write_text(
+            json.dumps({"metadata": metadata, "stages": [{"samples": rows}]})
+        )
+    else:
+        write_log(path, [metadata, *rows])
+    result = check_level1_workflow(task).evaluate_submission(submission)
+    assert result.score == 0
+    assert f"Missing required production sample field: {field}" in result.feedback
+
+
+@pytest.mark.parametrize("task", [7, 10])
+def test_nested_metadata_does_not_need_a_scoring_schema(tmp_path, task):
+    submission, path, rows = aluminum_log(tmp_path, task)
+    path.write_text(
+        json.dumps(
+            {"metadata": "unused", "phase": "unused", "step": "unused", "samples": rows}
+        )
+    )
+    result = check_level1_workflow(task).evaluate_submission(submission)
+    assert result.score == 1
+
+
+@pytest.mark.parametrize("task", [7, 10])
+def test_sample_phase_must_use_documented_field(tmp_path, task):
+    submission, path, rows = aluminum_log(tmp_path, task)
+    rows[1]["name"] = rows[1].pop("phase")
+    write_log(path, rows)
+    result = check_level1_workflow(task).evaluate_submission(submission)
+    assert result.score == 0
+    assert "Sample phase must be" in result.feedback
 
 
 def phonon_submission(tmp_path):
