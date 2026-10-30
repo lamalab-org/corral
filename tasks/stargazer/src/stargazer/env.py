@@ -86,7 +86,7 @@ def _task_prompt(env: Environment, _state: ExecutionState) -> str:
     obs = context.observations
     assisted = env.current_task.scoring_inputs.get("analysis_assistance", True)
     assistance = (
-        "\nUse stargazer_predict(planets) for the evaluator's RV signal and "
+        "\nUse stargazer_predict(planets) for the predicted RV signal and "
         "stargazer_diagnostics(planets, noise_jitter_ms=0.1) for fitted offsets, "
         "model_ms and residuals_ms arrays plus observation-only scalar diagnostics. "
         "Custom prediction times retain t_ref_days. "
@@ -123,14 +123,14 @@ The null model uses zero jitter. RMS guidance is {context.maximum_rms_factor} ti
 
 validate_fit(planets=[...], noise_jitter_ms=...) can be called repeatedly.
 It returns format errors, the effective candidate, likelihood, BIC and residuals.
-It contains no reference-based correctness feedback. history contains only these validations.
+These diagnostics describe the fit to the supplied observations. history contains only these validations.
 Choose planet count and parameters using observations. A low RMS alone does not establish planet recovery.
 Tool use is bounded by Corral's configured agent iteration limit. Reserve time to commit an answer.
 
 {SUBMISSION_FORMAT}
 Example final JSON: {{"planets": [{{"P_days": 10.0, "m_sin_i_mjup": 0.1,
 "e": 0.1, "omega_rad": 0.2, "l_rad": 1.0}}], "noise_jitter_ms": 0.5}}
-Only the final candidate is graded. No final answer is an unfinished attempt.
+Call submit_answer with your chosen final candidate to complete the task.
 """
 
 

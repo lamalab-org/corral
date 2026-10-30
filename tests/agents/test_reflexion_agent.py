@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from promptstore import PromptStore
 
 from corral.agents.reflection import ReflectionModule
 from corral.agents.reflexion_agent import ReflexionAgent
@@ -113,31 +114,33 @@ async def test_reflexion_requires_model_metadata_without_requiring_actor_model()
 
 
 @pytest.mark.anyio
-async def test_reflexion_generates_memory_before_next_actor_attempt(monkeypatch):
+@pytest.mark.parametrize("reflection_error", [False, True])
+async def test_reflexion_generates_memory_before_next_actor_attempt(
+    monkeypatch, reflection_error
+):
+    # Exercise the packaged reflection prompt, not the generic autouse fixture.
+    monkeypatch.setattr("corral.agents.base_agent.PromptStore", PromptStore)
     actor = Actor()
-    agent = ReflexionAgent(
-        actor=actor,
-        reflection_prompt=(
-            "{{task_id}} {{trial_id}} {{score}} {{trajectory_summary}} "
-            "{{task_description}}"
-        ),
-    )
+    agent = ReflexionAgent(actor=actor)
     first = FakeSession()
     first_outcome = await agent.run_session(first)
 
     reflection_models = []
+    reflection_messages = []
 
-    async def generate_reflection(reflection_module, **_kwargs):
-        reflection_models.append(reflection_module.model)
-        return (
-            "Check the measured value before answering.",
-            {"prompt_tokens": 5, "completion_tokens": 2},
+    async def reflection_call(**kwargs):
+        reflection_models.append(kwargs["model"])
+        reflection_messages.extend(kwargs["messages"])
+        if reflection_error:
+            raise RuntimeError("Reflection model unavailable")
+        return SimpleNamespace(
+            content="Check the measured value before answering.",
+            usage={"prompt_tokens": 5, "completion_tokens": 2},
         )
 
     monkeypatch.setattr(
-        ReflectionModule,
-        "generate_reflection",
-        generate_reflection,
+        "corral.agents.reflection.llm_call",
+        reflection_call,
     )
     previous_state = SimpleNamespace(
         through_commit_hash="a" * 64,
@@ -172,11 +175,31 @@ async def test_reflexion_generates_memory_before_next_actor_attempt(monkeypatch)
     memory = second.agent_state["reflexion"]["memory"]
     assert second.agent_state["reflexion"]["reflection_model"] == "test-model"
     assert len(memory["reflections"]) == 1
+    assert memory["reflections"][0]["score"] == 0.2
     assert second.agent_state["reflexion"]["source_commit_hash"] == ("a" * 64)
+    expected_reflection = (
+        "Previous attempt achieved score 0.200."
+        if reflection_error
+        else "Check the measured value"
+    )
     assert any(
-        "Check the measured value" in str(message.get("content"))
+        expected_reflection in str(message.get("content"))
         for message in second.messages
     )
+    reflection_prompt = next(
+        message["content"]
+        for message in reflection_messages
+        if message["role"] == "user"
+    )
+    assert "Score achieved:" in reflection_prompt
+    assert "0.2" in reflection_prompt
+    actor_memory = next(
+        message["content"]
+        for message in second.messages
+        if message.get("name") == "reflexion-memory"
+    )
+    assert "Score: 0.20" in actor_memory
+    assert expected_reflection in actor_memory
 
 
 @pytest.mark.anyio

@@ -116,6 +116,7 @@ async def test_submission_is_held_then_validated_and_reassessed(monkeypatch):
     assert sent[1][-1]["name"] == SUBMISSION_REVIEW_MESSAGE_NAME
     assert "Submission held" in sent[1][-1]["content"]
     assert "untested_claim" in sent[1][-2]["content"]
+    assert "The proposed final answer has not been validated." in sent[1][-2]["content"]
     # Deferred tool calls are preserved as proposals, never dangling provider calls.
     assert not any(
         call["id"] in {"unvalidated", "late"}
@@ -374,8 +375,13 @@ async def test_active_error_holds_until_repaired_even_when_history_remains_selec
     ]
     assert len(holds) == 1
     reports = [m for m in session.messages if m.get("name") == REPORT_MESSAGE_NAME]
+    assert "The proposed final answer has not been validated." in reports[0]["content"]
     assert pattern in reports[0]["content"]
     assert pattern not in reports[1]["content"]
+    assert (
+        reports[1]["content"]
+        == "No present unconstructive epistemic patterns detected."
+    )
     for report, status in zip(reports, ("active", "resolved"), strict=True):
         assessment = next(
             a
