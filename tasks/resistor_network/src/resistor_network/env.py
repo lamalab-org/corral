@@ -5,13 +5,8 @@ from pathlib import Path
 from time import perf_counter
 
 from resistor_network.score import (
-    check_complete_circuit_solution,
     check_conductance_topology,
-    check_resistance_measurements,
-    check_resistor_topology,
-    check_resistor_values_only,
     check_sparse_circuit_solution,
-    check_valid_circuit_json,
 )
 from resistor_network.tools import create_tools
 
@@ -23,12 +18,7 @@ from corral.report.logging import event, exception_fields
 # Registry of scoring functions
 SCORING_FUNCTIONS = {
     # Resistor network scoring functions
-    "resistor_topology": check_resistor_topology,
     "resistor_conductance": check_conductance_topology,
-    "resistance_measurements": check_resistance_measurements,
-    "complete_circuit_solution": check_complete_circuit_solution,
-    "resistor_values_only": check_resistor_values_only,
-    "valid_circuit_json": check_valid_circuit_json,
     "sparse_circuit_solution": check_sparse_circuit_solution,
 }
 
