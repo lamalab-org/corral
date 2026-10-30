@@ -1,0 +1,172 @@
+name: Infra failures
+
+# Runs reports/find_infra_failures.py on demand and posts the tables on the PR.
+#
+# Triggers:
+# - comment `/infra-failures [lfs] [<environment> ...]` on a pull request
+#   (members and collaborators only)
+# - add the `infra-failures` label to a pull request
+# - run it from the Actions tab (workflow_dispatch)
+#
+# GitHub runs comment and workflow_dispatch triggers only from the workflow file
+# on the default branch; the label trigger also works before this file is merged.
+# Reports stored in Git LFS are skipped unless `lfs` is given, to save LFS
+# bandwidth.
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      environments:
+        description: "Environments to scan, space-separated (default: all)"
+        required: false
+        default: ""
+      lfs:
+        description: "Fetch Git LFS reports so they are scanned too"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: infra-failures-${{ github.event.issue.number || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        github.event.label.name == 'infra-failures') ||
+      (github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        startsWith(github.event.comment.body, '/infra-failures') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+          github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read arguments
+        id: args
+        env:
+          EVENT: ${{ github.event_name }}
+          COMMENT: ${{ github.event.comment.body }}
+          INPUT_ENVS: ${{ inputs.environments }}
+          INPUT_LFS: ${{ inputs.lfs }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          lfs=false
+          envs=""
+          case "$EVENT" in
+            issue_comment)
+              number="$ISSUE_NUMBER"
+              ref="refs/pull/$ISSUE_NUMBER/head"
+              # Words after the command on its first line.
+              words=$(printf '%s\n' "$COMMENT" | head -n1 | sed 's|^/infra-failures||')
+              ;;
+            pull_request)
+              number="$PR_NUMBER"
+              ref="$PR_SHA"
+              words=""
+              ;;
+            *)
+              number=""
+              ref="$GITHUB_REF"
+              words="$INPUT_ENVS"
+              [ "$INPUT_LFS" = "true" ] && lfs=true
+              ;;
+          esac
+          for word in $words; do
+            if [ "$word" = "lfs" ]; then
+              lfs=true
+            elif printf '%s' "$word" | grep -Eq '^[a-z0-9_]+$'; then
+              envs="$envs $word"
+            else
+              echo "::error::invalid environment name: $word"
+              exit 1
+            fi
+          done
+          {
+            echo "number=$number"
+            echo "ref=$ref"
+            echo "lfs=$lfs"
+            echo "envs=$envs"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Acknowledge the comment
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api --method POST
+          "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions"
+          -f content=eyes
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.args.outputs.ref }}
+          lfs: ${{ steps.args.outputs.lfs == 'true' }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Find infrastructure failures
+        env:
+          ENVS: ${{ steps.args.outputs.envs }}
+        # $ENVS holds validated names only and is split into arguments on purpose.
+        run: |
+          python reports/find_infra_failures.py $ENVS \
+            --csv infra-failures.csv --markdown infra-failures.md
+
+      - name: Write the report
+        env:
+          ENVS: ${{ steps.args.outputs.envs }}
+          LFS: ${{ steps.args.outputs.lfs }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            # Marks this workflow's comment so it is updated, not duplicated.
+            echo "<!-- corral-infra-failures -->"
+            echo "## Infrastructure failure analysis"
+            echo
+            echo "Commit \`$(git rev-parse --short HEAD)\` · environments: ${ENVS:-all}" \
+              "· Git LFS reports: $([ "$LFS" = true ] && echo scanned || echo skipped)"
+            echo
+            cat infra-failures.md
+            echo
+            echo "[Workflow run and CSV of every finding]($RUN_URL)" \
+              "· rerun with \`/infra-failures [lfs] [<environment> ...]\`"
+          } > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: infra-failures
+          path: |
+            infra-failures.csv
+            comment.md
+
+      - name: Comment on the pull request
+        if: steps.args.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ steps.args.outputs.number }}
+          REPO: ${{ github.repository }}
+        # Update this workflow's previous comment instead of adding a new one.
+        run: |
+          id=$(gh api "repos/$REPO/issues/$NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]"
+              and (.body | startswith("<!-- corral-infra-failures -->"))) | .id' | tail -n1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$id" -F body=@comment.md
+          else
+            gh api --method POST "repos/$REPO/issues/$NUMBER/comments" -F body=@comment.md
+          fi
