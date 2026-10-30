@@ -8,7 +8,7 @@ same layout, names and index files, so runs can be compared across them.
 | AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics | [`psychometrics/`](psychometrics/) | `psychometric_hint_cleanup_clean` | 14 | 700 |
-| Resistor network (v4, terminal) | [`resistor_network/`](resistor_network/) | `resistor_level` | 14 | 700 |
+| Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
 | Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
@@ -127,9 +127,9 @@ files (2,100 in total) was found in Langfuse (`build_index.py --verify`).
 **Known issue: some traces mix attempts.** Some trials were retried under the
 same execution ID, so the retry wrote into the same trace as the attempt it
 replaced. Such a trace can hold observations from both. This affects about 139
-inference optimization trials and up to 319 resistor trials (Codex, Claude
-Code, OpenHands, react Kimi K3 and react GPT L2 runs). The psychometrics reruns
-and the ten resistor technical reruns (`resistor_network/technical-reruns.csv`)
+inference optimization trials and some resistor trials (including native agent
+Docker retries and react Kimi K3 and react GPT L2 runs). The psychometrics reruns
+and separate-ID resistor technical reruns (`resistor_network/technical-reruns.csv`)
 used new run IDs and are not affected. The report is authoritative for what the
 final attempt did. Future reruns should use a new run ID so each attempt gets
 its own trace.

@@ -2,7 +2,7 @@ import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 import httpx
 import litellm
@@ -111,6 +111,8 @@ class LLMResponseMetadata(TypedDict, total=False):
     id: str | None
     logprobs: Any | None
     usage: dict[str, int] | None
+    content_source: Literal["text", "reasoning_summary"]
+    finish_reason: str | None
 
 
 class LLMResponse:
@@ -143,6 +145,16 @@ class LLMResponse:
     def content(self) -> str | None:
         """Get the message content"""
         return self.message.content
+
+    @property
+    def content_source(self) -> str:
+        """Distinguish visible assistant text from a returned reasoning summary."""
+        return self.metadata.get("content_source", "text")
+
+    @property
+    def finish_reason(self) -> str | None:
+        """Provider stop reason, retained for empty/truncated response diagnostics."""
+        return self.metadata.get("finish_reason")
 
     @property
     def role(self) -> str:
@@ -290,7 +302,10 @@ async def llm_call(
                 message.content = str(reasoning_content) if reasoning_content else None
 
         metadata = LLMResponseMetadata()
+        # Provider reasoning is separate from public assistant text. In particular,
+        # masked thinking is not an empty public turn or a substitute explanation.
         metadata["id"] = response.id
+        metadata["finish_reason"] = getattr(response.choices[0], "finish_reason", None)
 
         # Include logprobs if requested via kwargs
         if kwargs.get("logprobs"):

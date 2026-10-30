@@ -59,7 +59,7 @@ def environments() -> list[Path]:
     return sorted(
         p
         for p in REPORTS_DIR.iterdir()
-        if p.is_dir() and not p.name.startswith((".", "_"))
+        if p.is_dir() and p.name != "figures" and not p.name.startswith((".", "_"))
     )
 
 

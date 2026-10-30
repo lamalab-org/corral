@@ -6,6 +6,7 @@ from corral.agents.ai_scientist import (
     SakanaAIScientistConfig,
 )
 from corral.agents.base_agent import BaseAgent
+from corral.agents.epistemic import EpistemicAgent
 from corral.agents.llm_planner import LLMPlanner
 from corral.agents.react import ReActAgent
 from corral.agents.reflexion_agent import ReflexionAgent
@@ -68,6 +69,7 @@ __all__ = [
     "BaseAgent",
     "ClaudeCodeAgent",
     "CodexAgent",
+    "EpistemicAgent",
     "LLMPlanner",
     "OpenHandsAgent",
     "ReActAgent",
