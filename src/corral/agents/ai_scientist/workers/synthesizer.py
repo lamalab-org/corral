@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from corral.agents.ai_scientist.prompts import render_prompt
 from corral.agents.ai_scientist.search.nodes import ExperimentNode
 from corral.agents.ai_scientist.workers.base import StructuredModel
+from corral.workspace import PUBLIC_WORKSPACE_ROOT
 
 
 class FinalAnswer(BaseModel):
@@ -38,8 +39,9 @@ class FinalSynthesizer:
                 ensure_ascii=False,
             ),
             canonical_workspace=(
-                canonical_workspace
-                or "No filesystem workspace is associated with this task."
+                PUBLIC_WORKSPACE_ROOT
+                if canonical_workspace
+                else "No filesystem workspace is associated with this task."
             ),
         )
         result = self.model.generate(prompt, FinalAnswer, purpose="final_synthesis")

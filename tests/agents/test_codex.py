@@ -192,6 +192,20 @@ def test_codex_configuration_keeps_native_tools_and_scopes_task_mcp_tools():
     assert 'enabled_tools = ["read_file", "submit_answer"]' in config
 
 
+def test_codex_file_guidance_defers_to_the_task_path_contract():
+    instructions = CodexAgent(system_prompt="system")._developer_instructions(
+        False, ["write_file", "submit_answer"]
+    )
+
+    assert "task environment's public path contract" in instructions
+    assert (
+        "Do not construct task paths from Codex's isolated working directory"
+        in instructions
+    )
+    assert "RELATIVE path" not in instructions
+    assert "never an absolute path" not in instructions
+
+
 @pytest.mark.anyio
 async def test_codex_never_receives_the_physical_task_workspace(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

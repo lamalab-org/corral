@@ -61,6 +61,8 @@ def wait_for_active_app(identifier: str) -> None:
 
 def smoke_test(identifier: str, volume: modal.Volume) -> None:
     """Exercise LAMMPS, GPU Python, asset permissions and result recovery."""
+    from corral_md.resources import asset_descriptors
+
     wait_for_active_app(identifier)
     initializer = modal.Function.from_name(APP_NAME, "prepare_workspace")
     worker = modal.Function.from_name(APP_NAME, "run_lammps")
@@ -112,31 +114,25 @@ assert Path.cwd().samefile('/workspace'), str(Path.cwd())
 assert os.getuid() == 10001
 for hidden in ('/results', '/bases', '/corral-state', '/test_files'):
     assert not Path(hidden).exists(), hidden
-for name in ('models', 'potentials', 'structures'):
-    root = Path('/workspace') / name
-    assert root.is_dir(), root
-    assert root.is_symlink(), root
+root = Path('/workspace/resources')
+assert root.is_dir() and not root.is_symlink()
+for resource in root.glob('*/*'):
+    assert resource.is_file() and not resource.is_symlink()
     try:
-        root.unlink()
+        resource.open('ab')
     except PermissionError:
         pass
     else:
-        raise AssertionError(f'Asset link can be replaced: {root}')
-    assert any(p.is_file() for p in root.rglob('*')), root
-    probe = root / '.corral-read-only-smoke'
-    try:
-        with probe.open('xb'):
-            pass
-    except PermissionError:
-        pass
-    except OSError as exc:
-        import errno
-        assert exc.errno == errno.EROFS, exc
-    else:
-        probe.unlink()
-        raise AssertionError(f'Asset mount is writable: {root}')
-assert Path('/workspace/models/teacher.model').is_file()
-assert Path('/workspace/models/student.model').is_file()
+        raise AssertionError(f'Resource is writable: {resource}')
+try:
+    list(Path('/assets').iterdir())
+except PermissionError:
+    pass
+else:
+    raise AssertionError('Undeclared cache paths are accessible')
+assert 'CORRAL_WORKSPACE' not in os.environ
+assert Path('/workspace/resources/md-models-teacher/teacher.model').is_file()
+assert Path('/workspace/resources/md-models-student/student.model').is_file()
 import torch
 assert torch.cuda.is_available()
 assert (torch.tensor([2.0], device='cuda') * 3).cpu().item() == 6
@@ -163,7 +159,13 @@ Path('/workspace/output/gpu.json').write_text(json.dumps({'ok': True}))
                     "size": len(python_script),
                 },
             },
-            execution_options={"timeout": 300, "working_dir": "/workspace"},
+            execution_options={
+                "timeout": 300,
+                "resources": {
+                    name: descriptor.model_dump(mode="json")
+                    for name, descriptor in asset_descriptors().items()
+                },
+            },
         ).get()
         if "output/gpu.json" not in result.get("files", {}):
             raise RuntimeError("MD GPU sandbox smoke test did not publish its result")

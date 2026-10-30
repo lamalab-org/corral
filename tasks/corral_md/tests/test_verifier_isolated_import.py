@@ -1,4 +1,4 @@
-"""Exercise the worker's sibling imports under its deployed Python isolation."""
+"""Exercise raw worker calculations under the deployed Python isolation."""
 
 import os
 import subprocess
@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 
-def test_isolated_hessian_postprocessing_uses_only_trusted_sibling_code(tmp_path):
+def test_isolated_worker_returns_raw_hessian_without_importing_workspace_code(tmp_path):
     app_dir = Path(__file__).resolve().parents[1] / "modal_app"
-    (tmp_path / "ground_truth.py").write_text(
+    (tmp_path / "ase.py").write_text(
         "raise RuntimeError('must not import submitted code')\n"
     )
     script = """
@@ -27,17 +27,13 @@ job = {
     'operation': 'mace', 'parameters': {}, 'properties': ['hessian'],
     'frames': [{'numbers': [14, 14], 'positions': [[0, 0, 0], [1, 1, 1]],
                 'cell': np.eye(3).tolist(), 'pbc': [False] * 3}],
-    'postprocess': [{'symmetrization': 'average_transpose',
-                     'acoustic_sum_rule': 'projection'}],
 }
 result = calculate(job, {}, Path('/unused'), {})
 value = np.asarray(result['frames'][0]['hessian'])
-assert np.allclose(value, value.T)
-assert np.allclose(value @ np.tile(np.eye(3), (2, 1)), 0)
-assert not np.allclose(value, raw)
-assert Path(sys.modules['ground_truth'].__file__).parent == trusted
+assert np.array_equal(value, raw)
+assert not Path(sys.modules['ase'].__file__).is_relative_to(Path.cwd())
 assert str(Path.cwd()) not in sys.path
-print(json.dumps({'hessian_postprocessed': True}))
+print(json.dumps({'raw_hessian_preserved': True}))
 """
     result = subprocess.run(
         [sys.executable, "-I", "-c", script, str(app_dir)],
@@ -48,4 +44,4 @@ print(json.dumps({'hessian_postprocessed': True}))
         timeout=30,
         check=True,
     )
-    assert '"hessian_postprocessed": true' in result.stdout
+    assert '"raw_hessian_preserved": true' in result.stdout
