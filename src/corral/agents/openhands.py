@@ -329,11 +329,13 @@ class OpenHandsAgent(BaseAgent):
         )
         suffix = (
             self.system_prompt
-            + "\n\nYou are solving a task in a sandboxed evaluation environment. "
+            + "\n\nYou are solving a task in an evaluation environment. "
             "You may use OpenHands' built-in tools as well as the provided "
             f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and terminal "
             "tools start in a fresh per-run workspace; use the MCP tools for task "
-            "environment data and actions. Do not invent tool outputs. "
+            "environment data and actions. Task tools may control external systems or real "
+            "instruments; workspace isolation does not imply those actions are simulated. "
+            "Follow the task-specific operating instructions. Do not invent tool outputs. "
             + final_answer_directive
         )
         if enable_surrender:

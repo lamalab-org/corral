@@ -128,6 +128,18 @@ def test_codex_extracts_usage_from_nested_total():
     assert usage.llm_calls == 1
 
 
+def test_codex_preserves_task_specific_absolute_paths():
+    agent = CodexAgent(model="gpt-test", system_prompt="system")
+    instructions = agent._developer_instructions(False, ["write_file", "Code_Executor"])
+    assert "including absolute paths when required" in instructions
+    assert (
+        "Do not construct task paths from the isolated harness working directory"
+        in instructions
+    )
+    assert "never an absolute path" not in instructions
+    assert "does not imply those actions are simulated" in instructions
+
+
 @pytest.mark.anyio
 async def test_codex_final_answer_falls_back_to_submission_action(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
