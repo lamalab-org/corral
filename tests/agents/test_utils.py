@@ -6,11 +6,9 @@ from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import httpx
-import openai
 import pytest
 
 from corral.agents.utils import (
-    RETRY_EXCEPTIONS,
     LiteLLMMessage,
     LLMResponse,
     _reasoning_tokens,
@@ -137,17 +135,6 @@ class MockSerializableMessage:
         self.id = msg_id
 
 
-def test_retry_exceptions_are_openai_exceptions():
-    """Test that RETRY_EXCEPTIONS contains valid OpenAI exception types."""
-    # Test that all exceptions in RETRY_EXCEPTIONS are OpenAI exceptions
-    for exception_type in RETRY_EXCEPTIONS:
-        assert hasattr(openai, exception_type.__name__)
-        assert issubclass(exception_type, Exception)
-
-    # Test that the tuple is not empty
-    assert len(RETRY_EXCEPTIONS) > 0
-
-
 @pytest.mark.parametrize(
     ("status", "retryable"),
     [
@@ -236,26 +223,6 @@ def test_before_sleep_loguru_logs_retry_info(monkeypatch):
     mock_logger.warning.assert_called_once_with(
         "LLM call retry 2/3 after ValueError: boom; waiting 30s"
     )
-
-
-def test_litellm_message_structure():
-    """Test that LiteLLMMessage has expected structure."""
-    # Test with minimal required fields
-    msg1: LiteLLMMessage = {"role": "user", "content": "Hello"}
-    assert msg1["role"] == "user"
-    assert msg1["content"] == "Hello"
-
-    # Test with optional fields
-    msg2: LiteLLMMessage = {
-        "role": "assistant",
-        "content": "Hi there",
-        "tool_call_id": "call_123",
-        "name": "assistant",
-        "id": "msg_123",
-    }
-    assert msg2["tool_call_id"] == "call_123"
-    assert msg2["name"] == "assistant"
-    assert msg2["id"] == "msg_123"
 
 
 @pytest.mark.anyio

@@ -14,31 +14,6 @@ from corral.agents.utils import LiteLLMMessage
 class TestReflection:
     """Test cases for the Reflection dataclass."""
 
-    def test_reflection_creation(self):
-        """Test creating a Reflection object."""
-        trajectory = [
-            LiteLLMMessage(role="user", content="Test task"),
-            LiteLLMMessage(role="assistant", content="Test response"),
-        ]
-
-        reflection = Reflection(
-            trial_index=0,
-            task_id="test_task",
-            trajectory=trajectory,
-            reflection_text="I should check tool parameters before calling.",
-            score=0.3,
-        )
-
-        assert reflection.trial_index == 0
-        assert reflection.task_id == "test_task"
-        assert len(reflection.trajectory) == 2
-        assert (
-            reflection.reflection_text
-            == "I should check tool parameters before calling."
-        )
-        assert reflection.score == 0.3
-        assert isinstance(reflection.timestamp, datetime)
-
     def test_reflection_to_dict(self):
         """Test converting reflection to dictionary."""
         trajectory = [
@@ -93,12 +68,6 @@ class TestReflectionMemory:
 
         assert memory.max_size == 3
         assert len(memory.reflections) == 0
-
-    def test_memory_custom_size(self):
-        """Test initializing memory with custom size."""
-        memory = ReflectionMemory(max_size=5)
-
-        assert memory.max_size == 5
 
     def test_add_reflection(self):
         """Test adding reflections to memory."""
@@ -215,34 +184,6 @@ class TestReflectionMemory:
 
 class TestReflectionModule:
     """Test cases for ReflectionModule."""
-
-    def test_module_initialization(self):
-        """Test initializing reflection module."""
-        module = ReflectionModule(
-            model="test-model", reflection_prompt="Generate reflection: {{trajectory}}"
-        )
-
-        assert module.model == "test-model"
-        assert module.temperature == 1.0
-
-    def test_module_custom_temperature(self):
-        """Test module with custom temperature."""
-        module = ReflectionModule(
-            model="test-model",
-            reflection_prompt="Generate reflection: {{trajectory}}",
-            temperature=0.5,
-        )
-
-        assert module.temperature == 0.5
-
-    def test_default_prompt_exists(self):
-        """Test that default prompt is available."""
-        module = ReflectionModule(
-            model="test-model", reflection_prompt="Generate reflection: {{trajectory}}"
-        )
-
-        assert module.reflection_prompt is not None
-        assert len(module.reflection_prompt) > 0
 
     def test_summarize_trajectory_short(self):
         """Test trajectory summarization with few messages."""

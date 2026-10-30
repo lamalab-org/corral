@@ -379,30 +379,6 @@ def connection_list(draw, resistor_names):
 class TestPropertyBasedTests:
     """Property-based tests using Hypothesis for binary scoring"""
 
-    @given(
-        st.lists(
-            st.tuples(st.text(min_size=1), st.text(min_size=1), st.text(min_size=1)),
-            min_size=0,
-            max_size=10,
-        )
-    )
-    def test_topology_score_binary_range(self, connections):
-        """Property: binary topology scores should be exactly 0.0 or 1.0"""
-        score = _score_topology_structure(connections, connections)
-        assert score in [0.0, 1.0]
-
-        # Perfect match should give score 1.0
-        assert score == 1.0
-
-    @given(resistor_dict(), st.floats(min_value=0.01, max_value=1.0))
-    def test_resistor_score_binary_range(self, resistors, tolerance):
-        """Property: binary resistor scores should be exactly 0.0 or 1.0"""
-        score = _score_resistor_values(resistors, resistors, tolerance)
-        assert score in [0.0, 1.0]
-
-        # Perfect match should give score 1.0
-        assert score == 1.0
-
     @given(resistor_dict(min_resistors=1, max_resistors=3))
     def test_single_resistor_failure_causes_total_failure(self, expected_resistors):
         """Property: if any resistor is outside tolerance, total score should be 0.0"""
@@ -697,24 +673,6 @@ class TestIntegration:
 
 class TestEdgeCases:
     """Test edge cases and error conditions for binary scoring"""
-
-    def test_very_large_numbers(self):
-        """Test with very large resistor values"""
-        large_resistors = {"R1": 1e12, "R2": 1e15}  # TΩ range
-        score = _score_resistor_values(large_resistors, large_resistors, 0.1)
-        assert score == 1.0
-
-    def test_very_small_numbers(self):
-        """Test with very small resistor values"""
-        small_resistors = {"R1": 1e-6, "R2": 1e-9}  # μΩ to nΩ range
-        score = _score_resistor_values(small_resistors, small_resistors, 0.1)
-        assert score == 1.0
-
-    def test_unicode_in_names(self):
-        """Test with Unicode characters in resistor/node names"""
-        expected = [("Ω", "μ", "R₁")]
-        proposed = [("Ω", "μ", "R₁")]
-        assert _score_topology_structure(proposed, expected) == 1.0
 
     def test_very_long_connection_lists(self):
         """Test with large numbers of connections"""

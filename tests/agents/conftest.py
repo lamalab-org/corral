@@ -88,23 +88,6 @@ class MockToolCall:
         )()
 
 
-@pytest.fixture
-def mock_prompt_store():
-    """Mock PromptStore for testing."""
-
-    class MockPromptStore:
-        def get(self, prompt_name: str):
-            # Return specific prompts for known IDs
-            if "system_prompt" in prompt_name:
-                return MockPrompt("You are a helpful assistant.")
-            elif "user_prompt" in prompt_name:
-                return MockPrompt("Task: {{task_guide}}")
-            else:
-                return MockPrompt("Test prompt: {{task_guide}}")
-
-    return MockPromptStore()
-
-
 @pytest.fixture(autouse=True)
 def mock_promptstore_module(monkeypatch):
     """Automatically mock the promptstore module for all tests."""

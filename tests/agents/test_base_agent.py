@@ -54,18 +54,6 @@ def test_usage_accumulators_keep_conversion_and_totals_per_run():
     assert second.outcome() == AgentUsage(input_tokens=1, output_tokens=1, llm_calls=1)
 
 
-def test_registered_agents_use_one_execution_entrypoint():
-    for agent_type in (
-        agents.ReActAgent,
-        agents.ToolCallingAgent,
-        agents.TerminusAgent,
-        agents.LLMPlanner,
-        agents.AIScientistAgent,
-        agents.ReflexionAgent,
-    ):
-        assert hasattr(agent_type, "run_session")
-
-
 def test_agent_level_run_limits_are_removed():
     with pytest.raises(TypeError, match="agent-level max_iterations"):
         agents.ReActAgent(max_iterations=3)

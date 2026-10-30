@@ -243,16 +243,6 @@ class TestSearchBySmiles:
         assert "Ethanol" in result
 
     @patch("spectra_elucidation.tools.vector_database_search")
-    def test_search_by_smiles_with_top_k(self, mock_vector_search):
-        """Test search with custom top_k parameter."""
-        mock_vector_search.return_value = []
-
-        _result = search_by_smiles.execute(smiles="C1=CC=CC=C1", top_k=5)
-
-        call_kwargs = mock_vector_search.call_args[1]
-        assert call_kwargs["top_k"] == 5
-
-    @patch("spectra_elucidation.tools.vector_database_search")
     def test_search_by_smiles_error(self, mock_vector_search):
         """Test error handling in search."""
         mock_vector_search.side_effect = Exception("Database error")

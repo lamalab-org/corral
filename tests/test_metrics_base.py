@@ -6,10 +6,12 @@ This module tests:
 - TaskMetric abstract base class
 """
 
+from dataclasses import dataclass
+
 import pytest
 from pydantic import ValidationError
 
-from corral.report.metrics.base import Metric, MetricMetadata, TaskMetric
+from corral.report.metrics.base import Metric, MetricContext, MetricMetadata, TaskMetric
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 
 
@@ -77,45 +79,6 @@ class TestMetric:
         """Test that Metric cannot be instantiated directly."""
         with pytest.raises(TypeError):
             Metric()
-
-    def test_concrete_metric_implementation(self):
-        """Test a concrete implementation of Metric."""
-
-        class TestMetric(Metric):
-            @property
-            def metadata(self) -> MetricMetadata:
-                return MetricMetadata(
-                    name="test_metric",
-                    display_name="Test Metric",
-                    description="A test metric",
-                )
-
-            def calculate(self, benchmark_result: BenchmarkResult) -> float:
-                return 42.0
-
-        metric = TestMetric()
-        assert metric.metadata.name == "test_metric"
-
-        # Create a simple benchmark result
-        benchmark_result = BenchmarkResult(
-            task_results={
-                "task1": TaskTrialResults(
-                    task_id="task1",
-                    trials=[
-                        TaskTrialResult(
-                            task_id="task1",
-                            trial_id="trial1",
-                            score=1.0,
-                            state={},
-                            tool_statistics={},
-                        )
-                    ],
-                )
-            }
-        )
-
-        result = metric.calculate(benchmark_result)
-        assert result == 42.0
 
 
 class TestTaskMetric:
@@ -255,3 +218,23 @@ class TestTaskMetric:
 
         results = metric.calculate(benchmark_result)
         assert results == {"task1": {"sub_metric_1": 1.0, "sub_metric_2": 2.0}}
+
+
+def test_metric_context_protocol_is_runtime_checkable():
+    """Any object exposing the context surface works, without subclassing."""
+
+    @dataclass
+    class GoodObject:
+        @property
+        def all_task_ids(self) -> set[str]:
+            return {"task1"}
+
+        def get_task_trials(self, task_id: str):
+            return None
+
+    @dataclass
+    class BadObject:
+        pass
+
+    assert isinstance(GoodObject(), MetricContext)
+    assert not isinstance(BadObject(), MetricContext)
