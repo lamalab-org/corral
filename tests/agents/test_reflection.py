@@ -185,6 +185,16 @@ class TestReflectionMemory:
 class TestReflectionModule:
     """Test cases for ReflectionModule."""
 
+    def test_module_custom_temperature(self):
+        """Test module with custom temperature."""
+        module = ReflectionModule(
+            model="test-model",
+            reflection_prompt="Generate reflection: {{trajectory}}",
+            temperature=0.5,
+        )
+
+        assert module.temperature == 0.5
+
     def test_summarize_trajectory_short(self):
         """Test trajectory summarization with few messages."""
         module = ReflectionModule(

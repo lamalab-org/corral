@@ -8,6 +8,7 @@ from resistor_network.tools import (
     calculate_series_resistance,
     delta_to_wye_transform,
     estimate_resistor_values,
+    generate_test_measurements,
     propose_simple_topology,
     simulate_circuit_resistance,
     validate_circuit_topology,
@@ -685,6 +686,61 @@ class TestEstimateResistorValues:
 
         assert "error" in result
         assert "Estimation failed" in result["error"]
+
+
+class TestGenerateTestMeasurements:
+    """Tests for generate_test_measurements tool"""
+
+    def test_measurements_are_simulated_and_rounded(self):
+        """Each pair gets its simulated resistance, rounded to 3 decimals"""
+        topology = {
+            "resistors": {"R1": 10.0, "R2": 20.0, "R3": 30.0},
+            "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["A", "C", "R3"]],
+        }
+
+        result = json.loads(
+            generate_test_measurements.execute(
+                topology=json.dumps(topology),
+                terminal_pairs=[["A", "B"], ["B", "C"], ["A", "C"]],
+            )
+        )
+
+        assert result == [
+            {"node_a": "A", "node_b": "B", "resistance": 8.333},
+            {"node_a": "B", "node_b": "C", "resistance": 13.333},
+            {"node_a": "A", "node_b": "C", "resistance": 15.0},
+        ]
+
+    def test_measurement_with_simulation_error(self):
+        """A failed simulation is reported per pair instead of aborting"""
+        topology = {"resistors": {"R1": 10.0}, "connections": [["A", "B", "R1"]]}
+
+        with patch(
+            "resistor_network.tools.get_resistance_between_nodes",
+            side_effect=Exception("Node not found"),
+        ):
+            result = json.loads(
+                generate_test_measurements.execute(
+                    topology=json.dumps(topology), terminal_pairs=[["X", "Y"]]
+                )
+            )
+
+        assert result == [
+            {"node_a": "X", "node_b": "Y", "error": "Could not measure: Node not found"}
+        ]
+
+    def test_invalid_terminal_pairs(self):
+        """Test handling of invalid terminal pairs"""
+        topology = {"resistors": {"R1": 10.0}, "connections": [["A", "B", "R1"]]}
+        terminal_pairs = [["A"], ["A", "B", "C"]]  # Wrong number of terminals
+
+        result_json = generate_test_measurements.execute(
+            topology=json.dumps(topology), terminal_pairs=terminal_pairs
+        )
+        result = json.loads(result_json)
+
+        # Should skip invalid pairs
+        assert len(result) == 0
 
 
 # Hypothesis-based property tests

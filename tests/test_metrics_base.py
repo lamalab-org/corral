@@ -238,3 +238,45 @@ def test_metric_context_protocol_is_runtime_checkable():
 
     assert isinstance(GoodObject(), MetricContext)
     assert not isinstance(BadObject(), MetricContext)
+
+
+def test_metrics_calculate_over_a_non_benchmark_result_context():
+    """Metrics only use the MetricContext surface, not BenchmarkResult."""
+
+    @dataclass
+    class Trials:
+        trials: list
+
+    @dataclass
+    class CustomContext:
+        task_data: dict[str, Trials]
+
+        @property
+        def all_task_ids(self) -> set[str]:
+            return set(self.task_data)
+
+        def get_task_trials(self, task_id: str) -> Trials | None:
+            return self.task_data.get(task_id)
+
+    metadata = MetricMetadata(name="count", display_name="Count", description="Count")
+
+    class TaskCount(Metric):
+        @property
+        def metadata(self) -> MetricMetadata:
+            return metadata
+
+        def calculate(self, context: MetricContext) -> int:
+            return len(context.all_task_ids)
+
+    class TrialCount(TaskMetric):
+        @property
+        def metadata(self) -> MetricMetadata:
+            return metadata
+
+        def calculate_for_task(self, context: MetricContext, task_id: str) -> int:
+            return len(context.get_task_trials(task_id).trials)
+
+    context = CustomContext({"task1": Trials([1, 2, 3]), "task2": Trials([1, 2])})
+
+    assert TaskCount().calculate(context) == 2
+    assert TrialCount().calculate(context) == {"task1": 3, "task2": 2}

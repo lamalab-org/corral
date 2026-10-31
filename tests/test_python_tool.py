@@ -6,6 +6,17 @@ from corral.utils.code_tools import execute_python_code
 class TestPythonExecutionTools:
     """Test tools that execute Python code."""
 
+    def test_execute_python_code_with_timeout(self):
+        """Code that finishes within an explicit timeout succeeds."""
+        result_json = execute_python_code.execute(
+            python_code="result = sum(range(100))",
+            timeout=5,
+        )
+
+        result = json.loads(result_json)
+        assert result["success"] is True
+        assert result["execution_result"]["result"] == sum(range(100))
+
     def test_execute_python_code_simple(self):
         """Test simple code execution."""
         code = "result = 10 * 5"
