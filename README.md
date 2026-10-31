@@ -506,6 +506,18 @@ Subagent inspection is opt-in per agent. Agents declaring
 the normal tool-call ledger path. AI Scientist enables it; other built-in
 agents do not expose it.
 
+Start independent trials from a finished trajectory with `corral continue`:
+
+```bash
+corral continue --source-trial PATH_TO_TRIAL --commit FULL_COMMIT_HASH \
+  --trials 4 --message "Recheck your conclusion." --sandbox docker
+```
+
+The child trials restore the selected workspace, environment, and canonical
+conversation, and record their parent commit. See the
+[continuation reference](docs/documentation/reference.md#continue-a-finished-trial)
+for the Python API, checkpoint semantics, and reproducible local/Docker checks.
+
 ## 🔧 Contributing
 
 ### Adding a New Environment

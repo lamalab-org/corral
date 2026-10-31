@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any
 
-RUNTIME_PROTOCOL_VERSION = "4"
+RUNTIME_PROTOCOL_VERSION = "5"
 
 
 class SandboxMode(str, Enum):
@@ -220,6 +220,24 @@ class StateRef:
 
 
 @dataclass(frozen=True)
+class ContinuationSource:
+    """A historical commit in a finished, self-contained trial directory."""
+
+    trial: str
+    commit_hash: str
+    branch_id: str = "main"
+    execution_id: str | None = None
+    agent_run_id: str | None = None
+    message: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.trial or not self.branch_id:
+            raise ValueError("continuation trial and branch cannot be empty")
+        if re.fullmatch(r"[0-9a-f]{64}", self.commit_hash) is None:
+            raise ValueError("continuation requires a full SHA-256 commit hash")
+
+
+@dataclass(frozen=True)
 class RunTaskInput:
     execution_id: str
     task_id: str
@@ -237,6 +255,7 @@ class RunTaskInput:
     sandbox: SandboxProfile = field(default_factory=SandboxProfile.local)
     agent_runtime: AgentRuntimeDefinition | None = None
     environment_runtime: EnvironmentRuntimeDefinition | None = None
+    continuation: ContinuationSource | None = None
 
     def __post_init__(self) -> None:
         if not self.execution_id:
@@ -326,6 +345,7 @@ class BenchmarkInput:
     environment_runtime_by_task: dict[str, EnvironmentRuntimeDefinition] = field(
         default_factory=dict
     )
+    continuation_by_task: dict[str, ContinuationSource] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.benchmark_run_id:
@@ -410,6 +430,7 @@ __all__ = [
     "AgentRuntimeDefinition",
     "BenchmarkExecutionResult",
     "BenchmarkInput",
+    "ContinuationSource",
     "DockerSandboxSpec",
     "EnvironmentRuntimeDefinition",
     "EvaluateTaskInput",

@@ -495,6 +495,10 @@ async def run_benchmark(
         state_dir = commit_file.parent / "runs"
     runs_root = Path(state_dir).expanduser().resolve()
     run_dir = runs_root / _run_directory_name(run_id)
+    for source in getattr(args, "continuation_by_task", {}).values():
+        source_dir = Path(source.trial).resolve()
+        if source_dir.is_relative_to(run_dir) or run_dir.is_relative_to(source_dir):
+            raise ValueError("continuations require a separate output run directory")
     configured_report = getattr(args, "report", None)
     report_path = (
         Path(configured_report) if configured_report else run_dir / "report.json"
@@ -568,6 +572,7 @@ async def run_benchmark(
             evaluate=not args.no_evaluate,
             verbose=args.verbose,
             retry_policy=_retry_policy(args),
+            continuation_by_task=getattr(args, "continuation_by_task", None),
         )
         result.metadata["storage"] = {
             "run_directory": str(run_dir),
@@ -612,6 +617,52 @@ async def run_benchmark(
             for trial in result.all_results
         )
     )
+
+
+async def continue_trial(args: argparse.Namespace) -> int:
+    """Continue one historical checkpoint with independent benchmark trials."""
+    from corral.persistence.continuation import read_checkpoint
+
+    source = orchestration.ContinuationSource(
+        trial=str(Path(args.source_trial).expanduser().resolve()),
+        commit_hash=args.commit,
+        execution_id=args.source_execution,
+        branch_id=args.source_branch,
+        agent_run_id=args.source_agent_run,
+        message=args.message,
+    )
+    checkpoint = await read_checkpoint(source)
+    task_id = checkpoint.source.task.metadata["id"]
+    if args.tasks and args.tasks != [task_id]:
+        raise ValueError("--task must match the source checkpoint task")
+    args.tasks = [task_id]
+    request_file = Path(source.trial) / "launch-request.json"
+    if not request_file.is_file():
+        request_file = Path(source.trial) / "request.json"
+    saved = json.loads(request_file.read_text()) if request_file.is_file() else {}
+    agent = saved.get("agent_runtime") or {}
+    environment = saved.get("environment_runtime") or {}
+    if args.environment is None:
+        args.environment = environment.get("name")
+    if args.environment is None:
+        raise ValueError(
+            "source has no environment runtime definition; pass --environment and --env-kwargs"
+        )
+    if args.agent is None:
+        name = agent.get("name") or checkpoint.source.task.scaffold.get("name")
+        if not name:
+            raise ValueError("source has no agent runtime definition; pass --agent")
+        args.agent = normalise_agent_name(name)
+    args.env_kwargs = {**environment.get("options", {}), **args.env_kwargs}
+    args.agent_kwargs = {**agent.get("options", {}), **args.agent_kwargs}
+    if args.model is None:
+        args.model = agent.get("model") or checkpoint.source.task.model.get("name")
+    if args.temperature is None:
+        args.temperature = agent.get("temperature")
+    if args.api_endpoint is None:
+        args.api_endpoint = agent.get("api_endpoint")
+    args.continuation_by_task = {task_id: source}
+    return await run_benchmark(args)
 
 
 async def run_task(args: argparse.Namespace) -> int:
@@ -886,6 +937,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_benchmark_arguments(bench)
     bench.set_defaults(_handler=run_benchmark)
+    continuation = commands.add_parser(
+        "continue", help="Start independent trials from a finished trial's commit."
+    )
+    _add_benchmark_arguments(continuation)
+    for action in continuation._actions:
+        if action.dest in {"agent", "environment"}:
+            action.required = False
+    continuation.add_argument("--source-trial", required=True)
+    continuation.add_argument("--commit", required=True)
+    continuation.add_argument("--source-execution")
+    continuation.add_argument("--source-branch", default="main")
+    continuation.add_argument("--source-agent-run")
+    continuation.add_argument("--message")
+    continuation.set_defaults(_handler=continue_trial)
     internal = commands.add_parser("internal", help=argparse.SUPPRESS)
     internal_commands = internal.add_subparsers(dest="internal_command", required=True)
     internal_run_task = internal_commands.add_parser("run-task")

@@ -108,7 +108,7 @@ def test_saved_reasoning_effort_reconstructs_agent(
         assert "reasoning_effort" not in agent.kwargs
 
 
-@pytest.mark.parametrize("version", ["1", "2", "3"])
+@pytest.mark.parametrize("version", ["1", "2", "3", "4"])
 def test_legacy_runtime_cannot_disable_worker_permissions(version):
     with pytest.raises(ValueError, match="rebuild the image"):
         DockerSandboxSpec(runtime_protocol_version=version)
@@ -880,3 +880,48 @@ async def test_container_task_traces_through_the_environment_observer(
         await internal.run_task_from_files(request_path, checkpoint / "result.json")
 
     assert flushed == [True]
+
+
+@pytest.mark.anyio
+async def test_checkpoint_export_falls_back_to_safe_tar_for_directory_mode_error(
+    tmp_path, monkeypatch
+):
+    import io
+    import tarfile
+
+    shard = tmp_path / "shard"
+    shard.mkdir()
+    (shard / "checkpoint-pending.json").write_text("{}")
+    (shard / "commits.sqlite3-wal").write_bytes(b"stale")
+
+    async def command(*arguments, **_kwargs):
+        if arguments[1] == "cp":
+            raise launchers.DockerInfrastructureError(
+                "fchmodat2 artifacts/aa: operation not permitted"
+            )
+        return 0, ""
+
+    async def stream(*arguments, stdout, **_kwargs):
+        assert arguments[-1] == "-"
+        with tarfile.open(fileobj=stdout, mode="w") as archive:
+            entry = tarfile.TarInfo("commits.sqlite3")
+            entry.size = 7
+            entry.mode = 0o6640
+            archive.addfile(entry, io.BytesIO(b"durable"))
+
+        class Process:
+            returncode = 0
+
+            async def communicate(self):
+                return None, b""
+
+        return Process()
+
+    monkeypatch.setattr(launchers, "_command", command)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", stream)
+    launcher = launchers.DockerTaskLauncher(Mock())
+    await launcher._export_checkpoint(shard, "container")
+    assert (shard / "commits.sqlite3").read_bytes() == b"durable"
+    assert not (shard / "commits.sqlite3").stat().st_mode & 0o6000
+    assert not (shard / "commits.sqlite3-wal").exists()
+    assert not (shard / "checkpoint-pending.json").exists()
