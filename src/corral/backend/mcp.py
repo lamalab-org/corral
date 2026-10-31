@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import socket
-from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager, suppress
 from contextvars import copy_context
 from typing import TYPE_CHECKING, Any
 
@@ -25,10 +25,13 @@ from corral.core.tool import ToolConnection
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
-    from starlette.types import Receive, Scope, Send
+    from starlette.types import Message, Receive, Scope, Send
 
     from corral.core.tool import ToolResponse
     from corral.core.tool_catalog import ToolCatalogSnapshot
+
+
+_PROGRESS_INTERVAL_S = 15.0
 
 
 class _EmbeddedServer(uvicorn.Server):
@@ -66,7 +69,40 @@ class _Binding:
 
         @self._server.call_tool()
         async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
-            response = await execute(Action(name=name, arguments=arguments or {}))
+            context = self._server.request_context
+            token = context.meta.progressToken if context.meta else None
+
+            async def report_progress() -> None:
+                started = anyio.current_time()
+                try:
+                    while True:
+                        await anyio.sleep(_PROGRESS_INTERVAL_S)
+                        elapsed = anyio.current_time() - started
+                        await context.session.send_progress_notification(
+                            progress_token=token,
+                            progress=elapsed,
+                            message=f"Request remains active; {elapsed:.0f} seconds elapsed.",
+                            related_request_id=str(context.request_id),
+                        )
+                except Exception:
+                    # Progress is best effort and must not interrupt accepted work.
+                    return
+
+            progress_task = (
+                asyncio.create_task(report_progress(), name="corral-mcp-progress")
+                if token is not None
+                else None
+            )
+            try:
+                response = await execute(Action(name=name, arguments=arguments or {}))
+            finally:
+                if progress_task is not None:
+                    progress_task.cancel()
+                    with (
+                        anyio.CancelScope(shield=True),
+                        suppress(asyncio.CancelledError),
+                    ):
+                        await progress_task
             content = response.result if response.success else response.error
             return CallToolResult(
                 content=[TextContent(type="text", text=str(content or ""))],
@@ -74,6 +110,21 @@ class _Binding:
             )
 
     async def _handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        body_received = False
+
+        async def receive_until_complete() -> Message:
+            nonlocal body_received
+            message = await receive()
+            if message["type"] == "http.request" and not message.get(
+                "more_body", False
+            ):
+                body_received = scope["method"] == "POST"
+            elif message["type"] == "http.disconnect" and body_received:
+                # SSE otherwise cancels its tool when the client disconnects.
+                # Keep accepted work alive until completion or owner cancellation.
+                await anyio.sleep_forever()
+            return message
+
         with anyio.CancelScope() as cancel_scope:
             self._scopes.add(cancel_scope)
             try:
@@ -83,10 +134,10 @@ class _Binding:
                 # Keep its task group in that request's cancellation scope, so
                 # cancellation also waits for non-abandoning synchronous tools.
                 manager = StreamableHTTPSessionManager(
-                    app=self._server, json_response=True, stateless=True
+                    app=self._server, json_response=False, stateless=True
                 )
                 async with manager.run():
-                    await manager.handle_request(scope, receive, send)
+                    await manager.handle_request(scope, receive_until_complete, send)
             finally:
                 self._scopes.remove(cancel_scope)
 

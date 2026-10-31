@@ -76,9 +76,13 @@ class AgentSessionCapabilities:
     """Opt-in model-facing capabilities supplied by the session runtime."""
 
     inspect_subagents: bool = False
+    native_workspace: bool = False
 
     def to_metadata(self) -> dict[str, bool]:
-        return {"inspect_subagents": self.inspect_subagents}
+        return {
+            "inspect_subagents": self.inspect_subagents,
+            **({"native_workspace": True} if self.native_workspace else {}),
+        }
 
     @classmethod
     def from_value(cls, value: object) -> AgentSessionCapabilities:
@@ -87,7 +91,7 @@ class AgentSessionCapabilities:
         if isinstance(value, cls):
             return value
         if isinstance(value, Mapping):
-            unknown = set(value) - {"inspect_subagents"}
+            unknown = set(value) - {"inspect_subagents", "native_workspace"}
             if unknown:
                 raise ValueError(
                     f"unknown AgentSession capabilities: {sorted(unknown)}"
@@ -95,7 +99,10 @@ class AgentSessionCapabilities:
             enabled = value.get("inspect_subagents", False)
             if not isinstance(enabled, bool):
                 raise TypeError("inspect_subagents capability must be a boolean")
-            return cls(inspect_subagents=enabled)
+            native_workspace = value.get("native_workspace", False)
+            if not isinstance(native_workspace, bool):
+                raise TypeError("native_workspace capability must be a boolean")
+            return cls(inspect_subagents=enabled, native_workspace=native_workspace)
         raise TypeError(
             "session_capabilities must be AgentSessionCapabilities or a mapping"
         )
@@ -401,6 +408,46 @@ class AgentSession:
         return self.execution_workspace
 
     @property
+    def native_tool_workspace(self) -> str | None:
+        """Workspace exposed to native tools inside Corral's enforced sandbox.
+
+        Local adapters retain their SDK isolation. Only the trusted Docker
+        runtime grants this capability and translates it to the worker mount.
+        """
+        if permissions.enabled() and self.capabilities.native_workspace:
+            return self.workspace
+        return None
+
+    async def _capture_native_workspace(self) -> None:
+        """Checkpoint direct SDK writes without scheduling them for replay."""
+        if self.native_tool_workspace is None:
+            return
+        async with self._action_lock:
+            await self._refresh()
+            # Submission already captured the final workspace through its MCP
+            # action. Buffered SDK transcripts can arrive after that boundary.
+            if self.state.is_terminal:
+                return
+            previous = self.state.workspace
+            workspace = await anyio.to_thread.run_sync(
+                lambda: self.environment.capture_workspace(previous)
+            )
+            if (
+                workspace.files == previous.files
+                and workspace.artifacts == previous.artifacts
+            ):
+                return
+            commit = await self._append_runtime(
+                TaskConfigured(
+                    status="Native SDK workspace changes captured",
+                    workspace_delta=WorkspaceDelta.from_workspace(workspace),
+                    expected_workspace_revision=previous.revision,
+                ),
+                f"agent:{self.actor.run_id}:native-workspace:{uuid4()}",
+            )
+            await self._refresh(observed_hash=commit.hash)
+
+    @property
     def previous_evaluation(self) -> Mapping[str, Any] | None:
         return dict(self._last_score) if isinstance(self._last_score, Mapping) else None
 
@@ -491,13 +538,43 @@ class AgentSession:
         usage: Mapping[str, Any] | None = None,
         llm_calls: int = 1,
     ) -> None:
-        """Commit messages or usage alone when no public output was returned."""
+        """Commit provider messages, retaining tools executed by the SDK.
+
+        Corral tools already have authored action/result commits. SDK tools
+        remain transcript-only so recovery never tries to execute them.
+        """
         messages: list[Mapping[str, JsonValue]] = []
+        native_calls = {
+            call["id"]: call["function"]["name"]
+            for message in self.messages
+            if message.get("sdk_native")
+            for call in message.get("tool_calls", ())
+        }
+        task_tools = {tool["function"]["name"] for tool in self.tools}
         for raw in raw_messages:
             message = dict(raw)
-            if message.get("role") == "tool" or message.get("tool_calls"):
-                continue
-            if message.get("content") is None and not message.get("name"):
+            if message.get("tool_calls"):
+                calls = [
+                    call
+                    for call in message["tool_calls"]
+                    if message.get("sdk_native")
+                    or (
+                        call["function"]["name"] not in task_tools
+                        and not call["function"]["name"].startswith("mcp__corral__")
+                    )
+                ]
+                if not calls:
+                    continue
+                message.update(tool_calls=calls, sdk_native=True)
+                native_calls.update(
+                    (call["id"], call["function"]["name"]) for call in calls
+                )
+            elif message.get("role") == "tool":
+                name = native_calls.get(message.get("tool_call_id"))
+                if name is None:
+                    continue
+                message.update(name=name, sdk_native=True)
+            elif message.get("content") is None and not message.get("name"):
                 continue
             detached = _json_value(message)
             if not isinstance(detached, Mapping):
@@ -505,22 +582,34 @@ class AgentSession:
             messages.append(detached)
         if not messages and usage is None:
             return
+        if any(m.get("sdk_native") and m.get("role") == "tool" for m in messages):
+            await self._capture_native_workspace()
         normalized = usage_from_mapping(
             usage,
             llm_calls=llm_calls if usage is not None else 0,
         )
-        await self._append_agent(
-            AgentTurnRecorded(
-                messages=tuple(messages),
-                usage_delta=UsageDelta(
-                    input_tokens=normalized.input_tokens,
-                    output_tokens=normalized.output_tokens,
-                    reasoning_tokens=normalized.reasoning_tokens,
-                    llm_calls=normalized.llm_calls,
-                ),
-            ),
-            f"agent:{self.actor.run_id}:turn:{uuid4()}",
+        # Keep native call/result boundaries visible to streaming observers.
+        batches = (
+            [(message,) for message in messages]
+            if any(message.get("sdk_native") for message in messages)
+            else [tuple(messages)]
         )
+        for index, batch in enumerate(batches):
+            await self._append_agent(
+                AgentTurnRecorded(
+                    messages=batch,
+                    usage_delta=UsageDelta(
+                        input_tokens=normalized.input_tokens if index == 0 else 0,
+                        output_tokens=normalized.output_tokens if index == 0 else 0,
+                        reasoning_tokens=normalized.reasoning_tokens
+                        if index == 0
+                        else 0,
+                        llm_calls=normalized.llm_calls if index == 0 else 0,
+                        tool_calls=sum(len(m.get("tool_calls", ())) for m in batch),
+                    ),
+                ),
+                f"agent:{self.actor.run_id}:turn:{uuid4()}",
+            )
 
     async def record_message(
         self,
@@ -1487,6 +1576,7 @@ async def run_agent_session(
     try:
         result = await _run_bound_agent(agent, interface)
         await interface._finish_subagents()
+        await interface._capture_native_workspace()
         # SDK/MCP adapters may turn a raised tool exception into an agent
         # outcome. Do not close the agent or execution while its tool still
         # needs recovery, even when an adapter swallowed the suspension.

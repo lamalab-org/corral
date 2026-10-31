@@ -12,7 +12,7 @@ from mcp.client.streamable_http import streamablehttp_client
 pytest.importorskip("openai_codex")
 
 from corral.agents import CodexAgent
-from corral.agents.codex import HarnessRunResult
+from corral.agents.codex import HarnessRunResult, _RunState
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
@@ -128,6 +128,89 @@ def test_codex_extracts_usage_from_nested_total():
     assert usage.llm_calls == 1
 
 
+@pytest.mark.parametrize(
+    ("payload", "tool_name", "arguments", "is_error"),
+    [
+        (
+            {
+                "type": "commandExecution",
+                "command": "pwd",
+                "cwd": "/tmp",
+                "commandActions": [],
+                "status": "completed",
+                "aggregatedOutput": "/tmp",
+                "exitCode": 0,
+                "durationMs": 12,
+            },
+            "commandExecution",
+            {"command": "pwd", "cwd": "/tmp"},
+            False,
+        ),
+        (
+            {
+                "type": "commandExecution",
+                "command": "false",
+                "cwd": "/tmp",
+                "commandActions": [],
+                "status": "completed",
+                "exitCode": 1,
+            },
+            "commandExecution",
+            {"command": "false", "cwd": "/tmp"},
+            True,
+        ),
+        (
+            {"type": "fileChange", "changes": [], "status": "declined"},
+            "fileChange",
+            {"changes": []},
+            True,
+        ),
+        (
+            {"type": "webSearch", "query": "Corral"},
+            "webSearch",
+            {"query": "Corral", "action": None},
+            False,
+        ),
+        (
+            {"type": "imageView", "path": "/tmp/image.png"},
+            "imageView",
+            {"path": "/tmp/image.png"},
+            False,
+        ),
+        (
+            {
+                "type": "dynamicToolCall",
+                "tool": "custom",
+                "arguments": {"value": 1},
+                "status": "completed",
+                "success": False,
+            },
+            "custom",
+            {"value": 1},
+            True,
+        ),
+    ],
+)
+def test_codex_records_native_tool_items(payload, tool_name, arguments, is_error):
+    import json
+
+    from openai_codex.generated.v2_all import ThreadItem
+
+    item = ThreadItem.model_validate({"id": "native-call", **payload}).root
+    run = _RunState()
+    CodexAgent(system_prompt="system")._record_item(item, run)
+
+    call, result = run.messages
+    assert call["sdk_native"] is True
+    function = call["tool_calls"][0]["function"]
+    assert function["name"] == tool_name
+    assert json.loads(function["arguments"]) == arguments
+    assert result["tool_call_id"] == "native-call"
+    assert result["is_error"] is is_error
+    assert json.loads(result["content"]) == item.model_dump(mode="json")
+    assert result["duration_ms"] == getattr(item, "duration_ms", None)
+
+
 def test_codex_preserves_task_specific_absolute_paths():
     agent = CodexAgent(model="gpt-test", system_prompt="system")
     instructions = agent._developer_instructions(False, ["write_file", "Code_Executor"])
@@ -202,6 +285,27 @@ def test_codex_configuration_keeps_native_tools_and_scopes_task_mcp_tools():
     assert "web_search" not in config
     assert "shell_tool" not in config
     assert 'enabled_tools = ["read_file", "submit_answer"]' in config
+
+
+@pytest.mark.anyio
+async def test_codex_uses_and_preserves_corral_workspace(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_turn(self, *, workspace, codex_home, run, **kwargs):
+        assert workspace == tmp_path
+        assert codex_home != workspace
+        assert run.metadata["sandbox"] == "externalSandbox"
+        (workspace / "native.txt").write_text("native output")
+        return "42"
+
+    monkeypatch.setattr(CodexAgent, "_execute_codex_turn", fake_turn)
+    session = Session()
+    session.native_tool_workspace = str(tmp_path)
+    outcome = await CodexAgent(system_prompt="system").run_session(session)
+    assert outcome.status == "completed"
+    assert (tmp_path / "native.txt").read_text() == "native output"
+    assert outcome.metadata["workspace_access"] == "corral_sandbox"
+    assert outcome.metadata["codex_cwd_is_execution_workspace"] is True
 
 
 @pytest.mark.anyio

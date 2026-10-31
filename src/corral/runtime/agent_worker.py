@@ -83,6 +83,7 @@ def _snapshot(session: AgentSession) -> dict[str, Any]:
         "execution_id",
         "execution_workspace",
         "workspace",
+        "native_tool_workspace",
         "branch_id",
         "actor",
         "messages",
@@ -103,12 +104,14 @@ def _snapshot(session: AgentSession) -> dict[str, Any]:
     )
     snapshot = {name: _json(getattr(session, name)) for name in fields}
     # Controller materialization names are capabilities, not public context.
-    # Native agents receive a separate scratch mount at this stable path; task
-    # workspace mutations must go through authorized Corral tools.
+    # SDK agents receive their assigned task mount; other agents retain their
+    # private scratch mount. Neither receives a controller-side physical path.
     if snapshot.get("workspace") is not None:
         snapshot["workspace"] = "/workspace"
     if snapshot.get("execution_workspace") is not None:
         snapshot["execution_workspace"] = "/workspace"
+    if snapshot.get("native_tool_workspace") is not None:
+        snapshot["native_tool_workspace"] = "/workspace"
     # Evaluation records can contain private scoring inputs and diagnostics.
     # Reflexion needs only the public score and attempt identifier.
     evaluation = session.previous_evaluation
@@ -362,6 +365,11 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
                 (agent, ("127.0.0.1", port, token, handle, snapshot)),
                 workspace,
                 cancel=cancelled,
+                workspace_access=(
+                    "read_write"
+                    if session.native_tool_workspace is not None
+                    else "scratch"
+                ),
             ),
         )
     )

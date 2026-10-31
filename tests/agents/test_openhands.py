@@ -23,12 +23,54 @@ from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
 from corral.core.tool import ToolConnection, tool
 from corral.persistence import SQLiteCommitStore
+from corral.report.projection import _tool_statistics
 from corral.runtime import TaskRuntime
+
+
+def test_native_tool_durations_follow_call_ids_and_preserve_unknowns(monkeypatch):
+    times = iter([10.0, 12.0, 13.0, 17.0])
+    monkeypatch.setattr(openhands_module, "perf_counter", lambda: next(times))
+    monkeypatch.setattr(OpenHandsAgent, "_event_text", lambda self, event: "output")
+    agent = OpenHandsAgent(system_prompt="system")
+    run = openhands_module._RunState()
+    for call_id in ("a", "b"):
+        agent._record_action_event(
+            SimpleNamespace(tool_call_id=call_id, tool_name="terminal"), run
+        )
+    for call_id in ("b", "a", "unknown"):
+        agent._record_observation_event(
+            SimpleNamespace(
+                tool_call_id=call_id,
+                tool_name="terminal",
+                observation=SimpleNamespace(is_error=call_id == "b"),
+            ),
+            run,
+        )
+    results = [m for m in run.messages if m["role"] == "tool"]
+    assert [r["duration_ms"] for r in results] == [1000, 7000, None]
+    assert results[0]["is_error"] is True
+    assert not run.tool_started_at
 
 
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_openhands_uses_and_preserves_corral_workspace(monkeypatch, tmp_path):
+    async def fake_conversation(self, *, cwd, **kwargs):
+        assert cwd == str(tmp_path)
+        (tmp_path / "native.txt").write_text("native output")
+        return "done"
+
+    monkeypatch.setattr(OpenHandsAgent, "_execute_openhands", fake_conversation)
+    session = Session("done", "submitted")
+    session.native_tool_workspace = str(tmp_path)
+    outcome = await OpenHandsAgent(system_prompt="system").run_session(session)
+    assert outcome.status == "completed"
+    assert (tmp_path / "native.txt").read_text() == "native output"
+    assert outcome.metadata["workspace_access"] == "corral_sandbox"
 
 
 class Session:
@@ -282,7 +324,14 @@ async def test_openhands_maps_tool_failure(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_openhands_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
+@pytest.mark.parametrize("native_error", [None, False, True])
+async def test_openhands_run_data_is_folded_into_final_state(
+    monkeypatch, tmp_path, native_error
+):
+    from openhands.sdk.event import ActionEvent, ObservationEvent
+    from openhands.sdk.llm import MessageToolCall, TextContent
+    from openhands.tools.terminal.definition import TerminalAction, TerminalObservation
+
     async def fake_run(self, *, mcp_url, run, **_kwargs):
         async with (
             streamablehttp_client(mcp_url) as streams,
@@ -292,6 +341,33 @@ async def test_openhands_run_data_is_folded_into_final_state(monkeypatch, tmp_pa
             result = await mcp_session.call_tool("submit_answer", {"answer": "42"})
             assert result.isError is False
 
+        if native_error is not None:
+            action = ActionEvent(
+                thought=[],
+                tool_name="terminal",
+                tool_call_id="native-terminal",
+                action=TerminalAction(command="pwd"),
+                tool_call=MessageToolCall(
+                    id="native-terminal",
+                    name="terminal",
+                    arguments='{"command":"pwd"}',
+                    origin="completion",
+                ),
+                llm_response_id="response-1",
+            )
+            observation = ObservationEvent(
+                tool_name="terminal",
+                tool_call_id="native-terminal",
+                action_id=action.id,
+                observation=TerminalObservation(
+                    command="pwd",
+                    exit_code=1 if native_error else 0,
+                    is_error=native_error,
+                    content=[TextContent(text="shell output")],
+                ),
+            )
+            self._record_event(action, run)
+            self._record_event(observation, run)
         run.messages.append(
             {"role": "assistant", "content": "OpenHands completed the task"}
         )
@@ -332,7 +408,26 @@ async def test_openhands_run_data_is_folded_into_final_state(monkeypatch, tmp_pa
     assert final.submission == "42"
     assert final.usage.input_tokens == 8
     assert final.usage.output_tokens == 2
-    assert final.tool_statistics == {"submit_answer": 1}
+    assert final.tool_statistics == (
+        {"submit_answer": 1}
+        if native_error is None
+        else {"submit_answer": 1, "terminal": 1}
+    )
+    assert final.usage.tool_calls == (1 if native_error is None else 2)
+    if native_error is not None:
+        native = next(
+            call
+            for call in _tool_statistics(final)["tool_calls"]
+            if call["tool_name"] == "terminal"
+        )
+        assert native["arguments"]["command"] == "pwd"
+        assert "shell output" in native["result"]
+        assert native["status"] == ("failed" if native_error else "completed")
+        assert any(
+            message.get("tool_call_id") == "native-terminal"
+            for conversation in final.conversations.values()
+            for message in conversation
+        )
     assert any(
         message.get("content") == "OpenHands completed the task"
         for conversation in final.conversations.values()
