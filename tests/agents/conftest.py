@@ -1,6 +1,5 @@
 """Shared test fixtures and mock classes for agent tests."""
 
-import json
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -76,33 +75,6 @@ class MockLLMResponse:
     def logprobs(self) -> Any:
         """Get logprobs from metadata"""
         return self._logprobs
-
-
-class MockToolCall:
-    """Mock tool call for testing."""
-
-    def __init__(self, call_id: str, name: str, arguments: dict):
-        self.id = call_id
-        self.function = type(
-            "MockFunction", (), {"name": name, "arguments": json.dumps(arguments)}
-        )()
-
-
-@pytest.fixture
-def mock_prompt_store():
-    """Mock PromptStore for testing."""
-
-    class MockPromptStore:
-        def get(self, prompt_name: str):
-            # Return specific prompts for known IDs
-            if "system_prompt" in prompt_name:
-                return MockPrompt("You are a helpful assistant.")
-            elif "user_prompt" in prompt_name:
-                return MockPrompt("Task: {{task_guide}}")
-            else:
-                return MockPrompt("Test prompt: {{task_guide}}")
-
-    return MockPromptStore()
 
 
 @pytest.fixture(autouse=True)

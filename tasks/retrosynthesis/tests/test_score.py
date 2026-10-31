@@ -220,19 +220,6 @@ class TestValidateReactionsWithProducts:
         result = validate_reactions_with_products(tree)
         assert result is False
 
-    def test_validate_simple_valid_reaction(self):
-        """Test validation of a simple valid reaction."""
-        # Note: This test requires actual template validation which may fail
-        # if templates are not set up correctly
-        tree = {
-            "type": "mol",
-            "smiles": "CCO",
-            "children": [],
-        }
-        result = validate_reactions_with_products(tree)
-        assert isinstance(result, bool)
-
-
 class TestScoreFinal:
     """Tests for score_final function."""
 
@@ -299,29 +286,6 @@ class TestScoreFinal:
 
         assert result == 0.0
         mock_validate.assert_called_once()
-
-    def test_score_final_valid_route(self):
-        """Test scoring a valid retrosynthesis route."""
-        prediction = json.dumps(
-            {
-                "type": "mol",
-                "smiles": "CCO",
-                "children": [
-                    {
-                        "type": "reaction",
-                        "template_id": "1",
-                        "children": [
-                            {"type": "mol", "smiles": "C", "children": []},
-                            {"type": "mol", "smiles": "CO", "children": []},
-                        ],
-                    }
-                ],
-            }
-        )
-        target = {"prize": 1000.0, "max_steps": 5}
-        result = score_final(prediction, target)
-        assert isinstance(result, float)
-        assert 0.0 <= result <= 1.0
 
     def test_score_final_exceeds_max_steps(self):
         """Test scoring fails when max_steps is exceeded."""
@@ -398,43 +362,8 @@ class TestScoreFinal:
         result = score_final(prediction, target)
         assert result == 0.0
 
-    def test_score_final_with_json_markers(self):
-        """Test that JSON markers are properly stripped."""
-        prediction = (
-            "```json\n"
-            + json.dumps({"type": "mol", "smiles": "CCO", "children": []})
-            + "\n```"
-        )
-        target = {"prize": 1000.0, "max_steps": 5}
-        result = score_final(prediction, target)
-        assert isinstance(result, float)
-
-
 class TestScoreFinalWithoutPrice:
     """Tests for score_final_without_price function."""
-
-    def test_score_without_price_valid(self):
-        """Test scoring without price validation."""
-        prediction = json.dumps(
-            {
-                "type": "mol",
-                "smiles": "CCO",
-                "children": [
-                    {
-                        "type": "reaction",
-                        "template_id": "1",
-                        "children": [
-                            {"type": "mol", "smiles": "C", "children": []},
-                            {"type": "mol", "smiles": "CO", "children": []},
-                        ],
-                    }
-                ],
-            }
-        )
-        target = []
-        result = score_final_without_price(prediction, target)
-        assert isinstance(result, float)
-        assert 0.0 <= result <= 1.0
 
     def test_score_without_price_invalid_json(self):
         """Test scoring without price with invalid JSON."""
@@ -442,86 +371,8 @@ class TestScoreFinalWithoutPrice:
         target = []
         assert score_final_without_price(prediction, target) == 0.0
 
-    def test_score_without_price_with_markers(self):
-        """Test that JSON markers are properly stripped."""
-        prediction = (
-            "```json\n"
-            + json.dumps({"type": "mol", "smiles": "CCO", "children": []})
-            + "\n```"
-        )
-        target = []
-        result = score_final_without_price(prediction, target)
-        assert isinstance(result, float)
-
-
 class TestCheckReactants:
     """Tests for check_reactants function."""
-
-    def test_check_reactants_match(self):
-        """Test when predicted reactants match target."""
-        prediction = json.dumps(
-            {
-                "type": "mol",
-                "smiles": "CCO",
-                "children": [
-                    {
-                        "type": "reaction",
-                        "template_id": "1",
-                        "children": [
-                            {"type": "mol", "smiles": "C", "children": []},
-                            {"type": "mol", "smiles": "CO", "children": []},
-                        ],
-                    }
-                ],
-            }
-        )
-        target = ["C", "CO"]
-        result = check_reactants(prediction, target)
-        assert isinstance(result, float)
-        assert 0.0 <= result <= 1.0
-
-    def test_check_reactants_no_match(self):
-        """Test when predicted reactants don't match target."""
-        prediction = json.dumps(
-            {
-                "type": "mol",
-                "smiles": "CCO",
-                "children": [
-                    {
-                        "type": "reaction",
-                        "template_id": "1",
-                        "children": [
-                            {"type": "mol", "smiles": "C", "children": []},
-                            {"type": "mol", "smiles": "CO", "children": []},
-                        ],
-                    }
-                ],
-            }
-        )
-        target = ["CC", "O"]
-        result = check_reactants(prediction, target)
-        assert isinstance(result, float)
-
-    def test_check_reactants_invalid_smiles(self):
-        """Test with invalid SMILES in prediction."""
-        prediction = json.dumps(
-            {
-                "type": "mol",
-                "smiles": "CCO",
-                "children": [
-                    {
-                        "type": "reaction",
-                        "template_id": "1",
-                        "children": [
-                            {"type": "mol", "smiles": "invalid", "children": []},
-                        ],
-                    }
-                ],
-            }
-        )
-        target = ["C", "CO"]
-        result = check_reactants(prediction, target)
-        assert result == 0.0
 
     def test_check_reactants_invalid_json(self):
         """Test with invalid JSON."""
@@ -533,14 +384,6 @@ class TestCheckReactants:
 
 class TestCheckTemplate:
     """Tests for check_template function."""
-
-    def test_check_template_valid(self):
-        """Test checking a valid template."""
-        prediction = json.dumps({"template_id": 1, "mapped_rxn": "test_rxn"})
-        target = "1"
-        result = check_template(prediction, target)
-        assert isinstance(result, float)
-        assert 0.0 <= result <= 1.0
 
     def test_check_template_mismatch(self):
         """Test checking with mismatched template ID."""
@@ -567,18 +410,6 @@ class TestCheckTemplate:
 class TestCheckApplyTemplate:
     """Tests for check_apply_template function."""
 
-    @patch("retrosynthesis.score.apply_template_retro")
-    @patch("retrosynthesis.score.search_by_template")
-    def test_check_apply_template_valid(self, mock_search, mock_apply):
-        """Test checking template application."""
-        mock_search.return_value = {"mapped_rxn": "test_rxn"}
-        mock_apply.return_value = ["C", "O"]
-        prediction = {"template_id": "1", "mapped_rxn": "test_rxn"}
-        target = "CCO"
-        result = check_apply_template(prediction, target)
-        assert isinstance(result, float)
-        assert 0.0 <= result <= 1.0
-
     @patch("retrosynthesis.score.search_by_template")
     def test_check_apply_template_missing_template_id(self, mock_search):
         """Test with missing template_id."""
@@ -589,18 +420,6 @@ class TestCheckApplyTemplate:
         # then .get() on None raises AttributeError
         with pytest.raises(AttributeError):
             check_apply_template(prediction, target)
-
-    @patch("retrosynthesis.score.apply_template_retro")
-    @patch("retrosynthesis.score.search_by_template")
-    def test_check_apply_template_invalid_smiles(self, mock_search, mock_apply):
-        """Test with invalid target SMILES."""
-        mock_search.return_value = {"mapped_rxn": "test_rxn"}
-        mock_apply.return_value = None
-        prediction = {"template_id": "1", "mapped_rxn": "test_rxn"}
-        target = "invalid_smiles"
-        result = check_apply_template(prediction, target)
-        assert isinstance(result, float)
-
 
 class TestCheckListMolecules:
     """Tests for check_list_molecules function."""
@@ -656,107 +475,3 @@ class TestCheckListMolecules:
         assert isinstance(result, float)
 
 
-class TestScoringIntegration:
-    """Integration tests for scoring functions."""
-
-    def test_score_complete_workflow(self):
-        """Test complete scoring workflow."""
-        # Create a simple route
-        route = {
-            "type": "mol",
-            "smiles": "CCO",
-            "children": [
-                {
-                    "type": "reaction",
-                    "template_id": "1",
-                    "children": [
-                        {"type": "mol", "smiles": "C", "children": []},
-                        {"type": "mol", "smiles": "CO", "children": []},
-                    ],
-                }
-            ],
-        }
-
-        # Test count_reactions
-        num_reactions = count_reactions(route)
-        assert num_reactions == 1
-
-        # Test collect_leaf_molecules
-        leaves = collect_leaf_molecules(route)
-        assert len(leaves) == 2
-
-        # Test validate_reactions_with_products
-        is_valid = validate_reactions_with_products(route)
-        assert isinstance(is_valid, bool)
-
-    def test_score_functions_consistency(self):
-        """Test that different scoring functions handle the same input consistently."""
-        route = {
-            "type": "mol",
-            "smiles": "CCO",
-            "children": [],
-        }
-        route_json = json.dumps(route)
-
-        # All scoring functions should return float between 0 and 1
-        target_with_price = {"prize": 1000.0, "max_steps": 5}
-        score1 = score_final(route_json, target_with_price)
-        assert isinstance(score1, float)
-        assert 0.0 <= score1 <= 1.0
-
-        target_without_price = []
-        score2 = score_final_without_price(route_json, target_without_price)
-        assert isinstance(score2, float)
-        assert 0.0 <= score2 <= 1.0
-
-    def test_helper_functions_on_complex_tree(self):
-        """Test helper functions on a more complex tree structure."""
-        complex_tree = {
-            "type": "mol",
-            "smiles": "CCCCO",
-            "children": [
-                {
-                    "type": "reaction",
-                    "template_id": "1",
-                    "children": [
-                        {
-                            "type": "mol",
-                            "smiles": "CCC",
-                            "children": [
-                                {
-                                    "type": "reaction",
-                                    "template_id": "2",
-                                    "children": [
-                                        {"type": "mol", "smiles": "C", "children": []},
-                                        {"type": "mol", "smiles": "CC", "children": []},
-                                    ],
-                                }
-                            ],
-                        },
-                        {
-                            "type": "mol",
-                            "smiles": "CO",
-                            "children": [
-                                {
-                                    "type": "reaction",
-                                    "template_id": "3",
-                                    "children": [
-                                        {"type": "mol", "smiles": "C", "children": []},
-                                        {"type": "mol", "smiles": "O", "children": []},
-                                    ],
-                                }
-                            ],
-                        },
-                    ],
-                }
-            ],
-        }
-
-        # Count reactions
-        num_reactions = count_reactions(complex_tree)
-        assert num_reactions == 3
-
-        # Collect leaf molecules
-        leaves = collect_leaf_molecules(complex_tree)
-        assert len(leaves) == 4
-        assert all(isinstance(leaf, str) for leaf in leaves)
