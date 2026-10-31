@@ -229,7 +229,9 @@ class ClaudeCodeAgent:
             f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
             "use the assigned working directory and permission policy; use "
             "the MCP tools for environment-specific data and actions. "
-            + final_answer_directive
+            "MCP calls have a default SDK limit of 100000 seconds (about 27.8 "
+            "hours); a tool's own timeout or default can stop it sooner. "
+            "Native tools use their own timeout limits. " + final_answer_directive
         )
         if enable_surrender:
             if self.surrender_prompt is not None:

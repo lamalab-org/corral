@@ -84,9 +84,9 @@ def test_tool_timeout_metadata_describes_per_call_policy(monkeypatch):
     """The run records a fallback and grace, not a fixed effective deadline."""
     monkeypatch.setattr("corral.agents.openhands.get_default_tools", list)
     agent = OpenHandsAgent(model="openai/gpt-5.6")
-    assert agent.tool_timeout_s == 1202
+    assert agent.tool_timeout_s == 100_000
     metadata = agent._harness_metadata("http://localhost/mcp", "brief", [], None, 10)
-    assert metadata["configured_mcp_timeout_s"] == 1202
+    assert metadata["configured_mcp_timeout_s"] == 100_000
     assert metadata["effective_tool_timeout_s"] is None
     assert metadata["openhands_executor_timeout_s"] is None
     assert metadata["tool_timeout_policy"] == "argument_or_schema_default_plus_grace"
@@ -116,8 +116,11 @@ def test_undeclared_timeout_argument_does_not_change_deadline():
 @pytest.mark.parametrize(
     ("parameter", "field", "arguments", "fallback", "expected"),
     [
+        (None, {}, {}, None, 100_000),
         (None, {}, {}, 1202, 1202),
         (None, {}, {}, 1800, 1800),
+        ("timeout", {"default": 900}, {"timeout": 30}, None, 40),
+        ("timeout", {"default": 900}, {}, None, 910),
         ("timeout", {"default": 900}, {"timeout": 3600}, 1202, 3610),
         ("timeout", {"default": 900}, {"timeout": 30}, 1202, 40),
         ("timeout", {"default": 900}, {}, 1202, 910),
@@ -193,7 +196,10 @@ async def test_real_mcp_call_uses_per_call_deadlines_at_every_layer(
             catalog=ToolCatalogSnapshot.capture((schema,)), execute=execute
         ) as endpoint,
     ):
-        adapter = OpenHandsAgent(api_key="offline-test", tool_timeout_s=fallback)
+        adapter = OpenHandsAgent(
+            api_key="offline-test",
+            **({"tool_timeout_s": fallback} if fallback is not None else {}),
+        )
         agent = adapter._build_agent(adapter._make_llm(), endpoint.url, False)
 
         def call_tool():

@@ -53,6 +53,16 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
     ) from exc
 from pydantic import SecretStr
 
+from corral.agents._mcp_timeout import (
+    DEFAULT_TOOL_TIMEOUT_S as _DEFAULT_TOOL_TIMEOUT_S,
+)
+from corral.agents._mcp_timeout import (
+    TOOL_TIMEOUT_GRACE_S as _TOOL_TIMEOUT_GRACE_S,
+)
+from corral.agents._mcp_timeout import (
+    mcp_call_timeout_s,
+    mcp_timeout_prompt,
+)
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
 from corral.agents.schema import SURRENDER_SENTINEL, AgentOutcome, AgentUsage
 from corral.agents.session import AgentSession, AgentSessionCapabilities
@@ -68,10 +78,6 @@ _MCP_SERVER_NAME = "corral"
 # from `openhands.tools.preset.default.get_default_tools()` at agent build time.
 _INCLUDED_DEFAULT_TOOLS = [tool.__name__ for tool in BUILT_IN_TOOLS]
 
-# Twice the longest successful silicon_melting_1 tool call (600.556482 s),
-# rounded up. Includes the simulation and workspace synchronization.
-_DEFAULT_TOOL_TIMEOUT_S = 1202.0
-_TOOL_TIMEOUT_GRACE_S = 10.0
 _OPENHANDS_DEFAULT_EXECUTOR_TIMEOUT_S = float(MCP_TOOL_TIMEOUT_SECONDS)
 
 
@@ -79,22 +85,9 @@ def _mcp_call_timeout_s(
     arguments: dict[str, Any], input_schema: dict[str, Any], fallback: float
 ) -> float:
     """Follow a declared timeout argument or its schema default, in seconds."""
-    properties = input_schema.get("properties", {})
-    for name in ("timeout", "timeout_seconds", "timeout_s"):
-        if name not in properties:
-            continue
-        value = arguments.get(name, properties[name].get("default"))
-        # Invalid values still reach the tool's normal validation. They must
-        # not disable the transport deadline (bool is also an int in Python).
-        if type(value) not in (int, float):
-            continue
-        try:
-            timeout = float(value) + _TOOL_TIMEOUT_GRACE_S
-        except OverflowError:
-            continue
-        if value > 0 and math.isfinite(timeout):
-            return timeout
-    return fallback
+    return mcp_call_timeout_s(
+        arguments, input_schema, fallback, grace_s=_TOOL_TIMEOUT_GRACE_S
+    )
 
 
 class _TimeoutMCPToolExecutor(MCPToolExecutor):
@@ -304,7 +297,8 @@ class OpenHandsAgent(BaseAgent):
             a tool has no valid timeout argument or schema default. Otherwise,
             the call's timeout, timeout_seconds, or timeout_s value plus 10
             seconds applies to both HTTP/session reads and the SDK executor.
-            Must be finite and positive. Defaults to 1202 seconds.
+            Must be finite and positive. Defaults to 100,000 seconds (about
+            27.8 hours), matching Claude Code's default MCP ceiling.
         system_prompt (str, optional): Instructions appended to the OpenHands
             harness system prompt (via `AgentContext.system_message_suffix`). If
             None, uses the default corral system prompt. Tool-usage and
@@ -382,6 +376,7 @@ class OpenHandsAgent(BaseAgent):
             f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and terminal "
             "tools start in a fresh per-run workspace; use the MCP tools for task "
             "environment data and actions. Do not invent tool outputs. "
+            + mcp_timeout_prompt(self.tool_timeout_s)
             + final_answer_directive
         )
         if enable_surrender:
