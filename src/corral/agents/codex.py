@@ -242,26 +242,27 @@ class CodexAgent(BaseAgent):
         )
         instructions = (
             self.system_prompt
-            + "\n\nYou are solving a task in a sandboxed evaluation environment. "
+            + "\n\nYou are solving a task in an evaluation environment. "
             "You may use Codex's built-in tools as well as the provided "
             f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
             "operate in an isolated per-run workspace; use the MCP tools for task "
-            "environment data and actions. Do not invent tool outputs. "
+            "environment data and actions. Task tools may control external systems or real "
+            "instruments; workspace isolation does not imply those actions are simulated. "
+            "Follow the task-specific operating instructions. Do not invent tool outputs. "
             + mcp_timeout_prompt(self.tool_timeout_s)
         )
         # Only mention file paths when a file-writing tool is actually available,
         # so a task without one sees the exact same instructions as before. The
         # harness advertises a sandbox working directory, but that directory is a
-        # throwaway temp dir — files must be addressed relative to the task
-        # workspace (handled by the corral filesystem tools), not by an absolute
-        # path built from the advertised cwd.
+        # throwaway temp dir. Do not derive task paths from it, but preserve
+        # explicit task contracts such as absolute paths returned by AFM tools.
         if tool_names and _FILE_WRITING_TOOLS.intersection(tool_names):
             instructions += (
-                "When a tool writes a file and you submit or reference its path, "
-                "use a RELATIVE path (a bare filename like `result.cif`), never an "
-                "absolute path: paths are resolved against the task workspace, and "
-                "an absolute path built from the working directory shown to you "
-                "points outside it and will not be found. "
+                "Follow the task's submission path requirements. Preserve paths "
+                "returned by task tools, including absolute paths when required. "
+                "For files you create through workspace tools without an explicit "
+                "path contract, use workspace-relative paths. Do not construct "
+                "task paths from the isolated harness working directory. "
             )
         instructions += final_answer_directive
         if enable_surrender:

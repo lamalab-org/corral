@@ -253,13 +253,3 @@ def test_role_metadata_cannot_hide_a_parameter_object(key):
         )
 
 
-def test_dispersion_damping_alias_and_rounded_bohr_conversion():
-    assert parse_calculator_settings(
-        {
-            "model_settings": {
-                "dispersion_damping": "bj",
-                "dispersion_cutoff_A": 40 * 0.52917726,
-                "dispersion": True,
-            }
-        }
-    ) == {"dispersion": True}

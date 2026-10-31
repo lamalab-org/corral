@@ -5,12 +5,56 @@ same layout, names and index files, so runs can be compared across them.
 
 | Environment | Folder | Branch | Runs | Trials |
 |---|---|---|---:|---:|
+| AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics | [`psychometrics/`](psychometrics/) | `psychometric_hint_cleanup_clean` | 14 | 700 |
-| Resistor network (v4, terminal) | [`resistor_network/`](resistor_network/) | `resistor_level` | 14 | 700 |
+| Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
+| Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
+| Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
+| Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
+| Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
+| Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
 
-Each branch holds only its own environment's folder. This file and
-`build_index.py` are identical on every branch.
+All nine environments together have **116 runs and 6,500 trials**. Each
+environment has its own indexes, with report paths relative to its folder. The
+`runs` and `trials` configs of the Hugging Face summary dataset combine them.
+
+The `report_audit` branch collects all environments. Add or update reports
+there, following [Adding or updating reports](#adding-or-updating-reports).
+
+## Browse agent conversations
+
+Start the local trace browser from the repository root (Python 3.9 or newer;
+no extra dependencies):
+
+```bash
+python3 reports/serve_traces.py --open
+```
+
+Open **http://127.0.0.1:8765**. Filter and group trials by **agent, environment,
+and model**, with additional filters for level, outcome, and saved errors.
+Select a trial to read its messages, search the conversation,
+filter by role or agent session, jump between tool calls and results, and
+inspect the submitted output and evaluation. Download the saved trial as JSON
+or copy a link to a trace or individual message. Links work when opened against
+the same local report collection and server address. For legacy OpenHands
+reports, the browser restores prompts ahead of tool calls and groups commentary
+whose timing was not recorded separately. Its exact interleaving with tool
+calls cannot be recovered. Message numbers follow the displayed order; JSON
+downloads retain the original saved data and order.
+
+The browser reads `*/trials.csv` indexes at startup and decompresses only the
+selected trial's report on demand. Large reports can take a moment to scan;
+recently opened trials are cached in memory. Both `.json.gz` and `.json.xz`
+reports are supported. Git LFS pointers and missing reports appear in the list;
+download LFS reports with `git lfs pull` to inspect their messages. Restart the
+browser after rebuilding CSV indexes.
+
+Use `--port 9000` for a different port or `--reports /path/to/reports` for another
+collection with the same layout. The server binds to `127.0.0.1` and serves only
+the trace browser and indexed trial data. Conversations show exactly what was
+saved: missing prompts, empty thinking messages, and unrecorded SDK activity
+cannot be reconstructed.
 
 ## Layout
 
@@ -21,10 +65,14 @@ reports/<environment>/
   trials.csv                        one row per trial, with Langfuse links
   level_<L>/<agent>__<model>/
     report.json.gz                  final `corral bench` report (or report.json.xz)
-    run-metadata.json               launcher metadata, where it was recorded
+    run-metadata.json               run metadata, where available
+    langfuse-overrides.json         recorded exceptions to deterministic trace IDs, if any
+    langfuse.json                   verified session and trial IDs, where available
+    provenance.json                 source hashes and recovery details, where available
 ```
 
-Each report holds exactly the trials that count: 10 tasks × 5 trials. Where a
+Each report holds exactly the trials that count: 10 tasks × 5 trials, or
+20 tasks × 5 trials for spectra elucidation. Where a
 trial failed for an infrastructure reason and was rerun, the report holds the
 rerun in that trial's place, and the report's metrics are computed from the
 final trials. Superseded attempts are not kept here.
@@ -36,7 +84,7 @@ final trials. Superseded attempts are not kept here.
 | `agent` | `react`, `claude-code`, `codex`, `openhands`, `ai-scientist` |
 | `model` | `claude-opus-5-5`, `gpt-5.6-sol`, `kimi-k3` |
 | `model_id` | `anthropic/claude-opus-5-5`, `openai/gpt-5.6-sol`, `openrouter/moonshotai/kimi-k3` |
-| `level` | `1`, `2` |
+| `level` | `1`, `2`; retrosynthesis and wetlab use `2`, `3` |
 
 Run folders are `<agent>__<model>`, e.g. `level_2/react__gpt-5.6-sol/`.
 `run_id` is the report's `benchmark_run_id` and keeps the name the run was
@@ -54,8 +102,9 @@ uncompressed JSON.
 execution_id, score, success, error, duration_s, input_tokens, output_tokens,
 tool_calls, langfuse_session_id, langfuse_trace_id, langfuse_trace_url,
 report_file`. `trial` is the trial's position within its task (0–4). `error`
-is empty for clean trials; trials that still ended in an error count as
-failures.
+is empty when the saved terminal error fields are empty. These raw error
+counts can include iteration-limit or answer-format outcomes. The saved
+score and success flag determine the benchmark outcome.
 
 ## Langfuse
 
@@ -68,25 +117,82 @@ Each trial is one trace in project `cmsio90yc092lad0ggc5lyo0x` on
   This is the `run_id`, except for a rerun substituted into a report, which
   keeps the session it was run in.
 
-On 2026-10-16 every trace in the three `trials.csv` files (2,100 in total) was
-found in Langfuse (`build_index.py --verify`).
+Recorded trace IDs in `langfuse-overrides.json` take precedence over the
+deterministic formula. `build_index.py` reads these mappings before deriving
+other IDs. Keep these files when rebuilding or copying a run.
+
+On 2026-10-16 every trace in the original three environments' `trials.csv`
+files (2,100 in total) was found in Langfuse (`build_index.py --verify`).
 
 **Known issue: some traces mix attempts.** Some trials were retried under the
 same execution ID, so the retry wrote into the same trace as the attempt it
 replaced. Such a trace can hold observations from both. This affects about 139
-inference optimization trials and up to 319 resistor trials (Codex, Claude
-Code, OpenHands, react Kimi K3 and react GPT L2 runs); psychometrics reruns used
-new run IDs and are not affected. The report is authoritative for what the
+inference optimization trials and some resistor trials (including native agent
+Docker retries and react Kimi K3 and react GPT L2 runs). The psychometrics reruns
+and separate-ID resistor technical reruns (`resistor_network/technical-reruns.csv`)
+used new run IDs and are not affected. The report is authoritative for what the
 final attempt did. Future reruns should use a new run ID so each attempt gets
 its own trace.
 
-## Rebuilding the index
+## Adding or updating reports
+
+1. Put each final report at `reports/<environment>/level_<L>/<agent>__<model>/report.json.gz`
+   (`report.json.xz` if gzip is much larger). Remove superseded reports; only
+   final ones belong here. Track reports over ~50 MB in Git LFS.
+2. Rebuild the index and check that every trace exists in Langfuse:
+
+   ```bash
+   python reports/build_index.py reports/<environment>
+   python reports/build_index.py reports/<environment> --verify  # needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+   ```
+
+3. Optionally, write or update `reports/<environment>/README.md` with results
+   and caveats.
+4. Push to Hugging Face (needs `HF_TOKEN`):
+
+   ```bash
+   python scripts/push_october_reports_to_hf.py   # jablonkagroup/corral-reports-october-runs-v1
+   python scripts/push_october_summary_to_hf.py   # jablonkagroup/corral-reports-october-runs-summary-v1
+   ```
+
+5. Check everything before pushing to git:
+
+   ```bash
+   python reports/check_reports.py        # convention
+   python reports/check_reports.py --hf   # Hugging Face datasets match (needs huggingface_hub, pyarrow)
+   ```
+
+To find trials that failed for infrastructure or environment reasons (exhausted
+credits, rate limits, provider errors, timeouts, environment crashes) and so
+are rerun candidates:
 
 ```bash
-python reports/build_index.py reports/<environment>
-# also check that every trace exists (needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY)
-python reports/build_index.py reports/<environment> --verify
+python reports/find_infra_failures.py [<environment> ...] [--csv findings.csv]
 ```
+
+On a pull request, comment `/infra-failures [lfs] [<environment> ...]` or add
+the `infra-failures` label to have the `Infra failures` workflow
+(`.github/workflows/infra-failures.yaml`) post the result as a comment; `lfs`
+also scans the reports stored in Git LFS. It can also be run from the Actions
+tab. Comment and Actions-tab runs need the workflow on the default branch.
+
+To tabulate pass@5 and pass^5 for every environment, agent, model and level
+from the `runs.csv` files:
+
+```bash
+python reports/scores.py [<environment> ...] [--markdown scores.md]
+```
+
+The `Scores` workflow (`.github/workflows/scores.yaml`) posts these tables on a
+pull request whenever a `runs.csv` changes, and on the `scores` label or a
+`/scores [<environment> ...]` comment. It updates its own comment in place.
+
+The `Reports` workflow (`.github/workflows/reports.yaml`) runs both checks on
+every push and pull request to `report_audit` that touches `reports/`. It fails
+on the reports, the two CSVs, their Langfuse IDs, or a missing or outdated
+Hugging Face copy; other files only produce warnings. It
+checks out without Git LFS, so reports stored in LFS are verified through the
+Hugging Face summary's `report_sha256` rather than rebuilt.
 
 Read a report with `gzip -dc report.json.gz` or `xz -dc report.json.xz`. The
 inference optimization AI Scientist reports are stored in Git LFS; run

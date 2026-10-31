@@ -1,5 +1,7 @@
 """Tests for the OpenHands native session adapter."""
 
+import asyncio
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -9,13 +11,17 @@ from mcp.client.streamable_http import streamablehttp_client
 
 pytest.importorskip("openhands.sdk")
 
+from openhands.sdk.event import ActionEvent, ObservationEvent, SystemPromptEvent
+from openhands.sdk.llm import MessageToolCall, TextContent
+from openhands.sdk.mcp.definition import MCPToolAction
+
 import corral.agents.openhands as openhands_module
 from corral.agents import OpenHandsAgent
 from corral.agents.openhands import HarnessRunResult
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
-from corral.core.tool import ToolConnection
+from corral.core.tool import ToolConnection, tool
 from corral.persistence import SQLiteCommitStore
 from corral.report.projection import _tool_statistics
 from corral.runtime import TaskRuntime
@@ -93,6 +99,14 @@ class Session:
 
     async def record_message(self, message):
         self.messages.append(message)
+
+
+def test_openhands_distinguishes_shell_isolation_from_real_task_tools():
+    agent = OpenHandsAgent(api_key="test-key", system_prompt="system")
+    instructions = agent._system_message_suffix(False)
+    assert "does not imply those actions are simulated" in instructions
+    assert "Follow the task-specific operating instructions" in instructions
+    assert "sandboxed evaluation environment" not in instructions
 
 
 def test_openhands_passes_retry_settings_without_changing_provider_or_reasoning():
@@ -426,3 +440,171 @@ async def test_openhands_run_data_is_folded_into_final_state(
     assert session_metadata["total_cost_usd"] == 0.01
     assert not hasattr(agent, "harness_result")
     assert not hasattr(agent, "messages")
+
+
+@pytest.mark.anyio
+async def test_openhands_parallel_tools_flush_each_message_once(monkeypatch):
+    session_loop = asyncio.get_running_loop()
+
+    class SlowSession(Session):
+        async def record_message(self, message):
+            assert asyncio.get_running_loop() is session_loop
+            await asyncio.sleep(0)
+            await super().record_message(message)
+
+    async def fake_run(self, *, run, **_kwargs):
+        run.messages.insert(0, {"role": "system", "content": "system"})
+        run.messages.append({"role": "assistant", "content": "Before tools"})
+        # Two SDK MCP executors can both reach the persistence barrier while
+        # its first commit is still awaiting I/O on the session loop.
+        await asyncio.gather(
+            asyncio.to_thread(lambda: asyncio.run(run.flush_messages())),
+            asyncio.to_thread(lambda: asyncio.run(run.flush_messages())),
+        )
+        run.messages.append({"role": "assistant", "content": "Finished"})
+        run.result = HarnessRunResult(status="success", answer="42")
+        return "42"
+
+    monkeypatch.setattr(OpenHandsAgent, "_execute_harness", fake_run)
+    session = SlowSession("42", "submitted")
+    outcome = await OpenHandsAgent(api_key="key", system_prompt="system").run_session(
+        session
+    )
+
+    assert outcome.status == "completed"
+    assert [message["content"] for message in session.messages] == [
+        "system",
+        "solve",
+        "Before tools",
+        "Finished",
+    ]
+
+
+@pytest.mark.anyio
+async def test_openhands_persists_sdk_messages_between_runtime_tool_calls(
+    monkeypatch, tmp_path
+):
+    """Exercise the real SDK MCP executor, session ledger, and cross-loop flush."""
+
+    @tool
+    def measure() -> str:
+        """Return the measured answer."""
+        return "42"
+
+    class FakeConversation:
+        def __init__(self, *, agent, mcp_tool_provider, callbacks, **_kwargs):
+            self.agent = agent
+            self.provider = mcp_tool_provider
+            self.on_event = callbacks[0]
+            self.client = None
+            self.state = SimpleNamespace(
+                execution_status=openhands_module.ConversationExecutionStatus.FINISHED
+            )
+
+        def send_message(self, _prompt):
+            self.on_event(
+                SystemPromptEvent(system_prompt=TextContent(text="system"), tools=[])
+            )
+
+        async def arun(self):
+            self.client = await asyncio.to_thread(
+                self.provider.create_tools, self.agent.mcp_config
+            )
+            tools = {item.name: item for item in self.client.tools}
+            for name, arguments, thought in (
+                ("measure", {}, "Measure before answering."),
+                ("submit_answer", {"answer": "42"}, "The measured answer is 42."),
+            ):
+                action = MCPToolAction(data=arguments)
+                event = ActionEvent(
+                    thought=[TextContent(text=thought)],
+                    action=action,
+                    tool_name=name,
+                    tool_call_id=f"sdk-{name}",
+                    tool_call=MessageToolCall(
+                        id=f"sdk-{name}",
+                        name=name,
+                        arguments=json.dumps(arguments),
+                        origin="completion",
+                    ),
+                    llm_response_id=f"response-{name}",
+                )
+                self.on_event(event)
+                observation = await asyncio.to_thread(tools[name], action)
+                assert not observation.is_error
+                self.on_event(
+                    ObservationEvent(
+                        action_id=event.id,
+                        tool_name=name,
+                        tool_call_id=event.tool_call_id,
+                        observation=observation,
+                    )
+                )
+
+        def close(self):
+            if self.client is not None:
+                self.client.sync_close()
+
+    monkeypatch.setattr(openhands_module, "LocalConversation", FakeConversation)
+    monkeypatch.setattr(
+        OpenHandsAgent, "_make_llm", lambda self: SimpleNamespace(metrics=None)
+    )
+    monkeypatch.setattr(
+        OpenHandsAgent,
+        "_build_agent",
+        lambda self, llm, mcp_url, **_kwargs: SimpleNamespace(
+            mcp_config={
+                "corral": openhands_module.MCPServer(
+                    url=mcp_url, transport="streamable-http"
+                )
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        OpenHandsAgent, "_extract_finish_message", lambda self, events: "Finished."
+    )
+    task = TaskDefinition(
+        name="task",
+        description="answer 42",
+        tools=["measure"],
+        scoring_fn=lambda answer: float(answer == "42"),
+        submission_format={"answer": "string"},
+        resolve_answer=False,
+    )
+    environment = Environment(
+        "task",
+        task,
+        toolset=Toolset(pool={"measure": measure}, workspace_factory=None),
+    )
+    agent = OpenHandsAgent(model="openai/test", api_key="key", system_prompt="system")
+    async with SQLiteCommitStore(tmp_path / "commits.sqlite3") as store:
+        final = await asyncio.wait_for(
+            TaskRuntime(store).run(
+                agent,
+                environment,
+                execution_id="openhands-ordered-transcript",
+                started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                max_iterations=3,
+            ),
+            timeout=20,
+        )
+
+    messages = next(iter(final.conversations.values()))
+    assert final.submission == "42"
+    assert [message["role"] for message in messages] == [
+        "system",
+        "user",
+        "assistant",
+        "assistant",
+        "tool",
+        "assistant",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+    assert messages[2]["content"] == "Measure before answering."
+    assert messages[3]["tool_calls"][0]["function"]["name"] == "measure"
+    assert messages[5]["content"] == "The measured answer is 42."
+    assert messages[6]["tool_calls"][0]["function"]["name"] == "submit_answer"
+    assert messages[8]["content"] == "Finished."
+    assert final.tool_statistics == {"measure": 1, "submit_answer": 1}

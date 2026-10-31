@@ -1,0 +1,155 @@
+name: Scores
+
+# Posts the scores of every environment, agent, model and level on the PR,
+# from reports/<environment>/runs.csv (reports/scores.py).
+#
+# Triggers:
+# - every PR push that changes a runs.csv
+# - add the `scores` label to a pull request
+# - comment `/scores [<environment> ...]` on a pull request
+#   (members and collaborators only)
+# - run it from the Actions tab (workflow_dispatch)
+#
+# GitHub runs comment and workflow_dispatch triggers only from the workflow file
+# on the default branch; the PR triggers also work before this file is merged.
+# Only runs.csv is read, so no Git LFS reports are downloaded.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - reports/*/runs.csv
+      - reports/scores.py
+      - .github/workflows/scores.yaml
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      environments:
+        description: "Environments to include, space-separated (default: all)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: scores-${{ github.event.issue.number || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scores:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        (github.event.action != 'labeled' ||
+          github.event.label.name == 'scores')) ||
+      (github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        startsWith(github.event.comment.body, '/scores') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+          github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read arguments
+        id: args
+        env:
+          EVENT: ${{ github.event_name }}
+          COMMENT: ${{ github.event.comment.body }}
+          INPUT_ENVS: ${{ inputs.environments }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          envs=""
+          case "$EVENT" in
+            issue_comment)
+              number="$ISSUE_NUMBER"
+              ref="refs/pull/$ISSUE_NUMBER/head"
+              # Words after the command on its first line.
+              words=$(printf '%s\n' "$COMMENT" | head -n1 | sed 's|^/scores||')
+              ;;
+            pull_request)
+              number="$PR_NUMBER"
+              ref="$PR_SHA"
+              words=""
+              ;;
+            *)
+              number=""
+              ref="$GITHUB_REF"
+              words="$INPUT_ENVS"
+              ;;
+          esac
+          for word in $words; do
+            if printf '%s' "$word" | grep -Eq '^[a-z0-9_]+$'; then
+              envs="$envs $word"
+            else
+              echo "::error::invalid environment name: $word"
+              exit 1
+            fi
+          done
+          {
+            echo "number=$number"
+            echo "ref=$ref"
+            echo "envs=$envs"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Acknowledge the comment
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api --method POST
+          "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions"
+          -f content=eyes
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.args.outputs.ref }}
+          lfs: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Tabulate scores
+        env:
+          ENVS: ${{ steps.args.outputs.envs }}
+        # $ENVS holds validated names only and is split into arguments on purpose.
+        run: python reports/scores.py $ENVS --markdown scores.md
+
+      - name: Write the report
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            # Marks this workflow's comment so it is updated, not duplicated.
+            echo "<!-- corral-scores -->"
+            echo "## Scores"
+            echo
+            echo "Commit \`$(git rev-parse --short HEAD)\`"
+            echo
+            cat scores.md
+            echo
+            echo "[Workflow run]($RUN_URL) · rerun with \`/scores [<environment> ...]\`"
+          } > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment on the pull request
+        if: steps.args.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ steps.args.outputs.number }}
+          REPO: ${{ github.repository }}
+        # Update this workflow's previous comment instead of adding a new one.
+        run: |
+          id=$(gh api "repos/$REPO/issues/$NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]"
+              and (.body | startswith("<!-- corral-scores -->"))) | .id' | tail -n1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$id" -F body=@comment.md
+          else
+            gh api --method POST "repos/$REPO/issues/$NUMBER/comments" -F body=@comment.md
+          fi

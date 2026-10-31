@@ -211,6 +211,18 @@ def test_codex_records_native_tool_items(payload, tool_name, arguments, is_error
     assert result["duration_ms"] == getattr(item, "duration_ms", None)
 
 
+def test_codex_preserves_task_specific_absolute_paths():
+    agent = CodexAgent(model="gpt-test", system_prompt="system")
+    instructions = agent._developer_instructions(False, ["write_file", "Code_Executor"])
+    assert "including absolute paths when required" in instructions
+    assert (
+        "Do not construct task paths from the isolated harness working directory"
+        in instructions
+    )
+    assert "never an absolute path" not in instructions
+    assert "does not imply those actions are simulated" in instructions
+
+
 @pytest.mark.anyio
 async def test_codex_final_answer_falls_back_to_submission_action(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

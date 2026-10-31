@@ -113,6 +113,7 @@ def test_undeclared_timeout_argument_does_not_change_deadline():
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"])
+@pytest.mark.parametrize("with_transcript_flush", [False, True])
 @pytest.mark.parametrize(
     ("parameter", "field", "arguments", "fallback", "expected"),
     [
@@ -131,13 +132,21 @@ def test_undeclared_timeout_argument_does_not_change_deadline():
     ],
 )
 async def test_real_mcp_call_uses_per_call_deadlines_at_every_layer(
-    monkeypatch, tmp_path, parameter, field, arguments, fallback, expected
+    monkeypatch,
+    tmp_path,
+    parameter,
+    field,
+    arguments,
+    fallback,
+    expected,
+    with_transcript_flush,
 ):
     """Inspect executor, MCP session, and actual HTTP request deadlines."""
     read_timeouts = []
     session_timeouts = []
     executor_timeouts = []
     call_clients = []
+    call_order = []
     original_send = httpx.AsyncClient.send
     original_call_tool = ClientSession.call_tool
     original_bridge = MCPClient.call_async_from_sync
@@ -184,7 +193,11 @@ async def test_real_mcp_call_uses_per_call_deadlines_at_every_layer(
         },
     }
 
+    async def flush_messages():
+        call_order.append("flush")
+
     async def execute(action):
+        call_order.append("execute")
         assert action.name == name
         assert action.arguments == arguments
         await asyncio.sleep(0.02)
@@ -208,7 +221,10 @@ async def test_real_mcp_call_uses_per_call_deadlines_at_every_layer(
                 workspace=str(tmp_path),
                 visualizer=None,
                 persistence_dir=None,
-                mcp_tool_provider=_TimeoutMCPToolProvider(adapter.tool_timeout_s),
+                mcp_tool_provider=_TimeoutMCPToolProvider(
+                    adapter.tool_timeout_s,
+                    before_tool=flush_messages if with_transcript_flush else None,
+                ),
             )
             try:
                 conversation.send_message("Initialize tools without calling a model")
@@ -222,6 +238,63 @@ async def test_real_mcp_call_uses_per_call_deadlines_at_every_layer(
         await anyio.to_thread.run_sync(call_tool)
     assert read_timeouts == session_timeouts == executor_timeouts == [expected]
     assert all(client._closed for client in call_clients)
+    assert call_order == (
+        ["flush", "execute"] if with_transcript_flush else ["execute"]
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+@pytest.mark.parametrize("with_transcript_flush", [False, True])
+async def test_mcp_native_name_collision_keeps_alias_with_transcript_flush(
+    with_transcript_flush,
+):
+    """A transcript barrier must preserve the MCP alias and original wire name."""
+    name = "native_collision_measure"
+    schema = {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": "A measurement sharing a native tool name",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+    call_order = []
+
+    async def flush_messages():
+        call_order.append("flush")
+
+    async def execute(action):
+        assert action.name == name
+        call_order.append("execute")
+        return ToolResponse(success=True, result="measured", error=None)
+
+    async with (
+        open_mcp_host() as host,
+        host.bind(
+            catalog=ToolCatalogSnapshot.capture((schema,)), execute=execute
+        ) as endpoint,
+    ):
+
+        def call_tool():
+            provider = _TimeoutMCPToolProvider(
+                100_000,
+                native_tool_names={name},
+                before_tool=flush_messages if with_transcript_flush else None,
+            )
+            with provider.create_tools(
+                {"corral": MCPServer(url=endpoint.url)}
+            ) as client:
+                registered = {tool.name: tool for tool in client.tools}
+                assert set(registered) == {f"mcp__corral__{name}"}
+                observation = registered[f"mcp__corral__{name}"](MCPToolAction(data={}))
+                assert not observation.is_error
+                assert observation.content[-1].text == "measured"
+
+        await anyio.to_thread.run_sync(call_tool)
+    assert call_order == (
+        ["flush", "execute"] if with_transcript_flush else ["execute"]
+    )
 
 
 @pytest.mark.anyio

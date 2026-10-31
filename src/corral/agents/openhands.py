@@ -1,9 +1,11 @@
+import asyncio
 import hashlib
 import json
 import math
 import os
 import platform
 import tempfile
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
@@ -99,10 +101,12 @@ class _TimeoutMCPToolExecutor(MCPToolExecutor):
         mcp_config: dict[str, Any],
         input_schema: dict[str, Any],
         fallback: float,
+        before_tool: Callable[[], Awaitable[None]] | None = None,
     ):
         super().__init__(executor.tool_name, executor.client, timeout=fallback)
         self._mcp_config = mcp_config
         self._input_schema = input_schema
+        self._before_tool = before_tool
 
     def __call__(
         self, action: MCPToolAction, conversation: LocalConversation | None = None
@@ -116,7 +120,27 @@ class _TimeoutMCPToolExecutor(MCPToolExecutor):
             self._mcp_config, timeout=timeout, log_handler=log_handler
         ) as client:
             executor = MCPToolExecutor(self.tool_name, client, timeout=timeout)
+            if self._before_tool is not None:
+                # Flush on the call-owned client's loop, preserving its
+                # per-call deadlines and the SDK's secret handling.
+                executor = _TranscriptMCPToolExecutor(executor, self._before_tool)
             return executor(action, conversation)
+
+
+class _TranscriptMCPToolExecutor(MCPToolExecutor):
+    """Persist preceding SDK messages before the runtime records this call."""
+
+    def __init__(
+        self,
+        executor: MCPToolExecutor,
+        before_tool: Callable[[], Awaitable[None]],
+    ):
+        super().__init__(executor.tool_name, executor.client, executor.timeout)
+        self.before_tool = before_tool
+
+    async def call_tool(self, action: Any) -> Any:
+        await self.before_tool()
+        return await super().call_tool(action)
 
 
 class _TimeoutMCPToolProvider:
@@ -128,10 +152,14 @@ class _TimeoutMCPToolProvider:
     """
 
     def __init__(
-        self, tool_timeout_s: float, native_tool_names: set[str] | None = None
+        self,
+        tool_timeout_s: float,
+        native_tool_names: set[str] | None = None,
+        before_tool: Callable[[], Awaitable[None]] | None = None,
     ):
         self.tool_timeout_s = tool_timeout_s
         self.native_tool_names = native_tool_names or set()
+        self.before_tool = before_tool
 
     def create_tools(
         self, mcp_config: dict[str, MCPServer], timeout: float = 30.0
@@ -157,6 +185,7 @@ class _TimeoutMCPToolProvider:
                     config,
                     tool.mcp_tool.inputSchema,
                     self.tool_timeout_s,
+                    before_tool=self.before_tool,
                 )
                 # SDK tool definitions are frozen; replace each definition in
                 # the same registry populated by _connect_and_list_tools.
@@ -224,6 +253,7 @@ class _RunState:
     result: HarnessRunResult | None = None
     tool_started_at: dict[str, float] = field(default_factory=dict)
     native_workspace: str | None = None
+    flush_messages: Callable[[], Awaitable[None]] | None = None
 
 
 class _OpenHandsError(RuntimeError):
@@ -371,11 +401,13 @@ class OpenHandsAgent(BaseAgent):
         )
         suffix = (
             self.system_prompt
-            + "\n\nYou are solving a task in a sandboxed evaluation environment. "
+            + "\n\nYou are solving a task in an evaluation environment. "
             "You may use OpenHands' built-in tools as well as the provided "
             f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and terminal "
             "tools start in a fresh per-run workspace; use the MCP tools for task "
-            "environment data and actions. Do not invent tool outputs. "
+            "environment data and actions. Task tools may control external systems or real "
+            "instruments; workspace isolation does not imply those actions are simulated. "
+            "Follow the task-specific operating instructions. Do not invent tool outputs. "
             + mcp_timeout_prompt(self.tool_timeout_s)
             + final_answer_directive
         )
@@ -597,6 +629,32 @@ class OpenHandsAgent(BaseAgent):
         # SDK metrics. The real OpenHands path replaces this with the count
         # of per-completion token-usage records in `_record_usage`.
         run.metadata["sdk_turns"] = 1
+        session_loop = asyncio.get_running_loop()
+        flush_lock = asyncio.Lock()
+        recorded_messages = 0
+
+        async def flush_messages() -> None:
+            nonlocal recorded_messages
+            async with flush_lock:
+                # Snapshot before awaiting: SDK callbacks may append while a
+                # commit is in flight. Those messages belong to the next flush.
+                pending = run.messages[recorded_messages:]
+                for message in pending:
+                    await session.record_message(message)
+                    recorded_messages += 1
+
+        async def flush_from_tool() -> None:
+            # SDK MCP executors run on their client's event loop, while the
+            # session (including remote worker sessions) belongs to this loop.
+            # Await its work without blocking either loop's thread.
+            if asyncio.get_running_loop() is session_loop:
+                await flush_messages()
+            else:
+                await asyncio.wrap_future(
+                    asyncio.run_coroutine_threadsafe(flush_messages(), session_loop)
+                )
+
+        run.flush_messages = flush_from_tool
         await self._execute_harness(
             task_id=task_id,
             prompt=prompt,
@@ -606,8 +664,7 @@ class OpenHandsAgent(BaseAgent):
             run=run,
         )
 
-        for message in run.messages:
-            await session.record_message(message)
+        await flush_messages()
         usage = self._usage(
             run.usage,
             llm_calls=int(run.metadata.get("sdk_turns", 0) or 0),
@@ -812,6 +869,7 @@ class OpenHandsAgent(BaseAgent):
                 {tool.name for tool in get_default_tools()}
                 if run.native_workspace
                 else None,
+                before_tool=run.flush_messages,
             ),
             callbacks=[on_event],
             # OpenHands deliberately falls back to a blocking response when
