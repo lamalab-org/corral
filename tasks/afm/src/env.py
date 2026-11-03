@@ -1,25 +1,17 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import asyncio
-import gc
 import json
 import os
-import platform
 import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
 
-import nanosurf
-
-# Safe pythoncom import (Windows only)
-if platform.system() == "Windows":
-    import pythoncom
-else:
-    pythoncom = None
-
+from afm_contract import CONTRACT_VERSION, INSTRUCTIONS, reference
+from afm_runtime import InstrumentUnavailable, runtime
 from corral.core.environment import Environment, Toolset, build_environments
-from corral.core.events import TaskConfigured
+from corral.core.events import ExecutionStarted, TaskConfigured
 from corral.core.state import ExecutionState
 from corral.core.task import InputRef, TaskDefinition
 from corral.core.tool import Tool
@@ -140,6 +132,7 @@ def load_tasks_from_json(
             initial_input=initial_input,
             resolve_answer=False,
             submission_resolver=resolve_submission,
+            execution_version=CONTRACT_VERSION,
         )
 
     return tasks
@@ -153,6 +146,20 @@ class AFMEnvironment(Environment):
     specialised here. Evaluation uses the task's scoring callable directly.
     """
 
+    def initial_event(self, **kwargs) -> ExecutionStarted:
+        # Setup happens after execution.started. Defer the prompt until the
+        # configuration event contains the verified machine identity.
+        started = super().initial_event(**kwargs)
+        metadata = dict(started.task)
+        metadata.pop("prompt", None)
+        return ExecutionStarted(**{**started.model_dump(), "task": metadata})
+
+    def capture_environment(self, environment):
+        captured = dict(super().capture_environment(environment))
+        if hasattr(self, "_initial_snapshot"):
+            captured["afm_initial_snapshot"] = self._initial_snapshot
+        return captured
+
     @asynccontextmanager
     async def task_execution_guard(self) -> AsyncIterator[None]:
         """Allow one AFM task at a time, regardless of runner concurrency."""
@@ -163,7 +170,32 @@ class AFMEnvironment(Environment):
         try:
             yield
         finally:
-            _INSTRUMENT_LOCK.release()
+            try:
+                # The owner serializes this after any in-flight instrument call.
+                # Quarantine prevents cleanup from issuing more commands after
+                # an uncertain/hung call; the operator must recover in that case.
+                cleanup = asyncio.create_task(
+                    asyncio.to_thread(runtime().call, "finish")
+                )
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    # Retain task ownership until cleanup has completed/failed.
+                    # A command timeout quarantines the worker instead of freeing
+                    # the instrument to a second task while a COM call is live.
+                    await cleanup
+                    raise
+            except InstrumentUnavailable as exc:
+                event(
+                    "ERROR",
+                    "afm.cleanup_blocked",
+                    subsystem="runtime",
+                    benchmark="afm",
+                    error=str(exc),
+                )
+                raise
+            finally:
+                _INSTRUMENT_LOCK.release()
 
     @property
     def initial_params(self) -> dict:
@@ -174,59 +206,15 @@ class AFMEnvironment(Environment):
         return self.workspace_path
 
     def reset_params(self) -> None:
-        if pythoncom:
-            pythoncom.CoInitialize()
-        spm = nanosurf.SPM()
-        application = spm.application
-        application.SetGalleryHistoryDirectoryPath(self.workspace_path)
-        scan = application.Scan
-        zcontrol = application.ZController
-        head = application.ScanHead
-        opmode = application.OperatingMode
-
-        # Access initial parameters
-        params = self.initial_params
-
-        # Helper to safely set attributes
-        def safe_set(obj, attr, key, transform=lambda x: x):
-            if key in params:
-                setattr(obj, attr, transform(params[key]))
-
-        # Select the tip and mode before applying settings: switching modes may
-        # restore previously stored controller values.
-        safe_set(head, "CantileverByGUID", "tip")
-        safe_set(opmode, "OperatingMode", "mode")
-
-        # Apply scan parameters (converted to meters and seconds)
-        safe_set(scan, "ImageHeight", "image_height", lambda x: x * 1e-9)
-        safe_set(scan, "ImageWidth", "image_width", lambda x: x * 1e-9)
-        safe_set(scan, "Scantime", "times_per_line")
-        safe_set(scan, "Points", "points_per_line")
-        safe_set(scan, "Rotation", "rotation")
-        safe_set(scan, "Lines", "lines_per_frame")
-        safe_set(scan, "CenterPosX", "centre_x", lambda x: x * 1e-9)
-        safe_set(scan, "CenterPosY", "centre_y", lambda x: x * 1e-9)
-
-        # Z-control parameters
-        safe_set(zcontrol, "PGain", "pgain")
-        safe_set(zcontrol, "IGain", "igain")
-        safe_set(zcontrol, "DGain", "dgain")
-        # Set the mode first: changing mode restores its previous setpoint.
-        if "setpoint" in params:
-            setpoint = params["setpoint"]
-            if setpoint["unit"] == "V" and params.get("mode") in (2, 9):
-                zcontrol.SetPointForceUnitMode = 0  # DefUnitMode_V
-            elif setpoint["unit"] != "%" or params.get("mode") not in (3, 4):
-                raise ValueError(
-                    "Expected V for static/lateral force, or % for dynamic/phase contrast"
-                )
-            zcontrol.SetPoint = setpoint["value"]
-        elif "setpoint_v" in params:
-            zcontrol.SetPointForceUnitMode = 0  # DefUnitMode_V
-            zcontrol.SetPoint = params["setpoint_v"]
-        elif "setpoint_p" in params:
-            zcontrol.SetPoint = params["setpoint_p"]
-
+        # Validate the local reference before touching hardware; no provider call.
+        reference("preflight")
+        params = runtime().call(
+            "begin",
+            self.initial_params,
+            self.workspace_path,
+            Path(self.workspace_path).name,
+        )
+        self._initial_snapshot = params
         event(
             "DEBUG",
             "environment.configuration_completed",
@@ -234,17 +222,11 @@ class AFMEnvironment(Environment):
             benchmark="afm",
             task_id=self.task_id,
             workspace=self.afm_dir,
-            image_directory=application.GetGalleryHistoryDirectoryPath,
+            image_directory=params["Current Working directory"],
+            machine_id=params["machine_id"],
+            hostname=params["hostname"],
+            afm_contract_version=CONTRACT_VERSION,
         )
-
-        # Cleanup
-        del zcontrol
-        del scan
-        del application
-        del spm
-        gc.collect()
-        if pythoncom:
-            pythoncom.CoUninitialize()
 
     def get_task_prompt(self, state: ExecutionState) -> str:
         prompt = "You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API."
@@ -254,6 +236,15 @@ class AFMEnvironment(Environment):
 
         """
 
+        prompt += "\n" + INSTRUCTIONS
+        snapshot = state.environment.values.get("afm_initial_snapshot")
+        if snapshot is not None:
+            prompt += (
+                f"\nInstrument: {snapshot['machine_id']} "
+                f"(host: {snapshot['hostname']}).\n"
+            )
+        else:
+            prompt += "\nInstrument setup has not completed; no verified state is available.\n"
         prompt += "\nAvailable input data:\n"
 
         # Display resolved inputs from dependencies
@@ -285,7 +276,7 @@ class AFMEnvironment(Environment):
         return TaskConfigured(
             **{
                 **configured.model_dump(),
-                "status": "AFM instrument parameters configured.",
+                "status": f"AFM instrument {runtime().config.machine_id} parameters configured.",
             }
         )
 

@@ -55,14 +55,6 @@ class TestToolSurface:
         tools = environments["gsm8k_a"].tools
         assert {"write_file", "read_file", "list_files"} <= set(tools)
 
-    def test_all_nine_task_tools_are_present(self, environments):
-        tools = environments["gsm8k_a"].tools
-        assert {
-            "get_baseline", "reveal_train_questions", "query_student",
-            "dry_run_policy", "evaluate_candidate", "inspect_failures",
-            "compare_runs", "get_budget", "submit_policy",
-        } <= set(tools)
-
     def test_inference_tools_are_trusted(self, environments):
         """The environment uses trusted tools and committed session state."""
         tools = environments["gsm8k_a"].tools

@@ -489,8 +489,9 @@ class AgentSession:
         raw_messages: Sequence[Mapping[str, Any]],
         *,
         usage: Mapping[str, Any] | None = None,
+        llm_calls: int = 1,
     ) -> None:
-        """Commit exactly the conversation messages added by one turn."""
+        """Commit messages or usage alone when no public output was returned."""
         messages: list[Mapping[str, JsonValue]] = []
         for raw in raw_messages:
             message = dict(raw)
@@ -502,11 +503,11 @@ class AgentSession:
             if not isinstance(detached, Mapping):
                 raise TypeError("a provider transcript message must be a JSON object")
             messages.append(detached)
-        if not messages:
+        if not messages and usage is None:
             return
         normalized = usage_from_mapping(
             usage,
-            llm_calls=1 if usage is not None else 0,
+            llm_calls=llm_calls if usage is not None else 0,
         )
         await self._append_agent(
             AgentTurnRecorded(
@@ -526,8 +527,9 @@ class AgentSession:
         raw: Mapping[str, Any],
         *,
         usage: Mapping[str, Any] | None = None,
+        llm_calls: int = 1,
     ) -> None:
-        await self.record_messages((raw,), usage=usage)
+        await self.record_messages((raw,), usage=usage, llm_calls=llm_calls)
 
     async def run_hooks(
         self,

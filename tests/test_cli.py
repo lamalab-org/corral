@@ -12,6 +12,7 @@ import pytest
 from corral import cli
 from corral.agents.ai_scientist import AIScientistConfig, SakanaAIScientistConfig
 from corral.agents.ai_scientist.agent import AIScientistAgent
+from corral.agents.epistemic import EpistemicAgent
 from corral.agents.llm_planner import LLMPlanner
 from corral.agents.react import ReActAgent
 from corral.agents.reflexion_agent import ReflexionAgent
@@ -50,6 +51,7 @@ EXPECTED_AGENTS = (
     "ai-scientist",
     "claude-code",
     "codex",
+    "epistemic",
     "llm-planner",
     "openhands",
     "react",
@@ -104,6 +106,7 @@ def test_every_public_concrete_agent_is_registered():
         "AIScientistAgent",
         "ClaudeCodeAgent",
         "CodexAgent",
+        "EpistemicAgent",
         "LLMPlanner",
         "OpenHandsAgent",
         "ReActAgent",
@@ -117,6 +120,7 @@ def test_every_public_concrete_agent_is_registered():
     ("name", "agent_class"),
     [
         ("ai-scientist", AIScientistAgent),
+        ("epistemic", EpistemicAgent),
         ("llm-planner", LLMPlanner),
         ("react", ReActAgent),
         ("terminus", TerminusAgent),
@@ -589,14 +593,16 @@ def test_run_executes_one_task_without_a_benchmark(
     default_limit,
     max_iterations,
 ):
+    from corral import run
+
     iteration_limits = []
-    original_execute = cli.execute_task
+    original_execute = run.execute_task
 
     async def record_execute(**kwargs):
         iteration_limits.append(kwargs["task"].max_iterations)
         return await original_execute(**kwargs)
 
-    monkeypatch.setattr(cli, "execute_task", record_execute)
+    monkeypatch.setattr(run, "execute_task", record_execute)
     monkeypatch.setattr(
         cli,
         "load_environment_group",

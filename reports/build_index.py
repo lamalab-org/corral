@@ -13,6 +13,7 @@ the session ID defaults to the execution's run ID and the trace ID is
 ``run-metadata.json`` may set ``langfuse_session_id`` when its replacement
 executions have been consolidated into one session. Its optional
 ``langfuse_trace_ids`` mapping records replacement trace IDs by execution ID.
+Legacy trace IDs may also be recorded in an adjacent ``langfuse-overrides.json``.
 
 Usage:
     python reports/build_index.py reports/<env>
@@ -29,6 +30,7 @@ import hashlib
 import json
 import lzma
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -116,6 +118,13 @@ def session_url(session_id: str) -> str:
     return f"{LANGFUSE_HOST}/project/{LANGFUSE_PROJECT_ID}/sessions/{session_id}"
 
 
+def session_id(execution_id: str, run_id: str) -> str:
+    """Retries may add attempt labels within their original run's ID."""
+    if execution_id.startswith(f"{run_id}:"):
+        return run_id
+    return execution_id.rsplit(":", 2)[0]
+
+
 def canonical(agent: str, model: str) -> tuple[str, str, str]:
     model_key = model.rsplit("/", 1)[-1]
     if agent not in AGENTS or model_key not in MODELS:
@@ -125,6 +134,54 @@ def canonical(agent: str, model: str) -> tuple[str, str, str]:
 
 def runtime(metadata: dict) -> dict:
     return next(iter(metadata["agent"]["by_task"].values()))["runtime"]
+
+
+def trace_overrides(report: Path, execution_ids: set[str]) -> dict[str, str]:
+    """Preserve trace IDs recorded for earlier runs when rebuilding indexes."""
+    path = report.with_name("langfuse-overrides.json")
+    if not path.exists():
+        return {}
+    overrides = {}
+    for execution_id, record in json.loads(path.read_text()).items():
+        if execution_id not in execution_ids:
+            raise ValueError(f"{path}: unknown execution ID {execution_id!r}")
+        tid = record["trace_id"]
+        if not isinstance(tid, str) or not re.fullmatch(r"[0-9a-f]{32}", tid):
+            raise ValueError(f"{path}: invalid trace ID for {execution_id!r}")
+        overrides[execution_id] = tid
+    return overrides
+
+
+def langfuse_overrides(
+    report: Path, execution_ids: set[str]
+) -> tuple[str | None, dict[str, str]]:
+    """Combine publication metadata with legacy trace overrides."""
+    metadata_path = report.with_name("run-metadata.json")
+    publication = (
+        json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
+    )
+    session_override = publication.get("langfuse_session_id")
+    if session_override is not None and (
+        not isinstance(session_override, str) or not session_override.strip()
+    ):
+        raise ValueError(
+            f"{metadata_path}: langfuse_session_id must be a nonempty string"
+        )
+    publication_traces = publication.get("langfuse_trace_ids", {})
+    if not isinstance(publication_traces, dict) or any(
+        execution not in execution_ids
+        or not isinstance(tid, str)
+        or len(tid) != 32
+        or any(char not in "0123456789abcdef" for char in tid)
+        for execution, tid in publication_traces.items()
+    ):
+        raise ValueError(
+            f"{metadata_path}: langfuse_trace_ids must map report execution IDs "
+            "to 32-character lowercase hexadecimal trace IDs"
+        )
+    overrides = trace_overrides(report, execution_ids)
+    overrides.update(publication_traces)
+    return session_override, overrides
 
 
 def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
@@ -139,42 +196,23 @@ def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
     k = int(meta["benchmark"]["trials_per_task"])
     metrics = data["metrics"]
     rel = report.relative_to(env_dir).as_posix()
-    metadata_path = report.with_name("run-metadata.json")
-    publication = (
-        json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
+    session_override, overrides = langfuse_overrides(
+        report,
+        {
+            t["trial_id"]
+            for task in data["task_results"].values()
+            for t in task["trials"]
+        },
     )
-    session_override = publication.get("langfuse_session_id")
-    if session_override is not None and (
-        not isinstance(session_override, str) or not session_override.strip()
-    ):
-        raise ValueError(
-            f"{metadata_path}: langfuse_session_id must be a nonempty string"
-        )
-    trace_overrides = publication.get("langfuse_trace_ids", {})
-    execution_ids = {
-        trial["trial_id"]
-        for task in data["task_results"].values()
-        for trial in task["trials"]
-    }
-    if not isinstance(trace_overrides, dict) or any(
-        execution not in execution_ids
-        or not isinstance(tid, str)
-        or len(tid) != 32
-        or any(char not in "0123456789abcdef" for char in tid)
-        for execution, tid in trace_overrides.items()
-    ):
-        raise ValueError(
-            f"{metadata_path}: langfuse_trace_ids must map report execution IDs "
-            "to 32-character lowercase hexadecimal trace IDs"
-        )
 
     trials = []
     for task_id, task in sorted(data["task_results"].items()):
         for slot, t in enumerate(task["trials"]):
             usage = t.get("token_usage") or {}
-            tid = trace_overrides.get(t["trial_id"], trace_id(t["trial_id"]))
+            tid = overrides.get(t["trial_id"], trace_id(t["trial_id"]))
             # Grouping can change without rewriting immutable execution IDs.
-            session = session_override or t["trial_id"].rsplit(":", 2)[0]
+            # Keep in-session retry labels separate from cross-session reruns.
+            session = session_override or session_id(t["trial_id"], run_id)
             trials.append(
                 {
                     "environment": env,
@@ -205,9 +243,7 @@ def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
 
     trace_keys = {(t["langfuse_session_id"], t["langfuse_trace_id"]) for t in trials}
     if len(trace_keys) != len(trials):
-        raise ValueError(
-            f"{metadata_path}: multiple trials point to the same Langfuse trace"
-        )
+        raise ValueError(f"{report}: multiple trials point to the same Langfuse trace")
 
     usage = metrics.get("Total Token Usage") or {}
     run = {
