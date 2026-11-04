@@ -170,7 +170,8 @@ STARGAZER_SUBMISSION_GUIDE = (
     "3) Convert M0 to l_rad via l_rad = (Omega_rad + omega_rad + M0) mod 2pi\n"
     "4) Avoid mixing phase aliases; if using l_rad, treat it as canonical\n"
     "5) Use validate_fit repeatedly to inspect observation-only fit diagnostics\n"
-    "6) Finalize once with submit_answer(answer=<candidate JSON>); this ends the episode\n"
+    "6) Submission is final, so check the JSON format and fitted parameters before "
+    "submitting with submit_answer(answer=<candidate JSON>)\n"
     "7) With analysis assistance: d = stargazer_diagnostics(planets); print({'rms': d['residuals']['rms'], 'bic': d['bic']})\n"
     "Print scalar diagnostics instead of full arrays. For large periodograms, process the frequency grid in chunks to fit the worker memory budget.\n"
 )
@@ -428,7 +429,7 @@ def create_tools(*, analysis_assistance: bool = True) -> dict[str, Tool]:
             "type": "function",
             "function": {
                 "name": "validate_fit",
-                "description": "Validate a candidate using observations only. Returns format errors, normalized parameters, likelihood, BIC, and residuals. Does not grade scientific correctness or finish the episode. Finalize with submit_answer containing candidate JSON.",
+                "description": "Validate a candidate using observations only. Returns format errors, normalized parameters, likelihood, BIC, and residuals. Use these diagnostics to inspect the fit and refine the candidate. Finalize with submit_answer containing candidate JSON.",
                 "parameters": {
                     "type": "object",
                     "properties": {

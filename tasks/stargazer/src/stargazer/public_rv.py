@@ -184,7 +184,7 @@ def simulate_keplerian_rv(
     `l_rad` is mean longitude at `t_ref_days` (default: `times_days[0]`).
     In the RV-only
     convention `Omega_rad` is zero, but retaining it here also supports raw
-    released task records before compatibility conversion.
+    input parameter records before compatibility conversion.
     """
     times = np.asarray(times_days, dtype=float)
     if times.size == 0:
@@ -224,7 +224,7 @@ def _simulate_legacy_rebound_rv(
     times: np.ndarray,
     t_ref_days: float = 0.0,
 ) -> np.ndarray:
-    """Reproduce the clean signal in a released synthetic task."""
+    """Compute the noise-free radial-velocity signal using REBOUND."""
     simulation = rebound.Simulation()
     simulation.units = ["msun", "m", "s"]
     star = raw_config["star"]
@@ -343,7 +343,7 @@ def parse_submission(
 
 
 class SemanticSubmissionError(SubmissionError):
-    """A phase/parameter protocol rejection, before consuming an attempt."""
+    """A phase or parameter validation error."""
 
     def __init__(self, check: dict[str, Any]):
         super().__init__(json.dumps(check["errors"]))
@@ -351,9 +351,9 @@ class SemanticSubmissionError(SubmissionError):
 
 
 def _coerce_float(value: Any, *, name: str, default: float | None = None) -> float:
-    """Best-effort conversion of LLM-provided values into finite floats.
+    """Best-effort conversion of submitted values into finite floats.
 
-    LLMs sometimes emit JSON nulls (parsed as Python None). Treat those as "missing"
+    Inputs may contain JSON nulls (parsed as Python None). Treat those as "missing"
     when a default is provided.
     """
     if value is None:
@@ -439,7 +439,7 @@ def _parse_phase_to_l_rad(
     when `l_rad` is provided, legacy aliases are treated as non-canonical hints.
 
     Legacy priority (when `l_rad` is absent):
-    1. phase_frac (common agent output, interpreted as time-of-periastron fraction)
+    1. phase_frac (interpreted as time-of-periastron fraction)
     2. phase_rad / phase_deg / phase (interpreted as mean anomaly M0)
     3. T0_days / T_peri (time of periastron)
     4. Default to 0.0
@@ -462,7 +462,7 @@ def _parse_phase_to_l_rad(
         t0_days_val = _get_float("T_peri")
 
     # Helper: convert phase_frac to l_rad
-    # Agent convention: tp = t0 + phase_frac * P (time of periastron)
+    # Input convention: tp = t0 + phase_frac * P (time of periastron)
     # At t=t0, M = -2π * phase_frac, so l = Omega + omega + M
     def l_from_phase_frac(pf: float) -> float:
         M0 = (-2.0 * np.pi * pf) % (2.0 * np.pi)
@@ -515,7 +515,7 @@ def _parse_phase_to_l_rad(
     if candidates:
         return candidates[0][1]
 
-    # Fallback: check for zero-valued fields (in case agent explicitly set them to 0)
+    # Fallback: check for fields explicitly set to zero in the submitted parameters.
     if l_rad_val is not None:
         return l_rad_val % (2.0 * np.pi)
     if phase_frac_val is not None:
@@ -678,7 +678,7 @@ def validate_submission_semantics(
             planet_info["max_phase_disagreement_rad"] = max_diff
             if max_diff > phase_conflict_tol_rad and worst_pair is not None:
                 # If explicit l_rad is provided, treat it as canonical and do not hard-fail.
-                # Many agents keep legacy phase_* fields as placeholders (often 0.0).
+                # Submitted parameters may include legacy phase_* placeholders (often 0.0).
                 if "l_rad" in candidates:
                     out["warnings"].append(
                         f"planet[{i}] phase fields disagree ({worst_pair[0]} vs {worst_pair[1]}, Δ={worst_pair[2]:.3f} rad), "

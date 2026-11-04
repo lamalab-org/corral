@@ -30,15 +30,14 @@ def example_files(task_number: int, *, level: int = 2) -> dict[str, str]:
     example = load_example(task_number, level=level)
     templates = {"manifest.json": example["manifest"], **example["files"]}
     guide = (
-        f"# Task {task_number}: submission examples\n\n"
-        "These are blank templates, not completed evidence. Copy the files you use "
+        "I've included blank templates to help you package the results. Copy the files you use "
         "to your output directory, fill them with actual data, and update the manifest "
         "paths. Only link files used in your calculation; do not submit unused "
         "alternative examples. File names are illustrative; keep the artifact-role "
         "keys that identify their contents. All linked paths must stay in the workspace.\n\n"
-        "## Files\n\n"
-        + "\n".join(f"- [{name}]({name})" for name in templates)
-        + "\n\n## Filling the templates\n\n"
+        "The templates are "
+        + ", ".join(f"[{name}]({name})" for name in templates)
+        + ".\n\n"
         "Replace nulls, empty strings, placeholder keys, and example records with "
         "your actual results and paths. Include every file used by the calculation "
         "and list the code in manifest.scripts. Keep all paths in the task workspace.\n\n"
@@ -200,7 +199,11 @@ def example_files(task_number: int, *, level: int = 2) -> dict[str, str]:
 def example_prompt(task_number: int, *, workspace: bool, level: int = 2) -> str:
     """Show the manifest first; load supporting layouts on demand in a workspace."""
     example = load_example(task_number, level=level)
-    prompt = "Blank manifest example:\n\n" + _json_block(example["manifest"]) + "\n"
+    prompt = (
+        "Here's a blank manifest showing how to link the results and supporting files:\n\n"
+        + _json_block(example["manifest"])
+        + "\n"
+    )
     if workspace:
         return prompt + (
             f"\nBlank copies and linked-file templates are in /workspace/{EXAMPLE_DIRECTORY}/. "
@@ -210,7 +213,7 @@ def example_prompt(task_number: int, *, workspace: bool, level: int = 2) -> str:
     files = example_files(task_number, level=level)
     prompt += "\n" + files["README.md"]
     for name, value in example["files"].items():
-        prompt += f"\n### {name}\n\n" + _json_block(value) + "\n"
+        prompt += f"\nFor `{name}`, use this layout:\n\n" + _json_block(value) + "\n"
     return prompt
 
 

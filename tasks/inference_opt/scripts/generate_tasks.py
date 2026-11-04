@@ -55,15 +55,16 @@ def _task(benchmark: str, models: list[str], level: int) -> dict:
     if joint:
         name = f"Joint {benchmark} improvement on two student models"
         description = (
-            f"Build and submit one inference-time policy for "
-            f"{BENCHMARK_LABELS[benchmark]}. The same policy is evaluated against "
-            "two frozen student models. It must help both models to pass."
+            f"I'd like to improve the answers my two frozen student models give "
+            f"to {BENCHMARK_LABELS[benchmark]} questions. Can you build one "
+            "inference-time policy that works well with both?"
         )
     else:
         name = f"Improve {benchmark}"
         description = (
-            f"Build and submit an inference-time policy for "
-            f"{BENCHMARK_LABELS[benchmark]}."
+            f"I'd like to improve the answers my frozen student model gives "
+            f"to {BENCHMARK_LABELS[benchmark]} questions. Can you build an "
+            "inference-time policy I can reuse?"
         )
 
     return {

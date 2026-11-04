@@ -399,24 +399,24 @@ class QualitativeAnalysisEnvironment(Environment):
 
     def get_task_prompt(self, state: ExecutionState) -> str:
         prompt = (
-            f"Task {self.current_task.name}:\n"
             f"{self.current_task.description}\n\n"
-            "Required submission format:\n"
+            "Please return your answer in this format so I can use it directly:\n"
             f"{self.current_task.submission_format}\n\n"
         )
 
         if self.current_task.input_map:
-            prompt += "\nAvailable data from previous subtasks:\n"
+            prompt += "Here are the results from the earlier work:\n"
 
         # Display resolved inputs from dependencies
         resolved = self.resolve_inputs(state)
         for input_name, ref in self.current_task.input_map.items():
             value = resolved[input_name]
             task_prompt = self.group_tasks[ref.task_id].description
-            prompt += f"- Input from '{ref.task_id}' with question: '{task_prompt}' and answer: '{value}'\n"
+            prompt += f"For '{task_prompt}' ({ref.task_id}), the result was: {value}\n"
 
         # Display initial input data
         if self.current_task.initial_input:
+            prompt += "\nI also have these inputs:\n"
             for key, value in self.current_task.initial_input.items():
                 if key != "work_dir":
                     prompt += f"- {key}: {value}\n"
