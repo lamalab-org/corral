@@ -1,5 +1,7 @@
+import asyncio
 import hashlib
 import json
+import math
 import os
 import platform
 import shutil
@@ -19,20 +21,31 @@ from corral.report.logging import logger
 # an environment without the extra gets an actionable install hint instead of a
 # bare ModuleNotFoundError deep in the import chain.
 try:
-    from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
+    from openai_codex import (
+        ApprovalMode,
+        Codex,
+        CodexConfig,
+        Sandbox,
+        TurnHandle,
+    )
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
     raise ModuleNotFoundError(
         "CodexAgent requires the OpenAI Codex SDK, which ships as the optional "
         "'codex' extra. Install it with `pip install 'corral[codex]'`."
     ) from exc
 
+from corral.agents._mcp_timeout import (
+    DEFAULT_TOOL_TIMEOUT_S,
+    mcp_timeout_prompt,
+)
+from corral.agents._transcript import StreamingTranscript
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
 from corral.agents.schema import (
     SURRENDER_SENTINEL,
     AgentOutcome,
     AgentUsage,
 )
-from corral.agents.session import AgentSession
+from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.usage import usage_field
 from corral.agents.utils import LiteLLMMessage
 from corral.core.action import submit_answer_action
@@ -40,6 +53,16 @@ from corral.core.action import submit_answer_action
 # Name under which the corral MCP server is registered with the Codex harness
 # (the `[mcp_servers.<name>]` config table key).
 _MCP_SERVER_NAME = "corral"
+
+_NATIVE_TOOL_ITEMS = {
+    "commandExecution",
+    "fileChange",
+    "webSearch",
+    "imageView",
+    "imageGeneration",
+    "dynamicToolCall",
+    "collabAgentToolCall",
+}
 
 # MCP tools that create/place a file the model may later submit a path to. When
 # any of these is available, the model is told to use relative paths: the corral
@@ -81,7 +104,12 @@ class HarnessRunResult:
 class _RunState:
     """Mutable scratch owned by one invocation, never by the agent instance."""
 
-    messages: list[dict[str, Any]] = field(default_factory=list)
+    native_workspace: str | None = None
+    messages: StreamingTranscript = field(
+        default_factory=lambda: StreamingTranscript("codex")
+    )
+    started_items: set[str] = field(default_factory=set)
+    completed_items: set[str] = field(default_factory=set)
     usage: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     result: HarnessRunResult | None = None
@@ -144,9 +172,11 @@ class CodexAgent(BaseAgent):
             reported with `status="timeout"`. Defaults to None (no timeout).
         startup_timeout_s (float, optional): Timeout Codex waits for the corral
             MCP server to initialise. Defaults to 30.
-        tool_timeout_s (float, optional): Per-tool-call timeout Codex applies to
-            the corral MCP server. Defaults to 600.
-        api_endpoint (str, optional): Unused by the native harness.
+        tool_timeout_s (float, optional): Fixed SDK wait limit for each MCP call.
+            Defaults to 10,000 seconds (about 2.8 hours). Tools enforce their
+            own execution limits independently.
+        api_endpoint (str, optional): Responses API base URL for the native
+            harness. Authentication still uses `OPENAI_API_KEY`.
         temperature (float, optional): Ignored by the Codex harness (the harness
             controls its own sampling; `reasoning_effort` is the tuning knob).
             Accepted for configuration consistency; the harness ignores it.
@@ -159,6 +189,7 @@ class CodexAgent(BaseAgent):
     """
 
     tool_transport = "mcp"
+    session_capabilities = AgentSessionCapabilities(native_workspace=True)
     unsupported_model_parameters = frozenset({"temperature"})
 
     def __init__(
@@ -167,7 +198,7 @@ class CodexAgent(BaseAgent):
         reasoning_effort: str | None = "high",
         wall_clock_timeout_s: float | None = None,
         startup_timeout_s: float = 30.0,
-        tool_timeout_s: float = 600.0,
+        tool_timeout_s: float = DEFAULT_TOOL_TIMEOUT_S,
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
@@ -177,6 +208,12 @@ class CodexAgent(BaseAgent):
     ):
         if user_prompt is None:
             user_prompt = "tool_calling/user_prompt"
+        for name, value in (
+            ("tool_timeout_s", tool_timeout_s),
+            ("startup_timeout_s", startup_timeout_s),
+        ):
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
 
         super().__init__(
             model=model,
@@ -200,19 +237,16 @@ class CodexAgent(BaseAgent):
     ) -> str:
         """Compose the developer instructions handed to the Codex thread."""
         final_answer_directive = (
-            "When you have solved the task, call the `submit_answer` MCP tool "
-            "with the complete answer. A plain-text final response is only a "
-            "fallback if you do not call the tool."
+            "When you have solved the task, call the `submit_answer` MCP tool with the complete answer.\n"
+            "A plain-text final response is only a fallback if you do not call the tool."
         )
         instructions = (
             self.system_prompt
-            + "\n\nYou are solving a task in an evaluation environment. "
-            "You may use Codex's built-in tools as well as the provided "
-            f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
-            "operate in an isolated per-run workspace; use the MCP tools for task "
-            "environment data and actions. Task tools may control external systems or real "
-            "instruments; workspace isolation does not imply those actions are simulated. "
-            "Follow the task-specific operating instructions. Do not invent tool outputs. "
+            + f"\n\nYou may use Codex's built-in tools as well as the provided `{_MCP_SERVER_NAME}` MCP tools.\n"
+            "Built-in filesystem and shell tools operate in an isolated per-run workspace; use the MCP tools for task environment data and actions.\n"
+            "Task tools may control external systems or real instruments; workspace isolation does not imply those actions are simulated.\n"
+            "Follow the task-specific operating instructions.\n"
+            "Do not invent tool outputs.\n" + mcp_timeout_prompt(self.tool_timeout_s)
         )
         # Only mention file paths when a file-writing tool is actually available,
         # so a task without one sees the exact same instructions as before. The
@@ -221,20 +255,16 @@ class CodexAgent(BaseAgent):
         # explicit task contracts such as absolute paths returned by AFM tools.
         if tool_names and _FILE_WRITING_TOOLS.intersection(tool_names):
             instructions += (
-                "Follow the task's submission path requirements. Preserve paths "
-                "returned by task tools, including absolute paths when required. "
-                "For files you create through workspace tools without an explicit "
-                "path contract, use workspace-relative paths. Do not construct "
-                "task paths from the isolated harness working directory. "
+                "Follow the task's submission path requirements.\n"
+                "Preserve paths returned by task tools, including absolute paths when required.\n"
+                "For files you create through workspace tools without an explicit path contract, use workspace-relative paths.\n"
+                "Do not construct task paths from the isolated harness working directory.\n"
             )
         instructions += final_answer_directive
         if enable_surrender:
             if self.surrender_prompt is not None:
                 instructions += "\n\n" + self.surrender_prompt.fill({})
-            instructions += (
-                "\nTo surrender, call `submit_answer` with the exact answer "
-                f"`{SURRENDER_SENTINEL}`; do not return the sentinel as text."
-            )
+            instructions += f"\nTo surrender, call `submit_answer` with the exact answer `{SURRENDER_SENTINEL}`; do not return the sentinel as text."
         return instructions
 
     def _render_config_toml(self, mcp_url: str, tool_names: list[str]) -> str:
@@ -260,7 +290,10 @@ class CodexAgent(BaseAgent):
             f"tool_timeout_sec = {_toml_num(self.tool_timeout_s)}",
             "",
         ]
-        return "\n".join(lines)
+        config = "\n".join(lines)
+        if self.api_endpoint is not None:
+            config = f"openai_base_url = {_toml_str(self.api_endpoint)}\n\n{config}"
+        return config
 
     def _harness_metadata(
         self,
@@ -283,6 +316,7 @@ class CodexAgent(BaseAgent):
         )
         return {
             "model_requested": self.harness_model,
+            "api_endpoint": self.api_endpoint,
             "openai_codex_version": _sdk_version(),
             "python_version": platform.python_version(),
             "reasoning_effort": self.reasoning_effort,
@@ -290,6 +324,8 @@ class CodexAgent(BaseAgent):
             "streaming_enabled": True,
             "wall_clock_timeout_s": self.wall_clock_timeout_s,
             "tool_timeout_s": self.tool_timeout_s,
+            "tool_timeout_policy": "fixed_sdk_wait",
+            "effective_tool_timeout_s": self.tool_timeout_s,
             "startup_timeout_s": self.startup_timeout_s,
             "mcp_url": mcp_url,
             "tool_verbosity": verbosity,
@@ -320,7 +356,8 @@ class CodexAgent(BaseAgent):
     ) -> str:
         """Drive the Codex harness to completion and return its answer."""
         (codex_home / "config.toml").write_text(
-            self._render_config_toml(mcp_url, tool_names), encoding="utf-8"
+            self._render_config_toml(mcp_url, tool_names),
+            encoding="utf-8",
         )
 
         # Isolate CODEX_HOME so the run cannot inherit the developer's global
@@ -345,7 +382,7 @@ class CodexAgent(BaseAgent):
                 cwd=str(workspace),
                 developer_instructions=developer_instructions,
                 approval_mode=ApprovalMode.auto_review,
-                sandbox=Sandbox.read_only,
+                sandbox=None if run.native_workspace is not None else Sandbox.read_only,
                 ephemeral=True,
             )
             return self._drive_turn(thread, prompt, run)
@@ -358,12 +395,30 @@ class CodexAgent(BaseAgent):
         (b) select the final answer with the SDK's phase-aware logic, and
         (c) enforce a wall-clock deadline via a watchdog that interrupts the turn.
         """
-        turn = thread.turn(
-            prompt,
-            effort=self.reasoning_effort,
-            sandbox=Sandbox.read_only,
-            approval_mode=ApprovalMode.auto_review,
-        )
+        if run.native_workspace is not None:
+            # SDK 0.1's preset enum omits externalSandbox. Use its wire client
+            # for this policy, retaining the normal SDK streaming turn handle.
+            started = thread._client.turn_start(
+                thread.id,
+                prompt,
+                params={
+                    "effort": self.reasoning_effort,
+                    "sandboxPolicy": {
+                        "type": "externalSandbox",
+                        "networkAccess": "enabled",
+                    },
+                    "approvalPolicy": "on-request",
+                    "approvalsReviewer": "auto_review",
+                },
+            )
+            turn = TurnHandle(thread._client, thread.id, started.turn.id)
+        else:
+            turn = thread.turn(
+                prompt,
+                effort=self.reasoning_effort,
+                sandbox=Sandbox.read_only,
+                approval_mode=ApprovalMode.auto_review,
+            )
 
         # Watchdog: interrupt the turn if it outlives the wall-clock deadline.
         timed_out = threading.Event()
@@ -395,11 +450,20 @@ class CodexAgent(BaseAgent):
                 method = getattr(event, "method", None)
                 payload = getattr(event, "payload", None)
 
-                if method == "item/completed":
+                if method == "item/started":
+                    item = getattr(payload, "item", None)
+                    root = getattr(item, "root", item)
+                    if getattr(root, "type", None) in _NATIVE_TOOL_ITEMS | {
+                        "mcpToolCall"
+                    }:
+                        with run.messages.event(root, envelope=payload):
+                            self._record_tool_call(root, run, completed=False)
+                        run.messages.flush_from_thread()
+                elif method == "item/completed":
                     item = getattr(payload, "item", None)
                     root = getattr(item, "root", item)
                     kind = getattr(root, "type", None)
-                    if kind == "mcpToolCall":
+                    if kind == "mcpToolCall" or kind in _NATIVE_TOOL_ITEMS:
                         tool_calls += 1
                     elif kind == "agentMessage":
                         phase = getattr(getattr(root, "phase", None), "value", None)
@@ -408,7 +472,12 @@ class CodexAgent(BaseAgent):
                             final_phase_text = text
                         elif phase is None:
                             phase_less_text = text
-                    self._record_item(root, run)
+                    with run.messages.event(root, envelope=payload):
+                        self._record_item(root, run)
+                    # A later MCP request can write directly to the session.
+                    # Persist this event before consuming the next SDK event so
+                    # the background transcript writer cannot fall behind it.
+                    run.messages.flush_from_thread()
                 elif method == "thread/tokenUsage/updated":
                     usage = getattr(payload, "token_usage", None)
                     if usage is not None:
@@ -487,36 +556,84 @@ class CodexAgent(BaseAgent):
                 run.messages.append(
                     LiteLLMMessage(role="assistant", content=text, name="thinking")
                 )
-        elif kind == "mcpToolCall":
+        elif kind == "mcpToolCall" or kind in _NATIVE_TOOL_ITEMS:
             self._record_tool_call(item, run)
 
-    def _record_tool_call(self, item: Any, run: _RunState) -> None:
-        """Record an MCP tool call and its result as transcript messages."""
-        tool = getattr(item, "tool", "")
+    def _record_tool_call(
+        self, item: Any, run: _RunState, *, completed: bool = True
+    ) -> None:
+        """Record SDK tool items, including tools executed outside Corral MCP."""
+        native = item.type in _NATIVE_TOOL_ITEMS
+        tool = getattr(item, "tool", None) or item.type
+        tool = getattr(tool, "value", tool)
         call_id = getattr(item, "id", "")
+        if call_id in run.completed_items:
+            return
         arguments = getattr(item, "arguments", None)
-        run.messages.append(
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {
-                        "id": call_id,
-                        "function": {
-                            "name": tool,
-                            "arguments": json.dumps(arguments, default=str),
-                        },
-                    }
-                ],
-            }
-        )
         error = getattr(item, "error", None)
         is_error = error is not None
+        result = getattr(item, "result", None)
+        result_meta = getattr(result, "field_meta", None) or {}
+        if native:
+            payload = item.model_dump(mode="json")
+            arguments = (
+                arguments
+                if arguments is not None
+                else {
+                    key: value
+                    for key, value in payload.items()
+                    if key
+                    in {
+                        "command",
+                        "cwd",
+                        "changes",
+                        "query",
+                        "action",
+                        "path",
+                        "prompt",
+                        "receiver_thread_ids",
+                        "model",
+                        "reasoning_effort",
+                    }
+                }
+            )
+            # Preserve the SDK's complete result, including exit codes, patches,
+            # and child-agent status. Some native items have no separate output.
+            result = payload
+            is_error = (
+                payload.get("status") in {"failed", "declined"}
+                or payload.get("success") is False
+                or payload.get("exit_code") not in {None, 0}
+            )
+        if call_id not in run.started_items:
+            run.started_items.add(call_id)
+            run.messages.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "sdk_native": native,
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "function": {
+                                "name": tool,
+                                "arguments": json.dumps(arguments, default=str),
+                            },
+                        }
+                    ],
+                }
+            )
+        if not completed:
+            return
+        run.completed_items.add(call_id)
         if is_error:
             run.metadata["tool_errors"] = run.metadata.get("tool_errors", 0) + 1
+        if error is not None:
             content = getattr(error, "message", None) or str(error)
         else:
-            content = json.dumps(getattr(item, "result", None), default=str)
+            if hasattr(result, "model_dump"):
+                result = result.model_dump(mode="json")
+            content = json.dumps(result, default=str)
         run.messages.append(
             {
                 "role": "tool",
@@ -526,6 +643,12 @@ class CodexAgent(BaseAgent):
                 # generic "tool_result", so tool-level analysis stays possible.
                 "name": tool or "tool_result",
                 "is_error": is_error,
+                "duration_ms": getattr(item, "duration_ms", None),
+                **(
+                    {"runtime_action_id": result_meta["corral_action_id"]}
+                    if result_meta.get("corral_action_id")
+                    else {}
+                ),
             }
         )
 
@@ -615,7 +738,9 @@ class CodexAgent(BaseAgent):
                 ),
             )
 
-        run = _RunState()
+        run = _RunState(
+            native_workspace=getattr(session, "native_tool_workspace", None)
+        )
         iteration_limit = session.iteration_limit
 
         # Resolve verbosity once and use the *same* value for the REST allowlist
@@ -639,6 +764,11 @@ class CodexAgent(BaseAgent):
         developer_instructions = self._developer_instructions(
             session.surrender_allowed, tool_names
         )
+        if run.native_workspace is not None:
+            developer_instructions += (
+                f"\nNative tools and Corral MCP tools share the task workspace at {run.native_workspace}.\n"
+                "Corral provides the execution sandbox."
+            )
         mcp_url = session.tool_connection.mcp_url
         run.metadata = self._harness_metadata(
             mcp_url,
@@ -648,23 +778,36 @@ class CodexAgent(BaseAgent):
             iteration_limit=iteration_limit,
         )
         run.metadata["dropped_image_parts"] = dropped_images
+        if run.native_workspace is not None:
+            run.metadata["sandbox"] = "externalSandbox"
         # A Codex thread.turn(...) is one SDK turn for Corral usage
         # accounting, even though it can contain many internal events.
         run.metadata["sdk_turns"] = 1
-        await anyio.to_thread.run_sync(
-            lambda: self._execute_harness(
-                task_id=task_id,
-                prompt=prompt,
-                developer_instructions=developer_instructions,
-                mcp_url=mcp_url,
-                tool_names=tool_names,
-                enable_surrender=session.surrender_allowed,
-                run=run,
+        run.messages.start(session)
+        work = asyncio.create_task(
+            anyio.to_thread.run_sync(
+                lambda: self._execute_harness(
+                    task_id=task_id,
+                    prompt=prompt,
+                    developer_instructions=developer_instructions,
+                    mcp_url=mcp_url,
+                    tool_names=tool_names,
+                    enable_surrender=session.surrender_allowed,
+                    run=run,
+                )
             )
         )
-
-        for message in run.messages:
-            await session.record_message(message)
+        try:
+            await asyncio.shield(work)
+        except asyncio.CancelledError:
+            # Raw asyncio cancellation must not leave the SDK thread writing
+            # into a session that the runtime has already closed.
+            with anyio.CancelScope(shield=True):
+                await asyncio.gather(work, return_exceptions=True)
+            raise
+        finally:
+            with anyio.CancelScope(shield=True):
+                await run.messages.flush()
         result = run.result
         usage = self._usage(
             run.usage,
@@ -760,16 +903,22 @@ class CodexAgent(BaseAgent):
         codex_home = root / "codex-home"
         codex_home.mkdir()
 
-        # Codex never receives the server-side execution path. Its built-in
-        # filesystem/shell tools operate in an empty per-run directory, while
-        # task file operations remain available through the capability-scoped
-        # MCP endpoint. This prevents project discovery from exposing sibling
-        # task workspaces without disabling the native tools.
-        run_workspace = root / "workspace"
-        run_workspace.mkdir()
+        # A Docker worker exposes only the assigned task at a public mount.
+        # Local runs keep a throwaway workspace, never a controller-side path.
+        run_workspace = (
+            Path(run.native_workspace) if run.native_workspace else root / "workspace"
+        )
+        if run.native_workspace is None:
+            run_workspace.mkdir()
         run.metadata["codex_cwd"] = str(run_workspace)
-        run.metadata["codex_cwd_is_execution_workspace"] = False
-        run.metadata["workspace_access"] = "isolated_sdk_workspace_and_mcp"
+        run.metadata["codex_cwd_is_execution_workspace"] = (
+            run.native_workspace is not None
+        )
+        run.metadata["workspace_access"] = (
+            "corral_sandbox"
+            if run.native_workspace
+            else "isolated_sdk_workspace_and_mcp"
+        )
 
         try:
             final_answer = self._execute_codex_turn(

@@ -154,6 +154,7 @@ def _tool_statistics(state: ExecutionState | None) -> dict[str, Any]:
                 "actor_id": action.actor_id,
             }
         )
+    calls.extend(state.sdk_tool_calls)
     by_tool = dict(state.tool_statistics)
     for call in _branch_tool_calls(state):
         calls.append(call)
