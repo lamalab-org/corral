@@ -224,41 +224,6 @@ def validate_document(document, release_id, assets):
     return document
 
 
-def postprocess_hessian(hessian, specification):
-    """Apply the Task 5 transformations in standard atom/Cartesian order."""
-    result = _finite(hessian, (6, 6)).copy()
-    symmetry = specification.get("symmetrization", "none")
-    acoustic = specification.get("acoustic_sum_rule", "none")
-    onsite_modes = {
-        "onsite_blocks_then_resymmetrize": "average_transpose",
-        "onsite_blocks_iterative_100": "average_transpose_iterative_100",
-    }
-    if acoustic in onsite_modes:
-        if symmetry != onsite_modes[acoustic]:
-            raise ValueError("Unsupported Hessian symmetry and acoustic sequence")
-        iterations = 100 if acoustic == "onsite_blocks_iterative_100" else 1
-        for _ in range(iterations):
-            result = (result + result.T) / 2
-            updated = result.copy()
-            for atom in range(2):
-                own = slice(3 * atom, 3 * atom + 3)
-                other = slice(3 * (1 - atom), 3 * (1 - atom) + 3)
-                updated[own, own] = -result[own, other]
-            result = updated
-        return (result + result.T) / 2
-    if symmetry == "average_transpose":
-        result = (result + result.T) / 2
-    elif symmetry != "none":
-        raise ValueError(f"Unsupported reference symmetrization: {symmetry!r}")
-    if acoustic == "projection":
-        translations = np.tile(np.eye(3), (2, 1))
-        projection = np.eye(6) - translations @ translations.T / 2
-        result = projection @ result @ projection
-    elif acoustic != "none":
-        raise ValueError(f"Unsupported reference acoustic sum rule: {acoustic!r}")
-    return result
-
-
 def _task3_result(job, document, variant):
     reference = document["task_3"]
     values = reference[variant]
@@ -306,14 +271,11 @@ def _task5_result(job, document):
     pairs = _finite(reference["strain_pairs"], (25, 2))
     hessians = _finite(values["hessians_eV_A2"], (25, 6, 6))
     frames = job.get("frames", [])
-    specifications = job.get("postprocess", [])
     requested = job.get("reference", {}).get("strain_pairs", [])
-    if not (len(frames) == len(specifications) == len(requested) == 25):
-        raise ValueError("Task 5 reference expects all 25 strain records")
+    if not (len(frames) == len(requested) and len(frames) in (5, 25)):
+        raise ValueError("Task 5 reference expects five or 25 strain records")
     output = []
-    for record, specification, requested_pair in zip(
-        frames, specifications, requested, strict=True
-    ):
+    for record, requested_pair in zip(frames, requested, strict=True):
         pair = _finite(requested_pair, (2,))
         distances = np.max(np.abs(pairs - pair), axis=1)
         index = int(np.argmin(distances))
@@ -335,7 +297,7 @@ def _task5_result(job, document):
         else:
             raise ValueError("Task 5 basis differs from the fixed reference")
         hessian = hessians[index][np.ix_(order, order)]
-        output.append({"hessian": postprocess_hessian(hessian, specification).tolist()})
+        output.append({"hessian": hessian.tolist()})
     return {"frames": output}
 
 
@@ -405,7 +367,6 @@ __all__ = [
     "GroundTruthUnavailable",
     "build_document",
     "calculation_jobs",
-    "postprocess_hessian",
     "publish_ground_truth",
     "resolve_reference",
     "task5_cell",

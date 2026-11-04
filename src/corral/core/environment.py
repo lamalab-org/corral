@@ -715,7 +715,9 @@ class Environment:
 
         return replace(value)
 
-    def _default_task_prompt(self, state: ExecutionState) -> str:
+    def _default_task_prompt(
+        self, state: ExecutionState, *, include_task_name: bool = True
+    ) -> str:
         """Render description + submission format + resolved inputs.
 
         Dependency inputs are resolved strictly: by the time the prompt is
@@ -724,8 +726,8 @@ class Environment:
         state to render. There is therefore no "not yet available" placeholder.
         """
         task = self.current_task
-        prompt = (
-            f"Task: {task.name}\n"
+        prompt = f"Task: {task.name}\n" if include_task_name else ""
+        prompt += (
             f"Description: {task.description}\n\n"
             f"Required submission format:\n{task.submission_format}\n\n"
         )

@@ -141,7 +141,7 @@ def run(config, destination, calculator=None):
     )
     record = {
         "schema": 1,
-        "runner": "corral.task10.langevin.v1",
+        "runner": "ase.langevin.v1",
         "config": config,
         "velocity_initializations": 1,
         "manual_velocity_resets": 0,

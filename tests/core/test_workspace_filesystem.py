@@ -4,8 +4,15 @@ from pathlib import Path
 import pytest
 
 from corral.core.environment import Environment, Toolset, default_file_tools
+from corral.core.resources import declare_file_resource
+from corral.core.state import EnvironmentState, ExecutionState, TaskState
 from corral.core.task import TaskDefinition
 from corral.orchestration.registry import RuntimeRegistry
+from corral.runtime.tool_execution import (
+    PreparedToolCall,
+    ToolExecutor,
+    execute_prepared_call,
+)
 from corral.workspace import (
     AbsoluteWorkspaceFilesystem,
     WorkspaceFilesystem,
@@ -83,6 +90,186 @@ def test_workspace_file_tools_match_the_restricted_worker_rebuild(tmp_path):
     }
     with pytest.raises(ValueError, match="absolute under /workspace"):
         host["read_file"].execute(path="data.csv")
+
+
+@pytest.fixture
+def resource_file_tools(tmp_path):
+    source = tmp_path / "assets" / "database.txt"
+    source.parent.mkdir()
+    source.write_text("immutable\nmatch\n", encoding="utf-8")
+    (source.parent / "private.txt").write_text("controller sibling", encoding="utf-8")
+    descriptor = declare_file_resource("database", source, runtime_version="v1")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    def workspace_factory(root):
+        tools = build_workspace_tools(AbsoluteWorkspaceFilesystem(root))
+        for item in tools.values():
+            item.resources = (descriptor.name,)
+        unprivileged = build_workspace_tools(AbsoluteWorkspaceFilesystem(root))[
+            "read_file"
+        ]
+        unprivileged.name = "unprivileged_read"
+        tools[unprivileged.name] = unprivileged
+        return tools
+
+    environment = Environment(
+        "resource-files",
+        TaskDefinition(
+            name="resource-files",
+            description="Read an immutable resource.",
+            tools=[],
+            scoring_fn=lambda _answer: 1.0,
+            submission_format={},
+            resolve_answer=False,
+        ),
+        base_work_dir=str(tmp_path),
+        workspace_path=str(workspace),
+        toolset=Toolset(workspace_factory=workspace_factory),
+        file_resources={descriptor.name: descriptor},
+        file_resource_sources={descriptor.name: source},
+    )
+    started = environment.initial_event(execution_id="resource-files")
+    state = ExecutionState(
+        through_commit_hash="a" * 64,
+        execution_id="resource-files",
+        branch_id="main",
+        task=TaskState(environment=started.environment_metadata),
+        environment=EnvironmentState(values={"hidden_arguments": {}}),
+    )
+
+    def execute(name, **arguments):
+        return ToolExecutor(environment).execute(
+            state, environment.tools[name], arguments, action_id=f"action-{name}"
+        )
+
+    return execute, descriptor, workspace, environment
+
+
+def test_prepared_file_tools_read_only_their_authorized_resources(resource_file_tools):
+    execute, descriptor, workspace, environment = resource_file_tools
+    path = descriptor.public_path
+
+    assert execute("read_file", path=path) == "immutable\nmatch\n"
+    assert (
+        execute("cat_files", paths=[path, path], separator="|")
+        == "immutable\nmatch\n|immutable\nmatch\n"
+    )
+    assert json.loads(
+        execute("list_files", path="/workspace/resources", recursive=True)
+    ) == {"files": [path]}
+    assert json.loads(execute("file_info", path=path)) == {
+        "path": path,
+        "type": "file",
+        "size": descriptor.size,
+        "read_only": True,
+    }
+    assert json.loads(
+        execute("grep", pattern="match", path="/workspace/resources", recursive=True)
+    ) == [{"file": path, "line": "match", "line_number": 2}]
+    execute("copy_file", source=path, destination="/workspace/editable.txt")
+    assert (workspace / "editable.txt").read_bytes() == b"immutable\nmatch\n"
+    assert not (workspace / "resources").exists()
+    # Authorization belongs to each prepared tool, not to the environment or
+    # a filesystem object left over from a previous authorized invocation.
+    with pytest.raises(ValueError, match="Permission denied"):
+        execute("unprivileged_read", path=path)
+    with pytest.raises(ValueError, match="Permission denied"):
+        environment.tools["read_file"].execute(path=path)
+
+
+def test_prepared_resource_file_tools_require_an_assigned_workspace(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    (controller / "private.txt").write_text("controller-only data")
+    source = tmp_path / "asset.txt"
+    source.write_text("declared resource")
+    read = build_workspace_tools(AbsoluteWorkspaceFilesystem(workspace))["read_file"]
+    read.resources = ("asset",)
+    prepared = PreparedToolCall.capture(
+        read,
+        {"path": "/workspace/private.txt"},
+        resource_mounts={
+            "asset": (str(source), "/workspace/resources/asset/asset.txt")
+        },
+        execution_kind="local",
+    )
+    monkeypatch.chdir(controller)
+
+    with pytest.raises(ValueError, match="assigned workspace"):
+        execute_prepared_call(prepared)
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("read_file", {"path": "/workspace/resources/undeclared/database.txt"}),
+        ("read_file", {"path": "/workspace/resources/database/private.txt"}),
+        ("read_file", {"path": "/workspace/resources/database/../private.txt"}),
+        ("read_file", {"path": "/workspace/resources/database/./database.txt"}),
+        (
+            "write_file",
+            {
+                "path": "/workspace/resources/database/database.txt",
+                "content": "overwrite",
+            },
+        ),
+        (
+            "copy_file",
+            {
+                "source": "/workspace/resources/database/database.txt",
+                "destination": "/workspace/resources/database/copy.txt",
+            },
+        ),
+        (
+            "move_file",
+            {
+                "source": "/workspace/resources/database/database.txt",
+                "destination": "/workspace/moved.txt",
+            },
+        ),
+        ("mkdir", {"path": "/workspace/resources/shadow"}),
+    ],
+)
+def test_prepared_resource_file_tools_reject_unauthorized_paths(
+    resource_file_tools, name, arguments
+):
+    execute, _, _, _ = resource_file_tools
+    with pytest.raises(ValueError, match="Permission denied"):
+        execute(name, **arguments)
+
+
+@pytest.mark.parametrize("directory_link", [False, True])
+def test_resource_file_tools_reject_symlink_bindings(tmp_path, directory_link):
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "file.txt").write_text("private", encoding="utf-8")
+    alias = tmp_path / "alias"
+    alias.symlink_to(resources if directory_link else resources / "file.txt")
+    public = "/workspace/resources/data/file.txt"
+    filesystem = AbsoluteWorkspaceFilesystem(
+        tmp_path,
+        resource_paths={public: alias / "file.txt" if directory_link else alias},
+    )
+    with pytest.raises(ValueError, match="symbolic links"):
+        filesystem.read_file(public)
+    with pytest.raises(ValueError, match="symbolic links"):
+        filesystem.copy_file(public, "/workspace/copied.txt")
+
+
+def test_resource_listing_does_not_expose_mutable_shadows(tmp_path):
+    shadow = tmp_path / "resources" / "undeclared"
+    shadow.mkdir(parents=True)
+    (shadow / "private.txt").write_text("shadow", encoding="utf-8")
+    filesystem = AbsoluteWorkspaceFilesystem(tmp_path)
+
+    assert filesystem.list_files(recursive=True) == []
+    with pytest.raises(ValueError, match="Permission denied"):
+        filesystem.read_file("/workspace/resources/undeclared/private.txt")
 
 
 def test_default_file_tools_use_the_integrated_workspace(tmp_path):

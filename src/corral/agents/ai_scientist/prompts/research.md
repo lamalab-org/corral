@@ -18,7 +18,7 @@ Existing child experiments from this checkpoint:
 Proposal slots in this expansion:
 {{proposal_slots}}
 
-Execution-relative workspaces, one per proposal in proposal order:
+Public workspaces, one per isolated proposal in proposal order:
 {{branch_workspaces}}
 
 Global research journal (including sibling evidence):
@@ -33,5 +33,6 @@ Do not repeat an existing child, and make requested slots test materially differ
 Do not precompute tool actions.
 A bounded worker will choose up to {{max_actions}} actions adaptively from actual observations.
 A DEBUG node must address the concrete failed action.
-The experiment must use listed tools only and keep output paths relative to the assigned task workspace.
+The experiment must use listed tools only.
+Follow the task environment's public path contract for all output paths.
 Return exactly {{count}} proposal(s) when possible.

@@ -23,6 +23,8 @@ from corral.runtime.permissions import NODE_WORKSPACE_DIR, SCRATCH_PREFIX
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from corral.core.resources import FileResourceDescriptor
+
 _ROOT = PurePosixPath("/corral/runs")
 _MOUNT = PurePosixPath("/results")
 _SCHEMA = 1
@@ -32,6 +34,24 @@ _PINNED_VOLUME: ContextVar[str | None] = ContextVar("corral_md_volume", default=
 _RECOVERY_SNAPSHOT: ContextVar[tuple[Any, Any] | None] = ContextVar(
     "corral_md_recovery_snapshot", default=None
 )
+
+_AUTHORIZED_RESOURCES: ContextVar[dict[str, dict] | None] = ContextVar(
+    "corral_md_authorized_resources", default=None
+)
+
+
+@contextmanager
+def authorized_resources(descriptors: dict[str, FileResourceDescriptor]):
+    token = _AUTHORIZED_RESOURCES.set(
+        {
+            name: descriptor.model_dump(mode="json")
+            for name, descriptor in descriptors.items()
+        }
+    )
+    try:
+        yield
+    finally:
+        _AUTHORIZED_RESOURCES.reset(token)
 
 
 class _RemoteToolFailed(RuntimeError):
@@ -67,11 +87,6 @@ def configured_runtime() -> tuple[str, str]:
     """Discover the currently deployed SimAgent worker and its storage Volume."""
     runtime = _deployed_runtime_info()
     return runtime["release_id"], runtime["volume_name"]
-
-
-def configured_release_id() -> str:
-    """Read the internal content identity of the deployed SimAgent worker."""
-    return configured_runtime()[0]
 
 
 def configured_app_name() -> str:
@@ -154,9 +169,9 @@ def _workspace(path: str | Path) -> Path:
         raise ValueError(f"MD workspace must be a regular directory: {path}")
     root = source.resolve()
     for entry in _workspace_entries(root, recursive=True):
-        if entry.relative_to(root).parts[0] in ASSET_DIRECTORIES:
+        if entry.relative_to(root).parts[0] == "resources":
             raise ValueError(
-                "Shared asset directories cannot be stored in the writable workspace"
+                "Declared resources cannot be stored in the writable workspace"
             )
         if entry.is_symlink() or not (entry.is_file() or entry.is_dir()):
             raise ValueError(f"Unsafe workspace entry: {entry.relative_to(root)}")
@@ -217,7 +232,7 @@ def _safe_relative(path: str) -> Path:
         or any(part in {"", ".", ".."} for part in parsed.parts)
     ):
         raise ValueError(f"Unsafe remote workspace path: {path!r}")
-    if parsed.parts[0] in ASSET_DIRECTORIES:
+    if parsed.parts[0] == "resources":
         raise ValueError(f"Remote output cannot replace a read-only asset: {path!r}")
     if _is_runtime_name(parsed.parts[0]):
         raise ValueError(f"Remote output cannot replace a runtime path: {path!r}")
@@ -337,6 +352,9 @@ def _load_journal(
     journal = {
         "schema": _SCHEMA,
         "workspace": str(root),
+        # Receipts and remote paths are agent-visible; keep task labels private.
+        # Derive the ID so remote actions can recover even if this journal is lost.
+        "run_id": hashlib.sha256(root.name.encode()).hexdigest()[:32],
         "release_id": release_id,
         "volume_name": volume_name or configured_volume_name(),
         "actions": {},
@@ -455,7 +473,12 @@ def _execute_impl(
     initializer: Any | None,
     call_factory: Any | None,
     execution_options: dict[str, Any] | None = None,
+    logs: dict[str, str] | None = None,
 ) -> tuple[Path, int]:
+    execution_options = dict(execution_options or {})
+    authorized = _AUTHORIZED_RESOURCES.get()
+    if authorized is not None:
+        execution_options["resources"] = authorized
     root = _workspace(workspace)
     action = _identifier(action_id or uuid.uuid4().hex, "action ID")
     journal_path, journal = _load_journal(
@@ -464,7 +487,9 @@ def _execute_impl(
         _PINNED_VOLUME.get(),
     )
     release = journal["release_id"]
-    run_id = _identifier(root.name, "run ID")
+    # Journals predating opaque IDs must keep their existing remote run so
+    # interrupted actions can still recover without repeating a simulation.
+    run_id = _identifier(journal.get("run_id", root.name), "run ID")
     remote_run = _ROOT / run_id
     action_manifest = remote_run / "actions" / f"{action}.json"
     failure_manifest = remote_run / "actions" / f"{action}.failure.json"
@@ -637,6 +662,19 @@ def _execute_impl(
         record["status"] = "completed"
         record.pop("local_before", None)
         _save_journal(journal_path, journal)
+    if logs is not None:
+        for name, public_path in result.get("logs", {}).items():
+            if name not in {"stdout", "stderr", "log"} or not isinstance(
+                public_path, str
+            ):
+                raise ValueError("Invalid MD execution log receipt")
+            if not public_path.startswith("/workspace/"):
+                raise ValueError("Invalid MD execution log path")
+            relative_log = _safe_relative(public_path.removeprefix("/workspace/"))
+            path = root / relative_log
+            if relative_log.as_posix() not in result["files"] or not path.is_file():
+                raise ValueError(f"MD execution log is unavailable: {public_path}")
+            logs[name] = public_path
     return root / "output" / relative_input.with_suffix(".log").name, count
 
 
@@ -662,6 +700,7 @@ def run_lammps_in_modal(
     initializer: Any | None = None,
     call_factory: Any | None = None,
     job_id: str | None = None,
+    logs: dict[str, str] | None = None,
 ) -> tuple[Path, int]:
     """Run LAMMPS once per Corral action and recover its committed outputs."""
     return _execute(
@@ -669,6 +708,7 @@ def run_lammps_in_modal(
         input_file,
         kind="lammps",
         args=[],
+        logs=logs,
         action_id=action_id or job_id,
         release_id=release_id,
         volume=volume,
@@ -691,7 +731,7 @@ def run_python_gpu_in_modal(
     call_factory: Any | None = None,
     job_id: str | None = None,
     timeout: int = 900,
-    working_dir: str = "/workspace",
+    logs: dict[str, str] | None = None,
 ) -> int:
     """Run isolated GPU Python and recover its committed outputs."""
     _, count = _execute(
@@ -705,7 +745,8 @@ def run_python_gpu_in_modal(
         remote_function=remote_function,
         initializer=initializer,
         call_factory=call_factory,
-        execution_options={"timeout": timeout, "working_dir": working_dir},
+        execution_options={"timeout": timeout},
+        logs=logs,
     )
     return count
 

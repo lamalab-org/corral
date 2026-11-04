@@ -28,8 +28,12 @@ Start the local trace browser from the repository root (Python 3.9 or newer;
 no extra dependencies):
 
 ```bash
+git lfs pull --include='reports/**' --exclude=''
 python3 reports/serve_traces.py --open
 ```
+
+The download needs Git LFS and retrieves report artifacts, including the Corral MD
+CSV indexes. It only needs to be repeated when new LFS artifacts are added.
 
 Open **http://127.0.0.1:8765**. Filter and group trials by **agent, environment,
 and model**, with additional filters for level, outcome, and saved errors.
@@ -58,6 +62,12 @@ recently opened trials are cached in memory. Both `.json.gz` and `.json.xz`
 reports are supported. Git LFS pointers and missing reports appear in the list;
 download LFS reports with `git lfs pull` to inspect their messages. Restart the
 browser after rebuilding CSV indexes.
+
+If an index is still an LFS pointer, the browser warns in the terminal and skips
+that environment while serving the available indexes. Empty indexes or indexes
+missing required columns are also skipped with a warning. If no readable trials
+remain, startup exits with recovery instructions. Download or rebuild the affected
+indexes and restart to include those environments.
 
 Use `--port 9000` for a different port or `--reports /path/to/reports` for another
 collection with the same layout. The server binds to `127.0.0.1` and serves only
@@ -120,11 +130,17 @@ score and success flag determine the benchmark outcome.
 Each trial is one trace in project `cmsio90yc092lad0ggc5lyo0x` on
 `https://cloud.langfuse.com`:
 
-- trace ID = `sha256("corral:" + execution_id)[:32]`, as set by
-  `corral.observability.langfuse.deterministic_trace_id`
+- trace ID defaults to `sha256("corral:" + execution_id)[:32]`, as set by
+  `corral.observability.langfuse.deterministic_trace_id`. When a replacement keeps
+  its execution ID but uses a fresh trace, `run-metadata.json` records that ID in
+  `langfuse_trace_ids`, a mapping from execution ID to published trace ID.
 - session ID = the run part of `execution_id` (`<session>:<task_id>:<n>`).
   This is the `run_id`, except for a rerun substituted into a report, which
-  keeps the session it was run in.
+  keeps the session it was run in by default. When finished replacements are
+  moved into the original benchmark session, the report's `run-metadata.json`
+  records `langfuse_session_id`; the index uses that session for all its trials.
+  Session overrides do not change execution or trace IDs; trace overrides are
+  applied separately through `langfuse_trace_ids`.
 
 Recorded trace IDs in `langfuse-overrides.json` take precedence over the
 deterministic formula. `build_index.py` reads these mappings before deriving
@@ -189,6 +205,7 @@ To tabulate pass@5 and pass^5 for every environment, agent, model and level
 from the `runs.csv` files:
 
 ```bash
+git lfs pull --include='reports/*/runs.csv' --exclude=''
 python reports/scores.py [<environment> ...] [--markdown scores.md]
 ```
 

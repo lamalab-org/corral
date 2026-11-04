@@ -11,10 +11,13 @@ import signal
 import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from corral.core.tool import Tool, tool
 from corral.core.workspace import normalize_workspace_path
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _TERMINAL_MAX_TIMEOUT_SECONDS = 3600
 _TERMINAL_MAX_OUTPUT_CHARS = 100_000
@@ -234,6 +237,9 @@ class WorkspaceFilesystem:
             raise ValueError(f"filesystem entry escapes its workspace: {path}")
         return path.relative_to(self.root).as_posix()
 
+    def _read_source(self, path: str) -> Path:
+        return self._resolve(path)
+
     def list_files(self, path: str = ".", *, recursive: bool = False) -> list[str]:
         """List regular files using logical workspace paths."""
         directory = self._resolve(path, allow_root=True)
@@ -253,7 +259,7 @@ class WorkspaceFilesystem:
 
     def read_file(self, path: str, *, encoding: str = "utf-8") -> str:
         """Read one UTF-8 workspace file."""
-        source = self._resolve(path)
+        source = self._read_source(path)
         if source.is_symlink() or not source.is_file():
             raise FileNotFoundError(f"workspace file was not found: {path}")
         return source.read_text(encoding=encoding)
@@ -289,7 +295,7 @@ class WorkspaceFilesystem:
 
     def copy_file(self, source: str, destination: str) -> None:
         """Copy one regular file within the workspace."""
-        source_path = self._resolve(source)
+        source_path = self._read_source(source)
         destination_path = self._resolve(destination)
         if source_path.is_symlink() or not source_path.is_file():
             raise FileNotFoundError(f"workspace file was not found: {source}")
@@ -379,6 +385,52 @@ class AbsoluteWorkspaceFilesystem(WorkspaceFilesystem):
 
     path_root = PUBLIC_WORKSPACE_ROOT
 
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        resource_paths: Mapping[str, str | Path] | None = None,
+    ) -> None:
+        super().__init__(root)
+        # Only central preparation/the worker bootstrap supplies these exact
+        # file bindings. A resource's parent never authorizes its siblings.
+        self._resource_paths = {}
+        for public, physical in (resource_paths or {}).items():
+            candidate = PurePosixPath(public)
+            if (
+                candidate.parts[:3] != ("/", "workspace", "resources")
+                or len(candidate.parts) != 5
+                or candidate.as_posix() != public
+                or ".." in candidate.parts
+                or "\\" in public
+                or "\x00" in public
+            ):
+                raise ValueError("resource bindings require canonical resource paths")
+            self._resource_paths[public] = Path(physical)
+
+    def _read_source(self, path: str) -> Path:
+        source = self._resource_paths.get(path)
+        if source is None:
+            return super()._read_source(path)
+        if ".." in source.parts or any(
+            component.is_symlink() for component in (source, *source.parents)
+        ):
+            raise ValueError(
+                "Permission denied: resource paths cannot traverse symbolic links or parents"
+            )
+        if not source.is_file():
+            raise FileNotFoundError(f"resource file was not found: {path}")
+        return source
+
+    def _resource_directory(self, path: str) -> bool:
+        return bool(self._resource_paths) and (
+            path == "/workspace/resources"
+            or any(
+                str(PurePosixPath(public).parent) == path
+                for public in self._resource_paths
+            )
+        )
+
     def _public_relative(self, path: str, *, allow_root: bool) -> str:
         return normalize_public_workspace_path(path, allow_root=allow_root)
 
@@ -398,9 +450,36 @@ class AbsoluteWorkspaceFilesystem(WorkspaceFilesystem):
     def list_files(
         self, path: str = PUBLIC_WORKSPACE_ROOT, *, recursive: bool = False
     ) -> list[str]:
+        if self._resource_directory(path):
+            return sorted(
+                public
+                for public in self._resource_paths
+                if str(PurePosixPath(public).parent) == path
+                or (recursive and public.startswith(path + "/"))
+            )
+        if path == PUBLIC_WORKSPACE_ROOT and recursive:
+            # The reserved namespace is an authorized catalog, never a mutable
+            # directory to traverse (even if a host workspace shadows it).
+            files = super().list_files(path)
+            for entry in self.root.iterdir():
+                if entry.name != "resources" and entry.is_dir():
+                    files.extend(
+                        super().list_files(self._logical_path(entry), recursive=True)
+                    )
+            return sorted([*files, *self._resource_paths])
         return super().list_files(path, recursive=recursive)
 
     def file_info(self, path: str) -> dict[str, Any]:
+        if path in self._resource_paths:
+            source = self._read_source(path)
+            return {
+                "path": path,
+                "type": "file",
+                "size": source.stat().st_size,
+                "read_only": True,
+            }
+        if self._resource_directory(path):
+            return {"path": path, "type": "directory", "read_only": True}
         info = super().file_info(path)
         if info["path"] == ".":
             info["path"] = PUBLIC_WORKSPACE_ROOT
