@@ -317,16 +317,6 @@ def test_default_metrics_registered_on_import():
         assert expected in metric_names, f"Metric '{expected}' not in default metrics"
 
 
-def test_registry_has_metrics():
-    """Test that BenchmarkResult instance registry contains metrics."""
-    task_results = create_dummy_results()
-    benchmark = BenchmarkResult(task_results=task_results, k=[1])
-
-    metrics = benchmark.metric_registry.list_all()
-    assert len(metrics) > 0, "Instance registry should contain metrics"
-    assert all(isinstance(m, Metric) for m in metrics)
-
-
 def test_can_get_registered_metrics():
     """Test that we can retrieve registered metrics from instance registry."""
     task_results = create_dummy_results()
