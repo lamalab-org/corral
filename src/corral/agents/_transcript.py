@@ -136,6 +136,11 @@ class StreamingTranscript(list):
                 finally:
                     self._writing = False
 
+    def flush_from_thread(self) -> None:
+        """Wait for durable writes from the SDK worker before it advances."""
+        if self._loop is not None:
+            asyncio.run_coroutine_threadsafe(self.flush(), self._loop).result()
+
     async def flush(self) -> None:
         if asyncio.get_running_loop() is not self._loop:
             await asyncio.wrap_future(

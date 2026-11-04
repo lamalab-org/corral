@@ -3,6 +3,7 @@
 import asyncio
 from types import SimpleNamespace
 
+import anyio
 import pytest
 
 from corral.agents._transcript import StreamingTranscript
@@ -35,7 +36,8 @@ async def test_late_system_prompt_cannot_replace_an_inflight_message():
 
 
 @pytest.mark.anyio
-async def test_writer_failure_is_reported_without_skipping_messages():
+@pytest.mark.parametrize("from_thread", [False, True])
+async def test_writer_failure_is_reported_without_skipping_messages(from_thread):
     attempts = []
 
     async def record(message):
@@ -51,7 +53,10 @@ async def test_writer_failure_is_reported_without_skipping_messages():
         ]
     )
     with pytest.raises(OSError, match="store unavailable"):
-        await transcript.flush()
+        if from_thread:
+            await anyio.to_thread.run_sync(transcript.flush_from_thread)
+        else:
+            await transcript.flush()
     assert [message["content"] for message in attempts] == ["first"]
     assert transcript._recorded == 0
 

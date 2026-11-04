@@ -410,7 +410,7 @@ async def test_codex_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("fail", [False, True])
-async def test_codex_streams_item_starts_and_completions_before_harness_exit(
+async def test_codex_persists_item_events_before_advancing_the_stream(
     monkeypatch, fail
 ):
     import threading
@@ -422,6 +422,9 @@ async def test_codex_streams_item_starts_and_completions_before_harness_exit(
 
     class StreamingSession(Session):
         async def record_message(self, message):
+            # Model an asynchronous store so queuing alone cannot satisfy the
+            # durability check when the SDK advances to its next event.
+            await anyio.sleep(0.01)
             await super().record_message(message)
             if message.get("role") == "tool":
                 durable.set()
@@ -450,8 +453,10 @@ async def test_codex_streams_item_starts_and_completions_before_harness_exit(
                 yield SimpleNamespace(
                     method=method, payload=SimpleNamespace(item=item, **clock)
                 )
-            # Block the SDK thread while the session loop persists both events.
-            assert durable.wait(5), "transcript was buffered until harness exit"
+                assert session.messages[-1]["chronology"]["phase"] == (
+                    "tool_started" if method == "item/started" else "tool_completed"
+                )
+            assert durable.is_set(), "SDK advanced before its events were persisted"
             assert [m["chronology"]["phase"] for m in session.messages[-2:]] == [
                 "tool_started",
                 "tool_completed",

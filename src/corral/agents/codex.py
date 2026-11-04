@@ -458,6 +458,7 @@ class CodexAgent(BaseAgent):
                     }:
                         with run.messages.event(root, envelope=payload):
                             self._record_tool_call(root, run, completed=False)
+                        run.messages.flush_from_thread()
                 elif method == "item/completed":
                     item = getattr(payload, "item", None)
                     root = getattr(item, "root", item)
@@ -473,6 +474,10 @@ class CodexAgent(BaseAgent):
                             phase_less_text = text
                     with run.messages.event(root, envelope=payload):
                         self._record_item(root, run)
+                    # A later MCP request can write directly to the session.
+                    # Persist this event before consuming the next SDK event so
+                    # the background transcript writer cannot fall behind it.
+                    run.messages.flush_from_thread()
                 elif method == "thread/tokenUsage/updated":
                     usage = getattr(payload, "token_usage", None)
                     if usage is not None:
