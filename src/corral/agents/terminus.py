@@ -273,8 +273,8 @@ Rules:
             return
         middle = run.messages[head:-tail]
         prompt = (
-            "Summarize this transcript into a concise progress note. Preserve "
-            "concrete observations and remaining work; invent nothing.\n\n"
+            "Summarize this transcript into a concise progress note.\n"
+            "Preserve concrete observations and remaining work; invent nothing.\n\n"
             + "\n\n".join(
                 f"[{message.get('role')}] {message.get('content')}"
                 for message in middle
@@ -373,7 +373,9 @@ Rules:
                     )
                 feedback = {
                     "role": "user",
-                    "content": f"Invalid response: {exc}. Return corrected JSON only.",
+                    "content": (
+                        f"Invalid response: {exc}.\nReturn corrected JSON only."
+                    ),
                 }
                 run.messages.append(feedback)
                 await session.record_message(feedback)
@@ -401,7 +403,9 @@ Rules:
                     )
                 feedback = {
                     "role": "user",
-                    "content": "Surrender is disabled. Continue using the available tools.",
+                    "content": (
+                        "Surrender is disabled.\nContinue using the available tools."
+                    ),
                 }
                 await session.record_message(assistant, usage=turn_usage)
                 run.messages.append(feedback)
@@ -413,8 +417,7 @@ Rules:
                 feedback = {
                     "role": "user",
                     "content": (
-                        f"Requested {len(parsed.tool_calls)} calls; at most "
-                        f"{self.max_actions_per_turn} are allowed per turn."
+                        f"Requested {len(parsed.tool_calls)} calls; at most {self.max_actions_per_turn} are allowed per turn."
                     ),
                 }
                 run.messages.append(feedback)

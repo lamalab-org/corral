@@ -128,7 +128,8 @@ class TestReflectionMemory:
         formatted = memory.format_for_prompt()
 
         assert "Attempt 1" in formatted
-        assert "Score: 0.30" in formatted
+        assert "Score:" not in formatted
+        assert "0.30" not in formatted
         assert "Check parameters before calling tools." in formatted
 
     def test_format_for_prompt_multiple(self):

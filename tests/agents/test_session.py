@@ -11,10 +11,13 @@ from corral.agents.ai_scientist.agent import _BranchSessionRegistry
 from corral.agents.schema import AgentOutcome
 from corral.agents.session import AgentSession, run_agent_session
 from corral.core import Action, ActorRef, AgentStarted, CommitRequest
+from corral.core.action import submit_answer_action
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
 from corral.core.tool_catalog import state_tool_catalog
 from corral.persistence import SQLiteCommitStore
+from corral.report.projection import _token_usage, _tool_statistics
+from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 from corral.workspace import AbsoluteWorkspaceFilesystem, build_terminal_tool
 
 
@@ -79,6 +82,129 @@ async def workspace_session(tmp_path):
             state_store=store,
             max_iterations=10,
         )
+
+
+@pytest.mark.anyio
+async def test_native_file_changes_are_checkpointed_without_replay(
+    workspace_session, monkeypatch
+):
+    session = workspace_session
+    monkeypatch.setattr(
+        AgentSession, "native_tool_workspace", property(lambda self: self.workspace)
+    )
+    root = Path(session.workspace)
+    (root / "notes.txt").unlink()
+    (root / "native.txt").write_text("created outside MCP")
+    await session.record_messages(
+        [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    Action(
+                        id="native", name="Bash", arguments={"command": "write"}
+                    ).to_tool_call()
+                ],
+            },
+            {"role": "tool", "tool_call_id": "native", "content": "done"},
+        ]
+    )
+    assert "native.txt" in session.state.workspace.files
+    assert "notes.txt" not in session.state.workspace.files
+    assert "native" not in session.state.actions
+    restored = await session.state_store.materialize("main")
+    assert restored.workspace == session.state.workspace
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("after_submission", [False, True])
+async def test_sdk_tools_persist_and_appear_in_verbose_reports(
+    workspace_session, after_submission
+):
+    session = workspace_session
+    if after_submission:
+        assert (await session.execute(submit_answer_action("done"))).success
+
+    native = Action(id="native-read", name="Read", arguments={"path": "notes.txt"})
+    failed = Action(id="native-shell", name="Bash", arguments={"command": "false"})
+    # SDK call ids differ from the ids assigned by the Corral MCP server.
+    echoed = Action(id="sdk-submit", name="submit_answer", arguments={"answer": "done"})
+    prefixed = Action(id="claude-submit", name="mcp__corral__submit_answer")
+    await session.record_messages(
+        (
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    call.to_tool_call() for call in (native, echoed, prefixed, failed)
+                ],
+            },
+            {"role": "tool", "tool_call_id": echoed.id, "content": "submitted"},
+            {"role": "tool", "tool_call_id": prefixed.id, "content": "submitted"},
+        ),
+        usage={"input_tokens": 10, "output_tokens": 2},
+    )
+    # An in-flight SDK tool must not block Corral actions or become recovery work.
+    assert native.id not in session.state.actions
+    if not after_submission:
+        assert (await session.execute(submit_answer_action("done"))).success
+    await session.record_messages(
+        (
+            {
+                "role": "tool",
+                "tool_call_id": native.id,
+                "name": "tool_result",
+                "content": "contents",
+            },
+            {
+                "role": "tool",
+                "tool_call_id": failed.id,
+                "content": "exit 1",
+                "is_error": True,
+                "duration_ms": 25,
+            },
+        )
+    )
+
+    state = await session.state_store.materialize(session.branch_id)
+    assert state.usage.tool_calls == 3
+    assert state.usage.llm_calls == 1
+    assert state.usage.input_tokens == 10
+    assert state.tool_statistics == {"submit_answer": 1, "Read": 1, "Bash": 1}
+    messages = state.model_dump(mode="json")["conversations"][session.actor.run_id]
+    calls = [call for message in messages for call in message.get("tool_calls", ())]
+    assert {call["function"]["name"] for call in calls} == {
+        "submit_answer",
+        "Read",
+        "Bash",
+    }
+    assert len(calls) == 3
+
+    trial = TaskTrialResult(
+        task_id="task",
+        trial_id="trial",
+        score=1.0,
+        state=state.model_dump(mode="json"),
+        tool_statistics=_tool_statistics(state),
+        messages=messages,
+        token_usage=_token_usage(state),
+    )
+    report = BenchmarkResult(
+        task_results={"task": TaskTrialResults(task_id="task", trials=[trial])},
+        verbose=True,
+    )
+    data = report._prepare_report_data({})["task_results"]["task"]["trials"][0]
+    by_name = {call["tool_name"]: call for call in data["tool_calls"]}
+    assert by_name["Read"]["arguments"] == {"path": "notes.txt"}
+    assert by_name["Read"]["result"] == "contents"
+    assert by_name["Read"]["status"] == "completed"
+    assert by_name["Bash"]["status"] == "failed"
+    assert by_name["Bash"]["error_message"] == "exit 1"
+    assert by_name["Bash"]["duration"] == 0.025
+    assert data["token_usage"]["tool_calls"] == 3
+    report.verbose = False
+    quiet = report._prepare_report_data({})["task_results"]["task"]["trials"][0]
+    assert "messages" not in quiet
+    assert "tool_calls" not in quiet
 
 
 @pytest.mark.anyio
@@ -263,3 +389,75 @@ async def test_scientist_nodes_have_independent_files_and_promote_the_winner(
         for mocked in closed:
             mocked.assert_called_once_with()
         shutdown_jobs.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_sdk_chronology_survives_delayed_delivery_and_resume(workspace_session):
+    from datetime import datetime, timezone
+
+    from corral.agents._transcript import event_clock
+    from corral.core.events import AgentTurnRecorded
+
+    session = workspace_session
+    native = Action(id="native-early", name="Bash", arguments={"command": "pwd"})
+    clock = event_clock(sdk="test")
+    await session.record_message(
+        {**native.to_message(), "sdk_native": True, "chronology": clock}
+    )
+    await session.execute(submit_answer_action("done"))
+    # The latest indexed event has no conversation message. Resume must read
+    # the ledger rather than recovering the counter only from visible history.
+    await session.record_message(
+        {
+            **Action(
+                id="sdk-submit", name="submit_answer", arguments={"answer": "done"}
+            ).to_message(),
+            "chronology": event_clock(sdk="test"),
+        }
+    )
+    # A delivered result retains its event time even after submission and restart.
+    completed_clock = event_clock(sdk="test")
+    resumed = AgentSession(
+        session.environment,
+        await session.state_store.materialize("main"),
+        actor=session.actor,
+        state_store=session.state_store,
+    )
+    await resumed.record_message(
+        {
+            "role": "tool",
+            "tool_call_id": native.id,
+            "content": "output",
+            "chronology": completed_clock,
+        }
+    )
+    commits = [
+        commit
+        async for commit in session.state_store.iter_commits("main")
+        if isinstance(commit.event, AgentTurnRecorded)
+    ]
+    indexes = [commit.event.metadata["chronology"]["event_index"] for commit in commits]
+    assert indexes == list(range(len(indexes)))
+    assert commits[0].occurred_at == datetime.fromisoformat(clock["occurred_at"])
+    assert commits[-1].occurred_at == datetime.fromisoformat(
+        completed_clock["occurred_at"]
+    )
+    assert commits[-1].recorded_at >= commits[-1].occurred_at
+    assert commits[-1].event.messages[0]["name"] == "Bash"
+    assert (
+        commits[-1].event.messages[0]["chronology"]["timestamp_source"]
+        == "local_observation"
+    )
+    assert datetime.now(timezone.utc) >= commits[-1].recorded_at
+    await resumed.record_message(
+        {**native.to_message(), "sdk_native": True, "chronology": clock}
+    )
+    await resumed.record_message(
+        {
+            "role": "tool",
+            "tool_call_id": native.id,
+            "content": "output",
+            "chronology": completed_clock,
+        }
+    )
+    assert await session.state_store.head("main") == commits[-1]

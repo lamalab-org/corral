@@ -17,7 +17,7 @@
     if (typeof value !== "string") return pretty(value);
     try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
   };
-  const state = {traces: [], filtered: [], selected: null, data: null, messages: [], savedIndices: [], untimed: new Set(), reordered: false, group: "agent", view: "messages", role: "", session: "", query: "", listLimit: 60, page: 0, target: null, controller: null};
+  const state = {traces: [], filtered: [], selected: null, data: null, messages: [], savedIndices: [], untimed: new Set(), reordered: false, group: "agent", view: "messages", role: "", session: "", query: "", listLimit: 60, page: 0, target: null, controller: null, scientist: null, experimentStage: "", experimentNode: ""};
   const PAGE_SIZE = 40;
   let traceSearchTimer, messageSearchTimer, toastTimer;
 
@@ -74,6 +74,10 @@
     if (state.group !== "agent") params.set("group", state.group);
     if (state.selected) params.set("trace", state.selected.id);
     if (state.view !== "messages") params.set("view", state.view);
+    if (state.view === "experiments") {
+      if (state.experimentStage) params.set("stage", state.experimentStage);
+      if (state.experimentNode) params.set("node", state.experimentNode);
+    }
     if (state.target != null) params.set("message", state.target + 1);
     const hash = params.size ? `#${params}` : "";
     if (location.hash !== hash) history[push ? "pushState" : "replaceState"](null, "", location.pathname + hash);
@@ -200,6 +204,9 @@
     const controller = state.controller;
     state.selected = trace;
     state.data = null;
+    state.scientist = null;
+    $("tab-experiments").hidden = trace.agent !== "ai-scientist";
+    $("experiment-total").textContent = "";
     state.messages = [];
     state.savedIndices = [];
     state.untimed = new Set();
@@ -209,7 +216,10 @@
     state.query = "";
     state.page = 0;
     state.target = target;
-    if (!preserveView) state.view = "messages";
+    if (!preserveView) {
+      state.view = trace.agent === "ai-scientist" ? "experiments" : "messages";
+      state.experimentStage = ""; state.experimentNode = "";
+    }
     $("message-search").value = "";
     $("jump-message").value = "";
     $("session-filter").replaceChildren(new Option("All agent sessions", ""));
@@ -233,11 +243,14 @@
       const untimed = new Set(presentation?.untimed || []);
       state.untimed = new Set(state.savedIndices.flatMap((savedIndex, index) => untimed.has(savedIndex) ? [index] : []));
       state.reordered = Boolean(presentation);
+      state.scientist = ReportScientist.build({...trial, agent: trace.agent, messages: state.messages});
+      $("tab-experiments").hidden = !state.scientist;
+      $("experiment-total").textContent = state.scientist ? number(state.scientist.nodes.length) : "";
       setStatus("");
       renderHeading();
       populateSessions();
       if (target != null) jumpTo(target, false);
-      else renderContent();
+      else setView(state.view);
     } catch (error) {
       if (error.name === "AbortError" || controller !== state.controller) return;
       setStatus(error.message, true);
@@ -264,7 +277,9 @@
   }
 
   function setView(view, updateURL = true) {
-    state.view = ["messages", "tools", "result"].includes(view) ? view : "messages";
+    state.view = ["experiments", "messages", "tools", "result"].includes(view) ? view : "messages";
+    if (state.view === "experiments" && state.data && !state.scientist) state.view = "messages";
+    if (state.view === "experiments") state.target = null;
     for (const tab of document.querySelectorAll("[data-view]")) {
       tab.setAttribute("aria-selected", String(tab.dataset.view === state.view));
       tab.tabIndex = tab.dataset.view === state.view ? 0 : -1;
@@ -435,6 +450,101 @@
     requestAnimationFrame(() => $(`message-${index + 1}`)?.scrollIntoView({block: "start"}));
   }
 
+  function renderExperiments() {
+    const model = state.scientist;
+    const fragment = document.createDocumentFragment();
+    const human = value => capitalize(String(value).replaceAll("_", " "));
+    const field = (parent, title, value, json = false) => {
+      if (value === undefined || value === "") return;
+      parent.append(el("h4", "field-label", title));
+      textBlock(value, parent, json);
+    };
+    const sources = (parent, entries) => {
+      for (const {message, index} of entries) {
+        const detail = el("details", "experiment-source");
+        detail.append(el("summary", "", `${capitalize(message.role)} · message #${index + 1}${message.name ? ` · ${message.name}` : ""}`));
+        detail.addEventListener("toggle", () => {
+          if (!detail.open || detail.dataset.loaded) return;
+          detail.dataset.loaded = "true";
+          if (message.content != null && message.content !== "") textBlock(message.content, detail);
+          if (message.tool_calls?.length) field(detail, "Tool calls", message.tool_calls);
+          detail.append(button(`Open message #${index + 1} →`, "text-button", () => jumpTo(index)));
+        });
+        parent.append(detail);
+      }
+    };
+    const controls = el("div", "experiment-controls");
+    const stage = el("select"), nodeSelect = el("select");
+    stage.id = "experiment-stage"; nodeSelect.id = "experiment-node";
+    for (const [title, control] of [["Stage", stage], ["Experiment node", nodeSelect]]) {
+      const group = el("div"), label = el("label", "field-label", title);
+      label.htmlFor = control.id; group.append(label, control); controls.append(group);
+    }
+    if (!model.stages.includes(state.experimentStage)) state.experimentStage = "";
+    stage.append(new Option("All stages", ""), ...model.stages.map(value => new Option(human(value), value)));
+    stage.value = state.experimentStage;
+    const choices = model.nodes.filter(node => !state.experimentStage || node.stage === state.experimentStage);
+    nodeSelect.append(...choices.map(node => new Option(`${node.id} · ${human(node.stage)}${model.sessions.length > 1 ? ` · session ${node.session.slice(0, 8) || "unattributed"}` : ""}`, node.key)));
+    const node = choices.find(item => item.key === state.experimentNode) || choices[0];
+    state.experimentNode = node?.key || ""; nodeSelect.value = state.experimentNode;
+    nodeSelect.disabled = !choices.length;
+    const change = control => { renderContent(); $(control).focus(); writeURL(); };
+    stage.addEventListener("change", () => { state.experimentStage = stage.value; change(stage.id); });
+    nodeSelect.addEventListener("change", () => { state.experimentNode = nodeSelect.value; change(nodeSelect.id); });
+    fragment.append(controls);
+    fragment.append(el("p", "info-note", "Grouped by experiment using saved node metadata and worker prompts. Source links open the original messages. Missing results and timing cannot be reconstructed."));
+    if (node) {
+      const overview = el("section", "result-section experiment-overview");
+      overview.append(el("h3", "", `${node.id} · ${human(node.node_type || "type unavailable")} · ${human(node.status || "status unavailable")}`));
+      if (node.parent_id) {
+        const parent = model.nodes.find(item => item.id === node.parent_id && item.session === node.session);
+        const link = button(`← Parent: ${node.parent_id}`, "text-button", () => {
+          state.experimentStage = ""; state.experimentNode = parent.key; change(nodeSelect.id);
+        });
+        link.disabled = !parent; overview.append(link);
+      } else overview.append(el("p", "muted small", node.parent_id === null ? "Root node" : "Parent not recorded"));
+      field(overview, "Hypothesis", node.hypothesis);
+      field(overview, "Experiment goal", node.experiment_goal);
+      if (node.worker_conclusion) {
+        const conclusion = el("details", "experiment-source"); conclusion.append(el("summary", "", "Node conclusion"));
+        textBlock(node.worker_conclusion, conclusion); overview.append(conclusion);
+      }
+      fragment.append(overview);
+      for (const [position, step] of node.steps.entries()) {
+        const responses = step.entries.filter(entry => entry.message.role === "assistant");
+        const decision = step.recorded?.decision || ReportScientist.parse(responses.at(-1)?.message.content);
+        const observation = step.recorded?.observation;
+        const status = observation?.success === true ? "completed" : observation?.success === false ? "failed"
+          : observation ? "result recorded" : decision?.decision === "finish" ? "conclusion" : "result unavailable";
+        const card = el("details", "experiment-step"); card.open = position === 0; card.dataset.status = status;
+        card.append(el("summary", "", `Step ${step.number}${decision?.tool_name ? ` · ${decision.tool_name}` : ""} · ${status}`));
+        const body = el("div", "message-body");
+        for (const [key, title] of [["rationale", "Decision rationale"], ["purpose", "Purpose"], ["expected_information", "Expected information"], ["conclusion", "Conclusion"]]) {
+          if (decision?.[key] != null) field(body, title, decision[key]);
+        }
+        if (decision?.decision === "act") field(body, "Tool arguments", decision.arguments ?? {}, true);
+        if (observation) {
+          field(body, "Tool result", observation.result ?? null, true);
+          if (observation.error) field(body, "Tool error", observation.error);
+          if (Number.isInteger(step.recorded.sourceIndex)) body.append(button(`Observation source · message #${step.recorded.sourceIndex + 1} →`, "text-button", () => jumpTo(step.recorded.sourceIndex)));
+        } else if (decision?.decision !== "finish") body.append(el("p", "info-note", "No tool result is linked to this step in the saved report."));
+        sources(body, step.entries); card.append(body); fragment.append(card);
+      }
+      if (node.evaluations.length) {
+        const evaluation = el("details", "experiment-step"); evaluation.append(el("summary", "", "Evaluation"));
+        const body = el("div", "message-body");
+        for (const entry of node.evaluations.filter(entry => entry.message.role === "assistant")) field(body, "Assessment", entry.message.content, true);
+        sources(body, node.evaluations); evaluation.append(body); fragment.append(evaluation);
+      }
+    } else fragment.append(el("p", "info-note", "No experiment nodes were saved in this trial."));
+    if (model.workflow.length) {
+      const workflow = el("details", "experiment-step");
+      workflow.append(el("summary", "", `Planning, stage selection and final synthesis · ${model.workflow.length} messages`));
+      const body = el("div", "message-body"); sources(body, model.workflow); workflow.append(body); fragment.append(workflow);
+    }
+    $("conversation-panel").replaceChildren(fragment);
+  }
+
   function renderTools() {
     const fragment = document.createDocumentFragment();
     fragment.append(el("p", "info-note", "The tool log contains executions saved in the report. Some agents record additional calls inside their conversation; inspect Messages for those. Log entries without timestamps retain their saved order."));
@@ -497,6 +607,7 @@
     if (!state.data) return;
     $("message-controls").hidden = state.view !== "messages";
     if (state.view === "messages") renderMessages();
+    else if (state.view === "experiments") renderExperiments();
     else if (state.view === "tools") renderTools();
     else renderResult();
   }
@@ -507,13 +618,16 @@
     $("trace-search").value = params.get("q") || "";
     $("error-filter").checked = params.get("error") === "1";
     $("group-by").value = ["agent", "environment", "model"].includes(params.get("group")) ? params.get("group") : "agent";
-    state.view = ["messages", "tools", "result"].includes(params.get("view")) ? params.get("view") : "messages";
+    state.view = ["experiments", "messages", "tools", "result"].includes(params.get("view")) ? params.get("view") : "messages";
+    state.experimentStage = params.get("stage") || "";
+    state.experimentNode = params.get("node") || "";
     applyFilters({updateURL: false});
     const requested = params.get("trace");
     const trace = state.traces.find(item => item.id === requested) || state.filtered[0];
     if (requested && !state.traces.some(item => item.id === requested)) toast("That trace is not present in these report indexes.");
     if (trace) {
       const message = params.has("message") ? Number(params.get("message")) - 1 : null;
+      if (!params.has("view") && message == null && trace.agent === "ai-scientist") state.view = "experiments";
       const position = state.filtered.findIndex(item => item.id === trace.id);
       if (position >= 0) state.listLimit = Math.max(60, position + 1);
       selectTrace(trace, false, message, true);
@@ -541,7 +655,7 @@
     tab.addEventListener("keydown", event => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
       event.preventDefault();
-      const tabs = [...document.querySelectorAll("[data-view]")];
+      const tabs = [...document.querySelectorAll("[data-view]")].filter(item => !item.hidden);
       const index = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (tabs.indexOf(tab) + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
       tabs[index].focus(); setView(tabs[index].dataset.view);
     });

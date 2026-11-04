@@ -414,6 +414,7 @@ class TraceHandler(BaseHTTPRequestHandler):
                     "/report-traces.html": ("report-traces.html", "text/html"),
                     "/report-traces.css": ("report-traces.css", "text/css"),
                     "/report-traces.js": ("report-traces.js", "text/javascript"),
+                    "/report-scientist.js": ("report-scientist.js", "text/javascript"),
                     "/favicon.ico": ("corral_logo.png", "image/png"),
                 }
                 if path not in assets:

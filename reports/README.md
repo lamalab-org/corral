@@ -47,6 +47,15 @@ whose timing was not recorded separately. Its exact interleaving with tool
 calls cannot be recovered. Message numbers follow the displayed order; JSON
 downloads retain the original saved data and order.
 
+AI Scientist trials open in **Experiments**. Select a stage and experiment node
+to inspect its hypothesis, parent, steps, tool observations, evaluation, and
+conclusion. Source links return to the original message; **Messages**, **Tool
+log**, and **Result & details** remain available. The node view reads saved
+graph metadata and snapshots in worker prompts, including older reports. It
+keeps separate agent sessions separate and labels missing results as unavailable.
+Copied links preserve the selected stage and node. JSON downloads retain the
+original trial without adding or reordering data.
+
 The browser reads `*/trials.csv` indexes at startup and decompresses only the
 selected trial's report on demand. Large reports can take a moment to scan;
 recently opened trials are cached in memory. Both `.json.gz` and `.json.xz`

@@ -22,16 +22,15 @@ questions, or any strategy you can come up with.
 
 Write it as a Python policy in `{policy_dir}/policy.py`. The API is documented in `guide/policy_api.md`.
 
-Return the answer marker required by the benchmark scorer: use `ANSWER: <answer>` for every benchmark except ChemBench, which uses `[ANSWER]<answer>[/ANSWER]`.
-The scorer parses and grades these markers.
+Format each answer as `ANSWER: <answer>`, except for ChemBench, which requires `[ANSWER]<answer>[/ANSWER]`.
 
-Benchmark: {benchmark}
+Dataset: {benchmark}
 Student model(s): {models}
 Policy API: {policy_api}
 Train questions: {n_train} (labels revealed a few at a time)
 Test questions: {n_test} (held out; you never should see these or their answers)
 
-## Scoring
+## Goal
 
 {scoring}
 
@@ -46,7 +45,7 @@ Every experiment costs real inference. `dry_run_policy` is much cheaper than
 ## Submitting
 
 When you are done - or when your budget is nearly gone - call `submit_policy('{policy_dir}')`, then pass the exact string it returns to `submit_answer`.
-A policy that is never submitted scores nothing, so submit early and re-submit if you improve on it.
+Submit a working policy early so it is saved, and re-submit if you improve on it.
 """
 
 
@@ -74,22 +73,19 @@ def _scoring_summary(config: dict) -> str:
     joint = len(config.get("models", [])) > 1
     if rule.get("kind") == "continuous":
         lines = [
-            "- Your submitted policy is run on the held-out test split, and your score "
-            "is the improvement over the student's measured zero-shot baseline on "
-            "those same questions.",
+            "- Improve the student's accuracy on held-out test questions relative "
+            "to its measured zero-shot baseline on those same questions.",
         ]
         if joint:
-            lines.append("- For two student models, the score is the smaller improvement.")
+            lines.append("- For two student models, maximize the smaller improvement.")
         return "\n".join(lines)
     share = f"{float(rule.get('min_closed', 0.5)):.0%}"
     lines = [
-        "- Your submitted policy is run on the held-out test split. The task passes "
-        f"(score 1) if the policy answers correctly at least {share} of the test "
-        "questions the student's measured zero-shot baseline gets wrong; otherwise "
-        "it scores 0.",
+        f"- Aim to answer correctly at least {share} of the held-out test questions "
+        "that the student's measured zero-shot baseline gets wrong.",
     ]
     if joint:
-        lines.append("- With two student models, both must reach this to pass.")
+        lines.append("- With two student models, both must reach this target.")
     return "\n".join(lines)
 
 
