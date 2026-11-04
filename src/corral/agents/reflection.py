@@ -112,7 +112,7 @@ class ReflectionMemory:
             return ""
 
         formatted_reflections = [
-            f"Attempt {reflection.trial_index + 1} (Score: {reflection.score:.2f}):\n{reflection.reflection_text}"
+            f"Attempt {reflection.trial_index + 1}:\n{reflection.reflection_text}"
             for _i, reflection in enumerate(self.reflections, 1)
         ]
         return "\n\n".join(formatted_reflections)
@@ -196,7 +196,8 @@ class ReflectionModule:
         # Summarize trajectory (take key messages to avoid context overflow)
         trajectory_summary = self._summarize_trajectory(trajectory)
 
-        # Prepare prompt
+        # Keep metadata available for custom prompts. The default prompt uses
+        # only the task description and trajectory, without scores or trial IDs.
         prompt_text = self.reflection_prompt.fill(
             {
                 "task_id": task_id,
@@ -246,8 +247,8 @@ class ReflectionModule:
             logger.warning(f"Reflection generation degraded to fallback: {e}")
             # Return a basic reflection on error with zero token usage
             fallback_reflection = (
-                f"Previous attempt achieved score {score:.3f}. "
-                "Consider reviewing the approach and trying a different strategy."
+                "Review the previous attempt's observations and unresolved issues "
+                "before choosing the next approach."
             )
             return fallback_reflection, {
                 "prompt_tokens": 0,
@@ -439,11 +440,12 @@ def create_reflexion_history(memory: ReflectionMemory) -> list[LiteLLMMessage] |
 
     reflection_text = (
         "=== LESSONS FROM PREVIOUS ATTEMPTS ===\n\n"
-        "You have attempted this task before. Here are reflections from those attempts "
-        "that can help you succeed this time:\n\n"
+        "You have attempted this task before.\n"
+        "Here are reflections from those attempts that can help you succeed this time:\n\n"
         + memory.format_for_prompt()
         + "\n\n=== END OF LESSONS ===\n\n"
-        "Use these insights to guide your approach. Avoid the mistakes identified above."
+        "Use these insights to guide your approach.\n"
+        "Avoid the mistakes identified above."
     )
 
     return [

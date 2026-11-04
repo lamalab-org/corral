@@ -389,3 +389,75 @@ async def test_scientist_nodes_have_independent_files_and_promote_the_winner(
         for mocked in closed:
             mocked.assert_called_once_with()
         shutdown_jobs.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_sdk_chronology_survives_delayed_delivery_and_resume(workspace_session):
+    from datetime import datetime, timezone
+
+    from corral.agents._transcript import event_clock
+    from corral.core.events import AgentTurnRecorded
+
+    session = workspace_session
+    native = Action(id="native-early", name="Bash", arguments={"command": "pwd"})
+    clock = event_clock(sdk="test")
+    await session.record_message(
+        {**native.to_message(), "sdk_native": True, "chronology": clock}
+    )
+    await session.execute(submit_answer_action("done"))
+    # The latest indexed event has no conversation message. Resume must read
+    # the ledger rather than recovering the counter only from visible history.
+    await session.record_message(
+        {
+            **Action(
+                id="sdk-submit", name="submit_answer", arguments={"answer": "done"}
+            ).to_message(),
+            "chronology": event_clock(sdk="test"),
+        }
+    )
+    # A delivered result retains its event time even after submission and restart.
+    completed_clock = event_clock(sdk="test")
+    resumed = AgentSession(
+        session.environment,
+        await session.state_store.materialize("main"),
+        actor=session.actor,
+        state_store=session.state_store,
+    )
+    await resumed.record_message(
+        {
+            "role": "tool",
+            "tool_call_id": native.id,
+            "content": "output",
+            "chronology": completed_clock,
+        }
+    )
+    commits = [
+        commit
+        async for commit in session.state_store.iter_commits("main")
+        if isinstance(commit.event, AgentTurnRecorded)
+    ]
+    indexes = [commit.event.metadata["chronology"]["event_index"] for commit in commits]
+    assert indexes == list(range(len(indexes)))
+    assert commits[0].occurred_at == datetime.fromisoformat(clock["occurred_at"])
+    assert commits[-1].occurred_at == datetime.fromisoformat(
+        completed_clock["occurred_at"]
+    )
+    assert commits[-1].recorded_at >= commits[-1].occurred_at
+    assert commits[-1].event.messages[0]["name"] == "Bash"
+    assert (
+        commits[-1].event.messages[0]["chronology"]["timestamp_source"]
+        == "local_observation"
+    )
+    assert datetime.now(timezone.utc) >= commits[-1].recorded_at
+    await resumed.record_message(
+        {**native.to_message(), "sdk_native": True, "chronology": clock}
+    )
+    await resumed.record_message(
+        {
+            "role": "tool",
+            "tool_call_id": native.id,
+            "content": "output",
+            "chronology": completed_clock,
+        }
+    )
+    assert await session.state_store.head("main") == commits[-1]

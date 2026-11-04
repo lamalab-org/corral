@@ -8,12 +8,14 @@ from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import anyio
 
+from corral.agents._transcript import event_clock
 from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.usage import usage_from_mapping
@@ -122,8 +124,7 @@ def inspect_subagent_tool() -> dict[str, Any]:
         "function": {
             "name": INSPECT_SUBAGENT_TOOL_NAME,
             "description": (
-                "Inspect the conversation and tool activity of a child or "
-                "descendant subagent that this agent is authorized to inspect. "
+                "Inspect the conversation and tool activity of a child or descendant subagent that this agent is authorized to inspect.\n"
                 "Use this only when the normal subagent result needs investigation."
             ),
             "parameters": {
@@ -250,6 +251,8 @@ class AgentSession:
             f"corral_delegate_budget_{id(self)}", default=None
         )
         self._action_lock = anyio.Lock()
+        self._record_lock = anyio.Lock()
+        self._event_index: int | None = None
         self._tool_connection: ContextVar[ToolConnection | None] = ContextVar(
             f"corral_tool_connection_{id(self)}", default=None
         )
@@ -281,6 +284,61 @@ class AgentSession:
         return self.state
 
     async def _append_agent(self, event: Any, request_id: str) -> Commit:
+        # SDK callbacks and MCP proposals share this writer. Only persistence
+        # is serialized; tool executions can still overlap.
+        async with self._record_lock:
+            return await self._append_agent_ordered(event, request_id)
+
+    async def _append_agent_ordered(self, event: Any, request_id: str) -> Commit:
+        occurred_at = None
+        if isinstance(event, AgentTurnRecorded):
+            if self._event_index is None:
+                # Metadata-only SDK lifecycle events also consume indexes.
+                # Recover from the ledger, including those absent from history.
+                history = await self.state_store.trace_commits(
+                    self.actor.run_id, branch_id=self.branch_id
+                )
+                self._event_index = (
+                    max(
+                        (
+                            commit.event.metadata.get("chronology", {}).get(
+                                "event_index", -1
+                            )
+                            for commit in history
+                            if isinstance(commit.event, AgentTurnRecorded)
+                        ),
+                        default=-1,
+                    )
+                    + 1
+                )
+            clock = dict(
+                event.messages[0].get("chronology", {})
+                if event.messages
+                else event.metadata.get("chronology", {})
+            )
+            if not clock:
+                clock = event_clock()
+            clock.update(event_index=self._event_index, agent_run_id=self.actor.run_id)
+            self._event_index += 1
+            occurred_at = datetime.fromisoformat(clock["occurred_at"])
+            event = AgentTurnRecorded.model_validate(
+                {
+                    **event.model_dump(mode="json"),
+                    "messages": tuple(
+                        {
+                            **message,
+                            "chronology": {
+                                **clock,
+                                **message.get("chronology", {}),
+                                "event_index": clock["event_index"],
+                                "agent_run_id": self.actor.run_id,
+                            },
+                        }
+                        for message in event.messages
+                    ),
+                    "metadata": {**event.metadata, "chronology": clock},
+                }
+            )
         commit = await self._bound_store.append(
             CommitRequest(
                 request_id=request_id,
@@ -289,6 +347,7 @@ class AgentSession:
                 based_on_hash=self._last_observed_hash,
                 author=self.actor,
                 event=event,
+                occurred_at=occurred_at,
             )
         )
         await self._notify(commit)
@@ -302,6 +361,7 @@ class AgentSession:
         *,
         based_on_hash: str | None = None,
     ) -> Commit:
+        clock = event_clock()
         commit = await self.state_store.bind(
             self.runtime_actor,
             branch_id=self.branch_id,
@@ -314,6 +374,7 @@ class AgentSession:
                 based_on_hash=based_on_hash or self._last_observed_hash,
                 author=self.runtime_actor,
                 event=event,
+                occurred_at=datetime.fromisoformat(clock["occurred_at"]),
             )
         )
         await self._notify(commit)
@@ -551,6 +612,40 @@ class AgentSession:
             for call in message.get("tool_calls", ())
         }
         task_tools = {tool["function"]["name"] for tool in self.tools}
+        native_results = {
+            message.get("tool_call_id")
+            for message in self.messages
+            if message.get("sdk_native") and message.get("role") == "tool"
+        }
+
+        async def record_sdk_lifecycle(message):
+            clock = message.get("chronology")
+            if not clock:
+                return
+            # Keep MCP SDK identity/timing without duplicating runtime tool
+            # calls in the conversation or charging their usage twice.
+            lifecycle = {
+                key: value
+                for key, value in message.items()
+                if key
+                in {
+                    "tool_calls",
+                    "tool_call_id",
+                    "name",
+                    "is_error",
+                    "runtime_action_id",
+                }
+            }
+            await self._append_agent(
+                AgentTurnRecorded(
+                    metadata={
+                        "chronology": clock,
+                        "sdk_tool_event": _json_value(lifecycle),
+                    }
+                ),
+                f"agent:{self.actor.run_id}:sdk-event:{uuid4()}",
+            )
+
         for raw in raw_messages:
             message = dict(raw)
             if message.get("tool_calls"):
@@ -563,6 +658,11 @@ class AgentSession:
                         and not call["function"]["name"].startswith("mcp__corral__")
                     )
                 ]
+                echoed = [call for call in message["tool_calls"] if call not in calls]
+                if echoed:
+                    await record_sdk_lifecycle({**message, "tool_calls": echoed})
+                if message.get("chronology", {}).get("sdk"):
+                    calls = [call for call in calls if call["id"] not in native_calls]
                 if not calls:
                     continue
                 message.update(tool_calls=calls, sdk_native=True)
@@ -570,10 +670,17 @@ class AgentSession:
                     (call["id"], call["function"]["name"]) for call in calls
                 )
             elif message.get("role") == "tool":
+                if (
+                    message.get("chronology", {}).get("sdk")
+                    and message.get("tool_call_id") in native_results
+                ):
+                    continue
                 name = native_calls.get(message.get("tool_call_id"))
                 if name is None:
+                    await record_sdk_lifecycle(message)
                     continue
                 message.update(name=name, sdk_native=True)
+                native_results.add(message.get("tool_call_id"))
             elif message.get("content") is None and not message.get("name"):
                 continue
             detached = _json_value(message)
@@ -582,8 +689,6 @@ class AgentSession:
             messages.append(detached)
         if not messages and usage is None:
             return
-        if any(m.get("sdk_native") and m.get("role") == "tool" for m in messages):
-            await self._capture_native_workspace()
         normalized = usage_from_mapping(
             usage,
             llm_calls=llm_calls if usage is not None else 0,
@@ -610,6 +715,8 @@ class AgentSession:
                 ),
                 f"agent:{self.actor.run_id}:turn:{uuid4()}",
             )
+        if any(m.get("sdk_native") and m.get("role") == "tool" for m in messages):
+            await self._capture_native_workspace()
 
     async def record_message(
         self,
@@ -779,6 +886,7 @@ class AgentSession:
         )
 
         async def fail(error: Exception) -> ToolResponse:
+            observed = event_clock()
             failed = await self.state_store.bind(
                 tool_actor,
                 branch_id=self.branch_id,
@@ -790,6 +898,7 @@ class AgentSession:
                     branch_id=self.branch_id,
                     based_on_hash=based_on,
                     author=tool_actor,
+                    occurred_at=datetime.fromisoformat(observed["occurred_at"]),
                     event=ToolFailed(
                         action_id=trusted.id,
                         invocation_id=invocation_id,
@@ -836,6 +945,7 @@ class AgentSession:
                 raise
             except Exception as exc:
                 return await fail(exc)
+        observed = event_clock()
         try:
             completed = await self.state_store.bind(
                 tool_actor,
@@ -848,6 +958,7 @@ class AgentSession:
                     branch_id=self.branch_id,
                     based_on_hash=based_on,
                     author=tool_actor,
+                    occurred_at=datetime.fromisoformat(observed["occurred_at"]),
                     event=ToolCompleted(
                         action_id=trusted.id,
                         invocation_id=invocation_id,

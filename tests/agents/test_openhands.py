@@ -106,7 +106,7 @@ def test_openhands_distinguishes_shell_isolation_from_real_task_tools():
     instructions = agent._system_message_suffix(False)
     assert "does not imply those actions are simulated" in instructions
     assert "Follow the task-specific operating instructions" in instructions
-    assert "sandboxed evaluation environment" not in instructions
+    assert "evaluation environment" not in instructions
 
 
 def test_openhands_passes_retry_settings_without_changing_provider_or_reasoning():
@@ -608,3 +608,25 @@ async def test_openhands_persists_sdk_messages_between_runtime_tool_calls(
     assert messages[6]["tool_calls"][0]["function"]["name"] == "submit_answer"
     assert messages[8]["content"] == "Finished."
     assert final.tool_statistics == {"measure": 1, "submit_answer": 1}
+
+
+@pytest.mark.anyio
+async def test_openhands_flushes_without_waiting_for_an_mcp_call(monkeypatch):
+    persisted = asyncio.Event()
+
+    class StreamingSession(Session):
+        async def record_message(self, message):
+            await super().record_message(message)
+            if message.get("content") == "live reasoning":
+                persisted.set()
+
+    async def fake_harness(self, *, run, **kwargs):
+        run.messages.append({"role": "assistant", "content": "live reasoning"})
+        await asyncio.wait_for(persisted.wait(), timeout=5)
+        raise RuntimeError("SDK failed after a message")
+
+    monkeypatch.setattr(OpenHandsAgent, "_execute_harness", fake_harness)
+    session = StreamingSession()
+    with pytest.raises(RuntimeError, match="SDK failed after a message"):
+        await OpenHandsAgent(api_key="key", system_prompt="system").run_session(session)
+    assert session.messages[-1]["chronology"]["timestamp_source"] == "local_observation"

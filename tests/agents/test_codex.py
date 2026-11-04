@@ -406,3 +406,108 @@ async def test_codex_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
     assert session_metadata["num_tool_calls"] == 1
     assert not hasattr(agent, "harness_result")
     assert not hasattr(agent, "messages")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("fail", [False, True])
+async def test_codex_streams_item_starts_and_completions_before_harness_exit(
+    monkeypatch, fail
+):
+    import threading
+
+    from openai_codex.generated.v2_all import ThreadItem
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    durable = threading.Event()
+
+    class StreamingSession(Session):
+        async def record_message(self, message):
+            await super().record_message(message)
+            if message.get("role") == "tool":
+                durable.set()
+
+    session = StreamingSession("42", "submitted")
+    item = ThreadItem.model_validate(
+        {
+            "id": "shell-1",
+            "type": "commandExecution",
+            "command": "pwd",
+            "cwd": "/tmp",
+            "commandActions": [],
+            "status": "completed",
+            "aggregatedOutput": "/tmp",
+            "exitCode": 0,
+            "durationMs": 2000,
+        }
+    ).root
+
+    def fake_harness(self, *, run, **kwargs):
+        def stream():
+            for method, clock in (
+                ("item/started", {"started_at_ms": 1000}),
+                ("item/completed", {"completed_at_ms": 3000}),
+            ):
+                yield SimpleNamespace(
+                    method=method, payload=SimpleNamespace(item=item, **clock)
+                )
+            # Block the SDK thread while the session loop persists both events.
+            assert durable.wait(5), "transcript was buffered until harness exit"
+            assert [m["chronology"]["phase"] for m in session.messages[-2:]] == [
+                "tool_started",
+                "tool_completed",
+            ]
+            if fail:
+                raise RuntimeError("SDK transport failed")
+            yield SimpleNamespace(
+                method="turn/completed",
+                payload=SimpleNamespace(
+                    turn=SimpleNamespace(status=SimpleNamespace(value="completed"))
+                ),
+            )
+
+        turn = SimpleNamespace(stream=stream)
+        thread = SimpleNamespace(turn=lambda *args, **kwargs: turn)
+        self._drive_turn(thread, "solve", run)
+        run.result = HarnessRunResult(status="success", answer="42")
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", fake_harness)
+    agent = CodexAgent(system_prompt="system")
+    if fail:
+        with pytest.raises(RuntimeError, match="SDK transport failed"):
+            await agent.run_session(session)
+    else:
+        await agent.run_session(session)
+    call, result = session.messages[-2:]
+    assert call["tool_calls"][0]["id"] == result["tool_call_id"] == "shell-1"
+    assert call["chronology"]["sdk_item_id"] == "shell-1"
+    assert call["chronology"]["timestamp_source"] == "sdk"
+    assert datetime.fromisoformat(call["chronology"]["occurred_at"]).timestamp() == 1
+    assert datetime.fromisoformat(result["chronology"]["occurred_at"]).timestamp() == 3
+
+
+@pytest.mark.anyio
+async def test_codex_cancellation_drains_worker_before_closing_session(monkeypatch):
+    import asyncio
+    import threading
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    started = threading.Event()
+    release = threading.Event()
+
+    def harness(self, *, run, **kwargs):
+        started.set()
+        assert release.wait(5)
+        run.messages.append({"role": "assistant", "content": "last event"})
+        run.result = HarnessRunResult(status="success", answer="42")
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", harness)
+    session = Session()
+    task = asyncio.create_task(CodexAgent(system_prompt="system").run_session(session))
+    await asyncio.to_thread(started.wait)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert session.messages[-1]["content"] == "last event"

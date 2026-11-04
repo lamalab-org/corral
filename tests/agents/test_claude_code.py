@@ -374,8 +374,14 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
     assert options.skills == []
     assert options.plugins == []
     assert options.include_partial_messages is True
+    assert options.thinking == {"type": "adaptive", "display": "summarized"}
+    assert outcome.metadata["thinking"] == options.thinking
     assert options.system_prompt["preset"] == "claude_code"
     assert session.messages[0] == {"role": "user", "content": "Test task"}
+    assert any(
+        message.get("name") == "thinking" and message["content"] == "let me reason"
+        for message in session.messages
+    )
     assert {"role": "assistant", "content": "42"} not in session.messages
 
 

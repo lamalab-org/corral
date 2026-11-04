@@ -86,9 +86,8 @@ class EpistemicSupport(BaseAgent):
 
     def _text_only_feedback(self) -> str:
         return (
-            "A plain-text answer does not finish the task. Call "
-            "submit_answer with the complete answer, or call an "
-            "available environment tool."
+            "A plain-text answer does not finish the task.\n"
+            "Call submit_answer with the complete answer, or call an available environment tool."
         )
 
     async def _before_turn(
@@ -174,13 +173,11 @@ class EpistemicSupport(BaseAgent):
                 "role": "user",
                 "name": SUBMISSION_REVIEW_MESSAGE_NAME,
                 "content": (
-                    "Submission held: the proposed answer has not been accepted. "
-                    "Address the unconstructive patterns in the preceding report. "
-                    "Validate the answer with a targeted experiment when useful, "
-                    "interpret the observations, and revise unsupported claims. "
-                    "If a pattern does not apply, explain why using concrete "
-                    "evidence. Then call submit_answer again with the complete "
-                    "answer and a fresh justification."
+                    "Submission held: the proposed answer has not been accepted.\n"
+                    "Address the unconstructive patterns in the preceding report.\n"
+                    "Validate the answer with a targeted experiment when useful, interpret the observations, and revise unsupported claims.\n"
+                    "If a pattern does not apply, explain why using concrete evidence.\n"
+                    "Then call submit_answer again with the complete answer and a fresh justification."
                 ),
             }
             await session.record_message(feedback)

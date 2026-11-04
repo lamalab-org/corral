@@ -93,8 +93,9 @@ class _Binding:
                 if token is not None
                 else None
             )
+            action = Action(name=name, arguments=arguments or {})
             try:
-                response = await execute(Action(name=name, arguments=arguments or {}))
+                response = await execute(action)
             finally:
                 if progress_task is not None:
                     progress_task.cancel()
@@ -105,6 +106,7 @@ class _Binding:
                         await progress_task
             content = response.result if response.success else response.error
             return CallToolResult(
+                _meta={"corral_action_id": action.id},
                 content=[TextContent(type="text", text=str(content or ""))],
                 isError=not response.success,
             )

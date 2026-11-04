@@ -74,7 +74,7 @@ JsonArguments = Annotated[
         {
             "type": "string",
             "description": (
-                "Tool arguments encoded as one JSON object string. "
+                "Tool arguments encoded as one JSON object string.\n"
                 'Use "{}" when the tool takes no arguments.'
             ),
         }

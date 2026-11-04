@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import json
 import math
@@ -13,6 +12,8 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal
+
+import anyio
 
 from corral.report.logging import logger
 
@@ -58,6 +59,7 @@ from corral.agents._mcp_timeout import (
     DEFAULT_TOOL_TIMEOUT_S as _DEFAULT_TOOL_TIMEOUT_S,
 )
 from corral.agents._mcp_timeout import mcp_timeout_prompt
+from corral.agents._transcript import StreamingTranscript
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
 from corral.agents.schema import SURRENDER_SENTINEL, AgentOutcome, AgentUsage
 from corral.agents.session import AgentSession, AgentSessionCapabilities
@@ -153,10 +155,7 @@ class _TimeoutMCPToolProvider:
 # so the system prompt cannot silently inherit a machine-local
 # `~/.openhands/SOUL.md`. Keeping the identity fixed makes the benchmarked prompt
 # reproducible across machines.
-_PINNED_SOUL_CONTENT = (
-    "You are OpenHands agent, a helpful AI assistant that can interact with the "
-    "provided tools to solve tasks."
-)
+_PINNED_SOUL_CONTENT = "You are OpenHands agent, a helpful AI assistant that can interact with the provided tools to solve tasks."
 
 # Terminal status of a single harness run. Distinguishing these lets the
 # benchmark record *why* a run ended instead of collapsing infrastructure
@@ -192,7 +191,9 @@ class HarnessRunResult:
 class _RunState:
     """Mutable scratch owned by one invocation, never by the agent instance."""
 
-    messages: list[dict[str, Any]] = field(default_factory=list)
+    messages: StreamingTranscript = field(
+        default_factory=lambda: StreamingTranscript("openhands")
+    )
     usage: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     available_tools: list[dict[str, Any]] = field(default_factory=list)
@@ -338,29 +339,23 @@ class OpenHandsAgent(BaseAgent):
         `AgentContext.system_message_suffix`.
         """
         final_answer_directive = (
-            "When you have solved the task, call the `submit_answer` MCP tool "
-            "with the complete answer. A plain-text final response does not "
-            "complete the task."
+            "When you have solved the task, call the `submit_answer` MCP tool with the complete answer.\n"
+            "A plain-text final response does not complete the task."
         )
         suffix = (
             self.system_prompt
-            + "\n\nYou are solving a task in an evaluation environment. "
-            "You may use OpenHands' built-in tools as well as the provided "
-            f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and terminal "
-            "tools start in a fresh per-run workspace; use the MCP tools for task "
-            "environment data and actions. Task tools may control external systems or real "
-            "instruments; workspace isolation does not imply those actions are simulated. "
-            "Follow the task-specific operating instructions. Do not invent tool outputs. "
+            + f"\n\nYou may use OpenHands' built-in tools as well as the provided `{_MCP_SERVER_NAME}` MCP tools.\n"
+            "Built-in filesystem and terminal tools start in a fresh per-run workspace; use the MCP tools for task environment data and actions.\n"
+            "Task tools may control external systems or real instruments; workspace isolation does not imply those actions are simulated.\n"
+            "Follow the task-specific operating instructions.\n"
+            "Do not invent tool outputs.\n"
             + mcp_timeout_prompt(self.tool_timeout_s)
             + final_answer_directive
         )
         if enable_surrender:
             if self.surrender_prompt is not None:
                 suffix += "\n\n" + self.surrender_prompt.fill({})
-            suffix += (
-                "\nTo surrender, call `submit_answer` with the exact answer "
-                f"`{SURRENDER_SENTINEL}`; do not return the sentinel as text."
-            )
+            suffix += f"\nTo surrender, call `submit_answer` with the exact answer `{SURRENDER_SENTINEL}`; do not return the sentinel as text."
         return suffix
 
     def model_parameter_defaults(self) -> dict[str, Any]:
@@ -562,49 +557,27 @@ class OpenHandsAgent(BaseAgent):
         )
         if run.native_workspace is not None:
             prompt += (
-                "\nNative tools and Corral MCP tools share the task workspace at "
-                f"{run.native_workspace}. Corral provides the execution sandbox."
+                f"\nNative tools and Corral MCP tools share the task workspace at {run.native_workspace}.\n"
+                "Corral provides the execution sandbox."
             )
         # Keep a conservative fallback for adapters/tests that do not expose
         # SDK metrics. The real OpenHands path replaces this with the count
         # of per-completion token-usage records in `_record_usage`.
         run.metadata["sdk_turns"] = 1
-        session_loop = asyncio.get_running_loop()
-        flush_lock = asyncio.Lock()
-        recorded_messages = 0
-
-        async def flush_messages() -> None:
-            nonlocal recorded_messages
-            async with flush_lock:
-                # Snapshot before awaiting: SDK callbacks may append while a
-                # commit is in flight. Those messages belong to the next flush.
-                pending = run.messages[recorded_messages:]
-                for message in pending:
-                    await session.record_message(message)
-                    recorded_messages += 1
-
-        async def flush_from_tool() -> None:
-            # SDK MCP executors run on their client's event loop, while the
-            # session (including remote worker sessions) belongs to this loop.
-            # Await its work without blocking either loop's thread.
-            if asyncio.get_running_loop() is session_loop:
-                await flush_messages()
-            else:
-                await asyncio.wrap_future(
-                    asyncio.run_coroutine_threadsafe(flush_messages(), session_loop)
-                )
-
-        run.flush_messages = flush_from_tool
-        await self._execute_harness(
-            task_id=task_id,
-            prompt=prompt,
-            mcp_url=mcp_url,
-            enable_surrender=session.surrender_allowed,
-            iteration_limit=iteration_limit,
-            run=run,
-        )
-
-        await flush_messages()
+        run.messages.start(session)
+        run.flush_messages = run.messages.flush
+        try:
+            await self._execute_harness(
+                task_id=task_id,
+                prompt=prompt,
+                mcp_url=mcp_url,
+                enable_surrender=session.surrender_allowed,
+                iteration_limit=iteration_limit,
+                run=run,
+            )
+        finally:
+            with anyio.CancelScope(shield=True):
+                await run.messages.flush()
         usage = self._usage(
             run.usage,
             llm_calls=int(run.metadata.get("sdk_turns", 0) or 0),
@@ -781,7 +754,8 @@ class OpenHandsAgent(BaseAgent):
             # recording of an event fails.
             self._log_event(event)
             try:
-                self._record_event(event, run)
+                with run.messages.event(event):
+                    self._record_event(event, run)
             except Exception:
                 logger.debug(
                     "Could not record OpenHands event into transcript",
