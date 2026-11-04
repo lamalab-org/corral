@@ -55,7 +55,7 @@ def test_final_synthesis_projects_the_canonical_workspace(tmp_path):
     )
 
     assert str(tmp_path) not in prompts[0]
-    assert "Canonical scored workspace:\n/workspace" in prompts[0]
+    assert "Final output workspace:\n/workspace" in prompts[0]
     assert answer == "/workspace/result.json"
 
 

@@ -32,6 +32,6 @@ Do not repeat an existing child experiment, and make every requested proposal sl
 Do not precompute tool actions.
 A bounded worker will choose up to {{max_actions}} actions one at a time after observing each result.
 The experiment must be executable using only the listed tools.
-When outputs are needed, keep their paths relative to the assigned task workspace.
+Follow the task environment's public path contract for all output paths.
 A DEBUG proposal must diagnose the parent's actual failure; a REFINE proposal must improve a successful route.
 Return exactly {{count}} proposal(s) when possible.

@@ -33,5 +33,5 @@ Define one experiment goal and observable success criteria, and state what compa
 Do not repeat an existing child, and make requested slots materially different parameter comparisons.
 Do not precompute tool actions.
 A bounded worker will choose up to {{max_actions}} listed-tool actions one at a time from actual observations.
-Keep output paths relative to the assigned task workspace.
+Follow the task environment's public path contract for all output paths.
 Return exactly {{count}} proposal(s) when possible.

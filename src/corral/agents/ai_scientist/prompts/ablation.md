@@ -35,4 +35,4 @@ For every other type, define one experiment goal and observable success criteria
 Do not repeat an existing child experiment from this checkpoint.
 Do not precompute tool actions.
 A bounded worker will choose up to {{max_actions}} listed-tool actions adaptively.
-Keep output paths relative to the assigned task workspace.
+Follow the task environment's public path contract for all output paths.
