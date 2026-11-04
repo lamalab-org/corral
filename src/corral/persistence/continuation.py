@@ -117,7 +117,7 @@ def _blob_refs(value):
             yield from _blob_refs(child)
 
 
-def validate_destination(request: RunTaskInput) -> None:
+def validate_destination(request: RunTaskInput, store_path: Path | None = None) -> None:
     """Reject reuse of the parent's identity before a destination is opened."""
     source = request.continuation
     assert source is not None
@@ -125,6 +125,10 @@ def validate_destination(request: RunTaskInput) -> None:
     metadata = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
     if request.execution_id in {source.execution_id, metadata.get("execution_id")}:
         raise ValueError("continuation must use a new execution ID")
+    if store_path is not None and Path(
+        store_path
+    ).expanduser().resolve().is_relative_to(Path(source.trial).expanduser().resolve()):
+        raise ValueError("continuation store must be outside the source trial")
 
 
 async def import_checkpoint(
@@ -135,7 +139,13 @@ async def import_checkpoint(
     """Copy referenced blobs, then atomically publish the child's initial commit."""
     source = request.continuation
     assert source is not None
-    validate_destination(request)
+    execution_path = getattr(store, "execution_path", None)
+    store_path = (
+        execution_path(request.execution_id) / "commits.sqlite3"
+        if callable(execution_path)
+        else getattr(store, "path", None)
+    )
+    validate_destination(request, store_path)
     target = store.for_execution(request.execution_id)
     head = await target.head("main")
     if head is not None:
@@ -153,6 +163,7 @@ async def import_checkpoint(
             or event.source.branch_id != source.branch_id
             or event.source_trial != str(Path(source.trial).expanduser().resolve())
             or event.message != source.message
+            or (request.model is not None and event.model.get("name") != request.model)
             or (
                 source.execution_id is not None
                 and source.execution_id != event.source.execution_id

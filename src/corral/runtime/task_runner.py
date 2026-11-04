@@ -390,7 +390,8 @@ class TaskRuntime:
                         current = session.state
                     message = current.runtime.metadata.get("continuation_message")
                     if message is not None and not current.is_terminal:
-                        await store.bind(agent_actor, branch_id=branch_id).append(
+                        await self._append(
+                            store,
                             CommitRequest(
                                 request_id="continuation:message",
                                 execution_id=execution_id,
@@ -400,7 +401,8 @@ class TaskRuntime:
                                 event=AgentTurnRecorded(
                                     messages=({"role": "user", "content": message},)
                                 ),
-                            )
+                            ),
+                            context,
                         )
                         current = await store.materialize(branch_id)
                     outcome = None

@@ -15,8 +15,12 @@ from corral.core.task import TaskDefinition
 from corral.observability import NoOpObserver
 from corral.orchestration import ContinuationSource, RunTaskInput, RuntimeRegistry
 from corral.persistence import ShardedCommitStore
-from corral.persistence.continuation import import_checkpoint, read_checkpoint
-from corral.run import CorralRunner, execute_task
+from corral.persistence.continuation import (
+    import_checkpoint,
+    read_checkpoint,
+    validate_destination,
+)
+from corral.run import BenchmarkTaskMetadata, CorralRunner, execute_task
 
 
 @pytest.fixture
@@ -188,6 +192,39 @@ async def test_import_is_durable_without_source_and_message_is_not_duplicated(tr
             replace(child, continuation=replace(source, message="changed")),
             store,
             store.workspace_manager("child"),
+        )
+    with pytest.raises(Exception, match="different checkpoint"):
+        await import_checkpoint(
+            replace(child, model="different-model"),
+            store,
+            store.workspace_manager("child"),
+        )
+
+
+@pytest.mark.anyio
+async def test_continuation_rejects_store_inside_source(trial):
+    _, _, _, request, source, _ = trial
+    child = replace(request, execution_id="child", continuation=source)
+    with pytest.raises(ValueError, match="store must be outside"):
+        validate_destination(child, Path(source.trial) / "nested" / "commits.sqlite3")
+
+
+@pytest.mark.anyio
+async def test_continuation_requires_selected_task(trial):
+    store, registry, _, _, source, _ = trial
+    runner = CorralRunner(
+        registry,
+        tasks={
+            "task": BenchmarkTaskMetadata(agent_id="agent", environment_id="task"),
+            "other": BenchmarkTaskMetadata(agent_id="agent", environment_id="task"),
+        },
+        state_store=store,
+    )
+    with pytest.raises(ValueError, match="continuation tasks not selected"):
+        runner.build_input(
+            "children",
+            task_ids=["other"],
+            continuation_by_task={"task": source},
         )
 
 
@@ -439,5 +476,11 @@ async def test_cli_rejects_overlapping_source_and_output_before_writing(
         lambda *_args, **_kwargs: ("tool-calling", agent, "test"),
     )
     with pytest.raises(ValueError, match="separate output run directory"):
+        await cli.run_benchmark(args)
+    assert fingerprints(Path(source.trial)) == before
+
+    args.state_dir = str(tmp_path / "separate-output")
+    args.report = str(Path(source.trial) / "report.json")
+    with pytest.raises(ValueError, match="report path must be outside"):
         await cli.run_benchmark(args)
     assert fingerprints(Path(source.trial)) == before

@@ -550,7 +550,22 @@ class DockerTaskLauncher:
                     staged = staged / "extracted"
                     staged.mkdir()
                     with tarfile.open(archive) as exported:
-                        exported.extractall(staged, filter="data")
+                        if hasattr(tarfile, "data_filter"):
+                            exported.extractall(staged, filter="data")
+                        else:
+                            # Early 3.10/3.11 releases have no extraction filter.
+                            # The export contains only regular files and directories.
+                            members = exported.getmembers()
+                            for member in members:
+                                target = (staged / member.name).resolve()
+                                if not target.is_relative_to(staged.resolve()) or not (
+                                    member.isfile() or member.isdir()
+                                ):
+                                    raise ValueError(
+                                        "unsafe Docker state archive member"
+                                    ) from None
+                                member.mode = 0o755 if member.isdir() else 0o644
+                            exported.extractall(staged, members=members)
                 shutil.copytree(
                     staged,
                     shard,

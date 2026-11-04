@@ -96,7 +96,13 @@ async def execute_task(
             validate_destination,
         )
 
-        validate_destination(task)
+        execution_path = getattr(state_store, "execution_path", None)
+        store_path = (
+            execution_path(task.execution_id) / "commits.sqlite3"
+            if callable(execution_path)
+            else getattr(state_store, "path", None)
+        )
+        validate_destination(task, store_path)
         manager_factory = getattr(state_store, "workspace_manager", None)
         if callable(manager_factory):
             manager = manager_factory(task.execution_id)
@@ -462,6 +468,9 @@ class CorralRunner:
             task_ids,
             include_dependencies=include_dependencies,
         )
+        unselected = set(continuations) - set(selected)
+        if unselected:
+            raise ValueError(f"continuation tasks not selected: {sorted(unselected)}")
         metadata = {task_id: tasks[task_id] for task_id in selected}
         iteration_limits: dict[str, int] = {}
         for task_id, task in metadata.items():

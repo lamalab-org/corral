@@ -504,6 +504,11 @@ async def run_benchmark(
         Path(configured_report) if configured_report else run_dir / "report.json"
     )
     report_path = report_path.expanduser().resolve()
+    for source in getattr(args, "continuation_by_task", {}).values():
+        if report_path.is_relative_to(Path(source.trial).expanduser().resolve()):
+            raise ValueError(
+                "continuation report path must be outside the source trial"
+            )
     run_manifest_path = run_dir / "run-metadata.json"
     run_manifest = {
         "schema_version": 1,
