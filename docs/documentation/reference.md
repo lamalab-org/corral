@@ -194,6 +194,11 @@ run only if the selected checkpoint precedes task configuration.
 from cumulative `inherited_usage`; environment resource budgets are not reset.
 Psychometrics restores its serialized REPL namespace and NumPy RNG state through
 the existing worker, without replaying previous cells.
+AI Scientist saves its search tree, journal, and active experiment-branch state
+after each evaluated batch. A continuation from one of those checkpoints
+restores the branches and resumes the saved search stage without rerunning
+their completed calls. Older AI Scientist checkpoints without branch snapshots
+are rejected rather than silently restarting the search.
 
 Live subagents and active background jobs are rejected explicitly: this API
 copies durable state, not running processes or external services. Tools with

@@ -2,9 +2,12 @@
 
 import json
 import re
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 from threading import RLock
 from typing import Any
 from uuid import uuid4
@@ -37,6 +40,10 @@ from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.utils import llm_call
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
+from corral.core.events import TaskConfigured, WorkspaceDelta
+from corral.core.transition import environment_operations
+from corral.core.workspace import WorkspaceState
+from corral.runtime import permissions
 
 _SCIENTIST_SYSTEM_PROMPT = """
 You are the reasoning component of a scientific experiment manager. Interact
@@ -144,6 +151,70 @@ class _BranchSessionRegistry:
         with self._lock:
             return self._sessions[execution_id]
 
+    def checkpoint(self, execution_id: str) -> dict[str, Any]:
+        session = self.session(execution_id)
+        state = self.portal.call(
+            partial(session.state_store.materialize, session.branch_id)
+        )
+        return {
+            "environment": state.environment.values,
+            "workspace": state.workspace.model_dump(mode="json"),
+        }
+
+    def restore_branch(self, checkpoint: Mapping[str, Any]) -> BranchSessionHandle:
+        handle = self.create_branch()
+        try:
+            session = self.session(handle.execution_id)
+            saved_workspace = WorkspaceState.model_validate(checkpoint["workspace"])
+            destination = session.workspace
+            if destination is None:
+                raise ValueError("AI Scientist branch checkpoint requires a workspace")
+            # Node workspaces are excluded from the main snapshot. Restore their
+            # bytes before publishing the branch's logical state.
+            with tempfile.TemporaryDirectory(dir=Path(destination).parent) as temporary:
+                staged = Path(temporary) / "workspace"
+                self.portal.call(
+                    partial(
+                        session.environment.workspace_manager.materialize,
+                        saved_workspace,
+                        staged,
+                    )
+                )
+                for entry in Path(destination).iterdir():
+                    if entry.is_dir() and not entry.is_symlink():
+                        shutil.rmtree(entry)
+                    else:
+                        entry.unlink()
+                permissions.copy_workspace(staged, destination)
+
+            async def publish() -> None:
+                current = session.state
+                restored = WorkspaceState.model_validate(
+                    {
+                        **saved_workspace.model_dump(mode="json"),
+                        "id": current.workspace.id,
+                    }
+                )
+                event = TaskConfigured(
+                    status="AI Scientist branch checkpoint restored",
+                    environment_operations=environment_operations(
+                        current.environment.values, checkpoint["environment"]
+                    ),
+                    workspace_delta=WorkspaceDelta.from_workspace(restored),
+                    expected_environment_revision=current.environment.revision,
+                    expected_workspace_revision=current.workspace.revision,
+                )
+                commit = await session._append_runtime(
+                    event, f"branch:{session.branch_id}:restored"
+                )
+                await session._refresh(observed_hash=commit.hash)
+
+            self.portal.call(publish)
+            return handle
+        except BaseException:
+            self.close_branch(handle.execution_id)
+            raise
+
 
 class AIScientistAgent(BaseAgent):
     """Progressive tree search over scientific actions exposed by Corral.
@@ -236,11 +307,14 @@ class AIScientistAgent(BaseAgent):
         status: str,
         tool_statistics: Mapping[str, Any] | None = None,
         error: str | None = None,
+        branches: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return {
             "schema_version": 1,
+            "checkpoint_version": 1,
             "status": status,
             "search": cls._search_snapshot(state) if state is not None else None,
+            "branches": list(branches or []),
             "graph": cls._trace_metadata(state, messages),
             "tool_statistics": dict(tool_statistics or {}),
             "error": error,
@@ -287,11 +361,26 @@ class AIScientistAgent(BaseAgent):
         )
         initial_llm_calls = gateway.call_count
         initial_llm_tokens = getattr(gateway, "token_count", 0)
-        formulation = formulator.formulate(
-            task_prompt=prompt, tools=tools, examples=examples
-        )
-        state = ScientistState(task_prompt=prompt, tools=tools, formulation=formulation)
-        trace.write("formulation", formulation.model_dump(mode="json"))
+        saved = session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}
+        saved_search = saved.get("search")
+        if isinstance(saved_search, Mapping):
+            if saved.get("checkpoint_version") != 1:
+                raise ValueError(
+                    "AI Scientist checkpoint predates branch restoration; "
+                    "select a checkpoint created by the current runtime"
+                )
+            state = ScientistState.from_snapshot(
+                dict(saved_search), task_prompt=prompt, tools=tools
+            )
+            trace.write("search_restored", {"stage": state.current_stage.value})
+        else:
+            formulation = formulator.formulate(
+                task_prompt=prompt, tools=tools, examples=examples
+            )
+            state = ScientistState(
+                task_prompt=prompt, tools=tools, formulation=formulation
+            )
+            trace.write("formulation", formulation.model_dump(mode="json"))
 
         branch_sessions = _BranchSessionRegistry(session, portal)
         pool = ExecutionPool(
@@ -302,6 +391,37 @@ class AIScientistAgent(BaseAgent):
             stop_on_error=config.stop_plan_on_tool_error,
             replay_equivalence=self.replay_equivalence,
         )
+        if isinstance(saved_search, Mapping):
+            pool.budget.scientific_calls = state.scientific_tool_calls
+            pool.budget.replay_calls = state.replay_tool_calls
+            pool.executions_created = state.executions_created
+            pool.executions_cloned = state.executions_cloned
+            pool.peak_simultaneous_executions = state.peak_simultaneous_executions
+            pool.replay_results = list(state.replay_results)
+            try:
+                pool.restore_branches(list(saved.get("branches", [])), state.tree)
+            except BaseException:
+                pool.close_all()
+                raise
+
+        def checkpoint(search: ScientistState, active_pool: ExecutionPool) -> None:
+            branches = [
+                {
+                    "branch_id": branch.branch_id,
+                    "head_node_id": branch.head_node_id,
+                    **branch_sessions.checkpoint(branch.execution_id),
+                }
+                for branch in active_pool.active.values()
+                if branch.execution_id is not None
+            ]
+            portal.call(
+                session.set_agent_state,
+                _SCIENTIST_STATE_NAMESPACE,
+                self._state_payload(
+                    search, owner.messages, status="partial", branches=branches
+                ),
+            )
+
         planner = NodePlanner(
             gateway,
             max_actions_per_node=config.max_actions_per_node,
@@ -336,6 +456,7 @@ class AIScientistAgent(BaseAgent):
             trace=trace,
             initial_llm_calls=initial_llm_calls,
             initial_llm_tokens=initial_llm_tokens,
+            on_checkpoint=checkpoint,
         )
         try:
             state = manager.execute_search(state, pool)
@@ -391,7 +512,10 @@ class AIScientistAgent(BaseAgent):
             # run; the local search state contains every node recorded so far.
             graph = self._trace_metadata(state, owner.messages)
             trace.write("graph_snapshot", graph)
-            pool.close_all()
+            try:
+                checkpoint(state, pool)
+            finally:
+                pool.close_all()
             branch_tool_statistics = pool.tool_statistics()
             portal.call(
                 session.set_agent_state,
@@ -401,6 +525,11 @@ class AIScientistAgent(BaseAgent):
                     owner.messages,
                     status="partial",
                     tool_statistics=branch_tool_statistics,
+                    branches=list(
+                        (session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}).get(
+                            "branches", []
+                        )
+                    ),
                 ),
             )
 
@@ -431,6 +560,11 @@ class AIScientistAgent(BaseAgent):
                 owner.messages,
                 status="completed",
                 tool_statistics=branch_tool_statistics,
+                branches=list(
+                    (session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}).get(
+                        "branches", []
+                    )
+                ),
             ),
         )
         return answer, usage, metadata
@@ -438,10 +572,12 @@ class AIScientistAgent(BaseAgent):
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Run search, experimentation, and synthesis through session branches."""
         owner = _GatewayOwner()
-        await session.set_agent_state(
-            _SCIENTIST_STATE_NAMESPACE,
-            self._state_payload(None, (), status="running"),
-        )
+        previous = session.get_agent_state(_SCIENTIST_STATE_NAMESPACE)
+        if not previous or previous.get("search") is None:
+            await session.set_agent_state(
+                _SCIENTIST_STATE_NAMESPACE,
+                self._state_payload(None, (), status="running"),
+            )
         async with BlockingPortal() as portal:
             try:
                 answer, usage, metadata = await anyio.to_thread.run_sync(

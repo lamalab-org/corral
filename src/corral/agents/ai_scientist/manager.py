@@ -1,5 +1,6 @@
 """Deterministic progressive experiment orchestration."""
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from itertools import cycle
 from math import sqrt
@@ -68,6 +69,7 @@ class ExperimentManager:
         trace: JSONLTraceWriter,
         initial_llm_calls: int = 0,
         initial_llm_tokens: int = 0,
+        on_checkpoint: Callable[[ScientistState, ExecutionPool], None] | None = None,
     ) -> None:
         if max_llm_calls < 1:
             raise ValueError("max_llm_calls must be at least 1")
@@ -81,15 +83,28 @@ class ExperimentManager:
         self.trace = trace
         self.initial_llm_calls = initial_llm_calls
         self.initial_llm_tokens = initial_llm_tokens
+        self.on_checkpoint = on_checkpoint
 
     def execute_search(
         self, state: ScientistState, pool: ExecutionPool
     ) -> ScientistState:
         """Execute the deterministic experiment-search lifecycle."""
-        self._transition(state, ResearchStage.PRELIMINARY)
-        self._begin_stage(state, ResearchStage.PRELIMINARY, seed=None)
-        self._preliminary(state, pool)
-        stage_winner = self._finish_stage(state, pool, ResearchStage.PRELIMINARY)
+        stages = list(ResearchStage)
+        if state.current_stage == ResearchStage.COMPLETE:
+            return state
+        if stages.index(state.current_stage) <= stages.index(ResearchStage.PRELIMINARY):
+            if ResearchStage.PRELIMINARY not in state.stages:
+                self._transition(state, ResearchStage.PRELIMINARY)
+                self._begin_stage(state, ResearchStage.PRELIMINARY, seed=None)
+            self._preliminary(state, pool)
+            stage_winner = self._finish_stage(state, pool, ResearchStage.PRELIMINARY)
+        else:
+            preliminary = state.stage_progress(ResearchStage.PRELIMINARY)
+            stage_winner = (
+                state.tree.get(preliminary.best_node_id)
+                if preliminary.best_node_id is not None
+                else None
+            )
 
         preliminary = state.stage_progress(ResearchStage.PRELIMINARY)
         if stage_winner is None or not preliminary.completion_criteria_met:
@@ -111,7 +126,8 @@ class ExperimentManager:
             return state
 
         if (
-            stage_winner is not None
+            stages.index(state.current_stage) <= stages.index(ResearchStage.TUNING)
+            and stage_winner is not None
             and (
                 state.formulation.has_tunable_parameters
                 or self.config.force_tuning_stage
@@ -119,8 +135,9 @@ class ExperimentManager:
             and self.config.tuning_node_budget > 0
             and self._can_create(state, pool, llm_calls=self._calls_per_node)
         ):
-            self._transition(state, ResearchStage.TUNING)
-            self._begin_stage(state, ResearchStage.TUNING, seed=stage_winner)
+            if ResearchStage.TUNING not in state.stages:
+                self._transition(state, ResearchStage.TUNING)
+                self._begin_stage(state, ResearchStage.TUNING, seed=stage_winner)
             self._iterative_stage(
                 state,
                 pool,
@@ -131,23 +148,34 @@ class ExperimentManager:
             stage_winner = (
                 self._finish_stage(state, pool, ResearchStage.TUNING) or stage_winner
             )
+        elif ResearchStage.TUNING in state.stages:
+            tuning = state.stage_progress(ResearchStage.TUNING)
+            if tuning.best_node_id is not None:
+                stage_winner = state.tree.get(tuning.best_node_id)
 
-        self._transition(state, ResearchStage.RESEARCH)
-        self._begin_stage(state, ResearchStage.RESEARCH, seed=stage_winner)
-        if stage_winner is not None:
-            self._iterative_stage(
-                state,
-                pool,
-                stage=ResearchStage.RESEARCH,
-                budget=self.config.research_node_budget,
-                default_type=NodeType.RESEARCH,
+        if stages.index(state.current_stage) <= stages.index(ResearchStage.RESEARCH):
+            if ResearchStage.RESEARCH not in state.stages:
+                self._transition(state, ResearchStage.RESEARCH)
+                self._begin_stage(state, ResearchStage.RESEARCH, seed=stage_winner)
+            if stage_winner is not None:
+                self._iterative_stage(
+                    state,
+                    pool,
+                    stage=ResearchStage.RESEARCH,
+                    budget=self.config.research_node_budget,
+                    default_type=NodeType.RESEARCH,
+                )
+            stage_winner = (
+                self._finish_stage(state, pool, ResearchStage.RESEARCH) or stage_winner
             )
-        stage_winner = (
-            self._finish_stage(state, pool, ResearchStage.RESEARCH) or stage_winner
-        )
+        elif ResearchStage.RESEARCH in state.stages:
+            research = state.stage_progress(ResearchStage.RESEARCH)
+            if research.best_node_id is not None:
+                stage_winner = state.tree.get(research.best_node_id)
 
-        self._transition(state, ResearchStage.VERIFICATION)
-        self._begin_stage(state, ResearchStage.VERIFICATION, seed=stage_winner)
+        if ResearchStage.VERIFICATION not in state.stages:
+            self._transition(state, ResearchStage.VERIFICATION)
+            self._begin_stage(state, ResearchStage.VERIFICATION, seed=stage_winner)
         if stage_winner is not None:
             self._verification(state, pool)
         self._finish_stage(state, pool, ResearchStage.VERIFICATION)
@@ -166,23 +194,26 @@ class ExperimentManager:
             self._remaining_node_capacity(state),
             pool.remaining_calls,
         )
-        root_count = self._affordable_candidate_count(root_limit)
-        if root_count <= 0:
-            return
-        proposals = self._propose(
-            state,
-            stage=ResearchStage.PRELIMINARY,
-            node_type=NodeType.DRAFT,
-            count=root_count,
-            parent=None,
+        root_count = (
+            0
+            if state.tree.by_stage(ResearchStage.PRELIMINARY)
+            else self._affordable_candidate_count(root_limit)
         )
-        self._execute_candidates(
-            state,
-            pool,
-            proposals,
-            parent=None,
-            substage_id=self._current_substage_id(state, ResearchStage.PRELIMINARY),
-        )
+        if root_count > 0:
+            proposals = self._propose(
+                state,
+                stage=ResearchStage.PRELIMINARY,
+                node_type=NodeType.DRAFT,
+                count=root_count,
+                parent=None,
+            )
+            self._execute_candidates(
+                state,
+                pool,
+                proposals,
+                parent=None,
+                substage_id=self._current_substage_id(state, ResearchStage.PRELIMINARY),
+            )
 
         while (
             self._search_node_count(state, ResearchStage.PRELIMINARY)
@@ -1254,6 +1285,8 @@ class ExperimentManager:
         self._update_usage(state, pool)
         state.llm_calls = self._llm_calls_used
         state.llm_tokens = self._llm_tokens_used
+        if self.on_checkpoint is not None:
+            self.on_checkpoint(state, pool)
         return pending
 
     @staticmethod

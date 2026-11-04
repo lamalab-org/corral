@@ -13,7 +13,7 @@ from corral.agents.ai_scientist.search.nodes import (
 )
 from corral.agents.ai_scientist.search.selector import TreeSelector
 from corral.agents.ai_scientist.search.tree import ExperimentTree
-from corral.agents.ai_scientist.state import TaskFormulation
+from corral.agents.ai_scientist.state import ScientistState, TaskFormulation
 
 
 def evaluated_node(
@@ -67,6 +67,31 @@ def test_journal_keeps_reliable_evidence_from_sibling_branches():
 
     assert [node_id for node_id, _ in journal.observations] == ["left", "right"]
     assert {claim.text for claim in journal.claims} == {"fact X", "fact Y"}
+
+
+def test_scientist_search_snapshot_restores_tree_journal_and_node_ids():
+    from corral.agents import AIScientistAgent
+
+    state = ScientistState(
+        task_prompt="measure",
+        tools=[],
+        formulation=TaskFormulation(objective="measure", required_answer="number"),
+    )
+    node = evaluated_node("node_0004", conclusion="measured")
+    state.tree.add(node)
+    state.journal.integrate(node)
+    state.current_stage = ResearchStage.RESEARCH
+    state.scientific_tool_calls = 2
+
+    restored = ScientistState.from_snapshot(
+        AIScientistAgent._search_snapshot(state), task_prompt="measure", tools=[]
+    )
+
+    assert restored.tree.get("node_0004") == node
+    assert restored.tree.next_id() == "node_0005"
+    assert restored.journal.as_dict() == state.journal.as_dict()
+    assert restored.current_stage == ResearchStage.RESEARCH
+    assert restored.scientific_tool_calls == 2
 
 
 def test_journal_does_not_promote_partial_node_conclusions_to_claims():
