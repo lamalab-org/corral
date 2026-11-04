@@ -355,7 +355,7 @@ class MolecularDynamicsEnvironment(Environment):
 
 def _md_task_prompt(env: Environment, state: ExecutionState) -> str:
     """Generate the MD task prompt with resource and logging guidance."""
-    prompt = env._default_task_prompt(state)
+    prompt = env._default_task_prompt(state, include_task_name=False)
 
     scorer = env.current_task.scoring_fn
     if env.workspace_path:

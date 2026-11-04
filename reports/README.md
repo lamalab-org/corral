@@ -28,8 +28,12 @@ Start the local trace browser from the repository root (Python 3.9 or newer;
 no extra dependencies):
 
 ```bash
+git lfs pull --include='reports/**' --exclude=''
 python3 reports/serve_traces.py --open
 ```
+
+The download needs Git LFS and retrieves report artifacts, including the Corral MD
+CSV indexes. It only needs to be repeated when new LFS artifacts are added.
 
 Open **http://127.0.0.1:8765**. Filter and group trials by **agent, environment,
 and model**, with additional filters for level, outcome, and saved errors.
@@ -49,6 +53,12 @@ recently opened trials are cached in memory. Both `.json.gz` and `.json.xz`
 reports are supported. Git LFS pointers and missing reports appear in the list;
 download LFS reports with `git lfs pull` to inspect their messages. Restart the
 browser after rebuilding CSV indexes.
+
+If an index is still an LFS pointer, the browser warns in the terminal and skips
+that environment while serving the available indexes. Empty indexes or indexes
+missing required columns are also skipped with a warning. If no readable trials
+remain, startup exits with recovery instructions. Download or rebuild the affected
+indexes and restart to include those environments.
 
 Use `--port 9000` for a different port or `--reports /path/to/reports` for another
 collection with the same layout. The server binds to `127.0.0.1` and serves only

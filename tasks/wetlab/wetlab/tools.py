@@ -1177,7 +1177,7 @@ def filter_solution(wetlab, label: str) -> str:
 def add_precipitate_to_solution(
     wetlab, test_label: str, prec_label: str, sol_label: str, sol_vol: int
 ) -> str:
-    """[BRIEF] Adds a precipitate to a specific volume of a solution and returns observations about the changes in the amount/color of the added precipitate or the solution color. [/BRIEF]
+    """[BRIEF] Adds a precipitate to a specific volume of a solution and returns observations about the changes in the amount/color of the added precipitate or the solution color. The solution volume `sol_vol` must be at least 4 mL. [/BRIEF]
 
     [DETAILED] Draws `sol_vol` mL of `sol_label` (which must not contain any precipitates), adds to it all of the precipitate `prec_label` and reports observations about any changes in the color or the amount of the added precipitate and any color changes in the solution. It also adds the resulting solution to the Inventory and labels it `test_label`. [/DETAILED]
 

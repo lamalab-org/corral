@@ -46,7 +46,7 @@ def recording_input(source: str, trajectory: str, *, level: int = 2) -> str:
     first = next(
         (i for i, line in enumerate(lines) if line.split()[:1] == ["run"]), None
     )
-    _require(first is not None, "Task 1 recording needs a run command in the input")
+    _require(first is not None, "LAMMPS recording needs a run command in the input")
     if level == 1:
         result = []
         for line in lines:
@@ -59,11 +59,21 @@ def recording_input(source: str, trajectory: str, *, level: int = 2) -> str:
                 )
             result.append(line)
         return "\n".join(result) + "\n"
+    dump_ids = {
+        fields[1]
+        for line in lines
+        if len(fields := line.split()) > 1 and fields[0] == "dump"
+    }
+    dump_id = "md_trajectory"
+    suffix = 0
+    while dump_id in dump_ids:
+        suffix += 1
+        dump_id = f"md_trajectory_{suffix}"
     lines.insert(
         first,
-        f'dump corral_task1 all custom $(ceil(1.0/dt):%.0f) "{trajectory}" '
+        f'dump {dump_id} all custom $(ceil(1.0/dt):%.0f) "{trajectory}" '
         + " ".join(DUMP_COLUMNS)
-        + "\ndump_modify corral_task1 sort id format float %.16g",
+        + f"\ndump_modify {dump_id} sort id format float %.16g",
     )
     # Reapply thermo output before each run because thermo_style can be reset.
     result = ["echo both"]

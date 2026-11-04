@@ -189,8 +189,13 @@ def _inputs(tmp_path: Path) -> Path:
     return workspace
 
 
-def test_persistent_modal_workspace_and_delta_sync(tmp_path: Path) -> None:
-    workspace = _inputs(tmp_path)
+@pytest.mark.parametrize("legacy_journal", [False, True])
+def test_persistent_modal_workspace_and_delta_sync(tmp_path: Path, legacy_journal) -> None:
+    workspace = _inputs(tmp_path).rename(tmp_path / "level_2_task_10-private-name")
+    if legacy_journal:
+        journal_path, journal = bridge._load_journal(workspace, "release-1", "simulations")
+        del journal["run_id"]
+        bridge._save_journal(journal_path, journal)
     volume = _Volume()
     initializer = _Initializer(volume)
     function = _Function(volume)
@@ -203,8 +208,27 @@ def test_persistent_modal_workspace_and_delta_sync(tmp_path: Path) -> None:
     assert downloaded == 4
     assert log.read_bytes() == b"LAMMPS log\n"
     assert len(function.calls) == 1
-    assert "/corral/runs/workspace/actions/action-1.json" in volume.files
+    run_id = function.calls[0].arguments[0]
+    if legacy_journal:
+        assert run_id == workspace.name
+    else:
+        assert workspace.name not in run_id
+        assert "task" not in run_id
+        assert len(run_id) == 32
+        assert int(run_id, 16) >= 0
+        assert json.loads(bridge._journal_path(workspace).read_text())["run_id"] == run_id
+    assert f"/corral/runs/{run_id}/actions/action-1.json" in volume.files
     assert not volume.removed
+
+    if not legacy_journal:
+        # Reconstructing controller state must still find the committed remote
+        # action instead of repeating an expensive simulation under a new ID.
+        bridge._journal_path(workspace).unlink()
+        bridge.run_lammps_in_modal(
+            workspace, "run.in", action_id="action-1", release_id="release-1",
+            volume=volume, remote_function=function, initializer=initializer,
+        )
+        assert len(function.calls) == 1
 
     volume.uploaded.clear()
     (workspace / "structure.data").unlink()
@@ -213,9 +237,10 @@ def test_persistent_modal_workspace_and_delta_sync(tmp_path: Path) -> None:
         workspace, "run.in", action_id="action-2", release_id="release-1",
         volume=volume, remote_function=function, initializer=initializer,
     )
-    assert volume.uploaded == ["/corral/runs/workspace/workspace/run.in"]
-    assert "/corral/runs/workspace/workspace/structure.data" in volume.removed
+    assert volume.uploaded == [f"/corral/runs/{run_id}/workspace/run.in"]
+    assert f"/corral/runs/{run_id}/workspace/structure.data" in volume.removed
     assert len(function.calls) == 2
+    assert function.calls[1].arguments[0] == run_id
     assert (workspace / "structure.data").exists() is False
 
 
@@ -332,7 +357,8 @@ def test_gpu_python_uses_same_persistent_protocol(tmp_path: Path) -> None:
     assert all((workspace / value.removeprefix("/workspace/")).is_file() for value in logs.values())
     assert (workspace / "gpu.out").read_bytes() == b"GPU output\n"
     assert not (workspace / "old.dat").exists()
-    assert volume.json("/corral/runs/workspace/actions/python-1.json")["kind"] == "python"
+    run_id = function.calls[0].arguments[0]
+    assert volume.json(f"/corral/runs/{run_id}/actions/python-1.json")["kind"] == "python"
 
 
 def test_recover_remote_completion_without_reexecuting(tmp_path: Path, monkeypatch) -> None:
@@ -423,7 +449,8 @@ def test_failed_attempt_retains_diagnostics_without_publishing(tmp_path: Path) -
         )
     assert not (workspace / "diagnostic.log").exists()
     assert not (workspace / "run.log").exists()
-    assert "/corral/runs/workspace/attempts/action-1/workspace/diagnostic.log" in volume.files
+    run_id = function.calls[0].arguments[0]
+    assert f"/corral/runs/{run_id}/attempts/action-1/workspace/diagnostic.log" in volume.files
 
 
 def test_execution_release_pin_rejects_journal_drift(tmp_path: Path) -> None:
@@ -527,6 +554,7 @@ def test_md_prompt_requires_absolute_workspace_paths(tmp_path: Path) -> None:
     )
     started = environment.initial_event(execution_id="execution")
     prompt = started.task["prompt"]
+    assert not prompt.startswith("Task:")
     assert prompt.count("canonical absolute paths under `/workspace`") == 1
     assert prompt.count("Available input data:") == 1
     assert "- temperature: 300" in prompt
@@ -824,7 +852,8 @@ def test_runtime_recovers_same_action_after_remote_success(tmp_path, monkeypatch
             invocation_id, = state.tool_invocations
             assert state.tool_invocations[invocation_id].status == "running"
             assert len(function.calls) == 1
-            assert f"/corral/runs/{workspace.name}/actions/action-1.json" in volume.files
+            run_id = function.calls[0].arguments[0]
+            assert f"/corral/runs/{run_id}/actions/action-1.json" in volume.files
             if interruption == "download":
                 monkeypatch.setattr(bridge, "_sync_result", original)
             else:

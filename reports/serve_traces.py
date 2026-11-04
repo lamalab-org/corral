@@ -185,14 +185,42 @@ def number(value):
 
 
 def load_index(reports: Path):
+    reports = reports.resolve()
     traces = []
     locations = {}
     availability = {}
+    required_columns = {
+        "report_file",
+        "task_id",
+        "trial",
+        "environment",
+        "agent",
+        "model",
+        "level",
+        "execution_id",
+        "run_id",
+    }
     for index in sorted(reports.glob("*/trials.csv")):
         with index.open(newline="", encoding="utf-8") as source:
-            for row in csv.DictReader(source):
+            if source.read(len(LFS_POINTER)) == LFS_POINTER.decode():
+                sys.stderr.write(
+                    f"Warning: skipping {index}: Git LFS pointer. Run `git lfs pull` "
+                    "in its repository and restart the browser to include these trials.\n"
+                )
+                continue
+            source.seek(0)
+            reader = csv.DictReader(source)
+            missing = required_columns - set(reader.fieldnames or ())
+            if missing:
+                sys.stderr.write(
+                    f"Warning: skipping {index}: missing columns: "
+                    f"{', '.join(sorted(missing))}. Rebuild this index with "
+                    "reports/build_index.py and restart the browser.\n"
+                )
+                continue
+            for row in reader:
                 report = (index.parent / row["report_file"]).resolve()
-                if not report.is_relative_to(reports.resolve()):
+                if not report.is_relative_to(reports):
                     raise ValueError(f"Report path escapes reports directory: {index}")
                 if report not in availability:
                     if not report.is_file():
@@ -450,7 +478,11 @@ def main():
     args = parser.parse_args()
     store = TraceStore(args.reports.resolve())
     if not store.traces:
-        parser.error(f"No trials.csv indexes found under {args.reports}")
+        parser.error(
+            f"No readable trials found in trials.csv indexes under {args.reports}. "
+            "Run `git lfs pull` in the reports repository if indexes are LFS pointers, "
+            "or rebuild the indexes with reports/build_index.py."
+        )
     server = ThreadingHTTPServer(("127.0.0.1", args.port), TraceHandler)
     server.daemon_threads = True
     server.store = store

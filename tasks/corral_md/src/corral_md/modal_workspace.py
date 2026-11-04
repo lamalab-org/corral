@@ -352,6 +352,9 @@ def _load_journal(
     journal = {
         "schema": _SCHEMA,
         "workspace": str(root),
+        # Receipts and remote paths are agent-visible; keep task labels private.
+        # Derive the ID so remote actions can recover even if this journal is lost.
+        "run_id": hashlib.sha256(root.name.encode()).hexdigest()[:32],
         "release_id": release_id,
         "volume_name": volume_name or configured_volume_name(),
         "actions": {},
@@ -484,7 +487,9 @@ def _execute_impl(
         _PINNED_VOLUME.get(),
     )
     release = journal["release_id"]
-    run_id = _identifier(root.name, "run ID")
+    # Journals predating opaque IDs must keep their existing remote run so
+    # interrupted actions can still recover without repeating a simulation.
+    run_id = _identifier(journal.get("run_id", root.name), "run ID")
     remote_run = _ROOT / run_id
     action_manifest = remote_run / "actions" / f"{action}.json"
     failure_manifest = remote_run / "actions" / f"{action}.failure.json"

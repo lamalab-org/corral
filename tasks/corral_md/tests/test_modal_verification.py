@@ -810,6 +810,8 @@ def short_config():
 def test_controlled_runner_records_actual_steps_and_continuity(tmp_path, short_config):
     runner = module("trusted_md")
     observed = runner.run(short_config, tmp_path, calculator=EMT())
+    assert observed["runner"] == "ase.langevin.v1"
+    assert "corral.task" not in (tmp_path / "observed.json").read_text()
     assert observed["total_steps"] == 32
     frames = read(tmp_path / "production.traj", ":")
     assert len(frames) == 24

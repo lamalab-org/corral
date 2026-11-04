@@ -388,7 +388,7 @@ class VerificationRuntime:
             observed = w._load(output / "observed.json")
             if (
                 observed.get("config") != config
-                or observed.get("runner") != "corral.task10.langevin.v1"
+                or observed.get("runner") != "ase.langevin.v1"
             ):
                 raise RuntimeError("Controlled MD record differs from its request")
             record = {

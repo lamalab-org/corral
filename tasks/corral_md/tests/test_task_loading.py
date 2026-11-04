@@ -196,7 +196,7 @@ def test_regression_prompt_requires_agent_written_calculations():
 
 @pytest.mark.parametrize("level", [1, 2])
 @pytest.mark.parametrize("number", range(1, 11))
-def test_agent_workspace_and_prompt_do_not_supply_recording_helpers(
+def test_agent_workspace_and_prompt_do_not_expose_internal_task_details(
     tmp_path, level, number
 ):
     task_id = f"level_{level}_task_{number}"
@@ -220,6 +220,19 @@ def test_agent_workspace_and_prompt_do_not_supply_recording_helpers(
         submission="{}",
     )
     prompt = environment.get_task_prompt(state)
+    assert task.name not in prompt
+    assert task_id not in prompt
+    assert not prompt.startswith("Task:")
+    assert task.description in prompt
+    assert task.submission_format in prompt
+    for key, value in task.initial_input.items():
+        assert f"- {key}: {value}" in prompt
+    # Other environments keep the existing default; internal identities remain
+    # available for orchestration and reporting.
+    assert environment._default_task_prompt(state).startswith(f"Task: {task.name}\n")
+    assert environment.task_id == task_id
+    assert environment.current_task.name == task.name
+    assert environment.current_task.scoring_fn is task.scoring_fn
     assert "Recorder" not in prompt
     assert "_recording.py" not in prompt
 

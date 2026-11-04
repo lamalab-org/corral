@@ -702,6 +702,8 @@ def test_recording_adapter_preserves_run_and_physics_commands(level):
     recorded = scoring.recording_input(
         source, "/workspace/output/run.lammpstrj", level=level
     )
+    assert "corral" not in recorded.lower()
+    assert "task1" not in recorded.lower()
     assert all(line in recorded.splitlines() for line in source.splitlines())
     if level == 1:
         assert recorded.splitlines() == [
@@ -719,9 +721,29 @@ def test_recording_adapter_preserves_run_and_physics_commands(level):
         assert recorded == scoring.recording_input(
             source, "/workspace/output/run.lammpstrj"
         )
-        assert recorded.count("dump corral_task1") == 1
+        assert recorded.count("dump md_trajectory") == 1
+        assert "dump_modify md_trajectory sort id format float %.16g" in recorded
         assert recorded.count("thermo_style custom step time temp press density") == 2
         assert "id type xu yu zu vx vy vz" in recorded
+
+
+def test_recording_adapter_preserves_existing_dump_ids():
+    source = (
+        "dump md_trajectory all custom 100 original.dump id type x y z\n"
+        "dump md_trajectory_1 all custom 100 second.dump id type x y z\n"
+        "run 1000\n"
+    )
+    recorded = scoring.recording_input(source, "/workspace/output/run.lammpstrj")
+    assert all(line in recorded.splitlines() for line in source.splitlines())
+    assert "dump md_trajectory_2 all custom" in recorded
+    assert "dump_modify md_trajectory_2 sort id format float %.16g" in recorded
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_recording_error_does_not_expose_task_name(level):
+    with pytest.raises(scoring.EvidenceError) as error:
+        scoring.recording_input("units metal\n", "/workspace/output/run.lammpstrj", level=level)
+    assert str(error.value) == "LAMMPS recording needs a run command in the input"
 
 
 @pytest.mark.parametrize("level", [1, 2])
@@ -752,7 +774,7 @@ def test_environment_records_task1_and_seeds_no_examples(
                 "thermo_modify format float %.16g\nrun 1000\n"
             )
         else:
-            assert "dump corral_task1" in recorded.read_text()
+            assert "dump md_trajectory" in recorded.read_text()
         log = root / "output" / "heat.recorded.log"
         log.write_text("Step Temp\n1000 2500\nLoop time of 1\n")
         return log
