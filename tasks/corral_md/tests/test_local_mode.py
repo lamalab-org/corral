@@ -1,4 +1,4 @@
-"""Default MD runs use local simulation and scoring; Modal requires opt-in."""
+"""MD benchmarks use local compute and reject Modal during initialization."""
 
 import json
 from pathlib import Path
@@ -44,8 +44,7 @@ def test_local_image_assets_use_private_fallback_and_preserve_explicit_paths(
     assert local_runtime.assets_directory() == image_assets
 
 
-@pytest.mark.parametrize("local", [False, True])
-def test_sandbox_rejects_legacy_public_image_assets(tmp_path, monkeypatch, local):
+def test_sandbox_rejects_legacy_public_image_assets(tmp_path, monkeypatch):
     from corral.runtime import permissions
 
     legacy_assets = _assets(tmp_path / "image")
@@ -60,8 +59,8 @@ def test_sandbox_rejects_legacy_public_image_assets(tmp_path, monkeypatch, local
     with pytest.raises(ValueError, match="Rebuild the MD image"):
         env.create_environments(
             work_dir=str(tmp_path / "work"),
-            local=local,
-            assets_dir=str(_assets(tmp_path / "private")) if local else None,
+            local=True,
+            assets_dir=str(_assets(tmp_path / "private")),
         )
 
 
@@ -83,6 +82,7 @@ def test_local_factory_uses_local_scoring_and_local_assets(
 
     monkeypatch.setattr(modal_workspace.modal.Function, "from_name", unexpected_modal)
     monkeypatch.setattr(modal_workspace.modal.Volume, "from_name", unexpected_modal)
+    monkeypatch.setenv("CORRAL_MD_VERIFICATION", "modal")
     environments = env.create_environments(
         work_dir=str(tmp_path / "work"), level=level,
         assets_dir=str(assets), **backend_options,
@@ -112,26 +112,75 @@ def test_local_factory_uses_local_scoring_and_local_assets(
 
 
 @pytest.mark.parametrize("level", [1, 2])
-def test_modal_factory_remains_an_explicit_option(tmp_path, monkeypatch, level):
+@pytest.mark.parametrize("configured_assets", [False, True])
+def test_modal_factory_fails_before_initialization(
+    tmp_path, monkeypatch, level, configured_assets
+):
     monkeypatch.delenv("CORRAL_MD_ASSETS_DIR", raising=False)
-    monkeypatch.delenv("CORRAL_MD_VERIFICATION", raising=False)
+    assets = str(_assets(tmp_path)) if configured_assets else None
+
+    def unexpected_initialization(*_args, **_kwargs):
+        pytest.fail("Modal must be rejected before any benchmark initialization")
+
+    for name in ("assets_directory", "load_tasks_from_json", "build_environments"):
+        monkeypatch.setattr(env, name, unexpected_initialization)
     monkeypatch.setattr(
-        env, "assets_directory",
-        lambda *_: pytest.fail("Explicit Modal runs must not require local assets"),
+        modal_workspace.modal.Function, "from_name", unexpected_initialization
     )
+    monkeypatch.setattr(
+        modal_workspace.modal.Volume, "from_name", unexpected_initialization
+    )
+    with pytest.raises(ValueError, match="Modal execution is disabled"):
+        env.create_environments(
+            work_dir=str(tmp_path / "work"), level=level,
+            local=False, assets_dir=assets,
+        )
+    assert not (tmp_path / "work").exists()
+
+
+@pytest.mark.parametrize("sandbox", ["local", "docker"])
+def test_modal_benchmark_stops_before_agent_or_sandbox_start(
+    tmp_path, monkeypatch, capsys, sandbox
+):
+    from corral import cli, orchestration
+
+    def unexpected_start(*_args, **_kwargs):
+        pytest.fail("A rejected Modal benchmark must not start execution")
+
+    monkeypatch.setattr(cli, "_configured_agent", unexpected_start)
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(
+        orchestration.DockerTaskLauncher, "preflight", unexpected_start
+    )
+    monkeypatch.setattr(modal_workspace.modal.Function, "from_name", unexpected_start)
+    monkeypatch.setattr(modal_workspace.modal.Volume, "from_name", unexpected_start)
+    # The loader records this variable; keep that change scoped to this test.
+    monkeypatch.setenv("CORRAL_WORK_DIR", str(tmp_path / "work"))
+    arguments = [
+        "bench", "--environment", "corral_md", "--agent", "tool-calling",
+        "--sandbox", sandbox, "--env-kwargs", '{"local": false}',
+    ]
+    with pytest.raises(SystemExit) as exc:
+        cli.main(arguments)
+    assert exc.value.code == 2
+    assert "Modal execution is disabled" in capsys.readouterr().err
+
+
+def test_missing_local_resource_does_not_fall_back_to_modal(
+    tmp_path, monkeypatch, md_assets
+):
     selected = env.create_environments(
-        work_dir=str(tmp_path / "work"), level=level, local=False,
-    )[f"level_{level}_task_4"]
-    assert selected.local_mode is False
-    assert selected.for_task("modal-prompt-test").local_mode is False
-    assert "run_verified_md" in selected.tools
-    assert selected.tools["run_lammps"].trusted
-    assert not isinstance(
-        selected.current_task.scoring_fn.verifier,
-        (Level1LocalVerifier, LocalVerifier),
-    )
-    assert selected.current_task.scoring_fn.verifier is not None
-    assert selected.file_resource_sources == {}
+        work_dir=str(tmp_path / "work"), assets_dir=str(md_assets),
+    )["level_1_task_4"]
+    selected.file_resource_sources.clear()
+
+    def unexpected_modal(*_args, **_kwargs):
+        pytest.fail("Missing local resources must not be fetched from Modal")
+
+    monkeypatch.setattr(modal_workspace.modal.Function, "from_name", unexpected_modal)
+    monkeypatch.setattr(modal_workspace.modal.Volume, "from_name", unexpected_modal)
+    with pytest.raises(RuntimeError, match="has no controller source binding"):
+        selected.initial_event(execution_id="missing-local-resource")
 
 
 @pytest.mark.parametrize("level", [1, 2])

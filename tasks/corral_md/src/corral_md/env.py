@@ -202,7 +202,11 @@ class MolecularDynamicsEnvironment(Environment):
     def ensure_file_resources_durable(
         self, names: tuple[str, ...] | None = None
     ) -> None:
-        """Cache pinned Modal assets once, then use ordinary Corral resources."""
+        """Use local resources in local mode; cache Modal assets only otherwise."""
+        if self.local_mode:
+            # Missing local resources must fail instead of falling back to Modal.
+            super().ensure_file_resources_durable(names)
+            return
         selected = tuple(self.file_resources) if names is None else names
         relative_paths = asset_relative_paths()
         with self._resource_materialization_lock:
@@ -395,7 +399,16 @@ def create_environments(
     local: bool = True,
     assets_dir: str | None = None,
 ) -> dict[str, Environment]:
-    """Build MD runs with local simulation and scoring unless Modal is selected."""
+    """Build local MD runs, rejecting Modal before benchmark initialization."""
+    if type(local) is not bool:
+        raise ValueError("local must be a boolean")
+    if not local:
+        raise ValueError(
+            "Modal execution is disabled for Corral MD benchmarks. "
+            "Remove local=False or set local=True in --env-kwargs to use "
+            "local CPUs/GPUs and local Docker verification. "
+            "The --sandbox option does not select the MD backend."
+        )
     # The shared environment loader can still pass the legacy selector.
     if subtask_level:
         raise ValueError("Corral MD has no subtasks; select level 1 or 2.")
@@ -410,8 +423,6 @@ def create_environments(
     )
     # Keep controller storage stable even when callers change their directory.
     work_dir = str(Path(work_dir).expanduser().resolve())
-    if type(local) is not bool:
-        raise ValueError("local must be a boolean")
     if permissions.enabled() and Path("/usr/local/share/corral-md-assets").exists():
         raise ValueError(
             "Rebuild the MD image with assets under /opt/corral/assets/corral_md "
