@@ -126,9 +126,9 @@ def test_task2_original_melt_matches_the_scoring_reference():
 
 
 @pytest.mark.parametrize("level", [1, 2])
-@pytest.mark.parametrize("local", [True, False])
+@pytest.mark.parametrize("backend_options", [{}, {"local": True}])
 def test_task2_agent_can_read_the_bundled_melt_before_simulation(
-    tmp_path, md_assets, monkeypatch, level, local
+    tmp_path, md_assets, monkeypatch, level, backend_options
 ):
     from zipfile import ZipFile
 
@@ -148,9 +148,10 @@ def test_task2_agent_can_read_the_bundled_melt_before_simulation(
     monkeypatch.setattr(md_environment, "asset_descriptors", lambda: descriptors)
 
     environment = create_environments(
-        work_dir=str(tmp_path / "work"), level=level, local=local,
-        assets_dir=str(md_assets),
+        work_dir=str(tmp_path / "work"), level=level,
+        assets_dir=str(md_assets), **backend_options,
     )[f"level_{level}_task_2"].for_task("melt-availability")
+    assert environment.local_mode is True
     started = environment.initial_event(execution_id="melt-availability")
     state = ExecutionState(
         through_commit_hash="0" * 64,

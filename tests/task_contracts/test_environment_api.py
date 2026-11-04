@@ -139,6 +139,27 @@ class SubmitAgent:
         return AgentOutcome(status="completed", answer="api-contract-answer")
 
 
+@pytest.fixture
+def corral_md_assets(tmp_path, monkeypatch):
+    """Supply declared local assets for submit-only runs without model downloads."""
+    from corral_md import env
+    from corral_md.resources import RUNTIME_VERSION, asset_relative_paths
+
+    from corral.core.resources import declare_file_resource
+
+    root = tmp_path / "assets"
+    descriptors = {}
+    for name, relative in asset_relative_paths().items():
+        source = root / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(f"fixture: {relative}\n")
+        descriptors[name] = declare_file_resource(
+            name, source, runtime_version=RUNTIME_VERSION
+        )
+    monkeypatch.setattr(env, "asset_descriptors", lambda: descriptors)
+    monkeypatch.setenv("CORRAL_MD_ASSETS_DIR", str(root))
+
+
 @pytest.mark.parametrize(("benchmark", "level", "subtasks"), CONFIGURATIONS)
 def test_task_definitions_run_and_restore(
     benchmark, level, subtasks, tmp_path, monkeypatch, request
@@ -153,6 +174,8 @@ def test_task_definitions_run_and_restore(
         # This API check runs a fixed submit-only agent on the host. Stargazer's
         # restricted Docker workers are exercised by its own permission tests.
         env_kwargs["development_mode"] = True
+    elif benchmark == "corral_md":
+        request.getfixturevalue("corral_md_assets")
     # Do not supply repository_root: this also checks the CLI's default lookup.
     environments = load_environment_group(benchmark, env_kwargs=env_kwargs)
     tasks = {name: env.current_task for name, env in environments.items()}

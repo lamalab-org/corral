@@ -196,6 +196,7 @@ To tabulate pass@5 and pass^5 for every environment, agent, model and level
 from the `runs.csv` files:
 
 ```bash
+git lfs pull --include='reports/*/runs.csv' --exclude=''
 python reports/scores.py [<environment> ...] [--markdown scores.md]
 ```
 

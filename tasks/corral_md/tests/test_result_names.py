@@ -127,13 +127,20 @@ def test_normalization_does_not_change_evidence_identity(tmp_path):
     assert path.read_bytes() == before
 
 
-def test_short_zpe_allows_null_for_unstable_modes(tmp_path):
+def test_short_zpe_preserves_unstable_mode_rejection(tmp_path):
     path = palladium._submission(tmp_path, sign=-1)
+    original = palladium.score(path)
+    assert original["score"] == 0, original
     data = json.loads(path.read_text())
     data["results"]["zpe"] = data["results"].pop("zpe_eV_per_atom")
     assert data["results"]["zpe"] is None
     path.write_text(json.dumps(data))
-    assert palladium.score(path)["score"] == 1
+    current = palladium.score(path)
+    assert current["score"] == 0, current
+    assert current["calculated_results"] == original["calculated_results"]
+    assert current["checks"] == original["checks"]
+    assert current["calculated_results"]["spectrum_status"] == "unstable"
+    assert current["calculated_results"]["zpe_eV_per_atom"] is None
 
 
 @pytest.mark.parametrize("value", [None, True, "1576.88", float("nan"), float("inf")])
