@@ -36,7 +36,6 @@ from openhands.sdk.mcp.tool import MCP_TOOL_TIMEOUT_SECONDS
 from corral.agents.openhands import (
     _OPENHANDS_DEFAULT_EXECUTOR_TIMEOUT_S,
     OpenHandsAgent,
-    _mcp_call_timeout_s,
     _TimeoutMCPToolProvider,
 )
 from corral.backend.mcp import open_mcp_host
@@ -80,17 +79,17 @@ def test_executor_timeout_constant_tracks_installed_sdk():
     assert float(MCP_TOOL_TIMEOUT_SECONDS) == _OPENHANDS_DEFAULT_EXECUTOR_TIMEOUT_S
 
 
-def test_tool_timeout_metadata_describes_per_call_policy(monkeypatch):
-    """The run records a fallback and grace, not a fixed effective deadline."""
+def test_tool_timeout_metadata_describes_fixed_sdk_wait(monkeypatch):
+    """The metadata and prompt describe the same fixed limit used by the SDK."""
     monkeypatch.setattr("corral.agents.openhands.get_default_tools", list)
     agent = OpenHandsAgent(model="openai/gpt-5.6")
-    assert agent.tool_timeout_s == 100_000
+    assert agent.tool_timeout_s == 10_000
     metadata = agent._harness_metadata("http://localhost/mcp", "brief", [], None, 10)
-    assert metadata["configured_mcp_timeout_s"] == 100_000
-    assert metadata["effective_tool_timeout_s"] is None
-    assert metadata["openhands_executor_timeout_s"] is None
-    assert metadata["tool_timeout_policy"] == "argument_or_schema_default_plus_grace"
-    assert metadata["tool_timeout_grace_s"] == 10
+    assert metadata["configured_mcp_timeout_s"] == 10_000
+    assert metadata["effective_tool_timeout_s"] == 10_000
+    assert metadata["openhands_executor_timeout_s"] == 10_000
+    assert metadata["tool_timeout_policy"] == "fixed_sdk_wait"
+    assert "10000 seconds" in agent._system_message_suffix(False)
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
@@ -99,45 +98,33 @@ def test_invalid_tool_timeout_is_rejected(timeout):
         OpenHandsAgent(tool_timeout_s=timeout)
 
 
-@pytest.mark.parametrize(
-    "value", [None, True, "600", 0, -1, float("nan"), float("inf"), 10**400]
-)
-def test_invalid_call_timeout_keeps_fallback(value):
-    schema = {"properties": {"timeout": {"type": "number", "default": 900}}}
-    assert _mcp_call_timeout_s({"timeout": value}, schema, 1202) == 1202
-
-
-def test_undeclared_timeout_argument_does_not_change_deadline():
-    assert _mcp_call_timeout_s({"timeout": 3600}, {"properties": {}}, 1202) == 1202
-
-
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"])
 @pytest.mark.parametrize("with_transcript_flush", [False, True])
 @pytest.mark.parametrize(
-    ("parameter", "field", "arguments", "fallback", "expected"),
+    ("parameter", "field", "arguments", "configured", "expected"),
     [
-        (None, {}, {}, None, 100_000),
+        (None, {}, {}, None, 10_000),
         (None, {}, {}, 1202, 1202),
         (None, {}, {}, 1800, 1800),
-        ("timeout", {"default": 900}, {"timeout": 30}, None, 40),
-        ("timeout", {"default": 900}, {}, None, 910),
-        ("timeout", {"default": 900}, {"timeout": 3600}, 1202, 3610),
-        ("timeout", {"default": 900}, {"timeout": 30}, 1202, 40),
-        ("timeout", {"default": 900}, {}, 1202, 910),
+        ("timeout", {"default": 900}, {"timeout": 30}, None, 10_000),
+        ("timeout", {"default": 900}, {}, None, 10_000),
+        ("timeout", {"default": 900}, {"timeout": 3600}, 1202, 1202),
+        ("timeout", {"default": 900}, {"timeout": 30}, 1202, 1202),
+        ("timeout", {"default": 900}, {}, 1202, 1202),
         ("timeout", {}, {}, 1202, 1202),
-        ("timeout_seconds", {"default": 120}, {}, 1202, 130),
-        ("timeout_seconds", {}, {"timeout_seconds": 60}, 1202, 70),
-        ("timeout_s", {}, {"timeout_s": 0.5}, 1202, 10.5),
+        ("timeout_seconds", {"default": 120}, {}, 1202, 1202),
+        ("timeout_seconds", {}, {"timeout_seconds": 60}, 1202, 1202),
+        ("timeout_s", {}, {"timeout_s": 0.5}, 1202, 1202),
     ],
 )
-async def test_real_mcp_call_uses_per_call_deadlines_at_every_layer(
+async def test_real_mcp_call_uses_fixed_timeout_at_every_layer(
     monkeypatch,
     tmp_path,
     parameter,
     field,
     arguments,
-    fallback,
+    configured,
     expected,
     with_transcript_flush,
 ):
@@ -211,7 +198,7 @@ async def test_real_mcp_call_uses_per_call_deadlines_at_every_layer(
     ):
         adapter = OpenHandsAgent(
             api_key="offline-test",
-            **({"tool_timeout_s": fallback} if fallback is not None else {}),
+            **({"tool_timeout_s": configured} if configured is not None else {}),
         )
         agent = adapter._build_agent(adapter._make_llm(), endpoint.url, False)
 
@@ -278,7 +265,7 @@ async def test_mcp_native_name_collision_keeps_alias_with_transcript_flush(
 
         def call_tool():
             provider = _TimeoutMCPToolProvider(
-                100_000,
+                10_000,
                 native_tool_names={name},
                 before_tool=flush_messages if with_transcript_flush else None,
             )
@@ -299,10 +286,8 @@ async def test_mcp_native_name_collision_keeps_alias_with_transcript_flush(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ["asyncio"])
-async def test_concurrent_calls_keep_independent_timeouts_and_recover(monkeypatch):
-    """A short timed-out call must not cut off a longer call or poison retries."""
-    # Keep the real timeout/cleanup test fast; the tests above pin the 10s grace.
-    monkeypatch.setattr("corral.agents.openhands._TOOL_TIMEOUT_GRACE_S", 0.1)
+async def test_concurrent_calls_share_fixed_timeout_and_recover(monkeypatch):
+    """Argument timeouts do not override the SDK limit or affect other calls."""
     schema = {
         "type": "function",
         "function": {
@@ -348,20 +333,21 @@ async def test_concurrent_calls_keep_independent_timeouts_and_recover(monkeypatc
                 tool = client.tools[0]
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     long = pool.submit(
-                        tool, MCPToolAction(data={"timeout": 3, "duration": 2.2})
+                        tool, MCPToolAction(data={"timeout": 30, "duration": 2.2})
                     )
                     anyio.from_thread.run(started.wait)
                     short = pool.submit(
                         tool, MCPToolAction(data={"timeout": 0.1, "duration": 0.5})
                     )
-                    assert short.result().is_error
-                    assert not long.result().is_error
+                    assert not short.result().is_error
+                    assert long.result().is_error
                 assert not tool(
                     MCPToolAction(data={"timeout": 1, "duration": 0})
                 ).is_error
 
         await anyio.to_thread.run_sync(call_tools)
     assert len(call_clients) == 3
+    assert len({id(client) for client in call_clients}) == 1
     assert all(client._closed for client in call_clients)
 
 

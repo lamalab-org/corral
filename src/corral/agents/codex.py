@@ -25,7 +25,6 @@ try:
         Codex,
         CodexConfig,
         Sandbox,
-        Thread,
         TurnHandle,
     )
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
@@ -34,10 +33,8 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
         "'codex' extra. Install it with `pip install 'corral[codex]'`."
     ) from exc
 
-from corral.agents._codex_mcp import CodexWithMCPTools, MCPToolBridge, timeout_tools
 from corral.agents._mcp_timeout import (
     DEFAULT_TOOL_TIMEOUT_S,
-    TOOL_TIMEOUT_GRACE_S,
     mcp_timeout_prompt,
 )
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
@@ -106,8 +103,6 @@ class _RunState:
     """Mutable scratch owned by one invocation, never by the agent instance."""
 
     native_workspace: str | None = None
-    available_tools: list[dict[str, Any]] = field(default_factory=list)
-    bridged_tool_names: set[str] = field(default_factory=set)
     messages: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -171,11 +166,11 @@ class CodexAgent(BaseAgent):
             reported with `status="timeout"`. Defaults to None (no timeout).
         startup_timeout_s (float, optional): Timeout Codex waits for the corral
             MCP server to initialise. Defaults to 30.
-        tool_timeout_s (float, optional): Fallback MCP timeout (100,000 seconds,
-            about 27.8 hours, matching Claude Code's default MCP ceiling).
-            A declared timeout, timeout_seconds, or timeout_s argument, or its
-            schema default, takes precedence and receives 10 seconds grace.
-        api_endpoint (str, optional): Unused by the native harness.
+        tool_timeout_s (float, optional): Fixed SDK wait limit for each MCP call.
+            Defaults to 10,000 seconds (about 2.8 hours). Tools enforce their
+            own execution limits independently.
+        api_endpoint (str, optional): Responses API base URL for the native
+            harness. Authentication still uses `OPENAI_API_KEY`.
         temperature (float, optional): Ignored by the Codex harness (the harness
             controls its own sampling; `reasoning_effort` is the tuning knob).
             Accepted for configuration consistency; the harness ignores it.
@@ -297,7 +292,10 @@ class CodexAgent(BaseAgent):
             f"tool_timeout_sec = {_toml_num(self.tool_timeout_s)}",
             "",
         ]
-        return "\n".join(lines)
+        config = "\n".join(lines)
+        if self.api_endpoint is not None:
+            config = f"openai_base_url = {_toml_str(self.api_endpoint)}\n\n{config}"
+        return config
 
     def _harness_metadata(
         self,
@@ -320,6 +318,7 @@ class CodexAgent(BaseAgent):
         )
         return {
             "model_requested": self.harness_model,
+            "api_endpoint": self.api_endpoint,
             "openai_codex_version": _sdk_version(),
             "python_version": platform.python_version(),
             "reasoning_effort": self.reasoning_effort,
@@ -327,10 +326,8 @@ class CodexAgent(BaseAgent):
             "streaming_enabled": True,
             "wall_clock_timeout_s": self.wall_clock_timeout_s,
             "tool_timeout_s": self.tool_timeout_s,
-            "tool_timeout_policy": "argument_or_schema_default_plus_grace",
-            "tool_timeout_grace_s": TOOL_TIMEOUT_GRACE_S,
-            "effective_tool_timeout_s": None,
-            "mcp_timeout_bridged_tools": [t["name"] for t in timeout_tools(tools)],
+            "tool_timeout_policy": "fixed_sdk_wait",
+            "effective_tool_timeout_s": self.tool_timeout_s,
             "startup_timeout_s": self.startup_timeout_s,
             "mcp_url": mcp_url,
             "tool_verbosity": verbosity,
@@ -360,12 +357,8 @@ class CodexAgent(BaseAgent):
         run: _RunState,
     ) -> str:
         """Drive the Codex harness to completion and return its answer."""
-        timed_tools = timeout_tools(run.available_tools)
-        timed_names = {tool["name"] for tool in timed_tools}
         (codex_home / "config.toml").write_text(
-            self._render_config_toml(
-                mcp_url, [name for name in tool_names if name not in timed_names]
-            ),
+            self._render_config_toml(mcp_url, tool_names),
             encoding="utf-8",
         )
 
@@ -378,16 +371,7 @@ class CodexAgent(BaseAgent):
             env={"CODEX_HOME": str(codex_home)},
         )
 
-        with (
-            MCPToolBridge(
-                mcp_url, timed_tools, self.tool_timeout_s, self.startup_timeout_s
-            ) as bridge,
-            (
-                CodexWithMCPTools(config, bridge)
-                if timed_tools
-                else Codex(config=config)
-            ) as codex,
-        ):
+        with Codex(config=config) as codex:
             # The isolated CODEX_HOME has no `auth.json`, and the harness does
             # not auto-authenticate the `/v1/responses` API from the
             # OPENAI_API_KEY env var alone. Explicitly log the key in so the
@@ -395,36 +379,14 @@ class CodexAgent(BaseAgent):
             # with "Missing bearer or basic authentication"). `run()` has
             # already verified OPENAI_API_KEY is present.
             codex.login_api_key(os.environ["OPENAI_API_KEY"])
-            if timed_tools:
-                # The pinned SDK's typed wrapper omits experimental dynamicTools.
-                # Use its wire client, retaining the SDK thread/turn handles.
-                run.bridged_tool_names = set(bridge.tools)
-                started = codex._client.thread_start(
-                    {
-                        "model": self.harness_model,
-                        "cwd": str(workspace),
-                        "developerInstructions": developer_instructions,
-                        "approvalPolicy": "on-request",
-                        "approvalsReviewer": "auto_review",
-                        "sandbox": None
-                        if run.native_workspace is not None
-                        else "read-only",
-                        "ephemeral": True,
-                        "dynamicTools": bridge.specifications,
-                    }
-                )
-                thread = Thread(codex._client, started.thread.id)
-            else:
-                thread = codex.thread_start(
-                    model=self.harness_model,
-                    cwd=str(workspace),
-                    developer_instructions=developer_instructions,
-                    approval_mode=ApprovalMode.auto_review,
-                    sandbox=None
-                    if run.native_workspace is not None
-                    else Sandbox.read_only,
-                    ephemeral=True,
-                )
+            thread = codex.thread_start(
+                model=self.harness_model,
+                cwd=str(workspace),
+                developer_instructions=developer_instructions,
+                approval_mode=ApprovalMode.auto_review,
+                sandbox=None if run.native_workspace is not None else Sandbox.read_only,
+                ephemeral=True,
+            )
             return self._drive_turn(thread, prompt, run)
 
     def _drive_turn(self, thread: Any, prompt: str, run: _RunState) -> str:
@@ -587,26 +549,6 @@ class CodexAgent(BaseAgent):
 
     def _record_tool_call(self, item: Any, run: _RunState) -> None:
         """Record SDK tool items, including tools executed outside Corral MCP."""
-        if (
-            item.type == "dynamicToolCall"
-            and getattr(item, "tool", None) in run.bridged_tool_names
-        ):
-            # The adapter invoked these through Corral MCP, which already
-            # committed their calls/results. They are not native SDK actions.
-            payload = item.model_dump(mode="json")
-            if payload.get("success") is False or payload.get("status") == "failed":
-                # Validation/transport failures can happen before Corral records
-                # an action. Preserve the SDK diagnostic without duplicating a
-                # canonical MCP invocation as an SDK-native tool call.
-                run.metadata["tool_errors"] = run.metadata.get("tool_errors", 0) + 1
-                run.messages.append(
-                    {
-                        "role": "assistant",
-                        "name": "codex-mcp-error",
-                        "content": json.dumps(payload, default=str),
-                    }
-                )
-            return
         native = item.type in _NATIVE_TOOL_ITEMS
         tool = getattr(item, "tool", None) or item.type
         tool = getattr(tool, "value", tool)
@@ -779,7 +721,6 @@ class CodexAgent(BaseAgent):
         # cannot drift apart (important for faithful ablations).
         verbosity = "full"
         tools = [dict(tool) for tool in session.tools]
-        run.available_tools = tools
         tool_names = [
             t["function"]["name"] for t in tools if t.get("function", {}).get("name")
         ]

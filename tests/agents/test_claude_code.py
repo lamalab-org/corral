@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -90,6 +91,38 @@ class FakeResultMessage:
 class FakeClaudeAgentOptions:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
+
+
+@pytest.mark.parametrize(
+    ("timeout", "milliseconds"), [(None, "10000000"), (12.345, "12345")]
+)
+def test_fixed_mcp_timeout_reaches_sdk_without_changing_parent_env(
+    monkeypatch, tmp_path, timeout, milliseconds
+):
+    monkeypatch.setenv("MCP_TOOL_TIMEOUT", "111")
+    agent = ClaudeCodeAgent(**({"tool_timeout_s": timeout} if timeout else {}))
+    options = agent._build_options(
+        server={"type": "http", "url": "http://unused/mcp"},
+        allowed_tools=[],
+        enable_surrender=False,
+        cwd=str(tmp_path),
+        max_turns=1,
+    )
+    assert options.env["MCP_TOOL_TIMEOUT"] == milliseconds
+    assert os.environ["MCP_TOOL_TIMEOUT"] == "111"
+    expected = timeout if timeout else 10_000
+    metadata = agent._harness_metadata(options, [])
+    assert (
+        metadata["tool_timeout_s"] == metadata["effective_tool_timeout_s"] == expected
+    )
+    assert metadata["tool_timeout_policy"] == "fixed_sdk_wait"
+    assert f"{expected:g} seconds" in options.system_prompt["append"]
+
+
+@pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan")])
+def test_invalid_tool_timeout_rejected(value):
+    with pytest.raises(ValueError, match="finite and positive"):
+        ClaudeCodeAgent(tool_timeout_s=value)
 
 
 def test_native_tool_durations_follow_call_ids_and_preserve_unknowns(monkeypatch):
@@ -564,11 +597,13 @@ async def test_bare_mode_real_sdk_preflight_exposes_corral_tools(tmp_path):
             )
             # Keep CLI state local to this test. Preflight uses only the SDK
             # control protocol, so it needs neither credentials nor model turns.
-            options.env = {
-                "CLAUDE_CONFIG_DIR": str(config_dir),
-                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-                "ANTHROPIC_API_KEY": "unused-mcp-smoke-test",
-            }
+            options.env.update(
+                {
+                    "CLAUDE_CONFIG_DIR": str(config_dir),
+                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                    "ANTHROPIC_API_KEY": "unused-mcp-smoke-test",
+                }
+            )
             assert options.extra_args == {"bare": None}
             async with claude_code_module.ClaudeSDKClient(options=options) as client:
                 await agent._preflight_mcp(client, tools, run)

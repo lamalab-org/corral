@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import importlib.resources
 import json
+import math
 import platform
 import re
 import tempfile
@@ -39,6 +40,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
         "optional 'claude' extra. Install it with `pip install 'corral[claude]'`."
     ) from exc
 
+from corral.agents._mcp_timeout import DEFAULT_TOOL_TIMEOUT_S, mcp_timeout_prompt
 from corral.agents.base_agent import provider_messages
 from corral.agents.hooks import AgentHooks
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
@@ -172,6 +174,9 @@ class ClaudeCodeAgent:
     and Edit alongside the explicit Corral MCP tools. Authentication requires
     `ANTHROPIC_API_KEY` or provider credentials; set `bare=False` to use a
     normal Claude subscription login and the full native tool preset.
+
+    `tool_timeout_s` is the fixed SDK wait limit for each MCP call, defaulting
+    to 10,000 seconds (about 2.8 hours). Tools enforce their own execution limits.
     """
 
     tool_transport = "mcp"
@@ -188,7 +193,10 @@ class ClaudeCodeAgent:
         wall_clock_timeout_s: float | None = None,
         hooks: AgentHooks | None = None,
         bare: bool = True,
+        tool_timeout_s: float = DEFAULT_TOOL_TIMEOUT_S,
     ) -> None:
+        if not math.isfinite(tool_timeout_s) or tool_timeout_s <= 0:
+            raise ValueError("tool_timeout_s must be finite and positive")
         if thinking is None:
             thinking = {"type": "adaptive"}
 
@@ -206,6 +214,7 @@ class ClaudeCodeAgent:
         self.reasoning_effort = reasoning_effort
         self.thinking = thinking
         self.wall_clock_timeout_s = wall_clock_timeout_s
+        self.tool_timeout_s = tool_timeout_s
         self.hooks = hooks or AgentHooks()
         self.bare = bare
 
@@ -229,9 +238,8 @@ class ClaudeCodeAgent:
             f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
             "use the assigned working directory and permission policy; use "
             "the MCP tools for environment-specific data and actions. "
-            "MCP calls have a default SDK limit of 100000 seconds (about 27.8 "
-            "hours); a tool's own timeout or default can stop it sooner. "
-            "Native tools use their own timeout limits. " + final_answer_directive
+            + mcp_timeout_prompt(self.tool_timeout_s)
+            + final_answer_directive
         )
         if enable_surrender:
             if self.surrender_prompt is not None:
@@ -260,6 +268,7 @@ class ClaudeCodeAgent:
             # Bash, Read, and Edit; disabling it restores the full preset.
             "tools": {"type": "preset", "preset": "claude_code"},
             "mcp_servers": {_MCP_SERVER_NAME: server},
+            "env": {"MCP_TOOL_TIMEOUT": str(math.ceil(self.tool_timeout_s * 1000))},
             # Ignore project `.mcp.json`, user settings, and plugin MCP servers
             # so only the corral task endpoint is loaded.
             "strict_mcp_config": True,
@@ -328,6 +337,9 @@ class ClaudeCodeAgent:
             "thinking": self.thinking,
             "max_turns_configured": getattr(options, "max_turns", None),
             "wall_clock_timeout_s": self.wall_clock_timeout_s,
+            "tool_timeout_s": self.tool_timeout_s,
+            "tool_timeout_policy": "fixed_sdk_wait",
+            "effective_tool_timeout_s": self.tool_timeout_s,
             "streaming_enabled": bool(
                 getattr(options, "include_partial_messages", False)
             ),
