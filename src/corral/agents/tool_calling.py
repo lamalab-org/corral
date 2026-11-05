@@ -51,6 +51,7 @@ class ToolCallingAgent(EpistemicSupport):
             user_prompt=user_prompt or "tool_calling/user_prompt",
             epistemic=epistemic,
             surrender_prompt=surrender_prompt,
+            default_surrender_prompt="surrender_prompt/surrender_prompt_tool_calling@tool_calling",
             temperature=temperature,
             **kwargs,
         )

@@ -280,8 +280,13 @@ class TaskRuntime:
                             action_id=accepted["action_id"],
                             requested_by_run_id=agent_actor.run_id,
                             answer=accepted["answer"],
-                            surrendered=accepted["answer"]
-                            == current.runtime.metadata.get("surrender_sentinel"),
+                            surrendered=(
+                                bool(
+                                    current.task.scaffold.get("enable_surrender", False)
+                                )
+                                and accepted["answer"]
+                                == current.runtime.metadata.get("surrender_sentinel")
+                            ),
                         ),
                     ),
                     context,

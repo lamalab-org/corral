@@ -783,7 +783,8 @@ class AgentSession:
             answer = trusted.arguments["answer"]
             assert isinstance(answer, str)
             surrendered = bool(
-                self.state.runtime.metadata.get("surrender_sentinel")
+                self.surrender_allowed
+                and self.state.runtime.metadata.get("surrender_sentinel")
             ) and answer == str(self.state.runtime.metadata["surrender_sentinel"])
             accepted = await self._append_runtime(
                 SubmissionAccepted(

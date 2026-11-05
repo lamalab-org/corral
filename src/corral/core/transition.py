@@ -171,6 +171,11 @@ def execute_action(
             content: Any = (
                 "submit_answer requires exactly one string argument named 'answer'"
             )
+        elif answer == state.runtime.metadata.get(
+            "surrender_sentinel"
+        ) and not state.task.scaffold.get("enable_surrender", False):
+            status = ToolCallStatus.EXECUTION_ERROR
+            content = "surrender is disabled for this task"
         else:
             raw_submitters = state.runtime.metadata.get("submitters")
             allowed = raw_submitters is None or (

@@ -104,6 +104,7 @@ class ReActAgent(EpistemicSupport):
             system_prompt=system_prompt,
             user_prompt=user_prompt or "react/user_prompt",
             surrender_prompt=surrender_prompt,
+            default_surrender_prompt="surrender_prompt/surrender_prompt_react@react",
             temperature=temperature,
             epistemic=epistemic,
             **kwargs,
