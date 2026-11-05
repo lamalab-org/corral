@@ -53,3 +53,47 @@ def test_cli_surrender_flag_can_be_enabled_and_disabled(flags, expected):
         ["bench", "--agent", "ReActAgent", "--environment", "samplemath", *flags]
     )
     assert args.enable_surrender is expected
+
+
+_EVALUATION_CUES = (
+    "sentinel",
+    "evaluat",
+    "benchmark",
+    "graded",
+    "score",
+    "test",
+    "unsolvable",
+    "impossible",
+)
+
+
+def _surrender_messages() -> dict[str, str]:
+    from corral.agents.ai_scientist.agent import _SCIENTIST_SURRENDER_INSTRUCTIONS
+    from corral.agents.schema import SURRENDER_INSTRUCTIONS
+    from corral.agents.terminus import TerminusAgent
+
+    terminus = TerminusAgent()
+    return {
+        "shared": SURRENDER_INSTRUCTIONS,
+        "react": ReActAgent().surrender_prompt.fill({}),
+        "tool_calling": ToolCallingAgent().surrender_prompt.fill({}),
+        "ai_scientist": _SCIENTIST_SURRENDER_INSTRUCTIONS,
+        **{
+            f"terminus_{enabled}": next(
+                line
+                for line in terminus._initial_prompt(
+                    "Do it", [], enable_surrender=enabled
+                ).splitlines()
+                if "tool_calls" in line
+                and line.startswith("- ")
+                and "exactly one" not in line
+            )
+            for enabled in (False, True)
+        },
+    }
+
+
+@pytest.mark.parametrize("name", list(_surrender_messages()))
+def test_surrender_messages_do_not_cue_evaluation(name):
+    message = _surrender_messages()[name].casefold()
+    assert not [cue for cue in _EVALUATION_CUES if cue in message]

@@ -61,7 +61,12 @@ from corral.agents._mcp_timeout import (
 from corral.agents._mcp_timeout import mcp_timeout_prompt
 from corral.agents._transcript import StreamingTranscript
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
-from corral.agents.schema import SURRENDER_SENTINEL, AgentOutcome, AgentUsage
+from corral.agents.schema import (
+    SURRENDER_INSTRUCTIONS,
+    SURRENDER_SENTINEL,
+    AgentOutcome,
+    AgentUsage,
+)
 from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.usage import usage_field
 from corral.agents.utils import LiteLLMMessage
@@ -352,9 +357,11 @@ class OpenHandsAgent(BaseAgent):
             + final_answer_directive
         )
         if enable_surrender:
-            if self.surrender_prompt is not None:
-                suffix += "\n\n" + self.surrender_prompt.fill({})
-            suffix += f"\nTo surrender, call `submit_answer` with the exact answer `{SURRENDER_SENTINEL}`; do not return the sentinel as text."
+            suffix += "\n\n" + (
+                self.surrender_prompt.fill({})
+                if self.surrender_prompt is not None
+                else SURRENDER_INSTRUCTIONS
+            )
         return suffix
 
     def model_parameter_defaults(self) -> dict[str, Any]:

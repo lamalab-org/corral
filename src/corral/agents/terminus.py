@@ -159,12 +159,18 @@ class TerminusAgent(BaseAgent):
         task_text = (
             task if isinstance(task, str) else json.dumps(task, ensure_ascii=False)
         )
-        surrender_rule = "Do not surrender; keep working until you have a final answer."
+        surrender_rule = (
+            "Always provide tool_calls; keep working until you can call submit_answer."
+        )
         if enable_surrender:
             surrender_rule = (
                 self.surrender_prompt.fill({})
                 if self.surrender_prompt is not None
-                else "Surrender only if the task is genuinely impossible."
+                else (
+                    "If you cannot complete this request, or you conclude that it "
+                    "cannot be done with the information and tools available, set "
+                    "surrender to true instead of providing tool_calls."
+                )
             )
         examples_block = (
             "\n\nWorked examples:\n" + "\n\n".join(map(str, examples))
@@ -405,7 +411,8 @@ Rules:
                 feedback = {
                     "role": "user",
                     "content": (
-                        "Surrender is disabled.\nContinue using the available tools."
+                        "Stopping without an answer is not available.\n"
+                        "Continue using the available tools."
                     ),
                 }
                 await session.record_message(assistant, usage=turn_usage)

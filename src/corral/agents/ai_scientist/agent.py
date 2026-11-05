@@ -60,9 +60,9 @@ Return the requested structured object without Markdown or surrounding prose.
 # The synthesizer writes a structured answer rather than calling tools, so the
 # tool-calling surrender prompt does not apply verbatim.
 _SCIENTIST_SURRENDER_INSTRUCTIONS = (
-    "If the collected evidence cannot support any answer and the task is "
-    "genuinely unsolvable, you may surrender: set final_answer to exactly "
-    f"{SURRENDER_SENTINEL}."
+    "If the collected evidence cannot support any answer, or you conclude that "
+    "the request cannot be done with the information and tools available, set "
+    f"final_answer to exactly {SURRENDER_SENTINEL}."
 )
 
 _TRACE_NODE_ID = re.compile(r"node_\d+")

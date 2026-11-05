@@ -68,7 +68,10 @@ async def test_surrender_requires_launch_opt_in(tmp_path, enable_surrender):
                 assert attempted.success
                 return AgentOutcome(status="surrendered")
             assert not attempted.success
-            assert attempted.error == "surrender is disabled for this task"
+            assert (
+                attempted.error
+                == "SURRENDER is not an available answer; submit an answer instead"
+            )
             assert session.submission is None
             submitted = await session.execute(
                 Action(name="submit_answer", arguments={"answer": "answer"})
@@ -104,7 +107,10 @@ async def test_surrender_sentinel_matches_case_insensitively(
                 return AgentOutcome(status="surrendered")
             # Disabled surrender cannot slip through as a scored answer.
             assert not attempted.success
-            assert attempted.error == "surrender is disabled for this task"
+            assert (
+                attempted.error
+                == "SURRENDER is not an available answer; submit an answer instead"
+            )
             submitted = await session.execute(
                 Action(name="submit_answer", arguments={"answer": "answer"})
             )

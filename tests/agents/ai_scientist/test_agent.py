@@ -412,7 +412,7 @@ async def test_ai_scientist_surrender_follows_launch_opt_in(
         assert session.get_agent_state("ai_scientist")["status"] == "surrendered"
     else:
         assert outcome.status == "protocol_failure"
-        assert "surrender is disabled" in (outcome.error or "")
+        assert "SURRENDER is not an available answer" in (outcome.error or "")
         assert session.submission is None
 
 

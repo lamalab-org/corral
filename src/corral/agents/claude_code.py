@@ -45,7 +45,7 @@ from corral.agents._transcript import event_clock
 from corral.agents.base_agent import provider_messages
 from corral.agents.hooks import AgentHooks
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
-from corral.agents.schema import AgentOutcome, AgentUsage
+from corral.agents.schema import SURRENDER_INSTRUCTIONS, AgentOutcome, AgentUsage
 from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.usage import usage_from_mapping
 from corral.agents.utils import LiteLLMMessage
@@ -244,9 +244,11 @@ class ClaudeCodeAgent:
             + final_answer_directive
         )
         if enable_surrender:
-            if self.surrender_prompt is not None:
-                append += "\n\n" + self.surrender_prompt
-            append += "\nTo surrender, call `submit_answer` with the exact answer `SURRENDER`; do not return the sentinel as text."
+            append += "\n\n" + (
+                self.surrender_prompt
+                if self.surrender_prompt is not None
+                else SURRENDER_INSTRUCTIONS
+            )
         return {"type": "preset", "preset": "claude_code", "append": append}
 
     def _build_options(

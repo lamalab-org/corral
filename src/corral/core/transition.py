@@ -193,7 +193,7 @@ def execute_action(
             )
         elif is_surrender_answer(state, answer) and not surrender_enabled(state):
             status = ToolCallStatus.EXECUTION_ERROR
-            content = "surrender is disabled for this task"
+            content = "SURRENDER is not an available answer; submit an answer instead"
         else:
             raw_submitters = state.runtime.metadata.get("submitters")
             allowed = raw_submitters is None or (

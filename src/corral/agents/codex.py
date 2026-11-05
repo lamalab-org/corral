@@ -41,6 +41,7 @@ from corral.agents._mcp_timeout import (
 from corral.agents._transcript import StreamingTranscript
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
 from corral.agents.schema import (
+    SURRENDER_INSTRUCTIONS,
     SURRENDER_SENTINEL,
     AgentOutcome,
     AgentUsage,
@@ -255,9 +256,11 @@ class CodexAgent(BaseAgent):
             )
         instructions += final_answer_directive
         if enable_surrender:
-            if self.surrender_prompt is not None:
-                instructions += "\n\n" + self.surrender_prompt.fill({})
-            instructions += f"\nTo surrender, call `submit_answer` with the exact answer `{SURRENDER_SENTINEL}`; do not return the sentinel as text."
+            instructions += "\n\n" + (
+                self.surrender_prompt.fill({})
+                if self.surrender_prompt is not None
+                else SURRENDER_INSTRUCTIONS
+            )
         return instructions
 
     def _render_config_toml(self, mcp_url: str, tool_names: list[str]) -> str:
