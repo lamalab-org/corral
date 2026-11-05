@@ -18,9 +18,10 @@ _TEMPLATE = """\
 
 ## The setup
 
-A frozen student model is served for you.
-Implement any strategy that does not modify model weights.
-You can change the prompts, how many samples you draw, how they are combined, whether one call checks another, what is remembered between questions, or any strategy you can come up with.
+A frozen student model is served for you. Implement any strategy that does not
+modify model weights. You can change the prompts, how many samples you draw, how
+they are combined, whether one call checks another, what is remembered between
+questions, or any strategy you can come up with.
 
 Write it as a Python policy in `{policy_dir}/policy.py`. The API is documented in `guide/policy_api.md`.
 
@@ -41,14 +42,14 @@ Test questions: {n_test} (held out; you never should see these or their answers)
 
 {budget}
 
-Every experiment costs real inference.
-`dry_run_policy` is much cheaper than `evaluate_candidate` and catches the errors that would otherwise waste one.
+Every experiment costs real inference. `dry_run_policy` is much cheaper than
+`evaluate_candidate` and catches the errors that would otherwise waste one.
 
 ## Submitting
 
-To submit, call `submit_policy('{policy_dir}')`, then call `submit_answer` to end the episode; the text you pass to it is not used.
+When you are done, or when your budget is nearly gone, call `submit_policy('{policy_dir}')`, then call `submit_answer` to end the episode; the text you pass to it is not used.
 `submit_policy` runs your policy once on the held-out test questions and keeps the result hidden until the episode is scored.
-Submit when you are done. The policy you submitted would be used for final scoring.
+Only one submission is allowed. The submitted policy is used for final scoring.
 A policy that is never submitted scores nothing, so submit before you run out of steps.
 """
 
@@ -87,8 +88,10 @@ def _budget_summary(config: dict) -> str:
         f"- {budget.get('max_experiments', 20)} full evaluations on the train split",
         f"- {budget.get('max_debug_runs', budget.get('max_debug_questions', 10))} dry runs",
         f"- {budget.get('max_student_calls', 250)} student model calls in total",
-        f"- {budget.get('max_reveals', 4)} reveals of {budget.get('reveal_batch', 5)} "
-        "labelled example questions each",
+        (
+            f"- {budget.get('max_reveals', 4)} reveals of {budget.get('reveal_batch', 5)} "
+            "labelled example questions each"
+        ),
         (
             f"- at most {MAX_TOKENS_CAP} generated tokens per student call, reasoning included"
         ),
@@ -96,7 +99,8 @@ def _budget_summary(config: dict) -> str:
     final_calls = config.get("final_max_student_calls")
     if final_calls:
         lines.append(
-            f"- at test time your policy may make {final_calls} student calls in total, per model"
+            f"- at test time your policy may make {final_calls} student calls in "
+            "total, per model - plan for that, not for unlimited sampling"
         )
     return "\n".join(lines)
 
