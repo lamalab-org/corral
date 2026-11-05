@@ -119,7 +119,15 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument(
         "--max-iterations", type=int, default=resolve_max_iterations(None, AGENT_ID)
     )
-    agent.add_argument("--enable-surrender", action="store_true")
+    agent.add_argument(
+        "--enable-surrender",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Allow the agent to give up by submitting SURRENDER "
+            "(default: disabled; --no-enable-surrender disables it explicitly)."
+        ),
+    )
 
     execution = parser.add_argument_group("execution")
     execution.add_argument("--trials", type=int, default=1)

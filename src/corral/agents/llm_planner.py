@@ -126,6 +126,8 @@ class LLMPlanner(BaseAgent):
                         error=f"submit_answer failed: {submission.error}",
                         usage=usage.outcome(),
                     )
+                if session.submission_status == "surrendered":
+                    return AgentOutcome(status="surrendered", usage=usage.outcome())
                 return AgentOutcome(
                     status="completed",
                     answer=answer,

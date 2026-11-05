@@ -90,5 +90,15 @@ class ExperimentTree:
     def model_dump(self) -> dict[str, object]:
         return {"nodes": [node.model_dump(mode="json") for node in self.nodes]}
 
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "ExperimentTree":
+        tree = cls()
+        for raw in data.get("nodes", []):
+            node = ExperimentNode.model_validate(raw)
+            tree.add(node)
+            if node.id.startswith("node_") and node.id[5:].isdigit():
+                tree._next_number = max(tree._next_number, int(node.id[5:]) + 1)
+        return tree
+
     def __len__(self) -> int:
         return len(self._nodes)

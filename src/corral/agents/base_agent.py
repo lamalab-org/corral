@@ -45,6 +45,7 @@ class BaseAgent(ABC):
         surrender_prompt: str | Any | None,
         temperature: float,
         hooks: AgentHooks | None = None,
+        default_surrender_prompt: str | None = None,
         **kwargs: Any,
     ) -> None:
         removed_limits = {"max_iterations", "max_turns"} & kwargs.keys()
@@ -72,8 +73,8 @@ class BaseAgent(ABC):
         except Exception:
             self.user_prompt = ensure_jinja_compatible(user_prompt)
         self.surrender_prompt = (
-            ensure_jinja_compatible(surrender_prompt)
-            if surrender_prompt is not None
+            get_prompt(store, surrender_prompt, default_surrender_prompt)
+            if surrender_prompt is not None or default_surrender_prompt is not None
             else None
         )
 

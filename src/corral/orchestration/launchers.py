@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import tarfile
 import tempfile
 from dataclasses import asdict, replace
 from datetime import datetime
@@ -111,7 +112,17 @@ def state_ref(state: ExecutionState, commit: Commit) -> StateRef:
         submission=state.submission,
         output=output,
         error=str(raw_error) if raw_error is not None else None,
-        metadata={"model_parameters": parameters} if parameters else {},
+        metadata={
+            **({"model_parameters": parameters} if parameters else {}),
+            **(
+                {
+                    "lineage": dict(state.runtime.metadata["lineage"]),
+                    "inherited_usage": dict(state.runtime.metadata["inherited_usage"]),
+                }
+                if state.runtime.metadata.get("lineage")
+                else {}
+            ),
+        },
     )
 
 
@@ -148,6 +159,7 @@ class LocalTaskLauncher:
         last_evaluation = (
             self.registry.last_evaluation(request.task_id)
             if environment.current_task.allow_previous_attempt_context
+            and request.continuation is None
             else None
         )
         previous_state = None
@@ -506,13 +518,60 @@ class DockerTaskLauncher:
                 prefix=".corral-checkpoint-", dir=shard.parent
             ) as directory:
                 staged = Path(directory)
-                await _command(
-                    self.docker_executable,
-                    "cp",
-                    f"{container}:/corral-state/.",
-                    str(staged),
-                    output_limit=32_000,
-                )
+                try:
+                    await _command(
+                        self.docker_executable,
+                        "cp",
+                        f"{container}:/corral-state/.",
+                        str(staged),
+                        output_limit=32_000,
+                    )
+                except DockerInfrastructureError as exc:
+                    if "fchmodat2" not in str(exc):
+                        raise
+                    # Docker Desktop may fail to restore Linux directory modes
+                    # on macOS. Stream the same archive and extract without
+                    # foreign ownership or setgid bits; never buffer the DB.
+                    archive = staged / "export.tar"
+                    with archive.open("wb") as output:
+                        process = await asyncio.create_subprocess_exec(
+                            self.docker_executable,
+                            "cp",
+                            f"{container}:/corral-state/.",
+                            "-",
+                            stdout=output,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        try:
+                            _, error = await process.communicate()
+                        except BaseException:
+                            with contextlib.suppress(ProcessLookupError):
+                                process.kill()
+                            await process.wait()
+                            raise
+                    if process.returncode:
+                        raise DockerInfrastructureError(
+                            error.decode(errors="replace")
+                        ) from exc
+                    staged = staged / "extracted"
+                    staged.mkdir()
+                    with tarfile.open(archive) as exported:
+                        if hasattr(tarfile, "data_filter"):
+                            exported.extractall(staged, filter="data")
+                        else:
+                            # Early 3.10/3.11 releases have no extraction filter.
+                            # The export contains only regular files and directories.
+                            members = exported.getmembers()
+                            for member in members:
+                                target = (staged / member.name).resolve()
+                                if not target.is_relative_to(staged.resolve()) or not (
+                                    member.isfile() or member.isdir()
+                                ):
+                                    raise ValueError(
+                                        "unsafe Docker state archive member"
+                                    ) from None
+                                member.mode = 0o755 if member.isdir() else 0o644
+                            exported.extractall(staged, members=members)
                 shutil.copytree(
                     staged,
                     shard,

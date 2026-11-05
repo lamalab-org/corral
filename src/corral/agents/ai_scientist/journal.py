@@ -147,6 +147,33 @@ class ResearchJournal:
             "visual_feedback": self.visual_feedback,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ResearchJournal":
+        journal = cls()
+        journal.observations = [
+            (
+                item["node_id"],
+                Observation.model_validate(
+                    {key: value for key, value in item.items() if key != "node_id"}
+                ),
+            )
+            for item in data.get("observations", [])
+        ]
+        journal.claims = [
+            JournalClaim.model_validate(item) for item in data.get("claims", [])
+        ]
+        journal.hypotheses = [
+            JournalHypothesis.model_validate(item)
+            for item in data.get("hypotheses", [])
+        ]
+        journal.unresolved_questions = list(data.get("unresolved_questions", []))
+        journal.failed_experiments = [
+            ExperimentFailure.model_validate(item)
+            for item in data.get("failed_experiments", [])
+        ]
+        journal.visual_feedback = list(data.get("visual_feedback", []))
+        return journal
+
     def context(self, max_chars: int = 30_000) -> str:
         rendered = json.dumps(self.as_dict(), indent=2, ensure_ascii=False)
         if len(rendered) <= max_chars:

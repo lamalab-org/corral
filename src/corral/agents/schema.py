@@ -80,6 +80,7 @@ class AgentOutcome:
 
 
 __all__ = [
+    "SURRENDER_INSTRUCTIONS",
     "SURRENDER_SENTINEL",
     "Action",
     "AgentOutcome",
@@ -93,6 +94,15 @@ __all__ = [
 #: task. The canonical tool transition derives the surrendered status from this
 #: shared sentinel.
 SURRENDER_SENTINEL = "SURRENDER"
+
+#: Default surrender instructions for tool-calling agents. Phrased as an
+#: ordinary request so the agent is not cued that it is being evaluated.
+SURRENDER_INSTRUCTIONS = (
+    "If you cannot complete this request, or you conclude that it cannot be "
+    "done with the information and tools available, call `submit_answer` with "
+    f"the exact answer `{SURRENDER_SENTINEL}` instead of an answer. Make this "
+    "a tool call, not plain text."
+)
 
 
 @dataclass

@@ -28,6 +28,7 @@ class FinalSynthesizer:
         journal_context: str,
         best_nodes: list[ExperimentNode],
         canonical_workspace: str | None = None,
+        surrender_instructions: str = "",
     ) -> str:
         prompt = render_prompt(
             "final_answer",
@@ -43,6 +44,7 @@ class FinalSynthesizer:
                 if canonical_workspace
                 else "No filesystem workspace is associated with this task."
             ),
+            surrender_instructions=surrender_instructions,
         )
         result = self.model.generate(prompt, FinalAnswer, purpose="final_synthesis")
         return result.final_answer.strip()

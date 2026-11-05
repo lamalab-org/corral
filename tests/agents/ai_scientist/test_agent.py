@@ -1,6 +1,7 @@
 """Session-boundary tests for AI Scientist."""
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import anyio
@@ -15,7 +16,21 @@ from corral.agents.ai_scientist.agent import (
     _BranchSessionRegistry,
     _call_llm_from_harness,
 )
+from corral.agents.ai_scientist.config import AIScientistConfig
 from corral.agents.ai_scientist.manager import ExperimentManager
+from corral.agents.ai_scientist.search.nodes import (
+    ExperimentNode,
+    NodeEvaluation,
+    NodeStatus,
+    NodeType,
+    Recommendation,
+    ResearchStage,
+)
+from corral.agents.ai_scientist.state import (
+    ScientistState,
+    StageProgress,
+    TaskFormulation,
+)
 from corral.agents.ai_scientist.workers.base import LiteLLMStructuredModel
 from corral.agents.ai_scientist.workers.synthesizer import FinalAnswer
 from corral.agents.schema import AgentUsage, BudgetExhaustedError
@@ -24,6 +39,7 @@ from corral.core.action import Action
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
 from corral.core.tool import tool
+from corral.persistence.workspace import WorkspaceManager
 
 pytestmark = pytest.mark.usefixtures("session_stores")
 
@@ -33,7 +49,14 @@ def anyio_backend():
     return "asyncio"
 
 
-async def make_session(calls, *, max_iterations=64, agent=None):
+async def make_session(
+    calls,
+    *,
+    max_iterations=64,
+    agent=None,
+    workspace_root=None,
+    enable_surrender=False,
+):
     def measure(value: int) -> str:
         """Return a measurement."""
         calls.append(value)
@@ -55,12 +78,21 @@ async def make_session(calls, *, max_iterations=64, agent=None):
             workspace_factory=None,
         ),
     )
-    return await start_session(
+    session = await start_session(
         environment,
         max_iterations=max_iterations,
         actor_id="agent_0",
         agent=agent,
+        enable_surrender=enable_surrender,
     )
+    if workspace_root is not None:
+        environment.base_work_dir = str(workspace_root)
+        environment.workspace_path = str(workspace_root / "workspace")
+        environment.workspace_manager = WorkspaceManager(
+            artifact_root=workspace_root / "artifacts"
+        )
+        session.execution_workspace = environment.workspace_path
+    return session
 
 
 def test_ai_scientist_exposes_only_the_session_entrypoint():
@@ -153,6 +185,150 @@ async def test_scientist_branches_execute_through_agent_sessions():
 
 
 @pytest.mark.anyio
+async def test_branch_checkpoint_restores_workspace_without_repeating_tools(tmp_path):
+    calls = []
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "seed.txt").write_text("seed", encoding="utf-8")
+    parent = await make_session(calls, workspace_root=tmp_path)
+
+    async with BlockingPortal() as portal:
+        sessions = _BranchSessionRegistry(parent, portal)
+        source = await anyio.to_thread.run_sync(sessions.create_branch)
+        Path(source.workspace, "result.txt").write_text("measured", encoding="utf-8")
+        response = await anyio.to_thread.run_sync(
+            lambda: source.execute(Action(name="measure", arguments={"value": 1}))
+        )
+        assert response.success
+        snapshot = await anyio.to_thread.run_sync(
+            lambda: sessions.checkpoint(source.execution_id)
+        )
+        Path(parent.workspace, "stale.txt").write_text("stale", encoding="utf-8")
+        restored = await anyio.to_thread.run_sync(
+            lambda: sessions.restore_branch(snapshot)
+        )
+        restored_state = sessions.session(restored.execution_id).state
+
+    assert calls == [1]
+    assert Path(restored.workspace, "result.txt").read_text() == "measured"
+    assert not Path(restored.workspace, "stale.txt").exists()
+    assert restored_state.environment.values == snapshot["environment"]
+    assert "result.txt" in restored_state.workspace.files
+
+
+@pytest.mark.anyio
+async def test_completed_search_checkpoint_skips_formulation_and_old_experiments(
+    monkeypatch,
+):
+    class NoOldCalls:
+        call_count = 0
+        token_count = 0
+
+        def generate(self, *_args, **_kwargs):
+            raise AssertionError("the completed search must not make an old model call")
+
+    agent = AIScientistAgent(model="test-model", model_gateway=NoOldCalls())
+    session = await make_session([], agent=agent)
+    state = ScientistState(
+        task_prompt="measure",
+        tools=[],
+        formulation=TaskFormulation(objective="measure", required_answer="number"),
+    )
+    state.current_stage = ResearchStage.COMPLETE
+    await session.set_agent_state(
+        "ai_scientist",
+        agent._state_payload(state, (), status="partial", branches=[]),
+    )
+    monkeypatch.setattr(
+        "corral.agents.ai_scientist.agent.FinalSynthesizer.generate",
+        lambda *_args, **_kwargs: "42",
+    )
+
+    outcome = await agent.run_session(session)
+
+    assert outcome.status == "completed"
+    assert outcome.answer == "42"
+    assert session.state.submission == "42"
+
+
+@pytest.mark.anyio
+async def test_mid_search_checkpoint_resumes_after_preliminary(monkeypatch):
+    class NoOldCalls:
+        call_count = 0
+        token_count = 0
+
+        def generate(self, *_args, **_kwargs):
+            raise AssertionError("completed preliminary work must not repeat")
+
+    config = AIScientistConfig(
+        initial_drafts=1,
+        preliminary_node_budget=1,
+        tuning_node_budget=0,
+        research_node_budget=1,
+        verification_node_budget=1,
+        verification_min_nodes=1,
+        max_search_nodes=1,
+        max_tool_calls=0,
+        stage_boundary_replications=0,
+        aggregate_stage_replications=False,
+    )
+    agent = AIScientistAgent(
+        model="test-model", model_gateway=NoOldCalls(), config=config
+    )
+    session = await make_session([], agent=agent)
+    state = ScientistState(
+        task_prompt="measure",
+        tools=[],
+        formulation=TaskFormulation(objective="measure", required_answer="number"),
+    )
+    node = ExperimentNode(
+        id="node_0001",
+        stage=ResearchStage.PRELIMINARY,
+        node_type=NodeType.DRAFT,
+        hypothesis="measurement works",
+        rationale="observed",
+        status=NodeStatus.SUCCESSFUL,
+        evaluation=NodeEvaluation(
+            validity=0.9,
+            task_progress=0.8,
+            evidence_strength=0.9,
+            information_gain=0.8,
+            consistency=0.9,
+            recommendation=Recommendation.CONTINUE,
+            reason="measured",
+        ),
+    )
+    state.tree.add(node)
+    state.current_stage = ResearchStage.RESEARCH
+    state.stages = {
+        ResearchStage.PRELIMINARY: StageProgress(
+            stage=ResearchStage.PRELIMINARY,
+            best_node_id=node.id,
+            completion_criteria_met=True,
+        ),
+        ResearchStage.RESEARCH: StageProgress(
+            stage=ResearchStage.RESEARCH, seed_node_id=node.id
+        ),
+    }
+    await session.set_agent_state(
+        "ai_scientist",
+        agent._state_payload(state, (), status="partial", branches=[]),
+    )
+    monkeypatch.setattr(
+        "corral.agents.ai_scientist.agent.FinalSynthesizer.generate",
+        lambda *_args, **_kwargs: "42",
+    )
+
+    outcome = await agent.run_session(session)
+
+    assert outcome.status == "completed", outcome.error
+    assert outcome.answer == "42"
+    restored = session.get_agent_state("ai_scientist")["search"]
+    assert restored["current_stage"] == ResearchStage.COMPLETE.value
+    assert len(restored["tree"]["nodes"]) == 1
+
+
+@pytest.mark.anyio
 async def test_scientist_branches_inherit_current_hook_state():
     calls = []
     parent = await make_session(calls)
@@ -213,6 +389,42 @@ async def test_ai_scientist_maps_harness_result_to_outcome(monkeypatch):
     scientist_state = session.get_agent_state("ai_scientist")
     assert scientist_state is not None
     assert scientist_state["status"] == "completed"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("enable_surrender", [False, True])
+async def test_ai_scientist_surrender_follows_launch_opt_in(
+    monkeypatch, enable_surrender
+):
+    agent = AIScientistAgent(model="test-model")
+    session = await make_session([], enable_surrender=enable_surrender)
+    monkeypatch.setattr(
+        agent,
+        "_execute_session",
+        lambda _session, _owner, _portal: ("surrender", AgentUsage(), {}),
+    )
+
+    outcome = await agent.run_session(session)
+
+    if enable_surrender:
+        assert outcome.status == "surrendered"
+        assert session.submission_status == "surrendered"
+        assert session.get_agent_state("ai_scientist")["status"] == "surrendered"
+    else:
+        assert outcome.status == "protocol_failure"
+        assert "SURRENDER is not an available answer" in (outcome.error or "")
+        assert session.submission is None
+
+
+@pytest.mark.parametrize("enable_surrender", [False, True])
+def test_ai_scientist_advertises_surrender_only_when_enabled(enable_surrender):
+    class Session:
+        surrender_allowed = enable_surrender
+
+    instructions = AIScientistAgent(model="test-model")._surrender_instructions(
+        Session()
+    )
+    assert ("SURRENDER" in instructions) is enable_surrender
 
 
 @pytest.mark.anyio
