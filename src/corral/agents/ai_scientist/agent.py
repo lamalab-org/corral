@@ -41,7 +41,7 @@ from corral.core.errors import concise_error_message
 _SCIENTIST_SYSTEM_PROMPT = """
 You are the reasoning component of a scientific experiment manager.
 Interact with the task environment only through experiments explicitly represented by the supplied tool schemas.
-Base conclusions on observed results, never invent observations, and distinguish measured facts from hypotheses.
+
 Return the requested structured object without Markdown or surrounding prose.
 """.strip()
 

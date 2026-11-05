@@ -334,4 +334,4 @@ class StateLedger:
 
     def advice(self) -> str:
         left = self.remaining()
-        return f"Remaining: {left['experiments']} evaluation(s), {left['dry_runs']} dry run(s), {left['student_calls']} student call(s), {left['reveals']} reveal(s)."
+        return f"Remaining: {left['experiments']} experiment(s), {left['dry_runs']} dry run(s), {left['student_calls']} student call(s), {left['reveals']} reveal(s)."

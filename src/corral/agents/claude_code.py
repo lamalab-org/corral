@@ -237,9 +237,9 @@ class ClaudeCodeAgent:
         )
         append = (
             self.system_prompt
-            + "\n\nYou are solving a task in a sandboxed environment.\n"
-            f"You may use Claude Code's built-in tools as well as the provided `{_MCP_SERVER_NAME}` MCP tools.\n"
+            + f"\n\nYou may use Claude Code's built-in tools as well as the provided `{_MCP_SERVER_NAME}` MCP tools.\n"
             "Built-in filesystem and shell tools use the assigned working directory and permission policy; use the MCP tools for environment-specific data and actions.\n"
+            "Task tools may control external systems or real instruments; workspace isolation does not imply those actions are simulated.\n"
             + mcp_timeout_prompt(self.tool_timeout_s)
             + final_answer_directive
         )

@@ -241,7 +241,7 @@ class CodexAgent(BaseAgent):
             "Built-in filesystem and shell tools operate in an isolated per-run workspace; use the MCP tools for task environment data and actions.\n"
             "Task tools may control external systems or real instruments; workspace isolation does not imply those actions are simulated.\n"
             "Follow the task-specific operating instructions.\n"
-            "Do not invent tool outputs.\n" + mcp_timeout_prompt(self.tool_timeout_s)
+            + mcp_timeout_prompt(self.tool_timeout_s)
         )
         # The task environment owns its public path contract; the harness's
         # separate scratch directory is not a task artifact destination.

@@ -115,8 +115,9 @@ class TestPrompt:
         assert "modify model weights" in prompt
         assert "frozen student model" in prompt
         assert "math_algebra" in prompt
-        assert "Llama 3.1 70B Instruct" in prompt
-        assert "76.7%" in prompt  # the larger model's train accuracy, the target
+        assert "run(questions, ctx)" in prompt
+        assert "submit_answer('submission.json')" in prompt
+        assert "Llama 3.1 70B Instruct" not in prompt
 
     def test_prompt_does_not_name_strategies(self, environments):
         """The prompt leaves strategy choice to the policy."""

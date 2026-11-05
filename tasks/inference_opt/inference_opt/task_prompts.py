@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from inference_opt.runner import MAX_TOKENS_CAP
-from inference_opt.score import DEFAULT_PASS_RULE
-
 if TYPE_CHECKING:
     from corral.core.environment import Environment
     from corral.core.state import ExecutionState
@@ -16,170 +13,62 @@ __all__ = ["task_prompt"]
 _TEMPLATE = """\
 {description}
 
-## The setup
+Please write a reusable Python policy in `{policy_dir}/policy.py` using the
+`run(questions, ctx)` API described in `guide/policy_api.md`. Don't modify model weights;
+the approach you use around the frozen student model is up to you. I have
+{n_train} development questions available, with separate labelled examples
+accessible a few at a time. The policy will later receive {n_test} new questions.
 
-A frozen student model is served for you. Implement any strategy that does not
-modify model weights. You can change the prompts, how many samples you draw, how
-they are combined, whether one call checks another, what is remembered between
-questions, or any strategy you can come up with.
+My software needs to extract each answer from the policy's response. Please put
+`ANSWER: <answer>` on the final line for MATH questions. For ChemBench, use
+`[ANSWER]<answer>[/ANSWER]`. For GSM-Symbolic, leave the final number as the answer.
+Put any explanation before the final answer so I can use the results directly.
 
-Write it as a Python policy in `{policy_dir}/policy.py`. The API is documented in `guide/policy_api.md`.
-
-{answer_format}
-
-Dataset: {benchmark}
-Student model(s): {models}
-Train questions: {n_train} (scored by `evaluate_candidate`; their answers are never shown)
-Example questions: labelled, revealed a few at a time, and given to your policy as `ctx.examples`; never scored
-Test questions: {n_test} (held out; you never should see these or their answers)
-
-## Goal
-
-{scoring}
-
-
-## Budget
+The dataset is {benchmark}. Labelled examples are given to the policy as
+`ctx.examples`; development questions are available through `evaluate_candidate`.
 
 {budget}
 
-Every experiment costs real inference. `dry_run_policy` is much cheaper than
-`evaluate_candidate` and catches the errors that would otherwise waste one.
+You can use `dry_run_policy` to check a small sample before spending more calls
+on a full run with `evaluate_candidate`.
 
-## Submitting
-
-When you are done, or when your budget is nearly gone, call `submit_policy('{policy_dir}')`, then call `submit_answer` to end the episode; the text you pass to it is not used.
-`submit_policy` runs your policy once on the held-out test questions and keeps the result hidden until the episode is scored.
-Only one submission is allowed. The submitted policy is used for final scoring.
-A policy that is never submitted scores nothing, so submit before you run out of steps.
+When you're ready, or running low on calls, please call
+`submit_policy('{policy_dir}')`, then call `submit_answer('submission.json')`.
+Only one submission is allowed. The text passed to `submit_answer` is a completion
+signal; the policy you submitted is what I will run on new questions.
 """
-
-
-_ANSWER_FORMATS = {
-    "math": (
-        "Answers are graded exactly as Inspect's MATH eval grades them: the answer is read "
-        "from an `ANSWER: <answer>` line, which must be the last line, and compared with "
-        "the gold answer using sympy. A `\\boxed{}` answer without that line is not read."
-    ),
-    "chembench": (
-        "End each answer with `[ANSWER]<answer>[/ANSWER]`. Every multiple-choice question "
-        "may have one or more correct options; the answer is all of them, as "
-        "comma-separated letters, and it is right only if the set is exact."
-    ),
-    "gsm": (
-        "Answers are graded as GSM-Symbolic grades them: the last number in the text is "
-        "the answer, compared with the gold answer as a number (commas are ignored)."
-    ),
-    "default": "End each answer with a line `ANSWER: <answer>`; the scorer reads that line.",
-}
-
-
-def _answer_format(benchmark: str) -> str:
-    """How the scorer for this benchmark reads an answer."""
-    if benchmark.startswith("math_"):
-        return _ANSWER_FORMATS["math"]
-    if benchmark.startswith("gsm_"):
-        return _ANSWER_FORMATS["gsm"]
-    return _ANSWER_FORMATS.get(benchmark, _ANSWER_FORMATS["default"])
 
 
 def _budget_summary(config: dict) -> str:
     budget = dict(config.get("budget") or {})
-    lines = [
-        f"- {budget.get('max_experiments', 20)} full evaluations on the train split",
-        f"- {budget.get('max_debug_runs', budget.get('max_debug_questions', 10))} dry runs",
-        f"- {budget.get('max_student_calls', 250)} student model calls in total",
-        (
-            f"- {budget.get('max_reveals', 4)} reveals of {budget.get('reveal_batch', 5)} "
-            "labelled example questions each"
-        ),
-        (
-            f"- at most {MAX_TOKENS_CAP} generated tokens per student call, reasoning included"
-        ),
-    ]
+    summary = (
+        f"I can allow {budget.get('max_experiments', 20)} full development runs, "
+        f"{budget.get('max_debug_runs', budget.get('max_debug_questions', 10))} dry runs, "
+        f"and {budget.get('max_student_calls', 250)} student model calls in total. "
+        f"You can request labelled examples {budget.get('max_reveals', 4)} times, "
+        f"with {budget.get('reveal_batch', 5)} questions in each batch. "
+        "Each student call may generate at most 8192 tokens, reasoning included."
+    )
     final_calls = config.get("final_max_student_calls")
     if final_calls:
-        lines.append(
-            f"- at test time your policy may make {final_calls} student calls in "
-            "total, per model - plan for that, not for unlimited sampling"
+        summary += (
+            " For subsequent use, I need the policy to handle batches of "
+            f"{config.get('n_test', 30)} new questions within {final_calls} "
+            "student calls per model."
         )
-    return "\n".join(lines)
-
-
-def _reference_summary(config: dict, rule: dict) -> str:
-    """The pass rule of a task that must match a larger model of the student's family."""
-    references = dict(rule.get("references") or {})
-    consistency = rule.get("metric") == "template_consistency"
-    if consistency:
-        lines = [
-            "- Each question is one instance of a template: the same problem with different names and numbers. A template counts as solved only if every one of its test instances is answered correctly. Template consistency is the share of templates solved.",
-            "- Your submitted policy is run on the held-out test split, whose templates appear in no other split. The task passes (score 1) if, with your policy, the student's template consistency is at least that of a larger model of its own family run with no policy (one zero-shot call per question, the same prompt and scorer as the student's baseline), and the student's accuracy is not below its own zero-shot accuracy; otherwise it scores 0.",
-        ]
-    else:
-        lines = [
-            "- Your submitted policy is run on the held-out test split. The task passes (score 1) if, with your policy, the student answers at least as many test questions correctly as a larger model of its own family answers with no policy (one zero-shot call per question, the same prompt and scorer as the student's baseline); otherwise it scores 0.",
-        ]
-    measure = "template consistency" if consistency else "accuracy"
-    for model in config.get("models", []):
-        reference = references.get(model, {})
-        lines.append(
-            f"- The larger model is {reference.get('name', '?')}. On the train split its "
-            f"zero-shot {measure} is {float(reference.get('train', 0.0)):.1%}."
-        )
-    if len(config.get("models", [])) > 1:
-        lines.append("- With two student models, both must match their larger model to pass.")
-    return "\n".join(lines)
-
-
-def _scoring_summary(config: dict) -> str:
-    """Describe the pass rule the scorer will apply to this task."""
-    rule = dict(config.get("pass_rule") or DEFAULT_PASS_RULE)
-    joint = len(config.get("models", [])) > 1
-    if rule.get("kind") == "continuous":
-        lines = [
-            "- Your submitted policy is run on the held-out test split, and your score is the improvement over the student's measured zero-shot baseline on those same questions.",
-        ]
-        if joint:
-            lines.append(
-                "- For two student models, the score is the smaller improvement."
-            )
-        return "\n".join(lines)
-    if rule.get("kind") == "reference":
-        return _reference_summary(config, rule)
-    if rule.get("kind") == "threshold":
-        bar = float(rule["min_accuracy"])
-        lines = [
-            f"- Your submitted policy is run on the held-out test split. The task passes (score 1) if the student answers at least {bar:.2%} of the test questions correctly with your policy; otherwise it scores 0.",
-            f"- {bar:.2%} is {rule.get('reference', 'a fixed reference score')}.",
-        ]
-        if joint:
-            lines.append("- With two student models, both must reach it to pass.")
-        return "\n".join(lines)
-    share = f"{float(rule.get('min_closed', 0.5)):.0%}"
-    lines = [
-        f"- Your submitted policy is run on the held-out test split. The task passes (score 1) if the policy answers correctly at least {share} of the test questions the student's measured zero-shot baseline gets wrong; otherwise it scores 0.",
-    ]
-    if joint:
-        lines.append("- With two student models, both must reach this target.")
-    return "\n".join(lines)
+    return summary
 
 
 def task_prompt(env: Environment, state: ExecutionState) -> str:
-    """Build the prompt for one inference-optimization task."""
+    """Build the request for one inference-optimization task."""
     del state
     task = env.current_task
     config = dict(task.initial_input)
     return _TEMPLATE.format(
         description=task.description,
+        policy_dir="policy",
         benchmark=config.get("benchmark", "?"),
-        answer_format=_answer_format(str(config.get("benchmark", ""))),
-        models=(
-            "two frozen student models"
-            if len(config.get("models", [])) > 1
-            else "one frozen student model"
-        ),
         n_train=config.get("n_train", 30),
         n_test=config.get("n_test", 30),
         budget=_budget_summary(config),
-        scoring=_scoring_summary(config),
-        policy_dir="policy",
     )

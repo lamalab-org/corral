@@ -60,7 +60,7 @@ def _compact(payload: dict[str, Any], summary: str, ledger: StateLedger) -> str:
     if ledger.fraction_left() <= NAG_THRESHOLD:
         lines.append(
             "NEXT: budget is nearly gone. Call submit_policy('policy'), then "
-            "submit_answer to end the episode NOW - an unsubmitted policy scores nothing."
+            "submit_answer to deliver the policy before the budget runs out."
         )
     return "\n".join(lines)
 

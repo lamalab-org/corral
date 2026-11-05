@@ -151,12 +151,16 @@ def _task(benchmark: str, model: str, level: int, measured: dict) -> dict:
     own = measured["results"][model][benchmark]
     if metric == "template_consistency":
         description = (
-            f"Build and submit an inference-time policy that makes the student "
-            f"answer {label} consistently: right on every renamed and renumbered "
-            "instance of a problem, not just some."
+            f"I'd like to improve the answers my frozen student model gives to "
+            f"{label} questions. Can you build a reusable inference-time policy "
+            "that answers every renamed and renumbered instance of a problem "
+            "consistently?"
         )
     else:
-        description = f"Build and submit an inference-time policy for {label}."
+        description = (
+            f"I'd like to improve the answers my frozen student model gives to "
+            f"{label} questions. Can you build an inference-time policy I can reuse?"
+        )
     config = {
         "benchmark": benchmark,
         "models": [model],
@@ -195,7 +199,8 @@ def _task(benchmark: str, model: str, level: int, measured: dict) -> dict:
         "description": description,
         "tools": TOOLS,
         "submission_format": (
-            "Any text; the score comes from the policy submitted with submit_policy."
+            "After submit_policy('policy'), call submit_answer('submission.json') "
+            "to finish. The text is only a completion signal."
         ),
         "initial_input": config,
     }

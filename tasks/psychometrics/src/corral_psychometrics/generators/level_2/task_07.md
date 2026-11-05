@@ -29,8 +29,8 @@ Use these rules:
 {"model_syntax": "F =~ HSNS1+...+HSNS10\nbehavior ~ F + gender", "association": {"group_adjusted": "supported|not_supported", "within_group": "replicates|does_not_replicate", "holdout": "generalizes|does_not_generalize"}, "unstable_items": ["item_name"]}
 ```
 
-The model must cover all HSNS items and include `behavior` and `gender`. The
-scorer re-estimates the claims from the submitted model.
+The model must cover all HSNS items and include `behavior` and `gender`, so the
+reported relationships can be reproduced from the submitted model.
 
 ## What needs checking
 

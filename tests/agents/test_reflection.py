@@ -131,6 +131,7 @@ class TestReflectionMemory:
         assert "Score:" not in formatted
         assert "0.30" not in formatted
         assert "Check parameters before calling tools." in formatted
+        assert memory.to_dict()["reflections"][0]["score"] == 0.3
 
     def test_format_for_prompt_multiple(self):
         """Test formatting multiple reflections."""

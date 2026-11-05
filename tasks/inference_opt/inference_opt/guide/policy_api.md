@@ -1,7 +1,8 @@
 # Policy API
 
-Write one policy in `policy/policy.py`.
-It defines `run(questions, ctx)`, which gets every question of a run at once and records an answer for each:
+Please put one reusable policy in `policy/policy.py` and define
+`run(questions, ctx)`. It gets every question of a run at once and records an
+answer for each:
 
 ```python
 class Policy:
@@ -14,21 +15,24 @@ class Policy:
 Everything else can be defined by you: the order of questions, what is sent side by side, what is remembered between questions, and how the call budget is spread.
 Keep any state you need in ordinary Python variables.
 
-## How answers are graded
+To deliver the policy, call `submit_policy('policy')`, then call `submit_answer`
+to end the episode. The text passed to `submit_answer` is only a completion signal;
+the submitted policy is run once on held-out questions.
 
-**MATH tasks** (`math_*`) are graded exactly as Inspect's MATH eval grades them (`expression_exact_match_sympy` in `inspect_evals`):
+## How to format answers
 
-- The answer is read from a line `ANSWER: <answer>`, and that line must be the last line of the text.
-- It is normalised and compared with the gold answer using sympy, so `ANSWER: \frac{1}{2}` and `ANSWER: 0.5` are the same answer.
-- Text with no final `ANSWER:` line is wrong, even if it contains the right answer, for example in `\boxed{...}`.
+**MATH tasks** (`math_*`) need a final `ANSWER: <answer>` line:
 
-Gold answers are numbers or expressions such as `\frac{3}{4}` or `1+2\sqrt{3}`.
-`question.answer_type` is `"text"` for every MATH question, so it does not say which.
+- Put `ANSWER: <answer>` on the last line of the text.
+- The answer can be a number or expression, such as `\frac{1}{2}` or `1+2\sqrt{3}`.
+- Include the final line even if you also write the answer in `\boxed{...}`.
 
-**GSM-Symbolic tasks** (`gsm_*`) are graded as GSM-Symbolic grades them: commas are removed, the **last number** in the text is the answer, and it is compared with the gold answer as a number.
-Every gold answer is a number, so `question.answer_type` is `"numeric"`.
+`question.answer_type` is `"text"` for every MATH question, so it does not say which kind of answer is needed.
+
+**GSM-Symbolic tasks** (`gsm_*`) need the **last number** in the text to be the answer.
+Every answer is a number, so `question.answer_type` is `"numeric"`.
 Each question is one instance of a template: the same problem with different names and numbers.
-`question.topic` names the template, so instances of one template can be recognised; the score counts a template only if all of its instances are right.
+`question.topic` names the template, so instances of one template can be recognised.
 
 You can also record `Answer(final=...)` from `inference_opt.api`, which writes an `ANSWER:` line for you; its value is then the last number for GSM-Symbolic too.
 `inference_opt.api` is the only `inference_opt` module a policy may import.
