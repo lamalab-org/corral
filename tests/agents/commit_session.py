@@ -10,6 +10,7 @@ from corral.persistence import SQLiteCommitStore
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
     from corral.core.environment import Environment
     from corral.core.state import ExecutionState
@@ -23,9 +24,10 @@ async def start_session(
     previous_state: ExecutionState | None = None,
     last_score: Mapping[str, Any] | None = None,
     agent: Any = None,
+    store_path: str | Path = ":memory:",
 ) -> AgentSession:
     execution_id = f"test-{uuid4()}"
-    store = SQLiteCommitStore(":memory:", execution_id)
+    store = SQLiteCommitStore(store_path, execution_id)
     runtime = ActorRef(
         kind="runtime", actor_id="corral", run_id=f"runtime:{execution_id}"
     )
