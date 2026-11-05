@@ -12,7 +12,7 @@ Responses are five-point ratings and `0` denotes a missing response. The target 
 
 ## What to report
 
-Submit a complete lavaan/semopy model, one standardised loading for every HSNS item, and the latent factor correlation when the selected model has correlated factors.
+Submit a complete semopy model, one standardised loading for every HSNS item, and the latent factor correlation when the selected model has correlated factors.
 
 ## Why this is non-trivial
 

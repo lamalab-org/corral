@@ -26,7 +26,6 @@ import corral.orchestration as orchestration
 from corral.observability.langfuse import langfuse_enabled
 from corral.orchestration.defaults import resolve_max_iterations
 from corral.persistence import ShardedCommitStore, SQLiteCommitStore
-from corral.run import CorralRunner, execute_task
 from corral.runtime.environment_loader import (
     ENVIRONMENT_NAMES,
     load_environment_group,
@@ -57,6 +56,10 @@ AGENT_DEFINITIONS: Mapping[str, AgentDefinition] = MappingProxyType(
             "corral.agents.codex",
             "CodexAgent",
             extra="codex",
+        ),
+        "epistemic": AgentDefinition(
+            "corral.agents.epistemic",
+            "EpistemicAgent",
         ),
         "llm-planner": AgentDefinition(
             "corral.agents.llm_planner",
@@ -314,7 +317,13 @@ def _print_results(run_id: str, result: Any) -> None:
     lines = [f"Run {run_id} completed:"]
     for task_id, task_results in result.task_results.items():
         for trial in task_results.trials:
-            status = "failed" if trial.error_message else "completed"
+            status = (
+                "failed"
+                if trial.error_message
+                else "evaluation failed"
+                if trial.evaluation_error
+                else "completed"
+            )
             score = "-" if trial.score is None else f"{trial.score:g}"
             output = json.dumps(trial.output, ensure_ascii=False, default=str)
             lines.append(
@@ -323,6 +332,8 @@ def _print_results(run_id: str, result: Any) -> None:
             )
             if trial.error_message:
                 lines.append(f"  error: {trial.error_message}")
+            if trial.evaluation_error:
+                lines.append(f"  evaluation error: {trial.evaluation_error}")
     sys.stdout.write("\n".join(lines) + "\n")
 
 
@@ -367,6 +378,7 @@ def _sandbox_profile(
         cpus=getattr(args, "sandbox_cpus", 2.0),
         memory=getattr(args, "sandbox_memory", "4g"),
         pids_limit=getattr(args, "sandbox_pids_limit", 256),
+        gpus=getattr(args, "sandbox_gpus", None),
         network=getattr(args, "sandbox_network", "bridge"),
         private_directories=tuple(
             str(Path(path).expanduser().resolve())
@@ -399,6 +411,8 @@ async def run_benchmark(
     agent_kwargs: Mapping[str, Any] | None = None,
 ) -> int:
     """Run one CLI-configured benchmark with the task runner."""
+    from corral.run import CorralRunner
+
     environments = load_environment_group(
         args.environment,
         env_kwargs=args.env_kwargs,
@@ -566,12 +580,17 @@ async def run_benchmark(
         }
         result.generate_report(str(report_path))
         failed_trials = sum(
-            trial.error_message is not None for trial in result.all_results
+            trial.error_message is not None or trial.evaluation_error is not None
+            for trial in result.all_results
+        )
+        evaluation_failed_trials = sum(
+            trial.evaluation_error is not None for trial in result.all_results
         )
         run_manifest.update(
             status="completed_with_errors" if failed_trials else "completed",
             completed_at=datetime.now(timezone.utc).isoformat(),
             failed_trials=failed_trials,
+            evaluation_failed_trials=evaluation_failed_trials,
         )
         _atomic_json(run_manifest_path, run_manifest)
     except BaseException as exc:
@@ -588,11 +607,18 @@ async def run_benchmark(
 
     _print_results(run_id, result)
     sys.stdout.write(f"Outputs: {run_dir}\n")
-    return int(any(trial.error_message for trial in result.all_results))
+    return int(
+        any(
+            trial.error_message or trial.evaluation_error
+            for trial in result.all_results
+        )
+    )
 
 
 async def run_task(args: argparse.Namespace) -> int:
     """Run exactly one independent task without benchmark evaluation/reporting."""
+    from corral.run import execute_task
+
     environments = load_environment_group(
         args.environment,
         env_kwargs=args.env_kwargs,
@@ -772,6 +798,13 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     sandbox.add_argument("--sandbox-memory", default="4g")
     sandbox.add_argument("--sandbox-pids-limit", type=int, default=256)
     sandbox.add_argument(
+        "--sandbox-gpus",
+        help=(
+            "Expose this many NVIDIA GPUs to each Docker trial, 'all', or "
+            "specific host GPUs such as 'device=2,3'."
+        ),
+    )
+    sandbox.add_argument(
         "--sandbox-private-directory",
         action="append",
         default=[],
@@ -839,6 +872,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run scientific agents and benchmarks with Corral.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    from corral.epistemic_analysis.cli import add_arguments as add_analysis_arguments
+
+    analyze = commands.add_parser(
+        "analyze", help="Annotate traces and analyze epistemic patterns."
+    )
+    add_analysis_arguments(analyze)
     run = commands.add_parser(
         "run",
         help="Run one independent task without benchmark evaluation.",

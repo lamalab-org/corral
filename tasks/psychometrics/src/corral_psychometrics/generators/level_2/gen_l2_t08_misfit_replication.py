@@ -97,17 +97,17 @@ SUBMISSION_FORMAT = """A single JSON object:
 {
   "model_syntax": "<complete two-factor model with group paths>",
   "findings": {
-    "local_dependence": [["item_a", "item_b"]],
-    "cross_loadings": ["item_c"],
-    "dif_items": ["item_d"],
-    "poor_items": ["item_e"]
+    "local_dependence": [["<item>", "<item>"], ...],
+    "cross_loadings": ["<item>", ...],
+    "dif_items": ["<item>", ...],
+    "poor_items": ["<item>", ...]
   },
   "replication": {
-    "local_dependence": "replicates|does_not_replicate",
-    "cross_loadings": "replicates|does_not_replicate",
-    "dif_items": "replicates|does_not_replicate",
-    "poor_items": "replicates|does_not_replicate",
-    "rejected_development_modifications": [["item_f", "item_g"]]
+    "local_dependence": "does_not_replicate|replicates",
+    "cross_loadings": "does_not_replicate|replicates",
+    "dif_items": "does_not_replicate|replicates",
+    "poor_items": "does_not_replicate|replicates",
+    "rejected_development_modifications": [["<item>", "<item>"], ...]
   }
 }
 
@@ -117,7 +117,13 @@ poor item may be left out of the measurement model; no other item may be.
 
 Each replication verdict is recomputed by removing that modification from your
 model and refitting in the replication sample, so the verdicts have to match what
-your own model does there."""
+your own model does there. A kind of finding `replicates` when removing each of its
+modifications lowers CFI in the replication sample by at least 0.01. Poor items
+replicate when every one still has a standardised loading below 0.30 there. A
+rejected modification is written as the pair of items it would join with a residual
+covariance; it must raise CFI by at least 0.01 in the development sample and by
+less than 0.01 in the replication sample. The final model must reach CFI >= 0.95
+and RMSEA <= 0.08 in the replication sample."""
 
 
 def baseline_syntax():

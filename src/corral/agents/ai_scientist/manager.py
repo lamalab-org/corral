@@ -45,6 +45,7 @@ from corral.agents.ai_scientist.workers.critic import ScientificCritic
 from corral.agents.ai_scientist.workers.experimenter import Experimenter
 from corral.agents.ai_scientist.workers.planner import NodePlanner
 from corral.report.logging import logger
+from corral.workspace import PUBLIC_WORKSPACE_ROOT
 
 
 class ExperimentManager:
@@ -1031,7 +1032,7 @@ class ExperimentManager:
                 parent_id=winner.id,
                 branch_id=branch.branch_id,
                 execution_id=branch.execution_id,
-                branch_workspace=branch.workspace,
+                branch_workspace=PUBLIC_WORKSPACE_ROOT if branch.workspace else None,
                 stage=stage,
                 stage_seed_id=progress.seed_node_id,
                 boundary_validation=True,
@@ -1275,9 +1276,9 @@ class ExperimentManager:
         parent: ExperimentNode | None,
     ) -> list[tuple[str, NodeProposal]]:
         candidate_ids = [state.tree.next_id() for _ in range(count)]
-        # Every proposal will execute in a separate execution workspace. Relative
-        # paths therefore isolate artifacts without synthetic node directories.
-        branch_workspaces = ["." for _ in candidate_ids]
+        # Each isolated branch exposes the same public workspace root. Physical
+        # directories stay in the execution pool, outside model-facing nodes.
+        branch_workspaces = [PUBLIC_WORKSPACE_ROOT for _ in candidate_ids]
         journal_context = state.journal.context(self.config.max_journal_chars)
         siblings = [
             node
@@ -1374,7 +1375,7 @@ class ExperimentManager:
                 journal_context=journal_context,
                 parent=parent,
                 siblings=existing_siblings[parent.id],
-                branch_workspaces=["."],
+                branch_workspaces=[PUBLIC_WORKSPACE_ROOT],
                 substage=(current_substage.plan if current_substage else None),
                 proposal_offset=batch_offsets[index],
             )
@@ -1630,7 +1631,11 @@ class ExperimentManager:
                 parent_id=parent.id if parent is not None else None,
                 branch_id=branch.branch_id if branch is not None else None,
                 execution_id=(branch.execution_id if branch is not None else None),
-                branch_workspace=branch.workspace if branch is not None else None,
+                branch_workspace=(
+                    PUBLIC_WORKSPACE_ROOT
+                    if branch is not None and branch.workspace
+                    else None
+                ),
                 stage=state.current_stage,
                 stage_seed_id=state.stage_progress(state.current_stage).seed_node_id,
                 substage_id=substage_id,

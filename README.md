@@ -220,7 +220,7 @@ If that environment is already activated, `uv run` is optional and the command
 is simply `corral bench ...`. The `--project` form is only needed when invoking
 `uv` from elsewhere in the monorepo.
 
-The available agent names are `ai-scientist`, `claude-code`, `codex`,
+The available agent names are `ai-scientist`, `claude-code`, `codex`, `epistemic`,
 `llm-planner`, `openhands`, `react`, `reflexion`, `terminus`, and
 `tool-calling`. Class names and underscore spellings such as `ReActAgent` and
 `tool_calling` are accepted as aliases. Claude Code, Codex, and OpenHands need
@@ -410,6 +410,49 @@ agent = ToolCallingAgent(
     temperature=0.0,
 )
 ```
+
+Both `ReActAgent` and `ToolCallingAgent` accept `epistemic=True` to enable the
+same annotations, actor feedback, and submission review as `EpistemicAgent`:
+
+```python
+agent = ReActAgent(model="gpt-4o", epistemic=True)
+# Or: ToolCallingAgent(model="gpt-4o", epistemic=True)
+```
+
+The mode is off by default.
+
+### EpistemicAgent
+
+Extends `ToolCallingAgent` with dedicated scientific prompts and a Decisions
+assessment after each public actor turn.
+
+```python
+from corral.agents import EpistemicAgent
+
+agent = EpistemicAgent(
+    model="openai/gpt-4o",  # Actor: any model supported by ToolCallingAgent.
+    actor_refusal_max_retries=1,  # Retries after the initial refused actor call.
+    epistemic_model="gpt-6-luna",  # Separate Decisions classifier.
+    epistemic_explanation_model="gpt-6-luna",  # Defaults to epistemic_model.
+    epistemic_explanation_concurrency=8,  # Per assessment, one request per candidate.
+    epistemic_timeout_s=120,
+    epistemic_max_retries=2,
+    epistemic_pattern_thresholds="positive-mass-20261020-v1",  # Default policy.
+)
+```
+
+```bash
+uv run corral bench \
+  --agent epistemic --environment samplemath --task task1 \
+  --model openai/gpt-4o \
+  --agent-kwargs '{"epistemic_model":"gpt-6-luna"}'
+```
+
+Set `OPENAI_API_KEY` for the classifier. Its connection can be configured with
+`epistemic_api_key` and `epistemic_base_url`, independently of the actor's
+`api_endpoint`. The [Decisions API](https://developers.openai.com/api/reference/python/resources/decisions/methods/create)
+currently supports `gpt-6-luna`. The annotator uses the SDK's native Decisions
+helper when available, or its generic `POST /decisions` transport on older SDKs.
 
 ### LLMPlanner
 

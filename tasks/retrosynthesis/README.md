@@ -2,6 +2,28 @@
 
 This directory contains the retrosynthesis task environment for Corral. It provides synthesis-planning benchmarks where agents query a reaction-template database, inspect candidate transformations, and submit precursor proposals for target molecules.
 
+## Route validation
+
+`verify_route`, `check_reactants` (levels 1 and 2), and `score_final` (level 3)
+share the same catalog reaction validator. Every reaction must use a positive
+integer catalog ID and its submitted reactants must match one complete outcome
+of applying that template to the parent molecule. All intermediate steps are
+checked. Missing or extra reactants, placeholder IDs, and custom SMARTS in the
+`template_id` field fail validation. Atom maps and stereochemistry are ignored
+when comparing reactant sets; duplicate molecules still count separately.
+
+`verify_route` confirms structure and catalog consistency, not experimental
+feasibility, prices, or task-specific constraints. `verify_step` still supports
+custom SMARTS for exploring a transformation; that does not register the
+transformation as a catalog template for submission. A database outage raises an
+evaluation error rather than becoming a failed synthesis.
+
+The 2026-10-23 correction adds the missing reaction checks to `check_reactants`
+and fixes the reversed traversal condition in the previous route validator.
+The flagged trials were rescored once; the corrected scores and rejection
+reasons are retained in the
+[retrosynthesis reports](../../reports/retrosynthesis/README.md).
+
 ## Database Setup
 
 The retrosynthesis environment uses two local, frozen databases:

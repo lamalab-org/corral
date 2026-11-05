@@ -6,13 +6,16 @@ import signal
 import subprocess
 import sys
 import tempfile
+from contextvars import ContextVar
 from pathlib import Path
 
+from corral_md.local_runtime import run_lammps_locally
 from corral_md.modal_workspace import (
     run_lammps_in_modal,
     run_python_gpu_in_modal,
     run_verified_md_in_modal,
 )
+from corral_md.resources import asset_descriptors, asset_relative_paths
 from corral_md.workspace import local_path
 
 from corral.core.tool import Tool, tool
@@ -22,6 +25,10 @@ from corral.workspace import (
     AbsoluteWorkspaceFilesystem,
     build_terminal_tool,
     workspace_relative_path,
+)
+
+_PYTHON_CALL: ContextVar[PreparedToolCall | None] = ContextVar(
+    "md_python_call", default=None
 )
 
 
@@ -89,14 +96,106 @@ def build_run_verified_md_tool(workspace: str | Path):
     return run_verified_md
 
 
-def build_md_terminal_tool(workspace: str | Path):
+def build_md_terminal_tool(workspace: str | Path, *, local: bool = False):
     """Run shell commands in Corral's local restricted workspace worker."""
-    terminal = build_terminal_tool(AbsoluteWorkspaceFilesystem(workspace))
-    terminal.description += (
-        " Commands execute locally with the task workspace as the current "
-        "directory; use relative paths such as output/result.json inside commands."
-    )
-    return terminal
+    if local:
+
+        @tool(workspace_access="read_write")
+        def terminal(
+            command: str, timeout_seconds: int = 120, max_output_chars: int = 20_000
+        ) -> str:
+            """[BRIEF] Run a bounded foreground shell command in the local task workspace. [/BRIEF]
+
+            [DETAILED] Execute a shell command with the task workspace as its current directory, capturing combined stdout and stderr. The timeout stops the command and its child processes. [/DETAILED]
+
+            [PROCEDURAL] Use this tool to inspect files, prepare inputs, and run local commands. Choose a timeout that fits the workload. [/PROCEDURAL]
+
+            [WORKFLOW_INTEGRATION] Save inputs, run the command, then inspect its exit code and output before using the resulting files. [/WORKFLOW_INTEGRATION]
+
+            [CONTEXTUAL] Commands run through /bin/sh with a limited environment. [/CONTEXTUAL]
+
+            [SYNTACTICAL] Example: `terminal("ls -la output", timeout_seconds=30)`. [/SYNTACTICAL]
+
+            Args:
+                command: [ARGS_BRIEF] Nonempty shell command, with the task workspace as its cwd. [/ARGS_BRIEF]
+                timeout_seconds: [ARGS_BRIEF] Wall-clock limit from 1 to 3600 seconds. [/ARGS_BRIEF]
+                max_output_chars: [ARGS_BRIEF] Maximum combined output from 1 to 100000 characters. [/ARGS_BRIEF]
+
+            Returns:
+                str: [RETURNS_BRIEF] JSON containing exit_code, output, timed_out, and truncated. [/RETURNS_BRIEF]
+
+            [RAISES] ValueError for an empty command or invalid limits; OSError if the shell cannot start. [/RAISES]
+
+            [LIMITATIONS] Output is returned after the command exits. Background processes are stopped when the call finishes, and only the final max_output_chars characters are returned. [/LIMITATIONS]
+            """
+            if not command.strip():
+                raise ValueError("terminal command cannot be empty")
+            if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 3600:
+                raise ValueError("timeout_seconds must be between 1 and 3600")
+            if (
+                type(max_output_chars) is not int
+                or not 1 <= max_output_chars <= 100_000
+            ):
+                raise ValueError("max_output_chars must be between 1 and 100000")
+            # Restricted workers see the assigned task directory at the
+            # canonical path, not at the controller's physical host path.
+            root = (
+                Path("/workspace")
+                if Path("/workspace").is_dir()
+                else Path(workspace).resolve()
+            )
+            environment = {
+                "HOME": str(root),
+                "TMPDIR": str(root),
+                "LANG": "C.UTF-8",
+                "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            }
+            for key in (
+                "CUDA_VISIBLE_DEVICES",
+                "CUDA_HOME",
+                "CUDA_PATH",
+                "LD_LIBRARY_PATH",
+                "NVIDIA_VISIBLE_DEVICES",
+            ):
+                if key in os.environ:
+                    environment[key] = os.environ[key]
+            with tempfile.TemporaryFile() as output:
+                process = subprocess.Popen(
+                    ["/bin/sh", "-c", command],
+                    cwd=root,
+                    env=environment,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                timed_out = False
+                try:
+                    process.wait(timeout=timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                finally:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                byte_count = output.tell()
+                output.seek(max(0, byte_count - max_output_chars * 4))
+                combined = output.read().decode("utf-8", errors="replace")
+            truncated = (
+                byte_count > max_output_chars or len(combined) > max_output_chars
+            )
+            return json.dumps(
+                {
+                    "exit_code": process.returncode,
+                    "output": combined[-max_output_chars:],
+                    "timed_out": timed_out,
+                    "truncated": truncated,
+                }
+            )
+
+        return terminal
+    return build_terminal_tool(AbsoluteWorkspaceFilesystem(workspace))
 
 
 @tool(workspace_access="read_write")
@@ -252,6 +351,8 @@ def keyword_log_extractor(path: str, keyword: str) -> str:
 
 
 def _local_python_argument(workspace: str | Path, argument: str) -> str:
+    if Path(workspace).resolve() == Path("/workspace"):
+        return argument
     if argument == "/workspace" or argument.startswith("/workspace/"):
         return str(local_path(workspace, argument, allow_root=argument == "/workspace"))
     return argument
@@ -262,17 +363,14 @@ def _run_python_locally(
     script_path: str,
     args: list[str] | None,
     timeout: int,
-    working_dir: str | None,
+    *,
+    gpu: bool = False,
 ) -> str:
     """Execute CPU Python after Corral has entered the restricted tool worker."""
     root = Path(workspace).resolve()
     script = local_path(root, script_path)
-    public_directory = working_dir if working_dir is not None else "/workspace"
-    directory = local_path(root, public_directory, allow_root=True)
     if not script.is_file():
         raise FileNotFoundError(f"Script not found: {script_path}")
-    if not directory.is_dir():
-        raise NotADirectoryError(f"Working directory not found: {public_directory}")
     if type(timeout) is not int or not 1 <= timeout <= 7200:
         raise ValueError("timeout must be between 1 and 7200 seconds")
 
@@ -285,7 +383,6 @@ def _run_python_locally(
     ]
     scratch = Path(tempfile.gettempdir()).resolve()
     environment = {
-        "CORRAL_WORKSPACE": str(root),
         "HOME": str(root),
         "LANG": "C.UTF-8",
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
@@ -294,6 +391,35 @@ def _run_python_locally(
         "TMPDIR": str(scratch),
         "XDG_CACHE_HOME": str(scratch / "cache"),
     }
+    # Keep container resource controls in fresh interpreters. Otherwise BLAS
+    # sizes its pools for the host, and CUDA loses the assigned device mask.
+    for key in (
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "OMP_NUM_THREADS",
+        "OMP_THREAD_LIMIT",
+        "MKL_NUM_THREADS",
+        "BLIS_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "NUMEXPR_MAX_THREADS",
+        "CUDA_VISIBLE_DEVICES",
+        "CUDA_HOME",
+        "CUDA_PATH",
+        "LD_LIBRARY_PATH",
+        "NVIDIA_VISIBLE_DEVICES",
+    ):
+        if key in os.environ:
+            environment[key] = os.environ[key]
+    if gpu:
+        try:
+            import torch
+        except ImportError as exc:
+            raise RuntimeError(
+                "Local GPU Python requires a CUDA-enabled PyTorch installation"
+            ) from exc
+        if not torch.cuda.is_available():
+            raise RuntimeError("Local GPU Python requires an available CUDA GPU")
     timed_out = False
     with (
         tempfile.TemporaryFile() as stdout_stream,
@@ -301,7 +427,7 @@ def _run_python_locally(
     ):
         process = subprocess.Popen(
             command,
-            cwd=directory,
+            cwd=root,
             env=environment,
             stdin=subprocess.DEVNULL,
             stdout=stdout_stream,
@@ -337,7 +463,7 @@ def _run_python_locally(
     return json.dumps(
         {
             "success": True,
-            "backend": "local_cpu",
+            "backend": "local_gpu" if gpu else "local_cpu",
             "return_code": process.returncode,
             "stdout": f"/workspace/output/{script.stem}.stdout.txt",
             "stderr": f"/workspace/output/{script.stem}.stderr.txt",
@@ -366,13 +492,13 @@ class _LocalPythonScriptTool(Tool):
                         ]
                     },
                     "timeout": {"type": "integer"},
-                    "directory_relative": {"type": "string"},
+                    "gpu": {"type": "boolean"},
                 },
                 "required": [
                     "script_relative",
                     "args",
                     "timeout",
-                    "directory_relative",
+                    "gpu",
                 ],
             },
         )
@@ -384,16 +510,14 @@ class _LocalPythonScriptTool(Tool):
         script_relative: str,
         args: list[str] | None,
         timeout: int,
-        directory_relative: str,
+        gpu: bool = False,
     ) -> str:
         return _run_python_locally(
             workspace,
             f"/workspace/{script_relative}",
             args,
             timeout,
-            "/workspace"
-            if directory_relative == "."
-            else f"/workspace/{directory_relative}",
+            gpu=gpu,
         )
 
 
@@ -402,26 +526,41 @@ def _run_python_in_local_worker(
     script_path: str,
     args: list[str] | None,
     timeout: int,
-    working_dir: str | None,
+    *,
+    gpu: bool = False,
 ) -> str:
     arguments = {
-        "workspace": str(Path(workspace).resolve()),
+        "workspace": "/workspace",
         "script_relative": workspace_relative_path(script_path),
         "args": args,
         "timeout": timeout,
-        "directory_relative": workspace_relative_path(
-            working_dir if working_dir is not None else "/workspace", allow_root=True
-        ),
+        "gpu": gpu,
     }
     worker_tool = _LocalPythonScriptTool()
+    authorized = _PYTHON_CALL.get()
+    if authorized is not None:
+        worker_tool.resources = authorized.resources
     prepared = PreparedToolCall.capture(
-        worker_tool, arguments, workspace=str(Path(workspace).resolve())
+        worker_tool,
+        arguments,
+        workspace=str(Path(workspace).resolve()),
+        resource_mounts=authorized.resource_mounts if authorized else None,
+        action_id=authorized.action_id if authorized else "",
     )
     return execute_prepared_call(prepared)
 
 
-def build_execute_python_script_tool(workspace: str | Path):
-    """Build one Python interface with local CPU and Modal GPU routing."""
+def build_execute_python_script_tool(
+    workspace: str | Path,
+    *,
+    local: bool = False,
+    assets_dir: str | None = None,  # noqa: ARG001 - Kept for builder compatibility.
+):
+    """Build one Python interface with local CPU and selectable GPU routing.
+
+    assets_dir remains accepted for builder compatibility; execution receives
+    immutable assets exclusively through the authorized resource mounts.
+    """
 
     @tool(
         hidden_args=["corral_action_id"],
@@ -432,13 +571,12 @@ def build_execute_python_script_tool(workspace: str | Path):
         script_path: str,
         args: list[str] | None = None,
         timeout: int = 900,
-        working_dir: str | None = None,
         use_gpu: bool = False,
         corral_action_id: str | None = None,
     ) -> str:
-        """[BRIEF] Run a saved Python script on CPU or an A100 GPU. The default wall-clock budget is 900 seconds (15 minutes) per call, including Python startup and model loading. The process is stopped when its timeout expires. Choose a workload that fits; use shorter runs and inspect their timing before scaling up. GPU outputs are synchronized only on success, so continue long simulations from previously synchronized restart states in separate calls, preserving positions and velocities. [/BRIEF]
+        """[BRIEF] Run a saved Python script on CPU or a GPU. The default wall-clock budget is 900 seconds (15 minutes) per call, including Python startup and model loading. The process is stopped when its timeout expires. Modal GPU workspace changes are synchronized only on success. Choose a workload that fits; use shorter runs and inspect their timing before scaling up. Continue long simulations from saved restart states in separate calls, preserving positions and velocities. [/BRIEF]
 
-        [DETAILED] CPU scripts run in Corral's restricted local task workspace. When use_gpu is true, the same interface synchronizes the script and task files to an env with an A100 GPU. [/DETAILED]
+        [DETAILED] CPU scripts run in Corral's restricted local task workspace. When use_gpu is true, the configured GPU backend runs the script and saves its results. [/DETAILED]
 
         [PROCEDURAL] When to use this tool:
         - Leave use_gpu false for lightweight analysis, plotting, and conversion.
@@ -452,8 +590,8 @@ def build_execute_python_script_tool(workspace: str | Path):
         [/WORKFLOW_INTEGRATION]
 
         [CONTEXTUAL] How this tool works:
-        - Validates the script and working-directory paths.
-        - Runs CPU work locally and GPU work on an A100 in Modal.
+        - Validates the script path.
+        - Runs CPU work locally and GPU work on the configured backend.
         - Saves or synchronizes captured logs under /workspace/output.
         [/CONTEXTUAL]
 
@@ -468,19 +606,15 @@ def build_execute_python_script_tool(workspace: str | Path):
                 [ARGS_SYNTACTICAL] Absolute /workspace path to a Python file. [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] "/workspace/scripts/mace_md.py" [/ARGS_EXAMPLES]
             args: [ARGS_BRIEF] Optional command-line arguments for the script. [/ARGS_BRIEF]
-                [ARGS_DETAILED] The strings are passed to the script in order. Absolute /workspace arguments are translated for local CPU execution. [/ARGS_DETAILED]
+                [ARGS_DETAILED] The strings are passed to the script in order. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] List of strings or null. [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] ["--steps", "1000"], null [/ARGS_EXAMPLES]
             timeout: [ARGS_BRIEF] Wall-clock limit in seconds, including Python startup and model loading. Defaults to 900 (15 minutes); allowed range 1-7200. A timeout stops the process and returns an error so you can reduce the workload. [/ARGS_BRIEF]
                 [ARGS_DETAILED] The value must be between 1 and 7200. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Integer from 1 to 7200. [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] 900, 3600 [/ARGS_EXAMPLES]
-            working_dir: [ARGS_BRIEF] Working directory. Defaults to /workspace. [/ARGS_BRIEF]
-                [ARGS_DETAILED] The directory must be under /workspace. [/ARGS_DETAILED]
-                [ARGS_SYNTACTICAL] Absolute /workspace directory path or null. [/ARGS_SYNTACTICAL]
-                [ARGS_EXAMPLES] "/workspace", "/workspace/output" [/ARGS_EXAMPLES]
             use_gpu: [ARGS_BRIEF] Whether the script requires a GPU. Defaults to false. [/ARGS_BRIEF]
-                [ARGS_DETAILED] False runs locally on CPU; true runs on an A100 in Modal. [/ARGS_DETAILED]
+                [ARGS_DETAILED] False runs locally on CPU; true selects the configured GPU backend. [/ARGS_DETAILED]
                 [ARGS_SYNTACTICAL] Boolean. [/ARGS_SYNTACTICAL]
                 [ARGS_EXAMPLES] false, true [/ARGS_EXAMPLES]
 
@@ -494,10 +628,6 @@ def build_execute_python_script_tool(workspace: str | Path):
                 [ERROR_WHEN] The script does not exist. [/ERROR_WHEN]
                 [ERROR_DETAILS] The supplied path does not name a workspace file. [/ERROR_DETAILS]
                 [ERROR_RECOVERY] Check the path and save the script first. [/ERROR_RECOVERY]
-            NotADirectoryError:
-                [ERROR_WHEN] The working directory does not exist. [/ERROR_WHEN]
-                [ERROR_DETAILS] The path does not name a workspace directory. [/ERROR_DETAILS]
-                [ERROR_RECOVERY] Use an existing workspace directory. [/ERROR_RECOVERY]
             ValueError:
                 [ERROR_WHEN] The timeout or a workspace path is invalid. [/ERROR_WHEN]
                 [ERROR_DETAILS] A value is outside its accepted range or path boundary. [/ERROR_DETAILS]
@@ -509,46 +639,59 @@ def build_execute_python_script_tool(workspace: str | Path):
         [/LIMITATIONS]
         """
         script = local_path(workspace, script_path)
-        directory = working_dir if working_dir is not None else "/workspace"
-        local_directory = local_path(workspace, directory, allow_root=True)
         if not script.is_file():
             raise FileNotFoundError(f"Script not found: {script_path}")
-        if not local_directory.is_dir():
-            raise NotADirectoryError(f"Working directory not found: {directory}")
         if type(timeout) is not int or not 1 <= timeout <= 7200:
             raise ValueError("timeout must be between 1 and 7200 seconds")
         if not use_gpu:
+            return _run_python_in_local_worker(workspace, script_path, args, timeout)
+        if local:
             return _run_python_in_local_worker(
-                workspace, script_path, args, timeout, directory
+                workspace,
+                script_path,
+                args,
+                timeout,
+                gpu=True,
             )
+        logs = {}
         downloaded = run_python_gpu_in_modal(
             workspace,
             str(script),
             args or [],
             action_id=corral_action_id,
             timeout=timeout,
-            working_dir=directory,
+            logs=logs,
         )
         return json.dumps(
             {
                 "success": True,
                 "backend": "modal_a100",
                 "return_code": 0,
-                "stdout": f"Script completed on an A100. Synchronized {downloaded} workspace file(s).",
-                "stderr": "Captured logs are in /workspace/output/.",
+                "synchronized_files": downloaded,
+                **logs,
             }
         )
 
     def execute_controller(_environment, _state, prepared):
         # Dispatch may synchronize files or start a restricted CPU worker;
         # agent-authored Python is never evaluated by the controller.
-        return execute_python_script.execute(**prepared.arguments)
+        token = _PYTHON_CALL.set(prepared)
+        try:
+            return execute_python_script.execute(**prepared.arguments)
+        finally:
+            _PYTHON_CALL.reset(token)
 
     execute_python_script.execute_controller = execute_controller
     return execute_python_script
 
 
-@tool
+@tool(
+    resources=tuple(
+        name
+        for name, relative in asset_relative_paths().items()
+        if relative.startswith("potentials/")
+    )
+)
 def get_potential_metadata(file_path: str) -> str:
     """
     [BRIEF] Returns metadata from a known LAMMPS potential file given the file path. The metadata includes potential type, elements supported, and the LAMMPS-compatible pair style keyword. Raises an exception if the path is invalid or the potential file is not recognized. [/BRIEF]
@@ -583,10 +726,10 @@ def get_potential_metadata(file_path: str) -> str:
 
     [SYNTACTICAL] Usage examples:
     [
-        `get_potential_metadata("/workspace/potentials/EAM/Al99.eam.alloy")`,
-        `get_potential_metadata("/workspace/potentials/EAM/Mg_Zhou04.eam.alloy")`,
-        `get_potential_metadata("/workspace/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs")`,
-        `get_potential_metadata("/workspace/potentials/SW/Si.sw")`
+        `get_potential_metadata("/workspace/resources/md-potentials-EAM-Al99.eam/Al99.eam.alloy")`,
+        `get_potential_metadata("/workspace/resources/md-potentials-EAM-Mg_Zhou04.eam/Mg_Zhou04.eam.alloy")`,
+        `get_potential_metadata("/workspace/resources/md-potentials-EAM-Fe-C_Hepburn_Ackland.eam/Fe-C_Hepburn_Ackland.eam.fs")`,
+        `get_potential_metadata("/workspace/resources/md-potentials-SW-Si/Si.sw")`
     ]
     [/SYNTACTICAL]
 
@@ -595,7 +738,7 @@ def get_potential_metadata(file_path: str) -> str:
             [ARGS_BRIEF] Path to the potential file. [/ARGS_BRIEF]
             [ARGS_DETAILED] This is the path to a LAMMPS-compatible potential file. The file must be accessible, and its filename is used to determine metadata, so it must match one of the known potential filenames. [/ARGS_DETAILED]
             [ARGS_SYNTACTICAL] Format: "string ending in a recognized potential filename". [/ARGS_SYNTACTICAL]
-            [ARGS_EXAMPLES] Examples: "/workspace/potentials/EAM/Al99.eam.alloy", "/workspace/potentials/EAM/Mg_Zhou04.eam.alloy" [/ARGS_EXAMPLES]
+            [ARGS_EXAMPLES] Examples: "/workspace/resources/md-potentials-EAM-Al99.eam/Al99.eam.alloy", "/workspace/resources/md-potentials-EAM-Mg_Zhou04.eam/Mg_Zhou04.eam.alloy" [/ARGS_EXAMPLES]
 
     Returns:
         str :
@@ -636,18 +779,17 @@ def get_potential_metadata(file_path: str) -> str:
         ),
     }
     POTENTIAL_PATHS = {
-        "Si.sw": "/workspace/potentials/SW/Si.sw",
-        "2007_SiO.tersoff": "/workspace/potentials/TERSOFF/2007_SiO.tersoff",
-        "Al99.eam.alloy": "/workspace/potentials/EAM/Al99.eam.alloy",
-        "Cu_Zhou04.eam.alloy": "/workspace/potentials/EAM/Cu_Zhou04.eam.alloy",
-        "Mg_Zhou04.eam.alloy": "/workspace/potentials/EAM/Mg_Zhou04.eam.alloy",
-        "Fe-C_Hepburn_Ackland.eam.fs": (
-            "/workspace/potentials/EAM/Fe-C_Hepburn_Ackland.eam.fs"
-        ),
-        "pot.mod": "/workspace/potentials/BKS/pot.mod",
+        descriptor.filename: descriptor.public_path
+        for name, descriptor in asset_descriptors().items()
+        if asset_relative_paths()[name].startswith("potentials/")
     }
 
-    workspace_relative_path(file_path)
+    if not isinstance(file_path, str) or not file_path.startswith(
+        "/workspace/resources/"
+    ):
+        raise ValueError(
+            "Potential path must name a declared /workspace/resources file"
+        )
     potential_path = Path(file_path)
     potential_name = potential_path.name
     metadata = POTENTIALS.get(potential_name)
@@ -655,7 +797,7 @@ def get_potential_metadata(file_path: str) -> str:
         raise ValueError(f"Unrecognized potential file: {potential_name}")
 
     expected_remote_path = POTENTIAL_PATHS[potential_name]
-    if potential_path.as_posix() != expected_remote_path:
+    if file_path != expected_remote_path:
         raise FileNotFoundError(f"Incorrect potential file path: {file_path}")
 
     return metadata
@@ -756,7 +898,14 @@ def get_structure_from_mp_text(mp_id: str, file_path: str) -> str:
         return f"Failed to retrieve or save structure: {e!s}"
 
 
-@tool(workspace_access="read_write")
+@tool(
+    workspace_access="read_write",
+    resources=tuple(
+        name
+        for name, relative in asset_relative_paths().items()
+        if relative.startswith("structures/")
+    ),
+)
 def convert_structure_to_lammps_data(
     structure_path: str, output_file: str, atom_style: str = "charge"
 ) -> str:
@@ -880,16 +1029,30 @@ def convert_structure_to_lammps_data(
         ) from e
 
 
+def _available_execution_logs(root: Path, stem: str, log: Path) -> dict[str, str]:
+    candidates = {
+        "log": log,
+        "stdout": root / "output" / f"{stem}.stdout.txt",
+        "stderr": root / "output" / f"{stem}.stderr.txt",
+    }
+    return {
+        name: "/workspace/" + path.relative_to(root).as_posix()
+        for name, path in candidates.items()
+        if path.is_file() and not path.is_symlink()
+    }
+
+
 def _run_lammps_for_workspace(
     workspace: str | Path, input_file: str, *, action_id: str | None = None
 ) -> str:
     try:
+        logs = {}
         log_file, downloaded = run_lammps_in_modal(
-            workspace, input_file, action_id=action_id
+            workspace, input_file, action_id=action_id, logs=logs
         )
         return (
             f"Simulation completed. Synchronized {downloaded} workspace file(s); "
-            f"log: /workspace/{log_file.relative_to(Path(workspace).resolve()).as_posix()}"
+            + "; ".join(f"{name}: {path}" for name, path in logs.items())
         )
     except ToolRecoveryPending:
         raise
@@ -901,14 +1064,53 @@ def _run_lammps_for_workspace(
         ) from None
 
 
-def build_run_lammps_tool(workspace: str | Path):
+def with_task1_recording(
+    simulator: Tool, workspace: str | Path, *, level: int = 2
+) -> Tool:
+    """Preserve the selected execution backend while adding Task 1 recording."""
+    from copy import copy
+
+    from corral_md.scoring.task_1 import recording_input
+
+    recorded_tool = copy(simulator)
+
+    def execute(**arguments):
+        root = Path(arguments.get("corral_workspace") or workspace).resolve()
+        source = local_path(root, arguments["input_file"])
+        recorded = local_path(root, f"/workspace/input/{source.stem}.recorded.in")
+        trajectory = f"/workspace/output/{source.stem}.lammpstrj"
+        recorded.parent.mkdir(parents=True, exist_ok=True)
+        local_path(root, "/workspace/output", allow_root=True).mkdir(exist_ok=True)
+        recorded.write_text(
+            recording_input(source.read_text(), trajectory, level=level)
+        )
+        arguments["input_file"] = "/workspace/" + recorded.relative_to(root).as_posix()
+        result = simulator.execute(**arguments)
+        return result if level == 1 else result + f"; trajectory: {trajectory}"
+
+    recorded_tool.execute = execute
+    return recorded_tool
+
+
+def build_run_lammps_tool(
+    workspace: str | Path, *, local: bool = False, assets_dir: str | None = None
+):
     """Build the LAMMPS tool bound to one local Corral workspace."""
 
-    @tool(hidden_args=["corral_action_id"], trusted=True, workspace_access="read_write")
-    def run_lammps(input_file: str, corral_action_id: str | None = None) -> str:
-        """[BRIEF] Run a LAMMPS input file in the isolated MD sandbox. [/BRIEF]
+    @tool(
+        hidden_args=["corral_action_id", "corral_workspace"],
+        workspace_args=("corral_workspace",),
+        trusted=not local,
+        workspace_access="read_write",
+    )
+    def run_lammps(
+        input_file: str,
+        corral_action_id: str | None = None,
+        corral_workspace: str | None = None,
+    ) -> str:
+        """[BRIEF] Run a LAMMPS input file on the configured MD backend. [/BRIEF]
 
-        [DETAILED] The tool runs LAMMPS with the task workspace and read-only shared assets, then synchronizes changed task files. [/DETAILED]
+        [DETAILED] The tool runs LAMMPS with the task workspace and read-only shared assets. Results are available in the task workspace. [/DETAILED]
 
         [PROCEDURAL] When to use this tool:
         - Use it after preparing a complete LAMMPS input file.
@@ -918,13 +1120,13 @@ def build_run_lammps_tool(workspace: str | Path):
         [WORKFLOW_INTEGRATION] Typical workflow integration:
         1. [PREREQUISITE] Save the LAMMPS input and any included task files under /workspace. [/PREREQUISITE]
         2. [CURRENT] Run this tool with the input-file path. [/CURRENT]
-        3. [FOLLOW_UP] Check the synchronized log and simulation outputs. [/FOLLOW_UP]
+        3. [FOLLOW_UP] Check the log and simulation outputs. [/FOLLOW_UP]
         [/WORKFLOW_INTEGRATION]
 
         [CONTEXTUAL] How this tool works:
         - Validates the input path inside the task workspace.
-        - Runs LAMMPS in an isolated sandbox.
-        - Synchronizes changed task files after a successful run.
+        - Runs LAMMPS on the configured backend.
+        - Makes changed task files available after a successful run.
         [/CONTEXTUAL]
 
         [SYNTACTICAL] Usage example:
@@ -939,7 +1141,7 @@ def build_run_lammps_tool(workspace: str | Path):
 
         Returns:
             str: [RETURNS_BRIEF] Message confirming completion and giving the log path. [/RETURNS_BRIEF]
-                [RETURNS_DETAILED] The message also reports how many workspace files were synchronized. [/RETURNS_DETAILED]
+                [RETURNS_DETAILED] Remote runs also report how many workspace files were synchronized. [/RETURNS_DETAILED]
                 [RETURNS_EXAMPLES] "Simulation completed. Synchronized 4 workspace file(s); log: /workspace/output/simulation.log" [/RETURNS_EXAMPLES]
 
         [RAISES] Exceptions:
@@ -959,12 +1161,25 @@ def build_run_lammps_tool(workspace: str | Path):
         [/LIMITATIONS]
         """
 
+        if local:
+            log = run_lammps_locally(
+                corral_workspace or workspace, input_file, assets_dir=assets_dir
+            )
+            root = Path(corral_workspace or workspace).resolve()
+            logs = _available_execution_logs(root, Path(input_file).stem, log)
+            return "Simulation completed locally; " + "; ".join(
+                f"{name}: {path}" for name, path in logs.items()
+            )
         return _run_lammps_for_workspace(
             workspace,
             str(local_path(workspace, input_file)),
             action_id=corral_action_id,
         )
 
+    if local:
+        # Local workers need only the assigned workspace; action IDs are
+        # controller-private inputs used by the remote recovery protocol.
+        run_lammps.hidden_args.pop("corral_action_id")
     return run_lammps
 
 

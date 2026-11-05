@@ -6,9 +6,9 @@ a residual covariance between HSNS5 and HSNS10, which are worded alike.
 
 Each holdout changes one thing, which fixes the right verdict for it:
 
-    holdout_a   the same population                    generalizes
-    holdout_b   the factors correlate 0.78, not 0.35   relations differ
-    holdout_c   an extra 0.45 cross-loading            structure fails
+    holdout_a   an extra 0.45 cross-loading            structure fails
+    holdout_b   the same population                    generalizes
+    holdout_c   the factors correlate 0.78, not 0.35   relations differ
 """
 
 from __future__ import annotations
@@ -47,14 +47,14 @@ RESIDUAL_CORR = (("HSNS5", "HSNS10"), 0.12)
 
 # What each holdout does to the population the training model was built on.
 HOLDOUTS = {
-    "holdout_a": {"phi": PHI, "extra_cross": 0.0},
-    "holdout_b": {"phi": 0.78, "extra_cross": 0.0},
-    "holdout_c": {"phi": PHI, "extra_cross": 0.45},
+    "holdout_b": {"phi": PHI, "extra_cross": 0.0},
+    "holdout_c": {"phi": 0.78, "extra_cross": 0.0},
+    "holdout_a": {"phi": PHI, "extra_cross": 0.45},
 }
 HOLDOUT_DECISIONS = {
-    "holdout_a": "generalizes",
-    "holdout_b": "measurement_structure_holds_relations_differ",
-    "holdout_c": "measurement_structure_fails",
+    "holdout_a": "measurement_structure_fails",
+    "holdout_b": "generalizes",
+    "holdout_c": "measurement_structure_holds_relations_differ",
 }
 
 # How far a standardised loading and the factor correlation may move before the
@@ -85,9 +85,9 @@ A single JSON object:
 {
   "model_syntax": "<complete frozen measurement model>",
   "holdout_conclusions": {
-    "holdout_a": "generalizes|measurement_structure_holds_relations_differ|measurement_structure_fails",
-    "holdout_b": "...",
-    "holdout_c": "..."
+    "holdout_a": "<classification>",
+    "holdout_b": "<classification>",
+    "holdout_c": "<classification>"
   }
 }
 
@@ -106,7 +106,7 @@ def reference_syntax():
 
 
 def cross_loading_syntax():
-    """A model that absorbs holdout C's change before validation."""
+    """A model that absorbs holdout A's change before validation."""
     f1 = "+".join(item for item, (factor, _) in LOADINGS.items() if factor == F1)
     f2 = "+".join(item for item, (factor, _) in LOADINGS.items() if factor == F2)
     pair = RESIDUAL_CORR[0]
@@ -150,7 +150,10 @@ def simulate(rng, n, phi=PHI, extra_cross=0.0, label=None):
 
 def build_holdouts(rng):
     """The three anonymised holdouts, with no column identifying the population."""
-    return {name: simulate(rng, N_HOLDOUT, **spec) for name, spec in HOLDOUTS.items()}
+    # Drawn in HOLDOUTS order, so the draws do not depend on the names; returned
+    # in name order, so nothing downstream lists them in generating order.
+    drawn = {name: simulate(rng, N_HOLDOUT, **spec) for name, spec in HOLDOUTS.items()}
+    return dict(sorted(drawn.items()))
 
 
 def analysis_sample(df):
@@ -273,7 +276,7 @@ def build_task_json(data_sha):
             },
         ],
     )
-    contract["holdout_datasets"] = {name: f"{name}.csv" for name in HOLDOUTS}
+    contract["holdout_datasets"] = {name: f"{name}.csv" for name in sorted(HOLDOUTS)}
     contract["holdout_thresholds"] = THRESHOLDS
     return [
         {
@@ -295,7 +298,7 @@ def build_task_json(data_sha):
                     "holdout_c.csv",
                 ],
                 "training_dataset": "data.csv",
-                "holdout_datasets": [f"{name}.csv" for name in HOLDOUTS],
+                "holdout_datasets": [f"{name}.csv" for name in sorted(HOLDOUTS)],
                 "codebook": "codebook.md",
                 "data_sha256": data_sha,
             },
@@ -310,7 +313,7 @@ def candidate_submissions(X):
     """The intended answer and the ways a validation stops short of it."""
     correct = {"model_syntax": reference_syntax(), "holdout_conclusions": dict(HOLDOUT_DECISIONS)}
     fit_only = dict(HOLDOUT_DECISIONS)
-    fit_only["holdout_b"] = "generalizes"
+    fit_only["holdout_c"] = "generalizes"
     return {
         "correct": correct,
         "judges on fit alone": {**correct, "holdout_conclusions": fit_only},
@@ -373,18 +376,18 @@ def verify(train, holdouts):
             ),
             ("the stated thresholds give the intended decisions", decisions == HOLDOUT_DECISIONS),
             (
-                "holdout A moves on neither measure",
-                moves["holdout_a"]["max_loading_shift"] < 0.07
-                and moves["holdout_a"]["factor_correlation_shift"] < 0.07,
-            ),
-            (
-                "holdout B keeps its loadings but moves its factor correlation",
+                "holdout B moves on neither measure",
                 moves["holdout_b"]["max_loading_shift"] < 0.07
-                and moves["holdout_b"]["factor_correlation_shift"] > 0.25,
+                and moves["holdout_b"]["factor_correlation_shift"] < 0.07,
             ),
             (
-                "holdout C moves a loading well past the threshold",
-                moves["holdout_c"]["max_loading_shift"] > 0.18,
+                "holdout C keeps its loadings but moves its factor correlation",
+                moves["holdout_c"]["max_loading_shift"] < 0.07
+                and moves["holdout_c"]["factor_correlation_shift"] > 0.25,
+            ),
+            (
+                "holdout A moves a loading well past the threshold",
+                moves["holdout_a"]["max_loading_shift"] > 0.18,
             ),
         ]
     )
@@ -406,13 +409,13 @@ def naive(train, holdouts):
         )
     wrong = [name for name in holdouts if verdicts[name] != HOLDOUT_DECISIONS[name]]
     print(f"\n  fit alone gets {len(wrong)} of {len(holdouts)} wrong: {', '.join(wrong)}")
-    print("  holdout_b fits beautifully and is not the same population.")
+    print("  holdout_c fits beautifully and is not the same population.")
     del train_fit
 
     return C.report(
         [
-            ("fit alone accepts holdout B", verdicts["holdout_b"] == "generalizes"),
-            ("but holdout B is not a replication", HOLDOUT_DECISIONS["holdout_b"] != "generalizes"),
+            ("fit alone accepts holdout C", verdicts["holdout_c"] == "generalizes"),
+            ("but holdout C is not a replication", HOLDOUT_DECISIONS["holdout_c"] != "generalizes"),
             ("so a fit-only validation reports a wrong decision", len(wrong) > 0),
         ]
     )

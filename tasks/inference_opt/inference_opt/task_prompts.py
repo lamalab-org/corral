@@ -26,13 +26,13 @@ Write it as a Python policy in `{policy_dir}/policy.py`. The API is documented i
 
 {answer_format}
 
-Benchmark: {benchmark}
+Dataset: {benchmark}
 Student model(s): {models}
 Train questions: {n_train} (scored by `evaluate_candidate`; their answers are never shown)
 Example questions: labelled, revealed a few at a time, and given to your policy as `ctx.examples`; never scored
 Test questions: {n_test} (held out; you never should see these or their answers)
 
-## Scoring
+## Goal
 
 {scoring}
 
@@ -155,7 +155,7 @@ def _scoring_summary(config: dict) -> str:
         f"- Your submitted policy is run on the held-out test split. The task passes (score 1) if the policy answers correctly at least {share} of the test questions the student's measured zero-shot baseline gets wrong; otherwise it scores 0.",
     ]
     if joint:
-        lines.append("- With two student models, both must reach this to pass.")
+        lines.append("- With two student models, both must reach this target.")
     return "\n".join(lines)
 
 

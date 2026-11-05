@@ -102,27 +102,25 @@ You are given responses from an online personality survey. The codebook describe
 every column.
 
 Read the data and select participants from the United States. The survey contains two \
-instruments, each covering several dimensions. Examine how the dimensions of one \
+instruments. Examine how the dimensions of one \
 relate to the dimensions of the other, accounting for the fact that no dimension is \
 measured perfectly.
 
 Report the correlation between each pair of dimensions across the two instruments, and \
 say which of those pairs are too closely related to be treated as distinct - take a \
 correlation of 0.80 or above to mean the two dimensions cannot be told apart.
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<complete lavaan/semopy model>",
+  "model_syntax": "<complete semopy model>",
   "correlations": [["<factor>", "<factor>", <float>], ...],
   "not_distinguishable": [["<factor>", "<factor>"], ...]
 }
 
-`model_syntax` is the model you used, in lavaan notation (`=~` loadings, `~~`
+`model_syntax` is the model you used, in semopy syntax (`=~` loadings, `~~`
 (co)variances). It is re-fitted during evaluation, so it must be complete and runnable.
 
 Name your factors whatever you like and refer to them by those names: dimensions are

@@ -5,7 +5,7 @@ from jsonschema.validators import validator_for
 from pydantic import Field
 
 from corral.core.tool import Tool, tool
-from corral.workspace import WorkspaceFilesystem, build_workspace_tools
+from corral.workspace import AbsoluteWorkspaceFilesystem, build_workspace_tools
 
 
 # Sample functions for testing (new Field-based style)
@@ -358,7 +358,7 @@ def test_tool_openai_format_with_hidden_args():
 def test_file_tool_schemas_pass_metaschema_validation(tmp_path):
     """Every filesystem tool schema must satisfy its JSON metaschema."""
 
-    tools = build_workspace_tools(WorkspaceFilesystem(tmp_path))
+    tools = build_workspace_tools(AbsoluteWorkspaceFilesystem(tmp_path))
     assert "write_file" in tools
     for file_tool in tools.values():
         schema = file_tool.params_json_schema

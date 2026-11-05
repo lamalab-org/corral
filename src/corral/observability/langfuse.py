@@ -14,7 +14,9 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
+from corral.core.action import Action
 from corral.core.events import (
+    AgentCompleted,
     AgentStarted,
     AgentTurnRecorded,
     ExecutionCompleted,
@@ -253,7 +255,18 @@ class LangfuseObserver:
         self._actions: dict[tuple[str, str], Mapping[str, Any]] = {}
         self._tool_starts: dict[tuple[str, str], datetime] = {}
         self._task_inputs: dict[str, list[Mapping[str, Any]]] = {}
+        self._task_outputs: dict[str, dict[str, Any]] = {}
+        self._sdk_runtime_ids: dict[tuple[str, str], dict[str, Any]] = {}
         self._last_times: dict[Any, datetime] = {}
+        self._chronology_buffers: dict[
+            tuple[str, str], list[tuple[Commit, ObservationContext]]
+        ] = {}
+        self._buffered_hashes: set[str] = set()
+        self._projecting_chronology = False
+        self._tool_parents: dict[tuple[str, str], Any] = {}
+        self._tool_origins: dict[tuple[str, str], tuple[str, str]] = {}
+        self._step_pending: dict[int, set[tuple[str, str]]] = {}
+        self._closed_steps: dict[int, tuple[Any, datetime]] = {}
 
     def start(self, observation: Observation) -> ObservationSpan:
         if observation.name == "task.evaluate":
@@ -331,7 +344,60 @@ class LangfuseObserver:
             span.end(end_time=int(ended_at.timestamp() * 1e9))
         step = self._steps.pop(key, None)
         if step is not None:
-            step.end(end_time=int(self._last_times[key].timestamp() * 1e9))
+            if self._step_pending.get(id(step)):
+                self._closed_steps[id(step)] = (step, self._last_times[key])
+            else:
+                step.end(end_time=int(self._last_times[key].timestamp() * 1e9))
+
+    def _bind_tool_parent(self, commit: Commit, run_id: str, tool_id: str) -> None:
+        step = self._steps.get((commit.execution_id, run_id))
+        if step is not None:
+            tool_key = (commit.execution_id, tool_id)
+            self._tool_parents[tool_key] = step
+            self._tool_origins[tool_key] = (
+                run_id,
+                commit.event.action_id
+                if isinstance(commit.event, ToolStarted)
+                else tool_id,
+            )
+            self._step_pending.setdefault(id(step), set()).add(tool_key)
+
+    def _finish_tool_parent(self, tool_key, ended_at) -> None:
+        self._tool_origins.pop(tool_key, None)
+        step = self._tool_parents.pop(tool_key, None)
+        if step is None:
+            return
+        pending = self._step_pending.get(id(step), set())
+        pending.discard(tool_key)
+        closed = self._closed_steps.get(id(step))
+        if closed is not None:
+            ended_at = max(ended_at, closed[1])
+            self._closed_steps[id(step)] = (step, ended_at)
+            if not pending:
+                step.end(end_time=int(ended_at.timestamp() * 1e9))
+                self._closed_steps.pop(id(step))
+        if not pending:
+            self._step_pending.pop(id(step), None)
+
+    def _drain_chronology(self, key) -> None:
+        pending = self._chronology_buffers.pop(key, [])
+        for commit, _context in pending:
+            if isinstance(commit.event, AgentTurnRecorded):
+                lifecycle = commit.event.metadata.get("sdk_tool_event", {})
+                action_id = lifecycle.get("runtime_action_id")
+                if action_id:
+                    self._sdk_runtime_ids[(commit.execution_id, action_id)] = {
+                        "sdk_item_id": lifecycle.get("tool_call_id"),
+                        "sdk": commit.event.metadata.get("chronology", {}).get("sdk"),
+                    }
+        self._projecting_chronology = True
+        try:
+            for commit, context in sorted(
+                pending, key=lambda entry: (entry[0].occurred_at, entry[0].sequence)
+            ):
+                self.record_commit(commit, context=context)
+        finally:
+            self._projecting_chronology = False
 
     def _finish_restored_generation(self, key: tuple[str, str]) -> None:
         restored = self._restored_generations.pop(key, None)
@@ -455,6 +521,10 @@ class LangfuseObserver:
         input_messages: Any = None,
         usage: UsageDelta | None = None,
         set_trace_input: bool = False,
+        tool_invocation_id: str | None = None,
+        duration_ms: float | None = None,
+        failed: bool = False,
+        incomplete: bool = False,
     ) -> None:
         key = (commit.execution_id, run_id)
         if self._restoring:
@@ -482,12 +552,20 @@ class LangfuseObserver:
                 self._step_numbers[key] = self._step_numbers.get(key, 0) + 1
                 self._restored_steps.add(key)
             if as_type == "tool":
-                self._tool_starts.pop(
-                    (commit.execution_id, commit.event.invocation_id), None
-                )
+                self._tool_starts.pop((commit.execution_id, tool_invocation_id), None)
             self._last_times[key] = commit.occurred_at
             return
         metadata = self._metadata(commit, run_id=run_id)
+        chronology = (
+            commit.event.metadata.get("chronology", {})
+            if isinstance(commit.event, AgentTurnRecorded)
+            else {}
+        )
+        metadata.update(chronology)
+        metadata.update(
+            occurred_at=commit.occurred_at.isoformat(),
+            recorded_at=commit.recorded_at.isoformat(),
+        )
         root = self._roots.get(commit.execution_id)
         if root is None:
             root = self._start_span(
@@ -503,6 +581,7 @@ class LangfuseObserver:
                     else self._task_inputs.get(commit.execution_id)
                 ),
                 metadata=self._mask(data=metadata),
+                output=self._mask(data=self._task_outputs.get(commit.execution_id)),
             )
             self._roots[commit.execution_id] = root
             self._last_times[commit.execution_id] = commit.occurred_at
@@ -511,7 +590,12 @@ class LangfuseObserver:
         if as_type == "generation":
             metadata["commit_hash"] = commit.hash
             self._end_step(key)
-        if key not in self._steps:
+        tool_parent = (
+            self._tool_parents.get((commit.execution_id, tool_invocation_id))
+            if as_type == "tool"
+            else None
+        )
+        if key not in self._steps and tool_parent is None:
             if key not in self._restored_steps:
                 self._step_numbers[key] = self._step_numbers.get(key, 0) + 1
             self._restored_steps.discard(key)
@@ -521,20 +605,48 @@ class LangfuseObserver:
                 as_type="span",
                 parent=root,
                 started_at=self._last_times.get(key, commit.occurred_at),
+                metadata=self._mask(data=chronology),
             )
         started_at = self._last_times.get(key, commit.occurred_at)
         if as_type == "tool":
             started_at = self._tool_starts.pop(
-                (commit.execution_id, commit.event.invocation_id), commit.occurred_at
+                (commit.execution_id, tool_invocation_id), commit.occurred_at
             )
             metadata.update(
-                execution_duration_ms=commit.event.duration_ms,
-                timing_source="tool_start_and_completion_commits",
+                execution_duration_ms=duration_ms,
+                timing_source="sdk_transcript_commits"
+                if isinstance(commit.event, AgentTurnRecorded)
+                else "tool_start_and_completion_commits",
             )
+            if chronology:
+                metadata.update(chronology)
+                metadata["timing_source"] = chronology["timestamp_source"]
+            metadata.update(
+                occurred_at=commit.occurred_at.isoformat(),
+                recorded_at=commit.recorded_at.isoformat(),
+                tool_call_id=tool_invocation_id,
+            )
+            if isinstance(commit.event, ToolCompleted | ToolFailed):
+                metadata.update(
+                    self._sdk_runtime_ids.get(
+                        (commit.execution_id, commit.event.action_id), {}
+                    )
+                )
+                metadata.update(
+                    tool_call_id=commit.event.action_id,
+                    invocation_id=tool_invocation_id,
+                    timestamp_source="local_runtime",
+                )
         else:
             metadata.update(
                 timing_source="estimated_between_commits",
                 input_source="reconstructed_conversation",
+            )
+        if incomplete:
+            metadata.update(
+                status="incomplete",
+                timing_source="start_to_execution_termination",
+                end_time_source="execution_termination",
             )
         args: dict[str, Any] = {}
         if as_type == "generation":
@@ -544,7 +656,7 @@ class LangfuseObserver:
             context,
             name=name,
             as_type=as_type,
-            parent=self._steps[key],
+            parent=tool_parent or self._steps[key],
             started_at=started_at,
             input=self._mask(data=input_messages),
             metadata=self._mask(data=metadata),
@@ -559,15 +671,17 @@ class LangfuseObserver:
                 commit.occurred_at,
             )
         else:
-            failed = (
-                isinstance(commit.event, ToolFailed) or commit.event.status != "success"
-            )
             span.update(
                 output=self._mask(data=dict(output)),
                 level="ERROR" if failed else "DEFAULT",
             )
             span.end(end_time=int(commit.occurred_at.timestamp() * 1e9))
-        self._last_times[key] = commit.occurred_at
+            self._finish_tool_parent(
+                (commit.execution_id, tool_invocation_id), commit.occurred_at
+            )
+        self._last_times[key] = max(
+            self._last_times.get(key, commit.occurred_at), commit.occurred_at
+        )
 
     def _record_agent_messages(
         self,
@@ -579,6 +693,32 @@ class LangfuseObserver:
             return
         key = (commit.execution_id, commit.author.run_id)
         messages = [dict(message) for message in event.messages]
+        for message in messages:
+            if not message.get("sdk_native"):
+                continue
+            for raw in message.get("tool_calls", ()):
+                action = Action.from_tool_call(raw)
+                self._actions[(commit.execution_id, action.id)] = dict(action.arguments)
+                self._tool_starts[(commit.execution_id, action.id)] = commit.occurred_at
+                self._tools[(commit.execution_id, action.id)] = action.name
+            if message.get("role") == "tool":
+                call_id = message["tool_call_id"]
+                self._pending_inputs.setdefault(key, []).append(message)
+                self._record_delta(
+                    commit,
+                    context,
+                    name=message["name"],
+                    as_type="tool",
+                    output=message,
+                    input_messages=self._actions.pop(
+                        (commit.execution_id, call_id), None
+                    ),
+                    run_id=commit.author.run_id,
+                    tool_invocation_id=call_id,
+                    duration_ms=message.get("duration_ms"),
+                    failed=bool(message.get("is_error")),
+                )
+                return
         assistant_indexes = [
             index
             for index, message in enumerate(messages)
@@ -597,6 +737,7 @@ class LangfuseObserver:
         if (
             event.usage_delta.llm_calls == 0
             and event.actions
+            and not self._projecting_chronology
             and (key in self._steps or key in self._restored_steps)
         ):
             self._pending_inputs[key] = [*inputs, output, *trailing]
@@ -629,6 +770,10 @@ class LangfuseObserver:
             run_id=commit.author.run_id,
             usage=event.usage_delta,
         )
+        for message in messages:
+            if message.get("sdk_native"):
+                for call in message.get("tool_calls", ()):
+                    self._bind_tool_parent(commit, commit.author.run_id, call["id"])
 
     def _record_tool_result(
         self,
@@ -659,6 +804,9 @@ class LangfuseObserver:
                 (commit.execution_id, event.action_id), None
             ),
             run_id=event.requested_by_run_id,
+            tool_invocation_id=event.invocation_id,
+            duration_ms=event.duration_ms,
+            failed=isinstance(event, ToolFailed) or event.status != "success",
         )
 
     def restore_commit(
@@ -679,6 +827,31 @@ class LangfuseObserver:
         selected_context = context or ObservationContext(
             execution_id=commit.execution_id
         )
+        # SDK and MCP transports can deliver an older event after submission.
+        # Persist immediately, then finalize SDK-run steps at the agent's drain
+        # boundary. Sorting receipt order can never repair such late delivery.
+        commit_event = commit.event
+        if not self._projecting_chronology:
+            run_id = getattr(commit_event, "requested_by_run_id", commit.author.run_id)
+            key = (commit.execution_id, run_id)
+            if isinstance(
+                commit_event, AgentTurnRecorded
+            ) and commit_event.metadata.get("chronology", {}).get("sdk"):
+                self._chronology_buffers.setdefault(key, [])
+            if key in self._chronology_buffers and isinstance(
+                commit_event,
+                AgentTurnRecorded | ToolStarted | ToolCompleted | ToolFailed,
+            ):
+                if commit.hash not in self._buffered_hashes:
+                    self._chronology_buffers[key].append((commit, selected_context))
+                    self._buffered_hashes.add(commit.hash)
+                return
+            if isinstance(commit_event, AgentCompleted):
+                self._drain_chronology((commit.execution_id, commit_event.agent_run_id))
+            elif isinstance(commit_event, ExecutionCompleted | ExecutionFailed):
+                for pending_key in list(self._chronology_buffers):
+                    if pending_key[0] == commit.execution_id:
+                        self._drain_chronology(pending_key)
         if self._exporter is not None and selected_context.state_db_path is not None:
             store = self._exporter.stores.get(commit.execution_id)
             if store is None:
@@ -754,6 +927,9 @@ class LangfuseObserver:
             self._tools[(commit.execution_id, commit_event.invocation_id)] = (
                 commit_event.tool_name
             )
+            self._bind_tool_parent(
+                commit, commit_event.requested_by_run_id, commit_event.invocation_id
+            )
             return
         if isinstance(commit_event, AgentTurnRecorded):
             for action in commit_event.actions:
@@ -764,6 +940,10 @@ class LangfuseObserver:
             self._record_tool_result(commit, commit_event, selected_context)
             return
         if isinstance(commit_event, SubmissionAccepted):
+            self._task_outputs[commit.execution_id] = {
+                "answer": commit_event.answer,
+                "status": "surrendered" if commit_event.surrendered else "submitted",
+            }
             root = self._roots.get(commit.execution_id)
             if root is not None:
                 root.update(
@@ -779,9 +959,39 @@ class LangfuseObserver:
             return
         if isinstance(commit_event, ExecutionCompleted | ExecutionFailed):
             self._task_ends[commit.execution_id] = commit
+            for tool_key, (run_id, call_id) in list(self._tool_origins.items()):
+                if tool_key[0] == commit.execution_id:
+                    self._record_delta(
+                        commit,
+                        selected_context,
+                        name=self._tools.get(tool_key, "tool"),
+                        as_type="tool",
+                        output={
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "status": "incomplete",
+                        },
+                        input_messages=self._actions.pop(
+                            (commit.execution_id, call_id), None
+                        ),
+                        run_id=run_id,
+                        tool_invocation_id=tool_key[1],
+                        failed=True,
+                        incomplete=True,
+                    )
             for key in self._steps.keys() | self._restored_steps:
                 if key[0] == commit.execution_id:
                     self._end_step(key)
+            # Interrupted native calls have no result. Close their containing
+            # steps at execution termination without inventing a completion.
+            for step_id, (step, ended_at) in list(self._closed_steps.items()):
+                if step.trace_id == deterministic_trace_id(commit.execution_id):
+                    step.end(
+                        end_time=int(
+                            max(ended_at, commit.occurred_at).timestamp() * 1e9
+                        )
+                    )
+                    self._closed_steps.pop(step_id)
             root = self._roots.pop(commit.execution_id, None)
             if root is not None:
                 if isinstance(commit_event, ExecutionFailed):

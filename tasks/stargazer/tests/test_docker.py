@@ -265,6 +265,35 @@ def test_docker_checkpoint_decoding_is_unprivileged_and_has_no_credentials(
         )
 
 
+def test_docker_repl_preserves_thread_limits_for_lazy_scipy_imports(
+    docker_workspace, simple_task, monkeypatch
+):
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "1")
+    monkeypatch.setenv("OMP_NUM_THREADS", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-only-credential")
+    data = {
+        **asdict(simple_task.observations),
+        "star_mass_sun": simple_task.star_mass_sun,
+    }
+    result = execute_analysis(
+        code=(
+            "import os, json\nfrom scipy import linalg\n"
+            "from threadpoolctl import threadpool_info\n"
+            "print(json.dumps({'threads': os.environ.get('OPENBLAS_NUM_THREADS'), "
+            "'secret': 'ANTHROPIC_API_KEY' in os.environ, "
+            "'pools': [p['num_threads'] for p in threadpool_info() "
+            "if p['internal_api'] == 'openblas']}))"
+        ),
+        public_data=data,
+        checkpoint=None,
+        workspace=docker_workspace,
+    )
+    observed = json.loads(result["output"])
+    assert observed["threads"] == "1"
+    assert not observed["secret"]
+    assert observed["pools"] and all(count == 1 for count in observed["pools"])
+
+
 def test_docker_protocol_and_history_updates_survive_checkpoint(
     docker_workspace, simple_task
 ):

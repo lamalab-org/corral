@@ -39,7 +39,7 @@ cd tasks/spectra_elucidation
 export CORRAL_SPECTRA_JS_DIR="$PWD/CORRAL_WORK_DIR/js"
 ```
 
-If `CORRAL_SPECTRA_JS_DIR` is not set, the code falls back to `/srv/js`. The unit tests mock these predictors, so passing tests do not prove the runtime Node.js setup is available.
+If `CORRAL_SPECTRA_JS_DIR` is not set, the code falls back to `/usr/local/share/corral-spectra-js`, where the default Docker image installs these packages. The unit tests mock these predictors, so passing tests do not prove the runtime Node.js setup is available.
 
 ## Inspect The Environment Definitions
 

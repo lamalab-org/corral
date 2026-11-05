@@ -10,7 +10,7 @@ Before estimating the correlations, assess response quality. In particular, cons
 
 ## What to report
 
-Submit one complete lavaan/semopy model covering both instruments and one latent
+Submit one complete semopy model covering both instruments and one latent
 correlation for every cross-instrument pair. Estimate the correlations after
 applying the response-quality rule you judge appropriate.
 

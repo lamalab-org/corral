@@ -1242,8 +1242,8 @@ def score_adaptive_bank_choice(
 ) -> dict:
     """Score an item-bank decision for adaptive testing.
 
-    Checks the chosen bank, the locally dependent pairs, the unsupported vendor
-    flags, the unstable items and the recommendation. No model is submitted.
+    Checks which items leave the bank, the verdict on each vendor flag and
+    whether the resulting bank is declared ready. No model is submitted.
     """
     base = Path(base_dir) if base_dir is not None else paths.task_root()
     try:
@@ -1257,39 +1257,32 @@ def score_adaptive_bank_choice(
     target = truth["scored"]
     checks = {}
 
-    def _pairs(value):
-        try:
-            return sorted(sorted(str(x) for x in pair) for pair in value or [])
-        except TypeError:
-            return None
+    reported = submission.get("removed_items")
+    if isinstance(reported, list) and all(isinstance(item, str) for item in reported):
+        removed = set(reported)
+        always = set(target["removed_items"]["always"])
+        pairs = [set(pair) for pair in target["removed_items"]["one_of_each"]]
+        allowed = always.union(*pairs)
+        checks["required_items_removed"] = "PASS" if always <= removed else "FAIL"
+        checks["one_of_each_pair_removed"] = (
+            "PASS" if all(len(pair & removed) == 1 for pair in pairs) else "FAIL"
+        )
+        checks["no_other_items_removed"] = "PASS" if removed <= allowed else "FAIL"
+    else:
+        checks["required_items_removed"] = "FAIL"
+        checks["one_of_each_pair_removed"] = "FAIL"
+        checks["no_other_items_removed"] = "FAIL"
 
-    def _names(value):
-        try:
-            return sorted(str(x) for x in value or [])
-        except TypeError:
-            return None
+    verdicts = submission.get("vendor_flags")
+    for item, want in target["vendor_flags"].items():
+        got = verdicts.get(item) if isinstance(verdicts, dict) else None
+        checks[f"vendor_flag_{item}"] = "PASS" if got == want else "FAIL"
 
-    checks["bank_choice"] = (
-        "PASS" if submission.get("bank_choice") == target["bank_choice"] else "FAIL"
-    )
-    checks["dependent_pairs"] = (
+    ready = submission.get("ready_for_adaptive_testing")
+    checks["ready_for_adaptive_testing"] = (
         "PASS"
-        if _pairs(submission.get("dependent_pairs")) == _pairs(target["dependent_pairs"])
+        if isinstance(ready, bool) and ready == target["ready_for_adaptive_testing"]
         else "FAIL"
-    )
-    checks["unsupported_vendor_flags"] = (
-        "PASS"
-        if _names(submission.get("unsupported_vendor_flags"))
-        == _names(target["unsupported_vendor_flags"])
-        else "FAIL"
-    )
-    checks["unstable_items"] = (
-        "PASS"
-        if _names(submission.get("unstable_items")) == _names(target["unstable_items"])
-        else "FAIL"
-    )
-    checks["recommendation"] = (
-        "PASS" if submission.get("recommendation") == target["recommendation"] else "FAIL"
     )
 
     measured = truth.get("measured", {})
@@ -1342,8 +1335,10 @@ def score_population_classification(
     """Score a classification of anonymised respondents into populations.
 
     Each person maps to the set of populations compatible with them. Order is
-    irrelevant; missing, extra or unknown people are errors. No model is
-    submitted.
+    irrelevant; missing, extra or unknown people are errors. When the truth
+    holds a model per population, each submitted model is refitted on that
+    population's reference sample and has to pass the Tier 1 constraints and
+    fit as well as the generating model (Tier 2).
     """
     base = Path(base_dir) if base_dir is not None else paths.task_root()
     try:
@@ -1372,15 +1367,48 @@ def score_population_classification(
     extra = set(reported) - set(target)
     if extra:
         checks["unexpected_people"] = "FAIL"
-    applicable = list(checks.values())
-    passed = sum(value == "PASS" for value in applicable)
-    complete = passed == len(target) and not extra
+    passed = sum(value == "PASS" for value in checks.values())
+
+    references = truth.get("scoring_reference", {}).get("population_models")
+    if references:
+        models = submission.get("models")
+        for name, reference in references.items():
+            spec = models.get(name) if isinstance(models, dict) else None
+            checks[f"model_{name}"] = (
+                "PASS"
+                if isinstance(spec, str)
+                and _population_model_fits(spec, name, reference, params, base)
+                else "FAIL"
+            )
+
+    complete = all(value == "PASS" for value in checks.values())
     return _result(
         1.0 if complete else 0.0,
         checks,
         {"n_people": len(target), "n_exact": passed},
-        "all classifications pass" if complete else "classification mismatch",
+        "all classifications and models pass" if complete else "classification or model mismatch",
     )
+
+
+def _population_model_fits(spec: str, name: str, reference: dict, params: dict, base: Path) -> bool:
+    """Whether a model fits one population's reference sample as well as its generating model."""
+    items = params["items"]
+    try:
+        spec = validate_syntax(spec, items, params.get("max_factors", 6))
+        if set(observed_in_spec(spec, items)) != set(items):
+            return False
+        frame = pd.read_csv(
+            base / params["data_dir"] / params["reference_datasets"][name], sep="\t"
+        )
+        X = frame[items][(frame[items] != 0).all(axis=1)].astype(float)
+        criteria, model = evaluate_model(spec, X, items)
+        constraints, _ = check_constraints(model, criteria, {})
+    except Exception:  # noqa: BLE001 - an unrunnable model simply fails
+        return False
+    dominance = check_dominance(
+        criteria, reference["reference_criteria"], params["tier_2_comparative"]
+    )
+    return all(constraints.values()) and all(v for v in dominance.values() if v is not None)
 
 
 def score_gender_item_integrity(

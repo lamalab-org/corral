@@ -52,9 +52,12 @@ MODEL_DESCRIPTIONS = {
 }
 
 # A candidate belongs in a dataset's answer when its BIC is within this of the
-# best-fitting candidate. The agent is told the number. Two is the conventional
-# point below which a BIC difference is not worth interpreting, and it is well
-# under what one extra free parameter costs here, log(2400) = 7.8.
+# best-fitting candidate. Two is the conventional point below which a BIC
+# difference is not worth interpreting, and it is well under what one extra
+# free parameter costs here, log(2400) = 7.8. The agent is not told how to
+# compare candidates: every dataset has a single answer, and the two close
+# calls are settled by the estimates too (dataset_04's two-factor rival has
+# factors correlating 1.0, dataset_05's extra cross-loading is about zero).
 TIE_MARGIN = 2.0
 
 # Inside one block of every candidate, so it cannot mimic a general factor.
@@ -236,21 +239,21 @@ def build_frames(rng, mapping, with_complications=True):
     }
 
 
-PROMPT = f"""You have six anonymised response datasets and a catalogue of six candidate measurement models. Each dataset is an independent sample from one of the candidates.
+PROMPT = """You have six anonymised response datasets and a catalogue of six candidate measurement models. Each dataset is an independent sample from one of the candidates.
 
-For each dataset, report every candidate whose BIC is within {TIE_MARGIN:g} of the lowest, computed after removing rows with missing responses and collapsing exact duplicate response patterns. Where several candidates qualify, report all of them.
+For each dataset, say which candidate it was drawn from.
 """
 
 SUBMISSION_FORMAT = """A single JSON object:
 
 {
   "assignments": {
-    "<dataset_id>": ["<model_id>", ...]
+    "<dataset_id>": ["<model_id>"]
   }
 }
 
-Include every dataset exactly once and use only identifiers from
-`candidate_models.csv`. No working is submitted."""
+Include every dataset exactly once, with one model each, and use only
+identifiers from `candidate_models.csv`. No working is submitted."""
 
 
 def write_codebook(path):

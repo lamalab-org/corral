@@ -84,7 +84,7 @@ A single JSON object:
   "affected_items": ["<item>", ...]
 }
 
-The model must include every HSNS item and `gender`. Use lavaan-style syntax
+The model must include every HSNS item and `gender`. Use semopy syntax
 (`=~`, `~~`, and `~`). Give `gender` a path to each trait. An item that does not
 behave the same way in both groups is declared by giving it its own path from
 `gender`, and listed in `affected_items`.

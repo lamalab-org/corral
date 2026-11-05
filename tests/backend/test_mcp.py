@@ -1,9 +1,10 @@
 """Exercise bound tool catalogs and MCP backend cleanup over real HTTP."""
 
 import asyncio
+import json
 import signal
 import threading
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -13,6 +14,7 @@ import httpx
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.server.session import ServerSession
 
 from corral.backend import mcp as transport_module
 from corral.backend.mcp import open_mcp_host
@@ -149,17 +151,122 @@ async def test_failed_startup_releases_the_listener(monkeypatch):
     assert listeners[0].fileno() == -1
 
 
-async def post_tool(client, url):
+def tool_request(progress_token=None):
+    params = {"name": "measure", "arguments": {"sample": "a"}}
+    if progress_token is not None:
+        params["_meta"] = {"progressToken": progress_token}
+    return {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params}
+
+
+async def post_tool(client, url, progress_token=None):
     return await client.post(
         url,
         headers={"Accept": "application/json, text/event-stream"},
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "measure", "arguments": {"sample": "a"}},
-        },
+        json=tool_request(progress_token),
     )
+
+
+def tool_result(response):
+    messages = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    return next(message["result"] for message in messages if message.get("id") == 1)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("progress_token", [None, 0, "measure-progress"])
+async def test_stream_starts_before_tool_completes_and_reports_progress(
+    monkeypatch, progress_token
+):
+    monkeypatch.setattr(transport_module, "_PROGRESS_INTERVAL_S", 0.01)
+    started, release = asyncio.Event(), asyncio.Event()
+    binding = make_binding("progress")
+
+    async def execute(action):
+        started.set()
+        await release.wait()
+        return ToolResponse(success=True, result="finished", error=None)
+
+    binding.execute = execute
+    async with serve_tools(binding) as endpoint, httpx.AsyncClient() as client:
+        try:
+            with anyio.fail_after(5):
+                async with client.stream(
+                    "POST",
+                    endpoint.url,
+                    headers={"Accept": "application/json, text/event-stream"},
+                    json=tool_request(progress_token),
+                ) as response:
+                    assert response.status_code == 200
+                    assert response.headers["content-type"].startswith(
+                        "text/event-stream"
+                    )
+                    await started.wait()
+                    assert not release.is_set()
+                    messages = (
+                        json.loads(line.removeprefix("data: "))
+                        async for line in response.aiter_lines()
+                        if line.startswith("data: ")
+                    )
+                    received = []
+                    if progress_token is not None:
+                        received = [await anext(messages), await anext(messages)]
+                        previous = 0
+                        for message in received:
+                            assert message["method"] == "notifications/progress"
+                            params = message["params"]
+                            assert params["progressToken"] == progress_token
+                            assert params["progress"] > previous
+                            assert "total" not in params
+                            previous = params["progress"]
+                    release.set()
+                    received.extend([message async for message in messages])
+                    results = [message for message in received if "id" in message]
+                    assert len(results) == 1
+                    assert results[0]["result"]["content"][0]["text"] == "finished"
+                    if progress_token is None:
+                        assert received == results
+        finally:
+            release.set()
+    assert not any(
+        task.get_name() == "corral-mcp-progress" for task in asyncio.all_tasks()
+    )
+
+
+@pytest.mark.anyio
+async def test_progress_transport_failure_does_not_interrupt_tool(monkeypatch):
+    monkeypatch.setattr(transport_module, "_PROGRESS_INTERVAL_S", 0.01)
+    failed = asyncio.Event()
+
+    async def fail_progress(*args, **kwargs):
+        failed.set()
+        raise anyio.ClosedResourceError
+
+    monkeypatch.setattr(ServerSession, "send_progress_notification", fail_progress)
+    binding = make_binding("progress-failure")
+
+    async def execute(action):
+        await failed.wait()
+        return ToolResponse(success=True, result="finished", error=None)
+
+    binding.execute = execute
+    async with serve_tools(binding) as endpoint, httpx.AsyncClient() as client:
+        with anyio.fail_after(5):
+            response = await post_tool(client, endpoint.url, progress_token=0)
+        assert tool_result(response)["isError"] is False
+        assert tool_result(response)["content"][0]["text"] == "finished"
+
+
+@pytest.mark.anyio
+async def test_progress_preserves_raised_tool_error():
+    binding = make_binding("raised-error")
+    binding.execute.side_effect = ValueError("tool crashed")
+    async with serve_tools(binding) as endpoint, httpx.AsyncClient() as client:
+        response = await post_tool(client, endpoint.url, progress_token=0)
+        assert tool_result(response)["isError"] is True
+        assert tool_result(response)["content"][0]["text"] == "tool crashed"
 
 
 @pytest.mark.anyio
@@ -178,7 +285,7 @@ async def test_concurrent_first_bindings_start_one_listener(monkeypatch):
         async def invoke(name):
             async with bind_tools(host, make_binding(name)) as connection:
                 response = await post_tool(client, connection.url)
-                assert response.json()["result"]["content"][0]["text"] == name
+                assert tool_result(response)["content"][0]["text"] == name
                 return connection.url
 
         urls = await asyncio.gather(invoke("first"), invoke("second"))
@@ -233,7 +340,7 @@ async def test_first_binding_can_retry_after_startup_failure(
             httpx.AsyncClient() as client,
         ):
             response = await post_tool(client, connection.url)
-            assert response.json()["result"]["content"][0]["text"] == "retry"
+            assert tool_result(response)["content"][0]["text"] == "retry"
 
     with pytest.raises(RuntimeError, match="host is closed"):
         async with bind_tools(host, make_binding("too-late")):
@@ -259,7 +366,7 @@ async def test_host_preserves_signal_handlers_and_invocation_context():
             context.reset(token)
             async with httpx.AsyncClient() as client:
                 response = await post_tool(client, endpoint.url)
-                assert response.json()["result"]["content"][0]["text"] == "delegate"
+                assert tool_result(response)["content"][0]["text"] == "delegate"
     assert {sig: signal.getsignal(sig) for sig in handlers} == handlers
 
 
@@ -295,7 +402,7 @@ async def test_binding_revokes_new_requests_and_drains_accepted_responses():
                 assert not owner.done()
                 release.set()
                 response = await request
-                assert response.json()["result"]["content"][0]["text"] == "finished"
+                assert tool_result(response)["content"][0]["text"] == "finished"
                 await owner
         finally:
             release.set()
@@ -343,7 +450,7 @@ async def test_cancellation_waits_for_accepted_tool_cleanup(
 
         owner = asyncio.create_task(invocation())
         endpoint = await endpoint_ready
-        request = asyncio.create_task(post_tool(client, endpoint.url))
+        request = asyncio.create_task(post_tool(client, endpoint.url, progress_token=0))
         try:
             with anyio.fail_after(5):
                 await started.wait()
@@ -360,7 +467,13 @@ async def test_cancellation_waits_for_accepted_tool_cleanup(
                 with pytest.raises(asyncio.CancelledError):
                     await owner
                 assert cleaned.is_set()
-                await request
+                # Cancellation can close an already-started SSE response.
+                with suppress(httpx.RemoteProtocolError):
+                    await request
+                assert not any(
+                    task.get_name() == "corral-mcp-progress"
+                    for task in asyncio.all_tasks()
+                )
         finally:
             release.set()
             owner.cancel()

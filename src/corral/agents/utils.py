@@ -1,9 +1,8 @@
 import json
 from collections.abc import Mapping
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
+import httpx
 import litellm
 import openai
 from litellm.exceptions import BudgetExceededError, RateLimitError
@@ -13,10 +12,12 @@ from tenacity import (
     retry_if_exception,
     stop_after_attempt,
     wait_chain,
+    wait_exponential,
     wait_fixed,
 )
 
 from corral.agents.schema import BudgetExhaustedError
+from corral.core.errors import concise_error_message
 from corral.report.logging import logger
 
 RETRY_EXCEPTIONS = (
@@ -37,6 +38,12 @@ RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
 
 def _should_retry(exc: BaseException) -> bool:
     """Retry transient failures only; fail fast on non-retryable 4xx errors."""
+    # Streaming transports can expose HTTPX errors before LiteLLM wraps them.
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status in RETRYABLE_STATUS_CODES or status >= 500
+    if isinstance(exc, httpx.TransportError):
+        return True
     if not isinstance(exc, RETRY_EXCEPTIONS):
         return False
     status = getattr(exc, "status_code", None)
@@ -61,6 +68,17 @@ QUOTA_EXHAUSTED_KEYWORDS = (
     "budget",
 )
 
+# Anthropic reports account spending caps as HTTP 400, rather than 429.
+# Keep these specific: an invalid thinking budget is a request error, not an
+# exhausted account quota.
+ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS = (
+    "reached your specified api usage limits",
+    "credit balance is too low",
+    "insufficient_quota",
+    "exceeded your current quota",
+    "insufficient credits",
+)
+
 
 def before_sleep_loguru(retry_state):
     # Surface *what* is being retried, not just the attempt count: without the
@@ -73,7 +91,10 @@ def before_sleep_loguru(retry_state):
     wait = f"{next_action.sleep:.0f}s" if next_action is not None else "unknown"
     retry_object = getattr(retry_state, "retry_object", None)
     stop = getattr(retry_object, "stop", None)
-    maximum_attempts = getattr(stop, "max_attempt_number", 3)
+    policy = getattr(retry_state, "kwargs", {}).get("llm_retry_policy") or {}
+    maximum_attempts = policy.get(
+        "max_attempts", getattr(stop, "max_attempt_number", 3)
+    )
     attempt_label = (
         f"{retry_state.attempt_number}/{maximum_attempts}"
         if maximum_attempts is not None
@@ -88,6 +109,8 @@ class LLMResponseMetadata(TypedDict, total=False):
     id: str | None
     logprobs: Any | None
     usage: dict[str, int] | None
+    content_source: Literal["text", "reasoning_summary"]
+    finish_reason: str | None
 
 
 class LLMResponse:
@@ -120,6 +143,16 @@ class LLMResponse:
     def content(self) -> str | None:
         """Get the message content"""
         return self.message.content
+
+    @property
+    def content_source(self) -> str:
+        """Distinguish visible assistant text from a returned reasoning summary."""
+        return self.metadata.get("content_source", "text")
+
+    @property
+    def finish_reason(self) -> str | None:
+        """Provider stop reason, retained for empty/truncated response diagnostics."""
+        return self.metadata.get("finish_reason")
 
     @property
     def role(self) -> str:
@@ -178,9 +211,25 @@ def _reasoning_tokens(usage: Any) -> int | None:
     return None
 
 
+def _llm_retry_stop(state):
+    policy = state.kwargs.get("llm_retry_policy") or {}
+    return stop_after_attempt(int(policy.get("max_attempts", 3)))(state)
+
+
+def _llm_retry_wait(state):
+    policy = state.kwargs.get("llm_retry_policy")
+    if not policy:
+        return wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90))(state)
+    return wait_exponential(
+        multiplier=policy.get("multiplier", 15),
+        min=policy.get("min_wait_s", 15),
+        max=policy.get("max_wait_s", 300),
+    )(state)
+
+
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_chain(wait_fixed(30), wait_fixed(60), wait_fixed(90)),
+    stop=_llm_retry_stop,
+    wait=_llm_retry_wait,
     retry=retry_if_exception(_should_retry),
     before_sleep=before_sleep_loguru,
     reraise=True,
@@ -192,6 +241,8 @@ async def llm_call(
     tools: list[dict[str, Any]] | None = None,
     api_endpoint: str | None = None,
     return_usage: bool = True,
+    # Consumed by Tenacity callbacks through retry_state.kwargs.
+    llm_retry_policy: dict[str, int | float] | None = None,  # noqa: ARG001
     **kwargs,
 ) -> LLMResponse:
     """
@@ -204,6 +255,8 @@ async def llm_call(
         tools (list[dict[str, Any]], optional): The tools to make available to the model.
         api_endpoint (str, optional): The API endpoint to use. When using VLLM.
         return_usage (bool, optional): If True, includes token usage in metadata. Defaults to True.
+        llm_retry_policy: Optional transport retry settings. These stay local
+            and are never sent to the model provider.
         **kwargs: Additional keyword arguments to pass to the LiteLLM API.
             Configure provider requirements here (e.g. max_tokens, reasoning_effort,
             thinking, tool_choice, or additional_drop_params). Caller settings are
@@ -238,15 +291,19 @@ async def llm_call(
 
         message = response.choices[0].message
 
-        # If message content is None, try to get reasoning_content
-        if message.content is None:
+        # Providers may return either None or an empty string for content.
+        # Preserve usable reasoning in either case for text-based agents.
+        if not message.content:
             reasoning_content = getattr(message, "reasoning_content", None)
             if reasoning_content is not None:
                 # Ensure reasoning_content is a string
                 message.content = str(reasoning_content) if reasoning_content else None
 
         metadata = LLMResponseMetadata()
+        # Provider reasoning is separate from public assistant text. In particular,
+        # masked thinking is not an empty public turn or a substitute explanation.
         metadata["id"] = response.id
+        metadata["finish_reason"] = getattr(response.choices[0], "finish_reason", None)
 
         # Include logprobs if requested via kwargs
         if kwargs.get("logprobs"):
@@ -295,147 +352,30 @@ async def llm_call(
 
     except RateLimitError as e:
         # Check if this is a quota exhaustion (not a temporary rate limit)
-        error_str = str(e).lower()
-        if any(keyword in error_str for keyword in QUOTA_EXHAUSTED_KEYWORDS):
+        detail = concise_error_message(e)
+        error_str = f"{e} {detail}".lower()
+        if any(
+            keyword in error_str
+            for keyword in (
+                *QUOTA_EXHAUSTED_KEYWORDS,
+                *ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS,
+            )
+        ):
             raise BudgetExhaustedError(
-                f"Benchmark stopped - quota exhausted: {e}"
+                f"Benchmark stopped - quota exhausted: {detail}"
             ) from e
         # Otherwise, it's a temporary rate limit - re-raise to let retry handle it
         raise
 
     except Exception as e:
-        raise e
-
-
-def format_examples(examples: list[str] | None) -> str:
-    """Format few-shot part of the prompt from a list of shots
-
-    Args:
-        examples (List[str], optional): The examples to format. Defaults to None.
-
-    Returns:
-        str: The formatted examples
-    """
-    if examples is None:
-        return ""
-    else:
-        example_prompt = f"""To help you in understanding this task, the next {
-            len(examples)
-        } examples are provided:\n\n"""
-        return example_prompt + "\n\n".join(examples)
-
-
-def serialize_messages(messages: list[LiteLLMMessage]) -> list[dict]:
-    """
-    Serialize LiteLLMMessage objects to a format that can be saved to a JSON file.
-
-    Args:
-        messages (List[LiteLLMMessage]): The messages to serialize.
-
-    Returns:
-        List[Dict]: The serialized messages.
-    """
-    serializable_messages = []
-    for msg in messages:
-        if isinstance(msg, dict):
-            message_dict = msg.copy()
-        else:
-            message_dict = {"role": msg.role, "content": msg.content}
-
-            if hasattr(msg, "id") and msg.id:
-                message_dict["id"] = msg.id
-            if hasattr(msg, "tool_call_id") and msg.tool_call_id:
-                message_dict["tool_call_id"] = msg.tool_call_id
-            if hasattr(msg, "name") and msg.name:
-                message_dict["name"] = msg.name
-            if hasattr(msg, "tool_calls") and msg.tool_calls:
-                message_dict["tool_calls"] = []
-                for tc in msg.tool_calls:
-                    if isinstance(tc, dict):
-                        tool_call = {
-                            "id": tc.get("id"),
-                            "function": {
-                                "name": tc.get("function", {}).get("name"),
-                                "arguments": tc.get("function", {}).get("arguments"),
-                            },
-                        }
-                    else:
-                        tool_call = {
-                            "id": tc.id,
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                    message_dict["tool_calls"].append(tool_call)
-
-        serializable_messages.append(message_dict)
-
-    return serializable_messages
-
-
-def save_agent_messages(
-    messages: list[LiteLLMMessage],
-    task_id: str,
-    agent_name: str,
-    model: str,
-    output_dir: str | None = None,
-    tools: list[dict] | None = None,
-    tool_verbosity: str = "brief",
-    trace_metadata: dict[str, Any] | None = None,
-) -> str:
-    """Save agent conversation to a JSON file for logging and analysis purposes.
-
-    This function handles both regular dictionaries and LiteLLMMessage objects,
-    properly serializing them for storage.
-
-    Args:
-        messages (list[LiteLLMMessage]): List of message objects (LiteLLMMessages or dictionaries)
-        task_id (str): The ID of the task being solved
-        agent_name (str): The name of the agent that generated the messages
-        output_dir (str, optional): Directory to save the logs (will be created if it doesn't exist). Default is "agent_logs".
-        tools (list[dict], optional): List of available tools used by the agent. Defaults to None.
-        tool_verbosity (str, optional): Verbosity level for tool descriptions. Defaults to "brief".
-        trace_metadata (dict, optional): Agent-specific trace information saved
-            beside `messages`. It is deliberately not merged into individual
-            messages, which keeps replayed/API-bound messages schema-compatible.
-
-    Returns:
-        str: Path to the saved file
-    """
-    if output_dir is None:
-        output_dir = f"agent_logs-{agent_name}-{model}-{tool_verbosity}"
-    Path(output_dir).mkdir(exist_ok=True, parents=True)
-
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"{task_id}_{timestamp}.json"
-    file_path = Path(output_dir) / filename
-
-    # Convert messages to serializable format
-    serializable_messages = serialize_messages(messages)
-
-    # Prepare log data with metadata
-    log_data = {
-        "task_id": task_id,
-        "model": model,
-        "agent": agent_name,
-        "tool_verbosity": tool_verbosity,
-        "tools": tools,
-        "timestamp": timestamp,
-        "messages": serializable_messages,
-    }
-    if trace_metadata is not None:
-        log_data["trace_metadata"] = trace_metadata
-
-    # Write to file with metadata and pretty formatting
-    with Path(file_path).open("w") as f:
-        json.dump(
-            log_data,
-            f,
-            indent=2,
-        )
-
-    return file_path
+        detail = concise_error_message(e)
+        if any(
+            keyword in detail.lower() for keyword in ACCOUNT_QUOTA_EXHAUSTED_KEYWORDS
+        ):
+            raise BudgetExhaustedError(
+                f"Benchmark stopped - quota exhausted: {detail}"
+            ) from e
+        raise
 
 
 def convert_outermost_triple_quotes(text: str) -> str:

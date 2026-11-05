@@ -12,6 +12,7 @@ import pytest
 from corral import cli
 from corral.agents.ai_scientist import AIScientistConfig, SakanaAIScientistConfig
 from corral.agents.ai_scientist.agent import AIScientistAgent
+from corral.agents.epistemic import EpistemicAgent
 from corral.agents.llm_planner import LLMPlanner
 from corral.agents.react import ReActAgent
 from corral.agents.reflexion_agent import ReflexionAgent
@@ -50,6 +51,7 @@ EXPECTED_AGENTS = (
     "ai-scientist",
     "claude-code",
     "codex",
+    "epistemic",
     "llm-planner",
     "openhands",
     "react",
@@ -104,6 +106,7 @@ def test_every_public_concrete_agent_is_registered():
         "AIScientistAgent",
         "ClaudeCodeAgent",
         "CodexAgent",
+        "EpistemicAgent",
         "LLMPlanner",
         "OpenHandsAgent",
         "ReActAgent",
@@ -117,6 +120,7 @@ def test_every_public_concrete_agent_is_registered():
     ("name", "agent_class"),
     [
         ("ai-scientist", AIScientistAgent),
+        ("epistemic", EpistemicAgent),
         ("llm-planner", LLMPlanner),
         ("react", ReActAgent),
         ("terminus", TerminusAgent),
@@ -591,14 +595,16 @@ def test_run_executes_one_task_without_a_benchmark(
     default_limit,
     max_iterations,
 ):
+    from corral import run
+
     iteration_limits = []
-    original_execute = cli.execute_task
+    original_execute = run.execute_task
 
     async def record_execute(**kwargs):
         iteration_limits.append(kwargs["task"].max_iterations)
         return await original_execute(**kwargs)
 
-    monkeypatch.setattr(cli, "execute_task", record_execute)
+    monkeypatch.setattr(run, "execute_task", record_execute)
     monkeypatch.setattr(
         cli,
         "load_environment_group",
@@ -793,3 +799,54 @@ def test_benchmark_runs_locally_and_writes_report(
     manifest = json.loads((reports[0].parent / "run-metadata.json").read_text())
     assert manifest["status"] == ("completed_with_errors" if failed else "completed")
     assert len(list(reports[0].parent.rglob("commits.sqlite3"))) == 2
+
+
+def test_benchmark_reports_evaluation_failure_as_incomplete(
+    monkeypatch, tmp_path, capsys
+):
+    import importlib
+
+    run_module = importlib.import_module("corral.run")
+
+    async def unavailable_evaluator(*args, **kwargs):
+        raise ValueError("Cannot grade a different execution protocol or task bank")
+
+    monkeypatch.setattr(run_module, "evaluate_task", unavailable_evaluator)
+    monkeypatch.setattr(
+        cli,
+        "load_environment_group",
+        lambda *args, **kwargs: {"task1": _environment("task1")},
+    )
+    monkeypatch.setattr(cli, "create_agent", lambda *args, **kwargs: SubmitAgent())
+    args = cli.build_parser().parse_args(
+        [
+            "bench",
+            "--agent",
+            "react",
+            "--environment",
+            "samplemath",
+            "--sandbox",
+            "local",
+            "--max-attempts",
+            "1",
+            "--run-id",
+            "evaluation-failure",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert asyncio.run(cli.run_benchmark(args)) == 1
+    assert (
+        "evaluation error: Cannot grade a different execution protocol or task bank"
+        in capsys.readouterr().out
+    )
+    manifest = json.loads(
+        (tmp_path / "evaluation-failure/run-metadata.json").read_text()
+    )
+    assert manifest["status"] == "completed_with_errors"
+    assert manifest["failed_trials"] == manifest["evaluation_failed_trials"] == 1
+    report = json.loads((tmp_path / "evaluation-failure/report.json").read_text())
+    trial = report["task_results"]["task1"]["trials"][0]
+    assert trial["score"] is None
+    assert trial["error_message"] is None
+    assert trial["evaluation_error"]

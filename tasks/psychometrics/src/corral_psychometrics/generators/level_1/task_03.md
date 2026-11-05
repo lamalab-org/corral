@@ -12,7 +12,7 @@ Responses are five-point ratings and `0` denotes a missing response. The target 
 
 ## What to report
 
-Submit a complete lavaan/semopy model for the 10 HSNS items, including correlated residuals where justified, plus the item loadings and any factor correlation.
+Submit a complete semopy model for the 10 HSNS items, including correlated residuals where justified, plus the item loadings and any factor correlation.
 
 ## Why this is non-trivial
 

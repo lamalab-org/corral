@@ -239,7 +239,9 @@ def predict_isotopic_distribution(smiles: str, ionization: str | None = None) ->
         console.log(JSON.stringify(isotopicDistribution.getPeaks()));
         """
     )
-    node_project_dir = os.environ.get("CORRAL_SPECTRA_JS_DIR", "/srv/js")
+    node_project_dir = os.environ.get(
+        "CORRAL_SPECTRA_JS_DIR", "/usr/local/share/corral-spectra-js"
+    )
     cwd = node_project_dir if Path(node_project_dir).is_dir() else None
     node_executable = shutil.which("node") or "node"
     out = subprocess.check_output(
@@ -276,7 +278,9 @@ def predict_nmr_spectra(smiles: str) -> dict:
         console.log(JSON.stringify(result));
         """
     )
-    node_project_dir = os.environ.get("CORRAL_SPECTRA_JS_DIR", "/srv/js")
+    node_project_dir = os.environ.get(
+        "CORRAL_SPECTRA_JS_DIR", "/usr/local/share/corral-spectra-js"
+    )
     cwd = node_project_dir if Path(node_project_dir).is_dir() else None
     node_executable = shutil.which("node") or "node"
     out = subprocess.check_output(

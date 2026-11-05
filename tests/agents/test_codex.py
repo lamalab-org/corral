@@ -12,7 +12,7 @@ from mcp.client.streamable_http import streamablehttp_client
 pytest.importorskip("openai_codex")
 
 from corral.agents import CodexAgent
-from corral.agents.codex import HarnessRunResult
+from corral.agents.codex import HarnessRunResult, _RunState
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
@@ -50,9 +50,16 @@ class Session:
         self.messages = []
         self.submission = submission
         self.submission_status = submission_status
+        self.submitted_actions = []
 
     async def record_message(self, message):
         self.messages.append(message)
+
+    async def execute(self, action):
+        self.submitted_actions.append(action)
+        self.submission = action.arguments["answer"]
+        self.submission_status = "submitted"
+        return SimpleNamespace(success=True, error=None)
 
 
 @pytest.mark.anyio
@@ -121,8 +128,103 @@ def test_codex_extracts_usage_from_nested_total():
     assert usage.llm_calls == 1
 
 
+@pytest.mark.parametrize(
+    ("payload", "tool_name", "arguments", "is_error"),
+    [
+        (
+            {
+                "type": "commandExecution",
+                "command": "pwd",
+                "cwd": "/tmp",
+                "commandActions": [],
+                "status": "completed",
+                "aggregatedOutput": "/tmp",
+                "exitCode": 0,
+                "durationMs": 12,
+            },
+            "commandExecution",
+            {"command": "pwd", "cwd": "/tmp"},
+            False,
+        ),
+        (
+            {
+                "type": "commandExecution",
+                "command": "false",
+                "cwd": "/tmp",
+                "commandActions": [],
+                "status": "completed",
+                "exitCode": 1,
+            },
+            "commandExecution",
+            {"command": "false", "cwd": "/tmp"},
+            True,
+        ),
+        (
+            {"type": "fileChange", "changes": [], "status": "declined"},
+            "fileChange",
+            {"changes": []},
+            True,
+        ),
+        (
+            {"type": "webSearch", "query": "Corral"},
+            "webSearch",
+            {"query": "Corral", "action": None},
+            False,
+        ),
+        (
+            {"type": "imageView", "path": "/tmp/image.png"},
+            "imageView",
+            {"path": "/tmp/image.png"},
+            False,
+        ),
+        (
+            {
+                "type": "dynamicToolCall",
+                "tool": "custom",
+                "arguments": {"value": 1},
+                "status": "completed",
+                "success": False,
+            },
+            "custom",
+            {"value": 1},
+            True,
+        ),
+    ],
+)
+def test_codex_records_native_tool_items(payload, tool_name, arguments, is_error):
+    import json
+
+    from openai_codex.generated.v2_all import ThreadItem
+
+    item = ThreadItem.model_validate({"id": "native-call", **payload}).root
+    run = _RunState()
+    CodexAgent(system_prompt="system")._record_item(item, run)
+
+    call, result = run.messages
+    assert call["sdk_native"] is True
+    function = call["tool_calls"][0]["function"]
+    assert function["name"] == tool_name
+    assert json.loads(function["arguments"]) == arguments
+    assert result["tool_call_id"] == "native-call"
+    assert result["is_error"] is is_error
+    assert json.loads(result["content"]) == item.model_dump(mode="json")
+    assert result["duration_ms"] == getattr(item, "duration_ms", None)
+
+
+def test_codex_preserves_task_specific_absolute_paths():
+    agent = CodexAgent(model="gpt-test", system_prompt="system")
+    instructions = agent._developer_instructions(False, ["write_file", "Code_Executor"])
+    assert "including absolute paths when required" in instructions
+    assert (
+        "Do not construct task paths from the isolated harness working directory"
+        in instructions
+    )
+    assert "never an absolute path" not in instructions
+    assert "does not imply those actions are simulated" in instructions
+
+
 @pytest.mark.anyio
-async def test_codex_plain_text_answer_is_not_a_submission(monkeypatch):
+async def test_codex_final_answer_falls_back_to_submission_action(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     def fake_run(self, *, run, **_kwargs):
@@ -130,10 +232,32 @@ async def test_codex_plain_text_answer_is_not_a_submission(monkeypatch):
         return "42"
 
     monkeypatch.setattr(CodexAgent, "_execute_harness", fake_run)
-    outcome = await CodexAgent(system_prompt="system").run_session(Session())
+    session = Session()
+    outcome = await CodexAgent(system_prompt="system").run_session(session)
+
+    assert outcome.status == "completed"
+    assert outcome.answer == "42"
+    assert session.submission == "42"
+    assert len(session.submitted_actions) == 1
+    assert session.submitted_actions[0].name == "submit_answer"
+    assert session.submitted_actions[0].metadata["source"] == "codex_final_answer"
+    assert outcome.metadata["submission_source"] == "codex_final_answer"
+
+
+@pytest.mark.anyio
+async def test_codex_empty_final_answer_remains_protocol_failure(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_run(self, *, run, **_kwargs):
+        run.result = HarnessRunResult(status="success", answer="  ")
+        return ""
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", fake_run)
+    session = Session()
+    outcome = await CodexAgent(system_prompt="system").run_session(session)
 
     assert outcome.status == "protocol_failure"
-    assert "without calling submit_answer" in outcome.error
+    assert not session.submitted_actions
 
 
 @pytest.mark.anyio
@@ -161,6 +285,41 @@ def test_codex_configuration_keeps_native_tools_and_scopes_task_mcp_tools():
     assert "web_search" not in config
     assert "shell_tool" not in config
     assert 'enabled_tools = ["read_file", "submit_answer"]' in config
+
+
+def test_codex_file_guidance_defers_to_the_task_path_contract():
+    instructions = CodexAgent(system_prompt="system")._developer_instructions(
+        False, ["write_file", "submit_answer"]
+    )
+
+    assert "task environment's public path contract" in instructions
+    assert (
+        "Do not construct task paths from the isolated harness working directory"
+        in instructions
+    )
+    assert "RELATIVE path" not in instructions
+    assert "never an absolute path" not in instructions
+
+
+@pytest.mark.anyio
+async def test_codex_uses_and_preserves_corral_workspace(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_turn(self, *, workspace, codex_home, run, **kwargs):
+        assert workspace == tmp_path
+        assert codex_home != workspace
+        assert run.metadata["sandbox"] == "externalSandbox"
+        (workspace / "native.txt").write_text("native output")
+        return "42"
+
+    monkeypatch.setattr(CodexAgent, "_execute_codex_turn", fake_turn)
+    session = Session()
+    session.native_tool_workspace = str(tmp_path)
+    outcome = await CodexAgent(system_prompt="system").run_session(session)
+    assert outcome.status == "completed"
+    assert (tmp_path / "native.txt").read_text() == "native output"
+    assert outcome.metadata["workspace_access"] == "corral_sandbox"
+    assert outcome.metadata["codex_cwd_is_execution_workspace"] is True
 
 
 @pytest.mark.anyio
@@ -261,3 +420,113 @@ async def test_codex_run_data_is_folded_into_final_state(monkeypatch, tmp_path):
     assert session_metadata["num_tool_calls"] == 1
     assert not hasattr(agent, "harness_result")
     assert not hasattr(agent, "messages")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("fail", [False, True])
+async def test_codex_persists_item_events_before_advancing_the_stream(
+    monkeypatch, fail
+):
+    import threading
+
+    from openai_codex.generated.v2_all import ThreadItem
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    durable = threading.Event()
+
+    class StreamingSession(Session):
+        async def record_message(self, message):
+            # Model an asynchronous store so queuing alone cannot satisfy the
+            # durability check when the SDK advances to its next event.
+            await anyio.sleep(0.01)
+            await super().record_message(message)
+            if message.get("role") == "tool":
+                durable.set()
+
+    session = StreamingSession("42", "submitted")
+    item = ThreadItem.model_validate(
+        {
+            "id": "shell-1",
+            "type": "commandExecution",
+            "command": "pwd",
+            "cwd": "/tmp",
+            "commandActions": [],
+            "status": "completed",
+            "aggregatedOutput": "/tmp",
+            "exitCode": 0,
+            "durationMs": 2000,
+        }
+    ).root
+
+    def fake_harness(self, *, run, **kwargs):
+        def stream():
+            for method, clock in (
+                ("item/started", {"started_at_ms": 1000}),
+                ("item/completed", {"completed_at_ms": 3000}),
+            ):
+                yield SimpleNamespace(
+                    method=method, payload=SimpleNamespace(item=item, **clock)
+                )
+                assert session.messages[-1]["chronology"]["phase"] == (
+                    "tool_started" if method == "item/started" else "tool_completed"
+                )
+            assert durable.is_set(), "SDK advanced before its events were persisted"
+            assert [m["chronology"]["phase"] for m in session.messages[-2:]] == [
+                "tool_started",
+                "tool_completed",
+            ]
+            if fail:
+                raise RuntimeError("SDK transport failed")
+            yield SimpleNamespace(
+                method="turn/completed",
+                payload=SimpleNamespace(
+                    turn=SimpleNamespace(status=SimpleNamespace(value="completed"))
+                ),
+            )
+
+        turn = SimpleNamespace(stream=stream)
+        thread = SimpleNamespace(turn=lambda *args, **kwargs: turn)
+        self._drive_turn(thread, "solve", run)
+        run.result = HarnessRunResult(status="success", answer="42")
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", fake_harness)
+    agent = CodexAgent(system_prompt="system")
+    if fail:
+        with pytest.raises(RuntimeError, match="SDK transport failed"):
+            await agent.run_session(session)
+    else:
+        await agent.run_session(session)
+    call, result = session.messages[-2:]
+    assert call["tool_calls"][0]["id"] == result["tool_call_id"] == "shell-1"
+    assert call["chronology"]["sdk_item_id"] == "shell-1"
+    assert call["chronology"]["timestamp_source"] == "sdk"
+    assert datetime.fromisoformat(call["chronology"]["occurred_at"]).timestamp() == 1
+    assert datetime.fromisoformat(result["chronology"]["occurred_at"]).timestamp() == 3
+
+
+@pytest.mark.anyio
+async def test_codex_cancellation_drains_worker_before_closing_session(monkeypatch):
+    import asyncio
+    import threading
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    started = threading.Event()
+    release = threading.Event()
+
+    def harness(self, *, run, **kwargs):
+        started.set()
+        assert release.wait(5)
+        run.messages.append({"role": "assistant", "content": "last event"})
+        run.result = HarnessRunResult(status="success", answer="42")
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", harness)
+    session = Session()
+    task = asyncio.create_task(CodexAgent(system_prompt="system").run_session(session))
+    await asyncio.to_thread(started.wait)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert session.messages[-1]["content"] == "last event"

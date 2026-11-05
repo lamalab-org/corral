@@ -33,11 +33,17 @@ def build_graph(topology: dict) -> nx.MultiGraph:
     return g
 
 
-def draw_topology(topology: dict, ax=None, title: str | None = None) -> None:
+def draw_topology(
+    topology: dict,
+    ax=None,
+    title: str | None = None,
+    *,
+    show_values: bool = True,
+) -> None:
     """Draw a single circuit topology onto a matplotlib axes."""
     g = build_graph(topology)
     ax = ax or plt.gca()
-    pos = nx.spring_layout(g, seed=0)
+    pos = nx.spring_layout(g, seed=0, iterations=300)
 
     node_colors = [TERMINAL_COLOR if n in ("A", "B") else NODE_COLOR for n in g.nodes]
     nx.draw_networkx_nodes(
@@ -67,7 +73,7 @@ def draw_topology(topology: dict, ax=None, title: str | None = None) -> None:
             label_pos = (mid[0] - dy * rad, mid[1] + dx * rad)
             ax.text(
                 *label_pos,
-                f"{key}\n{data['ohms']:g}Ω",
+                f"{key}\n{data['ohms']:.4g}Ω" if show_values else str(key),
                 fontsize=7,
                 ha="center",
                 va="center",

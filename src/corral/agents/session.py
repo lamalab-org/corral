@@ -8,12 +8,14 @@ from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import anyio
 
+from corral.agents._transcript import event_clock
 from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.usage import usage_from_mapping
@@ -76,9 +78,13 @@ class AgentSessionCapabilities:
     """Opt-in model-facing capabilities supplied by the session runtime."""
 
     inspect_subagents: bool = False
+    native_workspace: bool = False
 
     def to_metadata(self) -> dict[str, bool]:
-        return {"inspect_subagents": self.inspect_subagents}
+        return {
+            "inspect_subagents": self.inspect_subagents,
+            **({"native_workspace": True} if self.native_workspace else {}),
+        }
 
     @classmethod
     def from_value(cls, value: object) -> AgentSessionCapabilities:
@@ -87,7 +93,7 @@ class AgentSessionCapabilities:
         if isinstance(value, cls):
             return value
         if isinstance(value, Mapping):
-            unknown = set(value) - {"inspect_subagents"}
+            unknown = set(value) - {"inspect_subagents", "native_workspace"}
             if unknown:
                 raise ValueError(
                     f"unknown AgentSession capabilities: {sorted(unknown)}"
@@ -95,7 +101,10 @@ class AgentSessionCapabilities:
             enabled = value.get("inspect_subagents", False)
             if not isinstance(enabled, bool):
                 raise TypeError("inspect_subagents capability must be a boolean")
-            return cls(inspect_subagents=enabled)
+            native_workspace = value.get("native_workspace", False)
+            if not isinstance(native_workspace, bool):
+                raise TypeError("native_workspace capability must be a boolean")
+            return cls(inspect_subagents=enabled, native_workspace=native_workspace)
         raise TypeError(
             "session_capabilities must be AgentSessionCapabilities or a mapping"
         )
@@ -115,8 +124,7 @@ def inspect_subagent_tool() -> dict[str, Any]:
         "function": {
             "name": INSPECT_SUBAGENT_TOOL_NAME,
             "description": (
-                "Inspect the conversation and tool activity of a child or "
-                "descendant subagent that this agent is authorized to inspect. "
+                "Inspect the conversation and tool activity of a child or descendant subagent that this agent is authorized to inspect.\n"
                 "Use this only when the normal subagent result needs investigation."
             ),
             "parameters": {
@@ -243,6 +251,8 @@ class AgentSession:
             f"corral_delegate_budget_{id(self)}", default=None
         )
         self._action_lock = anyio.Lock()
+        self._record_lock = anyio.Lock()
+        self._event_index: int | None = None
         self._tool_connection: ContextVar[ToolConnection | None] = ContextVar(
             f"corral_tool_connection_{id(self)}", default=None
         )
@@ -274,6 +284,61 @@ class AgentSession:
         return self.state
 
     async def _append_agent(self, event: Any, request_id: str) -> Commit:
+        # SDK callbacks and MCP proposals share this writer. Only persistence
+        # is serialized; tool executions can still overlap.
+        async with self._record_lock:
+            return await self._append_agent_ordered(event, request_id)
+
+    async def _append_agent_ordered(self, event: Any, request_id: str) -> Commit:
+        occurred_at = None
+        if isinstance(event, AgentTurnRecorded):
+            if self._event_index is None:
+                # Metadata-only SDK lifecycle events also consume indexes.
+                # Recover from the ledger, including those absent from history.
+                history = await self.state_store.trace_commits(
+                    self.actor.run_id, branch_id=self.branch_id
+                )
+                self._event_index = (
+                    max(
+                        (
+                            commit.event.metadata.get("chronology", {}).get(
+                                "event_index", -1
+                            )
+                            for commit in history
+                            if isinstance(commit.event, AgentTurnRecorded)
+                        ),
+                        default=-1,
+                    )
+                    + 1
+                )
+            clock = dict(
+                event.messages[0].get("chronology", {})
+                if event.messages
+                else event.metadata.get("chronology", {})
+            )
+            if not clock:
+                clock = event_clock()
+            clock.update(event_index=self._event_index, agent_run_id=self.actor.run_id)
+            self._event_index += 1
+            occurred_at = datetime.fromisoformat(clock["occurred_at"])
+            event = AgentTurnRecorded.model_validate(
+                {
+                    **event.model_dump(mode="json"),
+                    "messages": tuple(
+                        {
+                            **message,
+                            "chronology": {
+                                **clock,
+                                **message.get("chronology", {}),
+                                "event_index": clock["event_index"],
+                                "agent_run_id": self.actor.run_id,
+                            },
+                        }
+                        for message in event.messages
+                    ),
+                    "metadata": {**event.metadata, "chronology": clock},
+                }
+            )
         commit = await self._bound_store.append(
             CommitRequest(
                 request_id=request_id,
@@ -282,6 +347,7 @@ class AgentSession:
                 based_on_hash=self._last_observed_hash,
                 author=self.actor,
                 event=event,
+                occurred_at=occurred_at,
             )
         )
         await self._notify(commit)
@@ -295,6 +361,7 @@ class AgentSession:
         *,
         based_on_hash: str | None = None,
     ) -> Commit:
+        clock = event_clock()
         commit = await self.state_store.bind(
             self.runtime_actor,
             branch_id=self.branch_id,
@@ -307,6 +374,7 @@ class AgentSession:
                 based_on_hash=based_on_hash or self._last_observed_hash,
                 author=self.runtime_actor,
                 event=event,
+                occurred_at=datetime.fromisoformat(clock["occurred_at"]),
             )
         )
         await self._notify(commit)
@@ -401,6 +469,46 @@ class AgentSession:
         return self.execution_workspace
 
     @property
+    def native_tool_workspace(self) -> str | None:
+        """Workspace exposed to native tools inside Corral's enforced sandbox.
+
+        Local adapters retain their SDK isolation. Only the trusted Docker
+        runtime grants this capability and translates it to the worker mount.
+        """
+        if permissions.enabled() and self.capabilities.native_workspace:
+            return self.workspace
+        return None
+
+    async def _capture_native_workspace(self) -> None:
+        """Checkpoint direct SDK writes without scheduling them for replay."""
+        if self.native_tool_workspace is None:
+            return
+        async with self._action_lock:
+            await self._refresh()
+            # Submission already captured the final workspace through its MCP
+            # action. Buffered SDK transcripts can arrive after that boundary.
+            if self.state.is_terminal:
+                return
+            previous = self.state.workspace
+            workspace = await anyio.to_thread.run_sync(
+                lambda: self.environment.capture_workspace(previous)
+            )
+            if (
+                workspace.files == previous.files
+                and workspace.artifacts == previous.artifacts
+            ):
+                return
+            commit = await self._append_runtime(
+                TaskConfigured(
+                    status="Native SDK workspace changes captured",
+                    workspace_delta=WorkspaceDelta.from_workspace(workspace),
+                    expected_workspace_revision=previous.revision,
+                ),
+                f"agent:{self.actor.run_id}:native-workspace:{uuid4()}",
+            )
+            await self._refresh(observed_hash=commit.hash)
+
+    @property
     def previous_evaluation(self) -> Mapping[str, Any] | None:
         return dict(self._last_score) if isinstance(self._last_score, Mapping) else None
 
@@ -489,45 +597,135 @@ class AgentSession:
         raw_messages: Sequence[Mapping[str, Any]],
         *,
         usage: Mapping[str, Any] | None = None,
+        llm_calls: int = 1,
     ) -> None:
-        """Commit exactly the conversation messages added by one turn."""
+        """Commit provider messages, retaining tools executed by the SDK.
+
+        Corral tools already have authored action/result commits. SDK tools
+        remain transcript-only so recovery never tries to execute them.
+        """
         messages: list[Mapping[str, JsonValue]] = []
+        native_calls = {
+            call["id"]: call["function"]["name"]
+            for message in self.messages
+            if message.get("sdk_native")
+            for call in message.get("tool_calls", ())
+        }
+        task_tools = {tool["function"]["name"] for tool in self.tools}
+        native_results = {
+            message.get("tool_call_id")
+            for message in self.messages
+            if message.get("sdk_native") and message.get("role") == "tool"
+        }
+
+        async def record_sdk_lifecycle(message):
+            clock = message.get("chronology")
+            if not clock:
+                return
+            # Keep MCP SDK identity/timing without duplicating runtime tool
+            # calls in the conversation or charging their usage twice.
+            lifecycle = {
+                key: value
+                for key, value in message.items()
+                if key
+                in {
+                    "tool_calls",
+                    "tool_call_id",
+                    "name",
+                    "is_error",
+                    "runtime_action_id",
+                }
+            }
+            await self._append_agent(
+                AgentTurnRecorded(
+                    metadata={
+                        "chronology": clock,
+                        "sdk_tool_event": _json_value(lifecycle),
+                    }
+                ),
+                f"agent:{self.actor.run_id}:sdk-event:{uuid4()}",
+            )
+
         for raw in raw_messages:
             message = dict(raw)
-            if message.get("role") == "tool" or message.get("tool_calls"):
-                continue
-            if message.get("content") is None and not message.get("name"):
+            if message.get("tool_calls"):
+                calls = [
+                    call
+                    for call in message["tool_calls"]
+                    if message.get("sdk_native")
+                    or (
+                        call["function"]["name"] not in task_tools
+                        and not call["function"]["name"].startswith("mcp__corral__")
+                    )
+                ]
+                echoed = [call for call in message["tool_calls"] if call not in calls]
+                if echoed:
+                    await record_sdk_lifecycle({**message, "tool_calls": echoed})
+                if message.get("chronology", {}).get("sdk"):
+                    calls = [call for call in calls if call["id"] not in native_calls]
+                if not calls:
+                    continue
+                message.update(tool_calls=calls, sdk_native=True)
+                native_calls.update(
+                    (call["id"], call["function"]["name"]) for call in calls
+                )
+            elif message.get("role") == "tool":
+                if (
+                    message.get("chronology", {}).get("sdk")
+                    and message.get("tool_call_id") in native_results
+                ):
+                    continue
+                name = native_calls.get(message.get("tool_call_id"))
+                if name is None:
+                    await record_sdk_lifecycle(message)
+                    continue
+                message.update(name=name, sdk_native=True)
+                native_results.add(message.get("tool_call_id"))
+            elif message.get("content") is None and not message.get("name"):
                 continue
             detached = _json_value(message)
             if not isinstance(detached, Mapping):
                 raise TypeError("a provider transcript message must be a JSON object")
             messages.append(detached)
-        if not messages:
+        if not messages and usage is None:
             return
         normalized = usage_from_mapping(
             usage,
-            llm_calls=1 if usage is not None else 0,
+            llm_calls=llm_calls if usage is not None else 0,
         )
-        await self._append_agent(
-            AgentTurnRecorded(
-                messages=tuple(messages),
-                usage_delta=UsageDelta(
-                    input_tokens=normalized.input_tokens,
-                    output_tokens=normalized.output_tokens,
-                    reasoning_tokens=normalized.reasoning_tokens,
-                    llm_calls=normalized.llm_calls,
+        # Keep native call/result boundaries visible to streaming observers.
+        batches = (
+            [(message,) for message in messages]
+            if any(message.get("sdk_native") for message in messages)
+            else [tuple(messages)]
+        )
+        for index, batch in enumerate(batches):
+            await self._append_agent(
+                AgentTurnRecorded(
+                    messages=batch,
+                    usage_delta=UsageDelta(
+                        input_tokens=normalized.input_tokens if index == 0 else 0,
+                        output_tokens=normalized.output_tokens if index == 0 else 0,
+                        reasoning_tokens=normalized.reasoning_tokens
+                        if index == 0
+                        else 0,
+                        llm_calls=normalized.llm_calls if index == 0 else 0,
+                        tool_calls=sum(len(m.get("tool_calls", ())) for m in batch),
+                    ),
                 ),
-            ),
-            f"agent:{self.actor.run_id}:turn:{uuid4()}",
-        )
+                f"agent:{self.actor.run_id}:turn:{uuid4()}",
+            )
+        if any(m.get("sdk_native") and m.get("role") == "tool" for m in messages):
+            await self._capture_native_workspace()
 
     async def record_message(
         self,
         raw: Mapping[str, Any],
         *,
         usage: Mapping[str, Any] | None = None,
+        llm_calls: int = 1,
     ) -> None:
-        await self.record_messages((raw,), usage=usage)
+        await self.record_messages((raw,), usage=usage, llm_calls=llm_calls)
 
     async def run_hooks(
         self,
@@ -688,6 +886,7 @@ class AgentSession:
         )
 
         async def fail(error: Exception) -> ToolResponse:
+            observed = event_clock()
             failed = await self.state_store.bind(
                 tool_actor,
                 branch_id=self.branch_id,
@@ -699,6 +898,7 @@ class AgentSession:
                     branch_id=self.branch_id,
                     based_on_hash=based_on,
                     author=tool_actor,
+                    occurred_at=datetime.fromisoformat(observed["occurred_at"]),
                     event=ToolFailed(
                         action_id=trusted.id,
                         invocation_id=invocation_id,
@@ -745,6 +945,7 @@ class AgentSession:
                 raise
             except Exception as exc:
                 return await fail(exc)
+        observed = event_clock()
         try:
             completed = await self.state_store.bind(
                 tool_actor,
@@ -757,6 +958,7 @@ class AgentSession:
                     branch_id=self.branch_id,
                     based_on_hash=based_on,
                     author=tool_actor,
+                    occurred_at=datetime.fromisoformat(observed["occurred_at"]),
                     event=ToolCompleted(
                         action_id=trusted.id,
                         invocation_id=invocation_id,
@@ -1205,9 +1407,12 @@ class AgentSession:
                 build_terminal_tool,
             )
 
-            environment.tools["terminal"] = build_terminal_tool(
+            rebound_terminal = build_terminal_tool(
                 AbsoluteWorkspaceFilesystem(environment.workspace_path)
             )
+            if original_terminal := environment.tools.get("terminal"):
+                rebound_terminal.description = original_terminal.description
+            environment.tools["terminal"] = rebound_terminal
         branch_state = await self.state_store.materialize(selected)
         if node_workspace is None:
             await anyio.to_thread.run_sync(
@@ -1482,6 +1687,7 @@ async def run_agent_session(
     try:
         result = await _run_bound_agent(agent, interface)
         await interface._finish_subagents()
+        await interface._capture_native_workspace()
         # SDK/MCP adapters may turn a raised tool exception into an agent
         # outcome. Do not close the agent or execution while its tool still
         # needs recovery, even when an adapter swallowed the suspension.
