@@ -70,6 +70,7 @@ async def test_epistemic_prompt_overrides_leave_base_agent_unchanged(monkeypatch
     # PromptStore mock that returns the same user prompt for every agent.
     monkeypatch.setattr("corral.agents.base_agent.PromptStore", PromptStore)
     base = ToolCallingAgent(model="test-model")
+    original_system_prompt = base.system_prompt
     epistemic = EpistemicAgent(
         model="test-model",
         annotator=annotator_with_transport(AsyncMock(return_value=decision_payload())),
@@ -118,24 +119,18 @@ async def test_epistemic_prompt_overrides_leave_base_agent_unchanged(monkeypatch
             assert "Do not return a final answer as plain text" not in user_prompt
             assert "a tool call is not required on every turn" in reminder
             assert "visible assistant text" in description
-            assert (
-                "will only interact with the environment"
-                not in initial["messages"][0]["content"]
-            )
+            assert EPISTEMIC_PROMPT in initial["messages"][0]["content"]
         else:
-            assert "You must think what to do next" in user_prompt
+            assert "Use the available tools as needed" in user_prompt
             assert "Do not return a final answer as plain text" in user_prompt
             assert "Before every tool call" not in user_prompt
             assert reminder == (
-                "A plain-text answer does not finish the task. Call "
+                "A plain-text answer does not finish the task.\nCall "
                 "submit_answer with the complete answer, or call an "
                 "available environment tool."
             )
             assert description == submit_answer_tool()["function"]["description"]
-            assert (
-                "will only interact with the environment"
-                in initial["messages"][0]["content"]
-            )
+            assert initial["messages"][0]["content"] == original_system_prompt
         assert catalog == original_catalog
 
 

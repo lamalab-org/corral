@@ -150,6 +150,58 @@ def _json(span, attribute):
     return json.loads(span.attributes[f"langfuse.observation.{attribute}"])
 
 
+@pytest.mark.parametrize("failed", [False, True])
+def test_sdk_native_transcript_exports_tool_span(observer, failed):
+    instance, exporter, _ = observer
+    action = Action(id="native-call", name="Bash", arguments={"command": "pwd"})
+    events = [
+        *_events()[:2],
+        AgentTurnRecorded(
+            messages=({**action.to_message(), "sdk_native": True},),
+            usage_delta=UsageDelta(tool_calls=1),
+        ),
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "role": "tool",
+                    "name": "Bash",
+                    "tool_call_id": action.id,
+                    "content": "failure" if failed else "/tmp",
+                    "sdk_native": True,
+                    "is_error": failed,
+                    "duration_ms": 25,
+                },
+            )
+        ),
+        AgentTurnRecorded(messages=({"role": "assistant", "content": "done"},)),
+        ExecutionCompleted(status="submitted"),
+    ]
+    _record(instance, events)
+    spans = exporter.get_finished_spans()
+    tool = next(span for span in spans if span.name == "Bash")
+    assert _json(tool, "input") == {"command": "pwd"}
+    assert _json(tool, "output")["content"] == ("failure" if failed else "/tmp")
+    assert tool.attributes["langfuse.observation.type"] == "tool"
+    assert tool.attributes["langfuse.observation.level"] == (
+        "ERROR" if failed else "DEFAULT"
+    )
+    assert tool.attributes["langfuse.observation.metadata.execution_duration_ms"] == 25
+    assert (
+        tool.attributes["langfuse.observation.metadata.timing_source"]
+        == "sdk_transcript_commits"
+    )
+    generation = next(
+        span
+        for span in spans
+        if span.attributes.get("langfuse.observation.type") == "generation"
+        and _json(span, "output").get("content") == "done"
+    )
+    assert any(
+        message.get("tool_call_id") == action.id
+        for message in _json(generation, "input")
+    )
+
+
 def test_task_tree_has_one_real_root_and_correct_step_parents(observer):
     instance, exporter, _ = observer
     _record(instance, _events())
@@ -773,3 +825,411 @@ def test_delivery_tracking_does_not_lock_the_commit_writer(observer, tmp_path):
         )
         == 2
     )
+
+
+@pytest.mark.parametrize("restored_prefix", [0, 6])
+@pytest.mark.parametrize("late_completion", [4.5, 11])
+def test_sdk_chronology_orders_delayed_native_mcp_submission_and_parallel_results(
+    observer, restored_prefix, late_completion
+):
+    from corral.core.events import AgentCompleted
+
+    instance, exporter, _ = observer
+    epoch = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    native_a = Action(id="native-a", name="shell-a", arguments={"command": "pwd"})
+    native_b = Action(id="native-b", name="shell-b", arguments={"command": "false"})
+    measure = Action(id="measure", name="measure", arguments={})
+    submit = Action(id="submit", name="submit_answer", arguments={"answer": "42"})
+
+    def transcript(message, seconds):
+        clock = {
+            "sdk": "codex",
+            "timestamp_source": "sdk",
+            "occurred_at": (epoch + timedelta(seconds=seconds)).isoformat(),
+            "sdk_item_id": message.get("tool_call_id", "item"),
+        }
+        return AgentTurnRecorded(
+            messages=({**message, "chronology": clock},), metadata={"chronology": clock}
+        )
+
+    def proposal(action):
+        return AgentTurnRecorded(
+            messages=(action.to_message(),),
+            actions=(action,),
+            metadata={"chronology": {"timestamp_source": "local_observation"}},
+        )
+
+    # The MCP transport wins the race. Both native items are delivered late,
+    # including the start of a command that actually preceded measurement.
+    timeline = [
+        (0, _events()[0]),
+        (1, _events()[1]),
+        (1.5, transcript({"role": "user", "content": "solve"}, 1.5)),
+        (3, transcript({**native_b.to_message(), "sdk_native": True}, 3)),
+        (5, proposal(measure)),
+        (
+            6,
+            ToolStarted(
+                action_id=measure.id,
+                invocation_id="im",
+                requested_by_run_id="agent-run",
+                tool_name="measure",
+            ),
+        ),
+        (
+            7,
+            ToolCompleted(
+                action_id=measure.id,
+                invocation_id="im",
+                requested_by_run_id="agent-run",
+                observation="42",
+                status="success",
+            ),
+        ),
+        (8, proposal(submit)),
+        (
+            9,
+            ToolStarted(
+                action_id=submit.id,
+                invocation_id="is",
+                requested_by_run_id="agent-run",
+                tool_name="submit_answer",
+            ),
+        ),
+        (
+            10,
+            ToolCompleted(
+                action_id=submit.id,
+                invocation_id="is",
+                requested_by_run_id="agent-run",
+                observation="accepted",
+                status="success",
+            ),
+        ),
+        (
+            10.5,
+            SubmissionAccepted(
+                action_id=submit.id, requested_by_run_id="agent-run", answer="42"
+            ),
+        ),
+        (2, transcript({**native_a.to_message(), "sdk_native": True}, 2)),
+        (
+            4,
+            transcript(
+                {
+                    "role": "tool",
+                    "tool_call_id": native_a.id,
+                    "name": "shell-a",
+                    "content": "/tmp",
+                    "sdk_native": True,
+                },
+                4,
+            ),
+        ),
+        (
+            late_completion,
+            transcript(
+                {
+                    "role": "tool",
+                    "tool_call_id": native_b.id,
+                    "name": "shell-b",
+                    "content": "failed",
+                    "sdk_native": True,
+                    "is_error": True,
+                },
+                late_completion,
+            ),
+        ),
+        (14, AgentCompleted(agent_run_id="agent-run", status="completed")),
+        (15, ExecutionCompleted(status="submitted")),
+    ]
+    commits = []
+    for index, (seconds, event) in enumerate(timeline):
+        record = _commit(event, index).model_dump(exclude={"hash"})
+        record.update(
+            occurred_at=epoch + timedelta(seconds=seconds),
+            recorded_at=epoch + timedelta(seconds=20 + index),
+        )
+        commits.append(Commit.create(**record))
+    for index, commit in enumerate(commits):
+        if index < restored_prefix:
+            instance.restore_commit(commit)
+        else:
+            instance.record_commit(commit)
+    instance.flush()
+    spans = exporter.get_finished_spans()
+    by_id = {span.context.span_id: span for span in spans}
+    tools = {
+        span.name: span
+        for span in spans
+        if span.attributes["langfuse.observation.type"] == "tool"
+    }
+    assert sorted(tools, key=lambda name: tools[name].start_time) == [
+        "shell-a",
+        "shell-b",
+        "measure",
+        "submit_answer",
+    ]
+    assert [
+        by_id[tools[name].parent.span_id].name
+        for name in ("shell-a", "shell-b", "measure", "submit_answer")
+    ] == ["Step 01", "Step 02", "Step 03", "Step 04"]
+    assert tools["shell-a"].end_time - tools["shell-a"].start_time == 2_000_000_000
+    assert (
+        tools["shell-a"].start_time
+        < tools["shell-b"].start_time
+        < tools["shell-a"].end_time
+    )
+    assert tools["shell-b"].end_time == int(
+        (epoch + timedelta(seconds=late_completion)).timestamp() * 1e9
+    )
+    assert tools["shell-b"].attributes["langfuse.observation.level"] == "ERROR"
+    for span in spans:
+        assert span.start_time <= span.end_time
+        if span.parent:
+            parent = by_id[span.parent.span_id]
+            assert (
+                parent.start_time <= span.start_time <= span.end_time <= parent.end_time
+            )
+    before = len(spans)
+    for commit in commits:
+        instance.record_commit(commit)
+    instance.flush()
+    assert len(exporter.get_finished_spans()) == before
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_local_resistor_smoke_native_then_mcp_then_submission(
+    observer, monkeypatch, tmp_path
+):
+    """Real resistor tools and MCP transport; scripted SDK, no model/network export."""
+    import subprocess
+    from pathlib import Path
+
+    import anyio
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    pytest.importorskip("openai_codex")
+    from openai_codex.generated.v2_all import ThreadItem
+
+    from corral.agents.codex import CodexAgent
+    from corral.persistence import SQLiteCommitStore
+    from corral.runtime import TaskRuntime
+
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "tasks/resistor_network/src")
+    )
+    env_module = pytest.importorskip("resistor_network.env")
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "tasks/resistor_network/environments/level_1/tasks_json/task_0.json"
+    )
+    environment = env_module.create_environments(
+        source, work_dir=str(tmp_path / "workspace")
+    )["task_0"]
+    # A small deterministic circuit exercises the real simulator. This is an
+    # instrumentation smoke, not a model's attempt to solve the benchmark.
+    topology = json.dumps({"resistors": {"R1": 10}, "connections": [["A", "B", "R1"]]})
+    instance, exporter, _ = observer
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-test-key")
+
+    async def call_mcp(url, name, arguments):
+        async with (
+            streamablehttp_client(url) as streams,
+            ClientSession(streams[0], streams[1]) as client,
+        ):
+            await client.initialize()
+            response = await client.call_tool(name, arguments)
+            assert not response.isError
+            return response
+
+    def notification(method, item):
+        clock_field = "started_at_ms" if method == "item/started" else "completed_at_ms"
+        return SimpleNamespace(
+            method=method,
+            payload=SimpleNamespace(
+                item=ThreadItem.model_validate(item),
+                **{clock_field: int(datetime.now(timezone.utc).timestamp() * 1000)},
+            ),
+        )
+
+    def harness(self, *, run, mcp_url, **kwargs):
+        def stream():
+            shell = {
+                "id": "native-resistor",
+                "type": "commandExecution",
+                "command": "printf native-tool-smoke-ok",
+                "cwd": str(tmp_path),
+                "commandActions": [],
+                "status": "inProgress",
+            }
+            yield notification("item/started", shell)
+            result = subprocess.run(
+                ["/bin/sh", "-c", "printf native-tool-smoke-ok"],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            yield notification(
+                "item/completed",
+                {
+                    **shell,
+                    "status": "completed",
+                    "exitCode": 0,
+                    "aggregatedOutput": result.stdout,
+                },
+            )
+            for name, arguments in (
+                (
+                    "simulate_circuit_resistance",
+                    {"topology": topology, "terminal_nodes": ["A", "B"]},
+                ),
+                ("submit_answer", {"answer": topology}),
+            ):
+                item = {
+                    "id": f"sdk-{name}",
+                    "type": "mcpToolCall",
+                    "server": "corral",
+                    "tool": name,
+                    "arguments": arguments,
+                    "status": "inProgress",
+                }
+                yield notification("item/started", item)
+                response = anyio.run(call_mcp, mcp_url, name, arguments)
+                yield notification(
+                    "item/completed",
+                    {
+                        **item,
+                        "status": "completed",
+                        "result": {
+                            "content": [
+                                block.model_dump(mode="json")
+                                for block in response.content
+                            ],
+                            "_meta": response.meta,
+                        },
+                    },
+                )
+            yield SimpleNamespace(
+                method="turn/completed",
+                payload=SimpleNamespace(
+                    turn=SimpleNamespace(status=SimpleNamespace(value="completed"))
+                ),
+            )
+
+        self._drive_turn(
+            SimpleNamespace(
+                turn=lambda *args, **kwargs: SimpleNamespace(stream=stream)
+            ),
+            "solve",
+            run,
+        )
+        run.result = self._result(run, "success", answer=topology)
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", harness)
+    async with SQLiteCommitStore(
+        tmp_path / "resistor.sqlite3", execution_id="local-resistor-chronology"
+    ) as store:
+        state = await TaskRuntime(store, observer=instance).run(
+            CodexAgent(system_prompt="offline instrumentation"),
+            environment,
+            execution_id="local-resistor-chronology",
+            started_at=datetime.now(timezone.utc),
+            max_iterations=1,
+        )
+        commits = [commit async for commit in store.iter_commits("main")]
+    instance.flush()
+    assert state.submission == topology
+    tools = sorted(
+        (
+            span
+            for span in exporter.get_finished_spans()
+            if span.attributes["langfuse.observation.type"] == "tool"
+        ),
+        key=lambda span: span.start_time,
+    )
+    expected = ["commandExecution", "simulate_circuit_resistance", "submit_answer"]
+    assert [span.name for span in tools] == expected
+    by_id = {span.context.span_id: span for span in exporter.get_finished_spans()}
+    assert [by_id[span.parent.span_id].name for span in tools] == [
+        "Step 01",
+        "Step 02",
+        "Step 03",
+    ]
+    assert (
+        tools[1].attributes["langfuse.observation.metadata.sdk_item_id"]
+        == "sdk-simulate_circuit_resistance"
+    )
+    assert (
+        tools[2].attributes["langfuse.observation.metadata.sdk_item_id"]
+        == "sdk-submit_answer"
+    )
+    recorded_calls = [
+        (commit, call["function"]["name"])
+        for commit in commits
+        if isinstance(commit.event, AgentTurnRecorded)
+        for message in commit.event.messages
+        for call in message.get("tool_calls", ())
+    ]
+    assert [name for _, name in recorded_calls] == expected
+    (tmp_path / "trace-comparison.json").write_text(
+        json.dumps(
+            {
+                "mode": "local_scripted_sdk_real_resistor_tools",
+                "external_export": False,
+                "recorded_calls": [
+                    {
+                        "name": name,
+                        "sequence": commit.sequence,
+                        "occurred_at": commit.occurred_at.isoformat(),
+                        "recorded_at": commit.recorded_at.isoformat(),
+                    }
+                    for commit, name in recorded_calls
+                ],
+                "langfuse_spans": [
+                    {
+                        "name": span.name,
+                        "step": by_id[span.parent.span_id].name,
+                        "start_ns": span.start_time,
+                        "end_ns": span.end_time,
+                    }
+                    for span in tools
+                ],
+            },
+            indent=2,
+        )
+    )
+
+
+def test_sdk_failure_with_unfinished_native_call_retains_start(observer):
+    instance, exporter, _ = observer
+    action = Action(id="unfinished", name="shell", arguments={"command": "sleep 10"})
+    _record(
+        instance,
+        [
+            *_events()[:2],
+            AgentTurnRecorded(
+                messages=({**action.to_message(), "sdk_native": True},),
+                metadata={
+                    "chronology": {
+                        "sdk": "codex",
+                        "timestamp_source": "local_observation",
+                    }
+                },
+            ),
+            ExecutionFailed(error="SDK disconnected", error_type="TransportError"),
+        ],
+    )
+    tool = next(span for span in exporter.get_finished_spans() if span.name == "shell")
+    assert _json(tool, "output")["status"] == "incomplete"
+    assert (
+        tool.attributes["langfuse.observation.metadata.end_time_source"]
+        == "execution_termination"
+    )
+    assert tool.start_time == int(
+        _commit(_events()[0], 2).occurred_at.timestamp() * 1e9
+    )
+    assert tool.end_time - tool.start_time == 1_000_000_000

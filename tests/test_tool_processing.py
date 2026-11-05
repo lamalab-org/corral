@@ -405,25 +405,6 @@ class TestEnvironmentPreprocessing:
             task_id="test_task", base_work_dir="/tmp/test", fs_manager=None
         )
 
-    def test_recursive_nested_structures(self):
-        """Test handling of deeply recursive structures"""
-        # Set up environment for this test
-        self._setup_for_additional_tests()
-
-        # Create a deeply nested structure
-        nested_json = '{"level": {"level": {"level": {"level": {"deep": "value"}}}}}'
-
-        mock_tool = Mock(spec=Tool)
-        mock_tool.name = "recursive_tool"
-        mock_tool.arguments = [
-            ToolArgument(name="data", type="dict", description="Nested data")
-        ]
-
-        self.env.tools["recursive_tool"] = mock_tool
-
-        args = {"data": nested_json}
-        _result = self.env.preprocess_arguments("recursive_tool", args)
-
     def test_large_json_structures(self):
         """Test handling of large JSON structures"""
         # Set up environment for this test

@@ -114,8 +114,7 @@ A single JSON object:
 }
 
 `model_syntax` is the measurement model you used, in semopy syntax (`=~` loadings,
-`~~` (co)variances). It is re-fitted during evaluation, so it must be complete and
-runnable.
+`~~` (co)variances). It must be complete and runnable so the fit can be reproduced.
 """
 
 

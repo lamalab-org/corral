@@ -173,7 +173,7 @@ def prompt_with_state_history(
         default=str,
     )
     return (
-        "Continue from this canonical Corral agent conversation. "
+        "Continue from this canonical Corral agent conversation.\n"
         "Treat it as prior context and do not repeat completed tool calls:\n"
         f"{rendered}\n\nCurrent task input follows.\n\n{prompt}"
     )

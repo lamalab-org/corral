@@ -23,10 +23,16 @@ import time
 from contextlib import contextmanager, suppress
 from functools import cache
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 import cloudpickle
+
+from corral.runtime import service_channel
+
+if TYPE_CHECKING:
+    import socket
+    from collections.abc import Callable
 
 DENIED = "Permission denied: access outside the trial workspace is not permitted"
 
@@ -219,6 +225,25 @@ def _open_directory(path: str | Path | int) -> int:
         raise
 
 
+def _use_local_workspace_io() -> bool:
+    """Use portable path operations only outside the privileged boundary."""
+    flags_available = all(
+        hasattr(os, name)
+        for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK", "fchmod")
+    )
+    if enabled():
+        if not flags_available:
+            raise RuntimeError(
+                "Docker permission enforcement requires Unix filesystem APIs"
+            )
+        return False
+    return not (
+        flags_available
+        and {os.open, os.mkdir} <= os.supports_dir_fd
+        and os.listdir in os.supports_fd
+    )
+
+
 def _entries(directory: int, prefix: str = ""):
     """Open entries relative to pinned directory FDs; never follow a link."""
     for name in sorted(os.listdir(directory)):
@@ -258,7 +283,11 @@ def _entries(directory: int, prefix: str = ""):
 def copy_workspace(
     source: str | Path | int, destination: str | Path | int
 ) -> list[str]:
-    """Copy authorized workspace data without a privileged symlink race."""
+    """Copy task files, using pinned descriptors for privileged operations."""
+    if _use_local_workspace_io():
+        from corral.runtime.local_workspaces import copy_local_workspace
+
+        return copy_local_workspace(source, destination)
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     source_fd = _open_directory(source)
     try:
@@ -322,6 +351,10 @@ def copy_workspace(
 
 def create_node_workspace(parent: str, source: str) -> str:
     """Allocate a sibling node directory and copy only its parent's task files."""
+    if _use_local_workspace_io():
+        from corral.runtime.local_workspaces import create_local_node_workspace
+
+        return create_local_node_workspace(parent, source)
     parent_path = Path(os.path.abspath(parent))  # noqa: PTH100 - do not follow links
     source_path = Path(os.path.abspath(source))  # noqa: PTH100 - do not follow links
     if not source_path.is_relative_to(parent_path):
@@ -538,6 +571,11 @@ def drop_privileges(
                 "LANG",
                 "LC_ALL",
                 "LD_LIBRARY_PATH",
+                # Retain the launcher's GPU assignment across tool workers.
+                "CUDA_VISIBLE_DEVICES",
+                "CUDA_HOME",
+                "CUDA_PATH",
+                "NVIDIA_VISIBLE_DEVICES",
                 # Numeric libraries may be imported only after this boundary.
                 # Keep resource controls while stripping provider credentials.
                 "OPENBLAS_NUM_THREADS",
@@ -599,8 +637,15 @@ def run_worker(
     max_response_bytes: int | None = None,
     workspace_access: str | None = None,
     resource_mounts: dict[str, tuple[str, str]] | None = None,
+    service: Callable[[Any], Any] | None = None,
+    service_workers: int = 16,
 ) -> Any:
-    """Run one trusted bootstrap, then accept an unprivileged JSON result."""
+    """Run one trusted bootstrap, then accept an unprivileged JSON result.
+
+    ``service``, when given, answers requests the worker sends with
+    :func:`corral.runtime.service_channel.call` while it runs. It runs on a
+    controller thread, so it can hold what the worker must never see.
+    """
     result, _ = run_worker_with_bulk(
         kind,
         payload,
@@ -609,6 +654,8 @@ def run_worker(
         max_response_bytes=max_response_bytes,
         workspace_access=workspace_access,
         resource_mounts=resource_mounts,
+        service=service,
+        service_workers=service_workers,
     )
     return result
 
@@ -622,6 +669,8 @@ def run_worker_with_bulk(
     max_response_bytes: int | None = None,
     workspace_access: str | None = None,
     resource_mounts: dict[str, tuple[str, str]] | None = None,
+    service: Callable[[Any], Any] | None = None,
+    service_workers: int = 16,
 ) -> tuple[Any, dict[str, bytes]]:
     """Run one worker, returning its JSON result and any bulk payloads it sent.
 
@@ -647,6 +696,8 @@ def run_worker_with_bulk(
                 else workspace_access
             ),
             resource_mounts=resource_mounts or {},
+            service=service,
+            service_workers=service_workers,
         )
     finally:
         try:
@@ -670,6 +721,8 @@ def _run_worker(
     resource_mounts: dict[str, tuple[str, str]],
     max_response_bytes: int,
     max_bulk_bytes: int,
+    service: Callable[[Any], Any] | None = None,
+    service_workers: int = 16,
 ) -> tuple[Any, dict[str, bytes]]:
     uid, gid = workspace_identity(workspace, descriptor=workspace_fd)
     with tempfile.TemporaryDirectory(dir=_root) as directory:
@@ -749,6 +802,17 @@ def _run_worker(
         thread.start()
         bulk_thread = threading.Thread(target=read_bulk, daemon=True)
         bulk_thread.start()
+        server: service_channel.ServiceServer | None = None
+        service_end: socket.socket | None = None
+        if service is not None:
+            controller_end, service_end = service_channel.socket_pair()
+            server = service_channel.ServiceServer(
+                controller_end,
+                service,
+                workers=service_workers,
+                max_message_bytes=max_response_bytes,
+            ).start()
+        service_fd = service_end.fileno() if service_end is not None else -1
         try:
             with tempfile.TemporaryFile(dir=_root) as log:
                 process = subprocess.Popen(
@@ -759,6 +823,7 @@ def _run_worker(
                         str(request),
                         str(writer),
                         str(bulk_writer),
+                        str(service_fd),
                     ],
                     stdin=subprocess.DEVNULL,
                     # A write-only pipe is the only log handle inherited by the
@@ -768,9 +833,17 @@ def _run_worker(
                     # Environment factories may add private task import roots.
                     # The fresh trusted bootstrap needs the same module paths.
                     env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
-                    pass_fds=(writer, bulk_writer, workspace_fd),
+                    pass_fds=(
+                        writer,
+                        bulk_writer,
+                        workspace_fd,
+                        *((service_fd,) if service_fd >= 0 else ()),
+                    ),
                     start_new_session=True,
                 )
+                if service_end is not None:
+                    service_end.close()
+                    service_end = None
 
                 def read_log() -> None:
                     with process.stdout as stream:
@@ -824,6 +897,10 @@ def _run_worker(
             for descriptor in (writer, bulk_writer):
                 if descriptor >= 0:
                     os.close(descriptor)
+            if service_end is not None:
+                service_end.close()
+            if server is not None:
+                server.close()
 
 
 def execute_restricted_tool(

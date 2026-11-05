@@ -342,3 +342,50 @@ async def test_failed_corrections_preserve_transcripts_and_usage(
     assert session.state.usage.reasoning_tokens == 2
     assert session.state.usage.llm_calls == 2
     assert session.state.submission is None
+
+
+@pytest.mark.anyio
+async def test_final_actions_are_hidden_from_the_search():
+    from corral.agents.ai_scientist.config import AIScientistConfig
+
+    agent = AIScientistAgent(
+        model="test-model",
+        config=AIScientistConfig(final_actions=[{"name": "measure"}]),
+    )
+    session = await make_session([], agent=agent)
+
+    names = {tool["function"]["name"] for tool in agent._search_tools(session)}
+    assert "measure" not in names
+    assert "measure" in {tool["function"]["name"] for tool in session.tools}
+
+
+@pytest.mark.anyio
+async def test_final_actions_run_on_the_main_session_in_order():
+    from corral.agents.ai_scientist.config import AIScientistConfig
+
+    calls = []
+    agent = AIScientistAgent(
+        model="test-model",
+        config=AIScientistConfig(
+            final_actions=[
+                {"name": "measure", "arguments": {"value": 7}},
+                {"name": "measure", "arguments": {"value": 8}},
+            ]
+        ),
+    )
+    session = await make_session(calls, agent=agent)
+
+    async with BlockingPortal() as portal:
+        results = await anyio.to_thread.run_sync(
+            lambda: agent._run_final_actions(session, portal)
+        )
+
+    assert calls == [7, 8]
+    assert [r["success"] for r in results] == [True, True]
+    assert session.state.tool_statistics == {"measure": 2}
+
+
+def test_without_final_actions_the_search_sees_every_tool():
+    from corral.agents.ai_scientist.config import AIScientistConfig
+
+    assert AIScientistConfig().final_actions == ()

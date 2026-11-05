@@ -2,13 +2,16 @@ import asyncio
 import hashlib
 import importlib.resources
 import json
+import math
 import platform
 import re
 import tempfile
 from collections.abc import AsyncIterator, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from time import perf_counter
 from typing import Any
 
 import anyio
@@ -37,11 +40,13 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
         "optional 'claude' extra. Install it with `pip install 'corral[claude]'`."
     ) from exc
 
+from corral.agents._mcp_timeout import DEFAULT_TOOL_TIMEOUT_S, mcp_timeout_prompt
+from corral.agents._transcript import event_clock
 from corral.agents.base_agent import provider_messages
 from corral.agents.hooks import AgentHooks
 from corral.agents.prompt_utils import ensure_jinja_compatible, get_prompt
 from corral.agents.schema import AgentOutcome, AgentUsage
-from corral.agents.session import AgentSession
+from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.usage import usage_from_mapping
 from corral.agents.utils import LiteLLMMessage
 
@@ -58,6 +63,7 @@ class _RunState:
     metadata: dict[str, Any] = field(default_factory=dict)
     usage: dict[str, int] = field(default_factory=dict)
     last_assistant_text: str | None = None
+    tool_started_at: dict[str, float] = field(default_factory=dict)
 
 
 class _HarnessError(RuntimeError):
@@ -169,9 +175,17 @@ class ClaudeCodeAgent:
     and Edit alongside the explicit Corral MCP tools. Authentication requires
     `ANTHROPIC_API_KEY` or provider credentials; set `bare=False` to use a
     normal Claude subscription login and the full native tool preset.
+
+    Adaptive thinking requests provider summaries by default, which are recorded
+    as `thinking` messages in reports and Langfuse. Pass an explicit `thinking`
+    configuration to override this (for example, `display="omitted"`).
+
+    `tool_timeout_s` is the fixed SDK wait limit for each MCP call, defaulting
+    to 10,000 seconds (about 2.8 hours). Tools enforce their own execution limits.
     """
 
     tool_transport = "mcp"
+    session_capabilities = AgentSessionCapabilities(native_workspace=True)
     unsupported_model_parameters = frozenset({"temperature"})
 
     def __init__(
@@ -184,9 +198,12 @@ class ClaudeCodeAgent:
         wall_clock_timeout_s: float | None = None,
         hooks: AgentHooks | None = None,
         bare: bool = True,
+        tool_timeout_s: float = DEFAULT_TOOL_TIMEOUT_S,
     ) -> None:
+        if not math.isfinite(tool_timeout_s) or tool_timeout_s <= 0:
+            raise ValueError("tool_timeout_s must be finite and positive")
         if thinking is None:
-            thinking = {"type": "adaptive"}
+            thinking = {"type": "adaptive", "display": "summarized"}
 
         self.model = model
         self.harness_model = model
@@ -202,6 +219,7 @@ class ClaudeCodeAgent:
         self.reasoning_effort = reasoning_effort
         self.thinking = thinking
         self.wall_clock_timeout_s = wall_clock_timeout_s
+        self.tool_timeout_s = tool_timeout_s
         self.hooks = hooks or AgentHooks()
         self.bare = bare
 
@@ -214,26 +232,21 @@ class ClaudeCodeAgent:
         bare string to the SDK replaces the preset entirely.)
         """
         final_answer_directive = (
-            "When you have solved the task, call the `submit_answer` MCP tool "
-            "with the complete final answer. A plain-text final response does "
-            "not complete the task."
+            "When you have solved the task, call the `submit_answer` MCP tool with the complete final answer.\n"
+            "A plain-text final response does not complete the task."
         )
         append = (
             self.system_prompt
-            + "\n\nYou are solving a task in a sandboxed environment. You may use "
-            "Claude Code's built-in tools as well as the provided "
-            f"`{_MCP_SERVER_NAME}` MCP tools. Built-in filesystem and shell tools "
-            "start in a fresh per-run workspace and remain governed by Claude "
-            "Code's sandbox and path checks; use the MCP tools for task environment "
-            "data and actions. " + final_answer_directive
+            + f"\n\nYou may use Claude Code's built-in tools as well as the provided `{_MCP_SERVER_NAME}` MCP tools.\n"
+            "Built-in filesystem and shell tools use the assigned working directory and permission policy; use the MCP tools for environment-specific data and actions.\n"
+            "Task tools may control external systems or real instruments; workspace isolation does not imply those actions are simulated.\n"
+            + mcp_timeout_prompt(self.tool_timeout_s)
+            + final_answer_directive
         )
         if enable_surrender:
             if self.surrender_prompt is not None:
                 append += "\n\n" + self.surrender_prompt
-            append += (
-                "\nTo surrender, call `submit_answer` with the exact answer "
-                "`SURRENDER`; do not return the sentinel as text."
-            )
+            append += "\nTo surrender, call `submit_answer` with the exact answer `SURRENDER`; do not return the sentinel as text."
         return {"type": "preset", "preset": "claude_code", "append": append}
 
     def _build_options(
@@ -243,6 +256,8 @@ class ClaudeCodeAgent:
         enable_surrender: bool,
         cwd: str,
         max_turns: int,
+        *,
+        corral_sandbox: bool = False,
     ) -> Any:
         """Assemble the fully-isolated `ClaudeAgentOptions` for a run."""
         opts: dict[str, Any] = {
@@ -252,6 +267,7 @@ class ClaudeCodeAgent:
             # Bash, Read, and Edit; disabling it restores the full preset.
             "tools": {"type": "preset", "preset": "claude_code"},
             "mcp_servers": {_MCP_SERVER_NAME: server},
+            "env": {"MCP_TOOL_TIMEOUT": str(math.ceil(self.tool_timeout_s * 1000))},
             # Ignore project `.mcp.json`, user settings, and plugin MCP servers
             # so only the corral task endpoint is loaded.
             "strict_mcp_config": True,
@@ -260,11 +276,10 @@ class ClaudeCodeAgent:
             # review. Task-scoped MCP tools are pre-approved above because the
             # benchmark is non-interactive and the endpoint is capability-scoped.
             "permission_mode": "auto",
-            # Bash and its children run inside Claude Code's OS sandbox and may
-            # not use the unsandboxed escape hatch. Read/Edit retain their SDK
-            # path permission checks and start from the fresh per-run cwd.
+            # Corral's Docker worker already enforces the filesystem and UID
+            # boundary. Local runs still need Claude's own OS sandbox.
             "sandbox": {
-                "enabled": True,
+                "enabled": not corral_sandbox,
                 "autoAllowBashIfSandboxed": True,
                 "allowUnsandboxedCommands": False,
             },
@@ -321,6 +336,9 @@ class ClaudeCodeAgent:
             "thinking": self.thinking,
             "max_turns_configured": getattr(options, "max_turns", None),
             "wall_clock_timeout_s": self.wall_clock_timeout_s,
+            "tool_timeout_s": self.tool_timeout_s,
+            "tool_timeout_policy": "fixed_sdk_wait",
+            "effective_tool_timeout_s": self.tool_timeout_s,
             "streaming_enabled": bool(
                 getattr(options, "include_partial_messages", False)
             ),
@@ -356,9 +374,20 @@ class ClaudeCodeAgent:
             enable_surrender,
             cwd,
             max_turns,
+            corral_sandbox=getattr(session, "native_tool_workspace", None) is not None,
         )
+        if getattr(session, "native_tool_workspace", None):
+            options.system_prompt["append"] += (
+                f"\nNative tools and Corral MCP tools share the task workspace at {cwd}.\n"
+                "Native commands run inside Corral's enforced sandbox."
+            )
         run.metadata = self._harness_metadata(options, tools)
         run.metadata["mcp_url"] = mcp_url
+        run.metadata["workspace_access"] = (
+            "corral_sandbox"
+            if getattr(session, "native_tool_workspace", None)
+            else "isolated_sdk_workspace_and_mcp"
+        )
 
         assistant_text: list[str] = []
         result_text: str | None = None
@@ -369,6 +398,7 @@ class ClaudeCodeAgent:
             await self._preflight_mcp(client, tools, run)
             await client.query(self._sdk_prompt(prompt_input))
             async for message in client.receive_response():
+                clock = event_clock(sdk="claude", item=message)
                 result_text, transcript = self._consume_message(
                     message,
                     assistant_text,
@@ -376,6 +406,22 @@ class ClaudeCodeAgent:
                     run,
                 )
                 for item in transcript:
+                    calls = item.get("tool_calls", ())
+                    item["chronology"] = {
+                        **clock,
+                        "phase": "tool_started"
+                        if calls
+                        else "tool_completed"
+                        if item.get("role") == "tool"
+                        else "message",
+                        **(
+                            {"sdk_item_id": calls[0]["id"]}
+                            if calls
+                            else {"sdk_item_id": item["tool_call_id"]}
+                            if item.get("tool_call_id")
+                            else {}
+                        ),
+                    }
                     await session.record_message(item)
 
         return result_text or ("\n".join(assistant_text)).strip()
@@ -504,6 +550,7 @@ class ClaudeCodeAgent:
                         )
                     )
                 elif isinstance(block, ToolUseBlock):
+                    run.tool_started_at[block.id] = perf_counter()
                     transcript.append(
                         {
                             "role": "assistant",
@@ -526,7 +573,14 @@ class ClaudeCodeAgent:
             if isinstance(content, list):
                 for block in content:
                     if isinstance(block, ToolResultBlock):
+                        started_at = run.tool_started_at.pop(block.tool_use_id, None)
+                        duration_ms = (
+                            None
+                            if started_at is None
+                            else (perf_counter() - started_at) * 1000
+                        )
                         is_error = bool(getattr(block, "is_error", False))
+                        tool_content = _stringify_tool_content(block.content)
                         if is_error:
                             # Count (but don't terminate on) MCP tool errors:
                             # recovering from them is legitimate agent behaviour,
@@ -534,13 +588,22 @@ class ClaudeCodeAgent:
                             run.metadata["tool_errors"] = (
                                 run.metadata.get("tool_errors", 0) + 1
                             )
+                            # Client-side MCP errors may have no canonical tool
+                            # transition, so retain their details in run metadata.
+                            run.metadata.setdefault("tool_error_details", []).append(
+                                {
+                                    "tool_call_id": block.tool_use_id,
+                                    "content": tool_content,
+                                }
+                            )
                         transcript.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": block.tool_use_id,
-                                "content": _stringify_tool_content(block.content),
+                                "content": tool_content,
                                 "name": "tool_result",
                                 "is_error": is_error,
+                                "duration_ms": duration_ms,
                             }
                         )
         elif isinstance(message, ResultMessage):
@@ -678,7 +741,7 @@ class ClaudeCodeAgent:
             default=str,
         )
         context = (
-            "Continue from this canonical Corral agent conversation. "
+            "Continue from this canonical Corral agent conversation.\n"
             "Treat it as prior context and do not repeat completed tool calls:\n"
             f"{history}\n\nCurrent task input follows."
         )
@@ -775,7 +838,12 @@ class ClaudeCodeAgent:
         )
 
         try:
-            with tempfile.TemporaryDirectory(prefix="corral-claude-") as cwd:
+            workspace = getattr(session, "native_tool_workspace", None)
+            with (
+                nullcontext(workspace)
+                if workspace is not None
+                else tempfile.TemporaryDirectory(prefix="corral-claude-")
+            ) as cwd:
                 mcp_url = session.tool_connection.mcp_url
                 call = self._execute_harness(
                     session,

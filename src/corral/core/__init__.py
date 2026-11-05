@@ -97,6 +97,7 @@ from corral.core.tool_catalog import (
 )
 from corral.core.transition import (
     CORRAL_ACTION_ID_ARGUMENT,
+    CORRAL_PRIVATE_ARTIFACTS_ARGUMENT,
     ToolEffects,
     ToolExecutionResult,
     ToolRecoveryPending,
@@ -117,6 +118,7 @@ from corral.core.workspace import (
 __all__ = [
     "COMMIT_SCHEMA_VERSION",
     "CORRAL_ACTION_ID_ARGUMENT",
+    "CORRAL_PRIVATE_ARTIFACTS_ARGUMENT",
     "RESOURCE_CATALOG_METADATA_KEY",
     "RESOURCE_SCHEMA_VERSION",
     "RESOURCE_STATE_NAMESPACE",

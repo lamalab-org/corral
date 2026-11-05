@@ -9,10 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -93,7 +90,7 @@ def mace_calculator(parameters, assets, evidence_root, *, cache=None):
     else:
         if model not in assets["models"]:
             raise ValueError("Unknown pinned model")
-        path = Path("/workspace/models") / model
+        path = Path("/workspace/resources") / f"md-models-{Path(model).stem}" / model
         expected = assets["models"][model]["sha256"]
     if file_hash(path) != expected:
         raise ValueError("Model checkpoint digest differs")
@@ -113,163 +110,9 @@ def mace_calculator(parameters, assets, evidence_root, *, cache=None):
     return calculator
 
 
-def lammps_restart_state(parameters, evidence_root):
-    """Read one submitted restart with the release-pinned LAMMPS executable.
-
-    The submitted bytes are input data only. The command and conversion output
-    path are fixed by this worker; no submitted LAMMPS input is executed.
-    """
-    if set(parameters) != {"checkpoint", "checkpoint_sha256"}:
-        raise ValueError("Restart conversion needs only a checkpoint and its digest")
-    name = parameters["checkpoint"]
-    expected = parameters["checkpoint_sha256"]
-    if (
-        not isinstance(name, str)
-        or Path(name).name != name
-        or not name.endswith(".restart")
-        or not isinstance(expected, str)
-        or re.fullmatch(r"[0-9a-fA-F]{64}", expected) is None
-    ):
-        raise ValueError("Invalid restart filename or digest")
-    root = Path(evidence_root)
-    path = root / name
-    if path.parent != root or path.is_symlink() or not path.is_file():
-        raise ValueError("Restart must be a flat, regular evidence file")
-    if path.stat().st_size > 64 * 1024 * 1024 or file_hash(path) != expected.lower():
-        raise ValueError("Restart size or SHA-256 differs")
-
-    from ase.io import read
-
-    with tempfile.TemporaryDirectory(prefix="corral-restart-") as temporary:
-        data = Path(temporary) / "converted.data"
-        dump = Path(temporary) / "converted.dump"
-        command = [
-            "/usr/local/bin/lmp",
-            "-log",
-            "none",
-            "-screen",
-            "none",
-            "-restart2data",
-            str(path),
-            str(data),
-            "nocoeff",
-        ]
-        completed = subprocess.run(
-            command,
-            cwd=temporary,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        if completed.returncode != 0 or not data.is_file():
-            raise ValueError(
-                "LAMMPS restart conversion failed: " + completed.stderr[-500:]
-            )
-        if data.stat().st_size > 64 * 1024 * 1024:
-            raise ValueError("Converted state is too large")
-        dumped = subprocess.run(
-            [
-                "/usr/local/bin/lmp",
-                "-log",
-                "none",
-                "-screen",
-                "none",
-                "-restart2dump",
-                str(path),
-                "all",
-                "custom",
-                str(dump),
-                "id",
-                "type",
-                "x",
-                "y",
-                "z",
-                "vx",
-                "vy",
-                "vz",
-            ],
-            cwd=temporary,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        if dumped.returncode != 0 or not dump.is_file():
-            raise ValueError("LAMMPS restart dump failed: " + dumped.stderr[-500:])
-        if dump.stat().st_size > 64 * 1024 * 1024:
-            raise ValueError("Converted dump is too large")
-        with dump.open() as snapshot:
-            markers = [snapshot.readline().strip() for _ in range(5)]
-        if (
-            markers[0] != "ITEM: TIMESTEP"
-            or markers[2] != "ITEM: NUMBER OF ATOMS"
-            or not markers[4].startswith("ITEM: BOX BOUNDS ")
-        ):
-            raise ValueError("Converted dump lacks timestep, count, or boundaries")
-        try:
-            dump_step = int(markers[1])
-            dump_count = int(markers[3])
-        except ValueError as exc:
-            raise ValueError("Converted dump has invalid timestep or count") from exc
-        pbc = [value == "pp" for value in markers[4].split()[-3:]]
-        if len(pbc) != 3 or not all(pbc):
-            raise ValueError("Restart is not periodic in all directions")
-        with data.open() as converted:
-            header = converted.readline()
-        match = re.search(
-            r"\btimestep\s*=\s*(\d+)\b.*\bunits\s*=\s*metal\b", header
-        )
-        if match is None:
-            raise ValueError("Converted state lacks a metal-unit timestep")
-        if int(match.group(1)) != dump_step:
-            raise ValueError("Data and dump conversions disagree on timestep")
-        atoms = read(
-            data,
-            format="lammps-data",
-            atom_style="full",
-            units="metal",
-            sort_by_id=True,
-        )
-
-    ids = atoms.arrays.get("id")
-    velocities = atoms.get_velocities()
-    masses = atoms.get_masses()
-    if (
-        len(atoms) != 216
-        or dump_count != len(atoms)
-        or set(atoms.get_chemical_symbols()) != {"Si"}
-        or ids is None
-        or len(np.unique(ids)) != 216
-        or velocities is None
-        or not np.all(np.isfinite(atoms.positions))
-        or not np.all(np.isfinite(atoms.cell.array))
-        or np.linalg.det(atoms.cell.array) <= 0
-        or not np.all(np.isfinite(velocities))
-        or not np.all(np.isfinite(masses))
-        or not np.all(masses > 0)
-    ):
-        raise ValueError("Converted restart is not a finite 216-atom Si state")
-    return {
-        "checkpoint_sha256": expected.lower(),
-        "state": {
-            "numbers": atoms.numbers.tolist(),
-            "positions": atoms.positions.tolist(),
-            "cell": atoms.cell.array.tolist(),
-            "pbc": pbc,
-            "atom_ids": ids.tolist(),
-            "momenta": atoms.get_momenta().tolist(),
-            "masses": masses.tolist(),
-            "timestep": int(match.group(1)),
-        },
-    }
-
-
 def calculate(job, assets, evidence_root, cache=None):
     operation = job["operation"]
     parameters = job.get("parameters", {})
-    if operation == "lammps_restart":
-        return lammps_restart_state(parameters, evidence_root)
     if operation == "pipeline":
         # This process and its entire sandbox are discarded after this one job.
         # There are no labels, expected predictions, scripts or credentials here.
@@ -346,13 +189,6 @@ def calculate(job, assets, evidence_root, cache=None):
     properties = job.get("properties", ["energy", "forces"])
     if not properties or set(properties) - {"energy", "forces", "stress", "hessian"}:
         raise ValueError("Invalid requested properties")
-    postprocess = job.get("postprocess")
-    if postprocess is not None and (
-        properties != ["hessian"]
-        or not isinstance(postprocess, list)
-        or len(postprocess) != len(frames)
-    ):
-        raise ValueError("Hessian postprocessing must align with every input frame")
     if operation == "mace":
         calculator = mace_calculator(parameters, assets, evidence_root, cache=cache)
     elif operation == "sw":
@@ -360,7 +196,7 @@ def calculate(job, assets, evidence_root, cache=None):
 
         if parameters or any(set(a.get_chemical_symbols()) != {"Si"} for a in frames):
             raise ValueError("SW verification uses only the supplied silicon potential")
-        potential = Path("/workspace/potentials/SW/Si.sw")
+        potential = Path("/workspace/resources/md-potentials-SW-Si/Si.sw")
         if not potential.is_file():
             raise FileNotFoundError("Pinned silicon SW potential is missing")
         calculator = LAMMPS(
@@ -376,7 +212,7 @@ def calculate(job, assets, evidence_root, cache=None):
     else:
         raise ValueError("Unknown verification operation")
     output = []
-    for index, atoms in enumerate(frames):
+    for atoms in frames:
         atoms.calc = calculator
         result = {}
         for name in properties:
@@ -389,10 +225,6 @@ def calculate(job, assets, evidence_root, cache=None):
                 if isinstance(value, list) and len(value) == 1:
                     value = value[0]
                 value = array(value).reshape(3 * len(atoms), 3 * len(atoms))
-                if postprocess is not None:
-                    from ground_truth import postprocess_hessian
-
-                    value = postprocess_hessian(value, postprocess[index])
                 result[name] = value.tolist()
             else:
                 function = {
@@ -402,7 +234,19 @@ def calculate(job, assets, evidence_root, cache=None):
                 }[name]
                 result[name] = array(function()).tolist()
         output.append(result)
-    return {"frames": output}
+    result = {"frames": output}
+    if job.get("parameter_digest"):
+        if operation != "mace" or parameters.get("dispersion", False):
+            raise ValueError("Parameter inspection requires a bare MACE model")
+        # Canonical parameter digest: name, shape, and little-endian float64 bytes.
+        digest = hashlib.sha256()
+        for name, value in calculator.models[0].named_parameters():
+            tensor = value.detach().cpu().double().contiguous().numpy()
+            digest.update(name.encode() + b"\0")
+            digest.update(str(tensor.shape).encode() + b"\0")
+            digest.update(tensor.astype("<f8", copy=False).tobytes())
+        result["parameter_sha256"] = digest.hexdigest()
+    return result
 
 
 def main():

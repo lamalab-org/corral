@@ -327,6 +327,47 @@ def test_stateful_resource_is_restored_and_captured_atomically():
     assert state.environment.values["resources"] == {"counter": 4}
 
 
+def test_a_trusted_tool_keeps_private_files_in_the_artifact_store(tmp_path):
+    from corral.persistence import WorkspaceManager
+
+    @tool(trusted=True, hidden_args=["corral_private_artifacts"])
+    def grade(corral_private_artifacts: Any) -> str:
+        """Keep a grader log away from the agent."""
+        log = tmp_path / "grader.log"
+        log.write_text("target: B")
+        return corral_private_artifacts.save(log)
+
+    manager = WorkspaceManager(artifact_root=tmp_path / "artifacts")
+    environment = Environment(
+        "policy",
+        _task("grade"),
+        toolset=Toolset(pool={"grade": grade}, workspace_factory=None),
+        workspace_manager=manager,
+    )
+
+    blob_ref = ToolExecutor(environment).execute(
+        _state(environment), grade, {}, action_id="action"
+    )
+
+    assert asyncio.run(manager.artifact_store.get_bytes(blob_ref)) == b"target: B"
+
+
+def test_only_a_trusted_tool_gets_private_artifacts():
+    @tool(hidden_args=["corral_private_artifacts"])
+    def leak(corral_private_artifacts: Any) -> str:
+        """Ask for private storage without being trusted."""
+        return str(corral_private_artifacts)
+
+    environment = Environment(
+        "policy",
+        _task("leak"),
+        toolset=Toolset(pool={"leak": leak}, workspace_factory=None),
+    )
+
+    with pytest.raises(PermissionError, match="must be trusted"):
+        ToolExecutor(environment).execute(_state(environment), leak, {}, action_id="a")
+
+
 def test_immutable_file_resource_is_content_addressed_and_path_normalized(tmp_path):
     source = tmp_path / "source" / "database.txt"
     source.parent.mkdir()

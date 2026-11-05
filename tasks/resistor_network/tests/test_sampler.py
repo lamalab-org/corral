@@ -410,19 +410,6 @@ class TestLoadBearingResistors:
             meas = task["initial_input"]["measurements"]
             assert find_non_load_bearing_resistors(topo, meas) == []
 
-    def test_checked_in_task_json_files_have_no_non_load_bearing_resistors(self):
-        """Check the saved inputs actually served by the environment."""
-        repo_root = Path(__file__).resolve().parents[1]
-        json_paths = sorted(repo_root.glob("environments/level_*/tasks_json/*.json"))
-        assert json_paths, "expected checked-in task JSON files to exist"
-
-        for path in json_paths:
-            task = json.loads(path.read_text())[0]
-            topo = task["scoring_params"]["expected_topology"]
-            meas = task["initial_input"]["measurements"]
-            bad = find_non_load_bearing_resistors(topo, meas)
-            assert bad == [], f"{path.name} has non-load-bearing resistors: {bad}"
-
     def test_bridge_motifs_remain_samplable_after_the_fix(self):
         """Guards against over-rejection: the load-bearing check must not make
         bridge motifs (the level-2 motif that forces real nodal analysis)

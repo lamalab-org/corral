@@ -11,7 +11,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
-from corral.core import ToolExecutionResult
+from corral.core import EnvironmentResourceAdapter
 from corral.core.environment import (
     Environment,
     EnvironmentSetup,
@@ -20,8 +20,10 @@ from corral.core.environment import (
 )
 from corral.core.task import TaskDefinition
 from corral.report.logging import event, exception_fields
+from inference_opt import datasets
+from inference_opt.budget import LEDGER_RESOURCE, BudgetSpec, StateLedger
+from inference_opt.score import StateScorer
 from inference_opt.task_prompts import task_prompt
-from inference_opt.score import policy_score
 from inference_opt.tools import create_tools
 
 if TYPE_CHECKING:
@@ -31,12 +33,14 @@ __all__ = ["InferenceOptEnvironment", "create_environments", "load_tasks_from_js
 
 BASE_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", ".corral/workspaces")
 
+#: Set to 1 to build environments before the example baselines are measured
+#: (the tests do); revealed examples then show no zero-shot reply.
+ALLOW_UNMEASURED_ENV = "CORRAL_INFERENCE_ALLOW_UNMEASURED"
+
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 
 
-def load_tasks_from_json(
-    json_path: str | Path, work_dir: str
-) -> dict[str, TaskDefinition]:
+def load_tasks_from_json(json_path: str | Path) -> dict[str, TaskDefinition]:
     """Load task definitions and bind each to its scorer."""
     path = Path(json_path)
     files = sorted(path.glob("*.json")) if path.is_dir() else [path]
@@ -58,26 +62,29 @@ def load_tasks_from_json(
             name=entry["name"],
             description=entry["description"],
             tools=list(entry.get("tools", [])),
-            scoring_fn=policy_score(config, work_dir),
-            submission_format=entry.get("submission_format", "submission.json"),
+            # submit_policy runs the test split inside the episode and records
+            # the result; scoring only reads it back from committed state.
+            scoring_fn=_scored_from_state,
+            state_scoring_fn=StateScorer(),
+            submission_format=entry.get("submission_format", "Any text; the score comes from the policy submitted with submit_policy."),
             initial_input=config,
             prompt_fn=task_prompt,
             setup_fn=_prepare_workspace,
-            # The scorer needs the path resolved against the re-materialised
-            # workspace so the scorer can find the submitted files.
-            resolve_answer=True,
+            resolve_answer=False,
         )
     return tasks
 
 
 def _bind_endpoints(models: list[str], configured: Any) -> dict[str, str]:
-    """Resolve task endpoints from config, falling back to startup environment."""
+    """Each student's vLLM address: the task's own, else ``CORRAL_VLLM_URL_<STUDENT>``, else ``CORRAL_VLLM_URL``.
+
+    OpenRouter students get an address too, and ignore it (``client.student_endpoint``).
+    """
     base_urls = dict(configured or {})
     default = os.environ.get("CORRAL_VLLM_URL", "http://127.0.0.1:8000")
     for model in models:
         key = "CORRAL_VLLM_URL_" + re.sub(r"[^A-Z0-9]+", "_", model.upper()).strip("_")
         base_urls.setdefault(model, os.environ.get(key, default))
-    # The eval runner hands these to Inspect, which expects the ``/v1`` root.
     return {model: _v1_root(url) for model, url in base_urls.items()}
 
 
@@ -86,7 +93,7 @@ def _v1_root(url: str) -> str:
     return url if url.endswith("/v1") else f"{url}/v1"
 
 
-def _seed_workspace(root: Path, policy_api: str = "primitive") -> None:
+def _seed_workspace(root: Path) -> None:
     """Create the guide, starter policy, and artifact directories."""
     (root / "revealed").mkdir(parents=True, exist_ok=True)
     (root / "runs").mkdir(parents=True, exist_ok=True)
@@ -97,16 +104,7 @@ def _seed_workspace(root: Path, policy_api: str = "primitive") -> None:
         destination.mkdir(parents=True, exist_ok=True)
         core = destination / "policy_api.md"
         if not core.exists():
-            guide = guide_source.read_text(encoding="utf-8")
-            start = "<!-- enhanced:start -->"
-            end = "<!-- enhanced:end -->"
-            if policy_api != "enhanced":
-                before, _, remainder = guide.partition(start)
-                _, _, after = remainder.partition(end)
-                guide = before.rstrip() + "\n" + after.lstrip()
-            else:
-                guide = guide.replace(start, "").replace(end, "")
-            core.write_text(guide, encoding="utf-8")
+            shutil.copyfile(guide_source, core)
 
     template = _PACKAGE_ROOT / "templates" / "policy"
     policy_dir = root / "policy"
@@ -116,63 +114,90 @@ def _seed_workspace(root: Path, policy_api: str = "primitive") -> None:
             if item.is_file():
                 shutil.copyfile(item, policy_dir / item.name)
 
-    for name, body in (("notes.md", "# Notes\n\nWhat I have learned about this student so far.\n"),):
-        path = root / name
-        if not path.exists():
-            path.write_text(body, encoding="utf-8")
+    notes = root / "notes.md"
+    if not notes.exists():
+        notes.write_text("# Notes\n\nWhat I have learned about this student so far.\n", "utf-8")
 
 
 def _prepare_workspace(env: Environment, state: ExecutionState) -> EnvironmentSetup:
     """Expose the workspace to tools and seed its starting contents."""
     del state
-    config = dict(env.current_task.initial_input)
     workspace = env.workspace_path or ""
     if workspace:
-        _seed_workspace(Path(workspace), str(config.get("policy_api", "primitive")))
-    budget = dict(config.get("budget") or {})
-    inference_state = {
-        "experiments": 0,
-        "debug_runs": 0,
-        "student_calls": 0,
-        "reveals": 0,
-        "probe_calls": 0,
-        "revealed_ids": [],
-        "runs": [],
-        "best_run_id": None,
-        "limits": {
-            "max_experiments": int(budget.get("max_experiments", 20)),
-            "max_debug_runs": int(budget.get("max_debug_runs", 10)),
-            "max_student_calls": int(budget.get("max_student_calls", 250)),
-            "max_reveals": int(budget.get("max_reveals", 4)),
-            "max_probe_calls": int(budget.get("max_probe_calls", 30)),
-            "reveal_batch": int(budget.get("reveal_batch", 5)),
-        },
-    }
+        _seed_workspace(Path(workspace))
     return EnvironmentSetup(
-        hidden_arguments={"work_dir": workspace, "inference_state": inference_state},
         status="Policy workspace prepared with guide, starter policy and state.",
     )
 
 
-class InferenceOptEnvironment(Environment):
-    """Run inference tools and return their updated session state."""
+def _check_example_baselines(tasks: dict[str, TaskDefinition]) -> None:
+    """Refuse to run a task unless each student's reply to every example was measured
+    on the deployment and options the task uses."""
+    if os.environ.get(ALLOW_UNMEASURED_ENV) == "1":
+        return
+    missing: set[str] = set()
+    for task in tasks.values():
+        benchmark = str(task.initial_input["benchmark"])
+        models = list(task.initial_input["models"])
+        specs = dict(task.initial_input.get("model_specs") or {})
+        options = dict(task.initial_input.get("student_options") or {})
+        try:
+            examples = datasets.load_items(benchmark, "examples")
+        except datasets.DatasetError:
+            return  # no dataset mounted: nothing can run, so nothing to check yet
+        wanted = {item.item_id for item in examples}
+        for model, rows in datasets.load_example_baselines(models).items():
+            measured = {
+                item_id for item_id, row in rows.items()
+                if model not in specs
+                or (
+                    row.get("model_spec") == specs[model]
+                    and (row.get("student_options") or {}) == (options.get(model) or {})
+                )
+            }
+            if not wanted <= measured:
+                missing.add(f"{model} ({specs.get(model, '?')}) on {benchmark}")
+    if missing:
+        raise RuntimeError(
+            "no measured zero-shot reply to the example questions for "
+            f"{', '.join(sorted(missing))}. Run scripts/measure_baselines.py "
+            f"--splits examples, or set {ALLOW_UNMEASURED_ENV}=1 to run without them."
+        )
 
-    def execute_tool(self, state: ExecutionState, tool, arguments):
-        if "inference_state" not in tool.hidden_args:
-            return super().execute_tool(state, tool, arguments)
-        session = arguments.get("inference_state")
-        if not isinstance(session, Mapping):
-            raise TypeError(
-                "ExecutionState hidden argument 'inference_state' must be an object"
-            )
-        raw = tool.execute(**arguments)
-        hidden = dict(state.environment.values.get("hidden_arguments", {}))
-        hidden["inference_state"] = session
-        environment = {
-            **dict(state.environment.values),
-            "hidden_arguments": hidden,
-        }
-        return ToolExecutionResult(content=raw, environment=environment)
+
+def _scored_from_state(answer: Any) -> float:
+    raise RuntimeError(
+        "inference_opt is scored from committed state by StateScorer, not from "
+        f"the submitted answer {answer!r}"
+    )
+
+
+def _initial_ledger(task: TaskDefinition) -> dict[str, Any]:
+    budget = BudgetSpec.from_mapping(task.initial_input.get("budget"))
+    return StateLedger({}, budget).state
+
+
+class InferenceLedgerAdapter(EnvironmentResourceAdapter):
+    """Restore and capture the budget ledger as committed JSON state."""
+
+    def restore(self, state: Any) -> object:
+        if not isinstance(state, Mapping):
+            raise TypeError("inference_state resource must be an object")
+        return json.loads(json.dumps(state))
+
+    def capture(self, runtime: object) -> Any:
+        if not isinstance(runtime, dict):
+            raise TypeError("inference_state runtime must be a dict")
+        return runtime
+
+
+class InferenceOptEnvironment(Environment):
+    """One inference-optimization task; the budget ledger is a Corral resource."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        adapters = dict(kwargs.pop("resource_adapters", {}) or {})
+        adapters.setdefault(LEDGER_RESOURCE, InferenceLedgerAdapter())
+        super().__init__(*args, resource_adapters=adapters, **kwargs)
 
 
 def create_environments(
@@ -181,8 +206,13 @@ def create_environments(
     level: int = 1,
     task_type: str = "task",
     work_dir: str = BASE_WORK_DIR,
+    shared_budget: bool = False,
 ) -> dict[str, Environment]:
-    """Create the inference-optimization environments for one level."""
+    """Create the inference-optimization environments for one level.
+
+    ``shared_budget`` makes every branch of a trial draw on one budget, for
+    agents that fork branches; agents that do not are unaffected by it.
+    """
     root = Path(__file__).resolve().parents[1]
     if local_dir is not None:
         source = Path(local_dir)
@@ -200,15 +230,19 @@ def create_environments(
         operation="create",
     )
     try:
-        tasks = load_tasks_from_json(source, work_dir)
+        tasks = load_tasks_from_json(source)
+        _check_example_baselines(tasks)
         environments = {
             task_id: InferenceOptEnvironment(
                 task_id=task_id,
                 task=task,
                 base_work_dir=work_dir,
                 component_id=name,
+                resource_states={LEDGER_RESOURCE: _initial_ledger(task)},
                 toolset=Toolset(
-                    pool=create_tools(task.initial_input, work_dir),
+                    pool=create_tools(
+                        task.initial_input, work_dir, shared_budget=shared_budget
+                    ),
                     workspace_factory=default_file_tools,
                 ),
             )
