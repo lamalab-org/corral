@@ -227,9 +227,8 @@ def test_agent_workspace_and_prompt_do_not_expose_internal_task_details(
     assert task.submission_format in prompt
     for key, value in task.initial_input.items():
         assert f"- {key}: {value}" in prompt
-    # Other environments keep the existing default; internal identities remain
-    # available for orchestration and reporting.
-    assert environment._default_task_prompt(state).startswith(f"Task: {task.name}\n")
+    assert environment._default_task_prompt(state).startswith(task.description)
+    # Internal identities remain available for orchestration and reporting.
     assert environment.task_id == task_id
     assert environment.current_task.name == task.name
     assert environment.current_task.scoring_fn is task.scoring_fn

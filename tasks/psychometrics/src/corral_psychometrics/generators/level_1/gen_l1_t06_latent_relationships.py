@@ -121,7 +121,7 @@ A single JSON object:
 }
 
 `model_syntax` is the model you used, in semopy syntax (`=~` loadings, `~~`
-(co)variances). It is re-fitted during evaluation, so it must be complete and runnable.
+(co)variances). It must be complete and runnable so the fit can be reproduced.
 
 Name your factors whatever you like and refer to them by those names: dimensions are
 matched by which items they cover. Report one correlation for every pair of dimensions

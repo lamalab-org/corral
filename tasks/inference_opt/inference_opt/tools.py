@@ -34,7 +34,7 @@ def _compact(payload: dict[str, Any], summary: str, ledger: StateLedger) -> str:
     if ledger.fraction_left() <= NAG_THRESHOLD:
         lines.append(
             "NEXT: budget is nearly gone. Call submit_policy('policy'), then "
-            "submit_answer('submission.json') NOW - an unsubmitted policy scores nothing."
+            "submit_answer('submission.json') to deliver a reusable policy bundle."
         )
     return "\n".join(lines)
 
@@ -268,7 +268,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         work_dir: str = "",
         inference_state: Any = None,
     ) -> str:
-        """Query the student without recording an evaluation prediction.
+        """Send a prompt directly to the student and inspect its response.
 
         Args:
             prompt: The user message to send.
@@ -321,7 +321,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         work_dir: str = "",
         inference_state: Any = None,
     ) -> str:
-        """Run a policy through the evaluation pipeline on a small sample.
+        """Try a policy on a small sample of development questions.
 
         Args:
             policy_path: Workspace-relative path to the policy directory.
@@ -434,7 +434,7 @@ def create_tools(config: dict[str, Any], work_dir: str) -> dict[str, Tool]:
         work_dir: str = "",
         inference_state: Any = None,
     ) -> str:
-        """Evaluate a policy on the training split.
+        """Run a policy on the development questions and report answer accuracy.
 
         Args:
             policy_path: Workspace-relative path to the policy directory.

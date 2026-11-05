@@ -167,7 +167,9 @@ class TerminusAgent(BaseAgent):
                 else "Surrender only if the task is genuinely impossible."
             )
         examples_block = (
-            "\nWorked examples:\n" + "\n\n".join(map(str, examples)) if examples else ""
+            "\n\nWorked examples:\n" + "\n\n".join(map(str, examples))
+            if examples
+            else ""
         )
         return f"""
 You are a Terminus-style autonomous scientific agent.
@@ -175,8 +177,7 @@ You are a Terminus-style autonomous scientific agent.
 Complete the task using only the Corral tools listed below.
 
 Task:
-{task_text}
-{examples_block}
+{task_text}{examples_block}
 
 Available Corral tools:
 {json.dumps(tools, indent=2, ensure_ascii=False)}

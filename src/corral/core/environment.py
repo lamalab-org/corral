@@ -715,9 +715,7 @@ class Environment:
 
         return replace(value)
 
-    def _default_task_prompt(
-        self, state: ExecutionState, *, include_task_name: bool = True
-    ) -> str:
+    def _default_task_prompt(self, state: ExecutionState) -> str:
         """Render description + submission format + resolved inputs.
 
         Dependency inputs are resolved strictly: by the time the prompt is
@@ -726,16 +724,17 @@ class Environment:
         state to render. There is therefore no "not yet available" placeholder.
         """
         task = self.current_task
-        prompt = f"Task: {task.name}\n" if include_task_name else ""
-        prompt += (
-            f"Description: {task.description}\n\n"
-            f"Required submission format:\n{task.submission_format}\n\n"
+        prompt = (
+            f"{task.description}\n\n"
+            "Please return your answer in this format so I can use it directly:\n"
+            f"{task.submission_format}\n\n"
         )
 
         # Strict resolution: raises if a dependency has not produced an output.
         resolved = self.resolve_inputs(state)
 
-        prompt += "\nAvailable input data:\n"
+        if task.input_map or any(key != "work_dir" for key in task.initial_input):
+            prompt += "Here are the inputs I have:\n"
 
         # Display resolved inputs from dependencies
         for input_name, ref in task.input_map.items():
@@ -749,9 +748,9 @@ class Environment:
         # Add workspace info
         if self.workspace_path:
             prompt += (
-                "\nIMPORTANT: You have access to filesystem tools. Use only "
-                "canonical absolute paths under `/workspace`; relative paths and "
-                "other absolute roots are rejected.\n"
+                "\nYou can use the file tools to work in `/workspace`. Please give "
+                "them canonical absolute paths under `/workspace`; they do not "
+                "accept relative paths or paths outside that directory.\n"
             )
 
         return prompt

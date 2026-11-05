@@ -27,7 +27,6 @@ Global research journal (including sibling evidence):
 Allowed tools:
 {{tools}}
 
-Prefer discriminating or falsifying experiments: when hypotheses remain compatible with current observations, choose an observation expected to differ between them.
 Define one experiment goal and observable success criteria per proposal.
 Do not repeat an existing child, and make requested slots test materially different uncertainties.
 Do not precompute tool actions.

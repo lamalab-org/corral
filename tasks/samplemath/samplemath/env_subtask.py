@@ -199,18 +199,17 @@ def _samplemath_prompt(env: Environment, state: ExecutionState) -> str:
     "not yet available" placeholder.
     """
     task = env.current_task
-    prompt = f"""Task: {task.name}
-    Description: {task.description}
-
-    Required submission format:
-    {task.submission_format}
-
-    """
+    prompt = (
+        f"{task.description}\n\n"
+        "Please return your answer in this format so I can use it directly:\n"
+        f"{task.submission_format}\n\n"
+    )
 
     # Strict resolution: raises if a dependency has not produced an output.
     resolved = env.resolve_inputs(state)
 
-    prompt += "\nAvailable input data:\n"
+    if task.input_map or any(key != "work_dir" for key in task.initial_input):
+        prompt += "Here are the inputs I have:\n"
 
     # Display resolved inputs from dependencies
     for input_name, ref in task.input_map.items():
@@ -223,7 +222,7 @@ def _samplemath_prompt(env: Environment, state: ExecutionState) -> str:
 
     # Add workspace info
     if env.workspace_path:
-        prompt += "\nIMPORTANT: You have access to filesystem tools. All files will be saved in your isolated workspace.\n"
+        prompt += "\nYou can use the file tools to save your work in the workspace.\n"
 
     event(
         "DEBUG",

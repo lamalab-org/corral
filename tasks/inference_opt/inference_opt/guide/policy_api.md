@@ -1,6 +1,5 @@
-# Policy API
-
-Put one policy in `policy/policy.py`. Define a `Policy` class with `solve()`.
+Please put the policy in `policy/policy.py` and define a `Policy` class with
+`solve()`. Here's the basic interface:
 
 ```python
 class Policy:
@@ -9,17 +8,19 @@ class Policy:
 ```
 
 Return `ANSWER: <answer>` for most tasks and `[ANSWER]<answer>[/ANSWER]` for
-ChemBench. You can also return `Answer(final=...)` from `inference_opt.api`.
+ChemBench. These markers let downstream software extract the answer reliably.
+Put any explanation before the marker, and follow the question's answer type
+and choice labels. You can also return `Answer(final=...)` from `inference_opt.api`.
 
-## Question
+To deliver the policy, call `submit_policy('policy')`, then
+`submit_answer('submission.json')`. This bundle identifies the code and
+configuration needed to run your policy again.
 
 `question` has `id`, `text`, `benchmark`, `answer_type`, `choices`,
 `choice_labels`, `topic`, `index`, and `total`. Use
 `question.rendered_choices()` for multiple-choice prompts.
 
-## Primitive API
-
-The default context has:
+With the primitive API, the context provides:
 
 - `ctx.student.generate(prompt, *, system=None, temperature=0.0,
   max_tokens=None, stop=None, seed=None, component=None)`: one metered call.
@@ -30,8 +31,6 @@ The default context has:
 `ctx.student.calls_remaining` reports the current allowance. Set
 `ctx.scratch["fallback"]` to a safe answer for error recovery.
 Prompts may be strings or message dictionaries with `role` and `content`.
-
-## Optional manifest
 
 Keep configuration in the same `policy.py`; no second manifest file is needed.
 All fields are optional:
@@ -56,9 +55,7 @@ policy object between calls. `config` is passed to setup. `version` and
 `components` are diagnostic fields. Unknown fields are rejected.
 
 <!-- enhanced:start -->
-## Enhanced API
-
-Enhanced tasks also provide:
+If you're using the enhanced API, these methods are also available:
 
 ```python
 ctx.student.sample(prompt, *, n, temperature=0.8, system=None,

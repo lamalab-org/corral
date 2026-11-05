@@ -12,8 +12,7 @@ Highest-priority experiment nodes:
 Final output workspace:
 {{canonical_workspace}}
 
-Use only collected evidence.
-Resolve contradictions where the observations permit it, preserve uncertainty where they do not, and never invent an experiment or observation.
+Resolve contradictions based on the collected evidence.
 Follow the task's requested output format exactly.
 Artifacts from the highest-priority physical branch have been copied into the final output workspace.
 If the task requests a file path, report its path in the exact form requested by the task (prefer a canonical `/workspace/...` path) and never report a disposable branch-workspace path.

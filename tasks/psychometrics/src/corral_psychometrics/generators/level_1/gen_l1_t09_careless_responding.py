@@ -111,8 +111,8 @@ A single JSON object:
 
 Name your dimensions whatever you like and refer to them by those names; they are
 matched by which items they cover. Report one correlation for every pair of
-dimensions that spans the two instruments. `model_syntax` is re-fitted during
-evaluation, so it must be complete and runnable.
+dimensions that spans the two instruments. `model_syntax` must be complete
+and runnable so the fit can be reproduced.
 """
 
 

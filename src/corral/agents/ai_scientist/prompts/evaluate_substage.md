@@ -1,4 +1,4 @@
-Decide whether the current experimental substage in main stage {{stage}} has met its own observable completion criteria, using the recorded experimental observations.
+Decide whether the current experimental substage in main stage {{stage}} has met its own observable completion criteria.
 
 Task:
 {{task_prompt}}
@@ -18,6 +18,6 @@ Experiments assigned to this substage, including measured outcomes and visual fe
 Global evidence journal:
 {{journal}}
 
-Mark the substage complete only when actual valid observations satisfy its criteria.
+Mark the substage complete only when actual observations satisfy its criteria.
 A node count, an LLM confidence score by itself, or merely exhausting an experiment batch is not completion.
 Identify satisfied and unmet criteria and give a concise evidence-based reason.
