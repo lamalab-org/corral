@@ -106,7 +106,7 @@ class TestToolSurface:
 
 
 class TestPrompt:
-    def test_prompt_states_the_rule_and_how_to_finish(self, environments):
+    def test_prompt_explains_the_policy_and_how_to_finish(self, environments):
         from corral.core.state import ExecutionState
 
         environment = environments["math_algebra_b"]
@@ -114,10 +114,12 @@ class TestPrompt:
         assert "submit_answer" in prompt
         assert "modify model weights" in prompt
         assert "frozen student model" in prompt
-        assert "math_algebra" in prompt
+        assert "MATH Level 5 algebra" in prompt
         assert "run(questions, ctx)" in prompt
         assert "submit_answer('submission.json')" in prompt
         assert "Llama 3.1 70B Instruct" not in prompt
+        for evaluation_cue in ("held-out", "test questions", "final scoring", "dataset"):
+            assert evaluation_cue not in prompt.lower()
 
     def test_prompt_does_not_name_strategies(self, environments):
         """The prompt leaves strategy choice to the policy."""

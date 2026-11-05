@@ -17,7 +17,7 @@ Keep any state you need in ordinary Python variables.
 
 To deliver the policy, call `submit_policy('policy')`, then call `submit_answer`
 to end the episode. The text passed to `submit_answer` is only a completion signal;
-the submitted policy is run once on held-out questions.
+the submitted policy is what runs on new questions.
 
 ## How to format answers
 

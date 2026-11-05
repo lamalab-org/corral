@@ -213,14 +213,14 @@ def create_tools(
 
     @tool(**_TOOL)
     def get_baseline(work_dir: str = "", inference_state: Any = None) -> str:
-        """Return the measured zero-shot baseline.
+        """Return the student's direct-answer baseline and a larger model's results.
 
         Args:
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON with each student's train accuracy (and, on level 2, template
-            consistency), and the train score of the larger model it must match.
+            JSON with each student's development-question accuracy (and, on
+            level 2, template consistency), plus the larger model's results.
         """
         ledger = _ledger(inference_state, work_dir)
         payload = {
@@ -232,7 +232,7 @@ def create_tools(
             "n_test": int(config.get("n_test", 30)),
         }
         best = ", ".join(f"{m}={baselines_train.get(m, 0.0):.3f}" for m in models)
-        summary = f"Zero-shot baseline on {benchmark} (train split): {best}."
+        summary = f"Direct-answer baseline on {benchmark} development questions: {best}."
         rule = dict(config.get("pass_rule") or {})
         if rule.get("kind") == "reference":
             metric = str(rule.get("metric", "accuracy"))
@@ -248,7 +248,7 @@ def create_tools(
                 for m in models
                 if m in references
             }
-            summary += f" Larger model to match ({metric.replace('_', ' ')}): " + ", ".join(
+            summary += f" Larger model ({metric.replace('_', ' ')}): " + ", ".join(
                 f"{references[m]['name']}={float(references[m]['train']):.3f}"
                 for m in models
                 if m in references
@@ -354,7 +354,7 @@ def create_tools(
         work_dir: str = "",
         inference_state: Any = None,
     ) -> str:
-        """Query the student without recording an evaluation prediction.
+        """Send a prompt directly to the student and inspect its response.
 
         Args:
             prompt: The user message to send.
@@ -413,7 +413,7 @@ def create_tools(
         inference_state: Any = None,
         corral_private_artifacts: Any = None,
     ) -> str:
-        """Run a policy through the evaluation pipeline on a small sample.
+        """Try a policy on a small sample of development questions.
 
         Args:
             policy_path: Workspace-relative path to the policy directory.
@@ -510,7 +510,7 @@ def create_tools(
         inference_state: Any = None,
         corral_private_artifacts: Any = None,
     ) -> str:
-        """Evaluate a policy on the training split.
+        """Run a policy on development questions and report answer accuracy.
 
         Args:
             policy_path: Workspace-relative path to the policy directory.
@@ -719,8 +719,8 @@ def create_tools(
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON with the experiments ranked by their change on the task's pass
-            metric, and the best run so far.
+            JSON with completed runs ranked by their change in observed accuracy
+            or consistency, and the best run so far.
         """
         ledger = _ledger(inference_state, work_dir)
         experiments = [
@@ -781,7 +781,7 @@ def create_tools(
         inference_state: Any = None,
         corral_private_artifacts: Any = None,
     ) -> str:
-        """Submit the final policy: it runs once on the held-out test questions.
+        """Submit the policy for use on new questions.
 
         Args:
             policy_path: Workspace-relative path to the policy directory.
@@ -789,8 +789,8 @@ def create_tools(
             work_dir: Task workspace, injected by the environment.
 
         Returns:
-            JSON confirming the submission. The test result is not shown; it is
-            used when the episode is scored.
+            JSON confirming the submission. The policy's later results are not
+            shown here.
         """
         ledger = _ledger(inference_state, work_dir)
         policy_dir = _resolve(work_dir, policy_path)
@@ -798,8 +798,8 @@ def create_tools(
         if used >= spec.max_submissions:
             return _compact(
                 {"error": "no submissions left"},
-                "NOT submitted: a policy was already submitted and is used for final "
-                "scoring. Call submit_answer to end the episode.",
+                "NOT submitted: a policy was already submitted. "
+                "Call submit_answer to end the episode.",
                 ledger,
             )
         policy_hash = _policy_hash(policy_dir)
@@ -864,9 +864,9 @@ def create_tools(
                 "policy_hash": policy_hash[:12],
                 "submissions_left": spec.max_submissions - used - 1,
             },
-            "Submitted. Your policy ran on the held-out test questions; that result "
-            "is kept hidden and is used for final scoring. Now call submit_answer to "
-            "end the episode; the text you pass is not used.",
+            "Submitted. Your policy is ready for new questions. Now call "
+            "submit_answer('submission.json') to finish; the text you pass is "
+            "only a completion signal.",
             ledger,
         )
 

@@ -24,8 +24,7 @@ My software needs to extract each answer from the policy's response. Please put
 `[ANSWER]<answer>[/ANSWER]`. For GSM-Symbolic, leave the final number as the answer.
 Put any explanation before the final answer so I can use the results directly.
 
-The dataset is {benchmark}. Labelled examples are given to the policy as
-`ctx.examples`; development questions are available through `evaluate_candidate`.
+Labelled examples are given to the policy as `ctx.examples`.
 
 {budget}
 
@@ -67,7 +66,6 @@ def task_prompt(env: Environment, state: ExecutionState) -> str:
     return _TEMPLATE.format(
         description=task.description,
         policy_dir="policy",
-        benchmark=config.get("benchmark", "?"),
         n_train=config.get("n_train", 30),
         n_test=config.get("n_test", 30),
         budget=_budget_summary(config),

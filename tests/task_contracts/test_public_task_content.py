@@ -87,6 +87,12 @@ def test_inference_prompt_is_independent_of_private_grading_rules(path):
     prompt = render(config)
     assert_no_grading_language(prompt, path)
     assert_unsectioned(prompt, path)
+    assert re.search(
+        r"\b(?:evaluated|evaluation|scoring|grader|grading|held-out|"
+        r"test questions|dataset is)\b",
+        prompt,
+        re.IGNORECASE,
+    ) is None
     # Private grading changes must not influence the instructions an agent sees.
     assert prompt == render(
         {
