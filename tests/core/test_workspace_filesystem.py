@@ -423,7 +423,9 @@ def test_terminal_is_bounded_to_workspace_and_does_not_inherit_secrets(
     assert bounded["truncated"] is True
 
 
-def test_terminal_preserves_numerical_thread_limits_without_secrets(monkeypatch, tmp_path):
+def test_terminal_preserves_numerical_thread_limits_without_secrets(
+    monkeypatch, tmp_path
+):
     names = (
         "OPENBLAS_NUM_THREADS",
         "OPENBLAS_DEFAULT_NUM_THREADS",
