@@ -243,6 +243,12 @@ uv run corral bench \
   --agent-kwargs '{"reasoning_effort": "high"}'
 ```
 
+`--max-iterations` counts model responses for Claude Code and Codex, not
+individual tool calls. Claude Code uses its native `max_turns` limit. Codex uses
+cumulative SDK token usage updates as a proxy and interrupts at the limit; this
+can cut off tools from the final allowed response. Codex's count is approximate
+because usage updates are not guaranteed to arrive once per model call.
+
 `ReflexionAgent` wraps `ToolCallingAgent` by default. Select another actor with
 `{"actor": "react", "actor_kwargs": {...}}`. For `AIScientistAgent`, a JSON
 `config` object is validated as `AIScientistConfig`; add

@@ -429,6 +429,22 @@ async def test_sdk_failures_are_typed_not_error_answers(
 
 
 @pytest.mark.anyio
+async def test_max_turns_keeps_submission_from_last_allowed_turn(monkeypatch):
+    async def factory(options, captured):
+        return [
+            FakeResultMessage("", subtype="error_max_turns", is_error=True, num_turns=2)
+        ]
+
+    _install_fake_sdk(monkeypatch, factory)
+    session = FakeSession(submission="42", submission_status="submitted")
+    outcome = await ClaudeCodeAgent().run_session(session)
+
+    assert outcome.status == "completed"
+    assert outcome.answer == "42"
+    assert outcome.usage.llm_calls == 2
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("harness_error", [False, True])
 async def test_client_tool_errors_survive_in_outcome_metadata(
     monkeypatch, harness_error
