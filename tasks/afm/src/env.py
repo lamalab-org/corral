@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
 
-from afm_contract import CONTRACT_VERSION, reference
+from afm_contract import CONTRACT_VERSION, INSTRUCTIONS, reference
 from afm_runtime import InstrumentUnavailable, runtime
 from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.events import ExecutionStarted, TaskConfigured
@@ -235,6 +235,16 @@ class AFMEnvironment(Environment):
             "Please return your answer in this format so I can use it directly:\n"
             f"{self.current_task.submission_format}\n\n"
         )
+        prompt += INSTRUCTIONS
+        snapshot = state.environment.values.get("afm_initial_snapshot")
+        if snapshot is not None:
+            prompt += (
+                f"\nInstrument: {snapshot['machine_id']} "
+                f"(host: {snapshot['hostname']}).\n"
+            )
+        else:
+            prompt += "\nInstrument setup has not completed; no verified state is available.\n"
+
         if self.current_task.input_map or any(
             key not in {"work_dir", "params"} for key in self.current_task.initial_input
         ):

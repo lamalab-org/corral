@@ -116,7 +116,6 @@ def test_public_guides_and_starter_files_describe_usable_outputs():
         *TASKS.glob("psychometrics/src/corral_psychometrics/generators/**/task_*.md"),
         *INFERENCE_ROOT.glob("inference_opt/guide/*.md"),
         *INFERENCE_ROOT.glob("inference_opt/templates/**/*.py"),
-        *TASKS.glob("corral_md/src/corral_md/submission_templates/**/*.json"),
         TASKS / "stargazer/src/stargazer/public_rv.py",
     ]
     for path in files:
@@ -135,19 +134,26 @@ def test_regenerated_inference_descriptions_match_shipped_tasks():
         assert regenerated["description"] == task["description"]
 
 
-def test_generated_md_workspace_guides_describe_reproducible_artifacts(monkeypatch):
+def test_md_submission_examples_describe_direct_json_answers(monkeypatch):
     monkeypatch.syspath_prepend(str(TASKS / "corral_md/src"))
-    from corral_md.submission_examples import example_files
+    from corral_md.submission import parse_submission
 
     for level in (1, 2):
         for number in range(1, 11):
-            files = example_files(number, level=level)
-            assert "manifest.scripts" in files["README.md"]
-            assert_unsectioned(files["README.md"], f"MD level {level} task {number}")
-            for name, content in files.items():
-                assert_no_grading_language(
-                    content, f"MD level {level} task {number}/{name}"
-                )
+            path = (
+                TASKS
+                / "corral_md/environments"
+                / f"level_{level}/tasks_json/task_{number}.json"
+            )
+            for task in json.loads(path.read_text()):
+                submission_format = task["submission_format"]
+                assert_no_grading_language(submission_format, path)
+                assert_unsectioned(submission_format, path)
+                example = re.search(r"```json\n(.*?)\n```", submission_format, re.S)
+                assert example is not None, f"{path}: missing JSON answer example"
+                answer = parse_submission(example[1])
+                assert isinstance(answer["artifacts"], dict)
+                assert answer["artifacts"], f"{path}: missing calculation artifacts"
 
 
 def test_stargazer_public_tool_descriptions_explain_analysis(monkeypatch):

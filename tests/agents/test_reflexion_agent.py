@@ -178,7 +178,7 @@ async def test_reflexion_generates_memory_before_next_actor_attempt(
     assert memory["reflections"][0]["score"] == 0.2
     assert second.agent_state["reflexion"]["source_commit_hash"] == ("a" * 64)
     expected_reflection = (
-        "Previous attempt achieved score 0.200."
+        "Review the previous attempt's observations and unresolved issues"
         if reflection_error
         else "Check the measured value"
     )
@@ -191,15 +191,20 @@ async def test_reflexion_generates_memory_before_next_actor_attempt(
         for message in reflection_messages
         if message["role"] == "user"
     )
-    assert "Score achieved:" in reflection_prompt
-    assert "0.2" in reflection_prompt
+    assert "solve" in reflection_prompt
+    assert "actor attempt 1" in reflection_prompt
     actor_memory = next(
         message["content"]
         for message in second.messages
         if message.get("name") == "reflexion-memory"
     )
-    assert "Score: 0.20" in actor_memory
     assert expected_reflection in actor_memory
+    # Scores remain in persisted state, not in the default model-facing prompts.
+    for prompt in (reflection_prompt, actor_memory):
+        assert "score" not in prompt.lower()
+        assert "0.2" not in prompt
+        assert "trial-1" not in prompt
+        assert "task-1" not in prompt
 
 
 @pytest.mark.anyio
