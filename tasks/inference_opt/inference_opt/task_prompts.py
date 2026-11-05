@@ -14,14 +14,17 @@ _TEMPLATE = """\
 {description}
 
 Please write a reusable Python policy in `{policy_dir}/policy.py` using the
-`{policy_api}` API described in `guide/policy_api.md`. Don't modify model weights;
-the approach you use around the model is up to you. I have {n_train} development
-questions available, with labelled examples accessible a few at a time.
+`run(questions, ctx)` API described in `guide/policy_api.md`. Don't modify model weights;
+the approach you use around the frozen student model is up to you. I have
+{n_train} development questions available, with separate labelled examples
+accessible a few at a time. The policy will later receive {n_test} new questions.
 
-My software needs to extract each answer from the policy's response. Please use
-`ANSWER: <answer>`, or `[ANSWER]<answer>[/ANSWER]` for ChemBench, with any explanation
-before the marker. Follow the question's answer type and choice labels so I can
-use the results directly.
+My software needs to extract each answer from the policy's response. Please put
+`ANSWER: <answer>` on the final line for MATH questions. For ChemBench, use
+`[ANSWER]<answer>[/ANSWER]`. For GSM-Symbolic, leave the final number as the answer.
+Put any explanation before the final answer so I can use the results directly.
+
+Labelled examples are given to the policy as `ctx.examples`.
 
 {budget}
 
@@ -30,8 +33,8 @@ on a full run with `evaluate_candidate`.
 
 When you're ready, or running low on calls, please call
 `submit_policy('{policy_dir}')`, then call `submit_answer('submission.json')`.
-That gives me a bundle pointing to the policy code and configuration. Return
-that filename as your final answer so I can run the policy on new questions.
+Only one submission is allowed. The text passed to `submit_answer` is a completion
+signal; the policy you submitted is what I will run on new questions.
 """
 
 
@@ -42,12 +45,13 @@ def _budget_summary(config: dict) -> str:
         f"{budget.get('max_debug_runs', budget.get('max_debug_questions', 10))} dry runs, "
         f"and {budget.get('max_student_calls', 250)} student model calls in total. "
         f"You can request labelled examples {budget.get('max_reveals', 4)} times, "
-        f"with {budget.get('reveal_batch', 5)} questions in each batch."
+        f"with {budget.get('reveal_batch', 5)} questions in each batch. "
+        "Each student call may generate at most 8192 tokens, reasoning included."
     )
     final_calls = config.get("final_max_student_calls")
     if final_calls:
         summary += (
-            f" For subsequent use, I need the policy to handle batches of "
+            " For subsequent use, I need the policy to handle batches of "
             f"{config.get('n_test', 30)} new questions within {final_calls} "
             "student calls per model."
         )
@@ -55,14 +59,14 @@ def _budget_summary(config: dict) -> str:
 
 
 def task_prompt(env: Environment, state: ExecutionState) -> str:
-    """Build the prompt for one inference-optimization task."""
+    """Build the request for one inference-optimization task."""
     del state
     task = env.current_task
     config = dict(task.initial_input)
     return _TEMPLATE.format(
         description=task.description,
-        policy_api=config.get("policy_api", "primitive"),
-        n_train=config.get("n_train", 30),
-        budget=_budget_summary(config),
         policy_dir="policy",
+        n_train=config.get("n_train", 30),
+        n_test=config.get("n_test", 30),
+        budget=_budget_summary(config),
     )

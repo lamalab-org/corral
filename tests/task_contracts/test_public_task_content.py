@@ -87,6 +87,15 @@ def test_inference_prompt_is_independent_of_private_grading_rules(path):
     prompt = render(config)
     assert_no_grading_language(prompt, path)
     assert_unsectioned(prompt, path)
+    assert (
+        re.search(
+            r"\b(?:evaluated|evaluation|scoring|grader|grading|held-out|"
+            r"test questions|dataset is)\b",
+            prompt,
+            re.IGNORECASE,
+        )
+        is None
+    )
     # Private grading changes must not influence the instructions an agent sees.
     assert prompt == render(
         {
@@ -126,11 +135,16 @@ def test_regenerated_inference_descriptions_match_shipped_tasks():
     generate = runpy.run_path(str(INFERENCE_ROOT / "scripts/generate_tasks.py"))[
         "_task"
     ]
+    measured = json.loads(
+        (INFERENCE_ROOT / "inference_opt/data/baselines/v2.json").read_text()
+    )
     for path in INFERENCE_TASKS:
         task = json.loads(path.read_text())
         config = task["initial_input"]
         level = int(path.parts[-3].removeprefix("level_"))
-        regenerated = generate(config["benchmark"], config["models"], level)
+        regenerated = generate(
+            config["benchmark"], config["models"][0], level, measured
+        )
         assert regenerated["description"] == task["description"]
 
 
