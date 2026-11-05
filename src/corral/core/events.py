@@ -101,7 +101,7 @@ class ExecutionForked(FrozenModel):
     source_run_id: str | None = None
     source_trial: str
     configured: bool
-    message: str | None = None
+    message: str | tuple[str, ...] | None = None
     model: Mapping[str, JsonValue] = Field(default_factory=dict)
     scaffold: Mapping[str, JsonValue] = Field(default_factory=dict)
 

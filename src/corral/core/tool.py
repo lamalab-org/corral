@@ -144,6 +144,7 @@ class Tool:
         workspace_args: tuple[str, ...] = (),
         resources: tuple[str, ...] = (),
         worker_operation: str | None = None,
+        inflight_continuation: str = "retry",
     ):
         self.name = name
         self.description = description
@@ -168,6 +169,9 @@ class Tool:
         if any(not name or not name.strip() for name in self.resources):
             raise ValueError("resource names cannot be empty")
         self.worker_operation = worker_operation
+        if inflight_continuation not in {"retry", "reject"}:
+            raise ValueError("inflight_continuation must be 'retry' or 'reject'")
+        self.inflight_continuation = inflight_continuation
         # Background-execution metadata (PR 4). A tool marked
         # `background_capable` gets a generated `start_<tool>` variant that runs
         # it as a background job so the agent is not blocked while it runs.
@@ -340,6 +344,7 @@ def tool(
     workspace_args: tuple[str, ...] = (),
     resources: tuple[str, ...] = (),
     worker_operation: str | None = None,
+    inflight_continuation: str = "retry",
 ) -> Tool | Callable[[Callable], Tool]:
     """Decorator to convert a function into a Tool.
 
@@ -403,6 +408,9 @@ def tool(
             in the agent-facing JSON schema.
         worker_operation: Optional built-in restricted-worker operation. This
             is private execution policy and is never exposed to the agent.
+        inflight_continuation: Use ``reject`` when retrying an unfinished call
+            could repeat an external effect. Tools with a recovery contract can
+            keep the default ``retry`` policy.
 
     Returns:
         A Tool instance wrapping the function.
@@ -460,6 +468,7 @@ def tool(
                     workspace_args=workspace_args,
                     resources=resources,
                     worker_operation=worker_operation,
+                    inflight_continuation=inflight_continuation,
                 )
 
             def execute(self, **kwargs):

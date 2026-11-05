@@ -177,9 +177,12 @@ host-side runtime definitions, including paths before Docker mount translation.
 
 Environment values, consumed resource budgets, workspace files, canonical
 conversation messages, and stored agent algorithm state are inherited. The
-agent implementation and task/tool definitions must remain compatible. The
-optional message is recorded once, after any pending tool results and before
-the next agent turn. Native tool-calling/ReAct agents reconstruct their prompts
+agent implementation and task/tool definitions must remain compatible. Pass
+`messages=("first", "second")` to `ContinuationSource`, or repeat `--message`
+on the `continue` command, to append several new user messages to the saved
+conversation. The existing `message="..."` argument remains supported. New
+messages are recorded once, after any pending tool results and before the next
+agent turn. Native tool-calling/ReAct agents reconstruct their prompts
 and canonical history; external SDK adapters use their existing canonical
 history import, not a saved opaque provider session.
 
@@ -201,9 +204,11 @@ their completed calls. Older AI Scientist checkpoints without branch snapshots
 are rejected rather than silently restarting the search.
 
 Live subagents and active background jobs are rejected explicitly: this API
-copies durable state, not running processes or external services. Tools with
-external side effects need an environment-specific recovery contract before
-in-flight replay is safe. Workspace paths should use the portable `/workspace`
+copies durable state, not running processes or external services. A tool that
+could repeat an external effect when retried should declare
+`@tool(inflight_continuation="reject")`. Continuation rejects a checkpoint while
+such a tool call is pending or running. Tools with a recovery contract can use
+the default `retry` policy. Workspace paths should use the portable `/workspace`
 namespace or relative paths. Arbitrary host absolute paths, open OS resources,
 and external SDK process memory cannot be made portable by copying a checkpoint.
 Local mode retains its existing unrestricted execution semantics.

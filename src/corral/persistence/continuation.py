@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from corral.core.actors import ActorRef
 from corral.core.commit import CommitRequest
 from corral.core.events import ExecutionForked
+from corral.core.tool_catalog import state_tool_policy
 from corral.persistence.artifacts import LocalArtifactStore
 from corral.persistence.base import CommitConflictError
 from corral.persistence.sqlite import SQLiteCommitStore
@@ -92,12 +93,22 @@ async def read_checkpoint(source: ContinuationSource) -> ExecutionForked:
         for job in jobs.values()
     ):
         raise ValueError("checkpoint has live background jobs that cannot be cloned")
+    policies = state_tool_policy(state).policies
+    for action in state.actions.values():
+        if action.status not in {"pending", "running"} or action.action.is_submission:
+            continue
+        policy = policies.get(action.action.name)
+        if policy is not None and policy.inflight_continuation == "reject":
+            raise ValueError(
+                f"checkpoint has unfinished tool {action.action.name!r} whose "
+                "external effect cannot be safely retried"
+            )
     return ExecutionForked(
         source=state,
         source_run_id=selected,
         source_trial=str(root),
         configured=bool(configured),
-        message=source.message,
+        message=source.message_payload,
     )
 
 
@@ -162,7 +173,7 @@ async def import_checkpoint(
             or event.source.through_commit_hash != source.commit_hash
             or event.source.branch_id != source.branch_id
             or event.source_trial != str(Path(source.trial).expanduser().resolve())
-            or event.message != source.message
+            or event.message != source.message_payload
             or (request.model is not None and event.model.get("name") != request.model)
             or (
                 source.execution_id is not None

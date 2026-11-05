@@ -634,7 +634,10 @@ async def continue_trial(args: argparse.Namespace) -> int:
         execution_id=args.source_execution,
         branch_id=args.source_branch,
         agent_run_id=args.source_agent_run,
-        message=args.message,
+        message=(args.message[0] if args.message and len(args.message) == 1 else None),
+        messages=(
+            tuple(args.message) if args.message and len(args.message) > 1 else ()
+        ),
     )
     checkpoint = await read_checkpoint(source)
     task_id = checkpoint.source.task.metadata["id"]
@@ -954,7 +957,7 @@ def build_parser() -> argparse.ArgumentParser:
     continuation.add_argument("--source-execution")
     continuation.add_argument("--source-branch", default="main")
     continuation.add_argument("--source-agent-run")
-    continuation.add_argument("--message")
+    continuation.add_argument("--message", action="append")
     continuation.set_defaults(_handler=continue_trial)
     internal = commands.add_parser("internal", help=argparse.SUPPRESS)
     internal_commands = internal.add_subparsers(dest="internal_command", required=True)

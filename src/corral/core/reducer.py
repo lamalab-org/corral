@@ -232,7 +232,14 @@ def _fork_state(event: ExecutionForked, commit: Commit) -> ExecutionState:
             for key, value in source.usage.model_dump(mode="json").items()
         },
         "checkpoint_configured": event.configured,
-        "continuation_message": event.message,
+        "continuation_message": (
+            event.message if isinstance(event.message, str) else None
+        ),
+        **(
+            {"continuation_messages": list(event.message)}
+            if isinstance(event.message, tuple)
+            else {}
+        ),
         "surrender_sentinel": source.runtime.metadata.get(
             "surrender_sentinel", "SURRENDER"
         ),

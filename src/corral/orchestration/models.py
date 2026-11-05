@@ -229,12 +229,26 @@ class ContinuationSource:
     execution_id: str | None = None
     agent_run_id: str | None = None
     message: str | None = None
+    messages: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.trial or not self.branch_id:
             raise ValueError("continuation trial and branch cannot be empty")
         if re.fullmatch(r"[0-9a-f]{64}", self.commit_hash) is None:
             raise ValueError("continuation requires a full SHA-256 commit hash")
+        if isinstance(self.messages, str):
+            raise TypeError("continuation messages must be a sequence of strings")
+        messages = tuple(self.messages)
+        if any(not isinstance(item, str) for item in messages):
+            raise TypeError("continuation messages must be strings")
+        if self.message is not None and messages:
+            raise ValueError("use either message or messages for a continuation")
+        object.__setattr__(self, "messages", messages)
+
+    @property
+    def message_payload(self) -> str | tuple[str, ...] | None:
+        """Preserve the historical single-message event representation."""
+        return self.messages or self.message
 
 
 @dataclass(frozen=True)

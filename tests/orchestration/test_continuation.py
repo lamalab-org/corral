@@ -202,6 +202,33 @@ async def test_import_is_durable_without_source_and_message_is_not_duplicated(tr
 
 
 @pytest.mark.anyio
+async def test_continuation_appends_multiple_messages_after_inherited_history(trial):
+    store, registry, agent, request, source, _ = trial
+    multi = replace(
+        source, message=None, messages=("First instruction.", "Second instruction.")
+    )
+    child = replace(request, execution_id="multi-child", continuation=multi)
+
+    result = await execute_task(
+        task=child, state_store=store, registry=registry, observer=NoOpObserver()
+    )
+    repeated = await execute_task(
+        task=child, state_store=store, registry=registry, observer=NoOpObserver()
+    )
+
+    assert result.commit_hash == repeated.commit_hash
+    assert len(agent.seen) == 1
+    history = next(iter(agent.checkpoint.conversations.values()))
+    assert agent.seen[0][1] == (
+        *history,
+        {"role": "user", "content": "First instruction."},
+        {"role": "user", "content": "Second instruction."},
+    )
+    with pytest.raises(ValueError, match="either message or messages"):
+        replace(source, messages=("extra",))
+
+
+@pytest.mark.anyio
 async def test_continuation_rejects_store_inside_source(trial):
     _, _, _, request, source, _ = trial
     child = replace(request, execution_id="child", continuation=source)
@@ -376,6 +403,100 @@ async def test_cli_continuation_inherits_runtime_configuration(trial, monkeypatc
     assert seen[0].agent_kwargs == {"system_prompt": "saved prompt"}
     assert seen[0].continuation_by_task["task"].message == "feedback"
     assert seen[0].trials == 4
+
+    repeated = cli.build_parser().parse_args(
+        [
+            "continue",
+            "--source-trial",
+            source.trial,
+            "--commit",
+            source.commit_hash,
+            "--sandbox",
+            "local",
+            "--message",
+            "first",
+            "--message",
+            "second",
+        ]
+    )
+    assert await repeated._handler(repeated) == 0
+    assert seen[-1].continuation_by_task["task"].messages == ("first", "second")
+
+
+@pytest.mark.anyio
+async def test_unfinished_external_effect_tool_is_rejected(tmp_path):
+    from corral.core.environment import Toolset
+    from corral.core.tool import tool
+    from corral.core.transition import propose_action
+
+    @tool(inflight_continuation="reject")
+    def charge_account() -> str:
+        """Charge an external account."""
+        return "charged"
+
+    class PendingActionAgent:
+        async def run_session(self, session):
+            await session._append_agent(
+                propose_action(Action(name="charge_account")),
+                "pending-charge",
+            )
+            return AgentOutcome(status="agent_failure", error="interrupted")
+
+    environment = Environment(
+        "task",
+        TaskDefinition(
+            name="task",
+            description="charge account",
+            tools=["charge_account"],
+            scoring_fn=lambda _: 0.0,
+            submission_format={"answer": "string"},
+        ),
+        toolset=Toolset(
+            pool={"charge_account": charge_account}, workspace_factory=None
+        ),
+    )
+    store = ShardedCommitStore(tmp_path / "state")
+    agent = PendingActionAgent()
+    registry = RuntimeRegistry(
+        agents={"agent": agent},
+        environments={"task": environment},
+        workspace_manager_factory=store.workspace_manager,
+    )
+    try:
+        result = await execute_task(
+            task=RunTaskInput(
+                execution_id="parent",
+                task_id="task",
+                environment_id="task",
+                agent_id="agent",
+            ),
+            state_store=store,
+            registry=registry,
+            observer=NoOpObserver(),
+        )
+        assert result.status == "failed", result.error
+        commits = [
+            commit
+            async for commit in store.for_execution("parent").iter_commits("main")
+        ]
+        pending = next(
+            commit for commit in commits if commit.event.type == "agent.turn_recorded"
+        )
+        source = ContinuationSource(
+            trial=str(store.execution_dir("parent")), commit_hash=pending.hash
+        )
+        selected_state = await store.for_execution("parent").materialize(
+            "main", pending.hash
+        )
+        assert any(
+            action.status == "pending" for action in selected_state.actions.values()
+        ), selected_state.actions
+        await store.close_execution("parent")
+        with pytest.raises(ValueError, match="unfinished tool 'charge_account'"):
+            await read_checkpoint(source)
+    finally:
+        registry.close()
+        await store.aclose()
 
 
 @pytest.mark.anyio

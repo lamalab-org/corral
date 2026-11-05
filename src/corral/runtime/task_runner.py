@@ -388,8 +388,13 @@ class TaskRuntime:
                         )
                         await session.resume_pending_actions()
                         current = session.state
-                    message = current.runtime.metadata.get("continuation_message")
-                    if message is not None and not current.is_terminal:
+                    extra_messages = current.runtime.metadata.get(
+                        "continuation_messages"
+                    )
+                    if extra_messages is None:
+                        single = current.runtime.metadata.get("continuation_message")
+                        extra_messages = [] if single is None else [single]
+                    if extra_messages and not current.is_terminal:
                         await self._append(
                             store,
                             CommitRequest(
@@ -399,7 +404,10 @@ class TaskRuntime:
                                 based_on_hash=current.through_commit_hash,
                                 author=agent_actor,
                                 event=AgentTurnRecorded(
-                                    messages=({"role": "user", "content": message},)
+                                    messages=tuple(
+                                        {"role": "user", "content": message}
+                                        for message in extra_messages
+                                    )
                                 ),
                             ),
                             context,
