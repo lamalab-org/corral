@@ -331,6 +331,21 @@ def _execute_local(
             "HOME": str(scratch),
             "TMPDIR": str(scratch),
         }
+        # The policy host may import NumPy or SciPy before running a policy.
+        # Keep explicit thread limits while withholding controller credentials.
+        for name in (
+            "OPENBLAS_NUM_THREADS",
+            "OPENBLAS_DEFAULT_NUM_THREADS",
+            "OMP_NUM_THREADS",
+            "OMP_THREAD_LIMIT",
+            "MKL_NUM_THREADS",
+            "BLIS_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "NUMEXPR_MAX_THREADS",
+        ):
+            if name in os.environ:
+                env[name] = os.environ[name]
         with (scratch / "host.log").open("wb") as log:
             process = subprocess.Popen(
                 [

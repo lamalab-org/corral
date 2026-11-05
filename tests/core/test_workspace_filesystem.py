@@ -423,6 +423,31 @@ def test_terminal_is_bounded_to_workspace_and_does_not_inherit_secrets(
     assert bounded["truncated"] is True
 
 
+def test_terminal_preserves_numerical_thread_limits_without_secrets(monkeypatch, tmp_path):
+    names = (
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "OMP_NUM_THREADS",
+        "OMP_THREAD_LIMIT",
+        "MKL_NUM_THREADS",
+        "BLIS_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "NUMEXPR_MAX_THREADS",
+    )
+    for name in names:
+        monkeypatch.setenv(name, "2")
+    monkeypatch.setenv("OPENAI_API_KEY", "private-test-value")
+    terminal = build_terminal_tool(WorkspaceFilesystem(tmp_path))
+    command = "printf '%s\\n' " + " ".join(f'"${name}"' for name in names)
+    command += ' "$OPENAI_API_KEY"'
+
+    result = json.loads(terminal.execute(command=command))
+
+    assert result["exit_code"] == 0
+    assert result["output"].splitlines() == ["2"] * len(names) + [""]
+
+
 def test_terminal_timeout_kills_the_command_process_group(tmp_path):
     root = tmp_path / "workspace"
     root.mkdir()
