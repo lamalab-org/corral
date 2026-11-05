@@ -23,8 +23,8 @@ values, and a repeated delivery may receive a new participant identifier.
 {"model_syntax": "F1 =~ ...\nF2 =~ ...\nF1 ~~ F2", "diagnosis": "repeated_delivery_only|chance_collisions_only|both_mechanisms", "duplicate_key": ["<column>", "..."]}
 ```
 
-The key must use columns from `data.csv`. The scorer collapses records with it,
-refits the model, and checks the resulting factor correlation.
+The key must use columns from `data.csv`, so duplicate records can be collapsed
+consistently and the model fit and factor correlation can be reproduced.
 
 ## What needs checking
 

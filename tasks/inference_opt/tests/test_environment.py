@@ -81,7 +81,7 @@ class TestPrompt:
         assert "submit_answer" in prompt
         assert "modify model weights" in prompt
         assert "frozen student model" in prompt
-        assert "gsm8k" in prompt
+        assert "gsm8k" in prompt.lower()
 
     def test_prompt_does_not_name_strategies(self, environments):
         """The prompt leaves strategy choice to the policy."""

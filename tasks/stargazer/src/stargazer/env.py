@@ -43,9 +43,11 @@ DEFAULT_WORK_DIR = os.environ.get("CORRAL_WORK_DIR", str(TASK_ROOT / "CORRAL_WOR
 
 PROTOCOL_VERSION = ASSISTED_PROTOCOL
 SUBMISSION_FORMAT = (
-    "Commit your final candidate JSON using submit_answer(answer=...). "
-    'The JSON must contain "planets" and may contain "noise_jitter_ms". '
-    "This ends the episode irrevocably, including malformed or incorrect candidates."
+    "Please send me the final model as JSON using submit_answer(answer=...). "
+    'Include "planets" and, if available, "noise_jitter_ms". '
+    "Use the field names and units in the submission guide so I can reconstruct "
+    "the orbital model and make predictions with it. "
+    "Submission is final, so check the JSON format and fitted parameters before submitting."
 )
 
 
@@ -95,16 +97,16 @@ def _task_prompt(env: Environment, _state: ExecutionState) -> str:
         if assisted
         else ""
     )
-    return f"""You are an RV data analyst detecting exoplanets from radial-velocity observations.
-Interaction protocol: {protocol_version(assisted)}.
-
-Dataset: {len(obs.times_days)} observations over {np.ptp(obs.times_days):.3f} days.
-Stellar mass: {context.star_mass_sun} solar masses. Reference epoch: {context.t_ref_days} days.
+    return f"""I've collected {len(obs.times_days)} radial-velocity observations over
+{np.ptp(obs.times_days):.3f} days. Can you help me work out which planetary system
+best explains them? The star's mass is {context.star_mass_sun} solar masses, and
+the reference epoch is {context.t_ref_days} days.
 
 Use PythonREPL to compute Lomb-Scargle periodograms, compare planet counts,
 fit Keplerian models with multiple initializations, and inspect residuals.
-Preloaded: np, times_days, rvs_ms, sigmas_ms, instruments, star_mass_sun,
-t_ref_days, baselines, history, stargazer_planet_from_fit, STARGAZER_SUBMISSION_GUIDE.
+I've already loaded np, times_days, rvs_ms, sigmas_ms, instruments, star_mass_sun,
+t_ref_days, baselines, history, stargazer_planet_from_fit, and STARGAZER_SUBMISSION_GUIDE
+into PythonREPL.
 Read STARGAZER_SUBMISSION_GUIDE before fitting. Use print() for results. No plotting.
 {assistance}
 
@@ -125,12 +127,10 @@ validate_fit(planets=[...], noise_jitter_ms=...) can be called repeatedly.
 It returns format errors, the effective candidate, likelihood, BIC and residuals.
 These diagnostics describe the fit to the supplied observations. history contains only these validations.
 Choose planet count and parameters using observations. A low RMS alone does not establish planet recovery.
-Tool use is bounded by Corral's configured agent iteration limit. Reserve time to commit an answer.
 
 {SUBMISSION_FORMAT}
-Example final JSON: {{"planets": [{{"P_days": 10.0, "m_sin_i_mjup": 0.1,
+For example, the JSON should look like {{"planets": [{{"P_days": 10.0, "m_sin_i_mjup": 0.1,
 "e": 0.1, "omega_rad": 0.2, "l_rad": 1.0}}], "noise_jitter_ms": 0.5}}
-Call submit_answer with your chosen final candidate to complete the task.
 """
 
 

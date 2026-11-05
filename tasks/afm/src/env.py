@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
 
-from afm_contract import CONTRACT_VERSION, INSTRUCTIONS, reference
+from afm_contract import CONTRACT_VERSION, reference
 from afm_runtime import InstrumentUnavailable, runtime
 from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.events import ExecutionStarted, TaskConfigured
@@ -229,23 +229,16 @@ class AFMEnvironment(Environment):
         )
 
     def get_task_prompt(self, state: ExecutionState) -> str:
-        prompt = "You are an advanced AI-AFM system with access to the Nanosurf AFM software through its Python API."
-        prompt += f"""\nTask Description: {self.current_task.description}
-        Required submission format:
-        {self.current_task.submission_format}
-
-        """
-
-        prompt += "\n" + INSTRUCTIONS
-        snapshot = state.environment.values.get("afm_initial_snapshot")
-        if snapshot is not None:
-            prompt += (
-                f"\nInstrument: {snapshot['machine_id']} "
-                f"(host: {snapshot['hostname']}).\n"
-            )
-        else:
-            prompt += "\nInstrument setup has not completed; no verified state is available.\n"
-        prompt += "\nAvailable input data:\n"
+        prompt = (
+            "I'm working with a Nanosurf AFM that you can control through its Python API.\n\n"
+            f"{self.current_task.description}\n\n"
+            "Please return your answer in this format so I can use it directly:\n"
+            f"{self.current_task.submission_format}\n\n"
+        )
+        if self.current_task.input_map or any(
+            key not in {"work_dir", "params"} for key in self.current_task.initial_input
+        ):
+            prompt += "Here are the inputs I have:\n"
 
         # Display resolved inputs from dependencies
         resolved = self.resolve_inputs(state)
@@ -259,7 +252,10 @@ class AFMEnvironment(Environment):
 
         # Add workspace info
         if self.afm_dir:
-            prompt += f"\nIMPORTANT: You have access to filesystem tools. All image scans will automatically be saved in your isolated workspace which is {self.afm_dir}."
+            prompt += (
+                f"\nThe image scans are saved automatically in {self.afm_dir}. "
+                "You can inspect and work with them using the file tools."
+            )
 
         return prompt
 

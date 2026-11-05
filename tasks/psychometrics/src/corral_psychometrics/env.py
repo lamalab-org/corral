@@ -185,7 +185,7 @@ CLOSING_INSTRUCTION = (
 #: Added to every task that asks for a model. semopy and lavaan read the same
 #: syntax differently here, and the scorer fits with semopy.
 SEMOPY_NOTE = (
-    "Submitted models are fitted with semopy. When two factors are both regressed "
+    "I use semopy to fit the models. When two factors are both regressed "
     "on something (for example `F1 ~ gender` and `F2 ~ gender`), semopy fixes their "
     "correlation to zero unless you add `F1 ~~ F2`; lavaan would estimate it by default."
 )
@@ -199,10 +199,12 @@ def _task_prompt(env: Environment, state: ExecutionState) -> str:
     note = f"{SEMOPY_NOTE}\n\n" if "model_syntax" in task.submission_format else ""
     prompt = (
         f"{task.description}\n\n"
-        f"Required submission format:\n{task.submission_format}\n\n"
+        "Please return your answer in this format so I can use it directly:\n"
+        f"{task.submission_format}\n\n"
         f"{note}"
-        "Available workspace files:\n"
-        + "\n".join(f"- {name}" for name in files)
+        "I've put the files in your workspace: "
+        + ", ".join(f"`{name}`" for name in files)
+        + "."
         + f"\n\n{CLOSING_INSTRUCTION}"
     )
     return prompt

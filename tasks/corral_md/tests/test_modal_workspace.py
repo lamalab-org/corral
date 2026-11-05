@@ -556,7 +556,7 @@ def test_md_prompt_requires_absolute_workspace_paths(tmp_path: Path) -> None:
     prompt = started.task["prompt"]
     assert not prompt.startswith("Task:")
     assert prompt.count("canonical absolute paths under `/workspace`") == 1
-    assert prompt.count("Available input data:") == 1
+    assert prompt.count("Here are the inputs I have:") == 1
     assert "- temperature: 300" in prompt
     assert "/workspace/resources" in prompt
     assert "execute_python_script(use_gpu=True)" in prompt
