@@ -55,8 +55,8 @@ copies the inventory when an agent forks a branch. For agents such as AI Scienti
 run the environment with `--env-kwargs '{"level": 1, "shared_inventory": true}'`
 so all branches in one trial draw from the same physical inventory. The option is
 off by default for compatibility; enable it in comparisons where agents must have
-the same sample limit. It has the same effect on a single-session agent as the
-ordinary inventory.
+the same sample limit. A single-session agent has the same available material
+as with the ordinary inventory.
 
 Each successful WetLab tool call reads and updates the trial inventory under a
 lock. Failed calls leave it unchanged. Branches can still keep separate reasoning
