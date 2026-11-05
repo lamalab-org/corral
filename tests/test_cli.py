@@ -24,6 +24,7 @@ from corral.core.environment import Environment, Toolset
 from corral.core.task import InputRef, TaskDefinition
 from corral.observability import LoggingObserver
 from corral.orchestration.launchers import LocalTaskLauncher
+from corral.subsets import mini_task_ids, mini_versions
 
 
 def _load_legacy_script():
@@ -317,7 +318,7 @@ def test_benchmark_selects_image_task_and_extra_for_environment_and_harness(
         lambda *args, **kwargs: {"task1": _environment("task1")},
     )
     args = cli.build_parser().parse_args(
-        ["bench", "--agent", agent, "--environment", environment]
+        ["bench", "--agent", agent, "--environment", environment, "--run-full"]
     )
     image_kind = environment if environment in {"stargazer", "wetlab"} else "benchmark"
 
@@ -364,6 +365,7 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
             environment,
             "--sandbox-image",
             "custom:test",
+            "--run-full",
             *(["--build-sandbox-image"] if build else []),
         ]
     )
@@ -799,6 +801,70 @@ def test_benchmark_runs_locally_and_writes_report(
     manifest = json.loads((reports[0].parent / "run-metadata.json").read_text())
     assert manifest["status"] == ("completed_with_errors" if failed else "completed")
     assert len(list(reports[0].parent.rglob("commits.sqlite3"))) == 2
+
+
+def _bench_args(*extra):
+    return cli.build_parser().parse_args(
+        ["bench", "--agent", "react", "--environment", "afm", *extra]
+    )
+
+
+def _afm_environments(level=1):
+    task_ids = [f"afm_experiment_level_{level}_task_{i}" for i in range(1, 11)]
+    return {task_id: _environment(task_id) for task_id in task_ids}
+
+
+def test_benchmark_runs_corral_mini_by_default():
+    selected, subset = cli._select_tasks(_bench_args(), _afm_environments())
+
+    assert selected == list(mini_task_ids("afm", 1))
+    assert subset == {"name": "corral-mini", "version": mini_versions()[-1]}
+
+
+def test_benchmark_run_full_and_explicit_tasks_override_corral_mini():
+    environments = _afm_environments()
+
+    assert cli._select_tasks(_bench_args("--run-full"), environments) == (
+        None,
+        {"name": "full"},
+    )
+    assert cli._select_tasks(
+        _bench_args("--task", "afm_experiment_level_1_task_1"), environments
+    ) == (["afm_experiment_level_1_task_1"], {"name": "explicit"})
+
+
+def test_benchmark_rejects_run_mini_with_run_full():
+    with pytest.raises(SystemExit):
+        _bench_args("--run-mini", "--run-full")
+
+
+def test_benchmark_runs_uncovered_levels_in_full(capsys):
+    args = _bench_args("--env-kwargs", '{"subtasks": true}')
+
+    assert cli._select_tasks(args, _afm_environments()) == (
+        None,
+        {"name": "full", "reason": "not covered by corral-mini"},
+    )
+    assert "does not cover" in capsys.readouterr().err
+
+
+def test_benchmark_rejects_mini_tasks_missing_from_environment():
+    environments = _afm_environments()
+    environments.pop(mini_task_ids("afm", 1)[0])
+
+    with pytest.raises(ValueError, match="tasks not loaded"):
+        cli._select_tasks(_bench_args(), environments)
+
+
+def test_list_tasks_shows_only_corral_mini_tasks(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli, "load_environment_group", lambda *args, **kwargs: _afm_environments(2)
+    )
+    args = _bench_args("--env-kwargs", '{"level": 2}', "--list-tasks")
+
+    assert asyncio.run(cli.run_benchmark(args)) == 0
+    listed = [line.split("\t")[0] for line in capsys.readouterr().out.splitlines()]
+    assert listed == list(mini_task_ids("afm", 2))
 
 
 def test_benchmark_reports_evaluation_failure_as_incomplete(

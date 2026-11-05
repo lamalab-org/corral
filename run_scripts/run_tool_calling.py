@@ -15,7 +15,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 
 from corral import ENVIRONMENT_NAMES
-from corral.cli import run_benchmark
+from corral.cli import add_task_subset_arguments, run_benchmark
 from corral.orchestration.defaults import resolve_max_iterations
 
 if TYPE_CHECKING:
@@ -89,11 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help=(
-            "Task ID to run; repeat for multiple. If omitted, all tasks run. "
-            "Dependencies are included automatically."
+            "Task ID to run; repeat for multiple. Overrides --run-mini and "
+            "--run-full. Dependencies are included automatically."
         ),
     )
     parser.add_argument("--list-tasks", action="store_true")
+    add_task_subset_arguments(parser)
 
     environment = parser.add_argument_group("environment")
     environment.add_argument(
