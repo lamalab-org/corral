@@ -40,7 +40,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised via extras
         "optional 'claude' extra. Install it with `pip install 'corral[claude]'`."
     ) from exc
 
-from corral.agents._mcp_timeout import mcp_timeout_prompt
+from corral.agents._mcp_timeout import DEFAULT_TOOL_TIMEOUT_S, mcp_timeout_prompt
 from corral.agents._transcript import event_clock
 from corral.agents.base_agent import provider_messages
 from corral.agents.hooks import AgentHooks
@@ -180,8 +180,8 @@ class ClaudeCodeAgent:
     as `thinking` messages in reports and Langfuse. Pass an explicit `thinking`
     configuration to override this (for example, `display="omitted"`).
 
-    `tool_timeout_s` limits each Corral MCP call to 600 seconds by default.
-    Tools can also enforce shorter execution limits.
+    `tool_timeout_s` is the fixed SDK wait limit for each MCP call, defaulting
+    to 10,000 seconds (about 2.8 hours). Tools enforce their own execution limits.
     """
 
     tool_transport = "mcp"
@@ -198,7 +198,7 @@ class ClaudeCodeAgent:
         wall_clock_timeout_s: float | None = None,
         hooks: AgentHooks | None = None,
         bare: bool = True,
-        tool_timeout_s: float = 600.0,
+        tool_timeout_s: float = DEFAULT_TOOL_TIMEOUT_S,
     ) -> None:
         if not math.isfinite(tool_timeout_s) or tool_timeout_s <= 0:
             raise ValueError("tool_timeout_s must be finite and positive")
@@ -362,13 +362,7 @@ class ClaudeCodeAgent:
         run: _RunState,
     ) -> str:
         """Drive the Claude Code harness to completion and return its answer."""
-        # The per-server timeout (ms) sets both Claude Code's per-call limit and
-        # its idle limit, which otherwise cuts off HTTP tool calls after 5 min.
-        server = {
-            "type": "http",
-            "url": mcp_url,
-            "timeout": round(self.tool_timeout_s * 1000),
-        }
+        server = {"type": "http", "url": mcp_url}
         allowed_tools = [
             f"mcp__{_MCP_SERVER_NAME}__{t['function']['name']}"
             for t in tools

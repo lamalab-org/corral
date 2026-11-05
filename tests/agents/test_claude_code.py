@@ -94,7 +94,7 @@ class FakeClaudeAgentOptions:
 
 
 @pytest.mark.parametrize(
-    ("timeout", "milliseconds"), [(None, "600000"), (12.345, "12345")]
+    ("timeout", "milliseconds"), [(None, "10000000"), (12.345, "12345")]
 )
 def test_fixed_mcp_timeout_reaches_sdk_without_changing_parent_env(
     monkeypatch, tmp_path, timeout, milliseconds
@@ -110,7 +110,7 @@ def test_fixed_mcp_timeout_reaches_sdk_without_changing_parent_env(
     )
     assert options.env["MCP_TOOL_TIMEOUT"] == milliseconds
     assert os.environ["MCP_TOOL_TIMEOUT"] == "111"
-    expected = timeout if timeout else 600
+    expected = timeout if timeout else 10_000
     metadata = agent._harness_metadata(options, [])
     assert (
         metadata["tool_timeout_s"] == metadata["effective_tool_timeout_s"] == expected
@@ -361,11 +361,7 @@ async def test_run_session_returns_typed_outcome_and_preserves_harness(
         "mcp__corral__submit_answer",
     ]
     assert options.mcp_servers == {
-        "corral": {
-            "type": "http",
-            "url": "http://127.0.0.1:8765/mcp",
-            "timeout": 600_000,
-        }
+        "corral": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}
     }
     assert options.strict_mcp_config is True
     assert options.permission_mode == "auto"
@@ -597,7 +593,7 @@ async def test_bare_mode_real_sdk_preflight_exposes_corral_tools(tmp_path):
             ) as connection,
         ):
             options = agent._build_options(
-                server={"type": "http", "url": connection.url, "timeout": 600_000},
+                server={"type": "http", "url": connection.url},
                 allowed_tools=[
                     f"mcp__corral__{tool['function']['name']}" for tool in tools
                 ],
