@@ -155,6 +155,11 @@ uv run corral bench \
 `corral bench` calls the same `CorralRunner` used by Python callers. The runner
 schedules trials in the CLI process using `asyncio`.
 
+Without `--task`, `corral bench` runs **corral-mini**, a fixed 3-task subset of
+each level chosen from the published reports; pass `--run-full` to run every
+task. Levels the mini does not cover run in full. See
+[`corral_mini/README.md`](corral_mini/README.md).
+
 Benchmarks run one Docker container per `(run, task, trial)` by default. Corral
 builds `corral-benchmark:latest` from `docker/benchmark.Dockerfile` when that
 image is missing, resolves it to an immutable image ID before scheduling any

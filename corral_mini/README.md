@@ -1,28 +1,50 @@
 # Corral mini
 
-A small, reproducible subset of the Corral benchmark tasks. It picks the same
-number of tasks, *k*, from each of the 16 environment/levels (AFM excluded),
-using results from the final reports. **The selection method has not been
-chosen yet.** Two candidates exist, both score profile with k = 4 (64 tasks):
-`manifest.json` draws from all tasks, and `manifest_unsaturated.json` prefers
-unsaturated tasks (see [Unsaturated tasks first](#unsaturated-tasks-first)).
+A small, reproducible subset of the Corral benchmark: the same number of
+tasks, *k*, from each environment/level, chosen from the final reports.
 
-## Run
+**Released: corral-mini v1**, Rank + cost with k = 3, 54 tasks
+([`corral_mini_v1.json`](../src/corral/subsets/corral_mini_v1.json)). The 16
+levels with report data use Rank + cost. AFM has no report data yet, so its
+two levels get 3 tasks drawn at random with seed 0. Levels without report
+data in other environments (e.g. wetlab L1, retrosynthesis L1, samplemath)
+are not part of the mini.
 
-Pin the Hugging Face summary dataset by its full commit hash (current source:
+## Run the mini
+
+`corral bench` runs the mini by default. The level comes from
+`--env-kwargs '{"level": N}'` as before.
+
+```bash
+corral bench --environment wetlab --env-kwargs '{"level": 2}' --agent tool-calling   # mini
+corral bench ... --run-full          # every task of the level
+corral bench ... --mini-version 1    # pin a release (default: latest)
+corral bench ... --task ID           # explicit tasks override both
+corral bench ... --list-tasks        # show what would run
+```
+
+A level the mini does not cover runs in full with a warning. The run
+metadata records the subset (`task_subset`), and mini run IDs contain
+`tasks-mini-v<N>`, so mini and full results are not mixed up.
+
+## Build a release
+
+Releases are written once and never edited. When reports change (e.g. AFM
+results arrive), drop AFM from `EXCLUDED_ENVIRONMENTS` in
+`scripts/corral_mini_common.py` and build a new version; older versions stay
+available for reproducing earlier runs.
+
+Pin the Hugging Face summary dataset by its full commit hash (v1 source:
 `6d8dc71d6bcc3a3c6c76a28609f4f4a510ea2dd8`). Add `--tasks-parquet PATH` to
 use a local copy of the `tasks` table.
 
 ```bash
-# 1. Write manifest.json for one method and k
-python scripts/build_corral_mini.py --revision <HASH> --method profile --k 4
+# 1. Write src/corral/subsets/corral_mini_v<N>.json (defaults: rank_cost, k = 3, seed 0)
+python scripts/build_corral_mini.py --revision <HASH> --version <N>
 
 # 2. Compare all methods for k = 1..8 -> results.csv, saturation.csv
 python scripts/compare_corral_mini.py --revision <HASH>
-
-# Same two steps, preferring unsaturated tasks
-#   -> manifest_unsaturated.json, results_unsaturated.csv
-python scripts/build_corral_mini.py --revision <HASH> --exclude-saturated
+#    Same, preferring unsaturated tasks -> results_unsaturated.csv
 python scripts/compare_corral_mini.py --revision <HASH> --exclude-saturated
 
 # 3. Plot every results CSV present -> figures/ (*_unsaturated for that run)
@@ -30,14 +52,12 @@ uv run --no-project --with "lama-aesthetics @ git+https://github.com/lamalab-org
   python scripts/plot_corral_mini.py
 ```
 
-To run the mini, pass each ID in `tasks_by_environment` with `bench --task`
-(the flag can be repeated).
-
 ## Methods
 
 Each method runs separately in every environment/level. Apart from random,
-each one tries every possible *k*-task combination, and ties go to the first
-combination in task-ID order. "Score" means an agent's mean Pass@5 on the
+each one tries every possible *k*-task combination. Combinations that tie on
+every criterion are ordered by a seeded random permutation, so task IDs never
+decide the pick (for v1 no level needed it). "Score" means an agent's mean Pass@5 on the
 chosen tasks, and the target is the same agent's score on all tasks of that
 level.
 
@@ -98,25 +118,38 @@ rank methods make the mini slightly easier, Rank + cost the most (about
 
 | k (tasks) | Method | Ranking kept | Levels with a loss | …held-out model | Worst score error | USD |
 |---|---|---:|---:|---:|---:|---:|
-| 4 (64) | Random | 0.80 | 11 | 11 | 0.42 | 9.5k |
-| | Score profile | 0.88 | 5 | 14 | 0.13 | 10.0k |
-| | Rank | **1.00** | 1 | 12 | 0.40 | 10.7k |
-| | Rank + score guard | 0.97 | 5 | 12 | **0.12** | 10.1k |
+| 3 (48) | Random | 0.74 | 12 | **12** | 0.50 | 7.2k |
+| | Score profile | 0.92 | 7 | 13 | **0.17** | 7.4k |
+| | Rank | **0.99** | **3** | 13 | 0.68 | 7.4k |
+| | Rank + score guard | 0.94 | 7 | 13 | **0.17** | 7.2k |
+| | Cost-aware | 0.86 | 10 | 14 | **0.17** | **6.7k** |
+| | Rank + cost (v1) | **0.99** | **3** | 13 | 0.68 | 7.1k |
+| 4 (64) | Random | 0.80 | 11 | **11** | 0.42 | 9.5k |
+| | Score profile | 0.88 | 5 | 14 | 0.13 | 10.2k |
+| | Rank | **1.00** | **1** | 12 | 0.40 | 10.6k |
+| | Rank + score guard | 0.97 | 5 | 12 | **0.12** | 10.0k |
 | | Cost-aware | 0.90 | 7 | **11** | 0.13 | **8.4k** |
-| | Rank + cost | **1.00** | 1 | 13 | 0.42 | 9.5k |
+| | Rank + cost | **1.00** | **1** | 13 | 0.42 | 9.5k |
 | 5 (80) | Random | 0.85 | 9 | 9 | 0.33 | 12.0k |
-| | Score profile | 0.96 | 5 | 11 | **0.10** | 11.7k |
-| | Rank | **1.00** | **0** | **9** | 0.20 | 12.8k |
-| | Rank + score guard | 0.99 | 1 | **9** | **0.10** | 12.8k |
+| | Score profile | 0.96 | 3 | 11 | **0.10** | 12.2k |
+| | Rank | **1.00** | **0** | **7** | 0.20 | 13.0k |
+| | Rank + score guard | 0.99 | 1 | **7** | **0.10** | 12.9k |
 | | Cost-aware | 0.89 | 8 | 13 | 0.11 | **10.0k** |
 | | Rank + cost | **1.00** | **0** | 13 | 0.42 | 11.3k |
+
+**Why v1 is Rank + cost at k = 3.** It keeps the within-level ranking as well
+as Rank (0.99) at the lowest cost of the rank methods, about $7.1k for the
+observed agents, 29% of the full benchmark. The price is score accuracy: the
+mini is about 0.08 Pass@5 easier on average, one agent's level score is off
+by 0.68, and a new model loses an ordering in 13 of 15 levels. Use the mini
+to compare agents, not to report full-benchmark scores.
 
 ## Caveats
 
 - **The numbers are in-sample.** Every method except random is fitted to the
   same 7 agents it is scored on. Use the held-out-model column to judge how a
   method generalizes. Even at k = 5, every method loses an ordering for a new
-  model in 9 or more of the 15 levels. The mini is better suited to overall
+  model in 7 or more of the 15 levels. The mini is better suited to overall
   rankings than to per-level ones.
 - **Ranking and score accuracy trade off.** Rank alone distorts scores, and
   score profile alone gives a weaker ranking. The score guard is a compromise
@@ -163,17 +196,23 @@ All tasks → unsaturated tasks first. Numbers are in
 
 | k | Method | Spearman | Rank inversion, held-out model | Max. abs. error | Saturated tasks used | USD |
 |---|---|---:|---:|---:|---:|---:|
+| 3 | Random | 0.74 → 0.79 | 12 → **10** | 0.50 → 0.80 | 18 → 2 | 7.2k → 8.0k |
+| | Score profile | 0.92 → 0.85 | 13 → 13 | 0.17 → 0.80 | 20 → 2 | 7.4k → 7.7k |
+| | Rank | 0.99 → 0.91 | 13 → 13 | 0.68 → 0.80 | 18 → 2 | 7.4k → 8.8k |
+| | Rank + score guard | 0.94 → 0.88 | 13 → 13 | 0.17 → 0.80 | 19 → 2 | 7.2k → 8.8k |
+| | Cost-aware | 0.86 → 0.83 | 14 → 12 | 0.17 → 0.80 | 20 → 2 | 6.7k → 6.6k |
+| | Rank + cost | 0.99 → 0.91 | 13 → 12 | 0.68 → 0.80 | 19 → 2 | 7.1k → 8.2k |
 | 4 | Random | 0.80 → 0.83 | 11 → **7** | 0.42 → 0.80 | 24 → 4 | 9.5k → 10.9k |
-| | Score profile | 0.88 → 0.88 | 14 → 12 | 0.13 → 0.80 | 23 → 4 | 10.0k → 10.9k |
-| | Rank | 1.00 → 0.92 | 12 → 9 | 0.40 → 0.80 | 23 → 4 | 10.7k → 10.9k |
-| | Rank + score guard | 0.97 → 0.91 | 12 → 10 | 0.12 → 0.80 | 22 → 4 | 10.1k → 11.0k |
+| | Score profile | 0.88 → 0.88 | 14 → 12 | 0.13 → 0.80 | 23 → 4 | 10.2k → 10.9k |
+| | Rank | 1.00 → 0.92 | 12 → 9 | 0.40 → 0.80 | 23 → 4 | 10.6k → 10.9k |
+| | Rank + score guard | 0.97 → 0.91 | 12 → 11 | 0.12 → 0.80 | 22 → 4 | 10.0k → 11.1k |
 | | Cost-aware | 0.90 → 0.85 | 11 → 12 | 0.13 → 0.80 | 23 → 4 | 8.4k → 9.3k |
 | | Rank + cost | 1.00 → 0.92 | 13 → 11 | 0.42 → 0.80 | 26 → 4 | 9.5k → 10.8k |
 | 5 | Random | 0.85 → 0.88 | 9 → **5** | 0.33 → 0.60 | 30 → 9 | 12.0k → 13.4k |
-| | Score profile | 0.96 → 0.89 | 11 → 10 | 0.10 → 0.60 | 34 → 9 | 11.7k → 13.4k |
-| | Rank | 1.00 → 0.99 | 9 → 9 | 0.20 → 0.60 | 29 → 9 | 12.8k → 13.6k |
-| | Rank + score guard | 0.99 → 0.97 | 9 → 9 | 0.10 → 0.60 | 31 → 9 | 12.8k → 13.5k |
-| | Cost-aware | 0.89 → 0.89 | 13 → 10 | 0.12 → 0.60 | 31 → 9 | 10.0k → 11.8k |
+| | Score profile | 0.96 → 0.89 | 11 → 11 | 0.10 → 0.60 | 31 → 9 | 12.2k → 13.5k |
+| | Rank | 1.00 → 0.99 | 7 → 9 | 0.20 → 0.60 | 28 → 9 | 13.0k → 13.6k |
+| | Rank + score guard | 0.99 → 0.97 | 7 → 10 | 0.10 → 0.60 | 30 → 9 | 12.9k → 13.5k |
+| | Cost-aware | 0.89 → 0.89 | 13 → 10 | 0.11 → 0.60 | 31 → 9 | 10.0k → 11.8k |
 | | Rank + cost | 1.00 → 0.99 | 13 → 9 | 0.42 → 0.60 | 31 → 9 | 11.3k → 13.1k |
 
 What changes:
@@ -185,11 +224,13 @@ What changes:
 - **Fitted methods lose in-sample ranking but gain little on held-out
   models.** With fewer candidate tasks, Rank drops from 1.00 to 0.92 at
   k = 4. Its held-out result improves (12 → 9), but most other methods move
-  by only 0 to 2 levels.
+  by only 0 to 2 levels, and at k = 5 Rank and Rank + score guard get worse
+  (7 → 9 and 7 → 10).
 - **The mini is harder for every method.** Scores shift down by 0.1–0.15 on
   average at k = 4–5, compared with about 0 for the fitted methods on all
   tasks. The worst cases come from short levels
   that must use their few hard tasks: spectra elucidation L2 at k = 4 puts one
   agent 0.80 below its full score. Treat these as harder subsets, not as
   estimates of the full score.
-- **It costs about 2–18% more,** because unsaturated tasks run longer.
+- **It usually costs more,** up to about 20%, because unsaturated tasks run
+  longer.

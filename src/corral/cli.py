@@ -30,6 +30,7 @@ from corral.runtime.environment_loader import (
     ENVIRONMENT_NAMES,
     load_environment_group,
 )
+from corral.subsets import mini_task_ids, mini_versions
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,10 +282,13 @@ def _default_benchmark_run_id(
     task_ids: Sequence[str],
     trials: int,
     sandbox: str,
+    task_subset: str | None = None,
 ) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     nonce = uuid4().hex[:8]
-    if len(task_ids) <= 2:
+    if task_subset is not None:
+        tasks = _slug(task_subset)
+    elif len(task_ids) <= 2:
         tasks = "+".join(_slug(task_id)[:36] for task_id in task_ids)
     else:
         tasks = str(len(task_ids))
@@ -404,6 +408,38 @@ def _sandbox_profile(
     )
 
 
+def _select_tasks(
+    args: argparse.Namespace, environments: Mapping[str, Any]
+) -> tuple[list[str] | None, dict[str, Any]]:
+    """Return the task IDs to run (`None` for all) and the subset to record.
+
+    `--task` wins over `--run-full` and the default `--run-mini`. Levels the
+    mini does not cover, including subtask levels, run in full.
+    """
+    if args.tasks:
+        return list(args.tasks), {"name": "explicit"}
+    if getattr(args, "task_subset", "mini") == "full":
+        return None, {"name": "full"}
+    options = dict(args.env_kwargs)
+    version = getattr(args, "mini_version", None) or mini_versions()[-1]
+    task_ids = (
+        None
+        if options.get("subtasks")
+        else mini_task_ids(args.environment, options.get("level", 1), version)
+    )
+    if task_ids is None:
+        sys.stderr.write(
+            f"warning: corral-mini v{version} does not cover this level; "
+            "running all tasks\n"
+        )
+        return None, {"name": "full", "reason": "not covered by corral-mini"}
+    if missing := sorted(set(task_ids) - set(environments)):
+        raise ValueError(
+            f"corral-mini v{version} tasks not loaded: {', '.join(missing)}"
+        )
+    return list(task_ids), {"name": "corral-mini", "version": version}
+
+
 async def run_benchmark(
     args: argparse.Namespace,
     *,
@@ -417,8 +453,13 @@ async def run_benchmark(
         args.environment,
         env_kwargs=args.env_kwargs,
     )
+    selected_task_ids, task_subset = _select_tasks(args, environments)
     if args.list_tasks:
-        _list_tasks(environments)
+        _list_tasks(
+            environments
+            if selected_task_ids is None
+            else {task_id: environments[task_id] for task_id in selected_task_ids}
+        )
         return 0
 
     canonical_agent = normalise_agent_name(agent_name or args.agent)
@@ -480,7 +521,7 @@ async def run_benchmark(
         )
         agents[canonical_agent] = agent
 
-    requested_task_ids = tuple(args.tasks or environments)
+    requested_task_ids = tuple(selected_task_ids or environments)
     run_id = args.run_id or _default_benchmark_run_id(
         agent=canonical_agent,
         model=model if model is not None else "default",
@@ -488,6 +529,11 @@ async def run_benchmark(
         task_ids=requested_task_ids,
         trials=args.trials,
         sandbox=sandbox.mode,
+        task_subset=(
+            f"mini-v{task_subset['version']}"
+            if task_subset["name"] == "corral-mini"
+            else None
+        ),
     )
 
     state_dir = getattr(args, "state_dir", None)
@@ -513,6 +559,7 @@ async def run_benchmark(
         "model": model,
         "environment": args.environment,
         "requested_task_ids": list(requested_task_ids),
+        "task_subset": task_subset,
         "trials_per_task": args.trials,
         "sandbox": sandbox.mode,
     }
@@ -556,7 +603,7 @@ async def run_benchmark(
         )
         result = await runner.run(
             run_id,
-            task_ids=args.tasks or None,
+            task_ids=selected_task_ids,
             trials_per_task=args.trials,
             max_parallel=args.max_parallel,
             max_parallel_per_task=args.max_parallel_per_task,
@@ -743,6 +790,32 @@ def _add_execution_arguments(
     execution.add_argument("--commit-file", default=default_commit_file)
 
 
+def add_task_subset_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add `--run-mini` (default), `--run-full` and `--mini-version`."""
+    subset = parser.add_mutually_exclusive_group()
+    subset.add_argument(
+        "--run-mini",
+        dest="task_subset",
+        action="store_const",
+        const="mini",
+        default="mini",
+        help="Run only the corral-mini tasks of the selected level (default).",
+    )
+    subset.add_argument(
+        "--run-full",
+        dest="task_subset",
+        action="store_const",
+        const="full",
+        help="Run every task of the selected level.",
+    )
+    parser.add_argument(
+        "--mini-version",
+        type=int,
+        choices=mini_versions(),
+        help="corral-mini release to run; default: the latest.",
+    )
+
+
 def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--task",
@@ -750,11 +823,12 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         help=(
-            "Task ID to run; repeat for multiple. If omitted, all tasks run. "
-            "Dependencies are included automatically."
+            "Task ID to run; repeat for multiple. Overrides --run-mini and "
+            "--run-full. Dependencies are included automatically."
         ),
     )
     parser.add_argument("--list-tasks", action="store_true")
+    add_task_subset_arguments(parser)
     _add_environment_arguments(parser)
     _add_agent_arguments(parser)
 

@@ -112,11 +112,12 @@ def select(
     agents: np.ndarray,
     rng: np.random.Generator | None = None,
     exclude_saturated: bool = False,
+    seed: int = 0,
 ) -> np.ndarray:
     """Return the task indexes chosen for one stratum, fitting only `agents`.
 
-    Deterministic methods enumerate every k-task combination. Ties go to the
-    lexicographically first combination.
+    `rng` draws the random method. The others enumerate every k-task
+    combination and break exact ties with a permutation seeded by `seed`.
 
     With `exclude_saturated`, tasks every one of `agents` solves are skipped.
     A level with fewer than k other tasks takes all of them and fills the
@@ -143,20 +144,21 @@ def select(
     mse = np.mean(error**2, axis=1)
     worst = np.max(abs(error), axis=1)
     guarded = worst <= worst.min() + SCORE_GUARD + 1e-12
-    if method == "profile":
-        order = np.argsort(mse, kind="stable")
-    elif method == "cost_aware":
-        cost = stratum.costs[:, agents].sum(axis=1)[combos].sum(axis=1)
-        order = np.lexsort((mse, cost))
-    elif method in {"rank", "rank_guarded"}:
-        rho = row_spearman(target + error, target)
-        order = np.lexsort((mse, worst, -rho))
-    elif method == "rank_cost":
-        rho = row_spearman(target + error, target)
-        cost = stratum.costs[:, agents].sum(axis=1)[combos].sum(axis=1)
-        order = np.lexsort((mse, cost, -rho))
-    else:
+    cost = stratum.costs[:, agents].sum(axis=1)[combos].sum(axis=1)
+    rho = row_spearman(target + error, target)
+    # Rounded so float noise does not hide a tie. Last key sorts first.
+    mse, worst, cost, rho = (np.round(x, 9) for x in (mse, worst, cost, rho))
+    keys = {
+        "profile": (mse,),
+        "cost_aware": (mse, cost),
+        "rank": (mse, worst, -rho),
+        "rank_guarded": (mse, worst, -rho),
+        "rank_cost": (mse, cost, -rho),
+    }
+    if method not in keys:
         raise ValueError(f"unknown method: {method}")
+    tie_break = np.random.default_rng(seed).permutation(len(combos))
+    order = np.lexsort((tie_break, *keys[method]))
     if method in {"cost_aware", "rank_guarded"}:
         order = order[guarded[order]]
     return combos[order[0]]
