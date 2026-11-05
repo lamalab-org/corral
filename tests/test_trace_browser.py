@@ -113,6 +113,64 @@ def test_index_rejects_paths_outside_reports(tmp_path):
         browser.load_index(tmp_path)
 
 
+def test_index_skips_lfs_indexes_and_keeps_available_environments(tmp_path, capsys):
+    write_index(tmp_path)
+    missing = tmp_path / "missing"
+    missing.mkdir()
+    index = missing / "trials.csv"
+    pointer = browser.LFS_POINTER + b"\noid sha256:test\nsize 10\n"
+    index.write_bytes(pointer)
+
+    store = browser.TraceStore(tmp_path)
+
+    assert len(store.traces) == 1
+    assert store.traces[0]["environment"] == "environment"
+    assert len(store.locations) == 1
+    assert len(json.loads(store.index)["traces"]) == 1
+    warning = capsys.readouterr().err
+    assert str(index) in warning
+    assert "Git LFS pointer" in warning
+    assert "git lfs pull" in warning
+    assert index.read_bytes() == pointer
+
+
+@pytest.mark.parametrize("contents", ["", "task_id,trial\ntask,0\n"])
+def test_index_skips_incomplete_headers(tmp_path, capsys, contents):
+    write_index(tmp_path)
+    invalid = tmp_path / "invalid"
+    invalid.mkdir()
+    index = invalid / "trials.csv"
+    index.write_text(contents)
+
+    traces, _ = browser.load_index(tmp_path)
+
+    assert len(traces) == 1
+    warning = capsys.readouterr().err
+    assert str(index) in warning
+    assert "missing columns" in warning
+    assert "report_file" in warning
+
+
+def test_startup_with_only_lfs_indexes_gives_recovery_instructions(
+    tmp_path, capsys, monkeypatch
+):
+    write_index(tmp_path)
+    (tmp_path / "environment/trials.csv").write_bytes(
+        browser.LFS_POINTER + b"\noid sha256:test\nsize 10\n"
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["serve_traces.py", "--reports", str(tmp_path), "--open"]
+    )
+
+    with pytest.raises(SystemExit) as error:
+        browser.main()
+
+    assert error.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "No readable trials" in stderr
+    assert "git lfs pull" in stderr
+
+
 def test_cache_invalidates_changed_reports_and_detects_stale_index(tmp_path):
     path = write_index(tmp_path)
     path.parent.mkdir(parents=True)

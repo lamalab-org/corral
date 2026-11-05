@@ -473,5 +473,3 @@ class TestCheckListMolecules:
         target = [["C", "CO"]]
         result = check_list_molecules(prediction, target)
         assert isinstance(result, float)
-
-

@@ -157,8 +157,8 @@ class LLMPlanner(BaseAgent):
                 LiteLLMMessage(
                     role="user",
                     content=(
-                        "Execute the following high-level plan while still solving "
-                        f"the original task:\n\n{plan}"
+                        "Execute the following high-level plan while still solving the original task:\n\n"
+                        f"{plan}"
                     ),
                     name="high-level-plan",
                 )

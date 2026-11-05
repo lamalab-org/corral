@@ -148,5 +148,3 @@ def test_value_outside_allowed_pool_is_rejected():
 )
 def test_malformed_submissions_score_zero(bad):
     assert check_conductance_topology(TRUTH)(bad) == 0.0
-
-

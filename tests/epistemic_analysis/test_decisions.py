@@ -139,7 +139,9 @@ def test_historical_selection_does_not_override_current_status(
     # assessment an outstanding problem. Active findings still reach the actor.
     actionable = status == "active" and selected
     assert report.present_antipatterns == ((assessment,) if actionable else ())
+    assert (assessment.explanation in report.format_for_agent()) == actionable
     assert ("unsupported_judgment" in report.format_for_agent()) == actionable
+    assert report.to_dict()["assessments"][0]["name"] == "unsupported_judgment"
     assert report.to_dict()["assessments"][0]["explanation_supported"] is True
 
 
@@ -172,7 +174,12 @@ def test_descriptive_fixed_belief_does_not_hide_a_real_active_problem():
     assert report.present_antipatterns == (contradiction,)
     assert "fixed_belief_trace" not in report.format_for_agent()
     assert "contradiction_without_repair" in report.format_for_agent()
+    assert report.format_for_agent() == (
+        "Present unconstructive epistemic patterns (check against the observations):\n"
+        f"- contradiction_without_repair: {contradiction.explanation}"
+    )
     assert report.to_dict()["assessments"][0]["name"] == "fixed_belief_trace"
+    assert report.to_dict()["assessments"][1]["name"] == "contradiction_without_repair"
 
 
 @pytest.mark.anyio
@@ -385,6 +392,7 @@ async def test_only_active_evidenced_patterns_reach_agent_with_reasons():
     assert MOTIFS[7].name in rendered
     assert explanations[MOTIFS[7].name]["explanation"] in rendered
     assert all(m.name not in rendered for m in MOTIFS if m != MOTIFS[7])
+    assert report.to_dict()["assessments"][7]["name"] == MOTIFS[7].name
     assert reason not in rendered
     assert report.assessments[0].explanation == reason  # Productive record retained.
     assert "confidence" not in rendered

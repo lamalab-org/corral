@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 HIDDEN_ARGUMENTS_NAMESPACE = "hidden_arguments"
 CORRAL_ACTION_ID_ARGUMENT = "corral_action_id"
+#: A trusted tool that declares this hidden argument receives a
+#: ``PrivateArtifacts`` for saving files the agent must never see.
+CORRAL_PRIVATE_ARTIFACTS_ARGUMENT = "corral_private_artifacts"
 
 
 def surrender_enabled(state: ExecutionState) -> bool:
@@ -275,6 +278,7 @@ def execute_action(
 
 __all__ = [
     "CORRAL_ACTION_ID_ARGUMENT",
+    "CORRAL_PRIVATE_ARTIFACTS_ARGUMENT",
     "HIDDEN_ARGUMENTS_NAMESPACE",
     "ToolEffects",
     "ToolExecutionResult",

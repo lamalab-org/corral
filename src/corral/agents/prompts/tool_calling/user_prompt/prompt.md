@@ -15,13 +15,11 @@ created_at: '2025-11-13T15:41:27.537950+00:00'
 updated_at: '2025-11-13T15:41:27.537950+00:00'
 ---
 
-Task Guide:
+{{task_guide}}
 
-**`{{task_guide}}`**
+Use the available tools as needed to complete my request.
 
-You must think what to do next. You can use some of the tools available in the system.
-
-When the task is complete, call the `submit_answer` tool with the complete
-answer. Do not return a final answer as plain text.
+When the task is complete, call the `submit_answer` tool with the complete answer.
+Do not return a final answer as plain text.
 
 {{surrender_instructions}}

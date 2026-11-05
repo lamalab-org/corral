@@ -329,8 +329,8 @@ class ReActAgent(EpistemicSupport):
                             "role": "user",
                             "name": EMPTY_RESPONSE_REMINDER,
                             "content": (
-                                "Your last response contained no public text. Continue "
-                                "with <thought> and, when useful, <action>/<action_input>. "
+                                "Your last response contained no public text.\n"
+                                "Continue with <thought> and, when useful, <action>/<action_input>.\n"
                                 "Use submit_answer when finished."
                             ),
                         }
@@ -458,10 +458,9 @@ class ReActAgent(EpistemicSupport):
                     content=(
                         self._text_only_feedback()
                         if self.epistemic and thoughts and "<action>" not in content
-                        else "No valid action was found. Plain-text final answers do "
-                        "not complete the task. Return one or more complete "
-                        "<action>/<action_input> pairs; when finished, call "
-                        "submit_answer with a string answer."
+                        else "No valid action was found.\n"
+                        "Plain-text final answers do not complete the task.\n"
+                        "Return one or more complete <action>/<action_input> pairs; when finished, call submit_answer with a string answer."
                     ),
                 )
             )

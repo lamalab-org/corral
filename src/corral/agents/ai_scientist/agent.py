@@ -51,10 +51,9 @@ from corral.core.workspace import WorkspaceState
 from corral.runtime import permissions
 
 _SCIENTIST_SYSTEM_PROMPT = """
-You are the reasoning component of a scientific experiment manager. Interact
-with the task environment only through experiments explicitly represented by
-the supplied Corral tool schemas. Never invent observations, never use a
-benchmark score as evidence, and distinguish measured facts from hypotheses.
+You are the reasoning component of a scientific experiment manager.
+Interact with the task environment only through experiments explicitly represented by the supplied tool schemas.
+
 Return the requested structured object without Markdown or surrounding prose.
 """.strip()
 
@@ -340,6 +339,40 @@ class AIScientistAgent(BaseAgent):
             "error": error,
         }
 
+    def _search_tools(self, session: AgentSession) -> list[dict[str, Any]]:
+        """The session's tools without the final actions, which only the main
+        session runs."""
+        final_names = {action.name for action in self.config.final_actions}
+        return [
+            dict(tool)
+            for tool in session.tools
+            if tool.get("function", {}).get("name") not in final_names
+        ]
+
+    def _run_final_actions(
+        self, session: AgentSession, portal: BlockingPortal
+    ) -> list[dict[str, Any]]:
+        """Run each configured final action on the main session, in order."""
+        results = []
+        for final_action in self.config.final_actions:
+            outcome = portal.call(
+                session.execute,
+                Action(
+                    name=final_action.name,
+                    arguments=dict(final_action.arguments),
+                    metadata={"agent": type(self).__name__, "final_action": True},
+                ),
+            )
+            results.append(
+                {
+                    "name": final_action.name,
+                    "success": outcome.success,
+                    "error": outcome.error,
+                    "result": str(outcome.result)[:2000],
+                }
+            )
+        return results
+
     def _execute_session(
         self,
         session: AgentSession,
@@ -357,7 +390,7 @@ class AIScientistAgent(BaseAgent):
             else json.dumps(prompt_value, ensure_ascii=False)
         )
         prompt = prompt_with_state_history(prompt, session.messages)
-        tools = [dict(tool) for tool in session.tools]
+        tools = self._search_tools(session)
         tool_payload = {"tools": tools}
         tools = tool_payload.get("tools", [])
 
@@ -512,6 +545,9 @@ class AIScientistAgent(BaseAgent):
                         "files": list(promotion.files),
                     },
                 )
+
+            for result in self._run_final_actions(session, portal):
+                trace.write("final_action", result)
 
             answer = FinalSynthesizer(
                 gateway, max_journal_chars=config.max_journal_chars

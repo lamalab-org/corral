@@ -223,9 +223,9 @@ class ToolCallingAgent(EpistemicSupport):
                         "role": "user",
                         "name": EMPTY_RESPONSE_REMINDER,
                         "content": (
-                            "Your last response contained no public text or tool call. "
-                            "Please continue with visible assistant text or an "
-                            "available tool call. Use submit_answer when finished."
+                            "Your last response contained no public text or tool call.\n"
+                            "Please continue with visible assistant text or an available tool call.\n"
+                            "Use submit_answer when finished."
                         ),
                     }
                     messages.append(feedback)

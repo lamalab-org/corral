@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from inference_opt import datasets
-from inference_opt.outcomes import read_outcomes
-from inference_opt.eval_runner import PolicyEvaluator
-from inference_opt.eval_runner.spec import RunSpec
+from inference_opt.runner import MAX_TOKENS_CAP, run_policy
 
 __all__ = [
     "BASELINE_POLICY_SOURCE",
@@ -20,31 +17,69 @@ __all__ = [
     "measure_baseline",
 ]
 
-#: The pinned zero-shot policy. Written to a temporary directory and run through
-#: the normal pipeline, so the baseline and every candidate share one code path.
+#: The pinned zero-shot policy. It runs through the same pipeline as every
+#: candidate policy, so the baseline and a candidate differ only in the policy.
+#: MATH questions get Inspect's MATH prompt; the other branches serve the v1 set.
 BASELINE_POLICY_SOURCE = '''\
 """The pinned zero-shot baseline. One call, no system message, no demonstrations."""
 
 MANIFEST = {
     "name": "baseline-zero-shot",
-    "max_calls_per_question": 1,
     "max_tokens_per_call": 8192,
 }
 
 
+# inspect_evals' MATH prompt, word for word (USER_PROMPT_TEMPLATE in inspect_evals.math).
+MATH_TEMPLATE = """
+Solve the following math problem step by step. The last line of your response should be of the form "ANSWER: $ANSWER" (without quotes) where $ANSWER is the answer to the problem.
+
+{prompt}
+
+Remember to put your answer on its own line at the end in the form "ANSWER: $ANSWER" (without quotes) where $ANSWER is the answer to the problem, and you do not need to use a \\\\boxed command.
+""".strip()
+
+
+# GSM-Symbolic's evaluation prompt without its eight worked examples.
+GSM_TEMPLATE = """As an expert problem solver, solve step by step the following mathematical question.
+
+Q: {question}
+A: Let's think step by step."""
+
+
+def _prompt(question):
+    if question.benchmark.startswith("math_"):
+        return MATH_TEMPLATE.format(prompt=question.text)
+    if question.benchmark.startswith("gsm_"):
+        return GSM_TEMPLATE.format(question=question.text)
+    prompt = question.text
+    if question.choices:
+        prompt += "\\n\\n" + question.rendered_choices()
+    if question.benchmark == "chembench" and question.choices:
+        prompt += (
+            "\\n\\nOne or more options may be correct. Respond with the letters of "
+            "all correct options, separated by commas, wrapped as [ANSWER]<letters>[/ANSWER]."
+        )
+    elif question.benchmark == "chembench":
+        prompt += "\\n\\nRespond with your final answer wrapped as [ANSWER]<answer>[/ANSWER]."
+    elif question.choices:
+        prompt += (
+            "\\n\\nAnswer with the letter of the correct option, in the "
+            "format 'ANSWER: <letter>'."
+        )
+    return prompt
+
+
 class Policy:
-    def solve(self, question, ctx):
-        prompt = question.text
-        if question.choices:
-            prompt += "\\n\\n" + question.rendered_choices()
-        if question.benchmark == "chembench":
-            prompt += "\\n\\nRespond with your final answer wrapped as [ANSWER]<answer>[/ANSWER]."
-        elif question.choices:
-            prompt += (
-                "\\n\\nAnswer with the letter of the correct option, in the "
-                "format 'ANSWER: <letter>'."
-            )
-        return ctx.student.generate(prompt, temperature=0.0, max_tokens=8192, seed=0)
+    def run(self, questions, ctx):
+        texts = ctx.student.generate(
+            [{"prompt": _prompt(q), "question_id": q.id} for q in questions],
+            temperature=0.0,
+            max_tokens=8192,
+            seed=0,
+        )
+        # A failed request comes back empty and stays recorded as that
+        # question's error; an empty answer would be graded wrong anyway.
+        ctx.answer({q.id: text for q, text in zip(questions, texts) if text})
 '''
 
 
@@ -61,6 +96,10 @@ class BaselineResult:
     n_unparseable: int = 0
     chance: float = 0.0
     per_item: dict[str, bool] = field(default_factory=dict)
+    #: The student's reply, its separate reasoning if any, and why it ended
+    #: (``"stop"``, or ``"length"`` when the token limit ran out, often while it
+    #: was still reasoning), per item.
+    completions: dict[str, dict[str, str]] = field(default_factory=dict)
     per_topic: dict[str, Any] = field(default_factory=dict)
     error: str = ""
 
@@ -127,13 +166,19 @@ def measure_baseline(
     *,
     model_spec: str | None = None,
     base_url: str | None = None,
-    out_dir: Path | None = None,
     timeout_s: int = 3600,
     max_connections: int = 8,
+    options: dict[str, Any] | None = None,
 ) -> BaselineResult:
     """Run the pinned zero-shot policy over one split and grade it."""
     items = datasets.load_items(benchmark, split)  # type: ignore[arg-type]
     targets = datasets.load_targets(benchmark, split)  # type: ignore[arg-type]
+    unlabeled = [item.item_id for item in items if item.item_id not in targets]
+    if unlabeled:
+        raise datasets.DatasetError(
+            f"{benchmark}/{split}: {len(unlabeled)} item(s) have no label, "
+            f"e.g. {unlabeled[:3]}"
+        )
     result = BaselineResult(
         benchmark=benchmark,
         model=model,
@@ -143,49 +188,66 @@ def measure_baseline(
     )
 
     with tempfile.TemporaryDirectory(prefix="inference-opt-baseline-") as scratch:
-        scratch_root = Path(scratch)
-        policy_dir = scratch_root / "policy"
-        policy_dir.mkdir()
+        workspace = Path(scratch) / "workspace"
+        policy_dir = workspace / "policy"
+        policy_dir.mkdir(parents=True)
         (policy_dir / "policy.py").write_text(BASELINE_POLICY_SOURCE, encoding="utf-8")
-
-        questions = scratch_root / "questions.jsonl"
-        datasets.write_jsonl(
-            questions,
-            [
-                {**datasets.public_record(item), "index": index}
-                for index, item in enumerate(items)
-            ],
-        )
-
-        spec = RunSpec(
+        config = {
+            "benchmark": benchmark,
+            "model_specs": {model: model_spec or model},
+            "base_urls": {model: base_url},
+            "student_options": {model: dict(options or {})},
+            "student_concurrency": max(1, max_connections),
+        }
+        run = run_policy(
+            config=config,
+            work_dir=workspace,
             run_id=f"baseline-{benchmark}-{model}-{split}",
-            policy_dir=str(policy_dir),
-            questions_path=str(questions),
-            out_dir=str(out_dir or scratch_root / "out"),
-            model_spec=model_spec or model,
-            base_url=base_url,
-            total_calls=len(items) * 2,
-            max_calls_per_question=1,
-            max_tokens_per_call=8192,
-            benchmark=benchmark,
+            policy_dir=policy_dir,
             split=split,
-            max_connections=max(1, max_connections),
+            models=[model],
+            budget_per_model=len(items) * 2,
+            examples=[],
+            write_copy=False,
+            max_tokens_cap=MAX_TOKENS_CAP,
+            time_limit_s=timeout_s,
+        )[model]
+
+    failure = (
+        run.load_error
+        or run.grading_error
+        or (run.infrastructure_error if not run.answers else "")
+    )
+    if failure:
+        result.error = failure[:600]
+        return result
+    result.n_correct = run.n_correct
+    result.accuracy = run.accuracy
+    result.n_unparseable = sum(
+        1 for item_id in run.question_ids if not run.answers.get(item_id, "").strip()
+    )
+    result.per_item = {
+        item_id: run.correct.get(item_id, False) for item_id in run.question_ids
+    }
+    # The baseline makes one call per question.
+    result.completions = {
+        call["question_id"]: {
+            "completion": call["completion"],
+            "reasoning": call["reasoning"],
+            "finish_reason": call["finish_reason"],
+        }
+        for call in run.calls
+        if call["question_id"]
+    }
+    by_topic: dict[str, dict[str, Any]] = {}
+    for item in items:
+        bucket = by_topic.setdefault(
+            item.category or "(none)", {"n": 0, "n_correct": 0}
         )
-        summary = PolicyEvaluator().run(spec, targets=targets)
-        if not summary.ok and summary.n_answered == 0:
-            result.error = summary.error[:600]
-            return result
-
-        outcome = read_outcomes(spec.log_dir)
-        result.n_correct = outcome.n_correct
-        result.accuracy = outcome.n_correct / len(items) if items else 0.0
-        result.n_unparseable = summary.n_unparseable
-        result.per_item = {item.item_id: item.correct for item in outcome.items}
-        result.per_topic = outcome.by_category()
-
+        bucket["n"] += 1
+        bucket["n_correct"] += int(run.correct.get(item.item_id, False))
+    result.per_topic = {
+        name: {**bucket, "accuracy": bucket["n_correct"] / bucket["n"]}
+        for name, bucket in sorted(by_topic.items())
+    }
     return result
-
-
-def load_measured(path: Path) -> dict[str, Any]:
-    """Read a baselines artifact written by ``scripts/measure_baselines.py``."""
-    return json.loads(Path(path).read_text(encoding="utf-8"))

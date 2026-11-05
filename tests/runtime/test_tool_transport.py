@@ -1,6 +1,7 @@
 """Runtime transport selection, authored tool execution and invocation scope."""
 
 import asyncio
+import json
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -894,7 +895,15 @@ async def test_agent_completion_waits_for_unawaited_mcp_request(runtime):
             assert "agent.completed" not in events
             release.set()
             response = await agent.request
-            assert response.json()["result"]["content"][0]["text"] == "finished"
+            messages = [
+                json.loads(line.removeprefix("data: "))
+                for line in response.text.splitlines()
+                if line.startswith("data: ")
+            ]
+            result = next(
+                message["result"] for message in messages if message.get("id") == 1
+            )
+            assert result["content"][0]["text"] == "finished"
             state = await owner
             assert state.tool_statistics == {"blocking": 1}
             events = [commit.event.type async for commit in store.iter_commits("main")]

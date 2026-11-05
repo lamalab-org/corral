@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from corral_md.workflow_scoring.common import UnsupportedEvidence
-from corral_md.workflow_scoring.regression import (
+from corral_md.scoring.common import UnsupportedEvidence
+from corral_md.scoring.regression import (
     metrics,
     partition,
     predict,

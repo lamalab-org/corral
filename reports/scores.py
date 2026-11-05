@@ -1,12 +1,14 @@
 """Tabulate the scores of every environment, agent, model and level.
 
 Run from the repository root:
+    git lfs pull --include='reports/*/runs.csv' --exclude=''
     python reports/scores.py                      # every environment
     python reports/scores.py afm corral_md        # some environments
     python reports/scores.py --markdown out.md    # tables for a PR comment
 
-Reads only `reports/<environment>/runs.csv`, so it needs no Git LFS, network
-access or packages beyond the standard library. The overview shows pass@k
+Reads only `reports/<environment>/runs.csv`. Download any Git LFS indexes first;
+tabulation needs no network access or packages beyond the standard library.
+The overview shows pass@k
 (share of tasks solved in at least one of k trials) and pass^k (share of tasks
 solved in all k trials) per level, with k the trials per task (5); the
 per-environment tables add passes, average score, pass@1, error trials and

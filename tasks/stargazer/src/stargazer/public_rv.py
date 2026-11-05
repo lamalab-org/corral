@@ -1,7 +1,7 @@
-"""Public RV numerics shared by analysis helpers and final evaluation.
+"""Public RV numerics for candidate models and analysis helpers.
 
 Only observations, public conventions and submitted parameters enter this module.
-It also works as a standalone module: no task loaders or scoring imports.
+It also works as a standalone module using only its supplied inputs.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ M_JUPITER_KG = 1.89813e27
 
 
 class CandidatePlanet(BaseModel):
-    """Canonical planet fields for normalized submissions and reference audits."""
+    """Canonical planet fields for normalized candidate models."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -35,7 +35,7 @@ class CandidatePlanet(BaseModel):
     Omega_rad: float | None = None
 
     def to_planet_params(self) -> PlanetParams:
-        """Convert the public schema to the evaluator's native dataclass."""
+        """Convert the public schema to the numerical model's native dataclass."""
         return PlanetParams(
             P_days=self.P_days,
             m_sin_i_mjup=self.m_sin_i_mjup,
@@ -184,7 +184,7 @@ def simulate_keplerian_rv(
     `l_rad` is mean longitude at `t_ref_days` (default: `times_days[0]`).
     In the RV-only
     convention `Omega_rad` is zero, but retaining it here also supports raw
-    released task records before compatibility conversion.
+    input parameter records before compatibility conversion.
     """
     times = np.asarray(times_days, dtype=float)
     if times.size == 0:
@@ -224,7 +224,7 @@ def _simulate_legacy_rebound_rv(
     times: np.ndarray,
     t_ref_days: float = 0.0,
 ) -> np.ndarray:
-    """Reproduce the clean signal in a released synthetic task."""
+    """Compute the noise-free radial-velocity signal using REBOUND."""
     simulation = rebound.Simulation()
     simulation.units = ["msun", "m", "s"]
     star = raw_config["star"]
@@ -278,8 +278,8 @@ def simulate_submission_rv(
 ) -> np.ndarray:
     """Reproduce the original action builder's REBOUND model and analytic fallback.
 
-    This model estimates omitted jitter. The evaluator independently uses the
-    analytic RV-only model when computing its likelihood and matching score.
+    This model estimates omitted jitter. Fit diagnostics use the analytic
+    RV-only model when computing likelihoods.
     """
     times = np.asarray(task.observations.times_days, dtype=float)
     axis = task.los_axis
@@ -343,7 +343,7 @@ def parse_submission(
 
 
 class SemanticSubmissionError(SubmissionError):
-    """A phase/parameter protocol rejection, before consuming an attempt."""
+    """A phase or parameter validation error."""
 
     def __init__(self, check: dict[str, Any]):
         super().__init__(json.dumps(check["errors"]))
@@ -351,9 +351,9 @@ class SemanticSubmissionError(SubmissionError):
 
 
 def _coerce_float(value: Any, *, name: str, default: float | None = None) -> float:
-    """Best-effort conversion of LLM-provided values into finite floats.
+    """Best-effort conversion of submitted values into finite floats.
 
-    LLMs sometimes emit JSON nulls (parsed as Python None). Treat those as "missing"
+    Inputs may contain JSON nulls (parsed as Python None). Treat those as "missing"
     when a default is provided.
     """
     if value is None:
@@ -435,11 +435,11 @@ def _parse_phase_to_l_rad(
     2. Otherwise infer from legacy phase fields using this order:
        phase_frac, phase_rad/phase_deg/phase, T0_days/T_peri.
 
-    This keeps parser behavior consistent with semantic validation and scoring:
+    This keeps parser behavior consistent with semantic validation:
     when `l_rad` is provided, legacy aliases are treated as non-canonical hints.
 
     Legacy priority (when `l_rad` is absent):
-    1. phase_frac (common agent output, interpreted as time-of-periastron fraction)
+    1. phase_frac (interpreted as time-of-periastron fraction)
     2. phase_rad / phase_deg / phase (interpreted as mean anomaly M0)
     3. T0_days / T_peri (time of periastron)
     4. Default to 0.0
@@ -462,7 +462,7 @@ def _parse_phase_to_l_rad(
         t0_days_val = _get_float("T_peri")
 
     # Helper: convert phase_frac to l_rad
-    # Agent convention: tp = t0 + phase_frac * P (time of periastron)
+    # Input convention: tp = t0 + phase_frac * P (time of periastron)
     # At t=t0, M = -2π * phase_frac, so l = Omega + omega + M
     def l_from_phase_frac(pf: float) -> float:
         M0 = (-2.0 * np.pi * pf) % (2.0 * np.pi)
@@ -515,7 +515,7 @@ def _parse_phase_to_l_rad(
     if candidates:
         return candidates[0][1]
 
-    # Fallback: check for zero-valued fields (in case agent explicitly set them to 0)
+    # Fallback: check for fields explicitly set to zero in the submitted parameters.
     if l_rad_val is not None:
         return l_rad_val % (2.0 * np.pi)
     if phase_frac_val is not None:
@@ -678,7 +678,7 @@ def validate_submission_semantics(
             planet_info["max_phase_disagreement_rad"] = max_diff
             if max_diff > phase_conflict_tol_rad and worst_pair is not None:
                 # If explicit l_rad is provided, treat it as canonical and do not hard-fail.
-                # Many agents keep legacy phase_* fields as placeholders (often 0.0).
+                # Submitted parameters may include legacy phase_* placeholders (often 0.0).
                 if "l_rad" in candidates:
                     out["warnings"].append(
                         f"planet[{i}] phase fields disagree ({worst_pair[0]} vs {worst_pair[1]}, Δ={worst_pair[2]:.3f} rad), "
@@ -782,7 +782,7 @@ def normalize_candidate(submission, task: PublicFitContext) -> CandidateSubmissi
         default=float(np.average(observed, weights=weights)),
     )
     # The original builder uses REBOUND for omitted-jitter residuals, even
-    # though evaluation fits analytic RV-only curves and instrument offsets.
+    # though fit diagnostics use analytic RV-only curves and instrument offsets.
     candidate = CandidateSubmission(planets=planets)
     if plan.get("noise_jitter_ms") is None:
         model = np.full_like(observed, offset)
@@ -903,7 +903,7 @@ class FitDiagnostics:
     residuals_ms: np.ndarray
 
     def public_payload(self) -> dict[str, Any]:
-        """Explicit public allowlist; never serialize a private evaluation."""
+        """Serialize the supported observation-based diagnostics."""
         return {
             "valid": True,
             "errors": [],
@@ -995,7 +995,7 @@ def compute_fit(
 def validate_fit(
     public_context: PublicFitContext, payload: Any, *, include_arrays: bool = False
 ) -> dict[str, Any]:
-    """Validate a candidate without any reference-dependent code path."""
+    """Validate a candidate against the supplied observations and conventions."""
     try:
         parsed = parse_submission(payload)
         check = validate_submission_semantics(
@@ -1015,7 +1015,7 @@ def validate_fit(
     warnings = list(check["warnings"])
     if len(parsed["planets"]) > public_context.max_planets:
         warnings.append(
-            f"Only the first {public_context.max_planets} planets are evaluated."
+            f"Only the first {public_context.max_planets} planets are included in the fit."
         )
     warnings.append(
         "The returned candidate contains effective clipped parameters and jitter (minimum 0.1 m/s)."
@@ -1077,7 +1077,7 @@ class PublicRV:
     def diagnostics(self, planets, noise_jitter_ms=0.1, *, rv_offset_ms=None):
         """Return validator scalars plus planet_model_ms, model_ms, residuals_ms.
 
-        None jitter preserves the evaluator's legacy REBOUND estimate. Invalid
+        None jitter preserves the legacy REBOUND estimate. Invalid
         candidates return the same compact errors as validate_fit, without arrays.
         """
         return validate_fit(

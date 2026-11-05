@@ -1,9 +1,8 @@
-"""Host execution for explicitly selected local Corral MD tasks."""
+"""Host execution for the default local Corral MD backend."""
 
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -17,14 +16,12 @@ from corral_md.workspace import ASSET_DIRECTORIES, local_path
 def assets_directory(value: str | Path | None = None) -> Path:
     """Locate assets prepared by modal_app/setup_assets.py --output-dir."""
     configured = value or os.getenv("CORRAL_MD_ASSETS_DIR")
-    # The benchmark controller uses the host path. Docker trials use the same
-    # immutable catalogs baked into the image under a worker-visible /usr tree.
-    image_assets = Path("/usr/local/share/corral-md-assets")
+    # A host-configured path can be absent in Docker. Image copies stay private
+    # to the controller; workers receive only their authorized resource mounts.
+    image_assets = Path("/opt/corral/assets/corral_md")
     if (
-        configured
-        and not Path(configured).expanduser().exists()
-        and image_assets.is_dir()
-    ):
+        not configured or not Path(configured).expanduser().exists()
+    ) and image_assets.is_dir():
         configured = image_assets
     if not configured:
         raise ValueError(
@@ -41,7 +38,7 @@ def assets_directory(value: str | Path | None = None) -> Path:
 
 
 def run_lammps_locally(
-    workspace: str | Path, input_file: str, *, assets_dir: str | Path
+    workspace: str | Path, input_file: str, *, assets_dir: str | Path | None
 ) -> Path:
     """Run the host LAMMPS executable with task paths mapped to host paths."""
     root = Path(workspace).resolve()
@@ -53,34 +50,40 @@ def run_lammps_locally(
         raise FileNotFoundError(
             "Local LAMMPS executable not found; set CORRAL_MD_LAMMPS_BIN"
         )
-    assets = assets_directory(assets_dir)
     output = local_path(root, "/workspace/output", allow_root=True)
     output.mkdir(exist_ok=True)
     log = output / f"{source.stem}.log"
-    # LAMMPS scripts commonly contain public absolute paths. Run a temporary
-    # copy so the original remains an unchanged benchmark artifact.
-    text = source.read_text(encoding="utf-8")
-    text = re.sub(r"(?im)^\s*log\s+[^\n]*$", "", text)
-    for kind in sorted(ASSET_DIRECTORIES):
-        text = text.replace(f"/workspace/{kind}/", f"{assets / kind}/")
-    text = text.replace("/workspace/", f"{root}/")
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        suffix=".in",
-        prefix=".corral-md-",
-        dir=root,
-        delete=False,
-    ) as stream:
-        stream.write(text)
-        temporary = Path(stream.name)
+    # Sandboxes already mount public paths. Preserve source text there; the
+    # explicitly unconfined host fallback retains its existing path translation.
+    temporary = None
+    if root == Path("/workspace"):
+        execution_input = source
+    else:
+        from corral_md.resources import asset_public_path, asset_relative_paths
+
+        assets = assets_directory(assets_dir)
+        text = source.read_text(encoding="utf-8")
+        for relative in asset_relative_paths().values():
+            text = text.replace(asset_public_path(relative), str(assets / relative))
+        text = text.replace("/workspace/", f"{root}/")
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".in",
+            prefix=".corral-md-",
+            dir=root,
+            delete=False,
+        ) as stream:
+            stream.write(text)
+            temporary = Path(stream.name)
+        execution_input = temporary
     try:
         with (
             tempfile.TemporaryFile() as stdout_stream,
             tempfile.TemporaryFile() as stderr_stream,
         ):
             process = subprocess.Popen(
-                [executable, "-in", str(temporary), "-log", str(log)],
+                [executable, "-in", str(execution_input), "-log", str(log)],
                 cwd=root,
                 stdin=subprocess.DEVNULL,
                 stdout=stdout_stream,
@@ -107,7 +110,8 @@ def run_lammps_locally(
             stderr_stream.seek(max(0, stderr_stream.tell() - 4000))
             error_tail = stderr_stream.read().decode("utf-8", errors="replace")
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     if timed_out:
         raise TimeoutError("LAMMPS exceeded its 7200-second local timeout")
     if process.returncode:

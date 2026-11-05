@@ -149,24 +149,30 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
     trials_by_report: dict[str, list[dict[str, str]]] = {}
     seen: set[str] = set()
     overrides = {}
+    session_overrides = {}
     for report in reports:
         rel = report.relative_to(env_dir).as_posix()
         ids = {r["execution_id"] for r in trials if r["report_file"] == rel}
-        overrides.update(build_index.trace_overrides(report, ids))
+        session_override, report_overrides = build_index.langfuse_overrides(report, ids)
+        session_overrides[rel] = session_override
+        overrides.update(report_overrides)
     for row in trials:
         execution_id = row["execution_id"]
         row_where = f"{where}/trials.csv {execution_id}"
         if execution_id in seen:
             problems.add(row_where, "duplicate execution_id")
         seen.add(execution_id)
-        session = build_index.session_id(execution_id, row["run_id"])
+        session = session_overrides.get(row["report_file"]) or build_index.session_id(
+            execution_id, row["run_id"]
+        )
         trace = overrides.get(
             execution_id,
             hashlib.sha256(f"corral:{execution_id}".encode()).hexdigest()[:32],
         )
         if row["langfuse_session_id"] != session:
             problems.add(
-                row_where, "langfuse_session_id must be the run part of execution_id"
+                row_where,
+                "langfuse_session_id must match its recorded override or execution run",
             )
         if row["langfuse_trace_id"] != trace:
             problems.add(
@@ -187,8 +193,11 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
                 f"{run['tasks']} tasks x {run['trials_per_task']} trials needs {expected} "
                 f"trials; runs.csv says {run['trials']}, trials.csv has {count}",
             )
-        if run["langfuse_session_url"] != build_index.session_url(run["run_id"]):
-            problems.add(run_where, "langfuse_session_url does not match run_id")
+        session = session_overrides.get(run["report_file"]) or run["run_id"]
+        if run["langfuse_session_url"] != build_index.session_url(session):
+            problems.add(
+                run_where, "langfuse_session_url does not match its override or run_id"
+            )
 
     # The CSVs must be exactly what build_index.py produces from the reports.
     runs_by_file = {r["report_file"]: r for r in runs}
