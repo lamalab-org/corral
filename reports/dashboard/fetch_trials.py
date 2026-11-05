@@ -1,13 +1,13 @@
 """Download every environment's trials.csv from the corral GitHub repository.
 
-The benchmark reports live on the ``report_audit`` branch. This fetches
+The benchmark reports live on ``main``. This fetches
 ``reports/<environment>/trials.csv`` for each environment there into a local
 folder with the same layout, so ``build_dashboard.py --reports <folder>`` can
 build the dashboard on a branch that does not carry the reports.
 
 Run from the repository root:
     python reports/dashboard/fetch_trials.py --dest _data/reports
-    python reports/dashboard/fetch_trials.py --dest _data/reports --ref main
+    python reports/dashboard/fetch_trials.py --dest _data/reports --ref <branch>
 
 Uses only the standard library. Set GITHUB_TOKEN to raise the API rate limit.
 """
@@ -57,8 +57,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--ref",
-        default="report_audit",
-        help="branch, tag or commit to read (default: report_audit)",
+        default="main",
+        help="branch, tag or commit to read (default: main)",
     )
     parser.add_argument(
         "--repo", default=REPO, help=f"GitHub repository (default: {REPO})"

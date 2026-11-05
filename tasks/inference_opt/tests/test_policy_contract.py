@@ -100,6 +100,10 @@ class TestManifest:
         with pytest.raises(PolicyError, match="unknown key"):
             manifest_from_mapping({"memory": "shared"})
 
+    def test_invalid_execution_value(self):
+        with pytest.raises(PolicyError, match="unknown key"):
+            manifest_from_mapping({"execution": "whenever"})
+
     def test_concurrent_can_be_disabled(self):
         assert manifest_from_mapping({"concurrent": False}).concurrent is False
 
@@ -116,10 +120,6 @@ class TestManifest:
             "proposer",
         ]
         assert manifest.components[1].kind == "sampler"
-
-    def test_invalid_execution_value(self):
-        with pytest.raises(PolicyError, match="unknown key"):
-            manifest_from_mapping({"execution": "whenever"})
 
     def test_object_manifest_beats_module_manifest(self, tmp_path):
         root = write_policy(

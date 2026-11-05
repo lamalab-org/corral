@@ -219,6 +219,25 @@ def _open_directory(path: str | Path | int) -> int:
         raise
 
 
+def _use_local_workspace_io() -> bool:
+    """Use portable path operations only outside the privileged boundary."""
+    flags_available = all(
+        hasattr(os, name)
+        for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK", "fchmod")
+    )
+    if enabled():
+        if not flags_available:
+            raise RuntimeError(
+                "Docker permission enforcement requires Unix filesystem APIs"
+            )
+        return False
+    return not (
+        flags_available
+        and {os.open, os.mkdir} <= os.supports_dir_fd
+        and os.listdir in os.supports_fd
+    )
+
+
 def _entries(directory: int, prefix: str = ""):
     """Open entries relative to pinned directory FDs; never follow a link."""
     for name in sorted(os.listdir(directory)):
@@ -258,7 +277,11 @@ def _entries(directory: int, prefix: str = ""):
 def copy_workspace(
     source: str | Path | int, destination: str | Path | int
 ) -> list[str]:
-    """Copy authorized workspace data without a privileged symlink race."""
+    """Copy task files, using pinned descriptors for privileged operations."""
+    if _use_local_workspace_io():
+        from corral.runtime.local_workspaces import copy_local_workspace
+
+        return copy_local_workspace(source, destination)
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     source_fd = _open_directory(source)
     try:
@@ -322,6 +345,10 @@ def copy_workspace(
 
 def create_node_workspace(parent: str, source: str) -> str:
     """Allocate a sibling node directory and copy only its parent's task files."""
+    if _use_local_workspace_io():
+        from corral.runtime.local_workspaces import create_local_node_workspace
+
+        return create_local_node_workspace(parent, source)
     parent_path = Path(os.path.abspath(parent))  # noqa: PTH100 - do not follow links
     source_path = Path(os.path.abspath(source))  # noqa: PTH100 - do not follow links
     if not source_path.is_relative_to(parent_path):
@@ -538,6 +565,11 @@ def drop_privileges(
                 "LANG",
                 "LC_ALL",
                 "LD_LIBRARY_PATH",
+                # Retain the launcher's GPU assignment across tool workers.
+                "CUDA_VISIBLE_DEVICES",
+                "CUDA_HOME",
+                "CUDA_PATH",
+                "NVIDIA_VISIBLE_DEVICES",
                 # Numeric libraries may be imported only after this boundary.
                 # Keep resource controls while stripping provider credentials.
                 "OPENBLAS_NUM_THREADS",

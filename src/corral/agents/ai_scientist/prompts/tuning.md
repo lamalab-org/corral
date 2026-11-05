@@ -18,7 +18,7 @@ Existing child experiments from this checkpoint:
 Proposal slots in this expansion:
 {{proposal_slots}}
 
-Execution-relative workspaces, one per proposal in proposal order:
+Public workspaces, one per isolated proposal in proposal order:
 {{branch_workspaces}}
 
 All reliable evidence:
@@ -27,4 +27,11 @@ All reliable evidence:
 Allowed tools:
 {{tools}}
 
-Vary only meaningful parameters identified in the formulation or justified by observations. If the formulation lists no explicit tunable parameter, optimize a meaningful experimental or procedural choice such as sampling, controls, measurement settings, or analysis thresholds. Define one experiment goal and observable success criteria, and state what comparison the change enables. Do not repeat an existing child, and make requested slots materially different parameter comparisons. Do not precompute tool actions. A bounded worker will choose up to {{max_actions}} listed-tool actions one at a time from actual observations. Keep output paths relative to the assigned trial workspace. Return exactly {{count}} proposal(s) when possible.
+Vary only meaningful parameters identified in the formulation or justified by observations.
+If the formulation lists no explicit tunable parameter, optimize a meaningful experimental or procedural choice such as sampling, controls, measurement settings, or analysis thresholds.
+Define one experiment goal and observable success criteria, and state what comparison the change enables.
+Do not repeat an existing child, and make requested slots materially different parameter comparisons.
+Do not precompute tool actions.
+A bounded worker will choose up to {{max_actions}} listed-tool actions one at a time from actual observations.
+Follow the task environment's public path contract for all output paths.
+Return exactly {{count}} proposal(s) when possible.

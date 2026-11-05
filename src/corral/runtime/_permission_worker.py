@@ -86,7 +86,14 @@ def main() -> None:
         from corral.workspace import AbsoluteWorkspaceFilesystem, build_workspace_tools
 
         name, arguments = payload
-        tools = build_workspace_tools(AbsoluteWorkspaceFilesystem("/workspace"))
+        tools = build_workspace_tools(
+            AbsoluteWorkspaceFilesystem(
+                "/workspace",
+                resource_paths={
+                    public: public for _, public in resource_mounts.values()
+                },
+            )
+        )
         try:
             tool = tools[name]
         except KeyError as exc:

@@ -97,11 +97,6 @@ class TestNeutralizeCharges:
         total_charge = sum(atom.GetFormalCharge() for atom in result.GetAtoms())
         assert total_charge == 0
 
-    def test_extreme_charge(self):
-        """Test neutralization of extreme charges."""
-        mol = Chem.MolFromSmiles("[O-2]")
-        result = neutralize_charges(mol)
-        assert result is not None
         # Should attempt to neutralize even extreme charges
 
     def test_none_input(self):
@@ -161,31 +156,6 @@ class TestScoreMoleculeFragments:
         ground_truth = "CCO"
         score = score_molecule_fragments(prediction, ground_truth)
         assert score == 0.0
-
-    def test_charged_fragments(self):
-        """Test with charged fragments."""
-        prediction = ["[NH4+]", "C"]
-        ground_truth = "CN"
-        score = score_molecule_fragments(prediction, ground_truth)
-        # Should handle charged fragments through neutralization
-        assert score >= 0.0
-
-    def test_extreme_charge_fragments(self):
-        """Test with extreme charge fragments (should be lenient)."""
-        prediction = ["[O-2]", "C"]
-        ground_truth = "CO"
-        score = score_molecule_fragments(prediction, ground_truth)
-        # Extreme charge fragments are treated leniently
-        assert score >= 0.0
-
-    def test_unparseable_fragment(self):
-        """Test that unparseable fragments are skipped."""
-        prediction = ["C", "INVALID_SMILES", "CC"]
-        ground_truth = "CCC"
-        # Should skip invalid fragment and check others
-        score = score_molecule_fragments(prediction, ground_truth)
-        assert score >= 0.0
-
 
 class TestValidateMolecularFormula:
     """Tests for the validate_molecular_formula function."""

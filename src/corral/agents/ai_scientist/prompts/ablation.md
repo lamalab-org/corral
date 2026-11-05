@@ -18,7 +18,7 @@ Existing child experiments from this checkpoint:
 Proposal slot in this expansion:
 {{proposal_slots}}
 
-Execution-relative workspace:
+Public workspace for this isolated proposal:
 {{branch_workspaces}}
 
 Global research journal:
@@ -27,4 +27,12 @@ Global research journal:
 Allowed tools:
 {{tools}}
 
-For ABLATION, remove or change an assumption carrying the conclusion. For REPLICATION, independently repeat the decisive measurement. For COUNTERFACTUAL, seek an observation that would falsify the current conclusion. For AGGREGATION, define an experiment goal that reconciles repeated or conflicting evidence already in the journal and requires no environment action. For every other type, define one experiment goal and observable success criteria. Do not repeat an existing child experiment from this checkpoint. Do not precompute tool actions. A bounded worker will choose up to {{max_actions}} listed-tool actions adaptively. Keep output paths relative to the assigned trial workspace.
+For ABLATION, remove or change an assumption carrying the conclusion.
+For REPLICATION, independently repeat the decisive measurement.
+For COUNTERFACTUAL, seek an observation that would falsify the current conclusion.
+For AGGREGATION, define an experiment goal that reconciles repeated or conflicting evidence already in the journal and requires no environment action.
+For every other type, define one experiment goal and observable success criteria.
+Do not repeat an existing child experiment from this checkpoint.
+Do not precompute tool actions.
+A bounded worker will choose up to {{max_actions}} listed-tool actions adaptively.
+Follow the task environment's public path contract for all output paths.

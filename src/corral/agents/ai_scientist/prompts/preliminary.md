@@ -18,7 +18,7 @@ Existing child experiments from this checkpoint:
 Proposal slots in this expansion:
 {{proposal_slots}}
 
-Execution-relative workspaces, one per proposal in proposal order:
+Public workspaces, one per isolated proposal in proposal order:
 {{branch_workspaces}}
 
 Research journal:
@@ -27,4 +27,11 @@ Research journal:
 Allowed tools:
 {{tools}}
 
-Each proposal must define one scientifically distinct experiment: its hypothesis, rationale, experiment goal, and observable success criteria. Do not repeat an existing child experiment, and make every requested proposal slot materially different from the other slots in hypothesis or measurement. Do not precompute tool actions. A bounded worker will choose up to {{max_actions}} actions one at a time after observing each result. The experiment must be executable using only the listed tools. When outputs are needed, keep their paths relative to the assigned trial workspace. A DEBUG proposal must diagnose the parent's actual failure; a REFINE proposal must improve a successful route. Return exactly {{count}} proposal(s) when possible.
+Each proposal must define one scientifically distinct experiment: its hypothesis, rationale, experiment goal, and observable success criteria.
+Do not repeat an existing child experiment, and make every requested proposal slot materially different from the other slots in hypothesis or measurement.
+Do not precompute tool actions.
+A bounded worker will choose up to {{max_actions}} actions one at a time after observing each result.
+The experiment must be executable using only the listed tools.
+Follow the task environment's public path contract for all output paths.
+A DEBUG proposal must diagnose the parent's actual failure; a REFINE proposal must improve a successful route.
+Return exactly {{count}} proposal(s) when possible.

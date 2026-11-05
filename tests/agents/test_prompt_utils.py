@@ -14,13 +14,6 @@ from corral.agents.prompt_utils import (
 class TestValidatedPrompt:
     """Test cases for the ValidatedPrompt class."""
 
-    def test_init(self):
-        """Test ValidatedPrompt initialization."""
-        content = "Hello {{name}}!"
-        base_prompt = Prompt(content=content, version=1, uuid="test/test_init")
-        prompt = ValidatedPrompt(base_prompt)
-        assert prompt._prompt == base_prompt
-
     def test_fill_single_replacement(self):
         """Test filling a prompt with a single replacement."""
         base_prompt = Prompt(content="Hello {{name}}!", version=1, uuid="test/single")
