@@ -28,6 +28,7 @@ from corral.core.events import (
     ExecutionFailed,
     SubmissionAccepted,
 )
+from corral.core.transition import is_surrender_answer, surrender_enabled
 from corral.observability import (
     LoggingObserver,
     Observation,
@@ -281,11 +282,8 @@ class TaskRuntime:
                             requested_by_run_id=agent_actor.run_id,
                             answer=accepted["answer"],
                             surrendered=(
-                                bool(
-                                    current.task.scaffold.get("enable_surrender", False)
-                                )
-                                and accepted["answer"]
-                                == current.runtime.metadata.get("surrender_sentinel")
+                                surrender_enabled(current)
+                                and is_surrender_answer(current, accepted["answer"])
                             ),
                         ),
                     ),

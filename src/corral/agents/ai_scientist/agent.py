@@ -35,7 +35,12 @@ from corral.agents.ai_scientist.workers.experimenter import Experimenter
 from corral.agents.ai_scientist.workers.planner import NodePlanner, TaskFormulator
 from corral.agents.ai_scientist.workers.synthesizer import FinalSynthesizer
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
-from corral.agents.schema import AgentOutcome, AgentUsage, BudgetExhaustedError
+from corral.agents.schema import (
+    SURRENDER_SENTINEL,
+    AgentOutcome,
+    AgentUsage,
+    BudgetExhaustedError,
+)
 from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.utils import llm_call
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
@@ -52,6 +57,14 @@ the supplied Corral tool schemas. Never invent observations, never use a
 benchmark score as evidence, and distinguish measured facts from hypotheses.
 Return the requested structured object without Markdown or surrounding prose.
 """.strip()
+
+# The synthesizer writes a structured answer rather than calling tools, so the
+# tool-calling surrender prompt does not apply verbatim.
+_SCIENTIST_SURRENDER_INSTRUCTIONS = (
+    "If the collected evidence cannot support any answer and the task is "
+    "genuinely unsolvable, you may surrender: set final_answer to exactly "
+    f"{SURRENDER_SENTINEL}."
+)
 
 _TRACE_NODE_ID = re.compile(r"node_\d+")
 _TRACE_LABEL_HYPOTHESIS_CHARS = 96
@@ -255,6 +268,13 @@ class AIScientistAgent(BaseAgent):
             temperature=temperature,
             **kwargs,
         )
+
+    def _surrender_instructions(self, session: AgentSession) -> str:
+        if not session.surrender_allowed:
+            return ""
+        if self.surrender_prompt is not None:
+            return self.surrender_prompt.fill({})
+        return _SCIENTIST_SURRENDER_INSTRUCTIONS
 
     @staticmethod
     def _search_snapshot(state: ScientistState) -> dict[str, Any]:
@@ -500,6 +520,7 @@ class AIScientistAgent(BaseAgent):
                 journal_context=state.journal.context(config.max_journal_chars),
                 best_nodes=state.best_nodes,
                 canonical_workspace=state.artifact_destination_workspace,
+                surrender_instructions=self._surrender_instructions(session),
             )
             if promotion is not None:
                 answer = answer.replace(
@@ -639,11 +660,17 @@ class AIScientistAgent(BaseAgent):
                 usage=usage,
                 metadata=metadata,
             )
+        surrendered = (
+            session.surrender_allowed
+            and answer.casefold() == SURRENDER_SENTINEL.casefold()
+        )
+        if surrendered:
+            answer = SURRENDER_SENTINEL
         await session.set_agent_state(
             _SCIENTIST_STATE_NAMESPACE,
             {
                 **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
-                "status": "completed",
+                "status": "surrendered" if surrendered else "completed",
                 "error": None,
             },
         )
@@ -670,6 +697,8 @@ class AIScientistAgent(BaseAgent):
                 usage=usage,
                 metadata=metadata,
             )
+        if surrendered:
+            return AgentOutcome(status="surrendered", usage=usage, metadata=metadata)
         return AgentOutcome(
             status="completed",
             answer=answer,

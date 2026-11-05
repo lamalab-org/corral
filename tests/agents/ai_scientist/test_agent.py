@@ -49,7 +49,14 @@ def anyio_backend():
     return "asyncio"
 
 
-async def make_session(calls, *, max_iterations=64, agent=None, workspace_root=None):
+async def make_session(
+    calls,
+    *,
+    max_iterations=64,
+    agent=None,
+    workspace_root=None,
+    enable_surrender=False,
+):
     def measure(value: int) -> str:
         """Return a measurement."""
         calls.append(value)
@@ -76,6 +83,7 @@ async def make_session(calls, *, max_iterations=64, agent=None, workspace_root=N
         max_iterations=max_iterations,
         actor_id="agent_0",
         agent=agent,
+        enable_surrender=enable_surrender,
     )
     if workspace_root is not None:
         environment.base_work_dir = str(workspace_root)
@@ -381,6 +389,42 @@ async def test_ai_scientist_maps_harness_result_to_outcome(monkeypatch):
     scientist_state = session.get_agent_state("ai_scientist")
     assert scientist_state is not None
     assert scientist_state["status"] == "completed"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("enable_surrender", [False, True])
+async def test_ai_scientist_surrender_follows_launch_opt_in(
+    monkeypatch, enable_surrender
+):
+    agent = AIScientistAgent(model="test-model")
+    session = await make_session([], enable_surrender=enable_surrender)
+    monkeypatch.setattr(
+        agent,
+        "_execute_session",
+        lambda _session, _owner, _portal: ("surrender", AgentUsage(), {}),
+    )
+
+    outcome = await agent.run_session(session)
+
+    if enable_surrender:
+        assert outcome.status == "surrendered"
+        assert session.submission_status == "surrendered"
+        assert session.get_agent_state("ai_scientist")["status"] == "surrendered"
+    else:
+        assert outcome.status == "protocol_failure"
+        assert "surrender is disabled" in (outcome.error or "")
+        assert session.submission is None
+
+
+@pytest.mark.parametrize("enable_surrender", [False, True])
+def test_ai_scientist_advertises_surrender_only_when_enabled(enable_surrender):
+    class Session:
+        surrender_allowed = enable_surrender
+
+    instructions = AIScientistAgent(model="test-model")._surrender_instructions(
+        Session()
+    )
+    assert ("SURRENDER" in instructions) is enable_surrender
 
 
 @pytest.mark.anyio

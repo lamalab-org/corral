@@ -789,7 +789,15 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
             "Per-task trial budget; default: 100 for AI Scientist, 50 for other agents."
         ),
     )
-    agent.add_argument("--enable-surrender", action="store_true")
+    agent.add_argument(
+        "--enable-surrender",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Allow the agent to give up by submitting SURRENDER "
+            "(default: disabled; --no-enable-surrender disables it explicitly)."
+        ),
+    )
 
 
 def _add_execution_arguments(

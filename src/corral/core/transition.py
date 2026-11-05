@@ -29,6 +29,23 @@ HIDDEN_ARGUMENTS_NAMESPACE = "hidden_arguments"
 CORRAL_ACTION_ID_ARGUMENT = "corral_action_id"
 
 
+def surrender_enabled(state: ExecutionState) -> bool:
+    """Whether the launch opted this task into surrender."""
+    return bool(state.task.scaffold.get("enable_surrender", False))
+
+
+def is_surrender_answer(state: ExecutionState, answer: str) -> bool:
+    """Match the runtime surrender sentinel the same way every agent does.
+
+    Agents compare case-insensitively, so the runtime must as well; otherwise
+    an agent could report a surrender the runtime records as a scored answer.
+    """
+    sentinel = state.runtime.metadata.get("surrender_sentinel")
+    return bool(sentinel) and (
+        answer.strip().casefold() == str(sentinel).strip().casefold()
+    )
+
+
 class ToolRecoveryPending(RuntimeError):
     """Suspend execution while leaving this tool's durable action resumable.
 
@@ -171,9 +188,7 @@ def execute_action(
             content: Any = (
                 "submit_answer requires exactly one string argument named 'answer'"
             )
-        elif answer == state.runtime.metadata.get(
-            "surrender_sentinel"
-        ) and not state.task.scaffold.get("enable_surrender", False):
+        elif is_surrender_answer(state, answer) and not surrender_enabled(state):
             status = ToolCallStatus.EXECUTION_ERROR
             content = "surrender is disabled for this task"
         else:

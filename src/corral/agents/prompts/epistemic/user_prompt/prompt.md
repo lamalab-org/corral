@@ -49,4 +49,4 @@ unconstructive pattern remains, the answer is held. Address the feedback through
 validation, revision, or an evidence-grounded correction of the assessment, then
 call `submit_answer` again. An empty report does not establish correctness.
 
-**`{{surrender_instructions}}`**
+{{surrender_instructions}}

@@ -21,3 +21,4 @@ in the exact form requested by the task (prefer a canonical `/workspace/...` pat
 never report a disposable branch-workspace path.
 Do not write a paper, abstract, methods section, citations, review, or Markdown
 wrapper. Put that exact answer in the final_answer field.
+{{surrender_instructions}}

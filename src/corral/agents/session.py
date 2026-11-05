@@ -43,7 +43,9 @@ from corral.core.transition import (
     ToolEffects,
     ToolRecoveryPending,
     execute_action,
+    is_surrender_answer,
     propose_action,
+    surrender_enabled,
 )
 from corral.observability import record_commit_safely
 from corral.persistence import CommitConflictError
@@ -474,7 +476,7 @@ class AgentSession:
 
     @property
     def surrender_allowed(self) -> bool:
-        return bool(self.state.task.scaffold.get("enable_surrender", False))
+        return surrender_enabled(self.state)
 
     @property
     def submission(self) -> str | None:
@@ -782,10 +784,9 @@ class AgentSession:
         if trusted.is_submission and effects.success:
             answer = trusted.arguments["answer"]
             assert isinstance(answer, str)
-            surrendered = bool(
-                self.surrender_allowed
-                and self.state.runtime.metadata.get("surrender_sentinel")
-            ) and answer == str(self.state.runtime.metadata["surrender_sentinel"])
+            surrendered = self.surrender_allowed and is_surrender_answer(
+                self.state, answer
+            )
             accepted = await self._append_runtime(
                 SubmissionAccepted(
                     action_id=trusted.id,
