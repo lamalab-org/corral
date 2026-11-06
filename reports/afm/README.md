@@ -1,15 +1,13 @@
 # AFM benchmark reports
 
-14 runs and 675 trials imported from the supplied `runs` folder. Thirteen runs
-cover 10 tasks × 5 trials. The Level 1 AI Scientist run covers only tasks 1–5
-(5 tasks × 5 trials); it is a partial benchmark and is not directly comparable
-to the full-level runs.
+14 runs, each covering 10 tasks × 5 trials: 700 trials total.
+The Level 1 AI Scientist report combines the separate tasks 1–5 and 6–10 runs.
 
 Layout and indexes follow [`../README.md`](../README.md).
 
 | Level | Agent | Model | Tasks | Passes | Error trials | Average score |
 |---|---|---|---:|---:|---:|---:|
-| 1 | ai-scientist | claude-opus-5-5 | 5 | 23/25 | 1 | 0.92 |
+| 1 | ai-scientist | claude-opus-5-5 | 10 | 48/50 | 1 | 0.96 |
 | 1 | claude-code | claude-opus-5-5 | 10 | 47/50 | 0 | 0.94 |
 | 1 | codex | gpt-5.6-sol | 10 | 47/50 | 0 | 0.94 |
 | 1 | openhands | kimi-k3 | 10 | 43/50 | 1 | 0.86 |
@@ -27,10 +25,22 @@ Layout and indexes follow [`../README.md`](../README.md).
 ## Provenance and limitations
 
 These reports replace the previous AFM report collection. Compression is lossless:
-original report bytes, metrics, task results, execution IDs and run IDs are preserved.
-No trials were rescored, removed or substituted. Each run includes its original
-`run-metadata.json` and a `provenance.json` mapping to the source folder with SHA-256
-hashes of both source files. Previous reports remain in Git history.
+original bytes are preserved for the thirteen unmerged reports. No trials were
+rescored, removed or substituted. Their original `run-metadata.json` files and
+`provenance.json` source hashes accompany them. Previous reports remain in Git history.
+
+The Level 1 AI Scientist report merges `opus-ai-1-5` and `apus-ai-6-10`.
+All task results and trial objects remain unchanged. Aggregate metrics were
+recalculated with Corral’s metric registry after verifying it reproduces both
+source reports. Its duration is the sum of the two run durations, excluding the
+gap between runs. Source hashes, launcher metadata and original report metadata
+are recorded in `provenance.json`; the combined launcher metadata is explicitly
+marked as a composition.
+
+`afm-opus-aiscientist-l1-combined-001` is a synthetic report ID, not a Langfuse
+session. Trial execution IDs and their source session references are preserved.
+The generated run-level session link for this synthetic ID does not represent
+an uploaded session; use trial-level links for the two original sessions.
 
 Saved failures remain included. Error counts describe saved terminal errors; they
 do not establish whether a failure was caused by the agent or infrastructure.
