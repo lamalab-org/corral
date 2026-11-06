@@ -44,6 +44,7 @@ class DockerSandboxSpec:
         "AZURE_OPENAI_API_KEY",
         "AZURE_OPENAI_ENDPOINT",
         "CORRAL_LANGFUSE_ENABLED",
+        "CORRAL_LANGFUSE_SESSION_ID",
         "HF_TOKEN",
         "LANGFUSE_BASE_URL",
         "LANGFUSE_HOST",

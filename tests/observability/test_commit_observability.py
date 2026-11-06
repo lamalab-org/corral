@@ -365,6 +365,16 @@ def test_repeated_observers_share_the_sdk_exporter(observer):
     }
 
 
+def test_session_id_override_groups_runs(observer, monkeypatch):
+    _, exporter, _ = observer
+    monkeypatch.setenv("CORRAL_LANGFUSE_SESSION_ID", "merged-run")
+    grouped = LangfuseObserver()
+    _record(grouped, _events(), execution_id="grouped")
+    spans = exporter.get_finished_spans()
+    assert spans
+    assert {span.attributes["session.id"] for span in spans} == {"merged-run"}
+
+
 @pytest.mark.parametrize("cut", [4, 5, 6, 7, 8])
 def test_resume_recovers_unexported_generation_without_replaying_history(observer, cut):
     instance, exporter, _ = observer
