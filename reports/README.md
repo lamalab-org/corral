@@ -26,14 +26,16 @@ push scripts refuse to put runs whose ID contains `-mini-` into a repo without
 `mini` in its name, or the reverse:
 
 ```bash
-python scripts/push_october_reports_to_hf.py --env=psychometrics --only_env \
+python scripts/push_october_reports_to_hf.py --env=psychometrics,wetlab --only_env \
     --repo=jablonkagroup/corral-reports-mini-v1
-python scripts/push_october_summary_to_hf.py --env=psychometrics \
+python scripts/push_october_summary_to_hf.py --env=psychometrics,wetlab \
     --repo=jablonkagroup/corral-reports-mini-v1-summary
 ```
 
-Wetlab is pushed the same way with `--env=wetlab`. `--env` limits each push to
-that environment, so other environments already in the mini datasets are kept.
+List every environment with mini runs. The shared tables (`runs`, and the
+summary's `runs`, `tasks` and `trials`) are rebuilt from the listed
+environments and replaced as a whole, so the scripts refuse a mini push that
+leaves one out.
 
 The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).
