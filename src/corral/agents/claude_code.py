@@ -763,6 +763,28 @@ class ClaudeCodeAgent:
         exc: Exception,
         run: _RunState,
     ) -> AgentOutcome:
+        if (
+            isinstance(exc, _HarnessError)
+            and exc.subtype == "error_max_turns"
+            and session.submission is not None
+        ):
+            # The last allowed model response may have already submitted through
+            # MCP. Keep that durable submission even if the SDK wanted another
+            # model response to produce a text-only final answer.
+            return AgentOutcome(
+                status=(
+                    "surrendered"
+                    if session.submission_status == "surrendered"
+                    else "completed"
+                ),
+                answer=(
+                    None
+                    if session.submission_status == "surrendered"
+                    else session.submission
+                ),
+                usage=self._run_usage(run),
+                metadata=dict(run.metadata),
+            )
         if isinstance(exc, TimeoutError):
             status = "timeout"
             error = f"harness timed out after {self.wall_clock_timeout_s}s"
