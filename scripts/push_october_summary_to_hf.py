@@ -37,6 +37,7 @@ from huggingface_hub import HfApi
 from loguru import logger
 from push_october_reports_to_hf import (
     ENVIRONMENTS,
+    check_target,
     REPORTS_DIR,
     WORKSPACE,
     _load_report,
@@ -106,9 +107,11 @@ def _pass_metrics(metrics: dict, prefix: str) -> dict[str, float | None]:
     return out
 
 
-def _collect() -> tuple[list[dict], list[dict], list[dict]]:
+def _collect(
+    envs: tuple[str, ...] = ENVIRONMENTS,
+) -> tuple[list[dict], list[dict], list[dict]]:
     runs, tasks, trials = [], [], []
-    for env in ENVIRONMENTS:
+    for env in envs:
         env_dir = REPORTS_DIR / env
         index = {row["execution_id"]: row for row in _read_csv(env_dir / "trials.csv")}
         for run in _read_csv(env_dir / "runs.csv"):
@@ -208,15 +211,26 @@ def _collect() -> tuple[list[dict], list[dict], list[dict]]:
     return runs, tasks, trials
 
 
-def main(dry_run: bool = False, public: bool = False, repo: str = HF_REPO) -> None:
+def main(
+    dry_run: bool = False,
+    public: bool = False,
+    repo: str = HF_REPO,
+    env: str | None = None,
+) -> None:
     """Push the runs, tasks and trials summary tables.
 
     Args:
+        env: Summarize only this environment (for repos that hold one
+            environment, such as the corral-mini datasets).
         dry_run: Build the tables and log their sizes without pushing.
         public: Create the dataset repo public instead of private. Has no
             effect if the repo already exists.
         repo: Target dataset repo.
     """
+    if env is not None and env not in ENVIRONMENTS:
+        raise SystemExit(f"ERROR: Unknown environment '{env}'")
+    envs = ENVIRONMENTS if env is None else (env,)
+    check_target(repo, envs)
     if not dry_run:
         if not HF_TOKEN:
             raise SystemExit("ERROR: HF_TOKEN is not set (add it to .env)")
@@ -225,7 +239,7 @@ def main(dry_run: bool = False, public: bool = False, repo: str = HF_REPO) -> No
         )
 
     logger.info("Reading reports …")
-    runs, tasks, trials = _collect()
+    runs, tasks, trials = _collect(envs)
     for config_name, rows in (("runs", runs), ("tasks", tasks), ("trials", trials)):
         dataset = Dataset.from_list(rows)
         logger.info(

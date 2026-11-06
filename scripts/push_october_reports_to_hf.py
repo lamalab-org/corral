@@ -21,6 +21,10 @@ python scripts/push_october_reports_to_hf.py --dry_run
 # Push everything (the dataset repo is created private if it does not exist)
 python scripts/push_october_reports_to_hf.py
 
+# corral-mini runs go to their own repo, never to the October one
+python scripts/push_october_reports_to_hf.py --env=psychometrics --only_env \
+    --repo=jablonkagroup/corral-reports-mini-v1
+
 # Push only some configs (plus `runs`, which is always pushed)
 python scripts/push_october_reports_to_hf.py --env=psychometrics --level=2
 python scripts/push_october_reports_to_hf.py --runs_only
@@ -175,9 +179,29 @@ def _trial_dataset(env: str, level: int, cache_dir: str) -> Dataset:
     )
 
 
-def _runs_dataset() -> Dataset:
+MINI_RUN_PREFIX = "-mini-"
+
+
+def check_target(repo: str, envs: tuple[str, ...]) -> None:
+    """Refuse to mix corral-mini runs and other runs in one dataset repo.
+
+    corral-mini runs (run IDs containing ``-mini-``) only go to a repo with
+    ``mini`` in its name, and other runs never do, so a push cannot
+    overwrite the October datasets with mini runs or the reverse.
+    """
+    mini_repo = "mini" in repo.rsplit("/", 1)[-1]
+    for env in envs:
+        for row in _read_csv(REPORTS_DIR / env / "runs.csv"):
+            if (MINI_RUN_PREFIX in row["run_id"]) != mini_repo:
+                raise SystemExit(
+                    f"ERROR: {env} run {row['run_id']!r} does not belong in {repo}; "
+                    "corral-mini runs go only to a repo with 'mini' in its name"
+                )
+
+
+def _runs_dataset(envs: tuple[str, ...] = ENVIRONMENTS) -> Dataset:
     rows = []
-    for env in ENVIRONMENTS:
+    for env in envs:
         for row in _read_csv(REPORTS_DIR / env / "runs.csv"):
             for key in (
                 "level",
@@ -203,11 +227,14 @@ def main(
     dry_run: bool = False,
     public: bool = False,
     repo: str = HF_REPO,
+    only_env: bool = False,
 ) -> None:
     """Push the October reports as one config per environment and level.
 
     Args:
         env: Push only this environment (a folder under reports/).
+        only_env: Restrict the `runs` config to `env` as well (for repos that
+            hold one environment, such as the corral-mini datasets).
         level: Push only this level.
         runs_only: Push only the `runs` config.
         dry_run: Build the configs and log their sizes without pushing.
@@ -219,6 +246,10 @@ def main(
         raise SystemExit(
             f"ERROR: Unknown environment '{env}', expected one of {ENVIRONMENTS}"
         )
+    if only_env and env is None:
+        raise SystemExit("ERROR: --only_env needs --env")
+    runs_envs = (env,) if only_env else ENVIRONMENTS
+    check_target(repo, runs_envs if env is None else tuple(dict.fromkeys((env, *runs_envs))))
     if not dry_run:
         if not HF_TOKEN:
             raise SystemExit("ERROR: HF_TOKEN is not set (add it to .env)")
@@ -246,7 +277,7 @@ def main(
         for config_name, env_name, level_number in configs:
             logger.info(f"Building config '{config_name}' …")
             dataset = (
-                _runs_dataset()
+                _runs_dataset(runs_envs)
                 if env_name is None
                 else _trial_dataset(env_name, level_number, cache)
             )
