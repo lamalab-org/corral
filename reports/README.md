@@ -13,24 +13,29 @@ same layout, names and index files, so runs can be compared across them.
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
 | Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
-| Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
+| Wetlab (corral-mini v1; October full runs in `archive/`) | [`wetlab/`](wetlab/) | `mini-1-psychom` | 36 | 540 |
 
-All nine environments together have **130 runs and 6,220 trials**. Each
+All nine environments together have **152 runs and 6,060 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
-Psychometrics now holds the corral-mini v1 runs, which are published to their
+Psychometrics and wetlab now hold the corral-mini v1 runs, which are published to their
 own Hugging Face datasets, `jablonkagroup/corral-reports-mini-v1` and
 `jablonkagroup/corral-reports-mini-v1-summary`, not to the October ones. The
 push scripts refuse to put runs whose ID contains `-mini-` into a repo without
 `mini` in its name, or the reverse:
 
 ```bash
-python scripts/push_october_reports_to_hf.py --env=psychometrics --only_env \
+python scripts/push_october_reports_to_hf.py --env=psychometrics,wetlab --only_env \
     --repo=jablonkagroup/corral-reports-mini-v1
-python scripts/push_october_summary_to_hf.py --env=psychometrics \
+python scripts/push_october_summary_to_hf.py --env=psychometrics,wetlab \
     --repo=jablonkagroup/corral-reports-mini-v1-summary
 ```
+
+List every environment with mini runs. The shared tables (`runs`, and the
+summary's `runs`, `tasks` and `trials`) are rebuilt from the listed
+environments and replaced as a whole, so the scripts refuse a mini push that
+leaves one out.
 
 The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).

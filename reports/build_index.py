@@ -64,6 +64,11 @@ MODELS = {
     "kimi-k2-0905": ("kimi-k2-0905", "openrouter/moonshotai/kimi-k2-0905"),
     "gpt-6.1-sol": ("gpt-6.1-sol", "openai/gpt-6.1-sol"),
     "gpt-5-2025-08-07": ("gpt-5-2025-08-07", "openai/gpt-5-2025-08-07"),
+    "claude-opus-4-7": ("claude-opus-4-7", "anthropic/claude-opus-4-7"),
+    "claude-opus-4-5-20251101": (
+        "claude-opus-4-5-20251101",
+        "anthropic/claude-opus-4-5-20251101",
+    ),
 }
 
 RUN_FIELDS = [
