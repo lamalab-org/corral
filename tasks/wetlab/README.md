@@ -47,3 +47,19 @@ python -m wetlab.env --level 2 --subtask True
 - The Conda environment depends on `reaktoro`, so using Conda or Mamba is the intended installation path.
 - The package constructs one environment definition per task.
 - Inventory state is captured in Corral State; scoring is performed separately by the evaluation layer.
+
+## Shared inventory for branching agents
+
+WetLab samples and the solutions made from them are finite. By default, Corral
+copies the inventory when an agent forks a branch. For agents such as AI Scientist,
+run the environment with `--env-kwargs '{"level": 1, "shared_inventory": true}'`
+so all branches in one trial draw from the same physical inventory. The option is
+off by default for compatibility; enable it in comparisons where agents must have
+the same sample limit. A single-session agent has the same available material
+as with the ordinary inventory.
+
+Each successful WetLab tool call reads and updates the trial inventory under a
+lock. Failed calls leave it unchanged. Branches can still keep separate reasoning
+histories, but cloning a branch does not replenish a sample or a product. Labels
+for newly made solutions and precipitates must be unique across the trial. The
+shared inventory is carried into the next WetLab subtask after submission.

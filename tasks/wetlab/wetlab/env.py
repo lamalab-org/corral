@@ -2,7 +2,9 @@
 
 import argparse
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -17,6 +19,11 @@ from wetlab.engine import (
     WetlabState,
 )
 from wetlab.score import none_checker, score_ion_list, score_salt
+from wetlab.shared_inventory import (
+    InventoryTransaction,
+    SharedInventory,
+    inventory_path,
+)
 from wetlab.tools import create_tools
 
 from corral.core import EnvironmentResourceAdapter
@@ -24,6 +31,7 @@ from corral.core.environment import Environment, Toolset, build_environments
 from corral.core.events import TaskConfigured, WorkspaceDelta
 from corral.core.state import ExecutionState, TaskOutput
 from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
+from corral.core.tool import Tool
 from corral.core.transition import environment_operations
 from corral.report.logging import event, exception_fields
 
@@ -32,6 +40,10 @@ SCORING_FUNCTIONS = {
     "score_ion_list": score_ion_list,
     "score_salt": score_salt,
 }
+
+_active_inventory: ContextVar[InventoryTransaction | None] = ContextVar(
+    "wetlab_active_inventory", default=None
+)
 
 BASIC_REAGENTS = {
     "Water": StockSolution(composition={}, description="Distilled water"),
@@ -297,6 +309,9 @@ class WetlabResourceAdapter(EnvironmentResourceAdapter):
     """Restore and capture WetLab's durable JSON chemistry checkpoint."""
 
     def restore(self, state: Any) -> object:
+        transaction = _active_inventory.get()
+        if transaction is not None:
+            state = transaction.inventory
         if not isinstance(state, Mapping):
             raise TypeError("Wetlab resource state must be an object")
         wetlab_state = WetlabState.from_dict(state)
@@ -306,7 +321,11 @@ class WetlabResourceAdapter(EnvironmentResourceAdapter):
     def capture(self, runtime: object) -> Any:
         if not isinstance(runtime, WetlabInventory):
             raise TypeError("Wetlab resource runtime must be a WetlabInventory")
-        return runtime.engine.snapshot(runtime).to_dict()
+        snapshot = runtime.engine.snapshot(runtime).to_dict()
+        transaction = _active_inventory.get()
+        if transaction is not None:
+            transaction.commit(snapshot)
+        return snapshot
 
 
 class QualitativeAnalysisEnvironment(Environment):
@@ -324,9 +343,68 @@ class QualitativeAnalysisEnvironment(Environment):
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.shared_inventory = bool(kwargs.pop("shared_inventory", False))
         adapters = dict(kwargs.pop("resource_adapters", {}) or {})
         adapters.setdefault("wetlab", WetlabResourceAdapter())
         super().__init__(*args, resource_adapters=adapters, **kwargs)
+
+    def for_task(self, task_execution_id: str, **kwargs: Any) -> Environment:
+        bound = super().for_task(task_execution_id, **kwargs)
+        bound.shared_inventory = self.shared_inventory
+        return bound
+
+    def _shared_store(self) -> SharedInventory:
+        if not self.workspace_path:
+            raise RuntimeError("Shared WetLab inventory requires a bound workspace")
+        return SharedInventory(inventory_path(self.workspace_path))
+
+    @contextmanager
+    def execution_guard(self, tool: Tool) -> Iterator[None]:
+        with super().execution_guard(tool):
+            if not self.shared_inventory or "wetlab" not in tool.resources:
+                yield
+                return
+            with self._shared_store().transaction() as transaction:
+                token = _active_inventory.set(transaction)
+                try:
+                    yield
+                finally:
+                    _active_inventory.reset(token)
+
+    def execute_controller_tool(self, state: ExecutionState, prepared: Any) -> Any:
+        transaction = _active_inventory.get()
+        if transaction is None or "wetlab" not in prepared.resources:
+            return super().execute_controller_tool(state, prepared)
+        action_key = f"{state.branch_id}:{prepared.action_id}"
+        if action_key in transaction.actions:
+            return transaction.actions[action_key]
+
+        inventory = prepared.stateful["wetlab"]
+        if prepared.tool_name in {
+            "mix_two_solutions",
+            "add_a_solution",
+            "add_precipitate_to_solution",
+        }:
+            label = prepared.visible_arguments["test_label"]
+            if label in inventory:
+                raise ValueError(f"Inventory label {label!r} already exists")
+        elif prepared.tool_name == "filter_solution":
+            label = prepared.visible_arguments["label"]
+            if (
+                label in inventory
+                and getattr(inventory[label], "has_precipitate", False)
+                and any(
+                    f"{label}_{suffix}" in inventory
+                    for suffix in ("filtrate", "precipitate")
+                )
+            ):
+                raise ValueError(
+                    f"Filtered inventory labels for {label!r} already exist"
+                )
+
+        result = super().execute_controller_tool(state, prepared)
+        transaction.record(action_key, result)
+        return result
 
     def _state_for_configuration(self, state: ExecutionState) -> WetlabState:
         """Resolve the initial or latest upstream inventory from ExecutionState."""
@@ -364,6 +442,8 @@ class QualitativeAnalysisEnvironment(Environment):
     def configure(self, state: ExecutionState) -> TaskConfigured:
         """Build configuration effects for the task's structured chemistry snapshot."""
         wetlab_state = self._state_for_configuration(state)
+        if self.shared_inventory:
+            self._shared_store().initialize(wetlab_state.to_dict())
         event(
             "DEBUG",
             "environment.configuration_completed",
@@ -446,7 +526,11 @@ class QualitativeAnalysisEnvironment(Environment):
         output = super().get_task_output(state)
         if output is None:
             return None
-        wetlab_state = self._wetlab_from_state(state)
+        wetlab_state = (
+            WetlabState.from_dict(self._shared_store().read())
+            if self.shared_inventory
+            else self._wetlab_from_state(state)
+        )
         return TaskOutput(
             output=output.output,
             metadata={**dict(output.metadata), "wetlab": wetlab_state.to_dict()},
@@ -457,6 +541,7 @@ def create_qualysis_environments(
     level: int = 2,
     subtask: bool = False,
     work_dir: str = "",
+    shared_inventory: bool = False,
 ) -> dict[str, Environment]:
     """Create WetLab environments with optional per-execution scratch workspaces."""
     started = perf_counter()
@@ -494,6 +579,8 @@ def create_qualysis_environments(
             ),
             env_cls=QualitativeAnalysisEnvironment,
         )
+        for environment in environments.values():
+            environment.shared_inventory = shared_inventory
     except Exception as exc:
         event(
             "ERROR",
