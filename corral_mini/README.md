@@ -4,11 +4,11 @@ A small, reproducible subset of the Corral benchmark: the same number of
 tasks, *k*, from each environment/level, chosen from the final reports.
 
 **Released: corral-mini v1**, Rank + cost with k = 3, 54 tasks
-([`corral_mini_v1.json`](../src/corral/subsets/corral_mini_v1.json)). The 16
-levels with report data use Rank + cost. AFM has no report data yet, so its
-two levels get 3 tasks drawn at random with seed 0. Levels without report
-data in other environments (e.g. wetlab L1, retrosynthesis L1, samplemath)
-are not part of the mini.
+([`corral_mini_v1.json`](../src/corral/subsets/corral_mini_v1.json)). All 18
+levels with report data use Rank + cost. AFM's two levels use the November
+2026 reports, with 3 tasks selected per level. The other 16 levels retain
+their original v1 selections. Levels without report data in other environments
+(e.g. wetlab L1, retrosynthesis L1, samplemath) are not part of the mini.
 
 ## Run the mini
 
@@ -29,10 +29,10 @@ metadata records the subset (`task_subset`), and mini run IDs contain
 
 ## Build a release
 
-Releases are written once and never edited. When reports change (e.g. AFM
-results arrive), drop AFM from `EXCLUDED_ENVIRONMENTS` in
-`scripts/corral_mini_common.py` and build a new version; older versions stay
-available for reproducing earlier runs.
+The AFM selection in v1 was updated when its reports arrived. Its report
+source is recorded separately in the manifest; the original Hugging Face
+source still describes the other environments. The build script refuses to
+overwrite existing releases.
 
 Pin the Hugging Face summary dataset by its full commit hash (v1 source:
 `6d8dc71d6bcc3a3c6c76a28609f4f4a510ea2dd8`). Add `--tasks-parquet PATH` to
