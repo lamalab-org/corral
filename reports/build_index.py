@@ -58,6 +58,17 @@ MODELS = {
     "claude-opus-5-5": ("claude-opus-5-5", "anthropic/claude-opus-5-5"),
     "gpt-5.6-sol": ("gpt-5.6-sol", "openai/gpt-5.6-sol"),
     "kimi-k3": ("kimi-k3", "openrouter/moonshotai/kimi-k3"),
+    # corral-mini v1
+    "claude-opus-4-7": ("claude-opus-4-7", "anthropic/claude-opus-4-7"),
+    "claude-opus-4-5-20251101": (
+        "claude-opus-4-5-20251101",
+        "anthropic/claude-opus-4-5-20251101",
+    ),
+    "gpt-6.1-sol": ("gpt-6.1-sol", "openai/gpt-6.1-sol"),
+    "gpt-5-2025-08-07": ("gpt-5-2025-08-07", "openai/gpt-5-2025-08-07"),
+    "kimi-k3.1-pro": ("kimi-k3.1-pro", "openrouter/moonshotai/kimi-k3.1-pro"),
+    "kimi-k2.5": ("kimi-k2.5", "openrouter/moonshotai/kimi-k2.5"),
+    "kimi-k2-0905": ("kimi-k2-0905", "openrouter/moonshotai/kimi-k2-0905"),
 }
 
 RUN_FIELDS = [

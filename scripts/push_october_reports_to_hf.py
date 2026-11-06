@@ -1,8 +1,15 @@
 """
-Push the standardized October benchmark reports to HuggingFace Hub.
+Push the standardized benchmark reports to HuggingFace Hub.
 
-Reads the final reports under `reports/<environment>/` (see `reports/README.md`)
-and pushes them to `jablonkagroup/corral-reports-october-runs-v1`:
+Reads the final reports of one collection and pushes them to its dataset.
+`CORRAL_REPORTS_COLLECTION` picks the collection (see `REPORT_COLLECTIONS` in
+constants.py):
+
+- `mini` (default): `reports/<environment>/` → `jablonkagroup/corral-reports-mini-runs-v1`
+- `october`: `reports/archive/october-v1/<environment>/` →
+  `jablonkagroup/corral-reports-october-runs-v1`
+
+The dataset has
 
 - one config per environment and level, e.g. `inference_opt-level_1`, with one
   row per final trial: the trial's index fields from `trials.csv` (scores,
@@ -21,6 +28,9 @@ python scripts/push_october_reports_to_hf.py --dry_run
 # Push everything (the dataset repo is created private if it does not exist)
 python scripts/push_october_reports_to_hf.py
 
+# Re-push the archived October reports
+CORRAL_REPORTS_COLLECTION=october python scripts/push_october_reports_to_hf.py
+
 # Push only some configs (plus `runs`, which is always pushed)
 python scripts/push_october_reports_to_hf.py --env=psychometrics --level=2
 python scripts/push_october_reports_to_hf.py --runs_only
@@ -37,15 +47,21 @@ from pathlib import Path
 from typing import Any
 
 import fire
-from constants import HF_REPO_OCTOBER_REPORTS as HF_REPO
+from constants import REPORT_COLLECTIONS
 from datasets import Dataset, Features, Value
 from dotenv import load_dotenv
 from huggingface_hub import HfApi
 from loguru import logger
 
 WORKSPACE = Path(__file__).resolve().parent.parent
-REPORTS_DIR = WORKSPACE / "reports"
-# Every folder under reports/ with a runs.csv is an environment.
+COLLECTION = os.getenv("CORRAL_REPORTS_COLLECTION", "mini")
+if COLLECTION not in REPORT_COLLECTIONS:
+    raise SystemExit(
+        f"CORRAL_REPORTS_COLLECTION must be one of {sorted(REPORT_COLLECTIONS)}"
+    )
+_FOLDER, HF_REPO, HF_REPO_SUMMARY = REPORT_COLLECTIONS[COLLECTION]
+REPORTS_DIR = WORKSPACE / _FOLDER
+# Every folder in the collection with a runs.csv is an environment.
 ENVIRONMENTS = tuple(sorted(p.parent.name for p in REPORTS_DIR.glob("*/runs.csv")))
 
 load_dotenv(dotenv_path=WORKSPACE / ".env")
@@ -204,17 +220,19 @@ def main(
     public: bool = False,
     repo: str = HF_REPO,
 ) -> None:
-    """Push the October reports as one config per environment and level.
+    """Push the collection's reports as one config per environment and level.
 
     Args:
-        env: Push only this environment (a folder under reports/).
+        env: Push only this environment (a folder in the collection).
         level: Push only this level.
         runs_only: Push only the `runs` config.
         dry_run: Build the configs and log their sizes without pushing.
         public: Create the dataset repo public instead of private. Has no
             effect if the repo already exists.
-        repo: Target dataset repo.
+        repo: Target dataset repo (default: the collection's).
     """
+    if repo != HF_REPO:
+        logger.warning(f"Pushing {COLLECTION} reports to {repo}, not {HF_REPO}")
     if env is not None and env not in ENVIRONMENTS:
         raise SystemExit(
             f"ERROR: Unknown environment '{env}', expected one of {ENVIRONMENTS}"
@@ -242,7 +260,7 @@ def main(
 
     # A fresh cache per run: datasets keys generator caches on code and
     # arguments, not on the report files, so a reused cache could be stale.
-    with tempfile.TemporaryDirectory(prefix="corral-october-reports-") as cache:
+    with tempfile.TemporaryDirectory(prefix=f"corral-{COLLECTION}-reports-") as cache:
         for config_name, env_name, level_number in configs:
             logger.info(f"Building config '{config_name}' …")
             dataset = (

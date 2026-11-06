@@ -23,7 +23,8 @@ import sys
 from pathlib import Path
 
 REPORTS_DIR = Path(__file__).resolve().parent
-# The agent and model pairs every environment runs, in display order.
+# Display order: native agent, then ReAct, by model family. Pairs not listed
+# here follow in alphabetical order; only pairs with runs are shown.
 PAIRS = (
     ("ai-scientist", "claude-opus-5-5"),
     ("claude-code", "claude-opus-5-5"),
@@ -46,9 +47,9 @@ def read_runs(env_dir: Path) -> list[dict]:
 
 
 def pairs(runs: list[dict]) -> list[tuple[str, str]]:
-    """The standard pairs, then any other pair found in the runs."""
+    """The standard pairs that have runs, then any other pair found."""
     found = {(r["agent"], r["model"]) for r in runs}
-    return [*PAIRS, *sorted(found - set(PAIRS))]
+    return [p for p in PAIRS if p in found] + sorted(found - set(PAIRS))
 
 
 def levels(runs: list[dict]) -> list[str]:

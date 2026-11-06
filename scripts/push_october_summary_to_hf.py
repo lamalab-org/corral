@@ -1,9 +1,12 @@
 """
-Push a plotting-friendly summary of the October benchmark reports to HuggingFace Hub.
+Push a plotting-friendly summary of the benchmark reports to HuggingFace Hub.
 
-Reads the final reports under `reports/<environment>/` (see `reports/README.md`)
-and pushes three flat tables, without trial transcripts, to
-`jablonkagroup/corral-reports-october-runs-summary-v1`:
+Reads the final reports of one collection and pushes three flat tables, without
+trial transcripts, to its summary dataset. `CORRAL_REPORTS_COLLECTION` picks the
+collection, as in push_october_reports_to_hf.py: `mini` (default, `reports/` →
+`jablonkagroup/corral-reports-mini-runs-summary-v1`) or `october`
+(`reports/archive/october-v1/` → `jablonkagroup/corral-reports-october-runs-summary-v1`).
+The tables are:
 
 - `runs`: one row per run (environment x level x agent x model) with scores,
   pass@k / pass^k for k = 1..5, error counts, durations and token usage;
@@ -14,7 +17,7 @@ and pushes three flat tables, without trial transcripts, to
 
 All tables share `environment`, `level`, `agent`, `model` and `run_id`, so they
 can be grouped, filtered and joined directly. The full trials with messages are
-in `jablonkagroup/corral-reports-october-runs-v1` (push_october_reports_to_hf.py).
+in the collection's full dataset (push_october_reports_to_hf.py).
 
 Usage
 -----
@@ -30,18 +33,21 @@ import re
 from typing import Any
 
 import fire
-from constants import HF_REPO_OCTOBER_SUMMARY as HF_REPO
 from datasets import Dataset
 from dotenv import load_dotenv
 from huggingface_hub import HfApi
 from loguru import logger
 from push_october_reports_to_hf import (
+    COLLECTION,
     ENVIRONMENTS,
     REPORTS_DIR,
     WORKSPACE,
     _load_report,
     _optional,
     _read_csv,
+)
+from push_october_reports_to_hf import (
+    HF_REPO_SUMMARY as HF_REPO,
 )
 
 load_dotenv(dotenv_path=WORKSPACE / ".env")
@@ -192,7 +198,9 @@ def _collect() -> tuple[list[dict], list[dict], list[dict]]:
                     "wall_clock_s": metrics.get("total_benchmark_duration"),
                     **_usage(metrics.get("Total Token Usage"), "total_"),
                     "generated_at": run["generated_at"],
-                    "report_file": f"reports/{env}/{run['report_file']}",
+                    "report_file": (env_dir / run["report_file"])
+                    .relative_to(WORKSPACE)
+                    .as_posix(),
                     "report_sha256": run["report_sha256"],
                     "langfuse_session_url": run["langfuse_session_url"],
                 }
@@ -215,8 +223,10 @@ def main(dry_run: bool = False, public: bool = False, repo: str = HF_REPO) -> No
         dry_run: Build the tables and log their sizes without pushing.
         public: Create the dataset repo public instead of private. Has no
             effect if the repo already exists.
-        repo: Target dataset repo.
+        repo: Target dataset repo (default: the collection's).
     """
+    if repo != HF_REPO:
+        logger.warning(f"Pushing {COLLECTION} summary to {repo}, not {HF_REPO}")
     if not dry_run:
         if not HF_TOKEN:
             raise SystemExit("ERROR: HF_TOKEN is not set (add it to .env)")
