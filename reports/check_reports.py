@@ -33,8 +33,23 @@ sys.path.insert(0, str(REPORTS_DIR))
 
 import build_index  # noqa: E402
 
-FULL_REPO = "jablonkagroup/corral-reports-october-runs-v1"
-SUMMARY_REPO = "jablonkagroup/corral-reports-october-runs-summary-v1"
+# Report collections: folder and the Hugging Face datasets it is published to.
+# `reports/` holds the current (corral-mini) reports; earlier collections are
+# archived under `reports/archive/`.
+COLLECTIONS = {
+    "mini": (
+        REPORTS_DIR,
+        "jablonkagroup/corral-reports-mini-runs-v1",
+        "jablonkagroup/corral-reports-mini-runs-summary-v1",
+    ),
+    "october": (
+        REPORTS_DIR / "archive" / "october-v1",
+        "jablonkagroup/corral-reports-october-runs-v1",
+        "jablonkagroup/corral-reports-october-runs-summary-v1",
+    ),
+}
+COLLECTION_ROOT, FULL_REPO, SUMMARY_REPO = COLLECTIONS["mini"]
+NOT_ENVIRONMENTS = {"archive", "dashboard", "figures"}
 
 AGENTS = sorted(set(build_index.AGENTS.values()))
 MODELS = sorted(slug for slug, _ in build_index.MODELS.values())
@@ -58,8 +73,10 @@ class Problems(list):
 def environments() -> list[Path]:
     return sorted(
         p
-        for p in REPORTS_DIR.iterdir()
-        if p.is_dir() and p.name != "figures" and not p.name.startswith((".", "_"))
+        for p in COLLECTION_ROOT.iterdir()
+        if p.is_dir()
+        and p.name not in NOT_ENVIRONMENTS
+        and not p.name.startswith((".", "_"))
     )
 
 
@@ -337,7 +354,15 @@ def main() -> int:
     parser.add_argument(
         "--hf", action="store_true", help="also check the Hugging Face datasets"
     )
+    parser.add_argument(
+        "--collection",
+        choices=sorted(COLLECTIONS),
+        default="mini",
+        help="which report collection to check (default: mini, in reports/)",
+    )
     args = parser.parse_args()
+    global COLLECTION_ROOT, FULL_REPO, SUMMARY_REPO
+    COLLECTION_ROOT, FULL_REPO, SUMMARY_REPO = COLLECTIONS[args.collection]
 
     problems = Problems()
     warnings = Problems()

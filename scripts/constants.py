@@ -14,6 +14,23 @@ HF_REPO_OCTOBER_REPORTS = "jablonkagroup/corral-reports-october-runs-v1"
 # push_october_summary_to_hf
 HF_REPO_OCTOBER_SUMMARY = "jablonkagroup/corral-reports-october-runs-summary-v1"
 
+# corral-mini reports (reports/), pushed by the same two scripts
+HF_REPO_MINI_REPORTS = "jablonkagroup/corral-reports-mini-runs-v1"
+HF_REPO_MINI_SUMMARY = "jablonkagroup/corral-reports-mini-runs-summary-v1"
+
+# Report collections for push_october_reports_to_hf / push_october_summary_to_hf,
+# selected with CORRAL_REPORTS_COLLECTION: (folder under the repository root,
+# full dataset, summary dataset). Each collection only ever pushes its own
+# folder to its own datasets, so the mini reports cannot overwrite October's.
+REPORT_COLLECTIONS = {
+    "mini": ("reports", HF_REPO_MINI_REPORTS, HF_REPO_MINI_SUMMARY),
+    "october": (
+        "reports/archive/october-v1",
+        HF_REPO_OCTOBER_REPORTS,
+        HF_REPO_OCTOBER_SUMMARY,
+    ),
+}
+
 # push_qa_to_hf
 HF_REPO_QA_REPORTS = "jablonkagroup/corral-QAs-reports"
 HF_REPO_QA_TOPIC = "jablonkagroup/corral-QAs-topic_reports"
