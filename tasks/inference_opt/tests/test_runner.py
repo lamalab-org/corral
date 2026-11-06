@@ -92,6 +92,31 @@ def _gold_policy(benchmark: str, wrong: set[str] = frozenset()) -> str:
     )
 
 
+def test_local_policy_host_preserves_thread_limits_without_credentials(tmp_path, monkeypatch):
+    for name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        monkeypatch.setenv(name, "2")
+    monkeypatch.setenv("OPENAI_API_KEY", "private-test-value")
+    workspace, runs = _run(
+        tmp_path,
+        "import json, os\n"
+        "class Policy:\n"
+        "    def run(self, questions, ctx):\n"
+        "        keys = ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENAI_API_KEY')\n"
+        "        with open('thread_env.json', 'w') as stream:\n"
+        "            json.dump({key: os.environ.get(key) for key in keys}, stream)\n"
+        "        for question in questions:\n"
+        "            ctx.answer(question.id, 'ANSWER: A')\n",
+        n=1,
+    )
+    assert runs["m"].error == ""
+    assert json.loads((workspace / "thread_env.json").read_text()) == {
+        "OPENBLAS_NUM_THREADS": "2",
+        "OMP_NUM_THREADS": "2",
+        "MKL_NUM_THREADS": "2",
+        "OPENAI_API_KEY": None,
+    }
+
+
 class TestGrading:
     def test_answers_are_graded_against_the_labels(self, tmp_path):
         wrong = {_items()[1].item_id}
