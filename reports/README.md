@@ -11,24 +11,24 @@ same layout, names and index files, so runs can be compared across them.
 | Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
-| Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
+| Spectra elucidation (corral-mini v1, batch 1; October full runs in `archive/`) | [`spectra_elucidation/`](spectra_elucidation/) | `mini-1-psychom` | 12 | 180 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab (corral-mini v1; October full runs in `archive/`) | [`wetlab/`](wetlab/) | `mini-1-psychom` | 36 | 540 |
 
-All nine environments together have **152 runs and 6,060 trials**. Each
+All nine environments together have **150 runs and 4,840 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
-Psychometrics and wetlab now hold the corral-mini v1 runs, which are published to their
+Psychometrics, wetlab and spectra elucidation now hold the corral-mini v1 runs, which are published to their
 own Hugging Face datasets, `jablonkagroup/corral-reports-mini-v1` and
 `jablonkagroup/corral-reports-mini-v1-summary`, not to the October ones. The
 push scripts refuse to put runs whose ID contains `-mini-` into a repo without
 `mini` in its name, or the reverse:
 
 ```bash
-python scripts/push_october_reports_to_hf.py --env=psychometrics,wetlab --only_env \
+python scripts/push_october_reports_to_hf.py --env=psychometrics,spectra_elucidation,wetlab --only_env \
     --repo=jablonkagroup/corral-reports-mini-v1
-python scripts/push_october_summary_to_hf.py --env=psychometrics,wetlab \
+python scripts/push_october_summary_to_hf.py --env=psychometrics,spectra_elucidation,wetlab \
     --repo=jablonkagroup/corral-reports-mini-v1-summary
 ```
 

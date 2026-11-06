@@ -26,7 +26,7 @@ python scripts/push_october_summary_to_hf.py
 
 # corral-mini summary: list every environment with mini runs; each table is
 # replaced as a whole, so a single environment would drop the others
-python scripts/push_october_summary_to_hf.py --env=psychometrics,wetlab \
+python scripts/push_october_summary_to_hf.py --env=psychometrics,spectra_elucidation,wetlab \
     --repo=jablonkagroup/corral-reports-mini-v1-summary
 """
 
