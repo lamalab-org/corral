@@ -52,6 +52,7 @@ class DockerSandboxSpec:
         "LANGFUSE_TRACING_ENABLED",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
+        "OPENROUTER_API_KEY",
     )
     retention: str = SandboxRetention.ON_FAILURE.value
     registry_module: str | None = None
