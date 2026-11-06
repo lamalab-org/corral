@@ -7,7 +7,7 @@ same layout, names and index files, so runs can be compared across them.
 |---|---|---|---:|---:|
 | AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
-| Psychometrics | [`psychometrics/`](psychometrics/) | `psychometric_hint_cleanup_clean` | 14 | 700 |
+| Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
 | Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
@@ -15,9 +15,22 @@ same layout, names and index files, so runs can be compared across them.
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
 
-All nine environments together have **116 runs and 6,500 trials**. Each
+All nine environments together have **130 runs and 6,220 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
+
+Psychometrics now holds the corral-mini v1 runs, which are published to their
+own Hugging Face datasets, `jablonkagroup/corral-reports-mini-v1` and
+`jablonkagroup/corral-reports-mini-v1-summary`, not to the October ones. The
+push scripts refuse to put runs whose ID contains `-mini-` into a repo without
+`mini` in its name, or the reverse:
+
+```bash
+python scripts/push_october_reports_to_hf.py --env=psychometrics --only_env \
+    --repo=jablonkagroup/corral-reports-mini-v1
+python scripts/push_october_summary_to_hf.py --env=psychometrics \
+    --repo=jablonkagroup/corral-reports-mini-v1-summary
+```
 
 The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).
