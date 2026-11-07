@@ -8,27 +8,27 @@ same layout, names and index files, so runs can be compared across them.
 | AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
-| Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
+| Resistor network (corral-mini v1, batch 1 without Claude; v4 runs in `archive/`) | [`resistor_network/`](resistor_network/) | `mini-1-psychom` | 8 | 120 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
 | Spectra elucidation (corral-mini v1, batch 1; October full runs in `archive/`) | [`spectra_elucidation/`](spectra_elucidation/) | `mini-1-psychom` | 12 | 180 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab (corral-mini v1; October full runs in `archive/`) | [`wetlab/`](wetlab/) | `mini-1-psychom` | 36 | 540 |
 
-All nine environments together have **150 runs and 4,840 trials**. Each
+All nine environments together have **144 runs and 4,260 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
-Psychometrics, wetlab and spectra elucidation now hold the corral-mini v1 runs, which are published to their
+Psychometrics, resistor network, spectra elucidation and wetlab now hold the corral-mini v1 runs, which are published to their
 own Hugging Face datasets, `jablonkagroup/corral-reports-mini-v1` and
 `jablonkagroup/corral-reports-mini-v1-summary`, not to the October ones. The
 push scripts refuse to put runs whose ID contains `-mini-` into a repo without
 `mini` in its name, or the reverse:
 
 ```bash
-python scripts/push_october_reports_to_hf.py --env=psychometrics,spectra_elucidation,wetlab --only_env \
+python scripts/push_october_reports_to_hf.py --env=psychometrics,resistor_network,spectra_elucidation,wetlab --only_env \
     --repo=jablonkagroup/corral-reports-mini-v1
-python scripts/push_october_summary_to_hf.py --env=psychometrics,spectra_elucidation,wetlab \
+python scripts/push_october_summary_to_hf.py --env=psychometrics,resistor_network,spectra_elucidation,wetlab \
     --repo=jablonkagroup/corral-reports-mini-v1-summary
 ```
 
