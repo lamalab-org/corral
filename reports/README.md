@@ -16,7 +16,7 @@ Langfuse IDs.
 
 | Environment | Folder | Runs | Trials |
 |---|---|---:|---:|
-| Corral MD | [`corral_md/`](corral_md/) | 8 | 120 |
+| Corral MD | [`corral_md/`](corral_md/) | 26 | 390 |
 
 ## Layout
 

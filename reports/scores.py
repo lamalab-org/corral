@@ -26,12 +26,28 @@ REPORTS_DIR = Path(__file__).resolve().parent
 # Display order: native agent, then ReAct, by model family. Pairs not listed
 # here follow in alphabetical order; only pairs with runs are shown.
 PAIRS = (
-    ("ai-scientist", "claude-opus-5-5"),
+    # corral-mini v1: by family, newest model first, native agent then ReAct
     ("claude-code", "claude-opus-5-5"),
-    ("codex", "gpt-5.6-sol"),
-    ("openhands", "kimi-k3"),
     ("react", "claude-opus-5-5"),
+    ("claude-code", "claude-opus-4-7"),
+    ("react", "claude-opus-4-7"),
+    ("claude-code", "claude-opus-4-5-20251101"),
+    ("react", "claude-opus-4-5-20251101"),
+    ("codex", "gpt-6.1-sol"),
+    ("react", "gpt-6.1-sol"),
+    ("codex", "gpt-5.6-sol"),
     ("react", "gpt-5.6-sol"),
+    ("codex", "gpt-5-2025-08-07"),
+    ("react", "gpt-5-2025-08-07"),
+    ("openhands", "kimi-k3.1-pro"),
+    ("react", "kimi-k3.1-pro"),
+    ("openhands", "kimi-k2.5"),
+    ("react", "kimi-k2.5"),
+    ("openhands", "kimi-k2-0905"),
+    ("react", "kimi-k2-0905"),
+    # October collection
+    ("ai-scientist", "claude-opus-5-5"),
+    ("openhands", "kimi-k3"),
     ("react", "kimi-k3"),
 )
 MISSING = "—"
