@@ -811,7 +811,7 @@ class OpenHandsAgent(BaseAgent):
         )
 
         try:
-            conversation.send_message(prompt)
+            await anyio.to_thread.run_sync(conversation.send_message, prompt)
             await conversation.arun()
             # Fail loudly on a capability leak or a non-clean terminal state
             # (including max-iterations, which OpenHands does not raise for) so
@@ -823,7 +823,7 @@ class OpenHandsAgent(BaseAgent):
             self._record_usage(llm, run)
             run.metadata["num_events"] = len(events)
             try:
-                conversation.close()
+                await anyio.to_thread.run_sync(conversation.close)
             except Exception:
                 logger.warning("Failed to close OpenHands conversation", exc_info=True)
 
