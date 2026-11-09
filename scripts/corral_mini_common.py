@@ -37,7 +37,12 @@ class Stratum:
     solved: np.ndarray  # solved in at least one of five trials, tasks x agents
 
 
-def load(revision: str, tasks_parquet: Path | None, prices_path: Path):
+def load(
+    revision: str,
+    tasks_parquet: Path | None,
+    prices_path: Path,
+    score_column: str = "pass_at_5",
+):
     """Return strata keyed by (environment, level), agent names and source info."""
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("--revision must be a full 40-character commit hash")
@@ -50,6 +55,8 @@ def load(revision: str, tasks_parquet: Path | None, prices_path: Path):
             )
         )
     data = pd.read_parquet(tasks_parquet)
+    if score_column not in {"pass_at_5", "pass_hat_5"}:
+        raise ValueError(f"unknown score column: {score_column}")
     data = data[~data.environment.isin(EXCLUDED_ENVIRONMENTS)].copy()
     if (data.trials != 5).any():
         raise ValueError("expected five trials per task and agent")
@@ -68,7 +75,7 @@ def load(revision: str, tasks_parquet: Path | None, prices_path: Path):
     agents = sorted(data.agent_model.unique())
     strata = {}
     for (environment, level), group in data.groupby(["environment", "level"]):
-        passes = group.pivot_table("pass_at_5", "task_id", "agent_model")
+        passes = group.pivot_table(score_column, "task_id", "agent_model")
         costs = group.pivot_table("usd", "task_id", "agent_model")
         solved = group.pivot_table("passes", "task_id", "agent_model") > 0
         if list(passes.columns) != agents or passes.isna().any().any():
@@ -86,6 +93,37 @@ def load(revision: str, tasks_parquet: Path | None, prices_path: Path):
         "sha256": hashlib.sha256(Path(tasks_parquet).read_bytes()).hexdigest(),
     }
     return dict(sorted(strata.items())), agents, source
+
+
+def load_afm_strata(trials_csv: Path, prices_path: Path, agents: list[str]) -> dict:
+    """Load the newer AFM reports as five-trial Pass^5 strata."""
+    data = pd.read_csv(trials_csv)
+    data["agent_model"] = data.agent + "__" + data.model
+    prices = json.loads(prices_path.read_text())
+    data["usd"] = (
+        data.input_tokens * data.model.map(lambda m: prices[m]["input"])
+        + data.output_tokens * data.model.map(lambda m: prices[m]["output"])
+    ) / 1_000_000
+    grouped = data.groupby(["level", "task_id", "agent_model"], as_index=False).agg(
+        passes=("success", "sum"), trials=("success", "size"), usd=("usd", "sum")
+    )
+    if (grouped.trials != 5).any():
+        raise ValueError("AFM reports must have five trials per task and agent")
+    grouped["pass_hat_5"] = (grouped.passes / 5) ** 5
+    strata = {}
+    for level, group in grouped.groupby("level"):
+        scores = group.pivot_table("pass_hat_5", "task_id", "agent_model")
+        costs = group.pivot_table("usd", "task_id", "agent_model")
+        solved = group.pivot_table("passes", "task_id", "agent_model") > 0
+        if list(scores.columns) != agents or scores.isna().any().any():
+            raise ValueError(f"AFM level {level}: missing agent data")
+        strata[("afm", int(level))] = Stratum(
+            scores.index.to_numpy(),
+            scores.to_numpy(float),
+            costs.to_numpy(float),
+            solved.to_numpy(bool),
+        )
+    return strata
 
 
 @cache
@@ -162,6 +200,40 @@ def select(
     if method in {"cost_aware", "rank_guarded"}:
         order = order[guarded[order]]
     return combos[order[0]]
+
+
+def rank_cost_tie_counts(
+    stratum: Stratum, k: int, agents: np.ndarray, exclude_saturated: bool = True
+) -> dict[str, int]:
+    """Count eligible sets tied at each Rank + cost decision step.
+
+    Matches select(): Spearman is primary, estimated cost is secondary, and
+    mean squared score error is tertiary. Criteria are rounded to 9 decimals.
+    """
+    n = len(stratum.tasks)
+    unsaturated = (
+        ~stratum.solved[:, agents].all(axis=1)
+        if exclude_saturated
+        else np.ones(n, dtype=bool)
+    )
+    must_use = min(k, int(unsaturated.sum()))
+    combos = combinations(n, k)
+    combos = combos[unsaturated[combos].sum(axis=1) == must_use]
+    passes = stratum.passes[:, agents]
+    target = passes.mean(axis=0)
+    mini = passes[combos].mean(axis=1)
+    rho = np.round(row_spearman(mini, target), 9)
+    best_rank = rho == rho.max()
+    costs = np.round(stratum.costs[:, agents].sum(axis=1)[combos].sum(axis=1), 9)
+    best_cost = best_rank & (costs == costs[best_rank].min())
+    mse = np.round(np.mean((mini - target) ** 2, axis=1), 9)
+    best_mse = best_cost & (mse == mse[best_cost].min())
+    return {
+        "eligible_sets": len(combos),
+        "sets_tied_at_best_rank": int(best_rank.sum()),
+        "sets_tied_after_cost": int(best_cost.sum()),
+        "sets_tied_after_score_error": int(best_mse.sum()),
+    }
 
 
 def material_losses(full: np.ndarray, mini: np.ndarray, involving=None) -> int:

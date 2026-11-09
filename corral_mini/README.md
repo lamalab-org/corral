@@ -3,12 +3,13 @@
 A small, reproducible subset of the Corral benchmark: the same number of
 tasks, *k*, from each environment/level, chosen from the final reports.
 
-**Released: corral-mini v1**, Rank + cost with k = 3, 54 tasks
-([`corral_mini_v1.json`](../src/corral/subsets/corral_mini_v1.json)). All 18
-levels with report data use Rank + cost. AFM's two levels use the November
-2026 reports, with 3 tasks selected per level. The other 16 levels retain
-their original v1 selections. Levels without report data in other environments
-(e.g. wetlab L1, retrosynthesis L1, samplemath) are not part of the mini.
+**Released: corral-mini v2**, Rank + cost with Pass^5 and unsaturated tasks
+first, k = 3, 54 tasks
+([`corral_mini_v2.json`](../src/corral/subsets/corral_mini_v2.json)). All 18
+levels use report-based selection; AFM uses its November 2026 reports. The
+original [v1 release](../src/corral/subsets/corral_mini_v1.json) remains
+available by version. Levels without report data in other environments (e.g.
+wetlab L1, retrosynthesis L1, samplemath) are not part of the mini.
 
 ## Run the mini
 
@@ -29,9 +30,8 @@ metadata records the subset (`task_subset`), and mini run IDs contain
 
 ## Build a release
 
-The AFM selection in v1 was updated when its reports arrived. Its report
-source is recorded separately in the manifest; the original Hugging Face
-source still describes the other environments. The build script refuses to
+AFM's report source is recorded separately in the manifest; the pinned Hugging
+Face source describes the other environments. The build script refuses to
 overwrite existing releases.
 
 Pin the Hugging Face summary dataset by its full commit hash (v1 source:
@@ -39,7 +39,7 @@ Pin the Hugging Face summary dataset by its full commit hash (v1 source:
 use a local copy of the `tasks` table.
 
 ```bash
-# 1. Write src/corral/subsets/corral_mini_v<N>.json (defaults: rank_cost, k = 3, seed 0)
+# 1. Write a new release (defaults: rank_cost, Pass^5, unsaturated first, k = 3)
 python scripts/build_corral_mini.py --revision <HASH> --version <N>
 
 # 2. Compare all methods for k = 1..8 -> results.csv, saturation.csv
@@ -53,6 +53,45 @@ uv run --no-project --with "lama-aesthetics @ git+https://github.com/lamalab-org
 ```
 
 ## Methods
+
+**v2 selection.** In each level, choose three tasks. Prefer tasks that at least
+one of the seven observed agents never solved in five trials. If fewer than
+three such tasks exist, fill the remaining slots from saturated tasks. Among
+eligible three-task sets, maximize Spearman correlation between the agents'
+mean Pass^5 scores on the set and on the full level. If several sets share the
+best correlation, choose the one with the lowest estimated cost across the
+seven agents and five trials. If costs also tie, minimize mean squared Pass^5
+score error, then use seed 0 to break any remaining tie. Spearman, cost, and
+score error are rounded to nine decimals before comparing ties.
+
+The [tie audit](rank_cost_pass_hat_5_ties.csv) gives, for every environment and
+level, the number of eligible sets, the number tied at the best rank, and the
+number still tied after cost and score error. Cost resolves every best-rank
+tie in v2; no random tie break was needed. For example, all 120 three-task
+sets in stargazer L2 tie on Pass^5 ranking because every agent scores zero;
+cost picks one of them.
+
+![Rank + cost tie counts by environment and level](figures/rank_cost_pass_hat_5_ties.png)
+
+Regenerate the tie plot with `python scripts/plot_corral_mini_ties.py` in an
+environment with `lama-aesthetics` installed.
+
+![Full versus mini v2 Pass^5 by environment](figures/v2_pass_hat_5_by_environment.png)
+
+The [environment score table](v2_pass_hat_5_by_environment.csv) averages
+Pass^5 across the seven agent/model combinations and gives each reported level
+equal weight. The plot shows full and mini scores; labels at the right show
+mini minus full in percentage points. It can be regenerated with
+`python scripts/plot_corral_mini_v2_scores.py --tasks-parquet PATH`.
+
+![Full versus mini v2 Pass^5 by model and environment](figures/v2_pass_hat_5_by_model_environment.png)
+
+The [model score table](v2_pass_hat_5_by_model_environment.csv) separates the
+three observed models. Each subplot averages that model's agents within each
+level, then gives the environment's reported levels equal weight.
+
+The method comparison below describes the original Pass@5 analysis used for
+v1. The [Pass^5 comparison](#pass5-comparison) describes the v2 criterion.
 
 Each method runs separately in every environment/level. Apart from random,
 each one tries every possible *k*-task combination. Combinations that tie on
@@ -234,3 +273,35 @@ What changes:
   estimates of the full score.
 - **It usually costs more,** up to about 20%, because unsaturated tasks run
   longer.
+
+## Pass^5 comparison
+
+The following figure compares unsaturated-first **Rank + cost** and **Rank +
+score** using task Pass^5 instead of Pass@5 for selection and evaluation. Pass^5
+is `(successful trials / 5)^5` for each agent and task. AFM uses the November
+reports recorded in the v2 manifest; the other environments use the pinned
+October summary table. The Rank + cost point at k = 3 is the v2 selection.
+
+![Pass^5 comparison against estimated cost](figures/pass_hat_5_tradeoffs_vs_cost_unsaturated.png)
+
+The first panel shows mean within-level Spearman. The second counts levels
+where at least one pair involving a held-out model, separated by 0.05 Pass^5
+on the full level, ties or
+reverses on the subset. The third compares the average mini score with the
+average full score as a percentage; dashed lines show the smallest and largest
+percentage change in a level's average score. Stargazer L2 has zero full score,
+so its percentage change is undefined and omitted from that panel. The score
+panel uses a symmetric log scale to show both the mean and large positive
+outliers. Values are in [`results_pass_hat_5_unsaturated.csv`](results_pass_hat_5_unsaturated.csv).
+
+At three tasks per level, Rank + cost has Spearman 0.887, 17 held-out levels
+with an inversion, and a −33.1% average score change. Rank + score has Spearman
+0.887, 17 held-out levels with an inversion, and a −35.3% average score change.
+
+To regenerate the figures from the pinned summary table:
+
+```bash
+uv run --no-project --with pandas --with pyarrow --with scipy --with numpy \
+  --with "lama-aesthetics @ git+https://github.com/lamalab-org/lama-aesthetics@f9aaa7e58b66cd4698ea59a6785c24a841221dd2" \
+  python scripts/plot_corral_mini_pass_hat_5.py --tasks-parquet PATH
+```
