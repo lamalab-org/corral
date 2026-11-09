@@ -21,6 +21,12 @@ python scripts/push_october_reports_to_hf.py --dry_run
 # Push everything (the dataset repo is created private if it does not exist)
 python scripts/push_october_reports_to_hf.py
 
+# corral-mini runs go to their own repo, never to the October one. List every
+# environment with mini runs: `runs` is rebuilt from the listed environments,
+# so a push of one environment alone would drop the others from it.
+python scripts/push_october_reports_to_hf.py --env=inference_opt,psychometrics,resistor_network,spectra_elucidation,wetlab --only_env \
+    --repo=jablonkagroup/corral-reports-mini-v1
+
 # Push only some configs (plus `runs`, which is always pushed)
 python scripts/push_october_reports_to_hf.py --env=psychometrics --level=2
 python scripts/push_october_reports_to_hf.py --runs_only
@@ -175,9 +181,72 @@ def _trial_dataset(env: str, level: int, cache_dir: str) -> Dataset:
     )
 
 
-def _runs_dataset() -> Dataset:
+MINI_RUN_PREFIX = "-mini-"
+
+
+def check_target(repo: str, envs: tuple[str, ...]) -> None:
+    """Refuse to mix corral-mini runs and other runs in one dataset repo.
+
+    corral-mini runs (run IDs containing ``-mini-``) only go to a repo with
+    ``mini`` in its name, and other runs never do, so a push cannot
+    overwrite the October datasets with mini runs or the reverse.
+    """
+    mini_repo = "mini" in repo.rsplit("/", 1)[-1]
+    for env in envs:
+        for row in _read_csv(REPORTS_DIR / env / "runs.csv"):
+            if (MINI_RUN_PREFIX in row["run_id"]) != mini_repo:
+                raise SystemExit(
+                    f"ERROR: {env} run {row['run_id']!r} does not belong in {repo}; "
+                    "corral-mini runs go only to a repo with 'mini' in its name"
+                )
+
+
+def env_list(env: str | tuple[str, ...] | list[str] | None) -> tuple[str, ...] | None:
+    """Normalize --env: one name, a comma-separated list, or a tuple from fire."""
+    if env is None:
+        return None
+    names = env.split(",") if isinstance(env, str) else list(env)
+    names = tuple(dict.fromkeys(n.strip() for n in names if n.strip()))
+    for name in names:
+        if name not in ENVIRONMENTS:
+            raise SystemExit(
+                f"ERROR: Unknown environment '{name}', expected one of {ENVIRONMENTS}"
+            )
+    return names or None
+
+
+def mini_environments() -> tuple[str, ...]:
+    """Environments under reports/ whose runs are corral-mini runs."""
+    return tuple(
+        env
+        for env in ENVIRONMENTS
+        if any(
+            MINI_RUN_PREFIX in r["run_id"]
+            for r in _read_csv(REPORTS_DIR / env / "runs.csv")
+        )
+    )
+
+
+def check_shared_tables(repo: str, envs: tuple[str, ...]) -> None:
+    """Refuse a mini push whose shared tables would drop a mini environment.
+
+    Tables that span environments (`runs`, and the summary's tables) are
+    replaced as a whole on every push, so they must be built from every
+    environment that has corral-mini runs.
+    """
+    if "mini" not in repo.rsplit("/", 1)[-1]:
+        return
+    missing = [e for e in mini_environments() if e not in envs]
+    if missing:
+        raise SystemExit(
+            f"ERROR: pushing to {repo} would drop {missing} from its shared tables; "
+            f"pass every mini environment, e.g. --env={','.join(mini_environments())}"
+        )
+
+
+def _runs_dataset(envs: tuple[str, ...] = ENVIRONMENTS) -> Dataset:
     rows = []
-    for env in ENVIRONMENTS:
+    for env in envs:
         for row in _read_csv(REPORTS_DIR / env / "runs.csv"):
             for key in (
                 "level",
@@ -197,17 +266,22 @@ def _runs_dataset() -> Dataset:
 
 
 def main(
-    env: str | None = None,
+    env: str | tuple[str, ...] | None = None,
     level: int | None = None,
     runs_only: bool = False,
     dry_run: bool = False,
     public: bool = False,
     repo: str = HF_REPO,
+    only_env: bool = False,
 ) -> None:
     """Push the October reports as one config per environment and level.
 
     Args:
-        env: Push only this environment (a folder under reports/).
+        env: Push only these environments (folders under reports/), e.g.
+            `wetlab` or `psychometrics,wetlab`.
+        only_env: Restrict the `runs` config to `env` as well (for the
+            corral-mini datasets). For a mini repo `env` must then list every
+            environment with mini runs, or they would be dropped from `runs`.
         level: Push only this level.
         runs_only: Push only the `runs` config.
         dry_run: Build the configs and log their sizes without pushing.
@@ -215,10 +289,14 @@ def main(
             effect if the repo already exists.
         repo: Target dataset repo.
     """
-    if env is not None and env not in ENVIRONMENTS:
-        raise SystemExit(
-            f"ERROR: Unknown environment '{env}', expected one of {ENVIRONMENTS}"
-        )
+    envs = env_list(env)
+    if only_env and envs is None:
+        raise SystemExit("ERROR: --only_env needs --env")
+    runs_envs = envs if only_env else ENVIRONMENTS
+    check_target(
+        repo, runs_envs if envs is None else tuple(dict.fromkeys((*envs, *runs_envs)))
+    )
+    check_shared_tables(repo, runs_envs)
     if not dry_run:
         if not HF_TOKEN:
             raise SystemExit("ERROR: HF_TOKEN is not set (add it to .env)")
@@ -232,7 +310,7 @@ def main(
     if not runs_only:
         configs = [
             (f"{env_name}-level_{level_number}", env_name, level_number)
-            for env_name in (ENVIRONMENTS if env is None else (env,))
+            for env_name in (ENVIRONMENTS if envs is None else envs)
             for level_number in _levels(env_name)
             if level is None or level_number == level
         ]
@@ -246,7 +324,7 @@ def main(
         for config_name, env_name, level_number in configs:
             logger.info(f"Building config '{config_name}' …")
             dataset = (
-                _runs_dataset()
+                _runs_dataset(runs_envs)
                 if env_name is None
                 else _trial_dataset(env_name, level_number, cache)
             )
