@@ -24,7 +24,7 @@ python scripts/push_october_reports_to_hf.py
 # corral-mini runs go to their own repo, never to the October one. List every
 # environment with mini runs: `runs` is rebuilt from the listed environments,
 # so a push of one environment alone would drop the others from it.
-python scripts/push_october_reports_to_hf.py --env=inference_opt,psychometrics,resistor_network,spectra_elucidation,wetlab --only_env \
+python scripts/push_october_reports_to_hf.py --env=corral_md,inference_opt,psychometrics,resistor_network,spectra_elucidation,wetlab --only_env \
     --repo=jablonkagroup/corral-reports-mini-v1
 
 # Push only some configs (plus `runs`, which is always pushed)

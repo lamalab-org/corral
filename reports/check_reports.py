@@ -59,7 +59,9 @@ def environments() -> list[Path]:
     return sorted(
         p
         for p in REPORTS_DIR.iterdir()
-        if p.is_dir() and p.name != "figures" and not p.name.startswith((".", "_"))
+        if p.is_dir()
+        and p.name not in {"archive", "dashboard", "figures"}
+        and not p.name.startswith((".", "_"))
     )
 
 
@@ -88,7 +90,7 @@ def check_layout(env_dir: Path, problems: Problems, warnings: Problems) -> list[
     names = {p.name for p in env_dir.iterdir()}
     for missing in sorted(ENV_FILES - names):
         problems.add(where, f"missing {missing}")
-    for extra in sorted(names - ENV_FILES - {"README.md"}):
+    for extra in sorted(names - ENV_FILES - {"README.md", "archive"}):
         if not re.fullmatch(r"level_\d+", extra) or not (env_dir / extra).is_dir():
             warnings.add(where, f"'{extra}' is not part of the convention")
 

@@ -5,30 +5,52 @@ same layout, names and index files, so runs can be compared across them.
 
 | Environment | Folder | Branch | Runs | Trials |
 |---|---|---|---:|---:|
-| AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
+| AFM (November full reports) | [`afm/`](afm/) | `afm-reports-november-2026` | 14 | 700 |
 | Inference optimization (corral-mini v1, batch 1 without Claude; October full runs in `archive/`) | [`inference_opt/`](inference_opt/) | `mini-1` | 8 | 120 |
 | Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
 | Resistor network (corral-mini v1, batch 1 without Claude; v4 runs in `archive/`) | [`resistor_network/`](resistor_network/) | `mini-1-psychom` | 8 | 120 |
-| Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
+| Corral MD (corral-mini v1; October full runs in [`archive/october-v1/`](archive/october-v1/corral_md/)) | [`corral_md/`](corral_md/) | `corral-md-mini-v1-reports` | 26 | 390 |
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
 | Spectra elucidation (corral-mini v1, batch 1; October full runs in `archive/`) | [`spectra_elucidation/`](spectra_elucidation/) | `mini-1-psychom` | 12 | 180 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab (corral-mini v1; October full runs in `archive/`) | [`wetlab/`](wetlab/) | `mini-1-psychom` | 36 | 540 |
 
-All nine environments together have **138 runs and 3,680 trials**. Each
+All nine environments together have **160 runs and 3,870 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
-Inference optimization, psychometrics, resistor network, spectra elucidation and wetlab now hold the corral-mini v1 runs, which are published to their
+## Corral-mini run coverage
+
+Each family and batch has four planned runs per environment: its native agent
+and ReAct at both levels. A run is counted only when its merged report and all
+15 trials are in `runs.csv`. Batch 1 uses Kimi K3.1 Pro, Claude Opus 5.5 and
+GPT 6.1 Sol; batch 2 uses Kimi K2.5, Claude Opus 4.7 and GPT 5.6 Sol; batch 3
+uses Kimi K2, Claude Opus 4.5 and GPT 5.
+
+| Environment | Batch 1: Kimi / Claude / OpenAI | Batch 2: Kimi / Claude / OpenAI | Batch 3: Kimi / Claude / OpenAI |
+|---|---:|---:|---:|
+| Corral MD | 4 / 2 / 4 | 4 / 0 / 4 | 4 / 0 / 4 |
+| Psychometrics | 4 / 4 / 4 | 4 / 0 / 4 | 4 / 0 / 4 |
+| Wetlab | 4 / 4 / 4 | 4 / 4 / 4 | 4 / 4 / 4 |
+| Spectra elucidation | 4 / 4 / 4 | 0 / 0 / 0 | 0 / 0 / 0 |
+| Resistor network | 4 / 0 / 4 | 0 / 0 / 0 | 0 / 0 / 0 |
+| Inference optimization | 4 / 0 / 4 | 0 / 0 / 0 | 0 / 0 / 0 |
+| **Completed / planned** | **62 / 72** | **28 / 72** | **28 / 72** |
+
+Across these six environments, **118 of 216 runs** are complete. The partial
+Claude trials described in the Corral MD README do not count as completed runs.
+
+Corral MD, inference optimization, psychometrics, resistor network, spectra
+elucidation and wetlab now hold corral-mini v1 runs. The mini runs go to their
 own Hugging Face datasets, `jablonkagroup/corral-reports-mini-v1` and
 `jablonkagroup/corral-reports-mini-v1-summary`, not to the October ones. The
 push scripts refuse to put runs whose ID contains `-mini-` into a repo without
 `mini` in its name, or the reverse:
 
 ```bash
-python scripts/push_october_reports_to_hf.py --env=inference_opt,psychometrics,resistor_network,spectra_elucidation,wetlab --only_env \
+python scripts/push_october_reports_to_hf.py --env=corral_md,inference_opt,psychometrics,resistor_network,spectra_elucidation,wetlab --only_env \
     --repo=jablonkagroup/corral-reports-mini-v1
-python scripts/push_october_summary_to_hf.py --env=inference_opt,psychometrics,resistor_network,spectra_elucidation,wetlab \
+python scripts/push_october_summary_to_hf.py --env=corral_md,inference_opt,psychometrics,resistor_network,spectra_elucidation,wetlab \
     --repo=jablonkagroup/corral-reports-mini-v1-summary
 ```
 
