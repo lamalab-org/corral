@@ -50,7 +50,6 @@ def load_data(tasks_parquet: Path) -> tuple[dict, dict, list[str]]:
 def environment_scores(
     manifest: dict, strata: dict, agent_indices: np.ndarray
 ) -> list[dict]:
-
     by_environment: dict[str, list[tuple[float, float]]] = {}
     for (environment, level), stratum in sorted(strata.items()):
         ids = manifest["tasks_by_environment"][environment][f"level_{level}"]
