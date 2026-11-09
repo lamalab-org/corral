@@ -13,13 +13,14 @@ wetlab L1, retrosynthesis L1, samplemath) are not part of the mini.
 
 ## Run the mini
 
-`corral bench` runs the mini by default. The level comes from
+`corral bench` runs the latest mini (v2) by default. Run v1 only with
+`--mini-version 1`. The level comes from
 `--env-kwargs '{"level": N}'` as before.
 
 ```bash
 corral bench --environment wetlab --env-kwargs '{"level": 2}' --agent tool-calling   # mini
 corral bench ... --run-full          # every task of the level
-corral bench ... --mini-version 1    # pin a release (default: latest)
+corral bench ... --mini-version 1    # explicitly run v1
 corral bench ... --task ID           # explicit tasks override both
 corral bench ... --list-tasks        # show what would run
 ```
