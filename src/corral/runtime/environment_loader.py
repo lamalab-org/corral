@@ -35,6 +35,7 @@ EnvironmentName = Literal[
     "wetlab",
     "inference_opt",
     "psychometrics",
+    "trace_audit",
 ]
 
 ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
@@ -48,6 +49,7 @@ ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
     "wetlab",
     "inference_opt",
     "psychometrics",
+    "trace_audit",
 )
 
 ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
@@ -87,6 +89,9 @@ ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
     ),
     "psychometrics": EnvironmentPreset(
         "corral_psychometrics.env:create_environments", "tasks/psychometrics/src"
+    ),
+    "trace_audit": EnvironmentPreset(
+        "trace_audit.env:create_environments", "tasks/trace_audit/src"
     ),
 }
 
