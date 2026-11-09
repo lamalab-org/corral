@@ -6,7 +6,7 @@ same layout, names and index files, so runs can be compared across them.
 | Environment | Folder | Branch | Runs | Trials |
 |---|---|---|---:|---:|
 | AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
-| Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
+| Inference optimization (corral-mini v1, batch 1 without Claude; October full runs in `archive/`) | [`inference_opt/`](inference_opt/) | `mini-1` | 8 | 120 |
 | Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
 | Resistor network (corral-mini v1, batch 1 without Claude; v4 runs in `archive/`) | [`resistor_network/`](resistor_network/) | `mini-1-psychom` | 8 | 120 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
@@ -15,20 +15,20 @@ same layout, names and index files, so runs can be compared across them.
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab (corral-mini v1; October full runs in `archive/`) | [`wetlab/`](wetlab/) | `mini-1-psychom` | 36 | 540 |
 
-All nine environments together have **144 runs and 4,260 trials**. Each
+All nine environments together have **138 runs and 3,680 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
-Psychometrics, resistor network, spectra elucidation and wetlab now hold the corral-mini v1 runs, which are published to their
+Inference optimization, psychometrics, resistor network, spectra elucidation and wetlab now hold the corral-mini v1 runs, which are published to their
 own Hugging Face datasets, `jablonkagroup/corral-reports-mini-v1` and
 `jablonkagroup/corral-reports-mini-v1-summary`, not to the October ones. The
 push scripts refuse to put runs whose ID contains `-mini-` into a repo without
 `mini` in its name, or the reverse:
 
 ```bash
-python scripts/push_october_reports_to_hf.py --env=psychometrics,resistor_network,spectra_elucidation,wetlab --only_env \
+python scripts/push_october_reports_to_hf.py --env=inference_opt,psychometrics,resistor_network,spectra_elucidation,wetlab --only_env \
     --repo=jablonkagroup/corral-reports-mini-v1
-python scripts/push_october_summary_to_hf.py --env=psychometrics,resistor_network,spectra_elucidation,wetlab \
+python scripts/push_october_summary_to_hf.py --env=inference_opt,psychometrics,resistor_network,spectra_elucidation,wetlab \
     --repo=jablonkagroup/corral-reports-mini-v1-summary
 ```
 
@@ -239,5 +239,5 @@ checks out without Git LFS, so reports stored in LFS are verified through the
 Hugging Face summary's `report_sha256` rather than rebuilt.
 
 Read a report with `gzip -dc report.json.gz` or `xz -dc report.json.xz`. The
-inference optimization AI Scientist reports are stored in Git LFS; run
+archived inference optimization AI Scientist reports (`inference_opt/archive/october-full/`) are stored in Git LFS; run
 `git lfs pull` first.
