@@ -27,8 +27,18 @@ REDACTIONS = re.compile(
 def mask(value):
     """Remove explicit source labels throughout a dossier, including tool text."""
     if isinstance(value, dict):
-        return {key: mask(item) for key, item in value.items()
-                if key not in {"source_agent", "source_model"}}
+        result = {}
+        for key, item in value.items():
+            if key in {"source_agent", "source_model"}:
+                continue
+            if key == "source_path" and "trial_id" in value:
+                result[key] = (
+                    f"traces/{value.get('environment', 'traces')}/"
+                    f"run-{value['trial_id']}.json"
+                )
+            else:
+                result[key] = mask(item)
+        return result
     if isinstance(value, list):
         return [mask(item) for item in value]
     if isinstance(value, str):
@@ -36,23 +46,37 @@ def mask(value):
     return value
 
 
-def load_case(case_id: str, level: int) -> dict:
-    with gzip.open(DATA / "cases" / f"{case_id}.json.gz", "rt") as stream:
+def load_case(case_id: str, level: int, data_dir: Path = DATA) -> dict:
+    flat_path = data_dir / "cases" / f"{case_id}.json.gz"
+    paths = [flat_path] if flat_path.exists() else list(
+        (data_dir / "cases").glob(f"*/{case_id}.json.gz")
+    )
+    if len(paths) != 1:
+        raise FileNotFoundError(f"Expected one stored file for {case_id}; found {len(paths)}")
+    with gzip.open(paths[0], "rt") as stream:
         case = json.load(stream)
     return case if level == 1 else mask(case)
 
 
-def case_tools(case_ids: list[str], level: int) -> dict[str, Tool]:
+def case_tools(
+    case_ids: list[str], level: int, data_dir: Path = DATA
+) -> dict[str, Tool]:
     allowed = set(case_ids)
 
     def checked(case_id: str) -> dict:
         if case_id not in allowed:
             raise ValueError("Unknown case ID for this task")
-        return load_case(case_id, level)
+        return load_case(case_id, level, data_dir)
 
     @tool(trusted=True)
     def list_cases() -> str:
-        """List the case IDs in this audit task. Reviewing every case is optional."""
+        """List cases, grouped by source model when identities are visible."""
+        if level == 1:
+            groups = {}
+            for case_id in case_ids:
+                model = checked(case_id).get("source_model", "unknown")
+                groups.setdefault(model, []).append(case_id)
+            return json.dumps({f"traces/{model}": ids for model, ids in groups.items()})
         return json.dumps(case_ids)
 
     @tool(trusted=True)

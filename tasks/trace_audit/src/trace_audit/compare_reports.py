@@ -53,21 +53,37 @@ def compare(identified: Path, masked: Path, output: Path) -> dict:
             b = blind.get((environment, case_id), [])
             writer.writerow({
                 "environment": environment, "trial_id": case_id,
-                "identified_issues": ";".join(f["issue_type"] for f in a),
-                "masked_issues": ";".join(f["issue_type"] for f in b),
-                "identified_rerun": ";".join(f["rerun"] for f in a),
-                "masked_rerun": ";".join(f["rerun"] for f in b),
+                "identified_issues": ";".join(
+                    f.get("issue_type", f.get("issue", "")) for f in a
+                ),
+                "masked_issues": ";".join(
+                    f.get("issue_type", f.get("issue", "")) for f in b
+                ),
+                "identified_rerun": ";".join(f.get("rerun", "") for f in a),
+                "masked_rerun": ";".join(f.get("rerun", "") for f in b),
             })
-    return {
+    summary = {
         "identified_flagged_ids": len(known),
         "masked_flagged_ids": len(blind),
+        "identified_findings": sum(map(len, known.values())),
+        "masked_findings": sum(map(len, blind.values())),
         "flagged_in_both": len(known.keys() & blind.keys()),
         "identified_only": len(known.keys() - blind.keys()),
         "masked_only": len(blind.keys() - known.keys()),
-        "identified_issue_counts": dict(Counter(f["issue_type"] for flags in known.values() for f in flags)),
-        "masked_issue_counts": dict(Counter(f["issue_type"] for flags in blind.values() for f in flags)),
         "joined_csv": str(output),
     }
+    identified_types = Counter(
+        f["issue_type"] for flags in known.values() for f in flags
+        if "issue_type" in f
+    )
+    masked_types = Counter(
+        f["issue_type"] for flags in blind.values() for f in flags
+        if "issue_type" in f
+    )
+    if identified_types or masked_types:
+        summary["identified_issue_type_counts"] = dict(identified_types)
+        summary["masked_issue_type_counts"] = dict(masked_types)
+    return summary
 
 
 def main() -> None:
