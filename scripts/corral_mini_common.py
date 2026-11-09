@@ -95,8 +95,15 @@ def load(
     return dict(sorted(strata.items())), agents, source
 
 
-def load_afm_strata(trials_csv: Path, prices_path: Path, agents: list[str]) -> dict:
-    """Load the newer AFM reports as five-trial Pass^5 strata."""
+def load_afm_strata(
+    trials_csv: Path,
+    prices_path: Path,
+    agents: list[str],
+    score_column: str = "pass_hat_5",
+) -> dict:
+    """Load the newer AFM reports as five-trial Pass^5 or Pass@5 strata."""
+    if score_column not in {"pass_hat_5", "pass_at_5"}:
+        raise ValueError(f"unknown score column: {score_column}")
     data = pd.read_csv(trials_csv)
     data["agent_model"] = data.agent + "__" + data.model
     prices = json.loads(prices_path.read_text())
@@ -110,9 +117,10 @@ def load_afm_strata(trials_csv: Path, prices_path: Path, agents: list[str]) -> d
     if (grouped.trials != 5).any():
         raise ValueError("AFM reports must have five trials per task and agent")
     grouped["pass_hat_5"] = (grouped.passes / 5) ** 5
+    grouped["pass_at_5"] = 1 - (1 - grouped.passes / 5) ** 5
     strata = {}
     for level, group in grouped.groupby("level"):
-        scores = group.pivot_table("pass_hat_5", "task_id", "agent_model")
+        scores = group.pivot_table(score_column, "task_id", "agent_model")
         costs = group.pivot_table("usd", "task_id", "agent_model")
         solved = group.pivot_table("passes", "task_id", "agent_model") > 0
         if list(scores.columns) != agents or scores.isna().any().any():

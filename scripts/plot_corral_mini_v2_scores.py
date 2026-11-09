@@ -29,11 +29,13 @@ MODEL_LABELS = {
 }
 
 
-def load_data(tasks_parquet: Path) -> tuple[dict, dict, list[str]]:
+def load_data(
+    tasks_parquet: Path, score_column: str = "pass_hat_5"
+) -> tuple[dict, dict, list[str]]:
     manifest = json.loads(MANIFEST.read_text())
     prices = ROOT / "corral_mini/prices.json"
     strata, agents, source = load(
-        manifest["source"]["revision"], tasks_parquet, prices, "pass_hat_5"
+        manifest["source"]["revision"], tasks_parquet, prices, score_column
     )
     if source["sha256"] != manifest["source"]["sha256"]:
         raise ValueError("tasks table does not match the v2 manifest")
@@ -43,7 +45,7 @@ def load_data(tasks_parquet: Path) -> tuple[dict, dict, list[str]]:
         != manifest["afm_source"]["trials_csv_sha256"]
     ):
         raise ValueError("AFM trials do not match the v2 manifest")
-    strata.update(load_afm_strata(afm_path, prices, agents))
+    strata.update(load_afm_strata(afm_path, prices, agents, score_column))
     return manifest, dict(sorted(strata.items())), agents
 
 

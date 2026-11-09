@@ -90,6 +90,16 @@ The [model score table](v2_pass_hat_5_by_model_environment.csv) separates the
 three observed models. Each subplot averages that model's agents within each
 level, then gives the environment's reported levels equal weight.
 
+![Full versus mini v2 Pass^5 and Pass@5 by model and environment](figures/v2_pass_metrics_by_model_environment.png)
+
+The [combined metric table](v2_pass_metrics_by_model_environment.csv) adds
+Pass@5 to the same full-versus-mini comparison. In the six-panel figure, rows
+separate the three models and columns show Pass^5 and Pass@5. Both metrics use
+the observed five-trial success rate per task: Pass^5 is `(c/5)^5`, while
+Pass@5 is `1 - (1 - c/5)^5`. Right labels are mini minus full in percentage
+points. Regenerate it with
+`python scripts/plot_corral_mini_v2_metrics.py --tasks-parquet PATH`.
+
 The method comparison below describes the original Pass@5 analysis used for
 v1. The [Pass^5 comparison](#pass5-comparison) describes the v2 criterion.
 
