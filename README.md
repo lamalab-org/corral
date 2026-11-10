@@ -232,8 +232,9 @@ The available agent names are `ai-scientist`, `claude-code`, `codex`, `denario`,
 their corresponding optional package extra and report an installation hint if
 it is missing.
 
-`denario` uses Denario's fast idea and methodology stages, then executes the
-saved plan with Corral's `ToolCallingAgent` and the actual environment tools.
+`denario` uses [Denario](https://arxiv.org/abs/2510.26887) ([code](https://github.com/Denario-AI/Denario))
+for fast idea and methodology generation, then executes the saved plan with
+Corral's `ToolCallingAgent` and the actual environment tools.
 This is a hybrid agent; it does not use Denario's native `cmbagent` experiment
 executor. Plans persist in session state and are reused on resume.
 Denario runs directly in Corral's Python environment using the same OpenAI SDK.
