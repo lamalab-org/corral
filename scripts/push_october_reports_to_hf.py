@@ -21,11 +21,13 @@ python scripts/push_october_reports_to_hf.py --dry_run
 # Push everything (the dataset repo is created private if it does not exist)
 python scripts/push_october_reports_to_hf.py
 
-# corral-mini runs go to their own repo, never to the October one. List every
-# environment with mini runs: `runs` is rebuilt from the listed environments,
-# so a push of one environment alone would drop the others from it.
-python scripts/push_october_reports_to_hf.py --env=psychometrics,spectra_elucidation,wetlab --only_env \
+# corral-mini runs go to one repo per mini version, never to the October one.
+# List every environment with runs of that version: `runs` is rebuilt from the
+# listed environments, so leaving one out would drop it.
+python scripts/push_october_reports_to_hf.py --env=psychometrics --only_env \
     --repo=jablonkagroup/corral-reports-mini-v1
+python scripts/push_october_reports_to_hf.py --env=wetlab --only_env \
+    --repo=jablonkagroup/corral-reports-mini-v2
 
 # Push only some configs (plus `runs`, which is always pushed)
 python scripts/push_october_reports_to_hf.py --env=psychometrics --level=2
@@ -37,6 +39,7 @@ import gzip
 import json
 import lzma
 import os
+import re
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -182,6 +185,13 @@ def _trial_dataset(env: str, level: int, cache_dir: str) -> Dataset:
 
 
 MINI_RUN_PREFIX = "-mini-"
+MINI_VERSION = re.compile(r"mini-(v\d+)")
+
+
+def mini_version(name: str) -> str | None:
+    """The corral-mini version in a repo name or run ID (`mini-v2` -> `v2`)."""
+    match = MINI_VERSION.search(name.rsplit("/", 1)[-1])
+    return match.group(1) if match else None
 
 
 def check_target(repo: str, envs: tuple[str, ...]) -> None:
@@ -192,12 +202,18 @@ def check_target(repo: str, envs: tuple[str, ...]) -> None:
     overwrite the October datasets with mini runs or the reverse.
     """
     mini_repo = "mini" in repo.rsplit("/", 1)[-1]
+    version = mini_version(repo)
     for env in envs:
         for row in _read_csv(REPORTS_DIR / env / "runs.csv"):
             if (MINI_RUN_PREFIX in row["run_id"]) != mini_repo:
                 raise SystemExit(
                     f"ERROR: {env} run {row['run_id']!r} does not belong in {repo}; "
                     "corral-mini runs go only to a repo with 'mini' in its name"
+                )
+            if version and mini_version(row["run_id"]) != version:
+                raise SystemExit(
+                    f"ERROR: {env} run {row['run_id']!r} does not belong in {repo}; "
+                    f"a corral-mini {version} repo takes only {version} runs"
                 )
 
 
@@ -215,13 +231,14 @@ def env_list(env: str | tuple[str, ...] | list[str] | None) -> tuple[str, ...] |
     return names or None
 
 
-def mini_environments() -> tuple[str, ...]:
-    """Environments under reports/ whose runs are corral-mini runs."""
+def mini_environments(version: str | None = None) -> tuple[str, ...]:
+    """Environments under reports/ with corral-mini runs (of `version`, if given)."""
     return tuple(
         env
         for env in ENVIRONMENTS
         if any(
             MINI_RUN_PREFIX in r["run_id"]
+            and (version is None or mini_version(r["run_id"]) == version)
             for r in _read_csv(REPORTS_DIR / env / "runs.csv")
         )
     )
@@ -232,15 +249,16 @@ def check_shared_tables(repo: str, envs: tuple[str, ...]) -> None:
 
     Tables that span environments (`runs`, and the summary's tables) are
     replaced as a whole on every push, so they must be built from every
-    environment that has corral-mini runs.
+    environment with runs of the repo's corral-mini version.
     """
     if "mini" not in repo.rsplit("/", 1)[-1]:
         return
-    missing = [e for e in mini_environments() if e not in envs]
+    expected = mini_environments(mini_version(repo))
+    missing = [e for e in expected if e not in envs]
     if missing:
         raise SystemExit(
             f"ERROR: pushing to {repo} would drop {missing} from its shared tables; "
-            f"pass every mini environment, e.g. --env={','.join(mini_environments())}"
+            f"pass every mini environment, e.g. --env={','.join(expected)}"
         )
 
 
@@ -281,7 +299,7 @@ def main(
             `wetlab` or `psychometrics,wetlab`.
         only_env: Restrict the `runs` config to `env` as well (for the
             corral-mini datasets). For a mini repo `env` must then list every
-            environment with mini runs, or they would be dropped from `runs`.
+            environment with runs of that mini version, or they would be dropped from `runs`.
         level: Push only this level.
         runs_only: Push only the `runs` config.
         dry_run: Build the configs and log their sizes without pushing.
