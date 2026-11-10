@@ -27,19 +27,20 @@ from corral.agents.terminus import TerminusAgent
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.core.action import Action
 
-# ClaudeCodeAgent, CodexAgent and OpenHandsAgent drive black-box harnesses whose
-# SDKs ship only as optional extras (`corral[claude]` / `corral[codex]` /
-# `corral[openhands]`; the last is also gated to Python >= 3.12). Importing their
-# modules eagerly would make a plain `import corral` fail wherever those extras
+# These agents use optional SDKs (`corral[claude]`, `corral[codex]`,
+# `corral[denario]`, and `corral[openhands]`). Eagerly importing
+# in-process SDK modules would make `import corral` fail wherever those extras
 # are absent — e.g. task environments that only need the core runtime. They are
 # therefore resolved lazily via the module-level `__getattr__` below: the
 # module import, and any missing-dependency error, happens only when the
-# attribute is actually accessed. They are intentionally not imported at module
+# attribute is actually accessed. Denario imports its SDK when planning starts.
+# They are intentionally not imported at module
 # top-level (not even under `TYPE_CHECKING`) so no ruff type-checking rule is
 # tripped; `__all__` still advertises them and `__getattr__` resolves them.
 _LAZY_AGENTS = {
     "ClaudeCodeAgent": "corral.agents.claude_code",
     "CodexAgent": "corral.agents.codex",
+    "DenarioAgent": "corral.agents.denario",
     "OpenHandsAgent": "corral.agents.openhands",
 }
 
@@ -69,6 +70,7 @@ __all__ = [
     "BaseAgent",
     "ClaudeCodeAgent",
     "CodexAgent",
+    "DenarioAgent",
     "EpistemicAgent",
     "LLMPlanner",
     "OpenHandsAgent",

@@ -58,6 +58,11 @@ AGENT_DEFINITIONS: Mapping[str, AgentDefinition] = MappingProxyType(
             "CodexAgent",
             extra="codex",
         ),
+        "denario": AgentDefinition(
+            "corral.agents.denario",
+            "DenarioAgent",
+            extra="denario",
+        ),
         "epistemic": AgentDefinition(
             "corral.agents.epistemic",
             "EpistemicAgent",

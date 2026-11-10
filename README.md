@@ -225,12 +225,46 @@ If that environment is already activated, `uv run` is optional and the command
 is simply `corral bench ...`. The `--project` form is only needed when invoking
 `uv` from elsewhere in the monorepo.
 
-The available agent names are `ai-scientist`, `claude-code`, `codex`, `epistemic`,
+The available agent names are `ai-scientist`, `claude-code`, `codex`, `denario`, `epistemic`,
 `llm-planner`, `openhands`, `react`, `reflexion`, `terminus`, and
 `tool-calling`. Class names and underscore spellings such as `ReActAgent` and
 `tool_calling` are accepted as aliases. Claude Code, Codex, and OpenHands need
 their corresponding optional package extra and report an installation hint if
 it is missing.
+
+`denario` uses Denario's fast idea and methodology stages, then executes the
+saved plan with Corral's `ToolCallingAgent` and the actual environment tools.
+This is a hybrid agent; it does not use Denario's native `cmbagent` experiment
+executor. Plans persist in session state and are reused on resume.
+Denario runs directly in Corral's Python environment using the same OpenAI SDK.
+Install the optional extra on Python 3.12 or 3.13. For example, from the repository
+root with `OPENAI_API_KEY` configured:
+
+```bash
+uv run --python 3.12 --extra denario corral run \
+  --agent denario --environment samplemath --task task1 \
+  --model openai/gpt-4o \
+  --agent-kwargs '{"denario_model": "gpt-4o", "denario_iterations": 2}'
+```
+
+`denario_model` is a model name recognized by Denario (default `gpt-4o`);
+`denario_iterations` controls its idea refinement (default `2`). `--model`,
+`--api-endpoint`, `--temperature`, and other tool-calling settings apply to the
+executor. Planning uses Denario's own provider credentials and model defaults.
+
+Use `uv` for this extra: the project overrides older OpenAI constraints in
+`cmbagent-autogen` and `futurehouse-client` with the tested `openai==2.45.0`.
+The extra pins `langchain-openai==0.3.35` and the Mistral SDK version required by
+`cmbagent`. Plain `pip install 'corral[denario]'` cannot resolve those upstream
+constraints. The compatibility test covers the fast planning stages with real
+SDK clients and mocked HTTP responses; it does not validate Denario's native
+experiment or literature workflows.
+
+Reported usage and `--max-iterations` cover only the executor; Denario's internal
+planning calls and tokens are not included. Outcomes identify this with
+`usage_scope="executor_only"`, so these runs are not total-cost comparisons.
+For Docker benchmarks, `--agent denario --build-sandbox-image` selects the
+Denario extra automatically and applies the same OpenAI override during installation.
 
 Use `--agent-kwargs` for constructor-specific settings. Where the agent supports
 them, explicit `--model`, `--api-endpoint`, and `--temperature` options take
