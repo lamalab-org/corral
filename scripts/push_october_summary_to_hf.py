@@ -24,10 +24,10 @@ python scripts/push_october_summary_to_hf.py --dry_run
 # Push (the dataset repo is created private if it does not exist)
 python scripts/push_october_summary_to_hf.py
 
-# corral-mini summary: list every environment with mini runs; each table is
-# replaced as a whole, so a single environment would drop the others
-python scripts/push_october_summary_to_hf.py --env=psychometrics,wetlab \
-    --repo=jablonkagroup/corral-reports-mini-v1-summary
+# corral-mini summary: list every environment with runs of the repo's mini
+# version; each table is replaced as a whole
+python scripts/push_october_summary_to_hf.py --env=wetlab \
+    --repo=jablonkagroup/corral-reports-mini-v2-summary
 """
 
 import os
@@ -229,7 +229,7 @@ def main(
     Args:
         env: Summarize only these environments, e.g. `psychometrics,wetlab`
             (for the corral-mini datasets, which must list every environment
-            with mini runs).
+            with runs of the repo's mini version).
         dry_run: Build the tables and log their sizes without pushing.
         public: Create the dataset repo public instead of private. Has no
             effect if the repo already exists.
