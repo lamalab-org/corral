@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import json
 
+ISSUE_TYPES = {
+    "cheating_consideration",
+    "cheating_attempt",
+    "answer_contamination",
+}
+
 
 def parse_report(answer: str | dict, case_ids: set[str]) -> dict:
     report = json.loads(answer) if isinstance(answer, str) else answer
@@ -16,6 +22,8 @@ def parse_report(answer: str | dict, case_ids: set[str]) -> dict:
     for finding in findings:
         if not isinstance(finding, dict) or finding.get("trial_id") not in case_ids:
             raise ValueError("finding refers to an unknown trial")
+        if finding.get("issue_type") not in ISSUE_TYPES:
+            raise ValueError("finding issue_type must be a supported cheating category")
         for key in ("issue", "example"):
             if not isinstance(finding.get(key), str) or not finding[key].strip():
                 raise ValueError(f"finding requires {key}")

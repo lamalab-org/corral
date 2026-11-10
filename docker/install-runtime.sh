@@ -4,7 +4,9 @@ set -eu
 
 CORRAL_EXTRAS=${CORRAL_EXTRAS:-}
 # Tracing is passive and stays off without Langfuse keys, so every image has it.
-python -m pip install --no-cache-dir --editable ".[langfuse${CORRAL_EXTRAS:+,$CORRAL_EXTRAS}]" "$@"
+python -m pip install --no-cache-dir --prefer-binary \
+    "agent-client-protocol==0.11.0" "pandas==2.3.3" \
+    --editable ".[langfuse${CORRAL_EXTRAS:+,$CORRAL_EXTRAS}]" "$@"
 
 case ",$CORRAL_EXTRAS," in
     *,claude,*)

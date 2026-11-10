@@ -476,6 +476,11 @@ async def run_benchmark(
     image_kind = (
         args.environment if args.environment in {"stargazer", "wetlab"} else "benchmark"
     )
+    task_package = (
+        "trace_audit"
+        if args.environment == "trace_audit_pilot"
+        else args.environment
+    )
     sandbox = _sandbox_profile(
         args,
         default_image=f"corral-{args.environment}:{extra.replace(',', '-') or 'latest'}",
@@ -503,7 +508,7 @@ async def run_benchmark(
                 else None
             ),
             build_args=(
-                {"CORRAL_EXTRAS": extra, "CORRAL_TASK": args.environment}
+                {"CORRAL_EXTRAS": extra, "CORRAL_TASK": task_package}
                 if build_local
                 else None
             ),

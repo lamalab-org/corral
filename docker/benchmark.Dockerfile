@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/corral
