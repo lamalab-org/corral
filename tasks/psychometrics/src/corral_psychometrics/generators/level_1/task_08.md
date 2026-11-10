@@ -22,7 +22,7 @@ Submit one complete model covering both instruments, one scoring classification 
 
 ## Why this is non-trivial
 
-Internal consistency is not the same as interpretability. A total can be reliable because several related dimensions share variance without representing one useful construct. Conversely, a sensible total can tolerate modest local item dependence. Use the dimensional structure and common-variance evidence, not reliability alone.
+Internal consistency is not the same as interpretability. A total can be reliable because several related dimensions share variance without representing one useful construct. In a bifactor-(S-1) model, variance attributed to the reference factor is tied to one named facet; it is not automatically evidence for a broad Dark Triad total. Use the dimensional structure and common-variance evidence, not reliability alone.
 
 ## Synthetic task command
 

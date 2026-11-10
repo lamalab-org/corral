@@ -221,6 +221,35 @@ def bifactor_block(n, rng, general, specific, specific_of, items, taus):
     return pd.DataFrame(out)[items]
 
 
+def bifactor_s1_block(
+    n, rng, general, specific, specific_of, items, taus, *, reference="M", specific_phi=0.25
+):
+    """Simulate a reference-facet bifactor model with two correlated specifics.
+
+    The reference facet has no specific factor. Its items define the meaning
+    of the common factor; the other specifics are residual to that factor.
+    """
+    facets = [name for name in dict.fromkeys(specific_of.values()) if name != reference]
+    if len(facets) != 2 or not -1 < specific_phi < 1:
+        raise ValueError("bifactor_s1_block needs two non-reference facets and a valid phi")
+    common = rng.normal(size=n)
+    first = rng.normal(size=n)
+    second = specific_phi * first + np.sqrt(1 - specific_phi**2) * rng.normal(size=n)
+    specific_scores = dict(zip(facets, (first, second)))
+    out = {}
+    for item in items:
+        facet = specific_of[item]
+        g = general[item]
+        s = 0.0 if facet == reference else specific[item]
+        if g**2 + s**2 >= 1:
+            raise ValueError(f"loadings leave no residual variance for {item}")
+        ystar = g * common + rng.normal(0, np.sqrt(1 - g**2 - s**2), n)
+        if facet != reference:
+            ystar += s * specific_scores[facet]
+        out[item] = categorize(ystar, taus[item])
+    return pd.DataFrame(out)[items]
+
+
 def demographics(n, rng, country):
     """The non-item columns for one country's respondents."""
     return pd.DataFrame(

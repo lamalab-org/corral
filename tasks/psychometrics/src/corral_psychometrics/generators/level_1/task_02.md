@@ -16,7 +16,7 @@ Submit a complete semopy model for the 12 Dirty Dozen items and one standardised
 
 ## Why this is non-trivial
 
-A published subscale structure can fit adequately while still missing an important common dimension. Some apparently different model descriptions are also mathematically equivalent in this setting. Compare plausible models and their substantive interpretation rather than treating one fit cutoff as the answer.
+A published subscale structure can fit adequately while still missing an important common dimension. In a bifactor-(S-1) model, the reference facet defines that dimension; the remaining specific factors describe variance beyond it and may correlate. Compare plausible models and their substantive interpretation rather than treating one fit cutoff as the answer.
 
 ## Synthetic task command
 

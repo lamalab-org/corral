@@ -19,11 +19,11 @@ Responses are five-point ratings and `0` denotes a missing response.
 
 ## What to report
 
-Submit one complete model calibrated on the United States covering both instruments, plus the classification for both instruments in all six non-US countries.
+Submit one complete model calibrated on the United States covering both instruments, plus the classification for both instruments in all six non-US countries. Identify the Dirty Dozen reference facet (`M` or `N`) in the US, GB, CA and AU.
 
 ## Why this is non-trivial
 
-Replication is more than asking whether the original model still has acceptable fit. A model can fit well while no longer being the best or most meaningful description. Parameter changes, construct changes, item reassignment, and very different country sample sizes need to be considered separately.
+Replication is more than asking whether the original model still has acceptable fit. A model can fit well while its reference facet changes from Machiavellianism to narcissism. Parameter changes, construct changes, item reassignment, and different country sample sizes need to be considered separately.
 
 ## Synthetic task command
 

@@ -36,4 +36,4 @@ Items are taken from published self-report personality scales and were presented
 | `accuracy` | self-rated accuracy of own responses, 0-100 |
 | `country` | ISO country code |
 
-Rows: 39,000. Countries: US (24,000), GB (6,200), CA (3,800), AU (3,000), DE (830), IN (660), BR (510).
+Rows: 41,170. Countries: US (24,000), GB (6,200), CA (3,800), AU (3,000), DE (3,000), IN (660), BR (510).

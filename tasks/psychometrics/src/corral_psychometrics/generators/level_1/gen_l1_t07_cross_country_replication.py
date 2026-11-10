@@ -2,13 +2,12 @@
 """Generate Task 07 artifacts and scoring metadata.
 
 Generating model, United States: HSNS as two correlated factors (phi 0.35) and
-the Dirty Dozen as a bifactor model.
+the Dirty Dozen as a Machiavellianism-reference bifactor-(S-1) model.
 
-Each other country perturbs that in one named way, which fixes how far the US
-model carries over: Great Britain reproduces it, Canada and India measure the
-items worse, Australia and Canada weaken the Dirty Dozen general factor, Brazil
-pushes the HSNS factors to 0.95 so they stop being distinct, and Germany both
-loses the general factor and moves three items to the wrong subscale.
+Great Britain reproduces the US reference structure. Canada and Australia use
+narcissism as the reference facet. India and Brazil have correlated first-order
+facets; Germany changes reference facet and reassigns three items. HSNS changes
+in several countries independently of the Dirty Dozen.
 """
 
 from __future__ import annotations
@@ -92,15 +91,16 @@ DD_NO_GENERAL_PHI = 0.45
 # Germany's Dirty Dozen: three items move subscale and everything is measured worse.
 DD_SCRAMBLE = {"DDM3": "P", "DDP4": "N", "DDN4": "M"}
 
-# country -> (N, hsns loading scale, hsns phi, dd general scale or None, scrambled)
+# country -> (N, HSNS loading scale, HSNS phi, DD reference loading scale,
+#             reassigned items, DD reference facet)
 COUNTRIES = {
-    "US": (24000, 1.00, HSNS_PHI, 1.0, False),
-    "GB": (6200, 1.00, HSNS_PHI, 1.0, False),
-    "CA": (3800, 0.85, HSNS_PHI, 0.5, False),
-    "AU": (3000, 1.00, HSNS_PHI, 0.3, False),
-    "IN": (660, 0.85, HSNS_PHI, None, False),
-    "BR": (510, 1.00, 0.95, None, False),
-    "DE": (830, 0.85, HSNS_PHI, 0.6, True),
+    "US": (24000, 1.00, HSNS_PHI, 1.0, False, "M"),
+    "GB": (6200, 1.00, HSNS_PHI, 1.0, False, "M"),
+    "CA": (3800, 0.85, HSNS_PHI, 1.0, False, "N"),
+    "AU": (3000, 1.00, HSNS_PHI, 1.0, False, "N"),
+    "IN": (660, 0.85, HSNS_PHI, None, False, None),
+    "BR": (510, 1.00, 0.95, None, False, None),
+    "DE": (3000, 0.85, HSNS_PHI, 1.0, True, "N"),
 }
 REPLICATION_COUNTRIES = [c for c in COUNTRIES if c != "US"]
 
@@ -122,6 +122,7 @@ TRUTH = {
         "DE": "none",
     },
 }
+REFERENCE_FACETS = {"US": "M", "GB": "M", "CA": "N", "AU": "N"}
 
 POP_REFERENCE_N = 400_000
 
@@ -150,11 +151,14 @@ A single JSON object:
   "replication": {
     "hsns": {"<country>": "<class>", ...},
     "dirty_dozen": {"<country>": "<class>", ...}
-  }
+  },
+  "reference_facets": {"US": "<M|N>", "GB": "<M|N>", "CA": "<M|N>", "AU": "<M|N>"}
 }
 
 Name the two instruments `hsns` and `dirty_dozen`. `model_syntax` must be complete
 and runnable so the fit on the United States sample can be reproduced.
+For the US, GB, CA and AU, report whether Machiavellianism (`M`) or
+narcissism (`N`) is the reference facet of the Dirty Dozen model.
 """
 
 
@@ -172,9 +176,8 @@ def simulate_hsns(n, rng, scale, phi):
     return pd.DataFrame(out)[HSNS]
 
 
-def simulate_dd(n, rng, general_scale, scrambled):
-    """General factor plus specifics, or - if general_scale is None - three
-    correlated traits with no general factor at all."""
+def simulate_dd(n, rng, general_scale, scrambled, reference):
+    """S-1 reference facet or three correlated first-order facets."""
     assign = dict(SPECIFIC_OF)
     if scrambled:
         assign.update(DD_SCRAMBLE)
@@ -190,29 +193,43 @@ def simulate_dd(n, rng, general_scale, scrambled):
             out[item] = C.categorize(ystar, C.THRESHOLDS[item])
         return pd.DataFrame(out)[DD]
 
-    general = rng.normal(size=n)
-    specific = {k: rng.normal(size=n) for k in dict.fromkeys(assign.values())}
-    for item in DD:
-        g = DD_GENERAL[item] * general_scale
-        s = DD_SPECIFIC[item] * (0.6 if scrambled else 1.0)
-        ystar = (
-            g * general
-            + s * specific[assign[item]]
-            + rng.normal(0, np.sqrt(max(1 - g**2 - s**2, 1e-6)), n)
-        )
-        out[item] = C.categorize(ystar, C.THRESHOLDS[item])
-    return pd.DataFrame(out)[DD]
+    if reference == "N":
+        # Narcissism now defines the common factor. A strong residual M facet
+        # makes this a different population, not just a relabelled US model.
+        general = {
+            i: DD_GENERAL[i] * (0.7 if SPECIFIC_OF[i] == "M" else 0.85 if SPECIFIC_OF[i] == "P" else 1.4)
+            * general_scale
+            for i in DD
+        }
+        specific = {
+            i: DD_SPECIFIC[i] * (1.4 if SPECIFIC_OF[i] == "M" else 1.15)
+            for i in DD
+        }
+    else:
+        general = {i: DD_GENERAL[i] * general_scale for i in DD}
+        specific = DD_SPECIFIC
+    return C.bifactor_s1_block(
+        n,
+        rng,
+        general=general,
+        specific=specific,
+        specific_of=assign,
+        items=DD,
+        taus=C.THRESHOLDS,
+        reference=reference,
+        specific_phi=0.25,
+    )
 
 
 def build_dataset(rng):
     """Build the full survey: every country, both instruments, demographics."""
     frames = []
-    for country, (n, scale, phi, gen, scram) in COUNTRIES.items():
+    for country, (n, scale, phi, gen, scram, reference) in COUNTRIES.items():
         frames.append(
             pd.concat(
                 [
                     simulate_hsns(n, rng, scale, phi),
-                    simulate_dd(n, rng, gen, scram),
+                    simulate_dd(n, rng, gen, scram, reference),
                     C.demographics(n, rng, country),
                 ],
                 axis=1,
@@ -237,12 +254,13 @@ def hsns_syntax():
     return f"F1 =~ {'+'.join(HSNS_F1)}\nF2 =~ {'+'.join(HSNS_F2)}"
 
 
-def dd_bifactor():
+def dd_bifactor(reference="M"):
     by = {k: [i for i in DD if SPECIFIC_OF[i] == k] for k in "MPN"}
     lines = ["G =~ " + "+".join(DD)]
-    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "MPN"]
-    lines += [f"G ~~ 0*S{k}" for k in "MPN"]
-    lines += ["SM ~~ 0*SP", "SM ~~ 0*SN", "SP ~~ 0*SN"]
+    specifics = [k for k in "MPN" if k != reference]
+    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in specifics]
+    lines += [f"G ~~ 0*S{k}" for k in specifics]
+    lines += [f"S{specifics[0]} ~~ S{specifics[1]}"]
     return "\n".join(lines)
 
 
@@ -259,11 +277,11 @@ def reference_syntax():
 def population_correlation_matrix():
     """Correlation matrix a perfectly specified US model would reproduce."""
     rng = np.random.default_rng(SEED + 999)
-    n, scale, phi, gen, scram = COUNTRIES["US"]
+    n, scale, phi, gen, scram, reference = COUNTRIES["US"]
     big = pd.concat(
         [
             simulate_hsns(POP_REFERENCE_N, rng, scale, phi),
-            simulate_dd(POP_REFERENCE_N, rng, gen, scram),
+            simulate_dd(POP_REFERENCE_N, rng, gen, scram, reference),
         ],
         axis=1,
     )
@@ -308,6 +326,7 @@ def build_truth(floor, pop, data_sha, rows):
         "task_id": TASK_ID,
         "scored": {
             "replication": TRUTH,
+            "reference_facets": REFERENCE_FACETS,
             "calibration_country": "US",
         },
         "scoring_reference": {
@@ -329,6 +348,7 @@ def build_truth(floor, pop, data_sha, rows):
                 "general_loadings": DD_GENERAL,
                 "specific_loadings": DD_SPECIFIC,
                 "specific_of_item": SPECIFIC_OF,
+                "specific_factor_correlation": 0.25,
                 "no_general_phi": DD_NO_GENERAL_PHI,
                 "scramble": DD_SCRAMBLE,
             },
@@ -339,6 +359,7 @@ def build_truth(floor, pop, data_sha, rows):
                     "hsns_phi": v[2],
                     "dd_general_scale": v[3],
                     "dd_scrambled": v[4],
+                    "dd_reference_facet": v[5],
                 }
                 for c, v in COUNTRIES.items()
             },
@@ -359,6 +380,12 @@ def build_task_json(data_sha):
                 "fn": "score_label_panel",
                 "truth_key": "scored.replication",
                 "criterion": "replication",
+            },
+            {
+                "key": "reference_facets",
+                "fn": "score_label_panel",
+                "truth_key": "scored.reference_facets",
+                "criterion": "reference_facet",
             },
         ],
     )
@@ -402,10 +429,12 @@ def candidate_submissions(X):
     correct = {
         "model_syntax": reference_syntax(),
         "replication": {k: dict(v) for k, v in TRUTH.items()},
+        "reference_facets": dict(REFERENCE_FACETS),
     }
     everything_holds = {
         "model_syntax": reference_syntax(),
         "replication": {inst: {c: "exact" for c in v} for inst, v in TRUTH.items()},
+        "reference_facets": dict(REFERENCE_FACETS),
     }
     dd_assumed_fine = {
         "model_syntax": reference_syntax(),
@@ -413,16 +442,22 @@ def candidate_submissions(X):
             "hsns": dict(TRUTH["hsns"]),
             "dirty_dozen": {c: "exact" for c in TRUTH["dirty_dozen"]},
         },
+        "reference_facets": dict(REFERENCE_FACETS),
     }
     swapped = {
         "model_syntax": reference_syntax(),
         "replication": {"hsns": dict(TRUTH["dirty_dozen"]), "dirty_dozen": dict(TRUTH["hsns"])},
+        "reference_facets": dict(REFERENCE_FACETS),
     }
     return {
         "correct": correct,
         "fit-based: everything replicates": everything_holds,
         "HSNS right, Dirty Dozen assumed fine": dd_assumed_fine,
         "instruments swapped": swapped,
+        "country reference facets assumed constant": {
+            **correct,
+            "reference_facets": {country: "M" for country in REFERENCE_FACETS},
+        },
     }
 
 
@@ -459,7 +494,25 @@ def verify(df, pop):
         )
 
     by_country = {r[0]: r for r in rows}
+    reference_bic_gap = {
+        country: _bic(dd_bifactor("M"), country_sample(df, country), DD)
+        - _bic(dd_bifactor("N"), country_sample(df, country), DD)
+        for country in REFERENCE_FACETS
+    }
+    de_assign = {item: DD_SCRAMBLE.get(item, SPECIFIC_OF[item]) for item in DD}
+    de_syntax = "\n".join(
+        f"F{k} =~ {'+'.join(item for item in DD if de_assign[item] == k)}" for k in "MPN"
+    )
+    de = country_sample(df, "DE")
+    de_reassigned_bic = _bic(de_syntax, de, DD)
     checks = [
+        (
+            "the reference-facet switch is recoverable from model fit",
+            reference_bic_gap["US"] < -5
+            and reference_bic_gap["GB"] < -5
+            and reference_bic_gap["CA"] > 5
+            and reference_bic_gap["AU"] > 5,
+        ),
         (
             "the Dirty Dozen's structure holds only in GB",
             by_country["GB"][6] == "bifactor"
@@ -469,7 +522,10 @@ def verify(df, pop):
             "yet the US model still fits everywhere it has stopped being best",
             all(by_country[c][7] > 0.95 for c in ("CA", "AU", "IN", "BR")),
         ),
-        ("Germany's Dirty Dozen genuinely breaks down", by_country["DE"][7] < 0.95),
+        (
+            "Germany's item reassignment is detectable",
+            by_country["DE"][5] - de_reassigned_bic > 100,
+        ),
         (
             "the HSNS structure holds everywhere except BR",
             all(by_country[c][2] < 0.80 for c in ("GB", "CA", "AU", "IN", "DE"))

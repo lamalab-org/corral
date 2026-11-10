@@ -16,7 +16,7 @@ Submit the measurement model for the selected instrument, the standardised laten
 
 ## Why this is non-trivial
 
-Testing items one at a time can use a contaminated baseline and make fair items look biased. Group differences and item-level measurement differences must be separated, and pooling countries can change the comparison itself. Consider joint invariance evidence and the substantive meaning of the model.
+Testing items one at a time can use a contaminated baseline. Group differences and item-level measurement differences must be separated, and pooling countries can change the comparison itself. In a bifactor-(S-1) model, a group coefficient on the reference factor describes the reference facet, so its substantive meaning matters.
 
 ## Synthetic task command
 

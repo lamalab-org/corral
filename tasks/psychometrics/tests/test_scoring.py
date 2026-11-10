@@ -29,7 +29,7 @@ ROOT = paths.task_root()
 # follows from that numbering -- see corral_psychometrics.paths.
 TASKS = [
     (1, 1, "two_correlated_factors"),
-    (1, 2, "bifactor_general_plus_specifics"),
+    (1, 2, "bifactor_s1_machiavellianism_reference"),
     (1, 3, "unidimensional_with_correlated_residuals"),
     (1, 4, "DD, bifactor (CORRECT)"),
     (1, 5, "correct"),

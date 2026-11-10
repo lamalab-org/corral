@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Generate Task 02 artifacts and scoring metadata.
 
-Generating model, Dirty Dozen in the United States: bifactor.
+Generating model, Dirty Dozen in the United States: bifactor-(S-1).
 
-    broad    one trait under all 12 items
-    narrow   one per subscale - M, P, N - uncorrelated with the broad trait
+    reference   Machiavellianism, measured by its four items
+    specifics   psychopathy and narcissism residuals, correlated after M
 
 Outside the United States there is no broad trait at all, only the three
 subscales, correlated 0.20 to 0.35 and all measured worse. Analysing the
@@ -28,9 +28,8 @@ TASK = paths.task(__file__)
 
 ITEMS = C.DD_ITEMS
 
-# Every item measures one broad trait and, on top of that, the narrower trait
-# its subscale is named for. The two are unrelated to each other, so what an
-# item explains is split between them.
+# Machiavellianism defines the reference factor. Only the other two facets
+# receive specific factors; their residual association is estimated.
 SPECIFIC_OF = {
     "DDM1": "M",
     "DDM2": "M",
@@ -60,10 +59,6 @@ GENERAL_LOADINGS = {
     "DDN4": 0.52,
 }
 SPECIFIC_LOADINGS = {
-    "DDM1": 0.48,
-    "DDM2": 0.44,
-    "DDM3": 0.42,
-    "DDM4": 0.50,
     "DDP1": 0.52,
     "DDP2": 0.48,
     "DDP3": 0.55,
@@ -73,6 +68,7 @@ SPECIFIC_LOADINGS = {
     "DDN3": 0.45,
     "DDN4": 0.30,
 }
+SPECIFIC_PHI = 0.25
 
 # Outside the US there is no broad trait at all, only three related ones, and
 # all of them are measured worse. Analysing everyone together recovers
@@ -128,8 +124,7 @@ def build_dataset(rng):
     for country, n in C.N_BY_COUNTRY.items():
         demo = C.demographics(n, rng, country)
         if country == "US":
-            # One broad trait plus a narrow one per subscale.
-            dd = C.bifactor_block(
+            dd = C.bifactor_s1_block(
                 n,
                 rng,
                 general=GENERAL_LOADINGS,
@@ -137,6 +132,8 @@ def build_dataset(rng):
                 specific_of=SPECIFIC_OF,
                 items=ITEMS,
                 taus=C.THRESHOLDS,
+                reference="M",
+                specific_phi=SPECIFIC_PHI,
             )
         else:
             names = ["M", "P", "N"]
@@ -170,9 +167,9 @@ def reference_syntax():
     """lavaan syntax for the generating model, used as the scoring floor."""
     by = {k: [i for i in ITEMS if SPECIFIC_OF[i] == k] for k in "MPN"}
     lines = [f"G =~ {'+'.join(ITEMS)}"]
-    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "MPN"]
-    lines += [f"G ~~ 0*S{k}" for k in "MPN"]
-    lines += ["SM ~~ 0*SP", "SM ~~ 0*SN", "SP ~~ 0*SN"]
+    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "PN"]
+    lines += [f"G ~~ 0*S{k}" for k in "PN"]
+    lines += ["SP ~~ SN"]
     return "\n".join(lines)
 
 
@@ -184,14 +181,14 @@ def candidate_models():
         "unidimensional": f"G =~ {'+'.join(ITEMS)}",
         "three_correlated_factors": three,
         "second_order": three + "\nDT =~ FM+FP+FN",
-        "bifactor_general_plus_specifics": reference_syntax(),
+        "bifactor_s1_machiavellianism_reference": reference_syntax(),
     }
 
 
 def population_correlation_matrix():
     """Correlation matrix a perfectly specified model would reproduce."""
     rng = np.random.default_rng(SEED + 999)
-    big = C.bifactor_block(
+    big = C.bifactor_s1_block(
         POP_REFERENCE_N,
         rng,
         general=GENERAL_LOADINGS,
@@ -199,13 +196,15 @@ def population_correlation_matrix():
         specific_of=SPECIFIC_OF,
         items=ITEMS,
         taus=C.THRESHOLDS,
+        reference="M",
+        specific_phi=SPECIFIC_PHI,
     )
     return C.population_matrix(big, list(big.columns))
 
 
 def primary_loadings():
     """Largest absolute loading generated for each item, across all factors."""
-    return {i: round(max(GENERAL_LOADINGS[i], SPECIFIC_LOADINGS[i]), 3) for i in ITEMS}
+    return {i: round(max(GENERAL_LOADINGS[i], SPECIFIC_LOADINGS.get(i, 0.0)), 3) for i in ITEMS}
 
 
 def build_truth(floor, pop, data_sha, rows):
@@ -213,11 +212,11 @@ def build_truth(floor, pop, data_sha, rows):
     return {
         "task_id": TASK_ID,
         "scored": {
-            "model_family": "bifactor_general_plus_specifics",
-            "n_factors": 4,
+            "model_family": "bifactor_s1_machiavellianism_reference",
+            "n_factors": 3,
             "loadings": primary_loadings(),
             "item_assignment": {
-                i: ("G" if GENERAL_LOADINGS[i] >= SPECIFIC_LOADINGS[i] else f"S{SPECIFIC_OF[i]}")
+                i: ("G" if GENERAL_LOADINGS[i] >= SPECIFIC_LOADINGS.get(i, 0.0) else f"S{SPECIFIC_OF[i]}")
                 for i in ITEMS
             },
         },
@@ -234,7 +233,8 @@ def build_truth(floor, pop, data_sha, rows):
                 "general_loadings": GENERAL_LOADINGS,
                 "specific_loadings": SPECIFIC_LOADINGS,
                 "specific_of_item": SPECIFIC_OF,
-                "factors_orthogonal": True,
+                "reference_facet": "M",
+                "specific_factor_correlation": SPECIFIC_PHI,
             },
             "non_us": {
                 "structure": "three_correlated_factors",
@@ -262,7 +262,7 @@ def build_task_json(data_sha):
                 "psychometrics",
                 "factor analysis",
                 "model selection",
-                "bifactor",
+                "bifactor-(S-1)",
                 "Dirty Dozen",
             ],
             "metrics": ["binary", "partial"],
@@ -330,7 +330,7 @@ def verify(df, pop):
         )
     print(pd.DataFrame(rows).to_string(index=False, float_format=lambda v: f"{v:.4f}"))
 
-    truth = criteria["bifactor_general_plus_specifics"]
+    truth = criteria["bifactor_s1_machiavellianism_reference"]
     three, second = criteria["three_correlated_factors"], criteria["second_order"]
     checks = [
         (
