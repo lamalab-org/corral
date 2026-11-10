@@ -10,16 +10,17 @@ same layout, names and index files, so runs can be compared across them.
 | Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
 | Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
-| Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
+| Retrosynthesis (corral-mini v2, 3 runs pending; October full runs in `archive/`) | [`retrosynthesis/`](retrosynthesis/) | `mini-1-psychom` | 33 | 495 |
 | Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab (corral-mini v2; October full runs in `archive/`) | [`wetlab/`](wetlab/) | `mini-1-psychom` | 36 | 540 |
 
-All nine environments together have **152 runs and 6,060 trials**. Each
+All nine environments together have **171 runs and 5,855 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
-Psychometrics holds the corral-mini v1 runs and wetlab the corral-mini v2 runs.
+Psychometrics holds the corral-mini v1 runs; wetlab and retrosynthesis hold the
+corral-mini v2 runs.
 Each mini version has its own Hugging Face datasets, not the October ones:
 `jablonkagroup/corral-reports-mini-v1` (psychometrics) and
 `jablonkagroup/corral-reports-mini-v2` (wetlab), each with a `-summary`. The
