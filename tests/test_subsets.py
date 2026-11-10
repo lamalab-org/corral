@@ -4,7 +4,6 @@ import os
 
 import pytest
 
-from corral.runtime.environment_loader import load_environment_group
 from corral.subsets import load_mini, mini_task_ids, mini_versions
 
 
@@ -23,6 +22,14 @@ def test_every_release_has_k_distinct_tasks_per_level():
 
 def test_latest_release_is_the_default():
     assert load_mini() == load_mini(mini_versions()[-1])
+
+
+def test_v2_uses_pass_hat_5_and_unsaturated_tasks():
+    manifest = load_mini(2)
+    assert manifest["method"] == "rank_cost"
+    assert manifest["score_metric"] == "pass_hat_5"
+    assert manifest["exclude_saturated"] is True
+    assert manifest["random_environments"] == []
 
 
 def test_uncovered_levels_return_none():
@@ -48,6 +55,8 @@ def test_unknown_version_is_rejected():
     ],
 )
 def test_release_task_ids_exist_in_environment(environment, level):
+    from corral.runtime.environment_loader import load_environment_group
+
     try:
         loaded = load_environment_group(environment, env_kwargs={"level": level})
     except ImportError as exc:
