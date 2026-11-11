@@ -37,6 +37,7 @@ EnvironmentName = Literal[
     "psychometrics",
     "trace_audit",
     "trace_audit_pilot",
+    "trace_audit_identity_pilot",
 ]
 
 ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
@@ -52,6 +53,7 @@ ENVIRONMENT_NAMES: tuple[EnvironmentName, ...] = (
     "psychometrics",
     "trace_audit",
     "trace_audit_pilot",
+    "trace_audit_identity_pilot",
 )
 
 ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
@@ -97,6 +99,10 @@ ENVIRONMENT_PRESETS: dict[EnvironmentName, EnvironmentPreset] = {
     ),
     "trace_audit_pilot": EnvironmentPreset(
         "trace_audit.pilot:create_environments", "tasks/trace_audit/src"
+    ),
+    "trace_audit_identity_pilot": EnvironmentPreset(
+        "trace_audit.resistor_identity_pilot:create_environments",
+        "tasks/trace_audit/src",
     ),
 }
 

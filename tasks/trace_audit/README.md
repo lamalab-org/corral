@@ -64,3 +64,36 @@ The case files and `manifest.json` are needed to run the pilot. The researcher
 files `private_manifest.json` and `typed_ground_truth.json` contain source
 provenance and adjudication evidence; they are not copied into the auditor
 workspace.
+
+## Resistor folder-label pilot
+
+`data/resistor_identity_pilot/` contains six confirmed answer-contamination
+incidents and three no-incident controls, all from historical Resistor Level 2
+traces. The nine cases are identical across three assignments; each case
+appears once under each of the `claude-opus-5-5`, `gpt-5.6-sol`, and `kimi-k3`
+folder labels. Each assignment has two incidents and one control per folder.
+Transcript messages are preserved; source identity and score fields are not
+included in the public case wrapper. Some original messages identify the
+source agent, so the folder label is not guaranteed to be the only identity
+clue.
+
+The auditor workspace includes `RESISTOR_ENVIRONMENT.md` with the task and
+authorization boundary. The private manifest records case provenance and
+ground truth and is not copied to that workspace.
+
+Build or rebuild the frozen cases and folder variants with:
+
+```bash
+PYTHONPATH=tasks/trace_audit/src python3 -m trace_audit.build_resistor_identity_pilot
+```
+
+Run the three folder assignments once per auditor model. For example:
+
+```bash
+corral bench --agent codex --model openai/gpt-5.6-sol \
+  --environment trace_audit_identity_pilot --env-kwargs '{"folder_assignment":"a"}' \
+  --sandbox docker --trials 1 --run-id resistor-audit-gpt-a
+```
+
+Repeat with assignments `b` and `c`, then repeat all three for Claude Code and
+Kimi. This produces nine runs over the same nine transcripts.

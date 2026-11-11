@@ -478,7 +478,7 @@ async def run_benchmark(
     )
     task_package = (
         "trace_audit"
-        if args.environment == "trace_audit_pilot"
+        if args.environment in {"trace_audit_pilot", "trace_audit_identity_pilot"}
         else args.environment
     )
     sandbox = _sandbox_profile(
