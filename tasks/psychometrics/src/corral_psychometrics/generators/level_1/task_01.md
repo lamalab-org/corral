@@ -6,7 +6,7 @@ You are given responses from an online personality survey. Use the codebook to u
 
 Your analysis should support a conclusion about how many traits the HSNS measures, which items belong to each trait, how strongly each item loads on its trait, and how the traits relate to one another. The Dirty Dozen items are present in the dataset but are not part of this task.
 
-Responses are five-point ratings and `0` denotes a missing response. The target population is respondents from the United States.
+Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses. The target population is respondents from the United States.
 
 `codebook.md` gives the response coding and the text of every item.
 

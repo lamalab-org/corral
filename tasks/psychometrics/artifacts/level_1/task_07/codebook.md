@@ -1,6 +1,6 @@
 # Codebook - online personality survey
 
-Tab-separated, one row per respondent. Item responses are ratings on a five-point scale: 1 = Disagree, 3 = Neutral, 5 = Agree. **0 = missed.**
+Tab-separated, one row per respondent. Synthetic item responses are continuous and unbounded, centered around zero; higher values mean greater agreement. Zero is a valid neutral response. Empty fields denote missing responses.
 
 Items are taken from published self-report personality scales and were presented to respondents in a single block.
 

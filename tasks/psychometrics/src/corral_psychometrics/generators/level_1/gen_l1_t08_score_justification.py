@@ -132,14 +132,14 @@ def simulate_hsns(n, rng, us):
             loadings={i: ("F", HSNS_LOADINGS[i]) for i in HSNS},
             phi_matrix=np.array([[1.0]]),
             factor_names=["F"],
-            taus=C.THRESHOLDS,
+            intercepts=C.INTERCEPTS,
             resid_corr=HSNS_RESIDUAL_CORR,
         )[HSNS]
     phi = np.array([[1.0, NON_US_HSNS_PHI], [NON_US_HSNS_PHI, 1.0]])
     loadings = {i: ("A" if i in NON_US_HSNS_F1 else "B", NON_US_HSNS_LOADING) for i in HSNS}
     # Two weakly correlated factors instead: no total score to defend.
     return C.correlated_block(
-        n, rng, loadings=loadings, phi_matrix=phi, factor_names=["A", "B"], taus=C.THRESHOLDS
+        n, rng, loadings=loadings, phi_matrix=phi, factor_names=["A", "B"], intercepts=C.INTERCEPTS
     )[HSNS]
 
 
@@ -147,12 +147,23 @@ def simulate_dd(n, rng, us):
     """Reference-facet structure in the US; one broad factor elsewhere."""
     if us:
         return C.bifactor_s1_block(
-            n, rng, DD_GENERAL, DD_SPECIFIC, SPECIFIC_OF, DD, C.THRESHOLDS,
-            reference="M", specific_phi=DD_SPECIFIC_PHI,
+            n,
+            rng,
+            DD_GENERAL,
+            DD_SPECIFIC,
+            SPECIFIC_OF,
+            DD,
+            C.INTERCEPTS,
+            reference="M",
+            specific_phi=DD_SPECIFIC_PHI,
         )
     return C.correlated_block(
-        n, rng, {i: ("D", NON_US_DD_LOADING) for i in DD}, np.array([[1.0]]),
-        ["D"], C.THRESHOLDS,
+        n,
+        rng,
+        {i: ("D", NON_US_DD_LOADING) for i in DD},
+        np.array([[1.0]]),
+        ["D"],
+        C.INTERCEPTS,
     )[DD]
 
 
@@ -292,7 +303,7 @@ def build_truth(floor, pop, data_sha, rows):
                 "non_us_loading": NON_US_DD_LOADING,
             },
             "omega_h_floor": OMEGA_H_FLOOR,
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -383,13 +394,15 @@ def verify(df, pop):
     import semopy
 
     us = C.analysis_sample(df, ITEMS)
-    pooled = df[ITEMS][(df[ITEMS] != 0).all(axis=1)].astype(float)
+    pooled = df[ITEMS][df[ITEMS].notna().all(axis=1)].astype(float)
     print(f"US calibration sample: {len(us):,}   whole file: {len(pooled):,}\n")
 
     a_hsns, a_dd = C.alpha(us[HSNS]), C.alpha(us[DD])
     w_hsns = hsns_omega()
     w_dd_h, w_dd_total = omega(DD_GENERAL, DD_SPECIFIC, DD)
-    print(f"{'instrument':14s} {'alpha':>7s} {'reference share':>15s} {'omega_total':>12s} {'verdict':>20s}")
+    print(
+        f"{'instrument':14s} {'alpha':>7s} {'reference share':>15s} {'omega_total':>12s} {'verdict':>20s}"
+    )
     print(f"{'HSNS':14s} {a_hsns:7.3f} {w_hsns:9.3f} {w_hsns:12.3f} {TRUTH['hsns']:>20s}")
     print(
         f"{'Dirty Dozen':14s} {a_dd:7.3f} {w_dd_h:9.3f} {w_dd_total:12.3f} "
@@ -458,7 +471,10 @@ def verify(df, pop):
 
     checks = [
         ("alpha ranks the Dirty Dozen above the HSNS", a_dd - a_hsns > 0.05),
-        ("reference share does not justify a broad total", w_hsns > OMEGA_H_FLOOR and w_dd_h < 0.65),
+        (
+            "reference share does not justify a broad total",
+            w_hsns > OMEGA_H_FLOOR and w_dd_h < 0.65,
+        ),
         ("the Dirty Dozen total is reliable yet uninterpretable", w_dd_total > 0.85),
         (
             "its subscales are worth scoring",
@@ -480,8 +496,8 @@ def verify(df, pop):
             pooled_cfi < 0.95 and pooled_omega_h > 0.50,
         ),
         (
-            "neither generating model recovers its data exactly",
-            fits["unidimensional"][3] < 0.001 and fits["bifactor"][3] < 0.001,
+            "the simple HSNS model retains local misfit while the DD S-1 fits well",
+            fits["unidimensional"][3] < 0.001 and fits["bifactor"][0] > 0.99,
         ),
     ]
     return C.report(checks)

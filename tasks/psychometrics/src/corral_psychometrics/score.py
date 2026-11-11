@@ -314,7 +314,7 @@ def deduplicate_and_refit(spec, items, data, key, identity):
     kept = data[~data.duplicated(subset=list(key), keep="first")]
     repeats = int(kept.duplicated(subset=list(identity), keep="first").sum())
     X = kept[items]
-    X = X[(X != 0).all(axis=1)].astype(float)
+    X = X[X.notna().all(axis=1)].astype(float)
     try:
         _, model = evaluate_model(spec, X, items)
     except Exception:  # noqa: BLE001
@@ -419,6 +419,37 @@ def residual_pairs_from_fit(model, items) -> set:
     return {frozenset((row.lval, row.rval)) for row in rows.itertuples()}
 
 
+def local_dependence_pairs_from_fit(model, items) -> set:
+    """Count residual links and equivalent orthogonal two-item method factors.
+
+    The broad factor covers all items. Narrow factors must be orthogonal to
+    every other factor, so a second correlated trait is not treated as a method.
+    Fit, identification and parsimony still pass through the usual gates.
+    """
+    pairs = residual_pairs_from_fit(model, items)
+    ins = model.inspect(std_est=True)
+    latent = set(model.vars["latent"])
+    load = ins[(ins.op == "~") & ins.lval.isin(items) & ins.rval.isin(latent)]
+    if not any(set(rows.lval) == set(items) for _, rows in load.groupby("rval")):
+        return pairs
+    for factor, rows in load.groupby("rval"):
+        if len(rows) != 2:
+            continue
+        cov = ins[
+            (ins.op == "~~")
+            & (ins.lval != ins.rval)
+            & (
+                ((ins.lval == factor) & ins.rval.isin(latent))
+                | ((ins.rval == factor) & ins.lval.isin(latent))
+            )
+        ]
+        if pd.to_numeric(cov["Estimate"]).abs().gt(1e-8).any():
+            continue
+        if pd.to_numeric(rows["Estimate"]).abs().gt(1e-8).all():
+            pairs.add(frozenset(rows.lval))
+    return pairs
+
+
 def check_claims(
     submission: dict,
     truth: dict,
@@ -433,6 +464,8 @@ def check_claims(
         key, fn = item["key"], item["fn"]
         if item.get("derive_from") == "refit_primary_loadings":
             reported = primary_assignment(model)
+        elif item.get("derive_from") == "refit_local_dependence":
+            reported = local_dependence_pairs_from_fit(model, items)
         elif item.get("derive_from") == "refit_residual_covariances":
             reported = residual_pairs_from_fit(model, items)
         elif item.get("derive_from") == "refit_covariate_paths":
@@ -571,7 +604,7 @@ def score_model_criteria(
     for col, val in params.get("subset", {}).items():
         data = data[data[col].isin(val)] if isinstance(val, list) else data[data[col] == val]
     X = data[[c for c in known if c in data.columns]]
-    X = X[(X != 0).all(axis=1)].astype(float)
+    X = X[X.notna().all(axis=1)].astype(float)
     # A dataset may carry a recording fault that the task is about. Repairing it
     # here keeps every submission judged on the same responses, whether or not
     # the submission noticed.
@@ -631,7 +664,7 @@ def score_model_criteria(
         for name, filename in params["holdout_datasets"].items():
             frame = pd.read_csv(folder / filename, sep="\t")
             frame = frame[[c for c in known if c in frame.columns]]
-            holdouts[name] = frame[(frame != 0).all(axis=1)].astype(float)
+            holdouts[name] = frame[frame.notna().all(axis=1)].astype(float)
         try:
             labels, detail = diagnose_holdouts(
                 spec, items, model, holdouts, params["holdout_thresholds"]
@@ -828,8 +861,8 @@ def score_behavioral_validity(
         if _outcome_coefficient(model, outcome, group) is None:
             return _result(0.0, {"group_adjustment": "FAIL"}, {}, "model has no group adjustment")
 
-        complete_train = train[(train[items] != 0).all(axis=1)].copy()
-        complete_holdout = holdout[(holdout[items] != 0).all(axis=1)].copy()
+        complete_train = train[train[items].notna().all(axis=1)].copy()
+        complete_holdout = holdout[holdout[items].notna().all(axis=1)].copy()
         train_model = _fit_outcome_model(spec, complete_train, items, outcome, group)
         holdout_model = _fit_outcome_model(spec, complete_holdout, items, outcome, group)
         train_effect = _outcome_coefficient(train_model, outcome, latent)
@@ -1096,8 +1129,8 @@ def score_misfit_replication(
         else:
             checks["item_coverage"] = "PASS"
 
-        dev = development[(development[list(model_items)] != 0).all(axis=1)]
-        rep = replicate[(replicate[list(model_items)] != 0).all(axis=1)]
+        dev = development[development[list(model_items)].notna().all(axis=1)]
+        rep = replicate[replicate[list(model_items)].notna().all(axis=1)]
         variables = [item for item in items if item in model_items] + [group]
         fitted_dev = _model_fit_summary(spec, dev, variables)
         fitted_rep = _model_fit_summary(spec, rep, variables)
@@ -1400,7 +1433,7 @@ def _population_model_fits(spec: str, name: str, reference: dict, params: dict, 
         frame = pd.read_csv(
             base / params["data_dir"] / params["reference_datasets"][name], sep="\t"
         )
-        X = frame[items][(frame[items] != 0).all(axis=1)].astype(float)
+        X = frame[items][frame[items].notna().all(axis=1)].astype(float)
         criteria, model = evaluate_model(spec, X, items)
         constraints, _ = check_constraints(model, criteria, {})
     except Exception:  # noqa: BLE001 - an unrunnable model simply fails
@@ -1463,14 +1496,14 @@ def score_gender_item_integrity(
         folder = base / params["data_dir"]
         items, covariate = params["items"], params["covariate"]
         frame = pd.read_csv(folder / params["dataset"], sep="\t")
-        X = frame[(frame[items] != 0).all(axis=1)][items + [covariate]].astype(float).copy()
+        X = frame[frame[items].notna().all(axis=1)][items + [covariate]].astype(float).copy()
 
         # The submission's own diagnoses decide what gets repaired, so a wrong
         # diagnosis is carried into the model the comparison is read from.
         total = truth.get("repairs", {}).get("reverse_scored", {})
         for item, label in (reported_items or {}).items():
             if label == "mis_keyed" and item in X.columns:
-                X[item] = total.get(item, 6) - X[item]
+                X[item] = total.get(item, 0) - X[item]
 
         _, model = evaluate_model(spec, X, items + [covariate])
         checks["model_fit"] = "PASS"

@@ -80,8 +80,8 @@ identifiers, in any order.
 """
 
 
-def ordinal_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0.0):
-    """Draw ordinal responses from a latent factor model.
+def continuous_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0.0):
+    """Draw continuous responses from a latent factor model.
 
     factors       latent variable names, in the order `phi` uses
     phi           correlations between the latent variables
@@ -100,7 +100,7 @@ def ordinal_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0
             score = score + np.sqrt(residual) * shared
             explained += residual
         noise = rng.normal(0, np.sqrt(max(1 - explained, 0.08)), n)
-        out[item] = C.categorize(score + noise, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(score + noise, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
 
 
@@ -108,7 +108,7 @@ def correlated_factors(rng, n, loading, phi, **kwargs):
     """One factor per subscale, equally correlated."""
     matrix = np.full((3, 3), phi)
     np.fill_diagonal(matrix, 1.0)
-    return ordinal_block(
+    return continuous_block(
         rng, n, ["P", "N", "M"], matrix, {i: [(SUBSCALE[i], loading)] for i in ITEMS}, **kwargs
     )
 
@@ -116,7 +116,7 @@ def correlated_factors(rng, n, loading, phi, **kwargs):
 def two_factors(rng, n, loading, phi):
     """Two subscales merged against the third."""
     loadings = {i: [("A" if SUBSCALE[i] in ("P", "N") else "B", loading)] for i in ITEMS}
-    return ordinal_block(rng, n, ["A", "B"], np.array([[1, phi], [phi, 1]]), loadings)
+    return continuous_block(rng, n, ["A", "B"], np.array([[1, phi], [phi, 1]]), loadings)
 
 
 def three_factors(rng, n):
@@ -240,7 +240,7 @@ def build_cases(rng):
 def write_codebook(path):
     path.write_text(
         "# Codebook - anonymised population comparison\n\n"
-        "Every file is tab-separated. Responses run from 1 (Disagree) to 5 (Agree); all "
+        "Every file is tab-separated. Responses are continuous and unbounded, centered around zero; all "
         "responses are complete.\n\n"
         "The reference files hold large samples from four populations, named only by "
         "identifier. How they differ is not supplied. `cases.csv` holds three case samples of "

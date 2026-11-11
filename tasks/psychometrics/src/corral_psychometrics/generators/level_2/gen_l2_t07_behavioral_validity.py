@@ -102,7 +102,7 @@ def simulate(rng, n, item_effect):
     for item, loading in LOADINGS.items():
         signal = loading * eta + rng.normal(0, np.sqrt(1 - loading**2), n)
         signals[item] = signal
-        responses[item] = C.categorize(signal, C.THRESHOLDS[item])
+        responses[item] = C.continuous_response(signal, C.INTERCEPTS[item])
 
     outcome = (
         LATENT_EFFECT * eta
@@ -113,7 +113,7 @@ def simulate(rng, n, item_effect):
     frame = pd.DataFrame(responses)
     frame[GROUP] = group
     frame[OUTCOME] = outcome
-    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < MISSING_RATE, 0)
+    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < MISSING_RATE, np.nan)
     frame.insert(0, "participant_id", [f"{'T' if item_effect else 'H'}{i:05d}" for i in range(n)])
     return frame[["participant_id", *ITEMS, GROUP, OUTCOME]]
 
@@ -122,7 +122,7 @@ def write_codebook(path):
     path.write_text(
         "# Codebook - behavioural validity\n\n"
         "The training and holdout files are tab-separated and already joined by "
-        "`participant_id`. Ratings run from 1 (Disagree) to 5 (Agree); 0 denotes a "
+        "`participant_id`. Responses are continuous and unbounded, centered around zero; an empty field denotes a "
         "missing item response. The behavioural outcome is continuous.\n\n"
         "| variable | description |\n|---|---|\n"
         "| `participant_id` | participant identifier, unique within each file |\n"
@@ -277,8 +277,8 @@ def _item_effect(frame, item):
 
 
 def verify(train, holdout):
-    train = train[(train[ITEMS] != 0).all(axis=1)]
-    holdout = holdout[(holdout[ITEMS] != 0).all(axis=1)]
+    train = train[train[ITEMS].notna().all(axis=1)]
+    holdout = holdout[holdout[ITEMS].notna().all(axis=1)]
     pooled = _fit_coefficients(
         train, _measurement_syntax() + f"\n{OUTCOME} ~ F + {ITEM_WITHOUT_REPLICATION}"
     )["F"]
@@ -313,8 +313,8 @@ def verify(train, holdout):
 
 
 def naive(train, holdout):
-    train = train[(train[ITEMS] != 0).all(axis=1)]
-    holdout = holdout[(holdout[ITEMS] != 0).all(axis=1)]
+    train = train[train[ITEMS].notna().all(axis=1)]
+    holdout = holdout[holdout[ITEMS].notna().all(axis=1)]
     pooled = _fit_coefficients(train, reference_syntax())["F"]
     print(f"pooled coefficient: {pooled:+.3f}")
     print("A pooled coefficient alone cannot distinguish a between-group association,")

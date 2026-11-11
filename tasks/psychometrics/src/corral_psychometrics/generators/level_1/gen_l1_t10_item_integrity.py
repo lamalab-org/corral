@@ -5,8 +5,8 @@ Generating model, HSNS in the United States: one factor over all ten items,
 with four planted faults.
 
     HSNS4   mis-keyed - stored with the scale reversed
-    HSNS7   missing answers written as the scale midpoint, 45% of the time
-    HSNS2   truncated - the top of the scale was never recorded
+    HSNS7   answers overwritten with zero, 45% of the time
+    HSNS2   truncated - responses were clipped at an upper limit
     HSNS6   no recording fault at all; the item simply measures poorly
 
 The first three are damage to the data, the fourth is a property of the item,
@@ -21,7 +21,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
 
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
@@ -49,10 +48,10 @@ LOADINGS = {
 
 # Three recording faults and one genuinely poor item.
 MIS_KEYED = "HSNS4"  # stored with the scale reversed
-NEUTRAL_CODED = "HSNS7"  # real answers overwritten with the midpoint
+NEUTRAL_CODED = "HSNS7"  # real answers overwritten with zero (the neutral value)
 NEUTRAL_RATE = 0.45
-TRUNCATED = "HSNS2"  # the top of the scale was never recorded
-TRUNCATED_AT = 4
+TRUNCATED = "HSNS2"  # responses were clipped at an upper limit
+TRUNCATED_AT = 0.8
 WEAK = "HSNS6"  # the data are fine; the item measures poorly
 
 TRUTH = {
@@ -80,10 +79,9 @@ classify each item of the Hypersensitive Narcissism Scale as exactly one of:
 
   sound                the item is doing its job
   mis_keyed            the item was stored with its scale reversed
-  inserted_neutral     recorded answers were overwritten with the middle category
+  inserted_neutral     recorded answers were overwritten with zero (the neutral value)
   truncated_scale      one end of the response scale was never recorded
   duplicated_item      the column repeats another item's responses
-  out_of_range         values outside the response scale were recorded
   weak_item            nothing is wrong with the data; the item measures poorly
 """
 
@@ -114,13 +112,13 @@ def honest_responses(n, rng, scale):
             if scale == 1.0
             else NON_US_BROKEN.get(item, LOADINGS[item] * scale)
         )
-        cols[item] = C.categorize(
-            lam * eta + rng.normal(0, np.sqrt(1 - lam**2), n), C.THRESHOLDS[item]
+        cols[item] = C.continuous_response(
+            lam * eta + rng.normal(0, np.sqrt(1 - lam**2), n), C.INTERCEPTS[item]
         )
     for item in DD:
         lam = 0.62 * scale
-        cols[item] = C.categorize(
-            lam * dark + rng.normal(0, np.sqrt(1 - lam**2), n), C.THRESHOLDS[item]
+        cols[item] = C.continuous_response(
+            lam * dark + rng.normal(0, np.sqrt(1 - lam**2), n), C.INTERCEPTS[item]
         )
     return pd.DataFrame(cols)[C.ALL_ITEMS]
 
@@ -129,8 +127,8 @@ def corrupt(frame, rng):
     """Apply the three recording faults. They came from the survey platform, so
     they affect every country alike."""
     frame = frame.copy()
-    frame[MIS_KEYED] = 6 - frame[MIS_KEYED]
-    frame.loc[rng.random(len(frame)) < NEUTRAL_RATE, NEUTRAL_CODED] = 3
+    frame[MIS_KEYED] = -frame[MIS_KEYED]
+    frame.loc[rng.random(len(frame)) < NEUTRAL_RATE, NEUTRAL_CODED] = 0
     frame[TRUNCATED] = frame[TRUNCATED].clip(upper=TRUNCATED_AT)
     return frame
 
@@ -149,10 +147,10 @@ def analysis_sample(df, country="US", repair=True):
     """One country's complete HSNS responses, with the reversal undone."""
     block = df[df.country == country] if country else df
     X = block[ITEMS]
-    X = X[(X != 0).all(axis=1)].astype(float)
+    X = X[X.notna().all(axis=1)].astype(float)
     if repair:
         X = X.copy()
-        X[MIS_KEYED] = 6 - X[MIS_KEYED]
+        X[MIS_KEYED] = -X[MIS_KEYED]
     return X
 
 
@@ -176,12 +174,8 @@ def fitted_loadings(X):
 
 
 def excess_neutral(X):
-    """How much more often each item is answered 3 than a normal trait allows."""
-    out = {}
-    for item in ITEMS:
-        tau = C.THRESHOLDS[item]
-        out[item] = float((X[item] == 3).mean() - (norm.cdf(tau[2]) - norm.cdf(tau[1])))
-    return out
+    """Point mass at zero: continuous honest responses have no exact-zero mass."""
+    return {item: float((X[item] == 0).mean()) for item in ITEMS}
 
 
 def population_correlation_matrix():
@@ -189,7 +183,7 @@ def population_correlation_matrix():
     rng = np.random.default_rng(SEED + 999)
     big = corrupt(honest_responses(POP_REFERENCE_N, rng, 1.0), rng)
     big = big[ITEMS].astype(float)
-    big[MIS_KEYED] = 6 - big[MIS_KEYED]
+    big[MIS_KEYED] = -big[MIS_KEYED]
     return np.corrcoef(big.values.T).round(3)
 
 
@@ -210,7 +204,7 @@ def build_truth(floor, pop, data_sha, rows):
             "item_order": ITEMS,
             # Undone before fitting so that a submission is judged on the same
             # responses whether or not it spotted the reversal.
-            "repairs": {"reverse_scored": {MIS_KEYED: 6}},
+            "repairs": {"reverse_scored": {MIS_KEYED: 0}},
         },
         "generative_parameters": {
             "loadings": LOADINGS,
@@ -222,7 +216,7 @@ def build_truth(floor, pop, data_sha, rows):
             },
             "non_us_loading_scale": NON_US_LOADING_SCALE,
             "non_us_broken_items": NON_US_BROKEN,
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -309,12 +303,12 @@ def verify(df, pop):
     print(f"US sample: {len(X):,}\n")
     print(
         f"{'item':8s} {'generated':>10s} {'as stored':>10s} {'repaired':>9s} "
-        f"{'max':>4s} {'excess P(3)':>12s}  truth"
+        f"{'max':>4s} {'P(exact zero)':>12s}  truth"
     )
     for item in ITEMS:
         print(
             f"  {item:6s} {LOADINGS[item]:10.2f} {raw_loads[item]:10.3f} "
-            f"{loads[item]:9.3f} {int(X[item].max()):4d} {excess[item]:+12.3f}"
+            f"{loads[item]:9.3f} {X[item].max():4.1f} {excess[item]:+12.3f}"
             f"  {TRUTH[item]}"
         )
 
@@ -352,7 +346,8 @@ def verify(df, pop):
         ("the truncated item is invisible in the model", loads[TRUNCATED] > min(sound)),
         (
             "and unmistakable in the data",
-            X[TRUNCATED].max() < 5 and all(X[i].max() == 5 for i in ITEMS if i != TRUNCATED),
+            X[TRUNCATED].max() == TRUNCATED_AT
+            and all(X[i].max() > TRUNCATED_AT for i in ITEMS if i != TRUNCATED),
         ),
         (
             "every sound item stays clear of the weak one",

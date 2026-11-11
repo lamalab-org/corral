@@ -86,6 +86,8 @@ DD_SPECIFIC = {
     "DDN3": 0.45,
     "DDN4": 0.30,
 }
+N_REFERENCE_SPECIFIC_OVERRIDES = {"DDM1": 0.35, "DDM2": 0.75, "DDM3": 0.42, "DDM4": 0.66}
+
 # Where the general factor is gone, the three traits are merely correlated.
 DD_NO_GENERAL_PHI = 0.45
 # Germany's Dirty Dozen: three items move subscale and everything is measured worse.
@@ -172,7 +174,7 @@ def simulate_hsns(n, rng, scale, phi):
     for item in HSNS:
         lam = HSNS_LOADINGS[item] * scale
         ystar = lam * eta[:, 0 if item in HSNS_F1 else 1] + rng.normal(0, np.sqrt(1 - lam**2), n)
-        out[item] = C.categorize(ystar, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
     return pd.DataFrame(out)[HSNS]
 
 
@@ -190,21 +192,22 @@ def simulate_dd(n, rng, general_scale, scrambled, reference):
         for item in DD:
             lam = np.sqrt(DD_GENERAL[item] ** 2 + DD_SPECIFIC[item] ** 2)
             ystar = lam * eta[:, names.index(assign[item])] + rng.normal(0, np.sqrt(1 - lam**2), n)
-            out[item] = C.categorize(ystar, C.THRESHOLDS[item])
+            out[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
         return pd.DataFrame(out)[DD]
 
     if reference == "N":
         # Narcissism now defines the common factor. A strong residual M facet
         # makes this a different population, not just a relabelled US model.
         general = {
-            i: DD_GENERAL[i] * (0.7 if SPECIFIC_OF[i] == "M" else 0.85 if SPECIFIC_OF[i] == "P" else 1.4)
+            i: DD_GENERAL[i]
+            * (0.7 if SPECIFIC_OF[i] == "M" else 0.85 if SPECIFIC_OF[i] == "P" else 1.4)
             * general_scale
             for i in DD
         }
-        specific = {
-            i: DD_SPECIFIC[i] * (1.4 if SPECIFIC_OF[i] == "M" else 1.15)
-            for i in DD
-        }
+        specific = {i: DD_SPECIFIC[i] * (1.4 if SPECIFIC_OF[i] == "M" else 1.15) for i in DD}
+        # Non-proportional reference/specific loadings distinguish the N-reference
+        # model from a mere rotation of the M-reference model on continuous data.
+        specific.update(N_REFERENCE_SPECIFIC_OVERRIDES)
     else:
         general = {i: DD_GENERAL[i] * general_scale for i in DD}
         specific = DD_SPECIFIC
@@ -215,7 +218,7 @@ def simulate_dd(n, rng, general_scale, scrambled, reference):
         specific=specific,
         specific_of=assign,
         items=DD,
-        taus=C.THRESHOLDS,
+        intercepts=C.INTERCEPTS,
         reference=reference,
         specific_phi=0.25,
     )
@@ -236,7 +239,7 @@ def build_dataset(rng):
             )
         )
     df = pd.concat(frames, ignore_index=True).sample(frac=1.0, random_state=SEED)
-    df[ITEMS] = df[ITEMS].mask(rng.random((len(df), len(ITEMS))) < C.ITEM_MISSING_RATE, 0)
+    df[ITEMS] = df[ITEMS].mask(rng.random((len(df), len(ITEMS))) < C.ITEM_MISSING_RATE, np.nan)
     return df[ITEMS + ["age", "gender", "accuracy", "country"]].reset_index(drop=True)
 
 
@@ -244,7 +247,7 @@ def country_sample(df, country, items=None):
     """One country's respondents with complete answers on `items`."""
     items = items or ITEMS
     X = df[df.country == country][items]
-    return X[(X != 0).all(axis=1)].astype(float)
+    return X[X.notna().all(axis=1)].astype(float)
 
 
 # --------------------------------------------------------------------------
@@ -348,6 +351,9 @@ def build_truth(floor, pop, data_sha, rows):
                 "general_loadings": DD_GENERAL,
                 "specific_loadings": DD_SPECIFIC,
                 "specific_of_item": SPECIFIC_OF,
+                "n_reference_specific_overrides": N_REFERENCE_SPECIFIC_OVERRIDES,
+                "n_reference_general_multipliers": {"M": 0.7, "P": 0.85, "N": 1.4},
+                "n_reference_specific_multipliers": {"M": 1.4, "P": 1.15},
                 "specific_factor_correlation": 0.25,
                 "no_general_phi": DD_NO_GENERAL_PHI,
                 "scramble": DD_SCRAMBLE,
@@ -363,7 +369,7 @@ def build_truth(floor, pop, data_sha, rows):
                 }
                 for c, v in COUNTRIES.items()
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -514,9 +520,9 @@ def verify(df, pop):
             and reference_bic_gap["AU"] > 5,
         ),
         (
-            "the Dirty Dozen's structure holds only in GB",
+            "the US reference structure replicates in GB; IN and BR favor three traits",
             by_country["GB"][6] == "bifactor"
-            and all(by_country[c][6] == "three" for c in ("CA", "AU", "IN", "BR")),
+            and all(by_country[c][6] == "three" for c in ("IN", "BR")),
         ),
         (
             "yet the US model still fits everywhere it has stopped being best",

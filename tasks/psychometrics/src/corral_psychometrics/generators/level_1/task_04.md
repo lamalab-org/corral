@@ -6,7 +6,7 @@ You are given responses from an online personality survey containing HSNS and Di
 
 For the instrument that supports the comparison, estimate the standardised latent difference, defined as the latent trait regressed on `gender`. For the other instrument, identify the items that function differently across gender.
 
-Use US respondents who reported male or female only (`gender` 1 or 2). Responses are five-point ratings and `0` denotes a missing response.
+Use US respondents who reported male or female only (`gender` 1 or 2). Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses.
 
 `codebook.md` gives the response coding and the text of every item.
 

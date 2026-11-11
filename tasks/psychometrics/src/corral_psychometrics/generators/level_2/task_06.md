@@ -28,7 +28,7 @@ differences. Repair a mis-keyed item before interpreting the latent difference.
 
 ## What needs checking
 
-The audit describes transmission, not measurement. A frequent response category
+The audit describes transmission, not measurement. A concentration of responses near zero
 may be an export fault, genuine DIF, or a weak item. Compare suspect respondents
 with their remaining response profiles.
 

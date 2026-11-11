@@ -15,7 +15,7 @@ tie arbitrarily.
 - `candidate_models.csv`: model descriptions and lavaan-style syntax;
 - `codebook.md`: response and missing-value definitions.
 
-The twelve items use five-point responses and `0` denotes missing data. For BIC,
+The twelve items have continuous responses; zero is valid and empty fields denote missing data. For BIC,
 use complete response rows and collapse exact duplicate response patterns. The
 dataset-to-model mapping is permuted; catalogue order is not evidence.
 
@@ -30,7 +30,7 @@ Include every dataset exactly once and use only candidate IDs from the catalogue
 ## What needs checking
 
 Each sample has a different complication: missingness, residual dependence, a
-subgroup threshold shift, duplicate rows, a weak item, or response-style shift.
+subgroup item-intercept shift, duplicate rows, a weak item, or response-style shift.
 These can distort fit without defining the generating model. Check that the
 assignment follows the stated BIC rule rather than a filename, catalogue order,
 or one unusual item.

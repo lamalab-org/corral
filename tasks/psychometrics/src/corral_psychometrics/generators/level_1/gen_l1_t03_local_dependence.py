@@ -54,7 +54,7 @@ DECOY_PAIR = ("HSNS1", "HSNS8")
 
 # Outside the US the items are measured worse and no pair agrees beyond the
 # trait, so analysing everyone together weakens every loading.
-LOADING_SCALE_NON_US = 0.75
+LOADING_SCALE_NON_US = 0.65
 
 # The Dark Triad items are in the file but are not part of this task.
 DD_LOADINGS = {
@@ -96,7 +96,7 @@ A single JSON object:
 `model_syntax` uses semopy syntax (`=~` loadings, `~~` (co)variances, `0*` to fix a
 parameter to zero).
 
-`loadings` gives, for each item you analysed, the largest absolute standardised loading that item has on any factor in your model.
+`loadings` gives, for each item you analysed, the absolute standardised loading on the broad trait factor covering all ten items, excluding narrow method factors.
 
 `factor_correlation` is the correlation between the factors when your model has exactly two correlated factors, and null otherwise.
 """
@@ -116,7 +116,7 @@ def simulate_hsns(n, rng, scale=1.0, dependent=True):
                     common = common + np.sqrt(cov) * shared[pair]
                     explained += cov
         ystar = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), n)
-        out[item] = C.categorize(ystar, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
 
 
@@ -133,7 +133,12 @@ def build_dataset(rng):
             phi[names.index(b), names.index(a)] = v
         # Three correlated traits, the same everywhere: filler for this task.
         dd = C.correlated_block(
-            n, rng, loadings=DD_LOADINGS, phi_matrix=phi, factor_names=names, taus=C.THRESHOLDS
+            n,
+            rng,
+            loadings=DD_LOADINGS,
+            phi_matrix=phi,
+            factor_names=names,
+            intercepts=C.INTERCEPTS,
         )
         frames.append(pd.concat([hsns, dd, C.demographics(n, rng, country)], axis=1))
     return C.finalize(frames, rng, SEED)
@@ -208,7 +213,7 @@ def build_truth(floor, pop, data_sha, rows):
                 "loadings": {k: v[1] for k, v in DD_LOADINGS.items()},
                 "phi": {f"{a}_{b}": v for (a, b), v in DD_PHI.items()},
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -261,7 +266,7 @@ def build_task_json(data_sha):
                     {
                         "key": "residual_pairs",
                         "fn": "score_pair_set",
-                        "derive_from": "refit_residual_covariances",
+                        "derive_from": "refit_local_dependence",
                         "truth_key": "scored.residual_pairs",
                         "criterion": "local_dependence",
                     },
@@ -374,7 +379,7 @@ def naive(df, pop):
         ("pooled (no filter)", df),
     ):
         Xs = sub[ITEMS]
-        Xs = Xs[(Xs != 0).all(axis=1)].astype(float)
+        Xs = Xs[Xs.notna().all(axis=1)].astype(float)
         fitted = {k: abs(v) for k, v in C.loadings(C.fit(reference_syntax(), Xs, ITEMS)).items()}
         worst = max(abs(fitted[i] - truth[i]) for i in ITEMS)
         outcome[label] = worst <= 0.08

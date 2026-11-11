@@ -13,7 +13,7 @@ the same broad construct or constructs;
 - `none`: neither the structure nor the substantive interpretation carries
 over.
 
-Responses are five-point ratings and `0` denotes a missing response.
+Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses.
 
 `codebook.md` gives the response coding and the text of every item.
 

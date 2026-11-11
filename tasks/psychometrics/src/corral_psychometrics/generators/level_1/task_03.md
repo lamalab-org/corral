@@ -4,15 +4,15 @@
 
 You are given responses from an online personality survey. Use the codebook to investigate whether the HSNS measures one trait or more than one.
 
-The analysis should also identify pairs of items whose responses share additional association beyond the common trait. Report the standardised loading of every item and the latent correlation if the selected model has multiple traits. The Dirty Dozen items are present but are not part of this task.
+The analysis should also identify pairs of items whose responses share additional association beyond the common trait. Report each item’s standardised loading on the broad trait factor, excluding narrow method factors, and report the latent correlation if the selected model has multiple traits. The Dirty Dozen items are present but are not part of this task.
 
-Responses are five-point ratings and `0` denotes a missing response. The target population is respondents from the United States.
+Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses. The target population is respondents from the United States.
 
 `codebook.md` gives the response coding and the text of every item.
 
 ## What to report
 
-Submit a complete semopy model for the 10 HSNS items, including correlated residuals where justified, plus the item loadings and any factor correlation.
+Submit a complete semopy model for the 10 HSNS items, including correlated residuals or identified method factors where justified, plus the item loadings and any factor correlation.
 
 ## Why this is non-trivial
 

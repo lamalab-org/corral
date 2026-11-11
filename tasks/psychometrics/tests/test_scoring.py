@@ -172,7 +172,7 @@ def run_task(level, number, expected_winner):
     for col, val in params.get("subset", {}).items():
         data = data[data[col].isin(val)] if isinstance(val, list) else data[data[col] == val]
     X = data[[c for c in keep if c in data.columns]]
-    X = X[(X != 0).all(axis=1)].astype(float)
+    X = X[X.notna().all(axis=1)].astype(float)
 
     failures = []
     print(f"\n{gen.TASK_ID}")
@@ -199,7 +199,7 @@ def run_task(level, number, expected_winner):
     if "gender" in items:
         pooled_X = pooled_X[pooled_X.gender.isin([1, 2])]
     pooled_X = pooled_X[items]
-    pooled_X = pooled_X[(pooled_X != 0).all(axis=1)].astype(float)
+    pooled_X = pooled_X[pooled_X.notna().all(axis=1)].astype(float)
     key = (
         "item_quality"
         if "item_quality" in good

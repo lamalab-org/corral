@@ -2,6 +2,17 @@
 
 This environment contains psychometrics tasks. Each dataset is simulated from a known model, so the ground truth is available for evaluation.
 
+Questionnaire tasks use synthetic continuous, unbounded item responses centered
+around zero. Empty fields are missing; zero is a valid neutral response. Reverse
+scoring negates a response. Level 2 Task 09 retains binary adaptive IRT data.
+Scoring fits continuous SEMs by ML and compares BIC on the same items and sample.
+
+Dirty Dozen tasks L1 02, 04, 07 and 08 use bifactor S−1 models. Task 02 targets
+population omega of .60–.70 for each four-item facet score. Local dependence is
+represented by paired residual associations (L1 03) and a shared method factor
+with three indicators (L2 10). Equivalent identified two-item method factors
+are accepted for L1 03; its reported loadings refer to the broad trait.
+
 ## Layout
 
 ```text

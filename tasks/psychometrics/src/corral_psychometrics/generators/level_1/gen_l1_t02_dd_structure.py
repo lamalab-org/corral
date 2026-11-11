@@ -49,24 +49,24 @@ GENERAL_LOADINGS = {
     "DDM2": 0.52,
     "DDM3": 0.48,
     "DDM4": 0.60,
-    "DDP1": 0.55,
-    "DDP2": 0.50,
-    "DDP3": 0.53,
-    "DDP4": 0.38,
-    "DDN1": 0.42,
-    "DDN2": 0.40,
-    "DDN3": 0.50,
-    "DDN4": 0.52,
+    "DDP1": 0.479710,
+    "DDP2": 0.436100,
+    "DDP3": 0.462266,
+    "DDP4": 0.331436,
+    "DDN1": 0.3738,
+    "DDN2": 0.3560,
+    "DDN3": 0.4450,
+    "DDN4": 0.4628,
 }
 SPECIFIC_LOADINGS = {
-    "DDP1": 0.52,
-    "DDP2": 0.48,
-    "DDP3": 0.55,
-    "DDP4": 0.35,
-    "DDN1": 0.58,
-    "DDN2": 0.56,
-    "DDN3": 0.45,
-    "DDN4": 0.30,
+    "DDP1": 0.453544,
+    "DDP2": 0.418656,
+    "DDP3": 0.479710,
+    "DDP4": 0.305270,
+    "DDN1": 0.5162,
+    "DDN2": 0.4984,
+    "DDN3": 0.4005,
+    "DDN4": 0.2670,
 }
 SPECIFIC_PHI = 0.25
 
@@ -131,7 +131,7 @@ def build_dataset(rng):
                 specific=SPECIFIC_LOADINGS,
                 specific_of=SPECIFIC_OF,
                 items=ITEMS,
-                taus=C.THRESHOLDS,
+                intercepts=C.INTERCEPTS,
                 reference="M",
                 specific_phi=SPECIFIC_PHI,
             )
@@ -148,7 +148,7 @@ def build_dataset(rng):
                 loadings={i: (SPECIFIC_OF[i], NON_US_LOADING[SPECIFIC_OF[i]]) for i in ITEMS},
                 phi_matrix=phi,
                 factor_names=names,
-                taus=C.THRESHOLDS,
+                intercepts=C.INTERCEPTS,
             )[ITEMS]
         # Two correlated traits, the same everywhere: filler for this task.
         hsns = C.correlated_block(
@@ -157,7 +157,7 @@ def build_dataset(rng):
             loadings=HSNS_LOADINGS,
             phi_matrix=np.array([[1.0, HSNS_PHI], [HSNS_PHI, 1.0]]),
             factor_names=["ego", "sens"],
-            taus=C.THRESHOLDS,
+            intercepts=C.INTERCEPTS,
         )
         frames.append(pd.concat([hsns, dd, demo], axis=1))
     return C.finalize(frames, rng, SEED)
@@ -195,7 +195,7 @@ def population_correlation_matrix():
         specific=SPECIFIC_LOADINGS,
         specific_of=SPECIFIC_OF,
         items=ITEMS,
-        taus=C.THRESHOLDS,
+        intercepts=C.INTERCEPTS,
         reference="M",
         specific_phi=SPECIFIC_PHI,
     )
@@ -213,10 +213,15 @@ def build_truth(floor, pop, data_sha, rows):
         "task_id": TASK_ID,
         "scored": {
             "model_family": "bifactor_s1_machiavellianism_reference",
+            "facet_score_omega": facet_reliability(),
             "n_factors": 3,
             "loadings": primary_loadings(),
             "item_assignment": {
-                i: ("G" if GENERAL_LOADINGS[i] >= SPECIFIC_LOADINGS.get(i, 0.0) else f"S{SPECIFIC_OF[i]}")
+                i: (
+                    "G"
+                    if GENERAL_LOADINGS[i] >= SPECIFIC_LOADINGS.get(i, 0.0)
+                    else f"S{SPECIFIC_OF[i]}"
+                )
                 for i in ITEMS
             },
         },
@@ -245,7 +250,7 @@ def build_truth(floor, pop, data_sha, rows):
                 "loadings": {k: v[1] for k, v in HSNS_LOADINGS.items()},
                 "phi": HSNS_PHI,
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -306,6 +311,19 @@ def build_task_json(data_sha):
     ]
 
 
+def facet_reliability():
+    """Population omega of each four-item facet score, including both factors."""
+    result = {}
+    for facet in ("M", "P", "N"):
+        items = [item for item in ITEMS if SPECIFIC_OF[item] == facet]
+        general = np.array([GENERAL_LOADINGS[item] for item in items])
+        specific = np.array([SPECIFIC_LOADINGS.get(item, 0.0) for item in items])
+        signal = general.sum() ** 2 + specific.sum() ** 2
+        error = np.sum(1 - general**2 - specific**2)
+        result[facet] = float(signal / (signal + error))
+    return result
+
+
 def verify(df, pop):
     """Confirm the intended answer wins and each rival fails for its own reason."""
     from scipy.stats import chi2 as chi2_dist
@@ -333,6 +351,10 @@ def verify(df, pop):
     truth = criteria["bifactor_s1_machiavellianism_reference"]
     three, second = criteria["three_correlated_factors"], criteria["second_order"]
     checks = [
+        (
+            "facet-score population reliability is between .60 and .70",
+            all(0.60 <= value <= 0.70 for value in facet_reliability().values()),
+        ),
         (
             "the three-factor model looks acceptable on its own (CFI > .95)",
             three["CFI"] > 0.95,
@@ -373,7 +395,7 @@ def naive(df, pop):
         ("pooled (no filter)", df),
     ):
         X = sub[ITEMS]
-        X = X[(X != 0).all(axis=1)].astype(float)
+        X = X[X.notna().all(axis=1)].astype(float)
         fitted = {k: abs(v) for k, v in C.loadings(C.fit(spec, X, ITEMS)).items()}
         worst = max(abs(fitted[i] - truth[i]) for i in ITEMS)
         outcome[label] = worst <= 0.08

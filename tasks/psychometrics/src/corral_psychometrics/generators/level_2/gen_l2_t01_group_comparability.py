@@ -40,9 +40,9 @@ LOADINGS = {
     "HSNS9": ("oversensitivity", 0.52),
 }
 
-# Group 2 clears these four items' thresholds more easily at any trait level.
+# Group 2 scores higher on these four items at any trait level.
 # Two sit on each factor, so both traits look different until the items are freed.
-ITEM_DIF = {"HSNS1": -0.65, "HSNS8": -0.65, "HSNS3": -0.65, "HSNS7": -0.65}
+ITEM_DIF = {"HSNS1": -0.75, "HSNS8": -0.75, "HSNS3": -0.75, "HSNS7": -0.35}
 
 # The groups are identical on both traits. Every point of the observed gap is bias.
 LATENT_DIFFERENCE = {"egocentrism": 0.0, "oversensitivity": 0.0}
@@ -113,7 +113,7 @@ def responses(rng, n_1, n_2, apply_dif=True):
     """Draw item responses for both groups.
 
     n_1, n_2   respondents per group
-    apply_dif  shift the four biased items' thresholds for group 2
+    apply_dif  shift the four biased items' intercepts for group 2
     """
     gender = np.r_[np.ones(n_1), np.full(n_2, 2)]
     eta = rng.multivariate_normal([0.0, 0.0], [[1.0, PHI], [PHI, 1.0]], len(gender))
@@ -137,12 +137,12 @@ def responses(rng, n_1, n_2, apply_dif=True):
             common += np.sqrt(residual) * shared
             explained += residual
         y = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), len(gender))
-        tau = np.asarray(C.THRESHOLDS[item])
+        intercept = np.asarray(C.INTERCEPTS[item])
         shift = ITEM_DIF.get(item, 0.0) if apply_dif else 0.0
-        values = np.empty(len(y), dtype=int)
-        for group, threshold in ((1, tau), (2, tau + shift)):
+        values = np.empty(len(y), dtype=float)
+        for group, intercept_value in ((1, intercept), (2, intercept - shift)):
             mask = gender == group
-            values[mask] = C.categorize(y[mask], threshold)
+            values[mask] = C.continuous_response(y[mask], intercept_value)
         out[item] = values
     frame = pd.DataFrame(out)
     frame["gender"] = gender.astype(int)
@@ -155,7 +155,7 @@ def simulate(rng):
     frame["age"] = np.clip(rng.normal(35, 11, len(frame)).round(), 18, 78).astype(int)
     frame["accuracy"] = np.clip(rng.beta(8, 1.5, len(frame)) * 100, 1, 100).round().astype(int)
     frame["country"] = "US"
-    frame[ITEMS] = frame[ITEMS].mask(rng.random((len(frame), len(ITEMS))) < 0.01, 0)
+    frame[ITEMS] = frame[ITEMS].mask(rng.random((len(frame), len(ITEMS))) < 0.01, np.nan)
     frame = frame[ITEMS + ["age", "gender", "accuracy", "country"]]
     frame.insert(0, "participant_id", [f"P{i:05d}" for i in range(1, len(frame) + 1)])
     behavior = pd.DataFrame(
@@ -188,12 +188,12 @@ def responses_with_latents(rng, n_1, n_2, apply_dif=True):
             common += np.sqrt(residual) * shared
             explained += residual
         y = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), len(gender))
-        tau = np.asarray(C.THRESHOLDS[item])
+        intercept = np.asarray(C.INTERCEPTS[item])
         shift = ITEM_DIF.get(item, 0.0) if apply_dif else 0.0
-        values = np.empty(len(y), dtype=int)
-        for group, threshold in ((1, tau), (2, tau + shift)):
+        values = np.empty(len(y), dtype=float)
+        for group, intercept_value in ((1, intercept), (2, intercept - shift)):
             mask = gender == group
-            values[mask] = C.categorize(y[mask], threshold)
+            values[mask] = C.continuous_response(y[mask], intercept_value)
         out[item] = values
     frame = pd.DataFrame(out)
     frame["gender"] = gender.astype(int)
@@ -209,7 +209,7 @@ def population_matrix(rng):
 def analysis_sample(df):
     """Complete responses from both groups."""
     sub = df[df.gender.isin([1, 2])]
-    return sub[ALL_VARS][(sub[ITEMS] != 0).all(axis=1)].astype(float)
+    return sub[ALL_VARS][sub[ITEMS].notna().all(axis=1)].astype(float)
 
 
 def group_difference(X, syntax):
@@ -244,7 +244,7 @@ def write_codebook(path, df):
         "# Codebook - group comparability study",
         "",
         "Tab-separated, one row per respondent. Questionnaire responses are ratings "
-        "from 1 (Disagree) to 5 (Agree); 0 denotes a missing response.",
+        "on a continuous unbounded scale centered around zero; empty fields denote missing responses.",
         "",
         "The separate `behavior.csv` file contains two independent behavioural "
         "indicators for the same participants.",
@@ -305,12 +305,12 @@ def build_truth(floor, pop, data_sha, rows):
             "items": ITEMS,
             "loadings": LOADINGS,
             "group_latent_difference": LATENT_DIFFERENCE,
-            "item_threshold_shifts_for_group_2": ITEM_DIF,
+            "item_intercept_shifts_for_group_2": {item: -value for item, value in ITEM_DIF.items()},
             "metric_invariance": True,
             "scalar_invariance": False,
             "cross_loading": CROSS_LOADING,
             "residual_correlation": RESIDUAL_CORR,
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }

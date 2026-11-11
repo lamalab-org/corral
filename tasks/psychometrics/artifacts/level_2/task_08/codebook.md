@@ -1,6 +1,6 @@
 # Codebook - misfit replication
 
-The development and replication files are tab-separated and hold the same ten HSNS items. Ratings run from 1 (Disagree) to 5 (Agree); `0` denotes a missing response.
+The development and replication files are tab-separated and hold the same ten HSNS items. Responses are continuous and unbounded; empty fields denote a missing response.
 
 | variable | description |
 |---|---|

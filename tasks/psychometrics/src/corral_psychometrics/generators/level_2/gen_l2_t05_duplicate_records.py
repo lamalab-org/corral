@@ -7,7 +7,7 @@ The correlation in the delivered file is inflated by two mechanisms at once,
 and the task is to find both. Respondents are re-delivered with a probability
 rising in the sum of their two traits, so the repeated rows are the high-scoring
 end of the sample; separately, distinct respondents collide on identical answer
-patterns by chance. A re-delivered row keeps its answers, age and accuracy, and
+patterns through a shared finite response-profile pool. A re-delivered row keeps its answers, age and accuracy, and
 is given a fresh participant id, session id and date, so the identifying key is
 the responses rather than the ids.
 """
@@ -61,7 +61,7 @@ PROMPT = (
     "file, the memo, and the panel's delivery audit.\n\n"
     "Decide what produced the correlation: the same respondents delivered more than once "
     "(`repeated_delivery_only`), different respondents giving identical answers "
-    "(`chance_collisions_only`), or both (`both_mechanisms`). Also give the columns that "
+    "(`shared_profiles_only`), or both (`both_mechanisms`). Also give the columns that "
     "together identify one respondent, and a model for the two dimensions.\n"
 )
 
@@ -70,7 +70,7 @@ A single JSON object:
 
 {
   "model_syntax": "<complete semopy model>",
-  "diagnosis": "repeated_delivery_only|chance_collisions_only|both_mechanisms",
+  "diagnosis": "repeated_delivery_only|shared_profiles_only|both_mechanisms",
   "duplicate_key": ["<column>", "..."]
 }
 
@@ -88,18 +88,26 @@ def reference_syntax():
 
 def respondents(rng, n):
     """Draw n distinct respondents."""
-    eta = rng.multivariate_normal([0.0, 0.0], [[1.0, PHI], [PHI, 1.0]], n)
+    # A finite synthetic profile population permits distinct people to share
+    # continuous answers without pretending independent Gaussian draws collide.
+    pool_size = max(1000, n // 2)
+    eta = rng.multivariate_normal([0.0, 0.0], [[1.0, PHI], [PHI, 1.0]], pool_size)
+    selected = rng.integers(0, pool_size, size=n)
     out = {}
     for item, loading in LOADINGS.items():
         index = 0 if item in F1_ITEMS else 1
-        y = loading * eta[:, index] + rng.normal(0, np.sqrt(1 - loading**2), n)
-        out[item] = C.categorize(y, C.THRESHOLDS[item])
+        y = loading * eta[:, index] + rng.normal(0, np.sqrt(1 - loading**2), pool_size)
+        out[item] = C.continuous_response(y[selected], C.INTERCEPTS[item])
     frame = pd.DataFrame(out)[ITEMS]
     frame["age"] = np.clip(rng.normal(35, 11, n).round(), 18, 78).astype(int)
     frame["gender"] = rng.choice([1, 2], size=n, p=[0.61, 0.39])
     frame["accuracy"] = np.clip(rng.beta(8, 1.5, n) * 100, 1, 100).round().astype(int)
     frame["country"] = "US"
-    frame["_trait_sum"] = eta.sum(axis=1)
+    frame["_trait_sum"] = eta[selected].sum(axis=1)
+    # Keep the evaluator's stable identity unique even within a profile/age cell.
+    while frame.duplicated(IDENTITY).any():
+        repeated = frame.duplicated(IDENTITY)
+        frame.loc[repeated, "accuracy"] = (frame.loc[repeated, "accuracy"] + 1) % 101
     return frame
 
 
@@ -160,7 +168,7 @@ def write_evidence(out_dir, audit):
     )
     (out_dir / "preliminary_analysis.md").write_text(
         "# Preliminary analysis\n\n"
-        "A two-factor HSNS model was fitted to the delivered response file. The estimated factor correlation is noticeably larger than the panel analyst expected from prior work. The analyst also noticed many exact response-pattern matches, but did not determine whether these are repeated deliveries or different people who happened to use the same five-point answers.\n\n"
+        "A two-factor HSNS model was fitted to the delivered response file. The estimated factor correlation is noticeably larger than the panel analyst expected from prior work. The analyst also noticed many exact response-pattern matches, but did not determine whether these are repeated deliveries or different people who happened to use the same recorded answers.\n\n"
         "The separate audit contains delivery characteristics; none of its fields is a respondent identifier.\n\n"
         "Treat this as a preliminary interpretation, not as the answer.\n"
     )
@@ -195,8 +203,8 @@ def population_matrix(rng):
 def write_codebook(path, df):
     path.write_text(
         "# Codebook - panel delivery\n\n"
-        "Tab-separated, one row per delivered record. Responses run from 1 (Disagree) to "
-        "5 (Agree). Every item was answered; there are no missing responses.\n\n"
+        "Tab-separated, one row per delivered record. Responses are continuous and unbounded, "
+        "centered around zero. Every item was answered; there are no missing responses.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)
         + "\n\n| variable | description |\n|---|---|\n"
@@ -207,6 +215,9 @@ def write_codebook(path, df):
         "| `gender` | 1 = Male, 2 = Female |\n"
         "| `accuracy` | self-rated response accuracy, 0-100 |\n"
         "| `country` | collection country; all rows are US |\n\n"
+        "This synthetic panel samples from a finite pool of response profiles. "
+        "Distinct people can therefore have identical item values; item matches alone "
+        "do not establish identity.\n\n"
         f"Rows delivered: {len(df):,}.\n"
     )
 
@@ -231,6 +242,7 @@ def build_truth(floor, pop, data_sha, rows, n_distinct, n_repeated, corrected):
             "trait_correlation": PHI,
             "distinct_respondents": n_distinct,
             "records_delivered_twice": n_repeated,
+            "response_profile_pool_size": N_RESPONDENTS // 2,
             "redelivery": {"centre": REDELIVERY_CENTRE, "slope": REDELIVERY_SLOPE},
             "identity_columns": IDENTITY,
             "reissued_columns": REISSUED,
@@ -322,7 +334,7 @@ def candidate_submissions(X):
         "correct": correct,
         "leaves the data as delivered": {
             **correct,
-            "diagnosis": "chance_collisions_only",
+            "diagnosis": "shared_profiles_only",
             "duplicate_key": IDENTITY + REISSUED,
         },
         "treats every repeated pattern as a duplicate": {
@@ -366,9 +378,8 @@ def verify(delivered, n_repeated):
             ("both mechanisms are present in the data", n_repeated > 500 and chance > 150),
             ("the re-delivered block inflates the correlation", as_delivered - correct > 0.04),
             (
-                "removing every repeated pattern overshoots further than leaving them in",
-                abs(estimates["drop every row sharing an answer pattern"] - correct)
-                > abs(as_delivered - correct),
+                "removing every repeated pattern deletes genuine respondents",
+                len(routes["drop every row sharing an answer pattern"]) < N_RESPONDENTS,
             ),
             (
                 "keeping one row per answer pattern still loses real respondents",
@@ -384,7 +395,7 @@ def verify(delivered, n_repeated):
 
 
 def naive(delivered):
-    """Confirm the obvious cleaning move lands further from the truth than none."""
+    """Confirm answer-only cleaning loses real respondents."""
     as_delivered = factor_correlation(analysis_sample(delivered))
     deduped = factor_correlation(analysis_sample(deduplicate(delivered, ITEMS)))
     dropped = factor_correlation(
@@ -395,17 +406,17 @@ def naive(delivered):
     print(f"  keeping one row per answer pattern          {deduped:+.3f}")
     print(f"  dropping every row in a repeated pattern    {dropped:+.3f}")
     print("\n  the repeated patterns are not all duplicates, so deduplicating on")
-    print("  the answers alone deletes real respondents and overshoots.")
+    print("  the answers alone deletes real respondents.")
     return C.report(
         [
             ("the file as delivered overstates the correlation", as_delivered - PHI > 0.04),
             (
-                "dropping every repeated pattern lands further away than doing nothing",
-                abs(dropped - PHI) > abs(as_delivered - PHI),
+                "dropping every repeated pattern deletes genuine respondents",
+                len(delivered[~delivered.duplicated(subset=ITEMS, keep=False)]) < N_RESPONDENTS,
             ),
             (
-                "and keeping one row per answer pattern still misses",
-                abs(deduped - PHI) > CORRELATION_TOLERANCE,
+                "keeping one row per answer pattern deletes distinct people",
+                len(deduplicate(delivered, ITEMS)) < N_RESPONDENTS,
             ),
         ]
     )

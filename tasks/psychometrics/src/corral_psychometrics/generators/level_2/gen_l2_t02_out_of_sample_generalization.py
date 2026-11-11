@@ -135,12 +135,12 @@ def simulate(rng, n, phi=PHI, extra_cross=0.0, label=None):
             common += np.sqrt(RESIDUAL_CORR[1]) * shared
             explained += RESIDUAL_CORR[1]
         y = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), n)
-        out[item] = C.categorize(y, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(y, C.INTERCEPTS[item])
     frame = pd.DataFrame(out)
     frame["age"] = np.clip(rng.normal(35, 11, n).round(), 18, 78).astype(int)
     frame["gender"] = rng.choice([1, 2], size=n, p=[0.61, 0.39])
     frame["accuracy"] = np.clip(rng.beta(8, 1.5, n) * 100, 1, 100).round().astype(int)
-    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < 0.01, 0)
+    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < 0.01, np.nan)
     columns = ITEMS + ["age", "gender", "accuracy"]
     if label is not None:
         frame["country"] = label
@@ -158,7 +158,7 @@ def build_holdouts(rng):
 
 def analysis_sample(df):
     """Complete responses."""
-    return df[ITEMS][(df[ITEMS] != 0).all(axis=1)].astype(float)
+    return df[ITEMS][df[ITEMS].notna().all(axis=1)].astype(float)
 
 
 def population_matrix(rng):
@@ -220,7 +220,7 @@ def write_codebook(path, frames):
     path.write_text(
         "# Codebook - out-of-sample validation\n\n"
         "Each tab-separated file contains responses to the same ten HSNS items. "
-        "Ratings run from 1 (Disagree) to 5 (Agree); 0 denotes a missing response.\n\n"
+        "Responses are continuous and unbounded, centered around zero; empty fields denote missing responses.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)
         + "\n\n| variable | description |\n|---|---|\n"

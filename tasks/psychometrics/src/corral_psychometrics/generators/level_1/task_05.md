@@ -13,7 +13,7 @@ Give a defensibility judgement for each of these comparisons:
 - latent means;
 - observed total-score means.
 
-Also estimate the correlation between the HSNS trait and the Dirty Dozen narcissism trait separately for men and women. Responses are five-point ratings and `0` denotes a missing response.
+Also estimate the correlation between the HSNS trait and the Dirty Dozen narcissism trait separately for men and women. Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses.
 
 `codebook.md` gives the response coding and the text of every item.
 

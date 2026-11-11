@@ -4,7 +4,7 @@
 
 You are given responses from an online personality survey collected in several countries. Using US respondents, investigate the measurement-error-adjusted correlation between every dimension of one instrument and every dimension of the other.
 
-Before estimating the correlations, assess response quality. In particular, consider respondents whose item answers show no variation. The self-rated `accuracy` field is available but should be evaluated as evidence rather than treated as a guaranteed indicator of careless responding. Responses are five-point ratings and `0` denotes a missing response.
+Before estimating the correlations, assess response quality. In particular, consider respondents whose item answers show no variation. The self-rated `accuracy` field is available but should be evaluated as evidence rather than treated as a guaranteed indicator of careless responding. Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses.
 
 `codebook.md` gives the response coding and the text of every item.
 

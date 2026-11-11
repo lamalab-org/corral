@@ -46,33 +46,8 @@ N_BY_COUNTRY = {
 }
 ITEM_MISSING_RATE = 0.012
 
-# Four cut points per item. A respondent's unobserved score is cut at these to
-# give the 1-5 answer, which is what makes the answers skewed rather than
-# symmetric.
-THRESHOLDS = {
-    "HSNS1": [-1.701, -0.923, -0.487, 0.509],
-    "HSNS2": [-0.948, -0.253, 0.109, 0.984],
-    "HSNS3": [-1.351, -0.568, -0.189, 0.737],
-    "HSNS4": [-1.057, -0.032, 0.44, 1.18],
-    "HSNS5": [-1.32, -0.443, 0.013, 0.902],
-    "HSNS6": [-2.084, -1.288, -0.752, 0.326],
-    "HSNS7": [-1.451, -0.669, -0.25, 0.876],
-    "HSNS8": [-1.247, -0.383, 0.016, 0.873],
-    "HSNS9": [-1.591, -0.875, -0.445, 0.606],
-    "HSNS10": [-0.712, 0.158, 0.538, 1.229],
-    "DDP1": [-0.659, 0.026, 0.337, 1.06],
-    "DDP2": [-0.625, 0.171, 0.554, 1.209],
-    "DDP3": [-1.069, -0.35, 0.063, 0.925],
-    "DDP4": [-1.559, -0.969, -0.507, 0.434],
-    "DDN1": [-1.607, -1.037, -0.569, 0.509],
-    "DDN2": [-1.241, -0.539, -0.008, 0.941],
-    "DDN3": [-1.114, -0.371, 0.083, 0.888],
-    "DDN4": [-0.884, 0.046, 0.526, 1.379],
-    "DDM1": [-1.011, -0.296, 0.116, 1.007],
-    "DDM2": [-1.565, -0.934, -0.591, 0.612],
-    "DDM3": [-1.286, -0.523, -0.17, 0.865],
-    "DDM4": [-0.81, 0.057, 0.58, 1.396],
-}
+# Continuous item responses have zero baseline intercept and unit population variance.
+INTERCEPTS = dict.fromkeys(ALL_ITEMS, 0.0)
 
 ITEM_TEXT = {
     "HSNS1": "I can become entirely absorbed in thinking about my personal affairs, my health, my cares or my relations to others.",
@@ -103,13 +78,9 @@ ITEM_TEXT = {
 # --------------------------------------------------------------------------
 # Simulation
 # --------------------------------------------------------------------------
-def categorize(ystar, tau):
-    """Turn unobserved scores into 1-5 answers.
-
-    ystar  one unobserved score per respondent
-    tau    the four cut points for this item
-    """
-    return np.searchsorted(np.asarray(tau), ystar).astype(int) + 1
+def continuous_response(score, intercept=0.0):
+    """Return a continuous response, preserving zero as a valid observed value."""
+    return np.asarray(score, dtype=float) + intercept
 
 
 def correlated_block(
@@ -118,45 +89,17 @@ def correlated_block(
     loadings,
     phi_matrix,
     factor_names,
-    taus,
+    intercepts,
     scale=1.0,
     cross=None,
     resid_corr=None,
     dif=None,
     female=None,
 ):
-    """Answers from respondents whose traits are correlated with each other.
+    """Draw continuous items with optional cross-loadings, pair dependence and DIF.
 
-    Each item scores a respondent out of sight, then the cut points turn that
-    score into a 1-5 answer:
-
-        ystar = lam * eta + noise
-
-    ystar  the unobserved score, before cut points make it a 1-5 answer
-    eta    where the respondent stands on the trait the item measures, drawn so
-           the traits correlate the way `phi_matrix` says
-    lam    the item's loading: how much of the score the trait accounts for
-    noise  everything else about the item, drawn with the variance the loading
-           leaves over
-    tau    the item's four cut points, from `taus`
-
-    An item carries one unit of variance, which `lam` and `noise` divide: a
-    `lam` of 0.7 accounts for 0.49 of it and leaves 0.51 to `noise`. `cross`
-    and `resid_corr` add further terms, each paid for out of `noise` in turn.
-    Every generator in this package uses these names.
-
-    n            how many respondents
-    rng          random generator
-    loadings     {item: (factor, lam)}
-    phi_matrix   correlations between the factors
-    factor_names names in the order phi_matrix uses
-    taus         {item: tau}
-    scale        multiplies every loading, to make a worse-measured group
-    cross        (item, factor, loading): give one item a second loading
-    resid_corr   ((item, item), covariance): let two items agree beyond the
-                 factor, as near-duplicate wording makes them
-    dif          {item: shift}: move an item's cut points for one group
-    female       which respondents `dif` applies to
+    Each baseline item has variance one. DIF adds an item intercept for the
+    selected group; residual variance accounts for correlated cross-loadings.
     """
     eta = rng.multivariate_normal(np.zeros(len(factor_names)), phi_matrix, size=n)
     index = {f: i for i, f in enumerate(factor_names)}
@@ -174,21 +117,23 @@ def correlated_block(
             common = common + np.sqrt(resid_corr[1]) * shared
             explained += resid_corr[1]
         ystar = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), n)
-        tau = taus[item]
+        intercept = intercepts[item]
         if dif and item in dif and female is not None:
-            shifted = [t + dif[item] for t in tau]
-            out[item] = np.where(female, categorize(ystar, shifted), categorize(ystar, tau))
+            shifted = intercept + dif[item]
+            out[item] = np.where(
+                female, continuous_response(ystar, shifted), continuous_response(ystar, intercept)
+            )
         else:
-            out[item] = categorize(ystar, tau)
+            out[item] = continuous_response(ystar, intercept)
     return pd.DataFrame(out)
 
 
-def bifactor_block(n, rng, general, specific, specific_of, items, taus):
+def bifactor_block(n, rng, general, specific, specific_of, items, intercepts):
     """Answers driven by one broad trait plus a narrow one per subscale.
 
         ystar = broad_lam * broad + narrow_lam * narrow + noise
 
-    ystar       the unobserved score, before cut points make it a 1-5 answer
+    ystar       the continuous response before adding the item intercept
     broad       the one trait every item measures
     narrow      the trait of the item's own subscale
     broad_lam   the item's loading on `broad`, from `general`
@@ -202,7 +147,7 @@ def bifactor_block(n, rng, general, specific, specific_of, items, taus):
     specific     {item: narrow_lam}
     specific_of  {item: which narrow trait it belongs to}
     items        column order of the result
-    taus         {item: tau}
+    intercepts   {item: baseline intercept}
     """
     broad = rng.normal(size=n)
     # dict.fromkeys keeps first-appearance order; iterating a set here would
@@ -217,12 +162,12 @@ def bifactor_block(n, rng, general, specific, specific_of, items, taus):
             + narrow_lam * narrow[specific_of[item]]
             + rng.normal(0, np.sqrt(max(left_over, 1e-6)), n)
         )
-        out[item] = categorize(ystar, taus[item])
+        out[item] = continuous_response(ystar, intercepts[item])
     return pd.DataFrame(out)[items]
 
 
 def bifactor_s1_block(
-    n, rng, general, specific, specific_of, items, taus, *, reference="M", specific_phi=0.25
+    n, rng, general, specific, specific_of, items, intercepts, *, reference="M", specific_phi=0.25
 ):
     """Simulate a reference-facet bifactor model with two correlated specifics.
 
@@ -246,7 +191,7 @@ def bifactor_s1_block(
         ystar = g * common + rng.normal(0, np.sqrt(1 - g**2 - s**2), n)
         if facet != reference:
             ystar += s * specific_scores[facet]
-        out[item] = categorize(ystar, taus[item])
+        out[item] = continuous_response(ystar, intercepts[item])
     return pd.DataFrame(out)[items]
 
 
@@ -265,17 +210,19 @@ def demographics(n, rng, country):
 def finalize(frames, rng, seed):
     """Shuffle the per-country blocks together and drop a few answers at random.
 
-    A dropped answer is written as 0.
+    A dropped answer is written as NaN (an empty field in the public TSV).
     """
     df = pd.concat(frames, ignore_index=True).sample(frac=1.0, random_state=seed)
-    df[ALL_ITEMS] = df[ALL_ITEMS].mask(rng.random((len(df), len(ALL_ITEMS))) < ITEM_MISSING_RATE, 0)
+    df[ALL_ITEMS] = df[ALL_ITEMS].mask(
+        rng.random((len(df), len(ALL_ITEMS))) < ITEM_MISSING_RATE, np.nan
+    )
     return df[COLUMNS].reset_index(drop=True)
 
 
 def analysis_sample(df, items, country="US"):
     """One country's respondents who answered every item."""
     X = df[df.country == country][items]
-    return X[(X != 0).all(axis=1)].astype(float)
+    return X[X.notna().all(axis=1)].astype(float)
 
 
 # --------------------------------------------------------------------------
@@ -404,8 +351,9 @@ def write_codebook(path, df):
     lines = [
         "# Codebook - online personality survey",
         "",
-        "Tab-separated, one row per respondent. Item responses are ratings on a "
-        "five-point scale: 1 = Disagree, 3 = Neutral, 5 = Agree. **0 = missed.**",
+        "Tab-separated, one row per respondent. Synthetic item responses are continuous "
+        "and unbounded, centered around zero; higher values mean greater agreement. "
+        "Zero is a valid neutral response. Empty fields denote missing responses.",
         "",
         "Items are taken from published self-report personality scales and were "
         "presented to respondents in a single block.",
@@ -469,6 +417,8 @@ def scoring_contract(task, items, tier_3_claims):
         "subset": {"country": "US"},
         "items": items,
         "scorer_estimator": "ML",
+        "response_type": "continuous",
+        "missing_responses": "empty_fields",
         "refit_submitted_syntax": True,
         "syntax_whitelist": {"items": items, "operators": ["=~", "~~", "~"], "max_factors": 6},
         "method": "constraints_then_pareto_then_claims",

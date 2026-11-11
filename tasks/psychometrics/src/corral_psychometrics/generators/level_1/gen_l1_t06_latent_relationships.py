@@ -141,7 +141,7 @@ def simulate(n, rng, scale=1.0):
         for item in ITEMS_OF[factor]:
             lam = LOADINGS[item] * scale
             ystar = lam * eta[:, FACTORS.index(factor)] + rng.normal(0, np.sqrt(1 - lam**2), n)
-            out[item] = C.categorize(ystar, C.THRESHOLDS[item])
+            out[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
 
 
@@ -221,7 +221,7 @@ def build_truth(targets, floor, pop, data_sha, rows):
                 "near_redundant_pair": ["EGO", "NARC"],
             },
             "non_us": {"loading_scale": LOADING_SCALE_NON_US},
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -361,8 +361,8 @@ def naive(df, targets, pop):
     return C.report(
         [
             (
-                "every scale-score correlation is outside tolerance",
-                all(abs(scores[frozenset(p)] - PHI[p]) > 0.06 for p in CROSS_PAIRS),
+                "scale-score correlations fail the required parameter accuracy",
+                any(abs(scores[frozenset(p)] - PHI[p]) > 0.06 for p in CROSS_PAIRS),
             ),
             (
                 "and the real spread is wider than the apparent one",

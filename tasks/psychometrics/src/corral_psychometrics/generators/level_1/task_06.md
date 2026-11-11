@@ -4,7 +4,7 @@
 
 You are given responses from an online personality survey containing two instruments. Using respondents from the United States, investigate how the dimensions of one instrument relate to the dimensions of the other.
 
-Estimate the correlation between every cross-instrument dimension pair while accounting for measurement error. Also decide which pairs should not be treated as distinct constructs: use a correlation of `0.80` or above as the threshold for indistinguishability. Responses are five-point ratings and `0` denotes a missing response.
+Estimate the correlation between every cross-instrument dimension pair while accounting for measurement error. Also decide which pairs should not be treated as distinct constructs: use a correlation of `0.80` or above as the threshold for indistinguishability. Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses.
 
 `codebook.md` gives the response coding and the text of every item.
 

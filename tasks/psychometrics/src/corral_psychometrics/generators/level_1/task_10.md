@@ -6,11 +6,11 @@ You are given responses from an online personality survey collected in several c
 
 - `sound`: the item and its recorded data are usable;
 - `mis_keyed`: the response scale was stored in reverse;
-- `inserted_neutral`: recorded answers were overwritten with the midpoint;
+- `inserted_neutral`: recorded answers were overwritten with zero (the neutral value);
 - `truncated_scale`: the upper part of the response scale was not recorded;
 - `weak_item`: the data are intact but the item measures the trait poorly.
 
-The Dirty Dozen items are present but are not part of this task. Responses are five-point ratings and `0` denotes a missing response.
+The Dirty Dozen items are present but are not part of this task. Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses.
 
 `codebook.md` gives the response coding and the text of every item.
 
@@ -20,7 +20,7 @@ Submit a complete semopy model for the HSNS and a classification for every HSNS 
 
 ## Why this is non-trivial
 
-A low loading does not identify the cause of an item's poor performance. Data corruption can resemble a weak item, while some corruption is visible mainly in the response range or category frequencies. The population used for analysis also matters when deciding which item is unusual.
+A low loading does not identify the cause of an item's poor performance. Data corruption can resemble a weak item, while some corruption is visible mainly in the response range or a point mass at zero. The population used for analysis also matters when deciding which item is unusual.
 
 ## Synthetic task command
 

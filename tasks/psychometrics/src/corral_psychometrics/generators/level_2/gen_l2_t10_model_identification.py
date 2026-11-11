@@ -9,7 +9,7 @@ and then given one data-quality problem on top.
     model_c   bifactor - a general factor plus one narrow factor per subscale
     model_d   three correlated factors, Q01-Q03, Q04-Q07 and Q08-Q12
     model_e   two correlated factors, Q06 also loading on the second
-    model_f   one general factor plus a method effect shared by Q03 and Q10
+    model_f   one general factor plus a method effect shared by Q03, Q07 and Q10
 
 The complications - missingness, local dependence, a shifted subgroup, repeated
 rows, a weak item, a response style - are what make several structures fit a
@@ -19,6 +19,7 @@ margin rather than one name.
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -39,8 +40,8 @@ MODELS = [f"model_{letter}" for letter in "abcdef"]
 MODEL_D_BLOCKS = [(0, 3), (3, 7), (7, 12)]
 N = 2_400
 
-# The same cut points every other task uses, borrowed for twelve items.
-THRESHOLDS = dict(zip(ITEMS, list(C.THRESHOLDS.values())[: len(ITEMS)]))
+# Baseline continuous responses are centered at zero.
+INTERCEPTS = dict(zip(ITEMS, list(C.INTERCEPTS.values())[: len(ITEMS)]))
 
 MODEL_DESCRIPTIONS = {
     "model_a": "one general factor; all items have comparable loadings",
@@ -48,7 +49,7 @@ MODEL_DESCRIPTIONS = {
     "model_c": "a bifactor model; every item loads on a general factor and one subscale",
     "model_d": "three correlated factors; Q01-Q03, Q04-Q07 and Q08-Q12 form the subscales",
     "model_e": "two correlated factors with Q06 also loading on the second factor",
-    "model_f": "one general factor with a response-method effect shared by Q03 and Q10",
+    "model_f": "one general factor with a response-method effect shared by Q03, Q07 and Q10",
 }
 
 # A candidate belongs in a dataset's answer when its BIC is within this of the
@@ -71,10 +72,10 @@ DUPLICATED_ROWS = 320
 COMPLICATIONS = {
     "dataset_01": "responses to Q01 go missing more often at the low end of the scale",
     "dataset_02": f"{DEPENDENT_PAIR[0]} and {DEPENDENT_PAIR[1]} share residual variance",
-    "dataset_03": f"a subgroup answers {SHIFTED_ITEM} one threshold lower",
+    "dataset_03": f"a subgroup answers {SHIFTED_ITEM} 0.55 units higher at the same trait level",
     "dataset_04": f"{DUPLICATED_ROWS} rows are delivered twice",
     "dataset_05": f"{WEAK_ITEM} is weak but still measures the trait",
-    "dataset_06": "a quarter of respondents answer everything one category higher",
+    "dataset_06": "a quarter of respondents answer everything one unit higher",
 }
 
 
@@ -105,7 +106,7 @@ def factor_syntax(model):
         )
     if model == "model_e":
         return f"F1 =~ {join(ITEMS[:6])}\nF2 =~ {join(ITEMS[6:])}+Q06\nF1 ~~ F2"
-    return f"G =~ {join(ITEMS)}\nM =~ Q03+Q10\nG ~~ 0*M"
+    return f"G =~ {join(ITEMS)}\nM =~ Q03+Q07+Q10\nG ~~ 0*M"
 
 
 def latent_scores(model, rng, n):
@@ -136,7 +137,7 @@ def latent_scores(model, rng, n):
     else:
         eta = rng.normal(size=n)
         method = rng.normal(size=n)
-        columns = [0.68 * eta + (0.42 * method if i in (2, 9) else 0.0) for i in range(12)]
+        columns = [0.68 * eta + (0.42 * method if i in (2, 6, 9) else 0.0) for i in range(12)]
     return np.column_stack(columns)
 
 
@@ -157,24 +158,24 @@ def responses(model, rng, n, complication=None):
     for index, item in enumerate(ITEMS):
         column = signal[:, index]
         residual = np.sqrt(max(1.0 - float(np.var(column)), 0.05))
-        values[item] = C.categorize(column + rng.normal(0, residual, n), THRESHOLDS[item])
+        values[item] = C.continuous_response(column + rng.normal(0, residual, n), INTERCEPTS[item])
     frame = pd.DataFrame(values)[ITEMS]
 
     if complication == "shift":
         subgroup = rng.random(n) < 0.42
-        cut = np.asarray(THRESHOLDS[SHIFTED_ITEM]) - 0.55
+        cut = INTERCEPTS[SHIFTED_ITEM] + 0.55
         column = signal[:, ITEMS.index(SHIFTED_ITEM)]
         residual = np.sqrt(max(1.0 - float(np.var(column)), 0.05))
-        shifted = C.categorize(column + rng.normal(0, residual, n), cut)
+        shifted = C.continuous_response(column + rng.normal(0, residual, n), cut)
         frame.loc[subgroup, SHIFTED_ITEM] = shifted[subgroup]
     if complication == "response_style":
         subgroup = rng.random(n) < 0.25
-        frame.loc[subgroup, ITEMS] = np.clip(frame.loc[subgroup, ITEMS] + 1, 1, 5)
+        frame.loc[subgroup, ITEMS] = frame.loc[subgroup, ITEMS] + 1
     if complication == "missing":
-        low = frame["Q01"] <= 2
+        low = frame["Q01"] <= -0.5
         drop = (rng.random(n) < 0.35) & low.to_numpy()
-        frame.loc[drop, "Q01"] = 0
-        frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < 0.012, 0)
+        frame.loc[drop, "Q01"] = np.nan
+        frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < 0.012, np.nan)
     if complication == "duplicates":
         picked = rng.choice(n, size=DUPLICATED_ROWS, replace=False)
         frame = pd.concat([frame, frame.iloc[picked]], ignore_index=True)
@@ -194,7 +195,7 @@ COMPLICATION_KIND = {
 def analysis_sample(frame):
     """Complete responses, with repeated rows collapsed."""
     clean = frame[ITEMS]
-    clean = clean[(clean != 0).all(axis=1)]
+    clean = clean[clean.notna().all(axis=1)]
     return clean[~clean.duplicated()].astype(float)
 
 
@@ -260,11 +261,13 @@ def write_codebook(path):
     path.write_text(
         "# Codebook - model identification\n\n"
         "Each `dataset_*.csv` is tab-separated and holds an independent anonymised "
-        "sample answering the same twelve items. Responses run from 1 (low) to 5 "
-        "(high); `0` denotes a missing response.\n\n"
+        "sample answering the same twelve items. Responses are continuous and unbounded, "
+        "centered around zero; empty fields denote missing responses.\n\n"
         "| variable | meaning |\n|---|---|\n"
         "| `respondent_id` | row identifier |\n"
-        + "\n".join(f"| `{item}` | ordered response, 1 to 5 |" for item in ITEMS)
+        "| response format | Q03, Q07 and Q10 used a shared reverse-worded format; "
+        "their values have already been keyed in the same direction as the other items |\n"
+        + "\n".join(f"| `{item}` | continuous response; zero is valid |" for item in ITEMS)
         + "\n\n`candidate_models.csv` gives each model's description and lavaan-style "
         "syntax. The order of the catalogue carries no information.\n"
     )
@@ -479,7 +482,9 @@ def main():
         answers[dataset], measured[dataset] = chosen, bic
         written = frames[dataset].copy()
         written.insert(0, "respondent_id", [f"{dataset}_{i:05d}" for i in range(len(written))])
-        written.to_csv(TASK.artifacts / f"{dataset}.csv", sep="\t", index=False)
+        written.to_csv(
+            TASK.artifacts / f"{dataset}.csv", sep="\t", index=False, quoting=csv.QUOTE_NONNUMERIC
+        )
     pd.DataFrame(
         [
             {"model_id": key, "description": value, "syntax": factor_syntax(key)}

@@ -12,7 +12,7 @@ total;
 - `total_and_subscales`: both are defensible;
 - `none`: neither is defensible.
 
-Responses are five-point ratings and `0` denotes a missing response.
+Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses.
 
 `codebook.md` gives the response coding and the text of every item.
 

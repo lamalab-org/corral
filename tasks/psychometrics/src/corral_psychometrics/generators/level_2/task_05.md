@@ -4,8 +4,8 @@
 
 Investigate an unexpectedly strong relationship between two HSNS dimensions in a
 panel-delivered survey. Use the response file, preliminary memo, and delivery
-audit to decide whether the relationship reflects repeated deliveries, chance
-response collisions, or both. Identify a record key, collapse repeats with that
+audit to decide whether the relationship reflects repeated deliveries, shared
+response profiles, or both. Identify a record key, collapse repeats with that
 key, and refit the measurement model.
 
 ## Files
@@ -20,7 +20,7 @@ values, and a repeated delivery may receive a new participant identifier.
 ## Output
 
 ```json
-{"model_syntax": "F1 =~ ...\nF2 =~ ...\nF1 ~~ F2", "diagnosis": "repeated_delivery_only|chance_collisions_only|both_mechanisms", "duplicate_key": ["<column>", "..."]}
+{"model_syntax": "F1 =~ ...\nF2 =~ ...\nF1 ~~ F2", "diagnosis": "repeated_delivery_only|shared_profiles_only|both_mechanisms", "duplicate_key": ["<column>", "..."]}
 ```
 
 The key must use columns from `data.csv`, so duplicate records can be collapsed
@@ -28,7 +28,7 @@ consistently and the model fit and factor correlation can be reproduced.
 
 ## What needs checking
 
-Exact response matches are possible in a long survey. Removing every match can
+This synthetic panel samples a finite pool of continuous response profiles, so distinct people can have identical answers. Removing every match can
 discard genuine respondents; retaining every row can count one respondent twice.
 
 ## Rebuild

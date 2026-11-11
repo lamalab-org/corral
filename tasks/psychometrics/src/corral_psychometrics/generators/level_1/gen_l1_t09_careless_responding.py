@@ -82,7 +82,7 @@ STRAIGHT_LINE_RATE = 0.08
 RANDOM_RATE = 0.04
 # What a straight-liner picks. Weighted towards the middle of the scale, as
 # observed response sets are.
-STRAIGHT_VALUE_P = [0.10, 0.12, 0.38, 0.22, 0.18]
+STRAIGHT_VALUE_SD = 1.5
 
 # Outside the United States the two instruments really are strongly related, so
 # pooling inflates the same correlations a second time.
@@ -136,7 +136,7 @@ def honest_responses(n, rng, us):
     for item in ITEMS:
         lam = LOADINGS[item]
         ystar = lam * eta[:, FACTORS.index(FACTOR_OF[item])] + rng.normal(0, np.sqrt(1 - lam**2), n)
-        cols[item] = C.categorize(ystar, C.THRESHOLDS[item])
+        cols[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
     return pd.DataFrame(cols)[ITEMS]
 
 
@@ -153,8 +153,8 @@ def contaminate(frame, rng):
     straight = order[:n_straight]
     clicking = order[n_straight : n_straight + n_random]
     values = frame.to_numpy(copy=True)
-    values[straight] = rng.choice([1, 2, 3, 4, 5], size=(n_straight, 1), p=STRAIGHT_VALUE_P)
-    values[clicking] = rng.integers(1, 6, size=(n_random, len(ITEMS)))
+    values[straight] = rng.normal(0, STRAIGHT_VALUE_SD, size=(n_straight, 1))
+    values[clicking] = rng.normal(0, 1, size=(n_random, len(ITEMS)))
     return pd.DataFrame(values, columns=ITEMS), set(straight), set(clicking)
 
 
@@ -175,9 +175,9 @@ def analysis_sample(df, country="US", screen=None):
     """
     block = df[df.country == country] if country else df
     X = block[ITEMS]
-    keep = (X != 0).all(axis=1)
+    keep = X.notna().all(axis=1)
     if screen == "spread":
-        keep &= X.std(axis=1) > 0
+        keep &= X.nunique(axis=1) > 1
     elif screen == "accuracy":
         keep &= block.accuracy >= 50
     return X[keep].astype(float)
@@ -251,10 +251,10 @@ def build_truth(targets, floor, pop, data_sha, rows):
             "contamination": {
                 "straight_line_rate": STRAIGHT_LINE_RATE,
                 "random_rate": RANDOM_RATE,
-                "straight_value_probabilities": STRAIGHT_VALUE_P,
+                "straight_value_sd": STRAIGHT_VALUE_SD,
                 "detection": "zero spread across the 22 items",
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -381,7 +381,7 @@ def verify(df, targets):
     )
 
     us = df[df.country == "US"]
-    spoiled = us[ITEMS].std(axis=1) == 0
+    spoiled = us[ITEMS].nunique(axis=1) == 1
     print(
         f"  the spread screen removes {int(spoiled.sum()):,} of {len(us):,} "
         f"US rows; self-rated accuracy below 50 covers "

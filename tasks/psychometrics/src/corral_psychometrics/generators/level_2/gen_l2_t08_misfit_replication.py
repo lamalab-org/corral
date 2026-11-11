@@ -193,16 +193,18 @@ def simulate(rng, n, development):
             signal += np.sqrt(DEVELOPMENT_RESIDUAL_CORR) * shared_decoy
             explained += DEVELOPMENT_RESIDUAL_CORR
         y = signal + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), n)
-        tau = np.asarray(C.THRESHOLDS[item], dtype=float)
+        intercept = np.asarray(C.INTERCEPTS[item], dtype=float)
         if item == STABLE_DIF:
             out[item] = np.where(
-                gender == 2, C.categorize(y, tau - DIF_SHIFT), C.categorize(y, tau)
+                gender == 2,
+                C.continuous_response(y, intercept + DIF_SHIFT),
+                C.continuous_response(y, intercept),
             )
         else:
-            out[item] = C.categorize(y, tau)
+            out[item] = C.continuous_response(y, intercept)
     frame = pd.DataFrame(out)[ITEMS]
     frame[GROUP] = gender
-    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < MISSING_RATE, 0)
+    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < MISSING_RATE, np.nan)
     prefix = "D" if development else "R"
     frame.insert(0, "participant_id", [f"{prefix}{i:05d}" for i in range(n)])
     return frame[["participant_id", *ITEMS, GROUP]]
@@ -211,7 +213,7 @@ def simulate(rng, n, development):
 def complete(frame, items=None):
     """Rows answering every item the model uses."""
     columns = items or ITEMS
-    return frame[(frame[columns] != 0).all(axis=1)][columns + [GROUP]].astype(float)
+    return frame[frame[columns].notna().all(axis=1)][columns + [GROUP]].astype(float)
 
 
 def cfi(frame, syntax, items=None):
@@ -236,7 +238,7 @@ def write_codebook(path):
     path.write_text(
         "# Codebook - misfit replication\n\n"
         "The development and replication files are tab-separated and hold the same ten "
-        "HSNS items. Ratings run from 1 (Disagree) to 5 (Agree); `0` denotes a missing "
+        "HSNS items. Responses are continuous and unbounded; empty fields denote a missing "
         "response.\n\n"
         "| variable | description |\n|---|---|\n"
         "| `participant_id` | identifier, unique within each file |\n"

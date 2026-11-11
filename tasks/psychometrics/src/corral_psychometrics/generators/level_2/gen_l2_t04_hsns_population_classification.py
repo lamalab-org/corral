@@ -86,7 +86,7 @@ identifiers, in any order.
 """
 
 
-def ordinal_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0.0):
+def continuous_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0.0):
     eta = rng.multivariate_normal(np.zeros(len(factors)), phi, n)
     index = {name: i for i, name in enumerate(factors)}
     shared = rng.normal(size=n)
@@ -98,7 +98,7 @@ def ordinal_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0
             score = score + np.sqrt(residual) * shared
             explained += residual
         noise = rng.normal(0, np.sqrt(max(1 - explained, 0.08)), n)
-        out[item] = C.categorize(score + noise, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(score + noise, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
 
 
@@ -112,11 +112,11 @@ def two_factor(rng, n, loading_scale=1.0, phi=0.35, cross_loading=None):
     if cross_loading:
         item, factor, value = cross_loading
         loading[item].append((factor, value))
-    return ordinal_block(rng, n, ["F1", "F2"], [[1, phi], [phi, 1]], loading)
+    return continuous_block(rng, n, ["F1", "F2"], [[1, phi], [phi, 1]], loading)
 
 
 def residual_dependence(rng, n):
-    return ordinal_block(
+    return continuous_block(
         rng,
         n,
         ["F1", "F2"],
@@ -236,7 +236,7 @@ def build_cases(rng):
 def write_codebook(path):
     path.write_text(
         "# Codebook - anonymised HSNS population comparison\n\n"
-        "Every file is tab-separated. Responses run from 1 (Disagree) to 5 (Agree); all responses are complete.\n\n"
+        "Every file is tab-separated. Responses are continuous and unbounded, centered around zero; all responses are complete.\n\n"
         "The reference files hold large samples from four populations, named only by identifier. How they differ is not supplied. `cases.csv` holds three case samples of "
         f"{CASE_SIZE} respondents each, identified by `case_id`; each case comes from one of the four populations.\n\n"
         "| item | text |\n|---|---|\n"

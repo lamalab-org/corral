@@ -116,7 +116,7 @@ def build_dataset(rng):
             loadings=LOADINGS,
             phi_matrix=np.array([[1.0, phi], [phi, 1.0]]),
             factor_names=[F1, F2],
-            taus=C.THRESHOLDS,
+            intercepts=C.INTERCEPTS,
             scale=1.0 if is_us else LOADING_SCALE_NON_US,
             cross=CROSS_LOADING if is_us else None,
             resid_corr=RESIDUAL_CORR if is_us else None,
@@ -130,7 +130,12 @@ def build_dataset(rng):
             phi_dd[names.index(b), names.index(a)] = v
         # Three correlated traits, the same everywhere: filler for this task.
         dd = C.correlated_block(
-            n, rng, loadings=DD_LOADINGS, phi_matrix=phi_dd, factor_names=names, taus=C.THRESHOLDS
+            n,
+            rng,
+            loadings=DD_LOADINGS,
+            phi_matrix=phi_dd,
+            factor_names=names,
+            intercepts=C.INTERCEPTS,
         )
         frames.append(pd.concat([hsns, dd, demo], axis=1))
     return C.finalize(frames, rng, SEED)
@@ -173,7 +178,7 @@ def population_correlation_matrix():
         loadings=LOADINGS,
         phi_matrix=np.array([[1.0, PHI], [PHI, 1.0]]),
         factor_names=[F1, F2],
-        taus=C.THRESHOLDS,
+        intercepts=C.INTERCEPTS,
         cross=CROSS_LOADING,
         resid_corr=RESIDUAL_CORR,
     )[ITEMS]
@@ -213,7 +218,7 @@ def build_truth(floor, pop, data_sha, rows):
                 "loadings": {k: v[1] for k, v in DD_LOADINGS.items()},
                 "phi": {f"{a}_{b}": v for (a, b), v in DD_PHI.items()},
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -335,7 +340,7 @@ def naive(df, pop):
         ("pooled (no filter)", df),
     ):
         X = sub[ITEMS]
-        X = X[(X != 0).all(axis=1)].astype(float)
+        X = X[X.notna().all(axis=1)].astype(float)
         import semopy
 
         model = semopy.Model(spec)
