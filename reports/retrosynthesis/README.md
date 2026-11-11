@@ -1,8 +1,7 @@
 # Retrosynthesis reports: corral-mini v2
 
-33 of 36 runs (18 agent/model pairs × levels 2 and 3), 3 tasks per level ×
-k = 5, 495 trials. Three Kimi kimi-k2-0905 runs are still running and will be
-added. Layout, names and index columns follow [`../README.md`](../README.md).
+36 runs (18 agent/model pairs × levels 2 and 3), 3 tasks per level × k = 5,
+540 trials. Layout, names and index columns follow [`../README.md`](../README.md).
 The October full-benchmark runs are archived in
 [`archive/october-full/`](archive/october-full/).
 
@@ -33,19 +32,30 @@ No task is shared with corral-mini v1, so every trial was run for v2.
 | 2 | react | claude-opus-4-7 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 2 | codex | gpt-5.6-sol | 2 | 0.31 | 0.00 | 0 | 0.00 | 0.00 |
 | 2 | react | gpt-5.6-sol | 4 | 0.33 | 0.11 | 0 | 0.00 | 0.00 |
-| 3 | openhands | kimi-k2-0905 | pending | | | 0 | 0.00 | 0.00 |
-| 3 | react | kimi-k2-0905 | pending | | | pending | | |
+| 3 | openhands | kimi-k2-0905 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
+| 3 | react | kimi-k2-0905 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 3 | claude-code | claude-opus-4-5-20251101 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 3 | react | claude-opus-4-5-20251101 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 3 | codex | gpt-5-2025-08-07 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 3 | react | gpt-5-2025-08-07 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 
-13 of 495 trials pass, all at level 2 (`make_6_lvl2` 9, `make_10_lvl2` 4).
-Most failures are submitted routes that the checker rejects; 185 trials end
-with an error, almost all an agent using its 50-step budget without
-submitting. One ReAct claude-opus-4-5 trial overflowed the 200k context, and
-OpenAI refused one ReAct gpt-5.6-sol prompt as a possible policy violation;
-both are kept as failures.
+13 of 540 trials pass, all at level 2 (`make_6_lvl2` 9, `make_10_lvl2` 4). The
+same six tasks were also hard in the October runs (16 of 210 passed); the v2
+subset picks unsaturated tasks.
+
+204 trials end with an error, almost all an agent using its 50-step budget
+without submitting. One ReAct claude-opus-4-5 trial overflowed the 200k
+context, OpenAI refused one ReAct gpt-5.6-sol prompt as a possible policy
+violation, and the provider rejected one ReAct kimi-k2-0905 request as
+invalid; all three are kept as failures.
+
+The 336 submitted routes were rechecked step by step with the scorer's own
+checks (same 13 passes). Of the 323 that fail, 129 contain an invalid reaction
+(most often a reaction SMARTS instead of a catalog `template_id`, or a
+template that does not apply), 80 miss the starting material the level-2 task
+requires, 62 use starting materials that are not in the buyables database (the
+agents' `is_buyable` tool reports the same), 28 are not valid JSON, 19 are
+malformed route trees and 5 exceed the step limit.
 
 ## Settings
 
@@ -71,12 +81,13 @@ tool calls rebuilt from each trial's final state, source runs in
 
 **Langfuse.** Each run's trials share one session named after the merged run
 ID (`retrosynthesis-mini-v2-l<L>-<agent>-<model>`, in `run-metadata.json`);
-all 495 traces were found in their sessions (`build_index.py --verify`).
+all 540 traces were found in their sessions (`build_index.py --verify`).
 
 ## Caveats
 
-- **75 trials were rerun after the provider accounts ran out of credit**
-  (63 Kimi, 12 OpenAI); the reports hold the reruns only. Rerun traces share
+- **91 trials were rerun**: 90 after the provider accounts ran out of credit
+  (78 Kimi, 12 OpenAI) and 1 after an unnamed OpenRouter "Provider returned
+  error"; the reports hold the reruns only. Rerun traces share
   the trace of their failed attempt (see "Known issue: some traces mix
   attempts" in `../README.md`).
 - **Tools.** No tool call returned a database connection error; `verify_route`
