@@ -150,6 +150,224 @@ def _json(span, attribute):
     return json.loads(span.attributes[f"langfuse.observation.{attribute}"])
 
 
+def test_native_agents_export_their_actual_model_context(observer):
+    instance, exporter, _ = observer
+    inputs = [{"role": "system", "content": "You are the researcher."}]
+    events = [
+        *_events()[:2],
+        AgentTurnRecorded(
+            messages=({"role": "assistant", "content": "Planner history"},),
+            usage_delta=UsageDelta(llm_calls=1),
+        ),
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "role": "assistant",
+                    "name": "denario.researcher",
+                    "content": "Research result",
+                    "model_input": inputs,
+                },
+            ),
+            usage_delta=UsageDelta(input_tokens=10, output_tokens=5),
+        ),
+        ExecutionCompleted(status="submitted"),
+    ]
+    _record(instance, events)
+    span = next(
+        span
+        for span in exporter.get_finished_spans()
+        if span.name == "denario.researcher"
+    )
+    assert _json(span, "input") == inputs
+    assert "model_input" not in _json(span, "output")
+
+
+def test_native_sdk_events_preserve_proposals_without_extra_generations(observer):
+    instance, exporter, _ = observer
+    call = Action(
+        id="unexecuted", name="measure", arguments={"sample": "a"}
+    ).to_tool_call()
+    output = {"role": "assistant", "content": None, "tool_calls": [call]}
+    sdk_event = {
+        "sdk": "denario",
+        "type": "message",
+        "sender": "engineer",
+        "recipient": "executor",
+        "message": output,
+    }
+    events = [
+        *_events()[:2],
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "role": "system",
+                    "name": "denario.model_request",
+                    "content": "model_request",
+                    "sdk_event": {
+                        "sdk": "denario",
+                        "type": "model_request",
+                        "request": {"messages": []},
+                    },
+                },
+            ),
+            usage_delta=UsageDelta(llm_calls=1),
+        ),
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "role": "assistant",
+                    "name": "denario.engineer",
+                    "content": "",
+                    "model_input": [],
+                    "model_output": output,
+                },
+            ),
+            usage_delta=UsageDelta(input_tokens=10, output_tokens=5),
+        ),
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "role": "system",
+                    "name": "denario.message",
+                    "content": "message",
+                    "sdk_event": sdk_event,
+                },
+            )
+        ),
+        ExecutionCompleted(status="submitted"),
+    ]
+    _record(instance, events)
+    spans = exporter.get_finished_spans()
+    generations = [
+        s
+        for s in spans
+        if s.attributes.get("langfuse.observation.type") == "generation"
+    ]
+    assert len(generations) == 1
+    assert _json(generations[0], "output")["tool_calls"] == [call]
+    assert _json(generations[0], "input") == []
+    assert (
+        _json(next(s for s in spans if s.name == "denario.message"), "output")
+        == sdk_event
+    )
+
+
+def test_denario_chronology_counts_only_provider_responses_as_generations(observer):
+    instance, exporter, _ = observer
+    action = Action(
+        id="native-code", name="denario.execute_code", arguments={"code": "print(42)"}
+    )
+    dispatch = Action(id="env-call", name="measure", arguments={"sample": "a"})
+    clock = {"timestamp_source": "local_observation"}
+    events = [
+        *_events()[:2],
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "name": "denario.phase",
+                    "sdk_event": {
+                        "sdk": "denario",
+                        "type": "phase",
+                        "phase": "experiment",
+                    },
+                },
+            )
+        ),
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "role": "assistant",
+                    "name": "denario.engineer",
+                    "model_input": [],
+                    "model_output": {"content": "Measure and analyze."},
+                },
+            ),
+            usage_delta=UsageDelta(llm_calls=1),
+            metadata={"chronology": clock},
+        ),
+        AgentTurnRecorded(
+            messages=(dispatch.to_message(),),
+            actions=(dispatch,),
+            metadata={"chronology": clock},
+        ),
+        ToolStarted(
+            invocation_id="inv-env",
+            action_id=dispatch.id,
+            requested_by_run_id="agent-run",
+            tool_name="measure",
+        ),
+        ToolCompleted(
+            invocation_id="inv-env",
+            action_id=dispatch.id,
+            requested_by_run_id="agent-run",
+            observation=42,
+            status="success",
+            duration_ms=10,
+        ),
+        AgentTurnRecorded(
+            messages=(
+                {**action.to_message(), "name": "denario.executor", "sdk_native": True},
+            ),
+            metadata={"chronology": clock},
+        ),
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "role": "tool",
+                    "name": action.name,
+                    "tool_call_id": action.id,
+                    "content": "42",
+                    "sdk_native": True,
+                },
+            ),
+            metadata={"chronology": clock},
+        ),
+        AgentTurnRecorded(
+            messages=(
+                {
+                    "role": "assistant",
+                    "name": "denario.researcher",
+                    "model_input": [],
+                    "model_output": {"content": "provider failed"},
+                    "is_error": True,
+                },
+            ),
+            usage_delta=UsageDelta(llm_calls=1),
+            metadata={"chronology": clock},
+        ),
+        ExecutionCompleted(status="submitted"),
+    ]
+    _record(instance, events)
+    spans = exporter.get_finished_spans()
+    generations = [
+        s
+        for s in spans
+        if s.attributes.get("langfuse.observation.type") == "generation"
+    ]
+    assert [s.name for s in generations] == ["denario.engineer", "denario.researcher"]
+    assert generations[-1].attributes["langfuse.observation.level"] == "ERROR"
+    calls = [s for s in spans if s.name.startswith("Call ")]
+    assert {s.name for s in calls} == {
+        "Call 01 · experiment · engineer",
+        "Call 02 · experiment · researcher",
+    }
+    logs = next(s for s in spans if s.name == "SDK messages and routing")
+    by_id = {s.context.span_id: s for s in spans}
+    for s in spans:
+        if s.name in {"denario.tool_dispatch", "denario.executor", "denario.phase"}:
+            assert s.parent.span_id == logs.context.span_id
+        if s.parent:
+            parent = by_id[s.parent.span_id]
+            assert parent.start_time <= s.start_time <= s.end_time <= parent.end_time
+    tools = [
+        s for s in spans if s.attributes.get("langfuse.observation.type") == "tool"
+    ]
+    assert {s.name for s in tools} == {"measure", "denario.execute_code"}
+    assert all(
+        by_id[s.parent.span_id].name == "Call 01 · experiment · engineer" for s in tools
+    )
+
+
 @pytest.mark.parametrize("failed", [False, True])
 def test_sdk_native_transcript_exports_tool_span(observer, failed):
     instance, exporter, _ = observer

@@ -233,39 +233,110 @@ their corresponding optional package extra and report an installation hint if
 it is missing.
 
 `denario` uses [Denario](https://arxiv.org/abs/2510.26887) ([code](https://github.com/Denario-AI/Denario))
-for fast idea and methodology generation, then executes the saved plan with
-Corral's `ToolCallingAgent` and the actual environment tools.
-This is a hybrid agent; it does not use Denario's native `cmbagent` experiment
-executor. Plans persist in session state and are reused on resume.
-Denario runs directly in Corral's Python environment using the same OpenAI SDK.
-Install the optional extra on Python 3.12 or 3.13. For example, from the repository
-root with `OPENAI_API_KEY` configured:
+for idea and methodology generation followed by its native `get_results()`
+workflow. CMBagent owns planning, review, researcher/engineer handoffs, code
+execution, and retries. Corral exposes the benchmark's tools directly to the
+engineer and researcher for observations and nonterminal `propose_answer` calls.
+The final researcher step must confirm the candidate answer. The adapter submits
+it only after native control completes the plan and `get_results()` saves a
+nonempty `input_files/results.md`. Denario's native code executor handles Python
+calculations and file generation.
+
+The `Task` section contains the environment's task text directly, including its
+inputs, constraints and required answer format. Corral's system, user and surrender
+prompt templates are not applied to Denario, and the task is not JSON-serialized.
+Denario supplies its own role prompts; tool schemas and environment integration
+instructions are provided separately from the task text. Only text tasks are supported.
+
+Native code execution requires the Docker sandbox. With `OPENAI_API_KEY`
+configured, run from the task project, for example:
 
 ```bash
-uv run --python 3.12 --extra denario corral run \
+cd tasks/samplemath
+uv run corral bench \
   --agent denario --environment samplemath --task task1 \
-  --model openai/gpt-4o \
-  --agent-kwargs '{"denario_model": "gpt-4o", "denario_iterations": 2}'
+  --model openai/gpt-6.1-sol --max-iterations 50 \
+  --sandbox docker --build-sandbox-image
 ```
 
-`denario_model` is a model name recognized by Denario (default `gpt-4o`);
-`denario_iterations` controls its idea refinement (default `2`). `--model`,
-`--api-endpoint`, `--temperature`, and other tool-calling settings apply to the
-executor. Planning uses Denario's own provider credentials and model defaults.
+`--model` selects the model for every role, including formatters and plot review.
+For evaluation consistency, this implementation diverges from upstream Denario's default model configuration by using a single model across all roles.
+Use `openai/<model>`, `anthropic/<model>`, or `openrouter/<author>/<model>`.
+The gateway uses each provider's API key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+or `OPENROUTER_API_KEY`); Anthropic uses its OpenAI-compatible endpoint.
+`--api-endpoint`, `--temperature`, and explicit model settings such as
+`reasoning_effort` apply throughout; omitted sampling and reasoning settings use
+provider defaults. The legacy `denario_model` option, if supplied, must match
+`--model` without its provider prefix.
+
+For OpenRouter, `--agent-kwargs '{"openrouter_zdr":true}'` adds `zdr: true` and
+`data_collection: "deny"` to every request. Additional routing restrictions go
+in `openrouter_provider`, for example `{"only":["fireworks"]}`. These cannot
+override the requested ZDR policy. OpenRouter account logging and safety-retention
+exceptions must also be disabled or excluded when requiring no content retention.
+Claude Opus 5.5 rejects forced tool selection. For that model,
+the gateway retains the tool definitions, explicitly asks for the requested tool, and uses `auto`
+selection. Corral records this compatibility step; model reasoning stays at its
+configured setting. Automatic selection cannot guarantee that the model calls
+the tool.
+
+Kimi K3.1 Pro through OpenRouter keeps native tool selection, but omits the SDK's
+`parallel_tool_calls` parameter, which Fireworks does not advertise. When the SDK
+requests serial calls, the prompt asks for one tool call at a time; this is a
+preference, not an API guarantee.
+Corral records this adaptation and all returned tool calls. Strict OpenRouter
+parameter matching and zero-retention routing remain enabled when configured.
+
+`denario_iterations` controls native fast idea refinement (default `4`, matching
+upstream: four idea-generation passes and three critiques);
+`max_plan_steps` (default `6`) and `max_n_attempts` (default `10`) configure the
+native experiment workflow. `wall_clock_timeout_s` optionally limits elapsed
+time. Set these through `--agent-kwargs`.
+Environment execution failures use CMBagent's shared per-step attempt counter
+and native control handoff. Reaching the limit terminates the step and prevents
+further experimental calls, including remaining calls in the same batch.
+Argument-validation errors do not consume experimental attempts. Failed
+environment actions are never automatically replayed by the adapter.
+
+Reported usage and `--max-iterations` cover all model requests, including
+planning, review, formatting, and provider retries. A local gateway commits
+requests and responses to Corral state before native execution continues;
+streaming responses are buffered. SDK messages (including handoffs), proposed
+tool calls, native tool/code results, and Corral tool results are also recorded
+in state and exported to Langfuse. Interrupted requests are marked explicitly.
+This records public messages, not the provider's private reasoning. SDK logs
+and research artifacts remain in the trial workspace under `denario-*/`.
+
+Verbose JSON reports retain model inputs, outputs, tool results, and SDK handoffs.
+The short “Solve the supplied task…” handoff is only the task description: native Denario
+passes the generated idea and method into role-specific prompts, then adds the
+plan and current subtask for execution.
+New Langfuse exports label actual model calls separately from SDK bookkeeping,
+which appears under “SDK messages and routing”.
+
+For GPT-6 models, the gateway translates tool requests to the Responses API, which
+`gpt-6.1-sol` requires for function calling. This preserves default reasoning
+and Denario's native loop; the original provider payloads are also recorded.
+SDK speaker names are represented as `[Speaker: ...]` content labels across
+provider transports, without sending a message-level `name` field. Function
+names, tool-call IDs, multimodal inputs, and cached reasoning items are retained.
+
+Each trial uses a separate worker process. Resuming an interrupted native run
+is currently rejected to avoid replaying experiments; start a new trial instead.
+Subagents cannot call the terminal `submit_answer` tool. Failed or incomplete
+native runs cannot submit their preliminary candidates. Literature searches and
+publication writing are outside this task-solving workflow.
 
 Use `uv` for this extra: the project overrides older OpenAI constraints in
 `cmbagent-autogen` and `futurehouse-client` with the tested `openai==2.45.0`.
 The extra pins `langchain-openai==0.3.35` and the Mistral SDK version required by
 `cmbagent`. Plain `pip install 'corral[denario]'` cannot resolve those upstream
-constraints. The compatibility test covers the fast planning stages with real
-SDK clients and mocked HTTP responses; it does not validate Denario's native
-experiment or literature workflows.
-
-Reported usage and `--max-iterations` cover only the executor; Denario's internal
-planning calls and tokens are not included. Outcomes identify this with
-`usage_scope="executor_only"`, so these runs are not total-cost comparisons.
-For Docker benchmarks, `--agent denario --build-sandbox-image` selects the
-Denario extra automatically and applies the same OpenAI override during installation.
+constraints. `--agent denario --build-sandbox-image` selects the extra automatically
+on Python 3.12 and applies the same OpenAI override. The optional integration
+tests exercise the real native SDK with a mocked provider, including two-step
+engineer/researcher completion, saved results, environment failure recovery,
+attempt exhaustion, and native Python execution. Run `tests/agents/test_denario.py` with
+`CORRAL_TEST_DENARIO_NATIVE=1` inside a Denario-enabled Docker image.
 
 Use `--agent-kwargs` for constructor-specific settings. Where the agent supports
 them, explicit `--model`, `--api-endpoint`, and `--temperature` options take

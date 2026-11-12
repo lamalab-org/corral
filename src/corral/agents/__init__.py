@@ -33,7 +33,7 @@ from corral.core.action import Action
 # are absent — e.g. task environments that only need the core runtime. They are
 # therefore resolved lazily via the module-level `__getattr__` below: the
 # module import, and any missing-dependency error, happens only when the
-# attribute is actually accessed. Denario imports its SDK when planning starts.
+# attribute is actually accessed. Denario imports its SDK in an isolated worker.
 # They are intentionally not imported at module
 # top-level (not even under `TYPE_CHECKING`) so no ruff type-checking rule is
 # tripped; `__all__` still advertises them and `__getattr__` resolves them.
