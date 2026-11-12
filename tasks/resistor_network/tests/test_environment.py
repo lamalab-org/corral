@@ -1,8 +1,12 @@
 from pathlib import Path
 
 import pytest
+from resistor_network.env import load_tasks_from_json
 
+from corral.evaluation.scorer import _resolve_submission
 from corral.runtime.environment_loader import load_environment_group
+
+TASKS_ROOT = Path(__file__).resolve().parents[1] / "environments"
 
 
 @pytest.mark.parametrize("level", [1, 2])
@@ -41,3 +45,15 @@ def test_runtime_default_work_directory_is_used(monkeypatch, tmp_path):
     environment = environments["task_0"].for_task("default-workspace")
 
     assert Path(environment.workspace_path).parent == tmp_path
+
+
+@pytest.mark.parametrize("level", [1, 2])
+def test_prose_answers_are_scored_zero_instead_of_resolved_as_files(tmp_path, level):
+    tasks = load_tasks_from_json(TASKS_ROOT / f"level_{level}" / "tasks_json")
+    prose = "I am computing all simulated effective resistances first. " * 20
+
+    for task in tasks.values():
+        assert task.resolve_answer is False
+        answer = _resolve_submission(task, prose, tmp_path)
+        assert answer == prose
+        assert task.scoring_fn(answer) == 0.0

@@ -98,6 +98,8 @@ their sessions (`build_index.py --verify`).
   long") before the scorer ran, so no score was recorded. It is a model
   failure and is reported as 0; the original evaluation error stays in the
   trial index, and the override is recorded in the run's `provenance.json`.
+  The resistor tasks now skip file-path resolution (`resolve_answer=False`),
+  so a prose answer goes straight to the scorer and scores 0.
 - **Sandbox CPU count.** Each sandbox is capped at 2 CPUs, but `nproc` and
   `os.cpu_count()` report all 128 host cores. Agents size their own search
   scripts from that (`multiprocessing.Pool(24)`, `NUMBA_NUM_THREADS=32`), so
