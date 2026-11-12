@@ -21,14 +21,14 @@ Final evaluations are retained in the run reports.
 | claude-code | claude-opus-5-5 | 3 | 27/50 | 9 | 0 | [report](level_3/claude-code__claude-opus-5-5/report.json.gz) |
 | codex | gpt-5.6-sol | 2 | 38/50 | 0 | 0 | [report](level_2/codex__gpt-5.6-sol/report.json.gz) |
 | codex | gpt-5.6-sol | 3 | 28/50 | 13 | 0 | [report](level_3/codex__gpt-5.6-sol/report.json.gz) |
-| openhands | kimi-k3 | 2 | 24/50 | 9 | 0 | [report](level_2/openhands__kimi-k3/report.json.gz) |
-| openhands | kimi-k3 | 3 | 16/50 | 24 | 0 | [report](level_3/openhands__kimi-k3/report.json.gz) |
+| openhands | kimi-k3 | 2 | 26/50 | 11 | 0 | [report](level_2/openhands__kimi-k3/report.json.gz) |
+| openhands | kimi-k3 | 3 | 17/50 | 22 | 0 | [report](level_3/openhands__kimi-k3/report.json.gz) |
 | react | claude-opus-5-5 | 2 | 27/50 | 10 | 0 | [report](level_2/react__claude-opus-5-5/report.json.gz) |
 | react | claude-opus-5-5 | 3 | 25/50 | 12 | 0 | [report](level_3/react__claude-opus-5-5/report.json.gz) |
 | react | gpt-5.6-sol | 2 | 38/50 | 0 | 0 | [report](level_2/react__gpt-5.6-sol/report.json.gz) |
 | react | gpt-5.6-sol | 3 | 28/50 | 17 | 0 | [report](level_3/react__gpt-5.6-sol/report.json.gz) |
-| react | kimi-k3 | 2 | 23/50 | 19 | 0 | [report](level_2/react__kimi-k3/report.json.gz) |
-| react | kimi-k3 | 3 | 15/50 | 29 | 0 | [report](level_3/react__kimi-k3/report.json.gz) |
+| react | kimi-k3 | 2 | 31/50 | 10 | 0 | [report](level_2/react__kimi-k3/report.json.gz) |
+| react | kimi-k3 | 3 | 23/50 | 14 | 0 | [report](level_3/react__kimi-k3/report.json.gz) |
 
 Errors count nonempty saved execution/evaluation error fields, including
 iteration-limit or answer-format outcomes. CSV trial positions are zero-based.
@@ -60,13 +60,9 @@ October trials.
 | codex | gpt-5.6-sol | 50 | done |
 | react | claude-opus-5-5 | 50 | done |
 | react | gpt-5.6-sol | 50 | done |
-| openhands | kimi-k3 | 50 | **pending** (OpenRouter credit) |
-| react | kimi-k3 | 50 | **pending** (OpenRouter credit) |
+| openhands | kimi-k3 | 50 | done |
+| react | kimi-k3 | 50 | done |
 | ai-scientist | claude-opus-5-5 | 50 | done (100 steps, as in October) |
-
-Until the pending reruns are in, the Kimi runs still hold their October trials
-for the changed tasks, so those rows are not comparable with the
-others on these tasks.
 
 Each updated run report records the replaced trials and the rerun source runs
 under `metadata.reruns_20261112`; rerun trials keep their own execution IDs and
@@ -75,9 +71,10 @@ recorded per trial in `run-metadata.json`). All 700 traces were found
 (`build_index.py --verify`). The rerun trials ran on current Corral, which
 differs from the October code in ways that can change agent behaviour (for
 example #456 prompts, #465 Codex step budget, #475 `verify_route` in the
-controller); the unchanged tasks keep their October trials.
+controller); kimi-k3 again ran on the Together provider, now with
+`max_tokens` 32768; the unchanged tasks keep their October trials.
 
-Aggregate passes: **315/700 before, 378/700 after** (Kimi still October).
+Aggregate passes: **315/700 before, 397/700 after**; all 351 rerun trials are in.
 
 ## Caveats
 
