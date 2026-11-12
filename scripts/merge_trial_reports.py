@@ -23,6 +23,8 @@ Usage (from the repository root, in an environment with Corral installed):
     --run-prefix  merged run IDs are <prefix>-l<L>-<agent>-<model>
 """
 
+# ruff: noqa: T201  (progress output of a command-line script)
+
 from __future__ import annotations
 
 import argparse
@@ -40,13 +42,13 @@ from corral.report.projection import _tool_statistics, normalise_k_values
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "reports"))
-from build_index import AGENTS, MODELS  # noqa: E402
+from build_index import AGENTS, MODELS
 
 
 def load_trial(run_dir: Path) -> tuple[dict, TaskTrialResult, dict]:
     """Return (report metadata, verbose trial, run metadata) for a 1-trial run."""
     report = json.loads((run_dir / "report.json").read_text())
-    (task_id, task), = report["task_results"].items()
+    ((task_id, task),) = report["task_results"].items()
     (trial,) = task["trials"]
     (trial_dir,) = run_dir.glob(f"task-{task_id}/k-*")
     result = json.loads((trial_dir / "result.json").read_text())
@@ -116,10 +118,14 @@ def main() -> None:
     args = parser.parse_args()
 
     groups: dict[tuple[int, str, str], list[Path]] = defaultdict(list)
-    for run_dir in sorted(p for p in args.runs_dir.iterdir() if (p / "report.json").exists()):
+    for run_dir in sorted(
+        p for p in args.runs_dir.iterdir() if (p / "report.json").exists()
+    ):
         meta = json.loads((run_dir / "report.json").read_text())["metadata"]
         runtime = next(iter(meta["agent"]["by_task"].values()))["runtime"]
-        level = next(iter(meta["environment"]["by_task"].values()))["runtime"]["options"]["level"]
+        level = next(iter(meta["environment"]["by_task"].values()))["runtime"][
+            "options"
+        ]["level"]
         agent = AGENTS[runtime["name"]]
         model = MODELS[runtime["model"].rsplit("/", 1)[-1]][0]
         groups[(level, agent, model)].append(run_dir)
@@ -128,7 +134,9 @@ def main() -> None:
         loaded = [load_trial(d) for d in run_dirs]
         tasks: dict[str, TaskTrialResults] = {}
         for _, trial, _ in sorted(loaded, key=lambda x: x[1].trial_id):
-            tasks.setdefault(trial.task_id, TaskTrialResults(trial.task_id)).trials.append(trial)
+            tasks.setdefault(
+                trial.task_id, TaskTrialResults(trial.task_id)
+            ).trials.append(trial)
         counts = {t: len(r.trials) for t, r in tasks.items()}
         if set(counts.values()) != {args.trials_per_task}:
             raise ValueError(f"L{level} {agent}/{model}: trials per task {counts}")
@@ -149,7 +157,10 @@ def main() -> None:
         target.mkdir(parents=True, exist_ok=True)
         raw = target / "report.json"
         result.generate_report(str(raw))
-        with raw.open("rb") as src, gzip.open(target / "report.json.gz", "wb", 9) as dst:
+        with (
+            raw.open("rb") as src,
+            gzip.open(target / "report.json.gz", "wb", 9) as dst,
+        ):
             shutil.copyfileobj(src, dst)
         raw.unlink()
         (target / "provenance.json").write_text(
@@ -168,7 +179,9 @@ def main() -> None:
             + "\n"
         )
         passes = sum(bool(t.success) for r in tasks.values() for t in r.trials)
-        print(f"L{level} {agent}__{model}: {len(loaded)} trials, {passes} passes -> {target}")
+        print(
+            f"L{level} {agent}__{model}: {len(loaded)} trials, {passes} passes -> {target}"
+        )
 
 
 if __name__ == "__main__":
