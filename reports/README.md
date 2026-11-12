@@ -8,14 +8,14 @@ same layout, names and index files, so runs can be compared across them.
 | AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
-| Resistor network (corral-mini v2, 26 runs pending; October v4 runs in `archive/`) | [`resistor_network/`](resistor_network/) | `mini-1-psychom` | 10 | 150 |
+| Resistor network (corral-mini v2, 9 runs pending; October v4 runs in `archive/`) | [`resistor_network/`](resistor_network/) | `mini-1-psychom` | 27 | 405 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
 | Spectra elucidation (corral-mini v2, 6 runs pending; October full runs in `archive/`) | [`spectra_elucidation/`](spectra_elucidation/) | `mini-1-psychom` | 30 | 450 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab (corral-mini v2; October full runs in `archive/`) | [`wetlab/`](wetlab/) | `mini-1-psychom` | 36 | 540 |
 
-All nine environments together have **164 runs and 4,560 trials**. Each
+All nine environments together have **181 runs and 4,815 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
