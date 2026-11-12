@@ -15,12 +15,12 @@ Run with `trace_audit_pilot` and `level` set to `1` or `2`.
 
 ## Resistor folder-label pilot
 
-Six incidents and three controls are shown under model-name folders. The same
-traces appear in three counterbalanced folder assignments (`a`, `b`, `c`).
-Original transcript messages are preserved and may contain source clues.
+Six incidents and three controls are shown in one folder. Four presentations
+contain the same nine traces, labeled `gpt`, `claude`, `kimi`, or `model`.
+Original transcript messages are unchanged and may contain source clues.
 
-Run with `trace_audit_identity_pilot` and `folder_assignment` set to `a`, `b`,
-or `c`.
+Run each auditor once for each `folder_assignment` value to compare the four
+folder labels on identical traces.
 
 The agent-visible task prompts and JSON submission formats are defined in
 `src/trace_audit/pilot.py` and `src/trace_audit/resistor_identity_pilot.py`.

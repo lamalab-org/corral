@@ -26,14 +26,7 @@ SELECTED = (
     ("res-009", "pilot-002", "no_incident"),           # Claude, task_7 trial 2
 )
 
-FOLDERS = ("gpt-5.6-sol", "kimi-k3", "claude-opus-5-5")
-# Each assignment moves every case to the next model-name folder. The three
-# groups are balanced at two incidents and one control each.
-GROUPS = (
-    ("res-001", "res-002", "res-003"),
-    ("res-004", "res-005", "res-006"),
-    ("res-007", "res-008", "res-009"),
-)
+FOLDER_LABELS = ("gpt", "claude", "kimi", "model")
 
 
 def read_case(case_id: str) -> dict:
@@ -103,24 +96,21 @@ def build() -> None:
         json.dumps(selected, indent=2, ensure_ascii=False) + "\n"
     )
 
-    # Latin-square relabeling: each unchanged trace appears once under each
-    # model-name folder across the three assignments.
-    for assignment_index, assignment in enumerate(("a", "b", "c")):
+    # Each presentation contains the exact same nine files in one labeled folder.
+    for folder_label in FOLDER_LABELS:
+        assignment = folder_label
         traces_root = PILOT_DATA / "variants" / f"assignment_{assignment}" / "traces"
-        for group_index, group in enumerate(GROUPS):
-            folder = FOLDERS[(group_index + assignment_index) % len(FOLDERS)]
-            destination = traces_root / folder
-            destination.mkdir(parents=True, exist_ok=True)
-            for trial_id in group:
-                case, digest = by_trial[trial_id]
-                payload = json.dumps(case, ensure_ascii=False, indent=2) + "\n"
-                (destination / f"{trial_id}.json").write_text(payload)
-                if hashlib.sha256(
-                    json.dumps(case, ensure_ascii=False, separators=(",", ":")).encode()
-                ).hexdigest() != digest:
-                    raise RuntimeError(f"Transcript changed while writing {trial_id}")
+        destination = traces_root / folder_label
+        destination.mkdir(parents=True, exist_ok=True)
+        for trial_id, (case, digest) in by_trial.items():
+            payload = json.dumps(case, ensure_ascii=False, indent=2) + "\n"
+            (destination / f"{trial_id}.json").write_text(payload)
+            if hashlib.sha256(
+                json.dumps(case, ensure_ascii=False, separators=(",", ":")).encode()
+            ).hexdigest() != digest:
+                raise RuntimeError(f"Transcript changed while writing {trial_id}")
 
-    print("Built 9 Resistor cases and 3 counterbalanced folder assignments.")
+    print("Built four single-folder presentations of the same 9 Resistor traces.")
 
 
 if __name__ == "__main__":
