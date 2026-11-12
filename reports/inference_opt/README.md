@@ -108,7 +108,7 @@ are listed in `provenance.json`.
 own session, named by its single-trial run ID
 (`<agent>__<model>__L<level>__<task>__k<k>`). Use the trial links in
 `trials.csv`; the run-level `langfuse_session_url` in `runs.csv` has no
-traces. The check that every trace exists (`build_index.py --verify`) is still running. Traces of
+traces. All 360 traces were found (`build_index.py --verify`). Traces of
 trials that finished before about 2026-11-11 21:10 have no `benchmark_score`
 (the host venv lacked `langfuse`); the scores are in the reports.
 
