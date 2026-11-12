@@ -110,14 +110,6 @@ def _spectra_prompt(env: Environment, state: ExecutionState) -> str:
         dep_prompt = env.group_tasks[ref.task_id].description
         prompt += f"For '{dep_prompt}' ({ref.task_id}), the earlier result was: {resolved[input_name]}\n"
 
-    # Display initial input data; `work_dir` is internal and never shown, so
-    # the section is omitted when nothing else is left to list.
-    inputs = {k: v for k, v in task.initial_input.items() if k != "work_dir"}
-    if inputs:
-        prompt += "\nHere are the inputs I have:\n"
-        for key, value in inputs.items():
-            prompt += f"- {key}: {value}\n"
-
     event(
         "DEBUG",
         "environment.prompt_generated",
