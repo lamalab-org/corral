@@ -925,3 +925,11 @@ def test_benchmark_reports_evaluation_failure_as_incomplete(
     assert trial["score"] is None
     assert trial["error_message"] is None
     assert trial["evaluation_error"]
+
+
+def test_benchmark_parser_defaults_to_verbose_reports():
+    base = ["bench", "--agent", "ReActAgent", "--environment", "samplemath"]
+
+    assert cli.build_parser().parse_args(base).verbose is True
+    assert cli.build_parser().parse_args([*base, "--verbose"]).verbose is True
+    assert cli.build_parser().parse_args([*base, "--no-verbose"]).verbose is False
