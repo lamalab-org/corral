@@ -15,8 +15,8 @@ Final evaluations are retained in the run reports.
 
 | Agent | Model | Level | Passes | Errors | Unscored | Report |
 |---|---|---:|---:|---:|---:|---|
-| ai-scientist | claude-opus-5-5 | 2 | 16/50 | 19 | 0 | [report](level_2/ai-scientist__claude-opus-5-5/report.json.xz) |
-| ai-scientist | claude-opus-5-5 | 3 | 15/50 | 15 | 0 | [report](level_3/ai-scientist__claude-opus-5-5/report.json.xz) |
+| ai-scientist | claude-opus-5-5 | 2 | 27/50 | 12 | 0 | [report](level_2/ai-scientist__claude-opus-5-5/report.json.xz) |
+| ai-scientist | claude-opus-5-5 | 3 | 26/50 | 21 | 0 | [report](level_3/ai-scientist__claude-opus-5-5/report.json.xz) |
 | claude-code | claude-opus-5-5 | 2 | 36/50 | 2 | 0 | [report](level_2/claude-code__claude-opus-5-5/report.json.gz) |
 | claude-code | claude-opus-5-5 | 3 | 27/50 | 9 | 0 | [report](level_3/claude-code__claude-opus-5-5/report.json.gz) |
 | codex | gpt-5.6-sol | 2 | 38/50 | 0 | 0 | [report](level_2/codex__gpt-5.6-sol/report.json.gz) |
@@ -48,7 +48,8 @@ Two fixes changed what some tasks ask for or how they can be solved:
 `make_1`, `make_5`, `make_6`, `make_7` and `make_8` were therefore rerun at
 both levels with the October settings (same agents, models, reasoning effort
 `medium`, 50 steps, k = 5) on current Corral, one `corral bench --trials 1` run
-per trial. One level-3 `make_9` trial (claude-code k2) that had asked
+per trial (AI Scientist with 100 steps, as in October, after the Docker
+checkpoint fix #491). One level-3 `make_9` trial (claude-code k2) that had asked
 `is_buyable` about a newly priced compound was rerun too. Tasks `make_2`,
 `make_3`, `make_4`, `make_10` and level-2 `make_9` are unaffected and keep their
 October trials.
@@ -61,10 +62,10 @@ October trials.
 | react | gpt-5.6-sol | 50 | done |
 | openhands | kimi-k3 | 50 | **pending** (OpenRouter credit) |
 | react | kimi-k3 | 50 | **pending** (OpenRouter credit) |
-| ai-scientist | claude-opus-5-5 | 50 | **pending**: AI Scientist fails in Docker since #446 (#488) |
+| ai-scientist | claude-opus-5-5 | 50 | done (100 steps, as in October) |
 
-Until the pending reruns are in, the Kimi and AI Scientist runs still hold their
-October trials for the changed tasks, so those rows are not comparable with the
+Until the pending reruns are in, the Kimi runs still hold their October trials
+for the changed tasks, so those rows are not comparable with the
 others on these tasks.
 
 Each updated run report records the replaced trials and the rerun source runs
@@ -76,8 +77,7 @@ differs from the October code in ways that can change agent behaviour (for
 example #456 prompts, #465 Codex step budget, #475 `verify_route` in the
 controller); the unchanged tasks keep their October trials.
 
-Aggregate passes: **315/700 before, 356/700 after** (Kimi and AI Scientist
-still October).
+Aggregate passes: **315/700 before, 378/700 after** (Kimi still October).
 
 ## Caveats
 
