@@ -6,7 +6,7 @@ same layout, names and index files, so runs can be compared across them.
 | Environment | Folder | Branch | Runs | Trials |
 |---|---|---|---:|---:|
 | AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
-| Inference optimization (corral-mini v2, 21 runs pending, L1 without `math_number_theory_a`; October full runs in `archive/`) | [`inference_opt/`](inference_opt/) | `mini-1-psychom` | 15 | 185 |
+| Inference optimization (corral-mini v2.1: v2 with `math_number_theory_b` for `math_number_theory_a`; 12 Kimi runs pending; October full runs in `archive/`) | [`inference_opt/`](inference_opt/) | `mini-1-psychom` | 24 | 360 |
 | Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
 | Resistor network (corral-mini v2, 9 runs pending; October v4 runs in `archive/`) | [`resistor_network/`](resistor_network/) | `mini-1-psychom` | 27 | 405 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
@@ -15,12 +15,13 @@ same layout, names and index files, so runs can be compared across them.
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab (corral-mini v2; October full runs in `archive/`) | [`wetlab/`](wetlab/) | `mini-1-psychom` | 36 | 540 |
 
-All nine environments together have **182 runs and 4,300 trials**. Each
+All nine environments together have **191 runs and 4,475 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
-Psychometrics holds the corral-mini v1 runs; wetlab, spectra elucidation,
-resistor network and inference optimization hold the corral-mini v2 runs.
+Psychometrics holds the corral-mini v1 runs; wetlab, spectra elucidation and
+resistor network hold the corral-mini v2 runs, and inference optimization
+holds the corral-mini v2.1 runs (v2 with one level-1 task replaced).
 Each mini version has its own Hugging Face datasets, not the October ones:
 `jablonkagroup/corral-reports-mini-v1` (psychometrics) and
 `jablonkagroup/corral-reports-mini-v2` (wetlab), each with a `-summary`. The
