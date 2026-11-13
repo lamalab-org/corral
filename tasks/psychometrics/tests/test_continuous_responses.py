@@ -137,7 +137,7 @@ def test_replication_distinguishes_method_from_trait_cross_loadings():
     assert score_model_criteria(wrong, params, base_dir=paths.task_root())["score_binary"] == 0
 
 
-def test_replication_accepts_equivalent_residual_representation():
+def test_replication_penalizes_unrestricted_residual_overparameterization():
     from corral_psychometrics.generators.level_2 import gen_l2_t08_misfit_replication as replication
     from corral_psychometrics.score import _drop_method_factor
 
@@ -146,11 +146,14 @@ def test_replication_accepts_equivalent_residual_representation():
     good = replication.candidate_submissions()["correct"]
     syntax = _drop_method_factor(good["model_syntax"], "Format")
     items = replication.METHOD_ITEMS
-    # Multiple residual terms on one line exercise equivalent compact syntax.
+    # Six free covariance terms fit the same pattern but use five more
+    # parameters than a single method variance; this is not an equally
+    # parsimonious model. Multiple terms per line must still parse correctly.
     syntax += "\n" + "\n".join(
         f"{a} ~~ " + "+".join(items[index + 1 :]) for index, a in enumerate(items[:-1])
     )
     result = score_model_criteria(
         {**good, "model_syntax": syntax}, params, base_dir=paths.task_root()
     )
-    assert result["score_binary"] == 1, result
+    assert result["score_binary"] == 0, result
+    assert result["checks_vector"]["replication_quality_BIC"] == "FAIL", result

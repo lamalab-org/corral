@@ -18,6 +18,22 @@ score; method variance is excluded from its reported trait variance share.
 L1 01/08 and L2 01/02 omit incidental residual dependence to keep their questions
 focused. L2 09 retains its binary IRT pair-dependence exercise.
 
+## Scoring consistency
+
+Continuous SEM tasks share validity checks (convergence, nonnegative variances,
+positive degrees of freedom, finite standard errors, and nondegenerate factors)
+and matched comparisons of CFI, RMSEA, SRMR and BIC. Comparisons use the same
+observed variables and complete-case sample; the replication task restores
+omitted items for this comparison. Scientific interpretation, item diagnoses,
+and replication claims remain task-specific requirements.
+
+L2 10 selects BIC-supported candidates only after checking model validity.
+L2 09 uses binary IRT and adaptive-test diagnostics rather than continuous SEM
+fit indices. Passing reference and adversarial checks establishes scoring
+consistency; comparable agent difficulty requires pilot performance data.
+The benchmark uses the binary all-checks-pass score; partial scores are diagnostic
+and are not calibrated measures of difficulty.
+
 ## Layout
 
 ```text

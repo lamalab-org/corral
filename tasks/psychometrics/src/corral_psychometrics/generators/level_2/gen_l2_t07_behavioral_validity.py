@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
 
@@ -174,6 +175,7 @@ def build_task_json(data_sha):
             "scoring_function": "score_behavioral_validity",
             "scoring_params": {
                 "task_type": "behavioral_validity",
+                "model_quality_policy": POLICY_NAME,
                 "data_dir": TASK.artifacts_relpath,
                 "truth_path": TASK.truth_relpath,
                 "dataset": "data.csv",
@@ -202,6 +204,7 @@ def truth(data_sha, rows):
             },
             "unstable_items": [ITEM_WITHOUT_REPLICATION],
         },
+        "scoring_reference": {"reference_model_syntax": reference_syntax()},
         "generative_parameters": {
             "latent_effect": LATENT_EFFECT,
             "latent_group_shift": LATENT_GROUP_SHIFT,

@@ -13,6 +13,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME, comparative_rules, validity_rules
+
 HSNS_ITEMS = [f"HSNS{i}" for i in range(1, 11)]
 DD_ITEMS = [
     "DDP1",
@@ -435,34 +437,10 @@ def scoring_contract(task, items, tier_3_claims):
         "emit": ["score_binary", "score_partial", "checks_vector"],
         # Stage 1: is the model usable at all? Breaking one of these makes a
         # model invalid rather than worse, so it is dropped before comparison.
-        "tier_1_constraints": [
-            {"key": "converged"},
-            {"key": "no_negative_variance"},
-            {"key": "positive_df"},
-            {"key": "finite_standard_errors", "max_standard_error": 10.0},
-            {"key": "no_redundant_factor", "phi_max": 0.90},
-            {
-                "key": "no_collapsed_factor",
-                "min_salient_loading": 0.30,
-                "min_salient_per_factor": 2,
-                "sign_reversal_at": -0.10,
-            },
-        ],
-        # Stage 2: the generating model sets a floor. A submission must be no
-        # worse than it on any of these, and is allowed to be better.
+        "model_quality_policy": POLICY_NAME,
+        "tier_1_constraints": validity_rules(),
         "reference_role": "floor",
-        "tier_2_comparative": [
-            {"key": "CFI", "direction": "higher", "eps": 0.005, "criterion": "global_fit"},
-            {"key": "RMSEA", "direction": "lower", "eps": 0.005, "criterion": "global_fit"},
-            {"key": "SRMR", "direction": "lower", "eps": 0.005, "criterion": "global_fit"},
-            {"key": "BIC", "direction": "lower", "eps": 10.0, "criterion": "parsimony"},
-            {
-                "key": "sigma_max_abs_deviation",
-                "direction": "lower",
-                "eps": 0.010,
-                "criterion": "accuracy",
-            },
-        ],
+        "tier_2_comparative": comparative_rules(population=True),
         "tier_3_claims": tier_3_claims,
         "recorded_fields": ["chi_square_p", "chi_square_df"],
     }

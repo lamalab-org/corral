@@ -14,6 +14,7 @@ import pandas as pd
 
 from corral.utils.json_text import parse_json_text
 from corral_psychometrics import paths
+from corral_psychometrics.scoring_policy import comparative_rules, validity_options
 
 warnings.filterwarnings("ignore")
 logging.disable(logging.WARNING)
@@ -195,6 +196,7 @@ def evaluate_model(
 # Tier 1 - constraints
 # --------------------------------------------------------------------------
 def check_constraints(model, criteria: dict, params: dict) -> tuple[dict, list[str]]:
+    params = {**validity_options(), **params}
     ins = model.inspect(std_est=True)
     loadings = ins[ins.op == "~"]
     lstd = pd.to_numeric(loadings["Est. Std"], errors="coerce")
@@ -219,7 +221,8 @@ def check_constraints(model, criteria: dict, params: dict) -> tuple[dict, list[s
         ]
         if len(sub) and (sub.abs() >= min_load).sum() < min_per:
             degenerate.append(factor)
-        if len(sub) and (sub < sign_at).any():
+        oriented = sub * (-1 if len(sub) and sub.iloc[sub.abs().argmax()] < 0 else 1)
+        if len(sub) and (oriented < sign_at).any():
             degenerate.append(f"{factor}~sign_reversal")
 
     results = {
@@ -255,6 +258,20 @@ def check_dominance(criteria: dict, floor: dict, spec: list[dict]) -> dict:
             else criteria[key] <= floor[key] + eps
         )
     return out
+
+
+def model_quality_checks(spec, reference_spec, frame, items, prefix):
+    """Check validity and compare fit/parsimony on identical variables and rows.
+
+    No BIC comparisons are made between different item sets or samples.
+    Scientific claims are checked separately by each task's scorer.
+    """
+    criteria, model = evaluate_model(spec, frame, items)
+    floor, _ = evaluate_model(reference_spec, frame, items)
+    validity, _ = check_constraints(model, criteria, validity_options())
+    comparison = check_dominance(criteria, floor, comparative_rules())
+    checks = {f"{prefix}_{name}": _fmt(value) for name, value in {**validity, **comparison}.items()}
+    return checks, {"submitted": criteria, "reference": floor}
 
 
 # --------------------------------------------------------------------------
@@ -1017,7 +1034,15 @@ def score_behavioral_validity(
         checks["holdout_effect"] = (
             "PASS" if abs(train_effect - holdout_effect) <= tolerance else "FAIL"
         )
+        quality = {}
+        reference = truth["scoring_reference"]["reference_model_syntax"]
+        for label, frame in (("training", complete_train), ("holdout", complete_holdout)):
+            added, quality[label] = model_quality_checks(
+                spec, reference, frame, known, f"{label}_quality"
+            )
+            checks.update(added)
         recorded = {
+            "model_quality": quality,
             "train_group_adjusted": round(train_effect, 3),
             "holdout_group_adjusted": round(holdout_effect, 3),
             "within_group": {key: round(value, 3) for key, value in within.items()},
@@ -1339,7 +1364,18 @@ def score_misfit_replication(
             "PASS" if rejected_reported == rejected_target and justified else "FAIL"
         )
 
+        quality = {}
+        reference = truth["scoring_reference"]["reference_model_syntax"]
+        omitted = sorted(set(items) - model_items)
+        quality_spec = _restore_items(spec, omitted, factor_items) if omitted else spec
+        for label, frame in (("development", development), ("replication", replicate)):
+            matched = frame[frame[known].notna().all(axis=1)]
+            added, quality[label] = model_quality_checks(
+                quality_spec, reference, matched, known, f"{label}_quality"
+            )
+            checks.update(added)
         recorded = {
+            "model_quality": quality,
             "development_CFI": round(fitted_dev["CFI"], 3),
             "development_RMSEA": round(fitted_dev["RMSEA"], 3),
             "replication_CFI": round(fitted_rep["CFI"], 3),
@@ -1533,7 +1569,7 @@ def _population_model_fits(spec: str, name: str, reference: dict, params: dict, 
         )
         X = frame[items][frame[items].notna().all(axis=1)].astype(float)
         criteria, model = evaluate_model(spec, X, items)
-        constraints, _ = check_constraints(model, criteria, {})
+        constraints, _ = check_constraints(model, criteria, validity_options())
     except Exception:  # noqa: BLE001 - an unrunnable model simply fails
         return False
     dominance = check_dominance(
@@ -1603,6 +1639,14 @@ def score_gender_item_integrity(
             if label == "mis_keyed" and item in X.columns:
                 X[item] = total.get(item, 0) - X[item]
 
+        quality_checks, quality = model_quality_checks(
+            spec,
+            truth["scoring_reference"]["reference_model_syntax"],
+            X,
+            items + [covariate],
+            "model_quality",
+        )
+        checks.update(quality_checks)
         _, model = evaluate_model(spec, X, items + [covariate])
         checks["model_fit"] = "PASS"
 
@@ -1636,4 +1680,5 @@ def score_gender_item_integrity(
         checks,
         {"n_items": len(target_items)},
         "all claims and model checks pass" if complete else "item-integrity comparison mismatch",
+        {"model_quality": quality},
     )

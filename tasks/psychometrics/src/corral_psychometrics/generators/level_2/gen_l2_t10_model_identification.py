@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
 
@@ -193,18 +194,18 @@ def analysis_sample(frame):
 
 
 def bic_by_model(frame):
-    """BIC of every candidate model on one sample. Lower is better."""
-    import semopy
+    """Compare admissible models on the same observed items and complete rows."""
+    from corral_psychometrics.score import check_constraints, evaluate_model
+    from corral_psychometrics.scoring_policy import validity_options
 
     X = analysis_sample(frame)
     out = {}
     for model in MODELS:
         try:
-            fitted = semopy.Model(factor_syntax(model))
-            fitted.fit(X)
-            chi2 = float(semopy.calc_stats(fitted)["chi2"].iloc[0])
-            out[model] = round(chi2 + len(fitted.param_vals) * np.log(len(X)), 2)
-        except Exception:  # noqa: BLE001
+            criteria, fitted = evaluate_model(factor_syntax(model), X, ITEMS)
+            validity, _ = check_constraints(fitted, criteria, validity_options())
+            out[model] = round(criteria["BIC"], 2) if all(validity.values()) else float("inf")
+        except Exception:  # An inadmissible candidate cannot win on BIC.
             out[model] = float("inf")
     return out
 
@@ -298,6 +299,7 @@ def build_task_json(data_sha):
             "scoring_function": "score_model_identification",
             "scoring_params": {
                 "task_type": "model_identification",
+                "model_quality_policy": POLICY_NAME,
                 "data_dir": TASK.artifacts_relpath,
                 "truth_path": TASK.truth_relpath,
                 "datasets": DATASETS,
@@ -317,7 +319,12 @@ def truth(data_sha, mapping, answers, measured):
             "model_descriptions": MODEL_DESCRIPTIONS,
             "complications": COMPLICATIONS,
             "tie_margin": TIE_MARGIN,
-            "bic_by_dataset": measured,
+            "bic_by_dataset": {
+                dataset: {
+                    name: value if np.isfinite(value) else None for name, value in bic.items()
+                }
+                for dataset, bic in measured.items()
+            },
         },
         "provenance": C.provenance(Path(__file__).name, SEED, N * len(DATASETS), data_sha),
     }

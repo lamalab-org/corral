@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME, comparative_rules
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
 
@@ -162,12 +163,8 @@ ALTERNATIVE_SYNTAX = {
     "two factors + cross-loading": MODEL_SYNTAX["population_d"],
 }
 # The same margins Level 1 holds a model to, without the population-matrix term.
-TIER_2 = [
-    {"key": "CFI", "direction": "higher", "eps": 0.005},
-    {"key": "RMSEA", "direction": "lower", "eps": 0.005},
-    {"key": "SRMR", "direction": "lower", "eps": 0.005},
-    {"key": "BIC", "direction": "lower", "eps": 10.0},
-]
+TIER_2 = comparative_rules()
+
 MAX_FACTORS = 3
 
 
@@ -277,6 +274,7 @@ def build_task_json(shas):
             "scoring_function": "score_population_classification",
             "scoring_params": {
                 "task_type": "population_classification",
+                "model_quality_policy": POLICY_NAME,
                 "data_dir": TASK.artifacts_relpath,
                 "truth_path": TASK.truth_relpath,
                 "items": ITEMS,

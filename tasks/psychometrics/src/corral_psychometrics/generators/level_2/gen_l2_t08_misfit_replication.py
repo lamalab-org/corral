@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
 
@@ -302,6 +303,7 @@ def build_task_json(data_sha):
             "scoring_function": "score_misfit_replication",
             "scoring_params": {
                 "task_type": "misfit_replication",
+                "model_quality_policy": POLICY_NAME,
                 "data_dir": TASK.artifacts_relpath,
                 "truth_path": TASK.truth_relpath,
                 "dataset": "data.csv",
@@ -321,6 +323,7 @@ def truth(data_sha, rows):
     return {
         "task_id": TASK_ID,
         "scored": {"findings": FINDINGS, "replication": REPLICATION},
+        "scoring_reference": {"reference_model_syntax": build_syntax(drop_weak=False)},
         "generative_parameters": {
             "stable_method": {"items": list(METHOD_ITEMS), "variance": METHOD_VARIANCE},
             "development_only_method": {
