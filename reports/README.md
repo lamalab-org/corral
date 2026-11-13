@@ -10,7 +10,7 @@ same layout, names and index files, so runs can be compared across them.
 | Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
 | Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
-| Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
+| Retrosynthesis (corral-mini v2 in [`retrosynthesis/mini-v2/`](retrosynthesis/mini-v2/)) | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
 | Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
 | Wetlab (corral-mini v2 in [`wetlab/mini-v2/`](wetlab/mini-v2/)) | [`wetlab/`](wetlab/) | — | 14 | 700 |
@@ -21,18 +21,18 @@ environment has its own indexes, with report paths relative to its folder. The
 
 Psychometrics holds the corral-mini v1 runs. corral-mini v2 runs sit next to
 the full-benchmark runs of their environment, in `<environment>/mini-v2/` with
-their own indexes (wetlab); the totals above count only the full runs.
+their own indexes (wetlab, retrosynthesis); the totals above count only the full runs.
 Each mini version has its own Hugging Face datasets, not the October ones:
 `jablonkagroup/corral-reports-mini-v1` (psychometrics) and
-`jablonkagroup/corral-reports-mini-v2` (wetlab), each with a `-summary`. The
+`jablonkagroup/corral-reports-mini-v2` (wetlab, retrosynthesis), each with a `-summary`. The
 push scripts refuse to put runs whose ID contains `-mini-` into a repo without
 `mini` in its name (or the reverse), or runs of one mini version into another
 version's repo:
 
 ```bash
-python scripts/push_october_reports_to_hf.py --env=wetlab --only_env \
+python scripts/push_october_reports_to_hf.py --env=wetlab,retrosynthesis --only_env \
     --repo=jablonkagroup/corral-reports-mini-v2
-python scripts/push_october_summary_to_hf.py --env=wetlab \
+python scripts/push_october_summary_to_hf.py --env=wetlab,retrosynthesis \
     --repo=jablonkagroup/corral-reports-mini-v2-summary
 ```
 
