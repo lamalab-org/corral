@@ -1,8 +1,7 @@
 # Retrosynthesis reports: corral-mini v2
 
-32 of 36 runs (16 agent/model pairs × levels 2 and 3), 3 tasks per level ×
-k = 5, 480 trials. The 4 kimi-k3.1-pro runs are still running and will be
-added. Layout, names and index columns follow
+36 runs (18 agent/model pairs × levels 2 and 3), 3 tasks per level × k = 5,
+540 trials. Layout, names and index columns follow
 [`../../README.md`](../../README.md). The October full-benchmark runs are in
 [`../`](../).
 
@@ -36,21 +35,21 @@ reselected from the corrected October reports with the same method.
 | 3 | react | claude-opus-4-5-20251101 | 0 | 0.00 | 0.00 | 4 | 0.33 | 0.11 |
 | 3 | codex | gpt-5-2025-08-07 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 3 | react | gpt-5-2025-08-07 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 1 | openhands, react | kimi-k3.1-pro | pending | | | pending | | |
+| 1 | openhands | kimi-k3.1-pro | 3 | 0.33 | 0.03 | 5 | 0.56 | 0.11 |
+| 1 | react | kimi-k3.1-pro | 0 | 0.00 | 0.00 | 5 | 0.56 | 0.11 |
 | 2 | openhands | kimi-k2.5 | 0 | 0.00 | 0.00 | 2 | 0.45 | 0.00 |
 | 2 | react | kimi-k2.5 | 0 | 0.00 | 0.00 | 1 | 0.22 | 0.00 |
 | 3 | openhands | kimi-k2-0905 | 1 | 0.22 | 0.00 | 1 | 0.22 | 0.00 |
 | 3 | react | kimi-k2-0905 | 0 | 0.00 | 0.00 | 2 | 0.31 | 0.00 |
 
-89 of 480 trials pass (Claude and OpenAI 82 of 360, kimi-k2.5 and
-kimi-k2-0905 7 of 120). Level 2 is almost unsolved: `make_9_lvl2` (a
-16-reaction route) has no pass, `make_10_lvl2` 4 (react gpt-5.6-sol) and
-`make_6_lvl2` 7. On level 3, gpt-6.1-sol solves 29 of 30 trials; the Claude
+102 of 540 trials pass (Claude and OpenAI 82 of 360, Kimi 20 of 180). Level 2
+is almost unsolved: `make_9_lvl2` (a 16-reaction route) has no pass,
+`make_10_lvl2` 4 (react gpt-5.6-sol) and `make_6_lvl2` 10. On level 3, gpt-6.1-sol solves 29 of 30 trials; the Claude
 models mostly solve `make_7_lvl3`; gpt-5 solves none. The October runs found
 the same level-2 tasks hard (`make_9_lvl2` 1 and `make_10_lvl2` 4 passes in 35
 trials each).
 
-172 trials end with an error, all kept as failures: 161 used up the 50-step
+200 trials end with an error, all kept as failures: 189 used up the 50-step
 budget without a submission (Codex call budget, ReAct interaction budget,
 Claude Agent SDK `error_max_turns`, OpenHands iteration limit), 5 OpenHands
 runs finished without calling `submit_answer`, 5 prompts exceeded the model's
@@ -66,7 +65,7 @@ context limit, and the provider rejected 1 kimi-k2-0905 request as invalid. The 
   full benchmark (same runner, images, database, settings and prompts; only the
   Langfuse session differs). They are part of the corrected October reports in
   [`../`](../).
-- All other trials (290 so far) were run for these picks on 2026-11-13.
+- All other trials (370) were run for these picks on 2026-11-13.
 
 ## Settings
 
@@ -95,12 +94,14 @@ tool calls rebuilt from each trial's final state, source runs in
 ID (`retrosynthesis-mini-v2-l<L>-<agent>-<model>`, in `run-metadata.json`);
 the 80 reused full-rerun trials keep their session
 (`retrosynthesis-full-rerun-20261112-l<L>-<agent>-<model>`, listed under
-`langfuse_session_ids`). All 480 traces were found (`build_index.py --verify`).
+`langfuse_session_ids`). All 540 traces were found (`build_index.py --verify`).
 
 ## Caveats
 
-- **66 OpenAI trials were rerun** after the OpenAI account ran out of credit;
-  the reports hold the reruns only.
+- **Reruns after credit ran out:** 66 OpenAI trials and 1 kimi-k3.1-pro trial
+  (OpenRouter HTTP 402); the reports hold the reruns only. Kimi ran with a
+  credit guard (no new trial below $5), cheaper models first and kimi-k3.1-pro
+  last.
 - **Tools.** No trial log shows a database connection error.
 - **Machine load.** Runs shared the machine with the spectra pools; wall-clock
   durations are not comparable with other runs.
