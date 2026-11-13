@@ -38,4 +38,4 @@ Items are taken from published self-report personality scales and were presented
 
 Rows: 43,710. Countries: US (27,000), GB (6,200), CA (3,800), AU (3,000), DE (830), IN (660), SE (630), PH (560), PL (520), BR (510).
 
-Presentation log: HSNS2, HSNS5, HSNS7, HSNS10 appeared together on a matrix page. All other HSNS items appeared individually. The log describes presentation, not which effects exist in responses.
+Presentation log: HSNS1, HSNS3, HSNS6, HSNS8 appeared on matrix page A; HSNS2, HSNS5, HSNS7, HSNS10 appeared on matrix page B. Remaining items appeared individually. Presentation records do not establish whether a page influences responses.

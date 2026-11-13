@@ -95,7 +95,7 @@ Return a final model, your findings, and for each kind of finding whether it hol
 SUBMISSION_FORMAT = """A single JSON object:
 
 {
-  "model_syntax": "<two trait factors, supported method factors and group paths>",
+  "model_syntax": "<complete model>",
   "findings": {
     "local_dependence": [["<items sharing a method effect>"], ...],
     "cross_loadings": ["<item>", ...],
@@ -107,14 +107,14 @@ SUBMISSION_FORMAT = """A single JSON object:
     "cross_loadings": "does_not_replicate|replicates",
     "dif_items": "does_not_replicate|replicates",
     "poor_items": "does_not_replicate|replicates",
-    "rejected_development_modifications": [["<item>", "<item>"], ...]
+    "rejected_development_modifications": [["<items sharing a candidate effect>"], ...]
   }
 }
 
 The model may include orthogonal method factors, cross-loadings and item paths from
 `gender`. Give `gender` a path to each personality factor. Method factors must be
-orthogonal to the personality factors and each other; fix their loadings to 1
-and estimate their variances, or use another identified parameterization. An item reported as a
+orthogonal to the personality factors and each other. Use an identified
+parameterization for every factor. An item reported as a
 poor item may be left out of the measurement model; no other item may be.
 
 Each replication verdict is recomputed by removing that modification from your
@@ -250,7 +250,8 @@ def write_codebook(path):
         + " appeared together on one matrix page; "
         + ", ".join(DEVELOPMENT_METHOD_ITEMS)
         + " shared a separate page. "
-        "All other items appeared individually. Whether a shared response influence "
+        "HSNS8 and HSNS9 shared a third page; other items appeared individually. "
+        "Whether a shared response influence "
         "exists or replicates must be checked in the responses.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)

@@ -157,7 +157,9 @@ def evaluate_model(
     import semopy
 
     model = semopy.Model(spec)
-    model.fit(X[items])
+    fit_result = model.fit(X[items])
+    if not fit_result.success:
+        raise ValueError("model optimization did not converge")
     stats = semopy.calc_stats(model)
 
     sigma = model.calc_sigma()[0]
@@ -221,7 +223,7 @@ def check_constraints(model, criteria: dict, params: dict) -> tuple[dict, list[s
             degenerate.append(f"{factor}~sign_reversal")
 
     results = {
-        "converged": True,
+        "converged": bool(getattr(getattr(model, "last_result", None), "success", False)),
         "no_negative_variance": not (
             pd.to_numeric(variances["Estimate"], errors="coerce") < 0
         ).any(),
@@ -542,7 +544,7 @@ def check_claims(
             out[key] = None
             continue
         if reported is None and not item.get("derive_from"):
-            out[key] = None if key == "factor_correlation" else False
+            out[key] = False
             continue
 
         if fn == "score_vector":
@@ -558,6 +560,9 @@ def check_claims(
             except (TypeError, ValueError):
                 out[key] = False
         elif fn == "score_label_panel":
+            if not isinstance(reported, dict):
+                out[key] = False
+                continue
 
             def _flat(obj, prefix=""):
                 flat = {}
@@ -574,11 +579,21 @@ def check_claims(
             out[key] = reported is not None and reported == target
         elif fn == "score_boolean_panel":
             try:
-                out[key] = all(bool(reported[k]) == bool(v) for k, v in target.items())
+                out[key] = (
+                    isinstance(reported, dict)
+                    and set(reported) == set(target)
+                    and all(
+                        type(reported[k]) is bool and reported[k] == v for k, v in target.items()
+                    )
+                )
             except (KeyError, TypeError):
                 out[key] = False
         elif fn == "score_item_set":
-            out[key] = set(reported) == set(target or [])
+            out[key] = (
+                isinstance(reported, (list, set) if item.get("derive_from") else list)
+                and all(isinstance(value, str) for value in reported)
+                and set(reported) == set(target or [])
+            )
         elif fn == "score_pair_set":
             if item.get("match") == "composition":
                 # Pairs of factors, named by the submission and matched to the
@@ -652,6 +667,9 @@ def score_model_criteria(
         submission = parse_json_text(submission)
     except ValueError as exc:
         return _zero(f"submission: {exc}")
+
+    if not isinstance(submission, dict):
+        return _zero("submission must be a JSON object")
 
     truth = json.loads((base / params["truth_path"]).read_text())
     ref = truth["scoring_reference"]
@@ -1075,7 +1093,9 @@ def _model_fit_summary(spec: str, frame: pd.DataFrame, variables: list[str]) -> 
     import semopy
 
     model = semopy.Model(spec)
-    model.fit(frame[variables])
+    fit_result = model.fit(frame[variables])
+    if not fit_result.success:
+        raise ValueError("model optimization did not converge")
     stats = semopy.calc_stats(model).iloc[0]
     return {
         "model": model,

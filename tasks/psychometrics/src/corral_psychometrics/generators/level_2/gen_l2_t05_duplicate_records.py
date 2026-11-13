@@ -215,9 +215,8 @@ def write_codebook(path, df):
         "| `gender` | 1 = Male, 2 = Female |\n"
         "| `accuracy` | self-rated response accuracy, 0-100 |\n"
         "| `country` | collection country; all rows are US |\n\n"
-        "This synthetic panel samples from a finite pool of response profiles. "
-        "Distinct people can therefore have identical item values; item matches alone "
-        "do not establish identity.\n\n"
+        "Matching item values alone do not establish respondent identity. "
+        "Assess repeated deliveries using all available evidence.\n\n"
         f"Rows delivered: {len(df):,}.\n"
     )
 

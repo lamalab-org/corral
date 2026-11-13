@@ -58,6 +58,7 @@ CASE_SOURCES = ["population_b", "population_c", "population_d"]
 # the best-fitting population's. The agent is not told it.
 COMPATIBILITY_MARGIN = 0.04
 METHOD_ITEMS = ("HSNS2", "HSNS5", "HSNS7", "HSNS10")
+CONTROL_PAGE_ITEMS = ("HSNS1", "HSNS3", "HSNS6", "HSNS8")
 
 PROMPT = (
     "You have large HSNS response samples from four reference populations, `population_a` to "
@@ -239,8 +240,12 @@ def write_codebook(path):
         "Every file is tab-separated. Responses are continuous and unbounded, centered around zero; all responses are complete.\n\n"
         "The reference files hold large samples from four populations, named only by identifier. How they differ is not supplied. `cases.csv` holds three case samples of "
         f"{CASE_SIZE} respondents each, identified by `case_id`; each case comes from one of the four populations.\n\n"
-        "Items " + ", ".join(METHOD_ITEMS) + " were presented together on a matrix page; "
-        "other items appeared individually. This format was used in every population; "
+        "Items "
+        + ", ".join(METHOD_ITEMS)
+        + " were presented together on one matrix page; "
+        + ", ".join(CONTROL_PAGE_ITEMS)
+        + " shared a separate matrix page. "
+        "Other items appeared individually. This format was used in every population; "
         "whether it produces a shared response influence must be assessed from the data.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)

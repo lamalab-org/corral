@@ -44,6 +44,7 @@ LOADINGS = {
 # of the personality trait; unit loadings identify its variance.
 METHOD_ITEMS = ("HSNS2", "HSNS5", "HSNS7", "HSNS10")
 METHOD_VARIANCE = 0.30
+CONTROL_PAGE_ITEMS = ("HSNS1", "HSNS3", "HSNS6", "HSNS8")
 
 # HSNS1 and HSNS8 read as the most similar pair of all and have no such
 # agreement between them. They are the decoy.
@@ -88,18 +89,18 @@ A single JSON object:
   "model_syntax": "<complete semopy model>",
   "loadings": {"<item>": <float>, ...},
   "factor_correlation": <float or null>,
-  "measurement_explanation": "one_trait|two_traits|one_trait_with_method_effect",
+  "measurement_explanation": "one_trait|multiple_traits|one_trait_with_method_effect|multiple_traits_with_method_effect",
   "trait_variance_share": <float>
 }
 
 `model_syntax` uses semopy syntax (`=~` loadings, `~~` (co)variances, `0*` to fix a
 parameter to zero).
 
-`loadings`: Absolute standardised item loadings on the broad trait factor, excluding method factors.
+`loadings`: Largest absolute standardised loading per item on a personality factor.
 
 `factor_correlation`: Correlation between two trait factors, if applicable; otherwise `null`.
 
-`trait_variance_share`: Proportion of variance in the ten-item sum attributable to the broad personality trait, excluding method variance.
+`trait_variance_share`: Proportion of variance in the ten-item sum attributable to personality factors, excluding any method variance.
 """
 
 
@@ -197,7 +198,7 @@ def candidate_submissions(X):
             "factor_correlation": None,
             "measurement_explanation": "one_trait_with_method_effect"
             if name == "trait_with_method_factor"
-            else "two_traits",
+            else "multiple_traits",
             "trait_variance_share": variance_shares()["trait"],
         }
     return cases
@@ -264,7 +265,7 @@ def build_task_json(data_sha):
     return [
         {
             "id": TASK_ID,
-            "name": "HSNS trait structure and presentation effects",
+            "name": "HSNS structure and score interpretation",
             "uuid": "6c40b18e-9d2f-4a77-93e1-58aa0c7f5d03",
             "keywords": [
                 "psychometrics",
@@ -475,9 +476,11 @@ def main():
     book.write_text(
         book.read_text()
         + "\nPresentation log: "
+        + ", ".join(CONTROL_PAGE_ITEMS)
+        + " appeared on matrix page A; "
         + ", ".join(METHOD_ITEMS)
-        + " appeared together on a matrix page. All other HSNS items appeared individually. "
-        "The log describes presentation, not which effects exist in responses.\n"
+        + " appeared on matrix page B. Remaining items appeared individually. "
+        "Presentation records do not establish whether a page influences responses.\n"
     )
     return 0
 

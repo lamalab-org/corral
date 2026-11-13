@@ -4,7 +4,7 @@
 
 You are given responses from an online personality survey. Use the codebook to investigate whether the HSNS measures one trait or more than one.
 
-Use the presentation log and the covariance pattern to distinguish personality dimensions from a shared presentation effect. Report each item’s standardised loading on the broad trait factor, excluding narrow method factors, and report the latent correlation if the selected model has multiple traits. The Dirty Dozen items are present but are not part of this task.
+Use the presentation log and the covariance pattern to distinguish personality dimensions from a shared presentation effect. Report each item’s largest absolute standardised loading on a personality factor, and report the latent correlation if the selected model has multiple traits. The Dirty Dozen items are present but are not part of this task.
 
 Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses. The target population is respondents from the United States.
 
@@ -12,7 +12,7 @@ Responses are continuous and unbounded; zero is a valid neutral response and emp
 
 ## What to report
 
-Submit a complete semopy model for the 10 HSNS items, including correlated residuals or identified method factors where justified, plus the item loadings, any trait-factor correlation, and a `measurement_explanation` (`one_trait`, `two_traits`, or `one_trait_with_method_effect`). Report `trait_variance_share`: the proportion of variance in the unit-weighted ten-item sum attributable to the broad personality trait, excluding method variance.
+Submit a complete semopy model for the 10 HSNS items, including correlated residuals or identified method factors where justified, plus the item loadings, any trait-factor correlation, and a `measurement_explanation` (`one_trait`, `multiple_traits`, `one_trait_with_method_effect`, or `multiple_traits_with_method_effect`). Report `trait_variance_share`: the proportion of variance in the unit-weighted ten-item sum attributable to personality factors, excluding any method variance.
 
 ## Why this is non-trivial
 

@@ -125,6 +125,7 @@ TRUTH = {
     },
 }
 REFERENCE_FACETS = {"US": "M", "GB": "M", "CA": "N", "AU": "N"}
+REFERENCE_ANSWERS = {country: REFERENCE_FACETS.get(country) for country in COUNTRIES}
 
 POP_REFERENCE_N = 400_000
 
@@ -154,13 +155,14 @@ A single JSON object:
     "hsns": {"<country>": "<class>", ...},
     "dirty_dozen": {"<country>": "<class>", ...}
   },
-  "reference_facets": {"US": "<M|N>", "GB": "<M|N>", "CA": "<M|N>", "AU": "<M|N>"}
+  "reference_facets": {"<country>": "<M|P|N> or null", ...}
 }
 
 Name the two instruments `hsns` and `dirty_dozen`. `model_syntax` must be complete
 and runnable so the fit on the United States sample can be reproduced.
-For the US, GB, CA and AU, report whether Machiavellianism (`M`) or
-narcissism (`N`) is the reference facet of the Dirty Dozen model.
+For every country, report the reference facet of a defensible Dirty Dozen
+reference-facet model: Machiavellianism (`M`), psychopathy (`P`), or narcissism (`N`).
+Use `null` when no canonical reference facet is defensible.
 """
 
 
@@ -329,7 +331,7 @@ def build_truth(floor, pop, data_sha, rows):
         "task_id": TASK_ID,
         "scored": {
             "replication": TRUTH,
-            "reference_facets": REFERENCE_FACETS,
+            "reference_facets": REFERENCE_ANSWERS,
             "calibration_country": "US",
         },
         "scoring_reference": {
@@ -435,12 +437,12 @@ def candidate_submissions(X):
     correct = {
         "model_syntax": reference_syntax(),
         "replication": {k: dict(v) for k, v in TRUTH.items()},
-        "reference_facets": dict(REFERENCE_FACETS),
+        "reference_facets": dict(REFERENCE_ANSWERS),
     }
     everything_holds = {
         "model_syntax": reference_syntax(),
         "replication": {inst: {c: "exact" for c in v} for inst, v in TRUTH.items()},
-        "reference_facets": dict(REFERENCE_FACETS),
+        "reference_facets": dict(REFERENCE_ANSWERS),
     }
     dd_assumed_fine = {
         "model_syntax": reference_syntax(),
@@ -448,12 +450,12 @@ def candidate_submissions(X):
             "hsns": dict(TRUTH["hsns"]),
             "dirty_dozen": {c: "exact" for c in TRUTH["dirty_dozen"]},
         },
-        "reference_facets": dict(REFERENCE_FACETS),
+        "reference_facets": dict(REFERENCE_ANSWERS),
     }
     swapped = {
         "model_syntax": reference_syntax(),
         "replication": {"hsns": dict(TRUTH["dirty_dozen"]), "dirty_dozen": dict(TRUTH["hsns"])},
-        "reference_facets": dict(REFERENCE_FACETS),
+        "reference_facets": dict(REFERENCE_ANSWERS),
     }
     return {
         "correct": correct,
@@ -462,7 +464,7 @@ def candidate_submissions(X):
         "instruments swapped": swapped,
         "country reference facets assumed constant": {
             **correct,
-            "reference_facets": {country: "M" for country in REFERENCE_FACETS},
+            "reference_facets": {country: "M" for country in REFERENCE_ANSWERS},
         },
     }
 

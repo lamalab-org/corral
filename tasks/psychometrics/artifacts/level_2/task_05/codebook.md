@@ -25,6 +25,6 @@ Tab-separated, one row per delivered record. Responses are continuous and unboun
 | `accuracy` | self-rated response accuracy, 0-100 |
 | `country` | collection country; all rows are US |
 
-This synthetic panel samples from a finite pool of response profiles. Distinct people can therefore have identical item values; item matches alone do not establish identity.
+Matching item values alone do not establish respondent identity. Assess repeated deliveries using all available evidence.
 
 Rows delivered: 13,050.

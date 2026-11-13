@@ -51,6 +51,7 @@ CASE_SOURCES = ["population_d", "population_c", "population_b"]
 COMPATIBILITY_MARGIN = 0.06
 
 METHOD_ITEMS = ("DDP1", "DDP2", "DDN1", "DDN2")
+CONTROL_PAGE_ITEMS = ("DDM1", "DDM2", "DDP3", "DDN3")
 METHOD_VARIANCE = 0.22
 
 PROMPT = (
@@ -246,8 +247,12 @@ def write_codebook(path):
         "identifier. How they differ is not supplied. `cases.csv` holds three case samples of "
         f"{CASE_SIZE} respondents each, identified by `case_id`; each case comes from one of "
         "the four populations.\n\n"
-        "Items " + ", ".join(METHOD_ITEMS) + " were presented together on a matrix page; "
-        "other items appeared individually. This format was used in every population; "
+        "Items "
+        + ", ".join(METHOD_ITEMS)
+        + " were presented together on one matrix page; "
+        + ", ".join(CONTROL_PAGE_ITEMS)
+        + " shared a separate matrix page. "
+        "Other items appeared individually. This format was used in every population; "
         "whether it produces a shared response influence must be assessed from the data.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)
