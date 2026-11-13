@@ -243,6 +243,12 @@ uv run corral bench \
   --agent-kwargs '{"reasoning_effort": "high"}'
 ```
 
+`--max-iterations` counts model responses for Claude Code and Codex, not
+individual tool calls. Claude Code uses its native `max_turns` limit. Codex uses
+cumulative SDK token usage updates as a proxy and interrupts at the limit; this
+can cut off tools from the final allowed response. Codex's count is approximate
+because usage updates are not guaranteed to arrive once per model call.
+
 `ReflexionAgent` wraps `ToolCallingAgent` by default. Select another actor with
 `{"actor": "react", "actor_kwargs": {...}}`. For `AIScientistAgent`, a JSON
 `config` object is validated as `AIScientistConfig`; add
@@ -313,7 +319,9 @@ uv run --extra langfuse python run_scripts/run_tool_calling.py \
 When using a task package's environment instead, add `--with 'langfuse>=4,<5'`
 to its `uv run --project tasks/<environment>` command. Each task produces a
 trace named `corral.task.<task-id>`, with model turns, token usage, and tool
-results, grouped into a Langfuse session by run ID. Traces are flushed before
+results, grouped into a Langfuse session by run ID. Set `CORRAL_LANGFUSE_SESSION_ID`
+to group several runs (for example one-trial runs of the same model) under one
+session instead. Traces are flushed before
 the runner exits. Docker runs forward the Langfuse settings and build a
 separate image with the SDK installed; custom images need the `langfuse`
 extra too. Set `CORRAL_LANGFUSE_ENABLED=false` to keep only local logging.

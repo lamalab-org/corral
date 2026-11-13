@@ -218,6 +218,8 @@ class LangfuseObserver:
         tracer_provider: Any = None,
     ) -> None:
         self._public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+        # Groups runs under one session, e.g. one-trial runs of the same model.
+        self._session_id = os.getenv("CORRAL_LANGFUSE_SESSION_ID", "").strip() or None
         self._provider = tracer_provider or _task_tracer_provider(self._public_key)
         self._exporter = None
         if client is None:
@@ -320,7 +322,9 @@ class LangfuseObserver:
                 start_time=int(started_at.timestamp() * 1e9),
                 attributes={
                     "langfuse.trace.name": f"corral.task.{context.task_id or context.execution_id}",
-                    "session.id": context.benchmark_run_id or context.execution_id,
+                    "session.id": self._session_id
+                    or context.benchmark_run_id
+                    or context.execution_id,
                     "langfuse.trace.metadata.execution_id": context.execution_id,
                 },
             )

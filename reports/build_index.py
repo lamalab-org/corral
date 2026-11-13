@@ -14,7 +14,9 @@ the session ID defaults to the execution's run ID and the trace ID is
 (``corral.observability.langfuse.deterministic_trace_id``). A report's adjacent
 ``run-metadata.json`` may set ``langfuse_session_id`` when its replacement
 executions have been consolidated into one session. Its optional
-``langfuse_trace_ids`` mapping records replacement trace IDs by execution ID.
+``langfuse_trace_ids`` mapping records replacement trace IDs by execution ID,
+and ``langfuse_session_ids`` records the session of executions that belong to
+another session than the run's (for example trials reused from an earlier run).
 Legacy trace IDs may also be recorded in an adjacent ``langfuse-overrides.json``.
 
 Usage:
@@ -167,7 +169,7 @@ def trace_overrides(report: Path, execution_ids: set[str]) -> dict[str, str]:
 
 def langfuse_overrides(
     report: Path, execution_ids: set[str]
-) -> tuple[str | None, dict[str, str]]:
+) -> tuple[str | None, dict[str, str], dict[str, str]]:
     """Combine publication metadata with legacy trace overrides."""
     metadata_path = report.with_name("run-metadata.json")
     publication = (
@@ -192,9 +194,20 @@ def langfuse_overrides(
             f"{metadata_path}: langfuse_trace_ids must map report execution IDs "
             "to 32-character lowercase hexadecimal trace IDs"
         )
+    publication_sessions = publication.get("langfuse_session_ids", {})
+    if not isinstance(publication_sessions, dict) or any(
+        execution not in execution_ids
+        or not isinstance(session, str)
+        or not session.strip()
+        for execution, session in publication_sessions.items()
+    ):
+        raise ValueError(
+            f"{metadata_path}: langfuse_session_ids must map report execution IDs "
+            "to nonempty session IDs"
+        )
     overrides = trace_overrides(report, execution_ids)
     overrides.update(publication_traces)
-    return session_override, overrides
+    return session_override, overrides, publication_sessions
 
 
 def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
@@ -209,7 +222,7 @@ def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
     k = int(meta["benchmark"]["trials_per_task"])
     metrics = data["metrics"]
     rel = report.relative_to(env_dir).as_posix()
-    session_override, overrides = langfuse_overrides(
+    session_override, overrides, trial_sessions = langfuse_overrides(
         report,
         {
             t["trial_id"]
@@ -225,7 +238,11 @@ def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
             tid = overrides.get(t["trial_id"], trace_id(t["trial_id"]))
             # Grouping can change without rewriting immutable execution IDs.
             # Keep in-session retry labels separate from cross-session reruns.
-            session = session_override or session_id(t["trial_id"], run_id)
+            session = (
+                trial_sessions.get(t["trial_id"])
+                or session_override
+                or session_id(t["trial_id"], run_id)
+            )
             trials.append(
                 {
                     "environment": env,

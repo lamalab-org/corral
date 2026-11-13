@@ -54,3 +54,19 @@ def test_catalog_search_reports_multiple_unavailable_smiles(mock_check_price):
     assert result == (
         'No chemicals available in the catalogue with SMILES "missing-1", "missing-2".'
     )
+
+
+def test_reaction_catalog_tools_run_in_the_controller():
+    """Restricted tool workers drop RETRO_DB_*; catalog tools must be trusted."""
+    from retrosynthesis.tools import create_tools
+
+    tools = create_tools()
+    for name in (
+        "search_template_catalog_by_criteria",
+        "get_template",
+        "apply_template",
+        "verify_step",
+        "verify_route",
+        "check_smiles_reaction_template_matching",
+    ):
+        assert tools[name].trusted, name

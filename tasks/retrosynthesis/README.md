@@ -61,12 +61,12 @@ docker logs -f corral-retro-db
 ### Manual Pull
 
 ```bash
-docker pull ghcr.io/lamalab-org/corral-retro-db:v1
+docker pull ghcr.io/lamalab-org/corral-retro-db:v2
 docker run --name corral-retro-db \
   -p 5432:5432 \
   -e POSTGRES_PASSWORD=postgres \
   -v corral-retro-db:/var/lib/postgresql/data \
-  -d ghcr.io/lamalab-org/corral-retro-db:v1
+  -d ghcr.io/lamalab-org/corral-retro-db:v2
 ```
 
 Tasks 9 and 10 need the final three entries in the existing
