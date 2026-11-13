@@ -42,7 +42,6 @@ from huggingface_hub import HfApi
 from loguru import logger
 from push_october_reports_to_hf import (
     ENVIRONMENTS,
-    REPORTS_DIR,
     WORKSPACE,
     _load_report,
     _optional,
@@ -50,6 +49,8 @@ from push_october_reports_to_hf import (
     check_shared_tables,
     check_target,
     env_list,
+    report_dir,
+    use_repo,
 )
 
 load_dotenv(dotenv_path=WORKSPACE / ".env")
@@ -119,7 +120,7 @@ def _collect(
 ) -> tuple[list[dict], list[dict], list[dict]]:
     runs, tasks, trials = [], [], []
     for env in envs:
-        env_dir = REPORTS_DIR / env
+        env_dir = report_dir(env)
         index = {row["execution_id"]: row for row in _read_csv(env_dir / "trials.csv")}
         for run in _read_csv(env_dir / "runs.csv"):
             logger.info(f"  {env} L{run['level']} {run['agent']} / {run['model']}")
@@ -235,6 +236,7 @@ def main(
             effect if the repo already exists.
         repo: Target dataset repo.
     """
+    use_repo(repo)
     envs = env_list(env) or ENVIRONMENTS
     check_target(repo, envs)
     check_shared_tables(repo, envs)
