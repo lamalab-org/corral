@@ -175,6 +175,25 @@ def test_ir_gateway_errors_and_timeouts_are_retried(clock, failure):
 
 
 @pytest.mark.usefixtures("clock")
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        (None, "https://ir.cheminfo.org/v1/ir"),
+        ("", "https://ir.cheminfo.org/v1/ir"),
+        ("http://127.0.0.1:8091/v1/ir", "http://127.0.0.1:8091/v1/ir"),
+    ],
+)
+def test_ir_url_can_be_overridden(monkeypatch, override, expected):
+    if override is None:
+        monkeypatch.delenv("SPECTRA_IR_URL", raising=False)
+    else:
+        monkeypatch.setenv("SPECTRA_IR_URL", override)
+    session = Session([(200, None)])
+    asyncio.run(SpectraAPI.get_prediction_async(session, "CCO", "ir"))
+    assert session.requests[0][1] == expected
+
+
+@pytest.mark.usefixtures("clock")
 def test_ir_failures_stop_after_three_attempts():
     session = Session([(504, None)] * 3)
     with pytest.raises(aiohttp.ClientResponseError) as error:
