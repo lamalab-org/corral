@@ -3,7 +3,9 @@
 Levels with report data use `--method`. AFM uses its newer local reports for
 Pass^5 selection, as do the environments named with `--local-reports` (for
 example retrosynthesis, whose October reports were corrected after the dataset
-revision was published). Environments without reports are drawn with `--seed`.
+revision was published). Tasks named with `--exclude-task` are left out before
+selection (for example, a task whose student model is no longer served).
+Environments without reports are drawn with `--seed`.
 Releases are never overwritten.
 """
 
@@ -19,6 +21,7 @@ import numpy as np
 from corral_mini_common import (
     EXCLUDED_ENVIRONMENTS,
     METHODS,
+    Stratum,
     load,
     load_afm_strata,
     load_report_strata,
@@ -77,6 +80,14 @@ def main() -> None:
         help="take this environment's scores from reports/<environment>/trials.csv "
         "instead of the dataset revision (repeatable)",
     )
+    parser.add_argument(
+        "--exclude-task",
+        action="append",
+        default=[],
+        metavar="ENVIRONMENT/TASK",
+        help="leave this task out of selection, e.g. "
+        "inference_opt/math_number_theory_a (repeatable)",
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument(
         "--ties-output",
@@ -119,6 +130,26 @@ def main() -> None:
             "trials_csv": str(trials_csv.relative_to(REPOSITORY)),
             "trials_csv_sha256": hashlib.sha256(trials_csv.read_bytes()).hexdigest(),
         }
+    excluded_tasks: dict[str, list[str]] = {}
+    for entry in args.exclude_task:
+        environment, _, task = entry.partition("/")
+        excluded_tasks.setdefault(environment, []).append(task)
+    for environment, tasks in excluded_tasks.items():
+        found = set()
+        for key, stratum in strata.items():
+            if key[0] != environment:
+                continue
+            keep = ~np.isin(stratum.tasks, tasks)
+            found.update(stratum.tasks[~keep].tolist())
+            strata[key] = Stratum(
+                stratum.tasks[keep],
+                stratum.passes[keep],
+                stratum.costs[keep],
+                stratum.solved[keep],
+            )
+        if missing := sorted(set(tasks) - found):
+            raise SystemExit(f"--exclude-task: {environment} has no task {missing}")
+        excluded_tasks[environment] = sorted(set(tasks))
     strata = dict(sorted(strata.items()))
     every_agent = np.arange(len(agents))
     tasks_by_environment = {}
@@ -177,6 +208,8 @@ def main() -> None:
         manifest["afm_source"] = afm_source
     if local_sources:
         manifest["local_sources"] = local_sources
+    if excluded_tasks:
+        manifest["excluded_tasks"] = dict(sorted(excluded_tasks.items()))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(manifest, indent=2) + "\n")
     logger.info("Wrote {} tasks to {}", manifest["total_tasks"], output)
