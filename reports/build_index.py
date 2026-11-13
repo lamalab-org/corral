@@ -4,7 +4,9 @@ Reads every ``reports/<env>/level_<L>/<agent>__<model>/report.json.gz`` (or
 ``.json.xz``, used where gzip compresses a report far worse) and
 writes ``reports/<env>/runs.csv`` (one row per run) and
 ``reports/<env>/trials.csv`` (one row per trial, with its Langfuse links).
-Anything under ``archive/`` or ``provenance/`` is ignored.
+Anything under ``archive/`` or ``provenance/`` is ignored. corral-mini runs live
+in ``reports/<env>/mini-v<N>/`` with their own indexes; build them by passing
+that folder (its ``environment`` column is still ``<env>``).
 
 Langfuse IDs are derived the same way Corral sets them when tracing:
 the session ID defaults to the execution's run ID and the trace ID is
@@ -66,6 +68,11 @@ MODELS = {
     "kimi-k2-0905": ("kimi-k2-0905", "openrouter/moonshotai/kimi-k2-0905"),
     "gpt-6.1-sol": ("gpt-6.1-sol", "openai/gpt-6.1-sol"),
     "gpt-5-2025-08-07": ("gpt-5-2025-08-07", "openai/gpt-5-2025-08-07"),
+    "claude-opus-4-7": ("claude-opus-4-7", "anthropic/claude-opus-4-7"),
+    "claude-opus-4-5-20251101": (
+        "claude-opus-4-5-20251101",
+        "anthropic/claude-opus-4-5-20251101",
+    ),
 }
 
 RUN_FIELDS = [
@@ -344,6 +351,13 @@ def verify(trials: list[dict]) -> list[str]:
     ]
 
 
+def environment_name(env_dir: Path) -> str:
+    """``reports/<env>`` and ``reports/<env>/mini-v<N>`` both belong to ``<env>``."""
+    if re.fullmatch(r"mini-v\d+", env_dir.name):
+        return env_dir.parent.name
+    return env_dir.name
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("env_dir", type=Path)
@@ -354,7 +368,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     env_dir = args.env_dir.resolve()
-    env = env_dir.name
+    env = environment_name(env_dir)
 
     runs, trials = [], []
     for report in sorted(env_dir.glob("level_*/*/report.json.[gx]z")):

@@ -23,6 +23,11 @@ python scripts/push_october_summary_to_hf.py --dry_run
 
 # Push (the dataset repo is created private if it does not exist)
 python scripts/push_october_summary_to_hf.py
+
+# corral-mini summary: list every environment with runs of the repo's mini
+# version; each table is replaced as a whole
+python scripts/push_october_summary_to_hf.py --env=wetlab \
+    --repo=jablonkagroup/corral-reports-mini-v2-summary
 """
 
 import os
@@ -37,12 +42,15 @@ from huggingface_hub import HfApi
 from loguru import logger
 from push_october_reports_to_hf import (
     ENVIRONMENTS,
-    check_target,
-    REPORTS_DIR,
     WORKSPACE,
     _load_report,
     _optional,
     _read_csv,
+    check_shared_tables,
+    check_target,
+    env_list,
+    report_dir,
+    use_repo,
 )
 
 load_dotenv(dotenv_path=WORKSPACE / ".env")
@@ -112,7 +120,7 @@ def _collect(
 ) -> tuple[list[dict], list[dict], list[dict]]:
     runs, tasks, trials = [], [], []
     for env in envs:
-        env_dir = REPORTS_DIR / env
+        env_dir = report_dir(env)
         index = {row["execution_id"]: row for row in _read_csv(env_dir / "trials.csv")}
         for run in _read_csv(env_dir / "runs.csv"):
             logger.info(f"  {env} L{run['level']} {run['agent']} / {run['model']}")
@@ -215,22 +223,23 @@ def main(
     dry_run: bool = False,
     public: bool = False,
     repo: str = HF_REPO,
-    env: str | None = None,
+    env: str | tuple[str, ...] | None = None,
 ) -> None:
     """Push the runs, tasks and trials summary tables.
 
     Args:
-        env: Summarize only this environment (for repos that hold one
-            environment, such as the corral-mini datasets).
+        env: Summarize only these environments, e.g. `psychometrics,wetlab`
+            (for the corral-mini datasets, which must list every environment
+            with runs of the repo's mini version).
         dry_run: Build the tables and log their sizes without pushing.
         public: Create the dataset repo public instead of private. Has no
             effect if the repo already exists.
         repo: Target dataset repo.
     """
-    if env is not None and env not in ENVIRONMENTS:
-        raise SystemExit(f"ERROR: Unknown environment '{env}'")
-    envs = ENVIRONMENTS if env is None else (env,)
+    use_repo(repo)
+    envs = env_list(env) or ENVIRONMENTS
     check_target(repo, envs)
+    check_shared_tables(repo, envs)
     if not dry_run:
         if not HF_TOKEN:
             raise SystemExit("ERROR: HF_TOKEN is not set (add it to .env)")

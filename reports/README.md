@@ -13,24 +13,33 @@ same layout, names and index files, so runs can be compared across them.
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
 | Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
-| Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
+| Wetlab (corral-mini v2 in [`wetlab/mini-v2/`](wetlab/mini-v2/)) | [`wetlab/`](wetlab/) | — | 14 | 700 |
 
 All nine environments together have **140 runs and 6,720 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
-Psychometrics now holds the corral-mini v1 runs, which are published to their
-own Hugging Face datasets, `jablonkagroup/corral-reports-mini-v1` and
-`jablonkagroup/corral-reports-mini-v1-summary`, not to the October ones. The
+Psychometrics holds the corral-mini v1 runs. corral-mini v2 runs sit next to
+the full-benchmark runs of their environment, in `<environment>/mini-v2/` with
+their own indexes (wetlab); the totals above count only the full runs.
+Each mini version has its own Hugging Face datasets, not the October ones:
+`jablonkagroup/corral-reports-mini-v1` (psychometrics) and
+`jablonkagroup/corral-reports-mini-v2` (wetlab), each with a `-summary`. The
 push scripts refuse to put runs whose ID contains `-mini-` into a repo without
-`mini` in its name, or the reverse:
+`mini` in its name (or the reverse), or runs of one mini version into another
+version's repo:
 
 ```bash
-python scripts/push_october_reports_to_hf.py --env=psychometrics --only_env \
-    --repo=jablonkagroup/corral-reports-mini-v1
-python scripts/push_october_summary_to_hf.py --env=psychometrics \
-    --repo=jablonkagroup/corral-reports-mini-v1-summary
+python scripts/push_october_reports_to_hf.py --env=wetlab --only_env \
+    --repo=jablonkagroup/corral-reports-mini-v2
+python scripts/push_october_summary_to_hf.py --env=wetlab \
+    --repo=jablonkagroup/corral-reports-mini-v2-summary
 ```
+
+List every environment with runs of that mini version. The shared tables
+(`runs`, and the summary's `runs`, `tasks` and `trials`) are rebuilt from the
+listed environments and replaced as a whole, so the scripts refuse a mini push
+that leaves one out.
 
 The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).
