@@ -6,7 +6,9 @@ tasks, *k*, from each environment/level, chosen from the final reports.
 **Released: corral-mini v2**, Rank + cost with Pass^5 and unsaturated tasks
 first, k = 3, 54 tasks
 ([`corral_mini_v2.json`](../src/corral/subsets/corral_mini_v2.json)). All 18
-levels use report-based selection; AFM uses its November 2026 reports. The
+levels use report-based selection; AFM uses its November 2026 reports, and
+retrosynthesis uses its corrected October reports (see
+[Retrosynthesis correction](#retrosynthesis-correction-2026-11-13)). The
 original [v1 release](../src/corral/subsets/corral_mini_v1.json) remains
 available by version. Levels without report data in other environments (e.g.
 wetlab L1, retrosynthesis L1, samplemath) are not part of the mini.
@@ -31,9 +33,11 @@ metadata records the subset (`task_subset`), and mini run IDs contain
 
 ## Build a release
 
-AFM's report source is recorded separately in the manifest; the pinned Hugging
-Face source describes the other environments. The build script refuses to
-overwrite existing releases.
+AFM's report source is recorded separately in the manifest (`afm_source`), as
+are environments built from their reports in this repository with
+`--local-reports ENVIRONMENT` (`local_sources`); the pinned Hugging Face source
+describes the other environments. The build script refuses to overwrite
+existing releases.
 
 Pin the Hugging Face summary dataset by its full commit hash (v1 source:
 `6d8dc71d6bcc3a3c6c76a28609f4f4a510ea2dd8`). Add `--tasks-parquet PATH` to
@@ -51,6 +55,30 @@ python scripts/compare_corral_mini.py --revision <HASH> --exclude-saturated
 # 3. Plot every results CSV present -> figures/ (*_unsaturated for that run)
 uv run --no-project --with "lama-aesthetics @ git+https://github.com/lamalab-org/lama-aesthetics@f9aaa7e58b66cd4698ea59a6785c24a841221dd2" \
   python scripts/plot_corral_mini.py
+```
+
+## Retrosynthesis correction (2026-11-13)
+
+The October retrosynthesis reports contained trials that ran against reaction
+database v1, whose only template for `make_1` had the wrong product, and against
+the old buyables and budgets. `make_1`, `make_5`, `make_6`, `make_7` and
+`make_8` were rerun at both levels (351 trials; aggregate passes 315 -> 397/700;
+see [`reports/retrosynthesis/README.md`](../reports/retrosynthesis/README.md)).
+The v2 retrosynthesis levels were reselected from these corrected reports with
+the same method; all other environments keep their v2 tasks.
+
+| Level | Before | After |
+|---|---|---|
+| 2 | `make_1`, `make_6`, `make_10` | `make_6`, `make_9`, `make_10` |
+| 3 | `make_1`, `make_5`, `make_6` | `make_6`, `make_7`, `make_8` |
+
+`make_1` is now solved by most agents, so it no longer counts as unsaturated.
+The manifest records the reports under `local_sources`. Reproduce it with:
+
+```bash
+python scripts/build_corral_mini.py --version 2 --output PATH \
+  --revision 6d8dc71d6bcc3a3c6c76a28609f4f4a510ea2dd8 \
+  --local-reports retrosynthesis
 ```
 
 ## Methods
@@ -290,8 +318,8 @@ What changes:
 The following figure compares unsaturated-first **Rank + cost** and **Rank +
 score** using task Pass^5 instead of Pass@5 for selection and evaluation. Pass^5
 is `(successful trials / 5)^5` for each agent and task. AFM uses the November
-reports recorded in the v2 manifest; the other environments use the pinned
-October summary table. The Rank + cost point at k = 3 is the v2 selection.
+reports and retrosynthesis its corrected October reports, both recorded in the
+v2 manifest; the other environments use the pinned October summary table. The Rank + cost point at k = 3 is the v2 selection.
 
 ![Pass^5 comparison against estimated cost](figures/pass_hat_5_tradeoffs_vs_cost_unsaturated.png)
 
@@ -305,9 +333,9 @@ so its percentage change is undefined and omitted from that panel. The score
 panel uses a symmetric log scale to show both the mean and large positive
 outliers. Values are in [`results_pass_hat_5_unsaturated.csv`](results_pass_hat_5_unsaturated.csv).
 
-At three tasks per level, Rank + cost has Spearman 0.887, 17 held-out levels
-with an inversion, and a −33.1% average score change. Rank + score has Spearman
-0.887, 17 held-out levels with an inversion, and a −35.3% average score change.
+At three tasks per level, Rank + cost has Spearman 0.882, 17 held-out levels
+with an inversion, and a −32.8% average score change. Rank + score has Spearman
+0.882, 17 held-out levels with an inversion, and a −35.0% average score change.
 
 To regenerate the figures from the pinned summary table:
 
